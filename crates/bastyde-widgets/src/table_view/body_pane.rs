@@ -36,6 +36,7 @@ use super::a11y::CellA11y;
 use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
+use crate::common::row_metrics::SharedRowMetrics;
 use crate::table_view::RowReorderDragData;
 
 const BUFFER_ROWS: usize = 5;
@@ -57,7 +58,10 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
     pub(crate) column_widths: SharedColumnWidths,
 
-    pub(crate) row_height: f32,
+    /// Row geometry shared with the `TableView` root (one handle, two
+    /// holders — the root drives scrollbar totals / paint / keyboard,
+    /// the pane drives realization, placement, and measurement).
+    pub(crate) row_metrics: SharedRowMetrics,
     pub(crate) selection_mode: TableSelectionMode,
     pub(crate) selection: Option<SelectionModel>,
     pub(crate) cell_selection: Option<CellSelectionModel>,
@@ -73,23 +77,36 @@ pub(crate) struct BodyPane<T: 'static> {
     /// at construction so the closure stays `'static`.
     pub(crate) drag_anchor: WidgetId,
 
+    /// Pane-local rebuild trigger. A persistent field (re-bound each
+    /// build) so `place_children`'s post-measure realization re-check
+    /// can request a rebuild of this pane.
+    pub(crate) version: Signal<u64>,
+    /// Bound at `Relayout` on the `TableView` ROOT. The root computes
+    /// scrollbar totals (`max_scroll_y`, thumb ratio) before this pane
+    /// measures (parent-before-child layout order); when a measure pass
+    /// changes the content total, the pane bumps this so the root
+    /// re-places next frame with the corrected total — otherwise the
+    /// stale totals would persist forever (content beyond the estimated
+    /// total would be unreachable). A dedicated signal rather than a
+    /// `scroll_y` self-set so an in-flight scroll animation is never
+    /// cancelled.
+    pub(crate) total_refresh: Signal<u64>,
+    /// Buffered row range materialized by the latest build.
+    pub(crate) prev_built_start: Rc<Cell<usize>>,
+    pub(crate) prev_built_end: Rc<Cell<usize>>,
+
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
 }
 
 impl<T: 'static> BodyPane<T> {
     fn visible_range(&self) -> (usize, usize) {
-        let count = (self.len_fn)();
-        if count == 0 || self.row_height <= 0.0 {
-            return (0, 0);
-        }
-        let scroll = self.scroll_y.get().max(0.0);
-        let viewport = self.viewport_height.get();
-        let first = (scroll / self.row_height).floor() as usize;
-        let last = ((scroll + viewport) / self.row_height).ceil() as usize;
-        let start = first.saturating_sub(BUFFER_ROWS);
-        let end = (last + BUFFER_ROWS).min(count);
-        (start, end)
+        self.row_metrics.borrow_mut().visible_range(
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            (self.len_fn)(),
+            BUFFER_ROWS,
+        )
     }
 }
 
@@ -104,8 +121,10 @@ impl<T: 'static> std::fmt::Debug for BodyPane<T> {
 
 impl<T: 'static> Widget for BodyPane<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Self-rebuild trigger.
-        let version = ctx.signal(0_u64);
+        // Self-rebuild trigger. A persistent field (not `ctx.signal`)
+        // so the realization re-check in `place_children` can bump it
+        // after measurement.
+        let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Scroll position re-places rows without rebuilding (within buffer).
@@ -123,30 +142,22 @@ impl<T: 'static> Widget for BodyPane<T> {
         // (when the rebuild was rooted on TableView, an ancestor of
         // the scrollbar), dragging the thumb past the buffer left
         // the body empty until the user released the thumb.
-        let row_h = self.row_height;
         let len = self.len_fn.clone();
         let vp_h = self.viewport_height.clone();
         let (initial_start, initial_end) = self.visible_range();
-        let prev_built_start = Rc::new(Cell::new(initial_start));
-        let prev_built_end = Rc::new(Cell::new(initial_end));
+        self.prev_built_start.set(initial_start);
+        self.prev_built_end.set(initial_end);
         let v_for_scroll = version.clone();
         let scroll_handle = self.scroll_y.observe({
-            let pbs = prev_built_start.clone();
-            let pbe = prev_built_end.clone();
+            let pbs = self.prev_built_start.clone();
+            let pbe = self.prev_built_end.clone();
+            let metrics = self.row_metrics.clone();
             move |y| {
-                let scroll = y.max(0.0);
-                let vp = vp_h.get();
-                let visible_start = if row_h > 0.0 {
-                    (scroll / row_h).floor() as usize
-                } else {
-                    0
-                };
-                let visible_end = if row_h > 0.0 {
-                    ((scroll + vp) / row_h).ceil() as usize
-                } else {
-                    0
-                };
                 let count = (len)();
+                let (visible_start, visible_end) =
+                    metrics
+                        .borrow_mut()
+                        .visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ROWS);
                     let new_end = (visible_end + BUFFER_ROWS).min(count);
@@ -306,11 +317,22 @@ impl<T: 'static> Widget for BodyPane<T> {
                 }
             }
 
+            // Auto-measure mode hands the row a `None` height so its
+            // `layout_response` measures the tallest cell; fixed modes
+            // pass the per-row height from the metrics. (Two separate
+            // borrows — a borrow inside an `if` condition would live to
+            // the end of the statement and collide with `borrow_mut`.)
+            let needs_measure = self.row_metrics.borrow().needs_measure();
+            let row_height = if needs_measure {
+                None
+            } else {
+                Some(self.row_metrics.borrow_mut().row_height(row_idx))
+            };
             let row_widget = BodyRow::new(
                 cell_ids,
                 row_idx + 2,
                 row_selected_for_a11y,
-                self.row_height,
+                row_height,
                 row_widths_handle.clone(),
             );
             let row_id = ctx.add(row_widget);
@@ -392,15 +414,74 @@ impl<T: 'static> Widget for BodyPane<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        // Auto-measure pass: measure every realized row at the pane
+        // width (BodyRow reports its tallest cell, height-for-width),
+        // feed the heights back, and apply the scroll-anchor delta so
+        // content above the viewport stays put. Measurements are
+        // collected with NO metrics borrow held.
+        if self.row_metrics.borrow().needs_measure() {
+            let count = (self.len_fn)();
+            let pre_total = self.row_metrics.borrow_mut().total_height(count);
+            let mut measured = Vec::with_capacity(children.len());
+            for (i, child) in children.iter().enumerate() {
+                if let Some(size) = ctx.child_size(child.id, SizeProposal::with_width(bounds.width))
+                {
+                    let (model_index, _) = self.row_entries[i];
+                    measured.push((model_index, size.height));
+                }
+            }
+            let anchor = self
+                .row_metrics
+                .borrow_mut()
+                .observe_measured(&measured, self.scroll_y.get());
+            if anchor.abs() > 0.01 {
+                // Safe from place_children: the dirty flag is set but the
+                // binding flush already ran this pass — lands next frame.
+                self.scroll_y
+                    .set((self.scroll_y.get() + anchor).max(0.0));
+            }
+
+            // Realization re-check: corrected offsets may reveal viewport
+            // rows the estimated offsets never realized. Request a pane
+            // rebuild for next frame; the 0.01 measurement epsilon
+            // guarantees convergence.
+            let (vs, ve) = self.row_metrics.borrow_mut().visible_range(
+                self.scroll_y.get(),
+                self.viewport_height.get(),
+                count,
+                0,
+            );
+            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
+                self.prev_built_start.set(vs.saturating_sub(BUFFER_ROWS));
+                self.prev_built_end.set((ve + BUFFER_ROWS).min(count));
+                self.version.set(self.version.get() + 1);
+            }
+
+            // Total-refresh poke: the root computed `max_scroll_y` /
+            // thumb ratio BEFORE this measure pass (parent-first
+            // ordering). If the content total changed, re-place the
+            // root next frame so the corrected total lands — without
+            // this, content past the estimated total stays unreachable
+            // forever. Terminates: a re-measure of settled rows yields
+            // zero deltas (sub-pixel epsilon), leaving the total fixed.
+            let post_total = self.row_metrics.borrow_mut().total_height(count);
+            if (post_total - pre_total).abs() > 0.01 {
+                self.total_refresh.set(self.total_refresh.get() + 1);
+            }
+        }
+
         let scroll_y = self.scroll_y.get();
-        let row_h = self.row_height;
         for (i, child) in children.iter_mut().enumerate() {
             let (model_index, _) = self.row_entries[i];
-            let y = bounds.y + model_index as f32 * row_h - scroll_y;
+            let (top, height) = {
+                let mut m = self.row_metrics.borrow_mut();
+                (m.row_top(model_index), m.row_height(model_index))
+            };
+            let y = bounds.y + top - scroll_y;
             child.origin = Point::new(bounds.x, y);
-            child.size = Size::new(bounds.width, row_h);
+            child.size = Size::new(bounds.width, height);
         }
     }
 

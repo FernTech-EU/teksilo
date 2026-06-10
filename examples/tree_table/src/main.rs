@@ -6,10 +6,14 @@
 //! - Mock filesystem in a `TreeModel<FsNode>` projected through
 //!   `SortFilterTreeModel<FsNode>` with `TreeFilterMode::KeepAncestors`
 //!   so a filter on a deep node still shows its ancestor path.
-//! - Four columns: name (Flex, sortable, filterable, **tree column**
-//!   with twist + indent), size (Fixed, sortable, alignment Trailing),
-//!   modified (Fixed, alignment Trailing), kind (Flex, sortable +
-//!   filterable, alignment Center).
+//! - Three columns: name (Flex, sortable, filterable, **tree column**
+//!   with twist + indent + multi-line description), size (Fixed,
+//!   sortable, alignment Trailing), kind (Flex, sortable + filterable,
+//!   alignment Center).
+//! - **Variable row heights** via `auto_row_height(26.0)`: rows with a
+//!   description measure taller; expand/collapse and sort keep the
+//!   measured heights above the change (divergence-driven
+//!   invalidation), so the view doesn't jump.
 //! - `Role::TreeGrid` accessibility with per-row level + expanded.
 //! - ArrowLeft / ArrowRight on the tree column collapse / expand.
 
@@ -42,6 +46,9 @@ struct FsNode {
     name: String,
     size: u64,
     kind: &'static str,
+    /// Optional multi-line description — rows carrying one measure
+    /// taller under `auto_row_height`.
+    desc: &'static str,
 }
 
 impl FsNode {
@@ -50,6 +57,7 @@ impl FsNode {
             name: name.into(),
             size: 0,
             kind: "folder",
+            desc: "",
         }
     }
     fn file(name: impl Into<String>, size: u64, kind: &'static str) -> Self {
@@ -57,24 +65,47 @@ impl FsNode {
             name: name.into(),
             size,
             kind,
+            desc: "",
         }
+    }
+    fn described(mut self, desc: &'static str) -> Self {
+        self.desc = desc;
+        self
     }
 }
 
 fn build_tree() -> TreeModel<FsNode> {
     let t = TreeModel::new();
     let docs = t.insert_root(0, FsNode::folder("docs"));
-    t.insert_child(docs, 0, FsNode::file("README.md", 4_321, "markdown"));
+    t.insert_child(
+        docs,
+        0,
+        FsNode::file("README.md", 4_321, "markdown")
+            .described("Project overview.\nStart here before anything else."),
+    );
     t.insert_child(docs, 1, FsNode::file("guide.md", 12_876, "markdown"));
     let plans = t.insert_child(docs, 2, FsNode::folder("plans"));
-    t.insert_child(plans, 0, FsNode::file("phase-7.md", 7_654, "markdown"));
+    t.insert_child(
+        plans,
+        0,
+        FsNode::file("phase-7.md", 7_654, "markdown")
+            .described("Variable row heights.\nOffsets + measurement + anchoring.\nShipped."),
+    );
     t.insert_child(plans, 1, FsNode::file("phase-8.md", 5_432, "markdown"));
 
     let src = t.insert_root(1, FsNode::folder("src"));
-    t.insert_child(src, 0, FsNode::file("main.rs", 1_024, "rust"));
+    t.insert_child(
+        src,
+        0,
+        FsNode::file("main.rs", 1_024, "rust").described("Binary entry point."),
+    );
     t.insert_child(src, 1, FsNode::file("lib.rs", 2_048, "rust"));
     let util = t.insert_child(src, 2, FsNode::folder("util"));
-    t.insert_child(util, 0, FsNode::file("hash.rs", 512, "rust"));
+    t.insert_child(
+        util,
+        0,
+        FsNode::file("hash.rs", 512, "rust").described("FNV-1a.\nNo external deps."),
+    );
     t.insert_child(util, 1, FsNode::file("parse.rs", 1_536, "rust"));
 
     t.insert_root(2, FsNode::file("Cargo.toml", 768, "toml"));
@@ -109,7 +140,18 @@ fn main() {
                 let table = TreeTable::from_projection(proxy_for_table.clone())
                     .add_column(
                         Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
-                            Box::new(TextWidget::new(lit!(row.name.clone())))
+                            // Name plus the optional multi-line
+                            // description — the row's measured height
+                            // follows this cell.
+                            let mut v = VStack::new()
+                                .spacing(1.0)
+                                .child(TextWidget::new(lit!(row.name.clone())));
+                            for line in row.desc.lines() {
+                                v = v.child(
+                                    TextWidget::new(lit!(line)).color(TextRole::Secondary),
+                                );
+                            }
+                            Box::new(v)
                         })
                         .width(ColumnWidth::Flex(3.0))
                         .sortable(true)
@@ -137,7 +179,9 @@ fn main() {
                         .filterable(true)
                         .alignment(Alignment::Center),
                     )
-                    .row_height(26.0)
+                    // Rows measure to their tallest cell (described
+                    // files are 2–4 lines); 26 px is just the estimate.
+                    .auto_row_height(26.0)
                     .alternating_rows(true)
                     .grid_lines(GridLines::Horizontal)
                     .selection_mode(TableSelectionMode::MultiRow)

@@ -37,7 +37,7 @@ use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
 use crate::sort_filter_list_model::SortDirection;
-use crate::tree_change::NodeId;
+use crate::tree_change::{NodeId, TreeChange};
 use crate::tree_model::TreeModel;
 use crate::tree_slice::FlatEntry;
 
@@ -67,6 +67,9 @@ struct Inner<T: 'static> {
     filter_mode: TreeFilterMode,
     version: Signal<u64>,
     version_counter: Cell<u64>,
+    /// First flat index whose content may differ after the latest rebuild.
+    /// See [`SortFilterTreeModel::first_changed_index`].
+    last_divergence: Option<usize>,
     sort_signal: Option<Signal<Option<(String, SortDirection)>>>,
     filters_signal: Option<Signal<HashMap<String, String>>>,
     _tree_handle: Option<ObserverHandle>,
@@ -95,6 +98,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
             filter_mode: TreeFilterMode::default(),
             version: Signal::new(0),
             version_counter: Cell::new(0),
+            last_divergence: None,
             sort_signal: None,
             filters_signal: None,
             _tree_handle: None,
@@ -103,9 +107,9 @@ impl<T: 'static> SortFilterTreeModel<T> {
         }));
 
         let weak = Rc::downgrade(&inner);
-        let tree_handle = tree.observe_changes(move |_change| {
+        let tree_handle = tree.observe_changes(move |change| {
             if let Some(strong) = weak.upgrade() {
-                rebuild_and_bump(&strong);
+                rebuild_and_bump_with(&strong, Some(change));
             }
         });
         inner.borrow_mut()._tree_handle = Some(tree_handle);
@@ -335,6 +339,20 @@ impl<T: 'static> SortFilterTreeModel<T> {
         self.inner.borrow().version.clone()
     }
 
+    /// First flat index whose content may differ from before the latest
+    /// projection rebuild — rows `0..index` are the same nodes, at the
+    /// same depths, with the same expand state as before, so per-row
+    /// derived state (e.g. a measured row height) remains valid for them.
+    /// Equal to `visible_count()` when the visible list is unchanged.
+    ///
+    /// `None` means unknown (no rebuild observed yet) — treat as a full
+    /// change. The value describes the **latest** rebuild only; read it
+    /// synchronously from a `version_signal()` observer (observers fire
+    /// inline on every bump, so per-change reads cannot miss a value).
+    pub fn first_changed_index(&self) -> Option<usize> {
+        self.inner.borrow().last_divergence
+    }
+
     /// Underlying tree handle (for direct mutation).
     pub fn tree(&self) -> TreeModel<T> {
         self.inner.borrow().tree.clone()
@@ -383,6 +401,13 @@ fn collect_recurse<T: 'static>(tree: &TreeModel<T>, node: NodeId, out: &mut Vec<
 }
 
 fn rebuild_and_bump<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>) {
+    rebuild_and_bump_with(inner_rc, None);
+}
+
+fn rebuild_and_bump_with<T: 'static>(
+    inner_rc: &Rc<RefCell<Inner<T>>>,
+    upstream: Option<&TreeChange>,
+) {
     // Read inputs out of the borrow before doing the work — observers
     // attached to the version signal may call back into the proxy.
     let (tree, predicates, sort, filter_mode, expanded) = {
@@ -420,6 +445,23 @@ fn rebuild_and_bump<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>) {
 
     let next_version = {
         let mut g = inner_rc.borrow_mut();
+        // First flat index at which the new projection diverges from the
+        // old one. `NodeId`s are stable slotmap keys, so equal entries
+        // denote the same node at the same depth/expand state. A
+        // NodeUpdated leaves the structure identical but changes the
+        // node's content — fold its flat position in.
+        let mut d = g
+            .flattened
+            .iter()
+            .zip(flat.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if let Some(TreeChange::NodeUpdated { node }) = upstream
+            && let Some(p) = flat.iter().position(|e| e.node_id == *node)
+        {
+            d = d.min(p);
+        }
+        g.last_divergence = Some(d);
         g.flattened = flat;
         let v = g.version_counter.get() + 1;
         g.version_counter.set(v);
@@ -899,5 +941,62 @@ mod tests {
         let p2 = p1.clone();
         p1.expand(docs);
         assert_eq!(p2.visible_count(), p1.visible_count());
+    }
+
+    // ── first_changed_index (divergence) ────────────────────────────────
+
+    #[test]
+    fn divergence_on_expand_is_the_toggled_row() {
+        let (tree, _, src, _, _, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree);
+
+        // Roots: docs (0), src (1), build.txt (2). Expanding src changes
+        // src's own entry (is_expanded) and inserts its children — docs
+        // (flat 0) is untouched.
+        proxy.expand(src);
+        assert_eq!(proxy.first_changed_index(), Some(1));
+
+        proxy.collapse(src);
+        assert_eq!(proxy.first_changed_index(), Some(1));
+    }
+
+    #[test]
+    fn divergence_on_append_is_old_len() {
+        let (tree, _, _, _, _, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone());
+
+        tree.insert_root(3, "extra"); // old visible: docs, src, build.txt
+        assert_eq!(proxy.first_changed_index(), Some(3));
+    }
+
+    #[test]
+    fn divergence_on_sort_flip_is_first_reordered_row() {
+        let (tree, _, _, _, _, _) = sample();
+        let proxy =
+            SortFilterTreeModel::new(tree).with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
+
+        // [docs, src, build.txt] → ascending [build.txt, docs, src].
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        assert_eq!(proxy.first_changed_index(), Some(0));
+    }
+
+    #[test]
+    fn divergence_on_node_update_is_its_flat_index() {
+        let (tree, _, _, _, _, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone());
+
+        let build_txt = tree.root(2);
+        tree.update(build_txt, "build.log");
+        assert_eq!(proxy.first_changed_index(), Some(2));
+    }
+
+    #[test]
+    fn divergence_on_invisible_update_is_visible_count() {
+        let (tree, _, _, _, readme, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone());
+
+        // readme.md is hidden (docs collapsed) — nothing visible changed.
+        tree.update(readme, "readme.txt");
+        assert_eq!(proxy.first_changed_index(), Some(proxy.visible_count()));
     }
 }

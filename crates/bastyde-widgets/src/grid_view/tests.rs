@@ -255,6 +255,40 @@ fn auto_measure_places_rows_at_measured_heights() {
 }
 
 #[test]
+fn auto_measure_under_realization_converges_without_scroll() {
+    // Estimate 50, actual 20: the first build realizes far too few rows
+    // for the viewport (the estimated offsets say ~6 rows fill 300 px,
+    // the measured ones say 15 do). The post-measure realization
+    // re-check must request rebuilds until realized tiles cover the
+    // whole viewport — previously the bottom gap only healed on the
+    // next scroll event.
+    let model = ListModel::from_vec((0..200).collect());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(50.0, 20.0)))
+            .column_count(1, 50.0)
+            .row_spacing(0.0)
+            .variable_row_heights(50.0),
+    );
+    // Let the measure → re-check → rebuild cycle settle. No scroll input.
+    for _ in 0..6 {
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+    }
+    let t = tiles(&tree, id);
+    let last_bottom = t
+        .iter()
+        .map(|id| {
+            let b = tree.bounds(*id);
+            b.y + b.height
+        })
+        .fold(0.0_f32, f32::max);
+    assert!(
+        last_bottom >= 300.0,
+        "realized tiles must cover the viewport bottom without scrolling, got {last_bottom}"
+    );
+}
+
+#[test]
 fn variable_grid_virtualizes() {
     let model = ListModel::from_vec((0..500).collect());
     let mut tree = WidgetTree::new();

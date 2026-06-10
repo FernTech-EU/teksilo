@@ -8,4 +8,6 @@
 //! surface.
 
 pub mod datetime;
+pub(crate) mod row_metrics;
+pub(crate) mod row_offsets;
 pub(crate) mod scroll;

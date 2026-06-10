@@ -31,7 +31,10 @@ pub(crate) struct BodyRow {
     /// 1-based row index for AccessKit. Header is 1; first body row is 2.
     row_index_1based: usize,
     selected: bool,
-    row_height: f32,
+    /// `Some(h)` — fixed height (uniform / exact modes). `None` —
+    /// auto-measure: `layout_response` measures each cell at its column
+    /// width and reports the tallest (height-for-width).
+    row_height: Option<f32>,
     widths: SharedColumnWidths,
     /// When `false`, the row is invisible to AccessKit — used by
     /// TreeTable, which wraps BodyRow in `TreeRowA11y` and wants the
@@ -44,7 +47,7 @@ impl BodyRow {
         cells: Vec<WidgetId>,
         row_index_1based: usize,
         selected: bool,
-        row_height: f32,
+        row_height: Option<f32>,
         widths: SharedColumnWidths,
     ) -> Self {
         Self {
@@ -67,14 +70,31 @@ impl Widget for BodyRow {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
         // Width: caller's proposal (the row fills its parent's bounds).
-        // Height: the configured row height.
         let width = proposal
             .width
             .unwrap_or_else(|| self.widths.borrow().iter().sum());
-        Size::new(width, self.row_height).into()
+        // Height: the configured row height, or — in auto-measure mode —
+        // the tallest cell measured at its column width. The widths were
+        // resolved by the table root's `place_children` earlier in this
+        // same pass; the borrow is dropped before measuring.
+        let height = match self.row_height {
+            Some(h) => h,
+            None => {
+                let widths: Vec<f32> = self.widths.borrow().clone();
+                let mut max_h = 0.0_f32;
+                for (i, cell) in self.cells.iter().enumerate() {
+                    let w = widths.get(i).copied().unwrap_or(width);
+                    if let Some(size) = ctx.child_size(*cell, SizeProposal::with_width(w)) {
+                        max_h = max_h.max(size.height);
+                    }
+                }
+                max_h
+            }
+        };
+        Size::new(width, height).into()
     }
 
     fn place_children(

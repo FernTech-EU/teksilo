@@ -309,6 +309,53 @@ Widget-tree tests that want a representative model use `ListModel::from_vec(vec!
 - Two `TreeView`s sharing a `TreeModel` get independent `TreeSlice`s; expand state is per-view.
 - Mutations flow one-way: widget emits typed intent → `Action` translates → model mutates → change notification → widgets repaint. The widget never writes directly to the model.
 
+## 13. Divergence reporting — `first_changed_index()`
+
+The three projection layers — `TreeSlice`, `SortFilterTreeModel`, and
+`SortFilterListModel` — rebuild their visible list wholesale on every
+change, and (for the sort/filter proxies) notify observers with a
+blanket `Reset`. That is the safe *notification* contract, but it
+destroys information a consumer may need: which prefix of the visible
+list is actually unchanged. The canonical consumer is variable-row-height
+virtualization (`ListView` / `TreeView` / `TableView` / `TreeTable`
+keep per-visible-row measured heights), but anything caching per-row
+derived state can use it.
+
+Each projection therefore computes, during the rebuild it already
+performs, the **first visible index whose content may differ** and
+exposes it as a side-channel:
+
+```rust
+proxy.first_changed_index() // -> Option<usize>
+```
+
+- `Some(d)` — rows `0..d` show the same items, in the same order, at
+  the same depth/expand state as before the rebuild. `d == len()` means
+  nothing visible changed.
+- `None` — unknown (no rebuild observed yet); treat as a full change.
+
+Semantics per type:
+
+- **`TreeSlice` / `SortFilterTreeModel`** — prefix-compare of the old
+  and new flat lists (`NodeId`s are stable, so equality means identity).
+  An expand/collapse at flat index *k* reports *k* (the toggled row's
+  own entry changed); a `NodeUpdated` with unchanged structure reports
+  that node's flat index.
+- **`SortFilterListModel`** — prefix-compare of the projected
+  source-index map, with an *identity floor*: upstream inserts/removes/
+  moves renumber source indices, so equal index values are only trusted
+  below the change point. An `ItemUpdated` that didn't move under the
+  sort reports that row's visible position; an append reports the old
+  length.
+
+The value describes the **latest** rebuild only and is overwritten by
+the next one. Read it synchronously from a change observer
+(`observe_changes` callbacks and `version_signal()` observers fire
+inline on every rebuild, so per-change reads cannot miss a value). The
+external `DataChange::Reset` contract of the proxies is unchanged.
+`ListDataSource` carries a defaulted `first_changed_index()` (returning
+`None`) so generic consumers reach the side-channel without downcasts.
+
 ---
 
 ## See also

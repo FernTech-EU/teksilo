@@ -13,10 +13,10 @@ use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
 use crate::TreeModel;
-use crate::tree_change::NodeId;
+use crate::tree_change::{NodeId, TreeChange};
 
 /// A single entry in the flattened visible-node list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlatEntry {
     /// The node's ID in the underlying `TreeModel`.
     pub node_id: NodeId,
@@ -41,6 +41,9 @@ pub struct TreeSlice<T: 'static> {
     flattened: Rc<RefCell<Vec<FlatEntry>>>,
     version: Signal<u64>,
     version_counter: Rc<std::cell::Cell<u64>>,
+    /// First flat index whose content may differ after the latest
+    /// reflatten. See [`first_changed_index`](Self::first_changed_index).
+    divergence: Rc<std::cell::Cell<Option<usize>>>,
     _tree_observer: ObserverHandle,
 }
 
@@ -52,6 +55,7 @@ impl<T: 'static> TreeSlice<T> {
         let flattened: Rc<RefCell<Vec<FlatEntry>>> = Rc::new(RefCell::new(Vec::new()));
         let version = Signal::new(0_u64);
         let version_counter = Rc::new(std::cell::Cell::new(0_u64));
+        let divergence = Rc::new(std::cell::Cell::new(None));
 
         // Initial flatten
         Self::rebuild_flat_list(&tree, &expanded.borrow(), &mut flattened.borrow_mut());
@@ -62,8 +66,20 @@ impl<T: 'static> TreeSlice<T> {
         let tree_for_obs = tree.clone();
         let ver = version.clone();
         let vc = version_counter.clone();
-        let observer = tree.observe_changes(move |_change| {
-            Self::rebuild_flat_list(&tree_for_obs, &exp.borrow(), &mut flat.borrow_mut());
+        let div = divergence.clone();
+        let observer = tree.observe_changes(move |change| {
+            let mut d =
+                Self::rebuild_flat_list(&tree_for_obs, &exp.borrow(), &mut flat.borrow_mut());
+            // A NodeUpdated leaves the flat structure identical, but the
+            // updated node's content (and thus any per-row derived state
+            // such as a measured height) changed — fold its flat position
+            // into the divergence.
+            if let TreeChange::NodeUpdated { node } = change
+                && let Some(p) = flat.borrow().iter().position(|e| e.node_id == *node)
+            {
+                d = d.min(p);
+            }
+            div.set(Some(d));
             let next = vc.get() + 1;
             vc.set(next);
             ver.set(next);
@@ -75,6 +91,7 @@ impl<T: 'static> TreeSlice<T> {
             flattened,
             version,
             version_counter,
+            divergence,
             _tree_observer: observer,
         }
     }
@@ -208,6 +225,20 @@ impl<T: 'static> TreeSlice<T> {
         self.version.clone()
     }
 
+    /// First flat index whose content may differ from before the latest
+    /// reflatten — the rows `0..index` are the same nodes, at the same
+    /// depths, with the same expand state as before, so any per-row
+    /// derived state (e.g. a measured row height) remains valid for them.
+    /// Equal to `visible_count()` when the visible list is unchanged.
+    ///
+    /// `None` means unknown (no reflatten observed yet) — treat as a full
+    /// change. The value describes the **latest** reflatten only; read it
+    /// synchronously from a `version_signal()` observer (observers fire
+    /// inline on every bump, so per-change reads cannot miss a value).
+    pub fn first_changed_index(&self) -> Option<usize> {
+        self.divergence.get()
+    }
+
     /// Access the underlying `TreeModel`.
     pub fn tree(&self) -> &TreeModel<T> {
         &self.tree
@@ -222,17 +253,19 @@ impl<T: 'static> TreeSlice<T> {
             flattened: self.flattened.clone(),
             version: self.version.clone(),
             version_counter: self.version_counter.clone(),
+            divergence: self.divergence.clone(),
         }
     }
 
     // --- Internal ---
 
     fn reflatten_and_notify(&self) {
-        Self::rebuild_flat_list(
+        let d = Self::rebuild_flat_list(
             &self.tree,
             &self.expanded.borrow(),
             &mut self.flattened.borrow_mut(),
         );
+        self.divergence.set(Some(d));
         let next = self.version_counter.get() + 1;
         self.version_counter.set(next);
         self.version.set(next);
@@ -257,17 +290,27 @@ impl<T: 'static> TreeSlice<T> {
         }
     }
 
+    /// Rebuild `out` from scratch and return the length of the common
+    /// prefix with the previous flat list — the first flat index at which
+    /// the projection diverges (`out.len()` when nothing visible changed).
+    /// `NodeId`s are stable slotmap keys, so equal entries denote the same
+    /// node at the same depth/expand state.
     fn rebuild_flat_list(
         tree: &TreeModel<T>,
         expanded: &HashSet<NodeId>,
         out: &mut Vec<FlatEntry>,
-    ) {
-        out.clear();
+    ) -> usize {
+        let old = std::mem::take(out);
+        out.reserve(old.len());
         let root_count = tree.root_count();
         for i in 0..root_count {
             let root = tree.root(i);
             Self::flatten_node(tree, root, 0, expanded, out);
         }
+        old.iter()
+            .zip(out.iter())
+            .take_while(|(a, b)| a == b)
+            .count()
     }
 
     fn flatten_node(
@@ -313,6 +356,7 @@ pub struct TreeSliceHandle<T: 'static> {
     flattened: Rc<RefCell<Vec<FlatEntry>>>,
     version: Signal<u64>,
     version_counter: Rc<std::cell::Cell<u64>>,
+    divergence: Rc<std::cell::Cell<Option<usize>>>,
 }
 
 impl<T: 'static> TreeSliceHandle<T> {
@@ -362,12 +406,18 @@ impl<T: 'static> TreeSliceHandle<T> {
         &self.tree
     }
 
+    /// See [`TreeSlice::first_changed_index`].
+    pub fn first_changed_index(&self) -> Option<usize> {
+        self.divergence.get()
+    }
+
     fn reflatten_and_notify(&self) {
-        TreeSlice::<T>::rebuild_flat_list(
+        let d = TreeSlice::<T>::rebuild_flat_list(
             &self.tree,
             &self.expanded.borrow(),
             &mut self.flattened.borrow_mut(),
         );
+        self.divergence.set(Some(d));
         let next = self.version_counter.get() + 1;
         self.version_counter.set(next);
         self.version.set(next);
@@ -382,6 +432,7 @@ impl<T: 'static> Clone for TreeSliceHandle<T> {
             flattened: self.flattened.clone(),
             version: self.version.clone(),
             version_counter: self.version_counter.clone(),
+            divergence: self.divergence.clone(),
         }
     }
 }
@@ -625,5 +676,83 @@ mod tests {
         let slice = TreeSlice::new(tree);
         assert_eq!(slice.with_entry(99, |_, _| ()), None);
         assert_eq!(slice.visible_node_id(99), None);
+    }
+
+    // ── first_changed_index (divergence) ────────────────────────────────
+
+    #[test]
+    fn divergence_unknown_before_first_reflatten() {
+        let tree = sample_tree();
+        let slice = TreeSlice::new(tree);
+        assert_eq!(slice.first_changed_index(), None);
+    }
+
+    #[test]
+    fn divergence_on_expand_is_the_toggled_row() {
+        let tree = sample_tree();
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree);
+
+        // Expanding B (flat index 1) changes B's own entry (is_expanded)
+        // and inserts B1 after it — A (flat 0) is untouched.
+        slice.expand(b);
+        assert_eq!(slice.first_changed_index(), Some(1));
+
+        slice.collapse(b);
+        assert_eq!(slice.first_changed_index(), Some(1));
+    }
+
+    #[test]
+    fn divergence_on_append_is_old_len() {
+        let tree = sample_tree();
+        let slice = TreeSlice::new(tree.clone());
+
+        tree.insert_root(3, "D"); // old visible: A, B, C
+        assert_eq!(slice.first_changed_index(), Some(3));
+    }
+
+    #[test]
+    fn divergence_on_remove_is_removed_position() {
+        let tree = sample_tree();
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree.clone());
+
+        tree.remove(b); // old: A, B, C → new: A, C
+        assert_eq!(slice.first_changed_index(), Some(1));
+    }
+
+    #[test]
+    fn divergence_on_node_update_is_its_flat_index() {
+        let tree = sample_tree();
+        let c = tree.root(2);
+        let slice = TreeSlice::new(tree.clone());
+
+        // Structure unchanged, but C's content (flat index 2) changed.
+        tree.update(c, "C-updated");
+        assert_eq!(slice.first_changed_index(), Some(2));
+    }
+
+    #[test]
+    fn divergence_on_invisible_update_is_visible_count() {
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let a1 = tree.children(a)[0];
+        let slice = TreeSlice::new(tree.clone());
+
+        // A1 is hidden (A collapsed) — nothing visible changed.
+        tree.update(a1, "A1-updated");
+        assert_eq!(slice.first_changed_index(), Some(slice.visible_count()));
+    }
+
+    #[test]
+    fn divergence_via_handle_toggle() {
+        let tree = sample_tree();
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree);
+        let handle = slice.handle();
+
+        handle.toggle_expand(b);
+        assert_eq!(handle.first_changed_index(), Some(1));
+        assert_eq!(slice.first_changed_index(), Some(1));
     }
 }

@@ -71,6 +71,57 @@ let tree = TreeTable::from_projection(proxy.clone())
 
 ---
 
+## Row heights
+
+Three mutually exclusive modes (the last builder call wins), identical on
+`TableView` and `TreeTable`:
+
+```rust
+.row_height(28.0)                 // uniform — the default fast path
+.row_height_fn(|row| { /* … */ }) // exact per-row callback
+.auto_row_height(30.0)            // measured, 30 px estimate seed
+```
+
+- **Uniform** (`row_height`) — every row is the same height. Pure
+  arithmetic, no allocation; this is the historical behavior and stays
+  the default (28 px from the table style).
+- **Exact** (`row_height_fn`) — a pure callback `fn(visible_index) -> f32`
+  seeds a prefix-sum offset table (O(log n) row↔y lookups). No
+  measurement pass, exact scrollbar, zero jitter. The callback is
+  re-swept from the first changed index on every model change, so it
+  must be deterministic for the data it indexes.
+- **Auto-measure** (`auto_row_height(estimate)`) — each realized row
+  reports the height of its **tallest cell**, measured at the cell's
+  column width (height-for-width — wrapped text just works). Unrealized
+  rows assume the estimate. Two consequences:
+  - *Scroll anchoring*: when a correction shifts content above the
+    viewport top, `scroll_y` is adjusted in the same pass so on-screen
+    content doesn't jump (one-frame latency).
+  - *Scrollbar settle*: the root computes scrollbar totals before the
+    body pane measures, so the thumb geometry settles one frame after a
+    measurement change. A realization re-check guarantees rows always
+    tile the full viewport even when the estimate was far too large.
+
+`PageUp` / `PageDown` page by **visual distance** (the row one viewport
+above/below the current row's top), not by a fixed rows-per-page count.
+
+### Invalidation: which heights survive a model change
+
+Measured/seeded heights are keyed by visible index, so the question on
+every change is "from which row on are they stale?". The projection
+layers answer it: `SortFilterListModel`, `SortFilterTreeModel`, and
+`TreeSlice` expose `first_changed_index()` (see
+[data-models.md](data-models.md)), and the tables consume it
+automatically:
+
+- appending rows keeps every measured height (divergence = old length),
+  even though `SortFilterListModel` notifies with a blanket `Reset`;
+- expanding/collapsing a `TreeTable` node keeps the heights of all rows
+  above the toggle — no scroll jump;
+- a sort flip invalidates from the first reordered row.
+
+---
+
 ## Column model
 
 A column is a generic descriptor over the row type:

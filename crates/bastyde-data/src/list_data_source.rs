@@ -40,4 +40,19 @@ pub trait ListDataSource: 'static {
     /// The implementor is responsible for emitting correct `DataChange`
     /// notifications when the underlying data changes.
     fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle;
+
+    /// First visible index whose content may differ after the change just
+    /// delivered to observers — rows `0..index` are unchanged, so per-row
+    /// derived state (e.g. a measured row height) remains valid for them.
+    /// `None` means unknown: treat as a full change. Read synchronously
+    /// from an `observe_changes` callback.
+    ///
+    /// Default `None` (always safe). [`SortFilterListModel`] overrides it
+    /// so consumers can keep their measured prefix across the proxy's
+    /// blanket `DataChange::Reset` notifications.
+    ///
+    /// [`SortFilterListModel`]: crate::SortFilterListModel
+    fn first_changed_index(&self) -> Option<usize> {
+        None
+    }
 }

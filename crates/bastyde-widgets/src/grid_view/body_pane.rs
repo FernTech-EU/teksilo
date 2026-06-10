@@ -79,6 +79,21 @@ pub(crate) struct GridBodyPane<T: 'static> {
     #[allow(clippy::type_complexity)]
     pub(crate) header_title: Option<Rc<dyn Fn(usize) -> String>>,
 
+    /// Pane-local rebuild trigger. A persistent field (re-bound each
+    /// build) so `place_children`'s post-measure realization re-check
+    /// can request a rebuild of this pane.
+    pub(crate) version: Signal<u64>,
+    /// Bound at `Relayout` on the `GridView` ROOT — bumped when a
+    /// measure pass changes the content total so the root re-places
+    /// with the corrected `max_scroll_y` / thumb ratio next frame (the
+    /// root computes them before this pane measures; without the poke
+    /// they'd stay stale until the next scroll).
+    pub(crate) total_refresh: Signal<u64>,
+    /// Realized tile range from the latest build — consulted by both
+    /// the scroll observer and the realization re-check.
+    pub(crate) prev_built_start: Rc<Cell<usize>>,
+    pub(crate) prev_built_end: Rc<Cell<usize>>,
+
     // Build state
     pub(crate) tile_entries: Vec<(usize, WidgetId)>,
     pub(crate) header_entries: Vec<(usize, WidgetId)>,
@@ -108,8 +123,10 @@ impl<T: 'static> std::fmt::Debug for GridBodyPane<T> {
 
 impl<T: 'static> Widget for GridBodyPane<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Self-rebuild trigger.
-        let version = ctx.signal(0_u64);
+        // Self-rebuild trigger. A persistent field (not `ctx.signal`)
+        // so the realization re-check in `place_children` can bump it
+        // after measurement.
+        let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Scroll re-places tiles without rebuilding (within buffer).
@@ -123,12 +140,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         let vp_h = self.viewport_height.clone();
         let vp_w = self.viewport_width.clone();
         let (initial_start, initial_end) = self.visible();
-        let prev_start = Rc::new(Cell::new(initial_start));
-        let prev_end = Rc::new(Cell::new(initial_end));
+        self.prev_built_start.set(initial_start);
+        self.prev_built_end.set(initial_end);
         let v_scroll = version.clone();
         let scroll_handle = self.scroll_y.observe({
-            let ps = prev_start.clone();
-            let pe = prev_end.clone();
+            let ps = self.prev_built_start.clone();
+            let pe = self.prev_built_end.clone();
             move |y| {
                 let vr = strategy.visible_range(*y, vp_h.get(), vp_w.get(), (len)());
                 if vr.start < ps.get() || vr.end > pe.get() {
@@ -348,6 +365,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             self.header_entries.iter().map(|(s, id)| (*id, *s)).collect();
 
         // Pass A — measure realized tiles (variable-height strategies only).
+        let pre_total = if measures {
+            self.strategy.total_content_height((self.len_fn)(), vp_w)
+        } else {
+            0.0
+        };
         let mut measured: Vec<(usize, f32)> = Vec::new();
         if measures {
             measured.reserve(self.tile_entries.len());
@@ -400,6 +422,33 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         if anchor_delta.abs() > 0.01 {
             let new_scroll = (self.scroll_y.get() + anchor_delta).max(0.0);
             self.scroll_y.set(new_scroll);
+        }
+
+        // Realization re-check: corrected offsets may reveal viewport
+        // tiles the estimated offsets never realized (tiles measured
+        // shorter than the estimate previously left a gap at the bottom
+        // until the next scroll). Request a pane rebuild for next
+        // frame; the strategies' sub-pixel measurement epsilon
+        // guarantees convergence.
+        if measures {
+            let len = (self.len_fn)();
+            let vr = self
+                .strategy
+                .visible_range(self.scroll_y.get(), self.viewport_height.get(), vp_w, len);
+            if vr.start < self.prev_built_start.get() || vr.end > self.prev_built_end.get() {
+                self.prev_built_start.set(vr.start);
+                self.prev_built_end.set(vr.end);
+                self.version.set(self.version.get() + 1);
+            }
+
+            // Total-refresh poke: the root computed `max_scroll_y` /
+            // thumb ratio BEFORE this measure pass. Re-place it next
+            // frame when the total changed — otherwise content past the
+            // estimated total stays unreachable until the next scroll.
+            let post_total = self.strategy.total_content_height(len, vp_w);
+            if (post_total - pre_total).abs() > 0.01 {
+                self.total_refresh.set(self.total_refresh.get() + 1);
+            }
         }
     }
 

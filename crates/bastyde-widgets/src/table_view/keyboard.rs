@@ -16,6 +16,7 @@ use bastyde_data::{SelectionMode, SelectionModel};
 use super::column::{EditTrigger, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
+use crate::common::row_metrics::SharedRowMetrics;
 
 /// Configuration captured from the table at build time and threaded
 /// into the on_key handler. Cheap to clone (signals + Rcs).
@@ -30,7 +31,9 @@ pub(crate) struct KeyHandlerConfig {
     pub scroll_y: Signal<f32>,
     pub max_scroll_y: Signal<f32>,
     pub viewport_height: Rc<std::cell::Cell<f32>>,
-    pub row_height: f32,
+    /// Row geometry (uniform / exact / auto-measure) — drives the
+    /// PageUp/PageDown focus-row math.
+    pub row_metrics: SharedRowMetrics,
     pub tab_traversal: TabTraversal,
     pub editing_cell: Signal<Option<(usize, usize)>>,
     pub edit_trigger: EditTrigger,
@@ -106,7 +109,6 @@ pub(crate) fn build_key_handler(
         }
 
         let viewport_h = cfg.viewport_height.get();
-        let rows_per_page = ((viewport_h / cfg.row_height).floor() as usize).max(1);
 
         let new_pos: Option<(usize, usize)> = match key {
             Key::ArrowUp => cfg.navigator.prev_row(row).map(|r| (r, col)),
@@ -137,16 +139,36 @@ pub(crate) fn build_key_handler(
                 cfg.navigator.last_row().map(|r| (r, cfg.col_count - 1))
             }
             Key::PageUp => {
-                // Scroll one page; move focus the same number of rows up.
+                // Scroll one page; move focus to the row one viewport
+                // above the current row's top (offset-table-driven, so
+                // variable heights page by visual distance, not by a
+                // fixed row count). Guarantee progress even when a
+                // single row is taller than the viewport.
                 let new_y = (cfg.scroll_y.get() - viewport_h).max(0.0);
                 cfg.scroll_y.set(new_y);
-                let r = row.saturating_sub(rows_per_page);
+                let r = {
+                    let mut m = cfg.row_metrics.borrow_mut();
+                    m.resize(row_count);
+                    let target_y = (m.row_top(row) - viewport_h).max(0.0);
+                    m.row_at(target_y)
+                };
+                let r = if r == row { row.saturating_sub(1) } else { r };
                 Some((r, col))
             }
             Key::PageDown => {
                 let new_y = (cfg.scroll_y.get() + viewport_h).min(cfg.max_scroll_y.get());
                 cfg.scroll_y.set(new_y);
-                let r = (row + rows_per_page).min(row_count - 1);
+                let r = {
+                    let mut m = cfg.row_metrics.borrow_mut();
+                    m.resize(row_count);
+                    let target_y = m.row_top(row) + viewport_h;
+                    m.row_at(target_y)
+                };
+                let r = if r == row {
+                    (row + 1).min(row_count - 1)
+                } else {
+                    r.min(row_count - 1)
+                };
                 Some((r, col))
             }
             Key::Tab => {

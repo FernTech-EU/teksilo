@@ -2151,3 +2151,393 @@ fn rtl_live_resize_tracks_without_drift() {
         id_w
     );
 }
+
+// ── Variable row heights ───────────────────────────────────────────────────
+
+/// Fixed-size leaf for height-driven cell delegates.
+#[derive(Debug)]
+struct FixedLeaf(f32, f32);
+impl bastyde_core::widget::Widget for FixedLeaf {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &bastyde_core::widget::LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        bastyde_canvas::Size::new(self.0, self.1).into()
+    }
+}
+
+/// Collect the (y, height) bounds of the materialised `Role::Row`
+/// widgets, sorted by y.
+fn row_spans(tree: &WidgetTree, root: WidgetId) -> Vec<(f32, f32)> {
+    let mut walker = vec![root];
+    let mut spans = Vec::new();
+    while let Some(id) = walker.pop() {
+        if tree.accessibility_node(id).role() == Role::Row {
+            let b = tree.bounds(id);
+            spans.push((b.y, b.height));
+        }
+        for c in tree.children(id) {
+            walker.push(c);
+        }
+    }
+    spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    spans
+}
+
+#[test]
+fn exact_row_height_fn_positions_rows() {
+    let heights = [60.0_f32, 20.0, 40.0];
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .show_header(false)
+            .row_height_fn(move |i| heights[i]),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    let spans = row_spans(&tree, table);
+    assert_eq!(spans.len(), 3);
+    assert!((spans[0].0 - 0.0).abs() < 0.01 && (spans[0].1 - 60.0).abs() < 0.01);
+    assert!((spans[1].0 - 60.0).abs() < 0.01 && (spans[1].1 - 20.0).abs() < 0.01);
+    assert!((spans[2].0 - 80.0).abs() < 0.01 && (spans[2].1 - 40.0).abs() < 0.01);
+}
+
+#[test]
+fn auto_row_height_measures_tallest_cell() {
+    // Column A cells are 30 px tall, column B cells 44 px — the row must
+    // measure to the tallest cell (44), not the 20 px estimate.
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let col_a = Column::<Row>::new("a", lit!("A"), |_row, _: &CellContext| {
+        Box::new(FixedLeaf(50.0, 30.0))
+    })
+    .width(ColumnWidth::Fixed(60.0));
+    let col_b = Column::<Row>::new("b", lit!("B"), |_row, _: &CellContext| {
+        Box::new(FixedLeaf(50.0, 44.0))
+    })
+    .width(ColumnWidth::Flex(1.0));
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(col_a)
+            .add_column(col_b)
+            .show_header(false)
+            .auto_row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    let spans = row_spans(&tree, table);
+    assert!(
+        (spans[0].1 - 44.0).abs() < 0.01,
+        "row height must be the tallest cell, got {}",
+        spans[0].1
+    );
+    assert!(
+        (spans[1].0 - 44.0).abs() < 0.01,
+        "row 1 must sit below the measured row 0, got {}",
+        spans[1].0
+    );
+}
+
+#[test]
+fn page_down_with_variable_heights_lands_on_offset_row() {
+    use bastyde_core::event::{Key, Modifiers};
+    // Heights alternate 20 / 60 px (tops 0, 20, 80, 100, 160, 180, 240…).
+    // Viewport 200 from row 0 → the row containing y = 200 is row 5
+    // (top 180), NOT row 10 that a fixed rows-per-page would produce.
+    let model = rows(100);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .show_header(false)
+            .row_height_fn(|i| if i % 2 == 0 { 20.0 } else { 60.0 }),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    tree.press_key(Key::PageDown, Modifiers::NONE);
+    let after = read_focused_cell(&tree, table).unwrap();
+    assert_eq!(
+        after.0, 5,
+        "PageDown must land on the row one viewport below (offset-driven)"
+    );
+}
+
+#[test]
+fn append_through_sort_filter_keeps_measured_prefix() {
+    use bastyde_data::SortFilterListModel;
+    // Auto-measure through a SortFilterListModel: the proxy emits
+    // blanket `Reset`s, but its `first_changed_index` side-channel must
+    // keep the measured prefix on append — row 1 stays at the measured
+    // 30 px, it doesn't snap back to the 50 px estimate.
+    let model = rows(4);
+    let proxy = SortFilterListModel::new(model.clone());
+    let col = Column::<Row>::new("a", lit!("A"), |_row, _: &CellContext| {
+        Box::new(FixedLeaf(50.0, 30.0))
+    })
+    .width(ColumnWidth::Flex(1.0));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::from_source(proxy)
+            .add_column(col)
+            .show_header(false)
+            .auto_row_height(50.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    model.push(Row {
+        id: 99,
+        name: "new".into(),
+    });
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    let spans = row_spans(&tree, table);
+    assert_eq!(spans.len(), 5);
+    assert!(
+        (spans[1].0 - 30.0).abs() < 0.01,
+        "measured prefix must survive an append through SortFilterListModel, got y {}",
+        spans[1].0
+    );
+}
+
+#[test]
+fn row_drop_insertion_with_variable_heights() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    // Heights [40, 10, 40, 40, 40]: dropping at y = 35 (lower half of
+    // the tall row 0) must insert before row 1 — the naive midpoint
+    // formula would skip past the short row 1.
+    let heights = [40.0_f32, 10.0, 40.0, 40.0, 40.0];
+    let model = rows(5);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let _table = tree.add(
+        TableView::new(model.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .show_header(false)
+            .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
+            .reorderable_rows(true),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    // Drag row 4 (id 4, spans 130..170) up to y = 35.
+    let from = Point::new(150.0, 150.0);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: from,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x + 10.0, from.y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x, 35.0),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(from.x, 35.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    // Insertion before row 1: ids become [0, 4, 1, 2, 3].
+    let ids: Vec<u32> = (0..model.len())
+        .map(|i| model.with_item(i, |r| r.id).unwrap())
+        .collect();
+    assert_eq!(ids, vec![0, 4, 1, 2, 3]);
+}
+#[test]
+fn auto_row_height_totals_settle_after_measurement() {
+    // Regression: the root computes `max_scroll_y` before the pane's
+    // measure pass. Without the pane's total-refresh poke, rows that
+    // measure TALLER than the estimate left the totals stale forever —
+    // the bottom of the content was unreachable and the last visible
+    // row sat cut at the viewport edge.
+    let model = rows(50);
+    let col = Column::<Row>::new("a", lit!("A"), |_row, _: &CellContext| {
+        Box::new(FixedLeaf(50.0, 44.0))
+    })
+    .width(ColumnWidth::Flex(1.0));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(col)
+            .show_header(false)
+            .auto_row_height(30.0),
+    );
+    for _ in 0..5 {
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+    }
+    let max_scroll = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.max_scroll_y_signal().get()
+    };
+    // Realized rows measured 44 px; unrealized ones still estimate 30.
+    // The total must at least exceed the all-estimate figure and the
+    // scroll range must reach every measured row realized so far.
+    assert!(
+        max_scroll > 1300.0 + 0.5,
+        "max_scroll must pick up measured heights, got {max_scroll} (stale = 1300)"
+    );
+
+    // Scroll to the (corrected) bottom and let realization settle: the
+    // last row must end exactly at the viewport bottom — fully
+    // reachable, nothing cut beyond reach.
+    let scroll = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.scroll_y_signal().clone()
+    };
+    // Each measure → total-refresh → root re-place cycle spans two
+    // layout passes; scrolling to the (growing) bottom extends the
+    // measured region step by step — loop until the range stabilizes,
+    // exactly like a user holding the wheel / thumb across frames.
+    // Rows jumped over stay at their estimate (virtualization never
+    // measures unrealized rows), so the total converges to
+    // measured-so-far + estimates, not to the fully-measured figure.
+    let read_max = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.max_scroll_y_signal().get()
+    };
+    let mut settled = false;
+    for _ in 0..60 {
+        let max_before = read_max(&tree);
+        scroll.set(max_before);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        // Compare AFTER the layout — the total-refresh poke updates the
+        // max during the pass.
+        let max_after = read_max(&tree);
+        if (max_after - max_before).abs() < 0.01 && (scroll.get() - max_after).abs() < 0.01 {
+            settled = true;
+            break;
+        }
+    }
+    assert!(settled, "scroll range must converge");
+
+    // The user-facing invariant the total-refresh poke restores: at max
+    // scroll the LAST row ends exactly at the viewport bottom — fully
+    // reachable. (Pre-fix, the stale total left ~700 px of measured
+    // content beyond the reachable range, with the last visible row's
+    // lines cut at the viewport edge forever.)
+    let max_scroll = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.max_scroll_y_signal().get()
+    };
+    assert!(
+        (scroll.get() - max_scroll).abs() < 0.01,
+        "scroll must settle at max"
+    );
+    let spans = row_spans(&tree, table);
+    let last_bottom = spans.last().map(|(y, h)| y + h).unwrap();
+    assert!(
+        (last_bottom - 200.0).abs() < 1.0,
+        "at max scroll the last row must end at the viewport bottom, got {last_bottom}"
+    );
+}
+
+#[test]
+fn root_painted_row_decorations_clip_to_widget_bounds() {
+    // Regression: alt-row stripes / grid lines / selection bands are
+    // painted by the TableView root itself — `clips_children` doesn't
+    // cover a widget's own paint, so the partially visible bottom
+    // row's full-height stripe and its grid line bled past the
+    // table's bottom edge ("the colored line overflows, not the
+    // text"). The root paint now wraps the body band in a
+    // SetClip/ClearClip pair.
+    use bastyde_canvas::DrawCommand;
+
+    let model = rows(50);
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    sel.select(4); // the partial bottom row → selection band too
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let _table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .show_header(false)
+            .row_height_fn(|_| 44.0) // 200 / 44 → bottom row is partial
+            .alternating_rows(true)
+            .grid_lines(super::GridLines::Horizontal)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+
+    let frame = tree.render();
+    let mut clips: Vec<[f32; 4]> = Vec::new();
+    let mut saw_raw_overflow = false;
+    for cmd in &frame.draw_order {
+        match cmd {
+            DrawCommand::SetClip(r) => clips.push([r.x, r.y, r.width, r.height]),
+            DrawCommand::ClearClip => {
+                clips.pop();
+            }
+            DrawCommand::Decoration(i) => {
+                let rect = frame.decorations[*i].rect;
+                let raw_bottom = rect[1] + rect[3];
+                // Effective visible bottom = rect ∩ all active clips.
+                let mut bottom = raw_bottom;
+                for c in &clips {
+                    bottom = bottom.min(c[1] + c[3]);
+                }
+                if raw_bottom > 200.5 {
+                    saw_raw_overflow = true;
+                }
+                assert!(
+                    bottom <= 200.5,
+                    "a painted rect's visible region extends below the table \
+                     (raw rect {rect:?}, effective bottom {bottom})"
+                );
+            }
+            _ => {}
+        }
+    }
+    // Sanity: the scenario must actually exercise the bug — at least
+    // one raw rect (the partial bottom row's stripe / grid line)
+    // extends past the bounds and relies on the clip.
+    assert!(
+        saw_raw_overflow,
+        "expected a partial bottom-row decoration spanning past the bounds"
+    );
+}

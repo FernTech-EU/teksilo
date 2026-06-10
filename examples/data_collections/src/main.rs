@@ -2,8 +2,15 @@
 //!
 //! Demonstrates all Milestone 6 features:
 //! - **Repeater** — non-virtualized dynamic collection
-//! - **ListView** — virtualized list with selection and drag reordering
-//! - **TreeView** — hierarchical tree with expand/collapse and drag reparenting
+//! - **ListView** — virtualized list with selection, drag reordering,
+//!   and **variable row heights** (exact `item_height_fn` — two-line
+//!   rows are taller than single-line ones)
+//! - **Auto Feed** — message-feed ListView under `auto_item_height`:
+//!   rows self-measure (1–4 content lines each), scroll anchoring
+//!   keeps content steady as estimates are corrected
+//! - **TreeView** — hierarchical tree with expand/collapse, drag
+//!   reparenting, and auto-measured rows (branches carry a subtitle
+//!   line; measured heights above a toggle survive expand/collapse)
 //!
 //! Uses the `on_activate_fn(|ctx| …)` handler for button activation.
 //! Handlers can fire typed intents via `ctx.send_intent(AppIntent::X)`
@@ -50,13 +57,16 @@ struct Root {
     root_child_id: Option<WidgetId>,
     tags: ListModel<String>,
     list_items: ListModel<String>,
+    feed_items: ListModel<String>,
     tree_model: TreeModel<String>,
     list_selection: SelectionModel,
+    feed_selection: SelectionModel,
     tree_selection: SelectionModel,
     list_checks: CheckedModel,
     tree_checks: TreeCheckedModel<String>,
     tag_counter: Rc<Cell<usize>>,
     list_counter: Rc<Cell<usize>>,
+    feed_counter: Rc<Cell<usize>>,
     tree_counter: Rc<Cell<usize>>,
 }
 
@@ -67,17 +77,40 @@ impl Root {
         tree_model: TreeModel<String>,
     ) -> Self {
         let tree_checks = TreeCheckedModel::new(tree_model.clone());
+        // Message-feed content for the auto-measure tab: each entry
+        // carries 1–4 lines, so realized rows genuinely differ in
+        // measured height.
+        let feed_items = ListModel::from_vec(
+            (1..=300)
+                .map(|i| {
+                    let lines = 1 + (i * 7) % 4;
+                    (0..lines)
+                        .map(|l| {
+                            if l == 0 {
+                                format!("Message {i}")
+                            } else {
+                                format!("· detail line {} of message {i}", l + 1)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .collect(),
+        );
         Self {
             root_child_id: None,
             tags,
             list_items,
+            feed_items,
             tree_model,
             list_selection: SelectionModel::new(SelectionMode::Multi),
+            feed_selection: SelectionModel::new(SelectionMode::Single),
             tree_selection: SelectionModel::new(SelectionMode::Single),
             list_checks: CheckedModel::new(),
             tree_checks,
             tag_counter: Rc::new(Cell::new(5)),
             list_counter: Rc::new(Cell::new(201)),
+            feed_counter: Rc::new(Cell::new(301)),
             tree_counter: Rc::new(Cell::new(1)),
         }
     }
@@ -180,6 +213,8 @@ impl Root {
                         .child(
                             TextWidget::new(lit!(
                                 "200 items, only visible ones have widgets. \
+                                 Variable row heights via item_height_fn: \
+                                 two-line rows are 64 px, single-line 40 px. \
                                  Multi-select: click, Ctrl+click, Shift+click. \
                                  Drag to reorder. Alt+Arrow to reorder via keyboard."
                             ))
@@ -239,13 +274,82 @@ impl Root {
                     }
                     Box::new(row)
                 })
-                .item_height(48.0)
+                // Exact variable heights: the callback mirrors the
+                // delegate's structure (even rows are two-line).
+                .item_height_fn(|i| if i % 2 == 0 { 64.0 } else { 40.0 })
                 .selection(selection)
                 .reorderable(true),
             )
     }
 
-    // ---- Tab 3: TreeView ----
+    // ---- Tab 3: Auto-measured message feed ----
+
+    fn build_feed_tab(&self, theme: &Theme) -> impl Widget + 'static {
+        let items = self.feed_items.clone();
+        let items_add = self.feed_items.clone();
+        let selection = self.feed_selection.clone();
+        let counter = self.feed_counter.clone();
+
+        VStack::new()
+            .spacing(0.0)
+            .child(
+                Padding::uniform(16.0).child(
+                    VStack::new()
+                        .spacing(12.0)
+                        .child(
+                            TextWidget::new(lit!("Message Feed (auto_item_height)"))
+                                .style(theme.typography.body_bold.clone())
+                                .color(theme.colors.text_primary),
+                        )
+                        .child(
+                            TextWidget::new(lit!(
+                                "300 messages, 1–4 lines each. Rows self-measure \
+                                 (height-for-width); unrealized rows assume the \
+                                 estimate and scroll anchoring keeps content steady \
+                                 as measurements correct it. Appending keeps the \
+                                 measured prefix — scroll position doesn't jump."
+                            ))
+                            .style(theme.typography.body.clone())
+                            .color(theme.colors.text_primary),
+                        )
+                        .child(
+                            Button::new(lit!("+ Append Message"))
+                                .variant(ButtonVariant::Filled)
+                                .on_activate_fn(move |_ctx| {
+                                    let n = counter.get();
+                                    counter.set(n + 1);
+                                    items_add.push(format!(
+                                        "Message {n}\n· appended at runtime"
+                                    ));
+                                }),
+                        ),
+                ),
+            )
+            .child(
+                ListView::new(items, move |index, item, selected| {
+                    let mut lines = VStack::new().spacing(2.0);
+                    for (l, line) in item.lines().enumerate() {
+                        let text = TextWidget::new(lit!(line.to_string()));
+                        lines = lines.child(if l == 0 {
+                            text
+                        } else {
+                            text.color(TextRole::Secondary)
+                        });
+                    }
+                    let mut row = StandardListItem::new(lit!(format!("#{}", index + 1)))
+                        .selected(selected);
+                    row = row.trailing_slot(Padding::symmetric(6.0, 0.0).child(lines));
+                    Box::new(row)
+                })
+                // Auto-measure: 48 px is just an estimate — real heights
+                // come from measuring each realized row's content.
+                .auto_item_height(48.0)
+                .spacing(2.0)
+                .selection(selection),
+            )
+    }
+
+    // ---- Tab 4: TreeView ----
 
     fn build_treeview_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tree = self.tree_model.clone();
@@ -268,9 +372,12 @@ impl Root {
                         )
                         .child(
                             TextWidget::new(lit!(
-                                "Hierarchical tree with expand/collapse. \
-                                 Click to select, Right/Left expand/collapse. \
-                                 Drag to reparent (top=before, middle=into, bottom=after)."
+                                "Hierarchical tree with expand/collapse and \
+                                 auto-measured rows: branches carry a subtitle \
+                                 line (taller), leaves are single-line. Expanding \
+                                 a node keeps the measured heights above it — no \
+                                 scroll jump. Click to select, Right/Left \
+                                 expand/collapse, drag to reparent."
                             ))
                             .style(theme.typography.body.clone())
                             .color(theme.colors.text_primary),
@@ -311,8 +418,12 @@ impl Root {
                         .on_toggle_rc(ctx.toggle_callback());
                     if entry.has_children {
                         // Branches: tristate so `Indeterminate` is
-                        // visible when descendants are mixed.
-                        row = row.tristate_checkbox(tree_checks.signal_for(entry.node_id));
+                        // visible when descendants are mixed — plus a
+                        // subtitle, making branch rows measurably
+                        // taller than leaves.
+                        row = row
+                            .tristate_checkbox(tree_checks.signal_for(entry.node_id))
+                            .subtitle(lit!(format!("folder · depth {}", entry.depth)));
                     } else {
                         // Leaves: two-state via the bidirectional
                         // bool bridge. The model still recomputes
@@ -321,7 +432,9 @@ impl Root {
                     }
                     Box::new(row)
                 })
-                .item_height(28.0)
+                // Auto-measure: two-line branches and one-line leaves
+                // get their real heights from measurement.
+                .auto_item_height(28.0)
                 .selection(selection)
                 .reorderable(true)
                 .row_click_expands(false),
@@ -336,6 +449,7 @@ impl Widget for Root {
 
         let repeater_tab = self.build_repeater_tab(&theme);
         let listview_tab = self.build_listview_tab(&theme);
+        let feed_tab = self.build_feed_tab(&theme);
         let treeview_tab = self.build_treeview_tab(&theme);
 
         let root = ctx.add(
@@ -343,6 +457,7 @@ impl Widget for Root {
                 TabWidget::new(selected_tab)
                     .static_tab(TabInfo::new().title(lit!("Repeater")), repeater_tab)
                     .static_tab(TabInfo::new().title(lit!("ListView")), listview_tab)
+                    .static_tab(TabInfo::new().title(lit!("Auto Feed")), feed_tab)
                     .static_tab(TabInfo::new().title(lit!("TreeView")), treeview_tab),
             ),
         );

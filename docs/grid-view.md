@@ -52,7 +52,17 @@ Off-screen tiles aren't built, so their heights are unknown. Two paths:
   it back. Unmeasured rows use the estimate. When a corrected estimate shifts
   content at/above the viewport top, `VariableRowGrid` adjusts `scroll_y` to keep
   it visually stationary (one-frame latency, no jump). Backed by a prefix-sum
-  offset table with O(log n) row↔y lookups.
+  offset table with O(log n) row↔y lookups (`PrefixSumOffsets`, shared with the
+  1-D row widgets — `ListView` / `TreeView` / `TableView` / `TreeTable` — from
+  `common/row_offsets.rs`). After each measure pass a *realization re-check*
+  compares the corrected visible range against the realized tile range and
+  requests a rebuild when tiles measured shorter than the estimate would
+  otherwise leave a gap at the viewport bottom — convergence is guaranteed by
+  the sub-pixel measurement epsilon. When a measure pass changes the content
+  total, the pane pokes the container (a `Relayout`-bound signal) so
+  `max_scroll_y` and the thumb ratio — computed parent-first, before the
+  measurements — are re-derived next frame; without the poke, content past the
+  estimated total would stay unreachable until the next scroll.
 - **Exact** (`.item_height(index)`): row heights are seeded exactly as
   `max(item_height(i))` over the row — exact scrollbar, zero jitter, no
   measurement.

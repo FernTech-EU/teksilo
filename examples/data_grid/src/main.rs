@@ -1,13 +1,21 @@
 //! `data_grid` — flat `TableView` showcase.
 //!
 //! Run with: `cargo run -p data-grid`
+//! Uniform-row variant (the fast path): `cargo run -p data-grid -- --uniform`
 //!
 //! Demonstrates:
 //! - 1000-row `ListModel<Employee>`.
-//! - Six columns: id (Fixed, sortable, pinned Leading), name + email
+//! - Seven columns: id (Fixed, sortable, pinned Leading), name + email
 //!   (Flex, sortable + filterable), role (Flex, sortable, alignment
 //!   Center), salary (Fixed, sortable, alignment Trailing), active
-//!   (Fixed, alignment Center, custom badge cell).
+//!   (Fixed, alignment Center, custom badge cell), notes (Flex,
+//!   1–3 lines of varying content).
+//! - **Variable row heights** via `auto_row_height(30.0)`: each row
+//!   measures to its tallest cell (the multi-line notes column), with
+//!   scroll anchoring while estimates correct. "Append row" keeps the
+//!   measured prefix — `SortFilterListModel`'s `first_changed_index`
+//!   side-channel survives its blanket Resets. Pass `--uniform` for
+//!   the fixed-height fast path.
 //! - `MultiRow` selection wired through `SelectionModel`.
 //! - `SortFilterListModel<Employee>` proxy bound to `table.sort_signal()`
 //!   and `table.filters_signal()` so sort + filter compose.
@@ -41,6 +49,23 @@ struct Employee {
     role: &'static str,
     salary: u32,
     active: bool,
+    /// 1–3 lines — drives the per-row measured height.
+    notes: String,
+}
+
+fn notes_for(i: u32) -> String {
+    match i % 4 {
+        0 => format!("Onboarded in batch {}.", i / 50 + 1),
+        1 => format!(
+            "Onboarded in batch {}.\nPending equipment request.",
+            i / 50 + 1
+        ),
+        2 => format!(
+            "Onboarded in batch {}.\nPending equipment request.\nNeeds badge renewal next month.",
+            i / 50 + 1
+        ),
+        _ => "—".to_string(),
+    }
 }
 
 fn make_data(n: u32) -> Vec<Employee> {
@@ -61,6 +86,7 @@ fn make_data(n: u32) -> Vec<Employee> {
             role: roles[(i as usize) % roles.len()],
             salary: 35_000 + (i * 137) % 100_000,
             active: i % 3 != 0,
+            notes: notes_for(i),
         })
         .collect()
 }
@@ -134,7 +160,21 @@ fn active_column() -> Column<Employee> {
     .alignment(Alignment::Center)
 }
 
+fn notes_column() -> Column<Employee> {
+    // Multi-line cell: each row's notes carry 1–3 lines, so under
+    // `auto_row_height` the row grows to fit (the tallest cell wins).
+    Column::<Employee>::new("notes", lit!("Notes"), |row, _: &CellContext| {
+        let mut lines = VStack::new().spacing(1.0);
+        for line in row.notes.lines() {
+            lines = lines.child(TextWidget::new(lit!(line.to_string())));
+        }
+        Box::new(Padding::symmetric(4.0, 0.0).child(lines))
+    })
+    .width(ColumnWidth::Flex(2.0))
+}
+
 fn main() {
+    let uniform = std::env::args().any(|a| a == "--uniform");
     let model = ListModel::from_vec(make_data(1000));
 
     // SortFilterListModel proxies the source through sort + filter,
@@ -180,14 +220,23 @@ fn main() {
         .theme(bastyde::presets::intui::light())
         .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
             move |tree, _| {
-                let table = TableView::from_source(proxy.clone())
+                let mut table = TableView::from_source(proxy.clone())
                     .add_column(id_column())
                     .add_column(name_column())
                     .add_column(email_column())
                     .add_column(role_column())
                     .add_column(salary_column())
                     .add_column(active_column())
-                    .row_height(28.0)
+                    .add_column(notes_column());
+                // Default: rows measure to their tallest cell (the
+                // 1–3-line notes). `--uniform` keeps the fixed-height
+                // fast path for comparison.
+                table = if uniform {
+                    table.row_height(28.0)
+                } else {
+                    table.auto_row_height(30.0)
+                };
+                let table = table
                     .alternating_rows(true)
                     .grid_lines(GridLines::Horizontal)
                     .selection_mode(TableSelectionMode::MultiRow)
@@ -211,10 +260,31 @@ fn main() {
                     proxy.len(),
                     selection.count()
                 )));
+                // Live append: under auto_row_height the measured
+                // prefix survives (divergence = old length through the
+                // SortFilterListModel side-channel) — scroll position
+                // and row heights above don't jump.
+                let model_for_append = model.clone();
+                let next_id = std::cell::Cell::new(1001_u32);
                 let toolbar = HStack::new()
                     .spacing(8.0)
                     .child(Button::new(lit!("Reset filters")))
                     .child(Button::new(lit!("Reset sort")))
+                    .child(
+                        Button::new(lit!("+ Append row")).on_activate_fn(move |_ctx| {
+                            let i = next_id.get();
+                            next_id.set(i + 1);
+                            model_for_append.push(Employee {
+                                id: i,
+                                name: format!("New Hire {i}"),
+                                email: format!("user{i}@example.com"),
+                                role: "Viewer",
+                                salary: 42_000,
+                                active: true,
+                                notes: notes_for(i),
+                            });
+                        }),
+                    )
                     .child(Spacer::new())
                     .child(status);
 

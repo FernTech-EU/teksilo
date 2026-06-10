@@ -8,7 +8,10 @@
 //! backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
 //! accessibility, multi-row selection, and an empty-state slot. Headers,
 //! sort, filter, resize, reorder, pinning, cell selection, and editing are
-//! also included.
+//! also included. Row heights come in three modes: uniform (`row_height`,
+//! the default fast path), exact per-row callback (`row_height_fn`), and
+//! auto-measured (`auto_row_height` — rows grow to their tallest cell,
+//! height-for-width). See docs/table-view.md "Row heights".
 
 pub mod a11y;
 pub mod body;
@@ -43,6 +46,7 @@ use bastyde_tokens::{BorderRole, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
+use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
@@ -102,10 +106,20 @@ type ObserveFn = Rc<dyn Fn(Box<dyn Fn(&DataChange)>) -> ObserverHandle>;
 /// is a `ListModel<T>` (which exposes `move_item`); `ListDataSource`
 /// implementations are read-only and don't get one.
 type MoveItemFn = Rc<dyn Fn(usize, usize)>;
+/// Divergence side-channel for `DataChange::Reset`-emitting proxies
+/// (`ListDataSource::first_changed_index`). Raw `ListModel`s report
+/// `None` — their observers already get fine-grained variants.
+type FirstChangedFn = Rc<dyn Fn() -> Option<usize>>;
 
 fn erase_list_model<T: 'static>(
     model: ListModel<T>,
-) -> (LenFn, WithItemFn<T>, ObserveFn, Option<MoveItemFn>) {
+) -> (
+    LenFn,
+    WithItemFn<T>,
+    ObserveFn,
+    Option<MoveItemFn>,
+    FirstChangedFn,
+) {
     let m_len = model.clone();
     let m_read = model.clone();
     let m_obs = model.clone();
@@ -117,23 +131,37 @@ fn erase_list_model<T: 'static>(
     let observe_fn: ObserveFn =
         Rc::new(move |callback| m_obs.observe_changes(move |change| callback(change)));
     let move_fn: MoveItemFn = Rc::new(move |from, to| m_move.move_item(from, to));
-    (len_fn, with_item_fn, observe_fn, Some(move_fn))
+    (
+        len_fn,
+        with_item_fn,
+        observe_fn,
+        Some(move_fn),
+        Rc::new(|| None),
+    )
 }
 
 fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
     source: S,
-) -> (LenFn, WithItemFn<T>, ObserveFn, Option<MoveItemFn>) {
+) -> (
+    LenFn,
+    WithItemFn<T>,
+    ObserveFn,
+    Option<MoveItemFn>,
+    FirstChangedFn,
+) {
     let s = Rc::new(source);
     let s_len = s.clone();
     let s_read = s.clone();
-    let s_obs = s;
+    let s_obs = s.clone();
+    let s_changed = s;
     let len_fn: LenFn = Rc::new(move || s_len.len());
     let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
         s_read.with_item(idx, |item| f(item));
     });
     let observe_fn: ObserveFn =
         Rc::new(move |callback| s_obs.observe_changes(move |change| callback(change)));
-    (len_fn, with_item_fn, observe_fn, None)
+    let first_changed_fn: FirstChangedFn = Rc::new(move || s_changed.first_changed_index());
+    (len_fn, with_item_fn, observe_fn, None, first_changed_fn)
 }
 
 // `read_item` lived here for the inline body-row build; that loop now
@@ -151,10 +179,15 @@ pub struct TableView<T: 'static> {
     with_item_fn: WithItemFn<T>,
     observe_fn: ObserveFn,
     move_item_fn: Option<MoveItemFn>,
+    first_changed_fn: FirstChangedFn,
 
     // Configuration
     columns: Vec<Column<T>>,
     row_height: Option<f32>,
+    /// Height-mode selection (uniform / exact callback / auto-measure).
+    height_source: HeightSource,
+    /// Row geometry — shared with `BodyPane` and the keyboard handler.
+    row_metrics: SharedRowMetrics,
     header_height: Option<f32>,
     show_header: bool,
     selection_mode: TableSelectionMode,
@@ -220,6 +253,16 @@ pub struct TableView<T: 'static> {
     body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
     empty_id: Option<WidgetId>,
+    /// Pane-local rebuild trigger + buffered range, owned here so they
+    /// survive `TableView` rebuilds (each rebuild constructs a fresh
+    /// `BodyPane` struct that inherits these handles).
+    pane_version: Signal<u64>,
+    pane_built_start: Rc<Cell<usize>>,
+    pane_built_end: Rc<Cell<usize>>,
+    /// Bumped by the pane when a measure pass changes the content
+    /// total; bound at `Relayout` on this root so `max_scroll_y` / the
+    /// thumb ratio are recomputed with the corrected total next frame.
+    pane_total_refresh: Signal<u64>,
 
     // Layout state
     /// Resolved widths in **display order** (parallel to
@@ -252,15 +295,17 @@ pub struct TableView<T: 'static> {
 impl<T: 'static> TableView<T> {
     /// Wrap a `ListModel<T>`.
     pub fn new(model: ListModel<T>) -> Self {
-        let (len_fn, with_item_fn, observe_fn, move_fn) = erase_list_model(model);
-        Self::create(len_fn, with_item_fn, observe_fn, move_fn)
+        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) =
+            erase_list_model(model);
+        Self::create(len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn)
     }
 
     /// Wrap any `ListDataSource<Item = T>` (e.g. a
     /// [`SortFilterListModel<T>`](bastyde_data::SortFilterListModel)).
     pub fn from_source<S: ListDataSource<Item = T>>(source: S) -> Self {
-        let (len_fn, with_item_fn, observe_fn, move_fn) = erase_data_source::<S, T>(source);
-        Self::create(len_fn, with_item_fn, observe_fn, move_fn)
+        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) =
+            erase_data_source::<S, T>(source);
+        Self::create(len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn)
     }
 
     fn create(
@@ -268,6 +313,7 @@ impl<T: 'static> TableView<T> {
         with_item_fn: WithItemFn<T>,
         observe_fn: ObserveFn,
         move_item_fn: Option<MoveItemFn>,
+        first_changed_fn: FirstChangedFn,
     ) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
@@ -277,8 +323,11 @@ impl<T: 'static> TableView<T> {
             with_item_fn,
             observe_fn,
             move_item_fn,
+            first_changed_fn,
             columns: Vec::new(),
             row_height: None,
+            height_source: HeightSource::Uniform,
+            row_metrics: Rc::new(RefCell::new(RowMetrics::uniform(cp::ROW_HEIGHT, 0.0))),
             header_height: None,
             show_header: true,
             selection_mode: TableSelectionMode::default(),
@@ -311,6 +360,10 @@ impl<T: 'static> TableView<T> {
             body_pane_id: None,
             scrollbar_id: None,
             empty_id: None,
+            pane_version: Signal::new(0_u64),
+            pane_built_start: Rc::new(Cell::new(0)),
+            pane_built_end: Rc::new(Cell::new(0)),
+            pane_total_refresh: Signal::new(0_u64),
             column_widths: Rc::new(RefCell::new(Vec::new())),
             display_indices: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
@@ -341,8 +394,47 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Re-materialize `self.row_metrics` after a height-mode /
+    /// row-height builder call.
+    fn remake_metrics(&self) {
+        *self.row_metrics.borrow_mut() = self
+            .height_source
+            .make_metrics(self.effective_row_height(), 0.0);
+    }
+
+    /// Fixed row height (default: the table style's 28 px) — the
+    /// uniform fast path. Mutually exclusive with
+    /// [`row_height_fn`](Self::row_height_fn) and
+    /// [`auto_row_height`](Self::auto_row_height); the last mode setter
+    /// wins.
     pub fn row_height(mut self, height: f32) -> Self {
         self.row_height = Some(height);
+        self.height_source = HeightSource::Uniform;
+        self.remake_metrics();
+        self
+    }
+
+    /// Per-row heights from a callback over the visible row index. The
+    /// callback must be pure (same index + same data → same height); it
+    /// is re-swept from the first changed index on every model change
+    /// (a `SortFilterListModel` source reports that index through
+    /// `first_changed_index`, so sort/filter/append keep the valid
+    /// prefix). No measurement pass runs.
+    pub fn row_height_fn(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self {
+        self.height_source = HeightSource::Exact(Rc::new(f));
+        self.remake_metrics();
+        self
+    }
+
+    /// Auto-measured row heights: each realized row reports the height
+    /// of its tallest cell measured at the cell's column width
+    /// (height-for-width), unrealized rows assume `estimated`. Scroll
+    /// anchoring keeps content above the viewport stationary as
+    /// estimates are corrected; the scrollbar settles one frame after a
+    /// measurement change.
+    pub fn auto_row_height(mut self, estimated: f32) -> Self {
+        self.height_source = HeightSource::Auto { estimated };
+        self.remake_metrics();
         self
     }
 
@@ -590,8 +682,7 @@ impl<T: 'static> TableView<T> {
 
     /// Scroll so that `row` is aligned to the top of the viewport.
     pub fn scroll_to_row(&self, row: usize) {
-        let row_h = self.effective_row_height_static();
-        let target = row as f32 * row_h;
+        let target = self.row_metrics.borrow_mut().row_top(row);
         let max = self.max_scroll_y.get();
         self.scroll_y.set(target.clamp(0.0, max));
     }
@@ -704,28 +795,23 @@ impl<T: 'static> TableView<T> {
 
     /// Scroll the minimum distance needed to make `row` visible.
     pub fn ensure_row_visible(&self, row: usize) {
-        let row_h = self.effective_row_height_static();
-        let item_top = row as f32 * row_h;
-        let item_bottom = item_top + row_h;
-        let viewport = self.viewport_height.get();
         let scroll = self.scroll_y.get();
-        let max = self.max_scroll_y.get();
-        if item_top < scroll {
-            self.scroll_y.set(item_top.clamp(0.0, max));
-        } else if item_bottom > scroll + viewport {
-            self.scroll_y.set((item_bottom - viewport).clamp(0.0, max));
+        let new_scroll = self.row_metrics.borrow_mut().scroll_for_ensure_visible(
+            row,
+            scroll,
+            self.viewport_height.get(),
+            self.max_scroll_y.get(),
+        );
+        if (new_scroll - scroll).abs() > f32::EPSILON {
+            self.scroll_y.set(new_scroll);
         }
     }
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    /// The configured row height (override) or a sane fallback
-    /// of 28 px. Once a `BuildContext` is available we read the table
-    /// style; this static helper is for paths outside `build()`.
-    fn effective_row_height_static(&self) -> f32 {
-        self.row_height.unwrap_or(cp::ROW_HEIGHT)
-    }
-
+    /// The configured row height (override) or the table style's 28 px
+    /// fallback. In the non-uniform modes this is the seed estimate;
+    /// real geometry lives in `row_metrics`.
     fn effective_row_height(&self) -> f32 {
         self.row_height.unwrap_or(cp::ROW_HEIGHT)
     }
@@ -738,27 +824,17 @@ impl<T: 'static> TableView<T> {
         }
     }
 
-    fn total_content_height(&self, row_h: f32) -> f32 {
-        let count = (self.len_fn)();
-        if count == 0 {
-            0.0
-        } else {
-            count as f32 * row_h
-        }
+    fn total_content_height(&self) -> f32 {
+        self.row_metrics.borrow_mut().total_height((self.len_fn)())
     }
 
-    fn visible_range(&self, row_h: f32) -> (usize, usize) {
-        let count = (self.len_fn)();
-        if count == 0 || row_h <= 0.0 {
-            return (0, 0);
-        }
-        let scroll = self.scroll_y.get().max(0.0);
-        let viewport = self.viewport_height.get();
-        let first_visible = (scroll / row_h).floor() as usize;
-        let last_visible = ((scroll + viewport) / row_h).ceil() as usize;
-        let start = first_visible.saturating_sub(BUFFER_ROWS);
-        let end = (last_visible + BUFFER_ROWS).min(count);
-        (start, end)
+    fn visible_range(&self) -> (usize, usize) {
+        self.row_metrics.borrow_mut().visible_range(
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            (self.len_fn)(),
+            BUFFER_ROWS,
+        )
     }
 
     fn clamp_scroll(&self) {
@@ -798,6 +874,16 @@ impl<T: 'static> Widget for TableView<T> {
             BindingLevel::Relayout,
         );
         ctx.register_animated_signal(&self.scroll_y);
+
+        // Pane → root total refresh (auto-measure mode): re-place this
+        // root when the body pane's measurements changed the content
+        // total, so `max_scroll_y` / the thumb ratio pick up the
+        // corrected value.
+        self.pane_total_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
 
         // Column width overrides: any change re-runs place_children
         // (which calls ColumnSolver with the latest map). No rebuild
@@ -858,7 +944,27 @@ impl<T: 'static> Widget for TableView<T> {
             let dv = data_ver.clone();
             let sel_for_adjust = self.selection.clone();
             let cell_sel_for_adjust = self.cell_selection.clone();
+            let metrics_for_data = self.row_metrics.clone();
+            let len_for_data = self.len_fn.clone();
+            let first_changed = self.first_changed_fn.clone();
             move |change| {
+                // Keep row metrics in step with the data: rows before
+                // the first changed index keep their heights, the rest
+                // re-derive. A `SortFilterListModel` source collapses
+                // everything to `Reset` — its real divergence comes
+                // through the side-channel, which is what lets an
+                // append keep the measured prefix.
+                let divergence = match change {
+                    DataChange::ItemsInserted { range } | DataChange::ItemsRemoved { range } => {
+                        Some(range.start)
+                    }
+                    DataChange::ItemUpdated { index } => Some(*index),
+                    DataChange::ItemsMoved { from, to, .. } => Some((*from).min(*to)),
+                    DataChange::Reset => (first_changed)(),
+                };
+                metrics_for_data
+                    .borrow_mut()
+                    .apply_divergence(divergence, (len_for_data)());
                 // Auto-adjust both selection models on insert/remove so
                 // the visual selection survives data mutations on the
                 // upstream source.
@@ -919,7 +1025,7 @@ impl<T: 'static> Widget for TableView<T> {
         // intra-buffer scrolls without a rebuild.
         let vp_h = self.viewport_height.clone();
         let len_for_scroll = self.len_fn.clone();
-        let (built_start, built_end) = self.visible_range(row_h);
+        let (built_start, built_end) = self.visible_range();
         let prev_built_start = Rc::new(Cell::new(built_start));
         let prev_built_end = Rc::new(Cell::new(built_end));
         let v_for_scroll = version.clone();
@@ -928,20 +1034,13 @@ impl<T: 'static> Widget for TableView<T> {
             let pbs = prev_built_start.clone();
             let pbe = prev_built_end.clone();
             let sv = scroll_ver.clone();
+            let metrics = self.row_metrics.clone();
             move |y| {
-                let scroll = y.max(0.0);
-                let vp = vp_h.get();
-                let visible_start = if row_h > 0.0 {
-                    (scroll / row_h).floor() as usize
-                } else {
-                    0
-                };
-                let visible_end = if row_h > 0.0 {
-                    ((scroll + vp) / row_h).ceil() as usize
-                } else {
-                    0
-                };
                 let count = (len_for_scroll)();
+                let (visible_start, visible_end) =
+                    metrics
+                        .borrow_mut()
+                        .visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ROWS);
                     let new_end = (visible_end + BUFFER_ROWS).min(count);
@@ -1010,7 +1109,7 @@ impl<T: 'static> Widget for TableView<T> {
             scroll_y: self.scroll_y.clone(),
             max_scroll_y: self.max_scroll_y.clone(),
             viewport_height: self.viewport_height.clone(),
-            row_height: row_h,
+            row_metrics: self.row_metrics.clone(),
             tab_traversal: self.tab_traversal,
             editing_cell: self.editing_cell.clone(),
             edit_trigger: self.edit_trigger,
@@ -1024,7 +1123,7 @@ impl<T: 'static> Widget for TableView<T> {
         let move_item_fn = self.move_item_fn.clone();
         let scroll_y_for_drop = self.scroll_y.clone();
         let header_h_for_drop = header_h;
-        let row_h_for_drop = row_h;
+        let metrics_for_drop = self.row_metrics.clone();
         let len_fn_for_drop = self.len_fn.clone();
         let table_id_for_drop = self.table_id;
 
@@ -1067,14 +1166,10 @@ impl<T: 'static> Widget for TableView<T> {
                 let body_y = position.y - header_h_for_drop;
                 let scroll = scroll_y_for_drop.get();
                 let content_y = body_y + scroll;
-                let len = (len_fn_for_drop)();
-                let insertion_row = if row_h_for_drop > 0.0 {
-                    (((content_y + row_h_for_drop * 0.5) / row_h_for_drop)
-                        .floor()
-                        .max(0.0) as usize)
-                        .min(len)
-                } else {
-                    0
+                let insertion_row = {
+                    let mut m = metrics_for_drop.borrow_mut();
+                    m.resize((len_fn_for_drop)());
+                    m.insertion_index(content_y)
                 };
 
                 if let Some(drag) = payload.take_typed::<RowReorderDragData>()
@@ -1192,7 +1287,7 @@ impl<T: 'static> Widget for TableView<T> {
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
-                row_height: row_h,
+                row_metrics: self.row_metrics.clone(),
                 selection_mode: self.selection_mode,
                 selection: self.selection.clone(),
                 cell_selection: self.cell_selection.clone(),
@@ -1203,6 +1298,10 @@ impl<T: 'static> Widget for TableView<T> {
                 reorderable_rows: self.reorderable_rows,
                 table_id: self.table_id,
                 drag_anchor: ctx.self_id(),
+                version: self.pane_version.clone(),
+                prev_built_start: self.pane_built_start.clone(),
+                prev_built_end: self.pane_built_end.clone(),
+                total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
             };
             self.body_pane_id = Some(ctx.add(pane));
@@ -1268,11 +1367,13 @@ impl<T: 'static> Widget for TableView<T> {
             return;
         }
         let rtl = ctx.is_rtl();
-        let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let body_height = (bounds.height - header_h).max(0.0);
 
-        let total_height = self.total_content_height(row_h);
+        // Parent-before-child layout order means this runs before the
+        // body pane's measure pass — in auto-measure mode the scrollbar
+        // totals settle one frame after a measurement change.
+        let total_height = self.total_content_height();
         let max_y = (total_height - body_height).max(0.0);
         self.max_scroll_y.set(max_y);
         let ratio = if total_height > 0.0 {
@@ -1321,13 +1422,7 @@ impl<T: 'static> Widget for TableView<T> {
             &overrides,
         );
         *self.column_widths.borrow_mut() = widths;
-        let scroll_y = self.scroll_y.get();
         let body_origin_y = bounds.y + header_h;
-
-        // Suppress unused warnings — these were used by the inline
-        // row layout that's now done by `BodyPane`.
-        let _ = scroll_y;
-        let _ = row_h;
 
         let mut next = 0;
 
@@ -1377,7 +1472,6 @@ impl<T: 'static> Widget for TableView<T> {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let colors = &ctx.theme.colors;
 
@@ -1402,16 +1496,40 @@ impl<T: 'static> Widget for TableView<T> {
             bounds.x
         };
 
-        // Alt-row backgrounds — paint odd visible rows.
+        // Visible row window for the paint passes — offset-table-driven
+        // so variable heights paint correctly. One metrics borrow per
+        // pass; nothing inside re-enters the metrics.
+        let row_count = (self.len_fn)();
+        let (first_visible, last_visible) = self.row_metrics.borrow_mut().visible_range(
+            scroll_y,
+            body_height,
+            row_count,
+            0,
+        );
+
+        // Clip the root-painted row decorations (alt-row stripes,
+        // selection bands, grid lines, focus ring) to the body band.
+        // `clips_children` only clips child WIDGETS — this widget's own
+        // paint would otherwise bleed past the table's bottom edge for
+        // the partially visible last row (its stripe/grid-line rect
+        // spans the full row height).
+        canvas.set_clip(Rect::new(
+            content_left,
+            body_origin_y,
+            body_width_for_paint,
+            body_height,
+        ));
+
+        // Alt-row backgrounds — paint odd visible rows. Parity keys on
+        // the row index, not on y, so stripes stay stable under
+        // variable heights.
         if self.alternating_rows {
-            let first_visible = (scroll_y / row_h).floor().max(0.0) as usize;
-            let last_visible = ((scroll_y + body_height) / row_h).ceil() as usize;
-            let row_count = (self.len_fn)();
-            let last_visible = last_visible.min(row_count);
+            let mut m = self.row_metrics.borrow_mut();
             for row_idx in first_visible..last_visible {
                 if row_idx % 2 == 1 {
-                    let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                    let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
+                    let y = body_origin_y + m.row_top(row_idx) - scroll_y;
+                    let h = m.row_height(row_idx);
+                    let rect = Rect::new(content_left, y, body_width_for_paint, h);
                     canvas.fill_rect(rect, SurfaceRole::AltRow.resolve(colors));
                 }
             }
@@ -1425,12 +1543,14 @@ impl<T: 'static> Widget for TableView<T> {
             )
         {
             let bg = SurfaceRole::Selected.resolve(colors);
+            let mut m = self.row_metrics.borrow_mut();
             for row_idx in sel.selected_indices() {
-                let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                if y + row_h < body_origin_y || y > body_origin_y + body_height {
+                let y = body_origin_y + m.row_top(row_idx) - scroll_y;
+                let h = m.row_height(row_idx);
+                if y + h < body_origin_y || y > body_origin_y + body_height {
                     continue;
                 }
-                let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
+                let rect = Rect::new(content_left, y, body_width_for_paint, h);
                 canvas.fill_rect(rect, bg);
             }
         }
@@ -1440,12 +1560,10 @@ impl<T: 'static> Widget for TableView<T> {
         let line_w = cp::GRID_LINE_THICKNESS.max(1.0);
 
         if matches!(self.grid_lines, GridLines::Horizontal | GridLines::Both) {
-            let first_visible = (scroll_y / row_h).floor().max(0.0) as usize;
-            let last_visible = ((scroll_y + body_height) / row_h).ceil() as usize;
-            let row_count = (self.len_fn)();
-            let last_visible = last_visible.min(row_count);
+            let mut m = self.row_metrics.borrow_mut();
             for row_idx in first_visible..last_visible {
-                let y = body_origin_y + (row_idx as f32 + 1.0) * row_h - scroll_y - line_w;
+                let bottom = m.row_top(row_idx) + m.row_height(row_idx);
+                let y = body_origin_y + bottom - scroll_y - line_w;
                 let rect = Rect::new(content_left, y, body_width_for_paint, line_w);
                 canvas.fill_rect(rect, line_color);
             }
@@ -1486,8 +1604,12 @@ impl<T: 'static> Widget for TableView<T> {
                 x_off += w;
             }
             let cell_w = widths[focus_col];
-            let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
-            if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
+            let (focus_top, focus_h) = {
+                let mut m = self.row_metrics.borrow_mut();
+                (m.row_top(focus_row), m.row_height(focus_row))
+            };
+            let y = body_origin_y + focus_top - scroll_y;
+            if y + focus_h >= body_origin_y && y <= body_origin_y + body_height {
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
@@ -1501,7 +1623,7 @@ impl<T: 'static> Widget for TableView<T> {
                 };
                 let ry = y + inset;
                 let rw = (cell_w - inset * 2.0).max(0.0);
-                let rh = (row_h - inset * 2.0).max(0.0);
+                let rh = (focus_h - inset * 2.0).max(0.0);
                 // Top
                 canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
                 // Bottom
@@ -1512,6 +1634,8 @@ impl<T: 'static> Widget for TableView<T> {
                 canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
             }
         }
+
+        canvas.clear_clip();
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

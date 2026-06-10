@@ -76,6 +76,9 @@ struct Inner<T: 'static> {
     visible_to_source: Vec<usize>,
     /// Lazy reverse map; rebuilt on demand by `visible_index_of`.
     source_to_visible: RefCell<Option<Vec<Option<usize>>>>,
+    /// First visible index whose content may differ after the latest
+    /// rebuild. See [`SortFilterListModel::first_changed_index`].
+    last_divergence: Option<usize>,
     observers: Vec<ObserverEntry>,
     next_observer_id: u64,
     /// External signal handles. Held to keep observation alive and to route
@@ -88,7 +91,7 @@ struct Inner<T: 'static> {
 }
 
 impl<T: 'static> Inner<T> {
-    fn rebuild(&mut self) {
+    fn rebuild(&mut self, upstream: Option<&DataChange>) {
         let n = (self.len_fn)();
         let predicates: Vec<Box<dyn Fn(&T) -> bool>> = self
             .filters
@@ -132,6 +135,38 @@ impl<T: 'static> Inner<T> {
                 o
             });
         }
+
+        // Divergence: the first visible index whose content may differ.
+        // `visible_to_source` holds *positional* source indices, not item
+        // identities — an upstream insert/remove/move renumbers every
+        // source index at or above its change point, so equal index
+        // values only guarantee identical content while they sit *below*
+        // that floor. Sort/filter-only rebuilds (no upstream change)
+        // don't renumber, so the floor is unbounded there.
+        let floor = match upstream {
+            None | Some(DataChange::ItemUpdated { .. }) => usize::MAX,
+            Some(DataChange::ItemsInserted { range }) | Some(DataChange::ItemsRemoved { range }) => {
+                range.start
+            }
+            Some(DataChange::ItemsMoved { from, to, .. }) => (*from).min(*to),
+            Some(DataChange::Reset) => 0,
+        };
+        let mut d = self
+            .visible_to_source
+            .iter()
+            .zip(visible.iter())
+            .take_while(|(a, b)| a == b && **a < floor)
+            .count();
+        // An ItemUpdated leaves the index map unchanged when the sort key
+        // didn't move it, but the row's content changed — fold in its
+        // visible position. A moved/filtered-out item is caught by the
+        // prefix compare instead.
+        if let Some(DataChange::ItemUpdated { index }) = upstream
+            && let Some(p) = visible.iter().position(|s| s == index)
+        {
+            d = d.min(p);
+        }
+        self.last_divergence = Some(d);
 
         self.visible_to_source = visible;
         self.source_to_visible.replace(None);
@@ -190,6 +225,7 @@ impl<T: 'static> SortFilterListModel<T> {
             filters: HashMap::new(),
             visible_to_source: Vec::new(),
             source_to_visible: RefCell::new(None),
+            last_divergence: None,
             observers: Vec::new(),
             next_observer_id: 1,
             sort_signal: None,
@@ -201,9 +237,9 @@ impl<T: 'static> SortFilterListModel<T> {
 
         // Register upstream observer; on any source change rebuild + Reset.
         let weak = Rc::downgrade(&inner);
-        let upstream_handle = (observe_fn)(Box::new(move |_change| {
+        let upstream_handle = (observe_fn)(Box::new(move |change| {
             if let Some(strong) = weak.upgrade() {
-                rebuild_and_notify(&strong);
+                rebuild_and_notify_with(&strong, Some(change));
             }
         }));
         inner.borrow_mut()._upstream_handle = Some(upstream_handle);
@@ -343,6 +379,24 @@ impl<T: 'static> SortFilterListModel<T> {
         rebuild_and_notify(&self.inner);
     }
 
+    /// First visible index whose content may differ from before the
+    /// latest projection rebuild — rows `0..index` show the same items in
+    /// the same order as before, so per-row derived state (e.g. a
+    /// measured row height) remains valid for them. Equal to `len()` when
+    /// the visible list is unchanged. Renumbering from upstream
+    /// inserts/removes/moves is accounted for (equal source-index values
+    /// above the change point are not trusted).
+    ///
+    /// `None` means unknown (no rebuild observed yet) — treat as a full
+    /// change. The value describes the **latest** rebuild only; read it
+    /// synchronously from a `DataChange` observer (callbacks fire inline
+    /// on every rebuild, so per-change reads cannot miss a value). The
+    /// `DataChange::Reset` contract for observers is unchanged — this is
+    /// a side-channel for consumers that can exploit a valid prefix.
+    pub fn first_changed_index(&self) -> Option<usize> {
+        self.inner.borrow().last_divergence
+    }
+
     /// Map a visible (post sort+filter) index to its source index.
     pub fn source_index_of(&self, visible: usize) -> Option<usize> {
         self.inner.borrow().visible_to_source.get(visible).copied()
@@ -373,11 +427,18 @@ impl<T: 'static> SortFilterListModel<T> {
 }
 
 fn rebuild_and_notify<T: 'static>(inner: &Rc<RefCell<Inner<T>>>) {
+    rebuild_and_notify_with(inner, None);
+}
+
+fn rebuild_and_notify_with<T: 'static>(
+    inner: &Rc<RefCell<Inner<T>>>,
+    upstream: Option<&DataChange>,
+) {
     // Drop the borrow before invoking observer callbacks so they may freely
     // call back into the proxy (`with_item`, `len`, etc.).
     let callbacks = {
         let mut guard = inner.borrow_mut();
-        guard.rebuild();
+        guard.rebuild(upstream);
         guard.snapshot_callbacks()
     };
     let change = DataChange::Reset;
@@ -415,6 +476,10 @@ impl<T: 'static> ListDataSource for SortFilterListModel<T> {
             }
         });
         slot.into_inner()
+    }
+
+    fn first_changed_index(&self) -> Option<usize> {
+        SortFilterListModel::first_changed_index(self)
     }
 
     fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
@@ -679,6 +744,105 @@ mod tests {
         assert_eq!(proxy.visible_index_of(1), Some(0));
         assert_eq!(proxy.visible_index_of(0), Some(2));
         assert_eq!(proxy.visible_index_of(99), None);
+    }
+
+    // ── first_changed_index (divergence) ────────────────────────────────
+
+    #[test]
+    fn divergence_on_append_is_old_len() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone());
+        model.push(Row {
+            id: 5,
+            name: "eve".into(),
+        });
+        assert_eq!(proxy.first_changed_index(), Some(4));
+    }
+
+    #[test]
+    fn divergence_on_insert_at_front_is_zero() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone());
+        // Renumbering: every position now shows a shifted item even though
+        // the identity projection's index values mostly coincide.
+        model.insert(
+            0,
+            Row {
+                id: 5,
+                name: "eve".into(),
+            },
+        );
+        assert_eq!(proxy.first_changed_index(), Some(0));
+    }
+
+    #[test]
+    fn divergence_on_update_in_place_is_its_visible_index() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone());
+        model.set(
+            2,
+            Row {
+                id: 2,
+                name: "bobby".into(),
+            },
+        );
+        assert_eq!(proxy.first_changed_index(), Some(2));
+    }
+
+    #[test]
+    fn divergence_on_update_that_moves_under_sort() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone())
+            .with_comparator("name", |a: &Row, b| a.name.cmp(&b.name));
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        // Sorted: alice(1), bob(2), carol(0), dan(3). Rename dan → "aaa":
+        // it moves to the front, shifting everything.
+        model.set(
+            3,
+            Row {
+                id: 4,
+                name: "aaa".into(),
+            },
+        );
+        assert_eq!(proxy.first_changed_index(), Some(0));
+    }
+
+    #[test]
+    fn divergence_on_sort_flip_is_first_reordered_row() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model)
+            .with_comparator("name", |a: &Row, b| a.name.cmp(&b.name));
+        // carol, alice, bob, dan → alice, bob, carol, dan: position 0 changes.
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        assert_eq!(proxy.first_changed_index(), Some(0));
+    }
+
+    #[test]
+    fn divergence_on_filter_removing_mid_row() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model).with_predicate("name", |t| {
+            let t = t.to_string();
+            Box::new(move |r: &Row| r.name.contains(&t))
+        });
+        // carol(0), alice(1), bob(2), dan(3); 'a' filters out bob (visible 2).
+        proxy.set_filter("name", "a");
+        assert_eq!(proxy.first_changed_index(), Some(2));
+    }
+
+    #[test]
+    fn divergence_on_noop_rebuild_is_len() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model);
+        proxy.clear_filters(); // rebuild with an identical projection
+        assert_eq!(proxy.first_changed_index(), Some(4));
+    }
+
+    #[test]
+    fn divergence_on_move_is_min_endpoint() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone());
+        model.move_item(1, 3);
+        assert_eq!(proxy.first_changed_index(), Some(1));
     }
 
     #[test]

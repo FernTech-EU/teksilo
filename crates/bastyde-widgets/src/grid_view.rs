@@ -965,6 +965,16 @@ impl<T: 'static> Widget for GridView<T> {
                 self.empty_id = Some(ctx.add_boxed(ef()));
             }
         } else {
+            // Pane → root total refresh (measuring strategies): re-place
+            // this root when the body pane's measurements changed the
+            // content total, so `max_scroll_y` / the thumb ratio pick up
+            // the corrected value next frame.
+            let pane_total_refresh = ctx.signal(0_u64);
+            pane_total_refresh.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::Relayout,
+            );
             let pane = GridBodyPane {
                 len_fn: self.source.len_fn.clone(),
                 with_item_fn: self.source.with_item_fn.clone(),
@@ -983,6 +993,12 @@ impl<T: 'static> Widget for GridView<T> {
                 tile_map: self.tile_map.clone(),
                 header_factory: self.header_factory(),
                 header_title: self.section_data.as_ref().map(|d| d.title_fn.clone()),
+                // Fresh per GridView rebuild; persists across the
+                // pane's own (buffer-exit / re-check) rebuilds.
+                version: Signal::new(0_u64),
+                prev_built_start: Rc::new(Cell::new(0)),
+                prev_built_end: Rc::new(Cell::new(0)),
+                total_refresh: pane_total_refresh,
                 tile_entries: Vec::new(),
                 header_entries: Vec::new(),
             };

@@ -24,6 +24,12 @@ pub(crate) struct ListSource<T: 'static> {
     /// a default close-tab behavior when the caller doesn't pass an
     /// explicit `on_close` handler.
     pub(crate) remove_item_fn: Option<Rc<dyn Fn(usize)>>,
+    /// Divergence side-channel for `DataChange::Reset`-emitting proxies
+    /// (`ListDataSource::first_changed_index`). Returns the first visible
+    /// index whose content may have changed in the latest rebuild, or
+    /// `None` for a genuine full change. Raw `ListModel`s report `None` —
+    /// their observers already get fine-grained `DataChange` variants.
+    pub(crate) first_changed_fn: Rc<dyn Fn() -> Option<usize>>,
 }
 
 impl<T: 'static> ListSource<T> {
@@ -43,6 +49,7 @@ impl<T: 'static> ListSource<T> {
                     let _ = m5.remove(index);
                 }
             })),
+            first_changed_fn: Rc::new(|| None),
         }
     }
 
@@ -51,12 +58,14 @@ impl<T: 'static> ListSource<T> {
         let s1 = s.clone();
         let s2 = s.clone();
         let s3 = s.clone();
+        let s4 = s.clone();
         Self {
             len_fn: Rc::new(move || s1.len()),
             with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
             observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
             move_item_fn: None,
             remove_item_fn: None,
+            first_changed_fn: Rc::new(move || s4.first_changed_index()),
         }
     }
 
@@ -80,6 +89,7 @@ impl<T: 'static> ListSource<T> {
             observe_fn,
             move_item_fn: None,
             remove_item_fn: None,
+            first_changed_fn: Rc::new(|| None),
         }
     }
 

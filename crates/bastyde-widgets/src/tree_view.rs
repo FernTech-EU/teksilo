@@ -2,10 +2,13 @@
 //!
 //! `TreeView` displays a `TreeModel<T>` as an indented, expandable/collapsible
 //! list. Internally it creates a `TreeSlice` for per-view expand state and
-//! virtualizes rendering like `ListView` (fixed row height, only visible rows
-//! have widgets).
+//! virtualizes rendering like `ListView` (only visible rows have widgets).
+//! Row heights come in three modes: uniform (`item_height`, the default),
+//! exact per-flat-index callback (`item_height_fn`), and auto-measured
+//! (`auto_item_height`) — expand/collapse keeps measured heights above the
+//! toggle via the slice's `first_changed_index` divergence.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
@@ -23,6 +26,7 @@ use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{FlatEntry, TreeSlice, TreeSliceHandle};
 use bastyde_data::{NodeId, TreeModel};
 
+use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
@@ -91,6 +95,10 @@ pub struct TreeView<T: 'static> {
     tree_slice: TreeSlice<T>,
     delegate: Rc<TreeDelegate<T>>,
     item_height: f32,
+    /// Height-mode selection (uniform / exact callback / auto-measure).
+    height_source: HeightSource,
+    /// Row geometry — all virtualization consumers go through this.
+    metrics: SharedRowMetrics,
     selection: Option<SelectionModel>,
 
     /// Keyboard-focused flat index.
@@ -118,6 +126,14 @@ pub struct TreeView<T: 'static> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
+
+    /// Rebuild trigger. A persistent field (re-bound each build) so
+    /// `place_children`'s post-measure realization re-check can request
+    /// a rebuild when corrected offsets reveal unrealized viewport rows.
+    version: Signal<u64>,
+    /// Buffered row range materialized by the latest build.
+    prev_built_start: Rc<Cell<usize>>,
+    prev_built_end: Rc<Cell<usize>>,
 
     // Set during build
     item_entries: Vec<(usize, WidgetId)>, // (flat_index, widget_id)
@@ -175,6 +191,8 @@ impl<T: 'static> TreeView<T> {
             tree_slice,
             delegate,
             item_height: DEFAULT_ITEM_HEIGHT,
+            height_source: HeightSource::Uniform,
+            metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
@@ -184,6 +202,9 @@ impl<T: 'static> TreeView<T> {
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
+            version: Signal::new(0_u64),
+            prev_built_start: Rc::new(Cell::new(0)),
+            prev_built_end: Rc::new(Cell::new(0)),
             item_entries: Vec::new(),
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
@@ -199,9 +220,42 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
-    /// Set the fixed height per row (default 28.0).
+    /// Re-materialize `self.metrics` after a height-mode / item-height
+    /// builder call.
+    fn remake_metrics(&self) {
+        *self.metrics.borrow_mut() = self.height_source.make_metrics(self.item_height, 0.0);
+    }
+
+    /// Set the fixed height per row (default 28.0) — the uniform fast
+    /// path. Mutually exclusive with [`item_height_fn`](Self::item_height_fn)
+    /// and [`auto_item_height`](Self::auto_item_height); the last mode
+    /// setter wins.
     pub fn item_height(mut self, height: f32) -> Self {
         self.item_height = height;
+        self.height_source = HeightSource::Uniform;
+        self.remake_metrics();
+        self
+    }
+
+    /// Per-row heights from a callback over the *flat (visible) index*.
+    /// The callback must be pure (same index + same data → same height);
+    /// it is re-swept from the first changed flat index on every model
+    /// change or expand/collapse. No measurement pass runs.
+    pub fn item_height_fn(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self {
+        self.height_source = HeightSource::Exact(Rc::new(f));
+        self.remake_metrics();
+        self
+    }
+
+    /// Auto-measured row heights: each realized row is measured at the
+    /// tree's content width (height-for-width), unrealized rows assume
+    /// `estimated`. Scroll anchoring keeps content above the viewport
+    /// stationary as estimates are corrected; measured heights above a
+    /// toggled row survive expand/collapse (divergence-driven
+    /// invalidation).
+    pub fn auto_item_height(mut self, estimated: f32) -> Self {
+        self.height_source = HeightSource::Auto { estimated };
+        self.remake_metrics();
         self
     }
 
@@ -263,28 +317,18 @@ impl<T: 'static> TreeView<T> {
     }
 
     fn total_content_height(&self) -> f32 {
-        let count = self.tree_slice.visible_count();
-        if count == 0 {
-            return 0.0;
-        }
-        count as f32 * self.item_height
+        self.metrics
+            .borrow_mut()
+            .total_height(self.tree_slice.visible_count())
     }
 
     fn visible_range(&self) -> (usize, usize) {
-        let count = self.tree_slice.visible_count();
-        if count == 0 {
-            return (0, 0);
-        }
-        let scroll = self.scroll_y.get().max(0.0);
-        let viewport = self.viewport_height.get();
-
-        let first_visible = (scroll / self.item_height).floor() as usize;
-        let last_visible = ((scroll + viewport) / self.item_height).ceil() as usize;
-
-        let start = first_visible.saturating_sub(BUFFER_ITEMS);
-        let end = (last_visible + BUFFER_ITEMS).min(count);
-
-        (start, end)
+        self.metrics.borrow_mut().visible_range(
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            self.tree_slice.visible_count(),
+            BUFFER_ITEMS,
+        )
     }
 
     fn clamp_scroll(&self) {
@@ -310,7 +354,9 @@ impl<T: 'static> std::fmt::Debug for TreeView<T> {
 impl<T: 'static> Widget for TreeView<T> {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
         // --- Version signal for rebuild triggering ---
-        let version = ctx.signal(0_u64);
+        // A persistent field (not `ctx.signal`) so the realization
+        // re-check in `place_children` can bump it after measurement.
+        let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Bind scroll_y at Relayout so place_children runs on every scroll
@@ -339,7 +385,16 @@ impl<T: 'static> Widget for TreeView<T> {
         ctx.effect(&slice_version, {
             let dv = data_ver.clone();
             let ver = version_for_data.clone();
+            let metrics = self.metrics.clone();
+            let slice = self.tree_slice.handle();
             move |_| {
+                // Slice observers fire synchronously per reflatten, so
+                // `first_changed_index()` describes exactly this change:
+                // heights of flat rows before it (e.g. above an
+                // expand/collapse point) stay valid.
+                metrics
+                    .borrow_mut()
+                    .apply_divergence(slice.first_changed_index(), slice.visible_count());
                 let next = dv.get() + 1;
                 dv.set(next);
                 ver.set(next);
@@ -361,33 +416,28 @@ impl<T: 'static> Widget for TreeView<T> {
         }
 
         // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
-        let item_height = self.item_height;
         let viewport_h = self.viewport_height.clone();
         // Track the buffered range from this build. Only trigger a rebuild
         // when the visible range exceeds the buffer — most scrolls just need
         // a relayout (handled by scroll_y's Relayout binding above).
         let (built_start, built_end) = self.visible_range();
-        let prev_built_start = Rc::new(Cell::new(built_start));
-        let prev_built_end = Rc::new(Cell::new(built_end));
+        self.prev_built_start.set(built_start);
+        self.prev_built_end.set(built_end);
         let version_for_scroll = version.clone();
         let scroll_ver = Rc::new(Cell::new(0_u64));
         let scroll_handle = self.scroll_y.observe({
-            let pbs = prev_built_start.clone();
-            let pbe = prev_built_end.clone();
+            let pbs = self.prev_built_start.clone();
+            let pbe = self.prev_built_end.clone();
             let sv = scroll_ver.clone();
+            let metrics = self.metrics.clone();
+            let slice = self.tree_slice.handle();
             move |y| {
-                let scroll = y.max(0.0);
-                let vp = viewport_h.get();
-                let visible_start = if item_height > 0.0 {
-                    (scroll / item_height).floor() as usize
-                } else {
-                    0
-                };
-                let visible_end = if item_height > 0.0 {
-                    ((scroll + vp) / item_height).ceil() as usize
-                } else {
-                    0
-                };
+                let (visible_start, visible_end) = metrics.borrow_mut().visible_range(
+                    *y,
+                    viewport_h.get(),
+                    slice.visible_count(),
+                    0,
+                );
                 // Only rebuild when visible items fall outside the currently-built range
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
@@ -437,7 +487,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
-            let ih_for_nav = self.item_height;
+            let metrics_for_nav = self.metrics.clone();
+            let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
 
             handlers = handlers.on_key(move |event, _ctx| {
@@ -593,14 +644,15 @@ impl<T: 'static> Widget for TreeView<T> {
                             }
                         }
                         // Scroll into view
-                        let item_top = idx as f32 * ih_for_nav;
-                        let item_bottom = item_top + ih_for_nav;
-                        let vp = vh_for_nav.get();
                         let scroll = scroll_for_nav.get();
-                        if item_top < scroll {
-                            scroll_for_nav.set(item_top);
-                        } else if item_bottom > scroll + vp {
-                            scroll_for_nav.set(item_bottom - vp);
+                        let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
+                            idx,
+                            scroll,
+                            vh_for_nav.get(),
+                            max_for_nav.get(),
+                        );
+                        if (new_scroll - scroll).abs() > f32::EPSILON {
+                            scroll_for_nav.set(new_scroll);
                         }
                         return bastyde_core::event::EventResponse::Handled;
                     }
@@ -622,7 +674,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let hovered_node: Rc<Cell<Option<(NodeId, std::time::Instant)>>> =
                 Rc::new(Cell::new(None));
 
-            let ih_for_hover = self.item_height;
+            let metrics_for_hover = self.metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
             let tsh_for_hover = self.tree_slice.handle();
             let feedback_for_hover = self.drop_feedback.clone();
@@ -632,27 +684,17 @@ impl<T: 'static> Widget for TreeView<T> {
                 if payload.has_typed::<TreeViewDragData>() {
                     let scroll = scroll_for_hover.get().max(0.0);
                     let content_y = position.y + scroll;
-                    let count = tsh_for_hover.visible_count();
-                    let flat_idx = if ih_for_hover > 0.0 {
-                        ((content_y + ih_for_hover * 0.5) / ih_for_hover)
-                            .floor()
-                            .max(0.0)
-                            .min(count as f32) as usize
-                    } else {
-                        0
+                    // Insertion line at the snapped boundary; spring-load
+                    // tracks the row the pointer actually sits on.
+                    let (insertion_top, row_idx) = {
+                        let mut m = metrics_for_hover.borrow_mut();
+                        m.resize(tsh_for_hover.visible_count());
+                        let flat_idx = m.insertion_index(content_y);
+                        (m.row_top(flat_idx), m.row_at(content_y))
                     };
-                    let insertion_y = flat_idx as f32 * ih_for_hover - scroll;
+                    let insertion_y = insertion_top - scroll;
                     feedback_for_hover.set(Some((insertion_y, 400.0)));
 
-                    // Track the currently-hovered node for spring-load.
-                    // Use the flat index *at* the pointer Y (not rounded
-                    // to half-step) so the spring timer tracks the row
-                    // the pointer actually sits on.
-                    let row_idx = if ih_for_hover > 0.0 {
-                        (content_y / ih_for_hover).floor().max(0.0) as usize
-                    } else {
-                        0
-                    };
                     let node = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
                     let prev = hn_for_hover.get();
                     match (prev, node) {
@@ -675,7 +717,7 @@ impl<T: 'static> Widget for TreeView<T> {
             // For the drop handler, we need access to the tree model and the
             // flattened entries. Access them via the TreeSlice's public methods.
             let tree_model_for_drop = self.tree_slice.tree().clone();
-            let ih_for_drop = self.item_height;
+            let metrics_for_drop = self.metrics.clone();
             let scroll_for_drop = self.scroll_y.clone();
 
             let tsh_for_drop = self.tree_slice.handle();
@@ -688,10 +730,11 @@ impl<T: 'static> Widget for TreeView<T> {
                     // Compute target flat index from Y
                     let scroll = scroll_for_drop.get().max(0.0);
                     let content_y = position.y + scroll;
-                    let flat_idx = if ih_for_drop > 0.0 {
-                        (content_y / ih_for_drop).floor().max(0.0) as usize
-                    } else {
-                        0
+                    let (flat_idx, row_top, row_h) = {
+                        let mut m = metrics_for_drop.borrow_mut();
+                        m.resize(tsh_for_drop.visible_count());
+                        let idx = m.row_at(content_y);
+                        (idx, m.row_top(idx), m.row_height(idx))
                     };
 
                     // Get the target entry for drop zone computation
@@ -702,9 +745,8 @@ impl<T: 'static> Widget for TreeView<T> {
 
                         // Compute drop zone from Y within the row:
                         // top third = before, middle = into (if has children), bottom = after
-                        let row_top = flat_idx as f32 * ih_for_drop;
                         let y_in_row = content_y - row_top;
-                        let third = ih_for_drop / 3.0;
+                        let third = row_h / 3.0;
 
                         if y_in_row < third {
                             // Drop BEFORE target: move as sibling above
@@ -981,7 +1023,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     let tsh_for_preview = self.tree_slice.handle();
                     let tree_model_for_preview = self.tree_slice.tree().clone();
                     let flat_idx = i;
-                    let item_height_for_preview = self.item_height;
+                    let metrics_for_preview = self.metrics.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
@@ -992,7 +1034,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 });
                                 let delegate = delegate_for_preview.clone();
                                 const PREVIEW_WIDTH: f32 = 240.0;
-                                let h = item_height_for_preview;
+                                let h = metrics_for_preview.borrow_mut().row_height(flat_idx);
                                 // Build the preview from the source
                                 // node's item + entry metadata. The
                                 // entry captures depth / expansion
@@ -1058,15 +1100,63 @@ impl<T: 'static> Widget for TreeView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         if children.is_empty() {
             return;
         }
 
-        let total_height = self.total_content_height();
         let viewport_height = bounds.height;
+        let count = self.tree_slice.visible_count();
+        let item_count = self.item_entries.len();
+        let content_width = (bounds.width - SCROLLBAR_THICKNESS).max(0.0);
 
+        // Auto-measure pass: measure every realized row at the content
+        // width (height-for-width), feed the heights back, and apply the
+        // scroll-anchor delta so content above the viewport stays put.
+        // Measurements are collected with NO metrics borrow held.
+        if self.metrics.borrow().needs_measure() {
+            let mut measured = Vec::with_capacity(item_count);
+            for (idx, child) in children.iter().enumerate() {
+                if idx < item_count
+                    && let Some(size) =
+                        ctx.child_size(child.id, SizeProposal::with_width(content_width))
+                {
+                    let (flat_index, _) = self.item_entries[idx];
+                    measured.push((flat_index, size.height));
+                }
+            }
+            let anchor = self
+                .metrics
+                .borrow_mut()
+                .observe_measured(&measured, self.scroll_y.get());
+            if anchor.abs() > 0.01 {
+                // Safe from place_children: the dirty flag is set but the
+                // binding flush already ran this pass — lands next frame.
+                self.scroll_y
+                    .set((self.scroll_y.get() + anchor).max(0.0));
+            }
+
+            // Realization re-check: corrected offsets may reveal viewport
+            // rows the estimated offsets never realized. Request a
+            // rebuild for next frame; the 0.01 measurement epsilon
+            // guarantees convergence.
+            let (vs, ve) = self.metrics.borrow_mut().visible_range(
+                self.scroll_y.get(),
+                viewport_height,
+                count,
+                0,
+            );
+            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
+                self.prev_built_start.set(vs.saturating_sub(BUFFER_ITEMS));
+                self.prev_built_end.set(ve + BUFFER_ITEMS);
+                self.version.set(self.version.get() + 1);
+            }
+        }
+
+        // Post-measure totals so even frame 1's scrollbar reflects the
+        // measured window.
+        let total_height = self.total_content_height();
         let max_y = (total_height - viewport_height).max(0.0);
         self.max_scroll_y.set(max_y);
         let ratio = if total_height > 0.0 {
@@ -1078,15 +1168,17 @@ impl<T: 'static> Widget for TreeView<T> {
         self.clamp_scroll();
 
         let scroll_y = self.scroll_y.get();
-        let content_width = (bounds.width - SCROLLBAR_THICKNESS).max(0.0);
 
-        let item_count = self.item_entries.len();
         for (idx, child) in children.iter_mut().enumerate() {
             if idx < item_count {
                 let (flat_index, _) = self.item_entries[idx];
-                let y = bounds.y + flat_index as f32 * self.item_height - scroll_y;
+                let (top, height) = {
+                    let mut m = self.metrics.borrow_mut();
+                    (m.row_top(flat_index), m.row_height(flat_index))
+                };
+                let y = bounds.y + top - scroll_y;
                 child.origin = Point::new(bounds.x, y);
-                child.size = Size::new(content_width, self.item_height);
+                child.size = Size::new(content_width, height);
             }
         }
 
@@ -1124,10 +1216,15 @@ impl<T: 'static> Widget for TreeView<T> {
             let line_y = bounds.y + y;
             let line_x = bounds.x;
             let half = recipe.thickness * 0.5;
+            // Own paint isn't covered by `clips_children` — clip so an
+            // insertion line at the after-last boundary can't bleed
+            // past the widget's bottom edge.
+            canvas.set_clip(bounds);
             canvas.fill_rect(
                 Rect::new(line_x, line_y - half, width, recipe.thickness),
                 color,
             );
+            canvas.clear_clip();
         }
     }
 
@@ -2046,5 +2143,127 @@ mod tests {
             outer_y.get() < 0.01,
             "Contain must prevent chaining: outer stays put"
         );
+    }
+
+    // --- Variable row heights ---
+
+    /// Collect the (y, height) bounds of the realized rows (the
+    /// scrollbar is always the last child), sorted by y.
+    fn row_spans(tree: &WidgetTree, tv_id: WidgetId) -> Vec<(f32, f32)> {
+        let children = tree.children(tv_id);
+        let mut spans: Vec<(f32, f32)> = children[..children.len() - 1]
+            .iter()
+            .map(|c| {
+                let b = tree.bounds(*c);
+                (b.y, b.height)
+            })
+            .collect();
+        spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        spans
+    }
+
+    #[test]
+    fn exact_item_height_fn_positions_tree_rows() {
+        let tree = sample_tree();
+        let heights = [60.0_f32, 20.0, 40.0];
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |_item, _entry, _sel| Box::new(FixedLeaf(100.0, 28.0)))
+                .item_height_fn(move |i| heights.get(i).copied().unwrap_or(28.0)),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let spans = row_spans(&wtree, tv_id);
+        assert_eq!(spans.len(), 3);
+        assert!((spans[0].0 - 0.0).abs() < 0.01 && (spans[0].1 - 60.0).abs() < 0.01);
+        assert!((spans[1].0 - 60.0).abs() < 0.01 && (spans[1].1 - 20.0).abs() < 0.01);
+        assert!((spans[2].0 - 80.0).abs() < 0.01 && (spans[2].1 - 40.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn auto_measure_tree_rows_at_measured_heights() {
+        // Delegate rows are 30 px tall; estimate says 50 → row 1 must
+        // settle at y = 30.
+        let tree = sample_tree();
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |_item, _entry, _sel| Box::new(FixedLeaf(100.0, 30.0)))
+                .auto_item_height(50.0),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let spans = row_spans(&wtree, tv_id);
+        assert!(
+            (spans[1].0 - 30.0).abs() < 0.01,
+            "row 1 should sit at measured 30, got {}",
+            spans[1].0
+        );
+    }
+
+    #[test]
+    fn expand_preserves_measured_heights_above_toggle() {
+        // Rows measure 30 (estimate 50). Expanding B (flat index 1) must
+        // keep A's measured height — row B stays at y = 30, it doesn't
+        // snap back to the estimate.
+        let tree = sample_tree();
+        let b = tree.root(1);
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |_item, _entry, _sel| Box::new(FixedLeaf(100.0, 30.0)))
+                .auto_item_height(50.0)
+                .row_click_expands(false),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        wtree
+            .widget_as_any(tv_id)
+            .and_then(|any| any.downcast_ref::<TreeView<&'static str>>())
+            .expect("TreeView exposes itself via as_any")
+            .expand(b);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let spans = row_spans(&wtree, tv_id);
+        assert_eq!(spans.len(), 4); // A, B, B1, C
+        assert!(
+            (spans[1].0 - 30.0).abs() < 0.01,
+            "A's measured height must survive the expand below it, got {}",
+            spans[1].0
+        );
+    }
+
+    #[test]
+    fn drop_zone_thirds_with_variable_heights() {
+        // Roots A (60 px), B (20 px), C (40 px), reorderable. Dropping C
+        // in the top third of the SHORT row B (y ∈ 60..~66) must insert
+        // it before B — uniform math would misattribute that y band.
+        let tree = TreeModel::new();
+        tree.insert_root(0, "A");
+        tree.insert_root(1, "B");
+        tree.insert_root(2, "C");
+        let heights = [60.0_f32, 20.0, 40.0];
+        let mut wtree = WidgetTree::new();
+        let _tv_id = wtree.add(
+            TreeView::new(tree.clone(), |_item, _entry, _sel| {
+                Box::new(FixedLeaf(100.0, 28.0))
+            })
+            .item_height_fn(move |i| heights.get(i).copied().unwrap_or(28.0))
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // C spans 80..120; grab its center. Drop at y = 62: row B's top
+        // third (60..60+20/3).
+        drag_item(
+            &mut wtree,
+            Point::new(50.0, 100.0),
+            Point::new(50.0, 62.0),
+        );
+
+        let order: Vec<&str> = (0..tree.root_count())
+            .map(|i| tree.with_item(tree.root(i), |v| *v).unwrap())
+            .collect();
+        assert_eq!(order, vec!["A", "C", "B"]);
     }
 }
