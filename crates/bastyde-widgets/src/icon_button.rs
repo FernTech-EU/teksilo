@@ -10,17 +10,22 @@
 //! icon stays at full visual weight (Primary at rest), the right default
 //! for stand-alone toolbar / menu rows.
 //!
-//! ```ignore
+//! ```rust
+//! # use bastyde_widgets::{IconButton};
+//! # use bastyde_widgets::primitives::IconWidget;
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! # const MY_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
 //! // Stand-alone toolbar use — full-weight icon.
-//! IconButton::new(IconWidget::from_svg(MY_SVG))
+//! let _w = IconButton::new(IconWidget::from_svg(MY_SVG))
 //!     .toolbar()
-//!     .tooltip(tr!(save()))
-//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
+//!     .tooltip(lit!("Save"))
+//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 //!
 //! // Embedded inside a TextInput's trailing slot — dim until hover.
-//! IconButton::clear()
+//! let _w = IconButton::clear()
 //!     .embedded()
-//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear))
+//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.clear")));
 //! ```
 //!
 //! ## Predefined constructors
@@ -29,11 +34,14 @@
 //! (which doubles as the AT name). They are size- and mode-agnostic —
 //! call `.embedded()`, `.toolbar()`, `.large()`, etc. to configure:
 //!
-//! ```ignore
-//! IconButton::browse().embedded()           // 24 dp, dim — TextInput trailing
-//! IconButton::clear().embedded()            // 24 dp, dim — clear-X
-//! IconButton::search().toolbar()            // 40 dp, full weight — toolbar
-//! IconButton::visibility_toggle(visible)    // password-field eye toggle
+//! ```rust
+//! # use bastyde_widgets::IconButton;
+//! # use bastyde_core::signal::Signal;
+//! # let visible = Signal::new(false);
+//! let _w = IconButton::browse().embedded();           // 24 dp, dim — TextInput trailing
+//! let _w = IconButton::clear().embedded();            // 24 dp, dim — clear-X
+//! let _w = IconButton::search().toolbar();            // 40 dp, full weight — toolbar
+//! let _w = IconButton::visibility_toggle(visible);    // password-field eye toggle
 //! ```
 //!
 //! ## Bistate
@@ -53,12 +61,17 @@
 //! Host widgets that accept icon buttons follow the `trailing_slot`
 //! convention established by [`TabWidget`](crate::tab_widget::TabWidget):
 //!
-//! ```ignore
-//! TextInput::new(value)
+//! ```rust
+//! # use bastyde_widgets::{IconButton, TextInput};
+//! # use bastyde_widgets::primitives::HStack;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_core::Intent;
+//! # let value = Signal::new(String::new());
+//! let _w = TextInput::new(value)
 //!     .trailing_slot(HStack::new().spacing(0.0)
-//!         .child(IconButton::clear().embedded().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear)))
-//!         .child(IconButton::browse().embedded().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse)))
-//!     )
+//!         .child(IconButton::clear().embedded().on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.clear"))))
+//!         .child(IconButton::browse().embedded().on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.browse"))))
+//!     );
 //! ```
 
 use std::rc::Rc;
@@ -838,7 +851,11 @@ impl bastyde_core::widget::Widget for IconButton {
 /// Call [`BuiltInIcons::set_global`] at app startup (before creating any
 /// built-in buttons) to replace the default icon set:
 ///
-/// ```ignore
+/// ```rust
+/// # use bastyde_widgets::{BuiltInIcons};
+/// # use bastyde_widgets::primitives::IconWidget;
+/// # const MY_BROWSE_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
+/// # const MY_CLEAR_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg'/>";
 /// BuiltInIcons::set_global(BuiltInIcons {
 ///     browse: || IconWidget::from_svg(MY_BROWSE_SVG),
 ///     clear: || IconWidget::from_svg(MY_CLEAR_SVG),

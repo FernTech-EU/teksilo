@@ -6,8 +6,12 @@
 //!
 //! ## High-level API
 //!
-//! ```ignore
+//! ```
+//! # use std::time::Duration;
+//! # use bastyde_tokens::Easing;
+//! # use bastyde_core::signal::Signal;
 //! // From an event handler or build():
+//! # let sidebar_width = Signal::new_animated(300.0_f32);
 //! sidebar_width.animate_to(0.0, Duration::from_millis(200), Easing::EaseInOut);
 //! ```
 //!

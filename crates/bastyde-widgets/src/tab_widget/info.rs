@@ -34,9 +34,12 @@ pub type CompositeTooltipFactory = Rc<dyn Fn() -> Box<dyn Widget>>;
 /// Per-tab presentation metadata. Build with [`TabInfo::new`] and
 /// fluent setters.
 ///
-/// ```ignore
-/// TabInfo::new()
-///     .title(tr!(welcome()))
+/// ```rust
+/// # use bastyde_widgets::tab_widget::TabInfo;
+/// # use bastyde_widgets::primitives::IconWidget;
+/// # use bastyde_i18n::lit;
+/// let _info = TabInfo::new()
+///     .title(lit!("Welcome"))
 ///     .icon(|| IconWidget::checkmark(16.0))
 ///     .closable(true);
 /// ```

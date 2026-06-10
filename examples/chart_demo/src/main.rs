@@ -140,8 +140,11 @@ fn main() {
                         .child(line)
                         .child(pie);
 
-                    let segmented = SegmentedControl::new(chart_kind.clone())
-                        .segments([lit!("Bars"), lit!("Lines"), lit!("Donut")]);
+                    let segmented = SegmentedControl::new(chart_kind.clone()).segments([
+                        lit!("Bars"),
+                        lit!("Lines"),
+                        lit!("Donut"),
+                    ]);
 
                     let content = VStack::new()
                         .spacing(12.0)

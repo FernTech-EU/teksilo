@@ -187,7 +187,8 @@ impl GridLayoutStrategy for SectionedGrid {
             let rel_top = (top - g.band_top).max(0.0);
             let first_row = (rel_top / self.row_step()).floor() as usize;
             let rel_bot = (bot - g.band_top).max(0.0);
-            let last_row = ((rel_bot / self.row_step()).ceil() as usize).min(g.rows.saturating_sub(1));
+            let last_row =
+                ((rel_bot / self.row_step()).ceil() as usize).min(g.rows.saturating_sub(1));
             let lo = g.first_flat + first_row * cols;
             let hi = (g.first_flat + (last_row + 1) * cols).min(g.first_flat + g.count);
             min_flat = Some(min_flat.map_or(lo, |m| m.min(lo)));
@@ -275,7 +276,11 @@ impl GridLayoutStrategy for SectionedGrid {
                 break;
             }
         }
-        current.or(if cache.sections.is_empty() { None } else { Some(0) })
+        current.or(if cache.sections.is_empty() {
+            None
+        } else {
+            Some(0)
+        })
     }
 
     fn header_rect(&self, section: usize, viewport_width: f32) -> Option<TileRect> {

@@ -266,8 +266,10 @@ impl SceneView {
     /// Pass [`DebugOverlay::ALL`] to enable every overlay or
     /// construct a custom config:
     ///
-    /// ```ignore
-    /// SceneView::new(scene)
+    /// ```
+    /// # use bastyde_scene::{Scene, SceneView, DebugOverlay};
+    /// # let scene = Scene::new();
+    /// let _view = SceneView::new(scene)
     ///     .debug_overlay(DebugOverlay {
     ///         item_bounds: true,
     ///         viewport: true,

@@ -295,8 +295,7 @@ pub struct TableView<T: 'static> {
 impl<T: 'static> TableView<T> {
     /// Wrap a `ListModel<T>`.
     pub fn new(model: ListModel<T>) -> Self {
-        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) =
-            erase_list_model(model);
+        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) = erase_list_model(model);
         Self::create(len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn)
     }
 
@@ -1038,9 +1037,7 @@ impl<T: 'static> Widget for TableView<T> {
             move |y| {
                 let count = (len_for_scroll)();
                 let (visible_start, visible_end) =
-                    metrics
-                        .borrow_mut()
-                        .visible_range(*y, vp_h.get(), count, 0);
+                    metrics.borrow_mut().visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ROWS);
                     let new_end = (visible_end + BUFFER_ROWS).min(count);
@@ -1500,12 +1497,10 @@ impl<T: 'static> Widget for TableView<T> {
         // so variable heights paint correctly. One metrics borrow per
         // pass; nothing inside re-enters the metrics.
         let row_count = (self.len_fn)();
-        let (first_visible, last_visible) = self.row_metrics.borrow_mut().visible_range(
-            scroll_y,
-            body_height,
-            row_count,
-            0,
-        );
+        let (first_visible, last_visible) =
+            self.row_metrics
+                .borrow_mut()
+                .visible_range(scroll_y, body_height, row_count, 0);
 
         // Clip the root-painted row decorations (alt-row stripes,
         // selection bands, grid lines, focus ring) to the body band.

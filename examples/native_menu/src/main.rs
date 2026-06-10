@@ -48,13 +48,22 @@ impl Widget for Root {
 
         // Shortcuts → become ⌘N / ⌘O / ⌘Q key equivalents on the native menu.
         ctx.register_shortcut_global(
-            Shortcut::new("app.new").name("New").primary(KeyStroke::ctrl(Key::N)).build(),
+            Shortcut::new("app.new")
+                .name("New")
+                .primary(KeyStroke::ctrl(Key::N))
+                .build(),
         );
         ctx.register_shortcut_global(
-            Shortcut::new("app.open").name("Open").primary(KeyStroke::ctrl(Key::O)).build(),
+            Shortcut::new("app.open")
+                .name("Open")
+                .primary(KeyStroke::ctrl(Key::O))
+                .build(),
         );
         ctx.register_shortcut_global(
-            Shortcut::new("app.quit").name("Quit").primary(KeyStroke::ctrl(Key::Q)).build(),
+            Shortcut::new("app.quit")
+                .name("Quit")
+                .primary(KeyStroke::ctrl(Key::Q))
+                .build(),
         );
 
         // Actions invoked whether the item is chosen from the native menu, the
@@ -77,14 +86,30 @@ impl Widget for Root {
         // One declarative model, shared by the in-window bar and the OS menu.
         let model = MenuModel::new()
             .menu(lit!("&File"), |m| {
-                m.item(MenuEntry::new(lit!("&New")).intent("app.new").shortcut("app.new"))
-                    .item(MenuEntry::new(lit!("&Open")).intent("app.open").shortcut("app.open"))
-                    // Reactively enabled — greys out until "Allow Save" is on.
-                    .item(MenuEntry::new(lit!("&Save")).intent("app.save").enabled(can_save.clone()))
-                    // Empty submenu populated at runtime (see the body buttons).
-                    .submenu_with_id(recent_menu, lit!("Open &Recent"), |s| s)
-                    .separator()
-                    .item(MenuEntry::new(lit!("&Quit")).intent("app.quit").shortcut("app.quit"))
+                m.item(
+                    MenuEntry::new(lit!("&New"))
+                        .intent("app.new")
+                        .shortcut("app.new"),
+                )
+                .item(
+                    MenuEntry::new(lit!("&Open"))
+                        .intent("app.open")
+                        .shortcut("app.open"),
+                )
+                // Reactively enabled — greys out until "Allow Save" is on.
+                .item(
+                    MenuEntry::new(lit!("&Save"))
+                        .intent("app.save")
+                        .enabled(can_save.clone()),
+                )
+                // Empty submenu populated at runtime (see the body buttons).
+                .submenu_with_id(recent_menu, lit!("Open &Recent"), |s| s)
+                .separator()
+                .item(
+                    MenuEntry::new(lit!("&Quit"))
+                        .intent("app.quit")
+                        .shortcut("app.quit"),
+                )
             })
             .menu(lit!("&Edit"), |m| {
                 m.item(MenuEntry::new(lit!("Cu&t")).intent("app.cut"))
@@ -112,9 +137,8 @@ impl Widget for Root {
 
         // `Suppress` ⇒ on macOS the OS menu bar carries the menus and the
         // in-window strip is hidden; elsewhere the in-window bar renders.
-        let menu_bar = ctx.add(
-            MenuBar::from_model(model).native_on_macos(NativeMenuMode::Suppress),
-        );
+        let menu_bar =
+            ctx.add(MenuBar::from_model(model).native_on_macos(NativeMenuMode::Suppress));
 
         // Runtime controls: toggle Save's enabled state, and add/clear items in
         // the "Open Recent" submenu — both reflected in the native menu live.

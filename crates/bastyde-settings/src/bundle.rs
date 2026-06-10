@@ -41,7 +41,7 @@ pub enum SettingsBundleError {
 /// Declarative configuration for the persistence services an app
 /// wants installed.
 ///
-/// ```no_run
+/// ```
 /// use bastyde_settings::SettingsBundle;
 /// use std::time::Duration;
 ///

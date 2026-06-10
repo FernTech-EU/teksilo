@@ -156,4 +156,3 @@ fn set_or_grant_scope_blocked_by_denied() {
         ConsentState::Denied
     ));
 }
-

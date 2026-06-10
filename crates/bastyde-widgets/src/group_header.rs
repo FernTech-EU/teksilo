@@ -6,8 +6,10 @@
 //! Int UI and Jewel use this pattern as a lightweight "soft divider with a
 //! caption" between groups of related controls.
 //!
-//! ```ignore
-//! GroupHeader::new(lit!("Appearance"))
+//! ```rust
+//! # use bastyde_widgets::GroupHeader;
+//! # use bastyde_i18n::lit;
+//! let _w = GroupHeader::new(lit!("Appearance"));
 //! ```
 //!
 //! Trivially composed from existing primitives:

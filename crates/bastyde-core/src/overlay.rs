@@ -134,7 +134,7 @@ impl OverlayRequest {
     /// everything internally — caller does not create a `Fade`
     /// widget or manage a signal:
     ///
-    /// ```ignore
+    /// ```text
     /// let req = OverlayRequest { content_id, anchor, ... }
     ///     .with_fade(theme.motion.duration_fast);
     /// ```
@@ -999,7 +999,12 @@ impl OverlayManager {
                     } else {
                         anchor.x
                     };
-                    Rect::new(x, anchor.y + anchor.height + 4.0, actual_width, content_size.height)
+                    Rect::new(
+                        x,
+                        anchor.y + anchor.height + 4.0,
+                        actual_width,
+                        content_size.height,
+                    )
                 }
                 OverlayPlacement::Above => {
                     let actual_width = content_size.width.max(anchor.width);
@@ -1010,7 +1015,12 @@ impl OverlayManager {
                     } else {
                         anchor.x
                     };
-                    Rect::new(x, anchor.y - content_size.height - 4.0, actual_width, content_size.height)
+                    Rect::new(
+                        x,
+                        anchor.y - content_size.height - 4.0,
+                        actual_width,
+                        content_size.height,
+                    )
                 }
                 OverlayPlacement::TrailingEdge => {
                     // In LTR trailing is to the right; in RTL trailing is to the left.

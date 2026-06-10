@@ -73,8 +73,7 @@ fn text_scene_tree() -> (WidgetTree, WidgetId, Rc<RefCell<Vec<f32>>>) {
         Point::new(20.0, 20.0),
     );
 
-    let mut tree = WidgetTree::new()
-        .with_text_backend(Rc::new(RefCell::new(backend)));
+    let mut tree = WidgetTree::new().with_text_backend(Rc::new(RefCell::new(backend)));
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     (tree, view_id, layout_scales)

@@ -11,11 +11,15 @@ use bastyde_core::widget_id::WidgetId;
 /// across shrinkable children proportional to their shrink weight, never below
 /// the floor set here.
 ///
-/// ```ignore
+/// ```rust
+/// # use bastyde_widgets::primitives::{HStack, Shrinkable, TextWidget, IconWidget};
+/// # use bastyde_i18n::lit;
+/// # let long_label = TextWidget::new(lit!("A very long label that may need to shrink"));
+/// # let icon = IconWidget::chevron_right(16.0);
 /// // The label gives up space before the (rigid) icon when the row is narrow:
-/// HStack::new()
+/// let _w = HStack::new()
 ///     .child(Shrinkable::new().min_width(40.0).child(long_label))
-///     .child(icon) // rigid — never shrinks
+///     .child(icon); // rigid — never shrinks
 /// ```
 ///
 /// `Shrinkable` preserves its child's grow weight (`flex`) and cross size, so a

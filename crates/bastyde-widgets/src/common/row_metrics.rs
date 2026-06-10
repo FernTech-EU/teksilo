@@ -246,11 +246,7 @@ impl RowMetrics {
                     count as f32 * (item_height + spacing) - spacing
                 }
             }
-            _ => self
-                .offsets
-                .as_mut()
-                .map(|o| o.total())
-                .unwrap_or_default(),
+            _ => self.offsets.as_mut().map(|o| o.total()).unwrap_or_default(),
         }
     }
 

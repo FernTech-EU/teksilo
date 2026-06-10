@@ -378,13 +378,21 @@ mod tests {
         // Regression: a centered, hit-testable badge swallowed the tap,
         // so the popover never opened when there were unread items.
         let (before, after) = bell_popover_open_check(false, 3);
-        assert_eq!(after, before + 1, "popover must open even with an unread badge");
+        assert_eq!(
+            after,
+            before + 1,
+            "popover must open even with an unread badge"
+        );
     }
 
     #[test]
     fn bell_popover_opens_under_toast_host_with_badge() {
         let (before, after) = bell_popover_open_check(true, 3);
-        assert_eq!(after, before + 1, "popover must open under the toast host, with a badge");
+        assert_eq!(
+            after,
+            before + 1,
+            "popover must open under the toast host, with a badge"
+        );
     }
 
     #[test]

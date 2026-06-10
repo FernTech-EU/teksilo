@@ -4,9 +4,10 @@
 //!
 //! ## Use
 //!
-//! ```ignore
+//! ```
 //! use bastyde_scene::{Scene, SceneView, SceneMinimap};
 //! use bastyde_canvas::Rect;
+//! # use bastyde_widgets::VStack;
 //!
 //! let mut scene = Scene::new();
 //! /* …populate scene… */
@@ -19,7 +20,7 @@
 //! let viewport_signal = view.viewport_in_scene_signal();
 //! let item_thumbs = view.scene().item_thumbnails(); // Vec<(Rect, Color)>
 //!
-//! VStack::new()
+//! let _w = VStack::new()
 //!     .child(view)
 //!     .child(
 //!         SceneMinimap::new(content, viewport_signal)

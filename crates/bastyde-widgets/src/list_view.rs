@@ -53,14 +53,21 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 
 /// A virtualized scrollable list backed by a `ListModel<T>`.
 ///
-/// ```ignore
-/// ListView::new(model, |index, item, selected| {
+/// ```rust
+/// # use bastyde_widgets::ListView;
+/// # use bastyde_widgets::primitives::{HStack, Spacer, TextWidget};
+/// # use bastyde_data::{ListModel, SelectionMode, SelectionModel};
+/// # use bastyde_i18n::lit;
+/// # struct Item { title: String }
+/// # let model: ListModel<Item> = ListModel::from_vec(vec![Item { title: "Alpha".into() }]);
+/// # let selection_model = SelectionModel::new(SelectionMode::Single);
+/// let _w = ListView::new(model, |_index, item, _selected| {
 ///     Box::new(HStack::new()
 ///         .child(TextWidget::new(lit!(&item.title)))
 ///         .child(Spacer::new()))
 /// })
 /// .item_height(28.0)
-/// .selection(selection_model)
+/// .selection(selection_model);
 /// ```
 pub struct ListView<T: 'static> {
     source: ListSource<T>,
@@ -927,8 +934,7 @@ impl<T: 'static> Widget for ListView<T> {
             if anchor.abs() > 0.01 {
                 // Safe from place_children: the dirty flag is set but the
                 // binding flush already ran this pass — lands next frame.
-                self.scroll_y
-                    .set((self.scroll_y.get() + anchor).max(0.0));
+                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
             }
 
             // Realization re-check: corrected offsets may reveal viewport
@@ -2134,7 +2140,10 @@ mod tests {
             item_count < 40,
             "Expected fewer than 40 realized rows, got {item_count}"
         );
-        assert!(item_count >= 8, "Expected at least 8 rows, got {item_count}");
+        assert!(
+            item_count >= 8,
+            "Expected at least 8 rows, got {item_count}"
+        );
     }
 
     #[test]

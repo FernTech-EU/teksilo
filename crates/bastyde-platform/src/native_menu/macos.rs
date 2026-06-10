@@ -25,9 +25,7 @@ use bastyde_core::window::BastydeWindowId;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadMarker, define_class, msg_send, sel};
-use objc2_app_kit::{
-    NSApplication, NSControlStateValue, NSEventModifierFlags, NSMenu, NSMenuItem,
-};
+use objc2_app_kit::{NSApplication, NSControlStateValue, NSEventModifierFlags, NSMenu, NSMenuItem};
 use objc2_foundation::{NSString, ns_string};
 
 use super::{
@@ -235,11 +233,19 @@ fn build_root_menu(
                 labels,
             } => {
                 let item = top_level_item(mtm, &labels.title);
-                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
+                let sub = NSMenu::initWithTitle(
+                    mtm.alloc::<NSMenu>(),
+                    &NSString::from_str(&labels.title),
+                );
                 sub.setAutoenablesItems(false);
                 // Standard window-management items (localized titles, system
                 // selectors), then the live window list AppKit maintains.
-                sub.addItem(&standard_item(mtm, &labels.minimize, sel!(performMiniaturize:), "m"));
+                sub.addItem(&standard_item(
+                    mtm,
+                    &labels.minimize,
+                    sel!(performMiniaturize:),
+                    "m",
+                ));
                 sub.addItem(&standard_item(mtm, &labels.zoom, sel!(performZoom:), ""));
                 sub.addItem(&NSMenuItem::separatorItem(mtm));
                 item.setSubmenu(Some(&sub));
@@ -251,7 +257,10 @@ fn build_root_menu(
                 labels,
             } => {
                 let item = top_level_item(mtm, &labels.title);
-                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
+                let sub = NSMenu::initWithTitle(
+                    mtm.alloc::<NSMenu>(),
+                    &NSString::from_str(&labels.title),
+                );
                 sub.setAutoenablesItems(false);
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
@@ -391,7 +400,12 @@ fn app_menu_item(mtm: MainThreadMarker, labels: &StandardLabels) -> Retained<NSM
     let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
     menu.setAutoenablesItems(false);
 
-    menu.addItem(&standard_item(mtm, &labels.about, sel!(orderFrontStandardAboutPanel:), ""));
+    menu.addItem(&standard_item(
+        mtm,
+        &labels.about,
+        sel!(orderFrontStandardAboutPanel:),
+        "",
+    ));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));

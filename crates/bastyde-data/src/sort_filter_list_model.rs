@@ -145,9 +145,8 @@ impl<T: 'static> Inner<T> {
         // don't renumber, so the floor is unbounded there.
         let floor = match upstream {
             None | Some(DataChange::ItemUpdated { .. }) => usize::MAX,
-            Some(DataChange::ItemsInserted { range }) | Some(DataChange::ItemsRemoved { range }) => {
-                range.start
-            }
+            Some(DataChange::ItemsInserted { range })
+            | Some(DataChange::ItemsRemoved { range }) => range.start,
             Some(DataChange::ItemsMoved { from, to, .. }) => (*from).min(*to),
             Some(DataChange::Reset) => 0,
         };

@@ -1,20 +1,23 @@
 //! MenuBar — a horizontal menu bar with dropdown menus.
 //!
 //! # Bastyde
-//! ```ignore
-//! MenuBar::new()
+//! ```rust
+//! # use bastyde_widgets::{Button, MenuBar, MenuList, MenuItem};
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! let _w = MenuBar::new()
 //!     .menu(lit!("File"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
+//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.new"))))
 //!             .separator()
-//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
+//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.quit"))))
 //!     ))
 //!     .menu(lit!("Edit"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
-//!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
+//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
+//!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
 //!     ))
-//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
+//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
 //! ```
 
 use std::cell::{Cell, RefCell};
@@ -165,7 +168,9 @@ impl MenuBar {
             .nodes()
             .iter()
             .filter_map(|node| match node {
-                crate::menu::MenuNode::Submenu { title, children, .. } => {
+                crate::menu::MenuNode::Submenu {
+                    title, children, ..
+                } => {
                     let children = children.clone();
                     Some(MenuBarEntry {
                         label: title.clone(),
@@ -200,7 +205,8 @@ impl MenuBar {
     /// via [`is_collapsed`](Self::is_collapsed), or bind your own signal
     /// with [`collapsible_bound`](Self::collapsible_bound).
     pub fn collapsible(mut self) -> Self {
-        self.collapse_policy.get_or_insert(CollapsePolicy::Responsive);
+        self.collapse_policy
+            .get_or_insert(CollapsePolicy::Responsive);
         self
     }
 
@@ -209,7 +215,8 @@ impl MenuBar {
     /// observe (and react to) collapse transitions. The responsive
     /// decision writes this signal.
     pub fn collapsible_bound(mut self, collapsed: Signal<bool>) -> Self {
-        self.collapse_policy.get_or_insert(CollapsePolicy::Responsive);
+        self.collapse_policy
+            .get_or_insert(CollapsePolicy::Responsive);
         self.last_collapsed.set(collapsed.get());
         self.collapsed = collapsed;
         self
@@ -330,10 +337,13 @@ impl MenubarDispatcher for MenuBarDispatcher {
         // Works on every platform (F10 is not transformed by any OS
         // input layer the way Alt+letter is on macOS).
         if event.modifiers == Modifiers::NONE && matches!(event.key, Key::F10) {
-            return self.trigger_ids.first().map(|&id| MenubarAction::FocusTrigger {
-                trigger_id: id,
-                reveal: None,
-            });
+            return self
+                .trigger_ids
+                .first()
+                .map(|&id| MenubarAction::FocusTrigger {
+                    trigger_id: id,
+                    reveal: None,
+                });
         }
         // Alt+<letter> mnemonics. On macOS, Option+letter is
         // intercepted by the OS to compose accented characters
@@ -383,10 +393,12 @@ impl MenubarDispatcher for MenuBarDispatcher {
         // Bare-Alt-tap (no other key during the hold) → focus the
         // first trigger in menubar-active mode (no menu opens until
         // ArrowDown / Enter / Space).
-        self.trigger_ids.first().map(|&id| MenubarAction::FocusTrigger {
-            trigger_id: id,
-            reveal: None,
-        })
+        self.trigger_ids
+            .first()
+            .map(|&id| MenubarAction::FocusTrigger {
+                trigger_id: id,
+                reveal: None,
+            })
     }
 }
 
@@ -1084,9 +1096,7 @@ impl Widget for MenuBar {
                         // Don't un-collapse while the overlay is up — it
                         // would make the bar both inline and floating.
                         self.collapsed.get()
-                    } else if let (Some(bar_id), Some(avail)) =
-                        (self.bar_id, proposal.width)
-                    {
+                    } else if let (Some(bar_id), Some(avail)) = (self.bar_id, proposal.width) {
                         ctx.measure_intrinsic(bar_id, SizeProposal::unspecified())
                             .map(|s| s.width)
                             .unwrap_or(0.0)
@@ -1962,20 +1972,25 @@ mod tests {
     #[test]
     fn runtime_model_mutation_rebuilds_in_window_bar() {
         use crate::menu::{MenuEntry, MenuModel};
-        let model = MenuModel::new()
-            .menu(lit!("&File"), |m| m.item(MenuEntry::new(lit!("&New"))));
+        let model = MenuModel::new().menu(lit!("&File"), |m| m.item(MenuEntry::new(lit!("&New"))));
         let model_handle = model.clone();
 
         let mut t = tree_with_window();
         let mb = t.add(MenuBar::from_model(model));
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
-        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 1);
+        assert_eq!(
+            collect_descendants_with_role(&t, mb, Role::MenuItem).len(),
+            1
+        );
 
         // Add a top-level menu at runtime → version bump → Rebuild binding →
         // the next layout re-derives the in-window triggers.
         model_handle.push_menu(lit!("&Edit"), |m| m.item(MenuEntry::new(lit!("Cu&t"))));
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
-        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 2);
+        assert_eq!(
+            collect_descendants_with_role(&t, mb, Role::MenuItem).len(),
+            2
+        );
 
         // Remove it again.
         let nodes_ids: Vec<_> = {
@@ -1994,7 +2009,10 @@ mod tests {
         };
         assert!(model_handle.remove(nodes_ids[0]));
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
-        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 1);
+        assert_eq!(
+            collect_descendants_with_role(&t, mb, Role::MenuItem).len(),
+            1
+        );
     }
 
     #[test]
@@ -2010,7 +2028,10 @@ mod tests {
         let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
         if cfg!(target_os = "macos") {
             // Suppressed: the OS menu bar carries the menus, no in-window triggers.
-            assert!(triggers.is_empty(), "macOS Suppress renders no in-window triggers");
+            assert!(
+                triggers.is_empty(),
+                "macOS Suppress renders no in-window triggers"
+            );
         } else {
             // Other platforms ignore the flag and render the in-window bar.
             assert_eq!(triggers.len(), 1);
@@ -2028,7 +2049,8 @@ mod tests {
         use crate::menu::{MenuEntry, MenuModel, NativeMenuMode, StandardMenu};
         use bastyde_core::AppEventPoster;
         use bastyde_platform::native_menu::{
-            MemoryNativeMenuBackend, NativeCheck, NativeMenuHandle, NativeMenuNode, StandardMenuRole,
+            MemoryNativeMenuBackend, NativeCheck, NativeMenuHandle, NativeMenuNode,
+            StandardMenuRole,
         };
         use std::any::{Any, TypeId};
         use std::collections::HashMap;

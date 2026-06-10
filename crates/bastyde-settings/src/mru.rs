@@ -6,7 +6,7 @@
 //! optional touch hook. The framework's job is the dedupe-on-add,
 //! pin-aware cap, and persistence; the app keeps the schema.
 //!
-//! ```ignore
+//! ```
 //! use std::path::{Path, PathBuf};
 //! use bastyde_settings::{AppPaths, MruEntry, MruList};
 //! use serde::{Serialize, Deserialize};
@@ -27,7 +27,8 @@
 //!     fn touch(&mut self) { /* update last_opened */ }
 //! }
 //!
-//! let paths = AppPaths::for_testing(std::path::Path::new("/tmp"));
+//! # let tmp = tempfile::tempdir().unwrap();
+//! # let paths = AppPaths::for_testing(tmp.path());
 //! let recents: MruList<RecentProject> = MruList::open(&paths, "recents", 10).unwrap();
 //! ```
 

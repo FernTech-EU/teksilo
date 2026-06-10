@@ -93,30 +93,40 @@ fn main() {
 
                     // --- Navigation buttons (drive the WebView by id) ---
                     let back = Button::new(lit!("◀")).on_activate_fn(move |ctx| {
-                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
-                            w.go_back()
-                        });
+                        ctx.with_widget_mut::<WebView>(
+                            webview_id,
+                            BindingLevel::RepaintOnly,
+                            |w| w.go_back(),
+                        );
                     });
                     let fwd = Button::new(lit!("▶")).on_activate_fn(move |ctx| {
-                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
-                            w.go_forward()
-                        });
+                        ctx.with_widget_mut::<WebView>(
+                            webview_id,
+                            BindingLevel::RepaintOnly,
+                            |w| w.go_forward(),
+                        );
                     });
                     let reload = Button::new(lit!("↻")).on_activate_fn(move |ctx| {
-                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
-                            w.reload()
-                        });
+                        ctx.with_widget_mut::<WebView>(
+                            webview_id,
+                            BindingLevel::RepaintOnly,
+                            |w| w.reload(),
+                        );
                     });
                     let send = Button::new(lit!("Send to JS")).on_activate_fn(move |ctx| {
-                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
-                            w.post_message(r#"{"from":"rust"}"#)
-                        });
+                        ctx.with_widget_mut::<WebView>(
+                            webview_id,
+                            BindingLevel::RepaintOnly,
+                            |w| w.post_message(r#"{"from":"rust"}"#),
+                        );
                     });
                     // Runtime DevTools toggle (debug builds; no-op where unsupported).
                     let devtools = Button::new(lit!("DevTools")).on_activate_fn(move |ctx| {
-                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
-                            w.open_devtools()
-                        });
+                        ctx.with_widget_mut::<WebView>(
+                            webview_id,
+                            BindingLevel::RepaintOnly,
+                            |w| w.open_devtools(),
+                        );
                     });
                     // Programmatic two-way navigation: setting the bound URL signal
                     // drives `load_url` through `bind_url` (the engine's own echo is

@@ -394,8 +394,7 @@ impl ShortcutSettings {
             .color(TextRole::Primary)
             .single_line();
 
-        let primary_slot =
-            self.slot_widget(id, SlotKind::Primary, row.primary, capturing, pending);
+        let primary_slot = self.slot_widget(id, SlotKind::Primary, row.primary, capturing, pending);
         let secondary_slot =
             self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing, pending);
 
@@ -436,8 +435,9 @@ impl ShortcutSettings {
     ) -> impl Widget + 'static {
         let is_capturing_here = capturing == Some(CaptureTarget { id, slot });
         // Confirm mode: a rebind on this slot is awaiting the user's OK.
-        let pending_here =
-            pending.filter(|p| p.target_id == id && p.slot == slot).cloned();
+        let pending_here = pending
+            .filter(|p| p.target_id == id && p.slot == slot)
+            .cloned();
         let keystroke_text = if is_capturing_here {
             bastyde_i18n::tr_widget!(a11y_shortcut_settings_capture_hint()).resolve_now()
         } else {
@@ -544,11 +544,9 @@ impl ShortcutSettings {
                 pending_signal.set(None);
             })
         };
-        row.child(
-            LiveStatusText::new(warning, TextRole::Accent),
-        )
-        .child(reassign)
-        .child(cancel)
+        row.child(LiveStatusText::new(warning, TextRole::Accent))
+            .child(reassign)
+            .child(cancel)
     }
 }
 
@@ -721,7 +719,12 @@ mod tests {
                 .build(),
         );
         // User rebinds app.sync to Ctrl+S (which app.save owns).
-        apply_capture(&mut reg, KeyStroke::ctrl(Key::S), "app.sync", SlotKind::Primary);
+        apply_capture(
+            &mut reg,
+            KeyStroke::ctrl(Key::S),
+            "app.sync",
+            SlotKind::Primary,
+        );
         assert_eq!(
             reg.effective("app.sync").unwrap().primary,
             Some(KeyStroke::ctrl(Key::S)),

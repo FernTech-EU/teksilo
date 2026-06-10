@@ -8,15 +8,15 @@
 //!
 //! Lookup is by Rust type (`TypeId`); each `T` has at most one slot.
 //!
-//! ```ignore
-//! pub struct MySyntaxPalette { /* ... */ }
+//! ```
+//! pub struct MySyntaxPalette { pub keyword_color: u32 }
 //!
 //! let theme = bastyde_core::presets::intui::light()
-//!     .with_extension(MySyntaxPalette { /* ... */ });
+//!     .with_extension(MySyntaxPalette { keyword_color: 0xFF6600 });
 //!
 //! // Later, anywhere with a &Theme:
 //! if let Some(syntax) = theme.extension::<MySyntaxPalette>() {
-//!     // ...
+//!     let _ = syntax.keyword_color;
 //! }
 //! ```
 //!

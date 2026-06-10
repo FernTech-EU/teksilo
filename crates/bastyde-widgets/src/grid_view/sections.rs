@@ -47,7 +47,10 @@ impl SectionProvider for GroupingSections {
         self.runs.get(section).map(|(_, c)| *c).unwrap_or(0)
     }
     fn section_title(&self, section: usize) -> String {
-        self.runs.get(section).map(|(t, _)| t.clone()).unwrap_or_default()
+        self.runs
+            .get(section)
+            .map(|(t, _)| t.clone())
+            .unwrap_or_default()
     }
 }
 

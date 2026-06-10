@@ -66,7 +66,7 @@ pub(crate) fn bastyde_core_root() -> TokenStream2 {
 ///
 /// Two forms:
 ///
-/// ```ignore
+/// ```text
 /// bati!(ctx => <root-element>)    // inserts into the arena via ctx.add,
 ///                                  // returns a WidgetId
 /// bati!(<root-element>)           // returns a widget value, suitable

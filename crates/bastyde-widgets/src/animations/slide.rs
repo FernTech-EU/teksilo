@@ -24,10 +24,16 @@
 //! For a "slide + fade" effect (notification snackbar), wrap the
 //! child in [`Fade`](super::Fade) before passing it to `Slide`:
 //!
-//! ```ignore
-//! Slide::new(visible.clone())
+//! ```rust
+//! # use bastyde_widgets::animations::{Slide, Fade, SlideEdge};
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! # let visible = Signal::new(false);
+//! # let snackbar_content = TextWidget::new(lit!("Changes saved"));
+//! let _w = Slide::new(visible.clone())
 //!     .from(SlideEdge::Bottom)
-//!     .child(Fade::new(visible).child(snackbar_content))
+//!     .child(Fade::new(visible).child(snackbar_content));
 //! ```
 //!
 //! ## Reduced motion

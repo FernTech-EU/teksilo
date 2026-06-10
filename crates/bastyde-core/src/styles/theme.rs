@@ -9,7 +9,7 @@
 //! Construct via a preset — there is no `Theme::default()` /
 //! `Theme::*_default()`. Apps explicitly pick one:
 //!
-//! ```ignore
+//! ```
 //! use bastyde_core::presets::intui;
 //! let theme = intui::light();
 //! ```

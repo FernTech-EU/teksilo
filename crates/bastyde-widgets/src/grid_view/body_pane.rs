@@ -130,8 +130,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Scroll re-places tiles without rebuilding (within buffer).
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         ctx.register_animated_signal(&self.scroll_y);
 
         // Buffer-exit detection → rebuild THIS pane (sibling of scrollbar).
@@ -359,10 +362,16 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         let measures = self.strategy.measures_tiles();
 
         // Lookups: tile id → model index, header id → section.
-        let tile_of: std::collections::HashMap<WidgetId, usize> =
-            self.tile_entries.iter().map(|(idx, id)| (*id, *idx)).collect();
-        let header_of: std::collections::HashMap<WidgetId, usize> =
-            self.header_entries.iter().map(|(s, id)| (*id, *s)).collect();
+        let tile_of: std::collections::HashMap<WidgetId, usize> = self
+            .tile_entries
+            .iter()
+            .map(|(idx, id)| (*id, *idx))
+            .collect();
+        let header_of: std::collections::HashMap<WidgetId, usize> = self
+            .header_entries
+            .iter()
+            .map(|(s, id)| (*id, *s))
+            .collect();
 
         // Pass A — measure realized tiles (variable-height strategies only).
         let pre_total = if measures {
@@ -432,9 +441,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         // guarantees convergence.
         if measures {
             let len = (self.len_fn)();
-            let vr = self
-                .strategy
-                .visible_range(self.scroll_y.get(), self.viewport_height.get(), vp_w, len);
+            let vr = self.strategy.visible_range(
+                self.scroll_y.get(),
+                self.viewport_height.get(),
+                vp_w,
+                len,
+            );
             if vr.start < self.prev_built_start.get() || vr.end > self.prev_built_end.get() {
                 self.prev_built_start.set(vr.start);
                 self.prev_built_end.set(vr.end);

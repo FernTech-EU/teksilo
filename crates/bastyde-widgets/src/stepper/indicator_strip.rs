@@ -9,15 +9,13 @@ use std::rc::Rc;
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
 
+use super::StepperOrientation;
 use super::controller::StepperController;
 use super::indicator::StepIndicator;
-use super::StepperOrientation;
 use crate::primitives::{HStack, Spacer, VStack};
 
 #[derive(Clone)]
@@ -162,9 +160,8 @@ impl Widget for IndicatorStrip {
         } else {
             builder.set_role(bastyde_core::accesskit::Role::List);
         }
-        builder.set_name(
-            bastyde_i18n::tr_widget!(a11y_stepper_indicator_strip_name()).resolve_now(),
-        );
+        builder
+            .set_name(bastyde_i18n::tr_widget!(a11y_stepper_indicator_strip_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {

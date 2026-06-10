@@ -230,11 +230,8 @@ fn type_ahead_timeout_zero_treats_each_keystroke_independently() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let cb = tree.add(
-        ComboBox::new(
-            vec!["Apple", "Banana", "Blueberry"],
-            selected.clone(),
-        )
-        .type_ahead_timeout(std::time::Duration::ZERO),
+        ComboBox::new(vec!["Apple", "Banana", "Blueberry"], selected.clone())
+            .type_ahead_timeout(std::time::Duration::ZERO),
     );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);

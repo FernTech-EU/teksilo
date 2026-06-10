@@ -9,10 +9,13 @@
 //! (installed in app-state) routes JS→Rust / lifecycle events back to the
 //! widget.
 //!
-//! ```ignore
+//! ```rust
+//! # use bastyde_core::signal::Signal;
 //! use bastyde_webview::WebView;
 //!
-//! WebView::new()
+//! # let title_signal: Signal<String> = Signal::new(String::new());
+//! # let loading_signal: Signal<bool> = Signal::new(false);
+//! let _wv = WebView::new()
 //!     .url("https://example.com")
 //!     .bind_title(title_signal.clone())
 //!     .bind_loading(loading_signal.clone())
@@ -109,9 +112,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::Role;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::window::BastydeWindowId;
 
@@ -354,10 +355,7 @@ impl WebView {
     }
 
     /// Called when the document title changes.
-    pub fn on_title_changed(
-        mut self,
-        cb: impl FnMut(String, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_title_changed(mut self, cb: impl FnMut(String, &mut EventContext) + 'static) -> Self {
         self.on_title_changed = Some(Rc::new(RefCell::new(cb)));
         self
     }
@@ -573,8 +571,7 @@ impl Widget for WebView {
 
         // Capture the window id now — the post-mount EventContext has no
         // direct window-id accessor, but BuildContext::window() does.
-        self.window_id
-            .set(ctx.window().map(|w| w.id()));
+        self.window_id.set(ctx.window().map(|w| w.id()));
 
         // --- Visibility bridge: framework activation → engine set_visible ---
         // The single reason this widget needs the activation signal: a native
@@ -643,8 +640,7 @@ impl Widget for WebView {
                 let poster = ectx.poster().cloned();
                 let wid = window_id.unwrap_or_else(|| BastydeWindowId::new(0));
 
-                let handle =
-                    registry.open(web_view_id, wid, parent, attrs, poster, on_event);
+                let handle = registry.open(web_view_id, wid, parent, attrs, poster, on_event);
                 // Apply the bounds layout already resolved, then the current
                 // activation state (so a view mounted while its tab is parked
                 // opens hidden, not visible-then-flashing).

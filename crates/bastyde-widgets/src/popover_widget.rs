@@ -10,15 +10,16 @@
 //! dismiss-callback shape match [`DateEdit`](crate::date_edit::DateEdit)
 //! so behavior across the disclosure family stays consistent.
 //!
-//! ```ignore
-//! use bastyde::widgets::{Button, ButtonVariant, IconButton, PopoverButton, PopoverIconButton};
-//!
+//! ```rust
+//! # use bastyde_widgets::{Button, ButtonVariant, IconButton, MenuList, MenuItem, PopoverButton, PopoverIconButton};
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
 //! // Text trigger (HasPopup::Dialog by default, no caret):
-//! PopoverButton::new(Button::new(lit!("Choose…")).variant(ButtonVariant::Plain))
-//!     .content(my_picker_widget);
+//! let _w = PopoverButton::new(Button::new(lit!("Choose…")).variant(ButtonVariant::Plain))
+//!     .content(TextWidget::new(lit!("Pick")));
 //!
 //! // Icon trigger (HasPopup::Menu by default, corner caret on):
-//! PopoverIconButton::new(IconButton::add().toolbar())
+//! let _w = PopoverIconButton::new(IconButton::add().toolbar())
 //!     .content(MenuList::new().item(MenuItem::new(lit!("New file"))));
 //! ```
 //!
@@ -685,8 +686,7 @@ mod tests {
         // `bare()` it's the leaf itself (no children).
         fn open_overlay_content(bare: bool) -> (WidgetTree, WidgetId) {
             let mut tree = light_tree();
-            let mut pb =
-                PopoverButton::new(Button::new(lit!("Open"))).content(RectWidget::new());
+            let mut pb = PopoverButton::new(Button::new(lit!("Open"))).content(RectWidget::new());
             if bare {
                 pb = pb.bare();
             }

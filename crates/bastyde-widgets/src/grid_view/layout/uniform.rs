@@ -21,12 +21,7 @@ pub struct UniformGrid {
 
 impl UniformGrid {
     /// Build from the public sizing description plus spacing/insets.
-    pub(crate) fn new(
-        sizing: GridSizing,
-        col_gap: f32,
-        row_gap: f32,
-        inset: EdgeInsets,
-    ) -> Self {
+    pub(crate) fn new(sizing: GridSizing, col_gap: f32, row_gap: f32, inset: EdgeInsets) -> Self {
         Self {
             columns: ColumnGeometry::new(sizing, col_gap, inset),
             tile_height: sizing.tile_height().max(0.0),

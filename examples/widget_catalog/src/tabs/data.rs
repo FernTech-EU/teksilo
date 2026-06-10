@@ -172,10 +172,18 @@ struct FsNode {
 
 impl FsNode {
     fn folder(name: impl Into<String>) -> Self {
-        Self { name: name.into(), size: 0, kind: "folder" }
+        Self {
+            name: name.into(),
+            size: 0,
+            kind: "folder",
+        }
     }
     fn file(name: impl Into<String>, size: u64, kind: &'static str) -> Self {
-        Self { name: name.into(), size, kind }
+        Self {
+            name: name.into(),
+            size,
+            kind,
+        }
     }
 }
 
@@ -252,14 +260,9 @@ fn grid_view_widget() -> impl Widget + 'static {
         } else {
             SurfaceRole::Raised
         };
-        Box::new(
-            ZStack::new()
-                .child(RectWidget::new().background(bg))
-                .child(
-                    Center::new()
-                        .child(TextWidget::new(lit!(tc.item.clone())).color(TextRole::Primary)),
-                ),
-        ) as Box<dyn Widget>
+        Box::new(ZStack::new().child(RectWidget::new().background(bg)).child(
+            Center::new().child(TextWidget::new(lit!(tc.item.clone())).color(TextRole::Primary)),
+        )) as Box<dyn Widget>
     })
     .sizing(GridSizing::Adaptive {
         min_width: 120.0,
@@ -282,7 +285,11 @@ fn sized(w: f32, h: f32, body: impl Widget + 'static) -> FixedSize {
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let repeater = section(ctx, lit!("Repeater"), repeater_widget());
-    let list_view = section(ctx, lit!("ListView"), sized(280.0, 180.0, list_view_widget()));
+    let list_view = section(
+        ctx,
+        lit!("ListView"),
+        sized(280.0, 180.0, list_view_widget()),
+    );
     let standard_list_item = section(
         ctx,
         tr!(dat_standard_list_item_standalone()),
@@ -302,10 +309,26 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(StandardTreeItem::new(tr!(data_child_b())).depth(1))
             .child(StandardTreeItem::new(tr!(dat_tree_grandchild())).depth(2)),
     );
-    let tree_view = section(ctx, lit!("TreeView"), sized(320.0, 200.0, tree_view_widget()));
-    let table_view = section(ctx, lit!("TableView"), sized(540.0, 200.0, table_view_widget()));
-    let tree_table = section(ctx, lit!("TreeTable"), sized(540.0, 200.0, tree_table_widget()));
-    let grid_view = section(ctx, lit!("GridView"), sized(540.0, 230.0, grid_view_widget()));
+    let tree_view = section(
+        ctx,
+        lit!("TreeView"),
+        sized(320.0, 200.0, tree_view_widget()),
+    );
+    let table_view = section(
+        ctx,
+        lit!("TableView"),
+        sized(540.0, 200.0, table_view_widget()),
+    );
+    let tree_table = section(
+        ctx,
+        lit!("TreeTable"),
+        sized(540.0, 200.0, tree_table_widget()),
+    );
+    let grid_view = section(
+        ctx,
+        lit!("GridView"),
+        sized(540.0, 230.0, grid_view_widget()),
+    );
 
     ctx.add(
         VStack::new()

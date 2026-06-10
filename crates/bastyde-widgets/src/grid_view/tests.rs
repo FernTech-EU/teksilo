@@ -27,8 +27,7 @@ fn make_grid(count: usize) -> (WidgetTree, WidgetId, ListModel<usize>) {
     let model = ListModel::from_vec((0..count).collect());
     let mut tree = WidgetTree::new();
     let id = tree.add(
-        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
-            .tile_size(100.0, 50.0),
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0))).tile_size(100.0, 50.0),
     );
     (tree, id, model)
 }
@@ -72,9 +71,8 @@ fn fixed_tile_size_derives_three_columns() {
 fn fixed_column_count_uses_exact_columns() {
     let model = ListModel::from_vec((0..40).collect());
     let mut tree = WidgetTree::new();
-    let id = tree.add(
-        GridView::new(model, |_tc| Box::new(FixedLeaf(10.0, 40.0))).column_count(4, 40.0),
-    );
+    let id =
+        tree.add(GridView::new(model, |_tc| Box::new(FixedLeaf(10.0, 40.0))).column_count(4, 40.0));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let t = tiles(&tree, id);
     // 4 columns: tile 4 wraps to row 1.
@@ -160,7 +158,10 @@ fn arrow_keys_move_focus_and_selection() {
         modifiers: Modifiers::default(),
         text: None,
     });
-    assert!(selection.is_selected(4), "ArrowDown moves by one row (cols)");
+    assert!(
+        selection.is_selected(4),
+        "ArrowDown moves by one row (cols)"
+    );
 }
 
 #[test]

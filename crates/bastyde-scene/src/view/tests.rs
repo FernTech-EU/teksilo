@@ -3732,11 +3732,11 @@ fn item_cache_clears_on_glyph_epoch_change() {
         Point::ZERO,
     );
 
-    let mut tree = WidgetTree::new().with_text_backend(std::rc::Rc::new(
-        std::cell::RefCell::new(EpochBackend {
+    let mut tree = WidgetTree::new().with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+        EpochBackend {
             epoch: epoch.clone(),
-        }),
-    ));
+        },
+    )));
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();

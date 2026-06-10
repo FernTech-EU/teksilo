@@ -446,7 +446,11 @@ impl TextBackend for TypesetterBridge {
         // No cache clearing: the layout cache keys on the raster scale,
         // so entries at different scales coexist. Stale-scale glyph
         // entries age out of text-typeset's atlas via the normal LRU.
-        self.raster_scale = if raster_scale > 0.0 { raster_scale } else { 1.0 };
+        self.raster_scale = if raster_scale > 0.0 {
+            raster_scale
+        } else {
+            1.0
+        };
     }
 
     fn raster_scale(&self) -> f32 {
@@ -901,10 +905,7 @@ mod tests {
 
     /// Minimal BlockLayoutParams for driving a rich-text `DocumentFlow`
     /// through the bridge's shared service, the way `RichTextEngine` does.
-    fn make_test_block(
-        id: usize,
-        text: &str,
-    ) -> text_typeset::layout::block::BlockLayoutParams {
+    fn make_test_block(id: usize, text: &str) -> text_typeset::layout::block::BlockLayoutParams {
         use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
         BlockLayoutParams {
             block_id: id,
@@ -1059,7 +1060,11 @@ mod tests {
                 .map(|(_, k)| *k)
                 .expect("at least one glyph with atlas residency")
         };
-        assert!(bridge.service_mut().debug_set_glyph_rect(&key, [499, 499, 1, 1]));
+        assert!(
+            bridge
+                .service_mut()
+                .debug_set_glyph_rect(&key, [499, 499, 1, 1])
+        );
         assert_eq!(
             bridge.debug_validate_layout(layout.layout_key),
             GlyphValidation::RectMismatch,

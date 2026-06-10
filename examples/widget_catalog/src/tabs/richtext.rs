@@ -77,9 +77,11 @@ fn viewer_doc() -> TextDocument {
 }
 
 fn editor_widget() -> FixedSize {
-    FixedSize::new()
-        .bind_width(560.0_f32)
-        .child(RichTextEditor::editor(editor_doc()).min_lines(3).max_lines(12))
+    FixedSize::new().bind_width(560.0_f32).child(
+        RichTextEditor::editor(editor_doc())
+            .min_lines(3)
+            .max_lines(12),
+    )
 }
 
 fn viewer_widget() -> FixedSize {
@@ -91,7 +93,11 @@ fn viewer_widget() -> FixedSize {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let editor = section(ctx, lit!("RichTextEditor::editor (min/max lines)"), editor_widget());
+    let editor = section(
+        ctx,
+        lit!("RichTextEditor::editor (min/max lines)"),
+        editor_widget(),
+    );
     let viewer = section(ctx, lit!("RichTextEditor::read_only"), viewer_widget());
 
     ctx.add(

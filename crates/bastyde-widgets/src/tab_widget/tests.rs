@@ -1441,7 +1441,10 @@ fn vertical_surface_role_keeps_headers_flush_leading() {
         let mut fills_at_leading = false;
         fn walk(tree: &WidgetTree, id: WidgetId, hb: bastyde_canvas::Rect, found: &mut bool) {
             let b = tree.bounds(id);
-            if (b.x - hb.x).abs() < 0.5 && (b.width - hb.width).abs() < 0.5 && tree.children(id).is_empty() {
+            if (b.x - hb.x).abs() < 0.5
+                && (b.width - hb.width).abs() < 0.5
+                && tree.children(id).is_empty()
+            {
                 *found = true;
             }
             for c in tree.children(id) {

@@ -220,12 +220,22 @@ impl StepperController {
 
     /// `true` if step `idx` has ever been the active step.
     pub fn visited(&self, idx: usize) -> bool {
-        self.inner.borrow().visited.get(idx).copied().unwrap_or(false)
+        self.inner
+            .borrow()
+            .visited
+            .get(idx)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// `true` if step `idx` was skipped via [`skip`](Self::skip).
     pub fn skipped(&self, idx: usize) -> bool {
-        self.inner.borrow().skipped.get(idx).copied().unwrap_or(false)
+        self.inner
+            .borrow()
+            .skipped
+            .get(idx)
+            .copied()
+            .unwrap_or(false)
     }
 
     pub fn step_count(&self) -> usize {

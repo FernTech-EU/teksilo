@@ -487,43 +487,46 @@ impl Widget for Root {
                     HStack::new()
                         .spacing(12.0)
                         .child(
-                            PopoverIconButton::new(IconButton::add().toolbar()).bare().content(
-                                MenuList::new()
-                                    .item(
-                                        MenuItem::new(lit!("New file"))
-                                            .on_activate_fn(|_| println!("NewFileFromPopoverIcon")),
-                                    )
-                                    .item(
-                                        MenuItem::new(lit!("New folder")).on_activate_fn(|_| {
-                                            println!("NewFolderFromPopoverIcon")
-                                        }),
-                                    )
-                                    .separator()
-                                    .item(
-                                        MenuItem::new(lit!("New project…"))
-                                            .on_activate_fn(|_| println!("NewProject")),
-                                    ),
-                            ),
+                            PopoverIconButton::new(IconButton::add().toolbar())
+                                .bare()
+                                .content(
+                                    MenuList::new()
+                                        .item(
+                                            MenuItem::new(lit!("New file")).on_activate_fn(|_| {
+                                                println!("NewFileFromPopoverIcon")
+                                            }),
+                                        )
+                                        .item(MenuItem::new(lit!("New folder")).on_activate_fn(
+                                            |_| println!("NewFolderFromPopoverIcon"),
+                                        ))
+                                        .separator()
+                                        .item(
+                                            MenuItem::new(lit!("New project…"))
+                                                .on_activate_fn(|_| println!("NewProject")),
+                                        ),
+                                ),
                         )
                         .child(
-                            PopoverIconButton::new(IconButton::search().large()).bare().content(
-                                MenuList::new()
-                                    .item(
-                                        MenuItem::new(lit!("Search files"))
-                                            .shortcut_label("Ctrl+P")
-                                            .on_activate_fn(|_| println!("SearchFiles")),
-                                    )
-                                    .item(
-                                        MenuItem::new(lit!("Search symbols"))
-                                            .shortcut_label("Ctrl+T")
-                                            .on_activate_fn(|_| println!("SearchSymbols")),
-                                    )
-                                    .item(
-                                        MenuItem::new(lit!("Search everywhere"))
-                                            .shortcut_label("Shift+Shift")
-                                            .on_activate_fn(|_| println!("SearchEverywhere")),
-                                    ),
-                            ),
+                            PopoverIconButton::new(IconButton::search().large())
+                                .bare()
+                                .content(
+                                    MenuList::new()
+                                        .item(
+                                            MenuItem::new(lit!("Search files"))
+                                                .shortcut_label("Ctrl+P")
+                                                .on_activate_fn(|_| println!("SearchFiles")),
+                                        )
+                                        .item(
+                                            MenuItem::new(lit!("Search symbols"))
+                                                .shortcut_label("Ctrl+T")
+                                                .on_activate_fn(|_| println!("SearchSymbols")),
+                                        )
+                                        .item(
+                                            MenuItem::new(lit!("Search everywhere"))
+                                                .shortcut_label("Shift+Shift")
+                                                .on_activate_fn(|_| println!("SearchEverywhere")),
+                                        ),
+                                ),
                         ),
                 )
                 .child(

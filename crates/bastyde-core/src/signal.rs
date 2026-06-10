@@ -451,7 +451,10 @@ impl<T: Clone + 'static> Signal<T> {
     ///
     /// Combine with [`Signal::map`] for n-ary predicates:
     ///
-    /// ```ignore
+    /// ```
+    /// # use bastyde_core::Signal;
+    /// # let focus = Signal::new(false);
+    /// # let readonly = Signal::new(false);
     /// let composite = focus.zip(&readonly).map(|(f, r)| *f && !*r);
     /// ```
     pub fn zip<U: Clone + 'static>(&self, other: &Signal<U>) -> Signal<(T, U)> {
@@ -555,15 +558,16 @@ impl<T: Clone + 'static> Signal<T> {
     ///
     /// Typical use — track the *active* item's reactive flag out of a set:
     ///
-    /// ```ignore
+    /// ```
+    /// # use bastyde_core::Signal;
+    /// # let current_step: Signal<usize> = Signal::new(0);
+    /// # let completion: Vec<Signal<bool>> = vec![Signal::new(true), Signal::new(false)];
     /// // disable Next until the currently-shown step's gate is satisfied
     /// let gate = current_step.flat_map(move |i| completion[*i].clone());
-    /// ctx.enabled_when(next_id, gate);
+    /// // ctx.enabled_when(next_id, gate);
+    /// # let _ = gate;
     /// ```
-    pub fn flat_map<U: Clone + 'static>(
-        &self,
-        f: impl Fn(&T) -> Signal<U> + 'static,
-    ) -> Signal<U> {
+    pub fn flat_map<U: Clone + 'static>(&self, f: impl Fn(&T) -> Signal<U> + 'static) -> Signal<U> {
         let f: Rc<dyn Fn(&T) -> Signal<U>> = Rc::new(f);
         let outer_compute = self.as_compute();
         let outer_sources = self.as_sources();

@@ -56,18 +56,13 @@ fn make_stepper() -> Stepper {
                 })
                 .complete_when(gate),
         )
-        .step(
-            Step::new(lit!("Preferences"))
-                .optional(true)
-                .content(|| {
-                    TextWidget::new(lit!("This step is optional — Skip is offered."))
-                        .style(TextStyleRole::Body)
-                }),
-        )
-        .step(
-            Step::new(lit!("Review"))
-                .content(|| TextWidget::new(lit!("All set — press Finish.")).style(TextStyleRole::Body)),
-        )
+        .step(Step::new(lit!("Preferences")).optional(true).content(|| {
+            TextWidget::new(lit!("This step is optional — Skip is offered."))
+                .style(TextStyleRole::Body)
+        }))
+        .step(Step::new(lit!("Review")).content(|| {
+            TextWidget::new(lit!("All set — press Finish.")).style(TextStyleRole::Body)
+        }))
         .help(lit!("Help"), |_ctx, _ctrl| {})
 }
 

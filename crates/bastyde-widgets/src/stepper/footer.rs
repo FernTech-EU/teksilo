@@ -10,9 +10,7 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
 
@@ -259,14 +257,20 @@ impl Widget for StepperFooter {
         });
 
         // Layout: [Back] ──spacer── [Help] [Cancel] [Skip] [Next] [Finish]
-        let mut row = HStack::new().spacing(12.0).add_child(back_id).child(Spacer::new());
+        let mut row = HStack::new()
+            .spacing(12.0)
+            .add_child(back_id)
+            .child(Spacer::new());
         if let Some(id) = help_id {
             row = row.add_child(id);
         }
         if let Some(id) = cancel_id {
             row = row.add_child(id);
         }
-        row = row.add_child(skip_id).add_child(next_id).add_child(finish_id);
+        row = row
+            .add_child(skip_id)
+            .add_child(next_id)
+            .add_child(finish_id);
 
         let root = ctx.add(row);
         self.root_child_id = Some(root);

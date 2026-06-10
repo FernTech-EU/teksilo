@@ -307,12 +307,13 @@ impl Widget for ToastHost {
         // background. Without this, *all* pointer input is blocked.
         if !self.has_pending_drain_handler.get() {
             let registry_for_drain = self.registry.clone();
-            let handlers = HandlerSet::new()
-                .event_pass_through(true)
-                .on_pointer_event(move |_event, ctx| {
-                    registry_for_drain.drain_pending_dismiss_callbacks(ctx);
-                    bastyde_core::event::EventResponse::Ignored
-                });
+            let handlers =
+                HandlerSet::new()
+                    .event_pass_through(true)
+                    .on_pointer_event(move |_event, ctx| {
+                        registry_for_drain.drain_pending_dismiss_callbacks(ctx);
+                        bastyde_core::event::EventResponse::Ignored
+                    });
             ctx.apply_self_handlers(handlers);
             self.has_pending_drain_handler.set(true);
         }
@@ -458,7 +459,11 @@ mod tests {
 
         let host_bounds = tree.bounds(host_id);
         let surfaces = tree.children(host_id);
-        assert_eq!(surfaces.len(), 1, "[{structure}] expected one toast surface");
+        assert_eq!(
+            surfaces.len(),
+            1,
+            "[{structure}] expected one toast surface"
+        );
         (host_bounds, tree.bounds(surfaces[0]))
     }
 
@@ -472,8 +477,7 @@ mod tests {
             let (host_bounds, sb) = surface_bounds(structure);
 
             assert!(
-                (host_bounds.width - 900.0).abs() < 0.5
-                    && (host_bounds.height - 600.0).abs() < 0.5,
+                (host_bounds.width - 900.0).abs() < 0.5 && (host_bounds.height - 600.0).abs() < 0.5,
                 "[{structure}] host should fill window, got {host_bounds:?}"
             );
             assert!(sb.height > 1.0, "[{structure}] surface collapsed: {sb:?}");
@@ -508,15 +512,35 @@ mod tests {
         use crate::primitives::Spacer;
         let build = |with_expand: bool| {
             let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-            let toolbar = tree.add(FixedSize::new().bind_width(900.0).bind_height(40.0).child(Spacer::new()));
-            let status = tree.add(FixedSize::new().bind_width(900.0).bind_height(30.0).child(Spacer::new()));
+            let toolbar = tree.add(
+                FixedSize::new()
+                    .bind_width(900.0)
+                    .bind_height(40.0)
+                    .child(Spacer::new()),
+            );
+            let status = tree.add(
+                FixedSize::new()
+                    .bind_width(900.0)
+                    .bind_height(30.0)
+                    .child(Spacer::new()),
+            );
             let mut vstack = VStack::new().spacing(0.0).add_child(toolbar);
             if with_expand {
-                let body = tree.add(FixedSize::new().bind_width(900.0).bind_height(100.0).child(Spacer::new()));
+                let body = tree.add(
+                    FixedSize::new()
+                        .bind_width(900.0)
+                        .bind_height(100.0)
+                        .child(Spacer::new()),
+                );
                 let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(body));
                 vstack = vstack.add_child(filled);
             } else {
-                let body = tree.add(FixedSize::new().bind_width(900.0).bind_height(100.0).child(Spacer::new()));
+                let body = tree.add(
+                    FixedSize::new()
+                        .bind_width(900.0)
+                        .bind_height(100.0)
+                        .child(Spacer::new()),
+                );
                 vstack = vstack.add_child(body);
             }
             vstack = vstack.add_child(status);
@@ -527,10 +551,16 @@ mod tests {
 
         let (root_plain, status_plain) = build(false);
         assert!((root_plain.height - 600.0).abs() < 0.5, "root fills window");
-        assert!((status_plain.y - 140.0).abs() < 0.5, "flexless: status top-clusters at 140");
+        assert!(
+            (status_plain.y - 140.0).abs() < 0.5,
+            "flexless: status top-clusters at 140"
+        );
 
         let (root_exp, status_exp) = build(true);
-        assert!((root_exp.height - 600.0).abs() < 0.5, "root still fills window");
+        assert!(
+            (root_exp.height - 600.0).abs() < 0.5,
+            "root still fills window"
+        );
         assert!(
             (status_exp.y + status_exp.height - 600.0).abs() < 0.5,
             "with Expand::vertical the status bar pins to the bottom edge, got {status_exp:?}"
@@ -649,7 +679,10 @@ mod tests {
 
         // Empty host: nothing to wait for.
         tree.layout(SizeProposal::exact(900.0, 600.0));
-        assert!(wake.get().is_none(), "empty host must not arm a wake deadline");
+        assert!(
+            wake.get().is_none(),
+            "empty host must not arm a wake deadline"
+        );
 
         // Sticky-only: a persistent toast has no timer → still no deadline.
         registry.enqueue(Toast::error(LocalizedString::literal("sticky")).persistent());

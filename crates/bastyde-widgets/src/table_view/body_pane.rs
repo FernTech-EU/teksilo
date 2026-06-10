@@ -155,9 +155,7 @@ impl<T: 'static> Widget for BodyPane<T> {
             move |y| {
                 let count = (len)();
                 let (visible_start, visible_end) =
-                    metrics
-                        .borrow_mut()
-                        .visible_range(*y, vp_h.get(), count, 0);
+                    metrics.borrow_mut().visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ROWS);
                     let new_end = (visible_end + BUFFER_ROWS).min(count);
@@ -439,8 +437,7 @@ impl<T: 'static> Widget for BodyPane<T> {
             if anchor.abs() > 0.01 {
                 // Safe from place_children: the dirty flag is set but the
                 // binding flush already ran this pass — lands next frame.
-                self.scroll_y
-                    .set((self.scroll_y.get() + anchor).max(0.0));
+                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
             }
 
             // Realization re-check: corrected offsets may reveal viewport

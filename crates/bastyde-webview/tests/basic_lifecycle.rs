@@ -297,7 +297,8 @@ fn devtools_toggle_reaches_handle() {
 
     let ops = records.ops_for(wv_id);
     assert!(
-        ops.iter().any(|op| matches!(op, WebViewOp::OpenDevtools { .. })),
+        ops.iter()
+            .any(|op| matches!(op, WebViewOp::OpenDevtools { .. })),
         "open_devtools must reach the handle, got {ops:?}"
     );
     assert!(

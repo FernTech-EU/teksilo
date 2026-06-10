@@ -24,8 +24,8 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_tokens::{BorderRole, FontWeight, SurfaceRole, TextRole, TextStyle, TextStyleRole};
 
-use super::step::StepStatus;
 use super::StepperOrientation;
+use super::step::StepStatus;
 use crate::primitives::{TextWidget, VStack};
 
 pub(crate) const DEFAULT_CIRCLE_SIZE: f32 = 28.0;
@@ -207,18 +207,18 @@ impl Widget for StepIndicator {
         let theme = ctx.theme;
         let status = self.status.get();
         let marker = self.marker_rect(bounds);
-        let center = Point::new(marker.x + marker.width / 2.0, marker.y + marker.height / 2.0);
+        let center = Point::new(
+            marker.x + marker.width / 2.0,
+            marker.y + marker.height / 2.0,
+        );
         let radius = marker.width / 2.0;
 
         // Per-status marker fill / stroke / glyph color.
         let (fill, stroke, fg, glyph): (SurfaceRole, Option<BorderRole>, TextRole, Glyph) =
             match status {
-                StepStatus::Active => (
-                    SurfaceRole::Accent,
-                    None,
-                    TextRole::OnAccent,
-                    Glyph::Number,
-                ),
+                StepStatus::Active => {
+                    (SurfaceRole::Accent, None, TextRole::OnAccent, Glyph::Number)
+                }
                 StepStatus::Complete => {
                     (SurfaceRole::Accent, None, TextRole::OnAccent, Glyph::Check)
                 }
@@ -250,7 +250,12 @@ impl Widget for StepIndicator {
 
         canvas.fill_circle(center, radius, RecipeColor::from(fill).resolve(theme));
         if let Some(border) = stroke {
-            canvas.stroke_circle(center, radius - 1.0, RecipeColor::from(border).resolve(theme), 2.0);
+            canvas.stroke_circle(
+                center,
+                radius - 1.0,
+                RecipeColor::from(border).resolve(theme),
+                2.0,
+            );
         }
 
         // Glyph (number / check / bang / dash), centred in the circle.
@@ -289,7 +294,8 @@ impl Widget for StepIndicator {
             builder.add_action(bastyde_core::accesskit::Action::Click);
             // controls → the content panel at this index.
             if let Some(&panel_id) = self.panel_ids.borrow().get(self.index) {
-                builder.push_controlled(bastyde_core::accessibility::widget_id_to_node_id(panel_id));
+                builder
+                    .push_controlled(bastyde_core::accessibility::widget_id_to_node_id(panel_id));
             }
         } else {
             builder.set_role(bastyde_core::accesskit::Role::ListItem);

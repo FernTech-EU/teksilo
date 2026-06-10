@@ -70,14 +70,12 @@ fn main() {
                             SurfaceRole::Raised
                         };
                         Box::new(
-                            ZStack::new()
-                                .child(RectWidget::new().background(bg))
-                                .child(
-                                    Center::new().child(
-                                        TextWidget::new(lit!(tc.item.caption.clone()))
-                                            .color(TextRole::Primary),
-                                    ),
+                            ZStack::new().child(RectWidget::new().background(bg)).child(
+                                Center::new().child(
+                                    TextWidget::new(lit!(tc.item.caption.clone()))
+                                        .color(TextRole::Primary),
                                 ),
+                            ),
                         ) as Box<dyn Widget>
                     })
                     .sizing(GridSizing::Adaptive {
@@ -100,8 +98,7 @@ fn main() {
                     });
 
                     let grid_id = tree.add(grid);
-                    let status_line =
-                        TextWidget::new(lit!("0 selected")).bind_text(status.clone());
+                    let status_line = TextWidget::new(lit!("0 selected")).bind_text(status.clone());
 
                     tree.add(
                         VStack::new()

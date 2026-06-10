@@ -583,4 +583,3 @@ mod platform {
         OsThemeColors::default()
     }
 }
-

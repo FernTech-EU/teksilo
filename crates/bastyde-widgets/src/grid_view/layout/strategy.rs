@@ -187,9 +187,7 @@ pub(crate) trait GridLayoutStrategy: std::fmt::Debug + 'static {
         match anchor {
             ScrollAnchor::Start => tile_top - scroll_y,
             ScrollAnchor::End => tile_bot - viewport_height - scroll_y,
-            ScrollAnchor::Center => {
-                (tile_top + r.height * 0.5) - viewport_height * 0.5 - scroll_y
-            }
+            ScrollAnchor::Center => (tile_top + r.height * 0.5) - viewport_height * 0.5 - scroll_y,
             ScrollAnchor::Auto => {
                 if tile_top < scroll_y {
                     tile_top - scroll_y
@@ -309,7 +307,10 @@ mod tests {
     fn index_at_point_finds_tile_and_gap() {
         let g = grid();
         // Point inside tile 2 (x 200..300, y 0..50).
-        assert_eq!(g.index_at_point(Point::new(250.0, 25.0), 40, 400.0), Some(2));
+        assert_eq!(
+            g.index_at_point(Point::new(250.0, 25.0), 40, 400.0),
+            Some(2)
+        );
         // Point in row 1, column 0 → index 4.
         assert_eq!(g.index_at_point(Point::new(10.0, 60.0), 40, 400.0), Some(4));
         // Point beyond the last item.

@@ -169,11 +169,14 @@ impl Widget for KeyboardHighlightWrapper {
 
 /// A themed vertical menu container.
 ///
-/// ```ignore
-/// MenuList::new()
-///     .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
+/// ```rust
+/// # use bastyde_widgets::{MenuList, MenuItem};
+/// # use bastyde_i18n::lit;
+/// # use bastyde_core::Intent;
+/// let _w = MenuList::new()
+///     .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
 ///     .separator()
-///     .item(MenuItem::new(lit!("Paste")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Paste)))
+///     .item(MenuItem::new(lit!("Paste")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.paste"))));
 /// ```
 pub struct MenuList {
     entries: Vec<MenuEntry>,

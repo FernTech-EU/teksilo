@@ -65,7 +65,7 @@ pub use unic_langid::LanguageIdentifier;
 ///
 /// expands to:
 ///
-/// ```ignore
+/// ```text
 /// &[
 ///     ("en-US", &[
 ///         include_str!("../locales/en-US/main.ftl"),

@@ -113,9 +113,7 @@ impl SceneView {
                 ambient_raster_scale * pushed_transform.geometric_scale(),
             );
             let raster_scale_changed = item_raster_scale != ambient_raster_scale;
-            if raster_scale_changed
-                && let Some(tb) = canvas.text_backend()
-            {
+            if raster_scale_changed && let Some(tb) = canvas.text_backend() {
                 tb.borrow_mut().set_raster_scale(item_raster_scale);
             }
             // Effective opacity composes through the parent chain. Pushed via
@@ -134,11 +132,7 @@ impl SceneView {
                 // frame against fresh-density bitmaps.
                 match item.cache_mode() {
                     crate::cache::CacheMode::ItemCoordinate => {
-                        let cached = self
-                            .item_cache
-                            .borrow()
-                            .get(id, item_raster_scale)
-                            .cloned();
+                        let cached = self.item_cache.borrow().get(id, item_raster_scale).cloned();
                         if let Some(frame) = cached {
                             canvas.draw_render_frame(&frame, Point::ZERO);
                         } else {
@@ -159,9 +153,7 @@ impl SceneView {
                     }
                 }
             }
-            if raster_scale_changed
-                && let Some(tb) = canvas.text_backend()
-            {
+            if raster_scale_changed && let Some(tb) = canvas.text_backend() {
                 tb.borrow_mut().set_raster_scale(ambient_raster_scale);
             }
             if opacity_pushed {

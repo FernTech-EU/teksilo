@@ -25,11 +25,20 @@ use bastyde_i18n::LocalizedString;
 /// A non-virtualized dynamic collection that creates one child widget
 /// per item in a `ListModel<T>`.
 ///
-/// ```ignore
-/// Repeater::new(model, |index, item| {
+/// ```rust
+/// # use bastyde_widgets::Repeater;
+/// # use bastyde_widgets::primitives::TextWidget;
+/// # use bastyde_data::ListModel;
+/// # use bastyde_i18n::lit;
+/// # struct Item { title: String }
+/// # let model: ListModel<Item> = ListModel::from_vec(vec![
+/// #     Item { title: "Alpha".into() },
+/// #     Item { title: "Beta".into() },
+/// # ]);
+/// let _w = Repeater::new(model, |_index, item| {
 ///     Box::new(TextWidget::new(lit!(&item.title)))
 /// })
-/// .spacing(8.0)
+/// .spacing(8.0);
 /// ```
 ///
 /// # Accessibility

@@ -190,10 +190,13 @@ pub enum IconLocation {
 
 /// A production-quality button widget — non-generic, composition-based.
 ///
-/// ```ignore
-/// Button::new(lit!("Save"))
+/// ```rust
+/// # use bastyde_widgets::{Button, ButtonVariant};
+/// # use bastyde_i18n::lit;
+/// # use bastyde_core::Intent;
+/// let _w = Button::new(lit!("Save"))
 ///     .variant(ButtonVariant::Filled)
-///     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
+///     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 /// ```
 /// Type-erased activation closure. Stored as `Box<dyn Fn>` so the
 /// same button type works for any handler — typed intent send,

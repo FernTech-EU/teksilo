@@ -227,10 +227,7 @@ mod tests {
         assert_eq!(tree.theme().appearance, ThemeAppearance::Light);
         // The request is parked for the app layer to drain.
         let parked = tree.take_pending_theme_request();
-        assert_eq!(
-            parked.map(|t| t.appearance),
-            Some(ThemeAppearance::Dark)
-        );
+        assert_eq!(parked.map(|t| t.appearance), Some(ThemeAppearance::Dark));
         // Drained exactly once.
         assert!(tree.take_pending_theme_request().is_none());
     }

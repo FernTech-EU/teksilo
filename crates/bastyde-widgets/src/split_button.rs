@@ -14,13 +14,16 @@
 //! `.item(...)`, so icons, shortcut labels, enabled flags, and separators
 //! all come for free.
 //!
-//! ```ignore
-//! SplitButton::new()
-//!     .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)))
-//!     .item(MenuItem::new(lit!("Run Tests")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::RunTests)))
+//! ```rust
+//! # use bastyde_widgets::{SplitButton, MenuItem, ButtonVariant};
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! let _w = SplitButton::new()
+//!     .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.run"))))
+//!     .item(MenuItem::new(lit!("Run Tests")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.run-tests"))))
 //!     .separator()
-//!     .item(MenuItem::new(lit!("Debug")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Debug)))
-//!     .variant(ButtonVariant::Plain)
+//!     .item(MenuItem::new(lit!("Debug")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.debug"))))
+//!     .variant(ButtonVariant::Plain);
 //! ```
 
 use bastyde_i18n::lit;
@@ -33,8 +36,8 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::styles::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
+use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::TextRole;
@@ -908,11 +911,7 @@ mod tests {
     fn custom_style_make_body_is_invoked() {
         struct MarkerStyle(StdRc<StdCell<bool>>);
         impl SplitButtonStyle for MarkerStyle {
-            fn make_body(
-                &self,
-                cfg: &SplitButtonStyleConfig,
-                _ctx: &mut BuildContext,
-            ) -> WidgetId {
+            fn make_body(&self, cfg: &SplitButtonStyleConfig, _ctx: &mut BuildContext) -> WidgetId {
                 self.0.set(true);
                 // Frame the pre-built interactive row verbatim.
                 cfg.content

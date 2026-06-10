@@ -5,7 +5,7 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Divider, DropTarget, DropTargetVariant, DropZone, FixedSize, Panel, Padding, TextWidget, VStack,
+    Divider, DropTarget, DropTargetVariant, DropZone, FixedSize, Padding, Panel, TextWidget, VStack,
 };
 
 use crate::shared::{Signals, section, tab_header};
@@ -25,39 +25,45 @@ fn prepend(log: &Signal<String>, line: String) {
 }
 
 fn images_zone(log: Signal<String>) -> FixedSize {
-    FixedSize::new().bind_width(360.0_f32).bind_height(120.0_f32).child(
-        DropZone::new(tr!(dnd_zone_images_title()))
-            .subtitle(tr!(dnd_zone_images_subtitle()))
-            .accept_extensions(["png", "jpg", "jpeg", "gif"])
-            .on_files_dropped(move |paths, _ctx| {
-                for p in &paths {
-                    prepend(&log, format!("🖼  {}", p.display()));
-                }
-            }),
-    )
+    FixedSize::new()
+        .bind_width(360.0_f32)
+        .bind_height(120.0_f32)
+        .child(
+            DropZone::new(tr!(dnd_zone_images_title()))
+                .subtitle(tr!(dnd_zone_images_subtitle()))
+                .accept_extensions(["png", "jpg", "jpeg", "gif"])
+                .on_files_dropped(move |paths, _ctx| {
+                    for p in &paths {
+                        prepend(&log, format!("🖼  {}", p.display()));
+                    }
+                }),
+        )
 }
 
 fn any_zone(log: Signal<String>) -> FixedSize {
     let files_log = log.clone();
     let text_log = log.clone();
     let urls_log = log;
-    FixedSize::new().bind_width(360.0_f32).bind_height(120.0_f32).child(
-        DropZone::new(tr!(dnd_zone_any_title()))
-            .subtitle(tr!(dnd_zone_any_subtitle()))
-            .on_files_dropped(move |paths, _ctx| {
-                for p in &paths {
-                    prepend(&files_log, format!("📄  {}", p.display()));
-                }
-            })
-            .on_text_dropped(move |text, _ctx| {
-                prepend(&text_log, format!("📝  {text}"));
-            })
-            .on_urls_dropped(move |urls, _ctx| {
-                for u in &urls {
-                    prepend(&urls_log, format!("🔗  {u}"));
-                }
-            }),
-    )
+    FixedSize::new()
+        .bind_width(360.0_f32)
+        .bind_height(120.0_f32)
+        .child(
+            DropZone::new(tr!(dnd_zone_any_title()))
+                .subtitle(tr!(dnd_zone_any_subtitle()))
+                .on_files_dropped(move |paths, _ctx| {
+                    for p in &paths {
+                        prepend(&files_log, format!("📄  {}", p.display()));
+                    }
+                })
+                .on_text_dropped(move |text, _ctx| {
+                    prepend(&text_log, format!("📝  {text}"));
+                })
+                .on_urls_dropped(move |urls, _ctx| {
+                    for u in &urls {
+                        prepend(&urls_log, format!("🔗  {u}"));
+                    }
+                }),
+        )
 }
 
 /// A DropTarget wraps an ordinary Panel — the child stays visible and
@@ -85,18 +91,24 @@ fn log_panel(log: Signal<String>) -> Panel {
     Panel::new()
         .background(SurfaceRole::Sunken)
         .corner_radius(8.0)
-        .child(Padding::uniform(12.0).child(
-            TextWidget::new(lit!(String::new()))
-                .style(TextStyleRole::Mono)
-                .bind_text(log),
-        ))
+        .child(
+            Padding::uniform(12.0).child(
+                TextWidget::new(lit!(String::new()))
+                    .style(TextStyleRole::Mono)
+                    .bind_text(log),
+            ),
+        )
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let log = ctx.signal(tr!(dnd_log_initial()).resolve_now());
     let header = tab_header(ctx, title(), refs());
     let any = section(ctx, tr!(dnd_section_zone_any()), any_zone(log.clone()));
-    let images = section(ctx, tr!(dnd_section_zone_images()), images_zone(log.clone()));
+    let images = section(
+        ctx,
+        tr!(dnd_section_zone_images()),
+        images_zone(log.clone()),
+    );
     let target = section(ctx, tr!(dnd_section_target()), wrapping_target(log.clone()));
     let logs = section(ctx, tr!(dnd_section_log()), log_panel(log));
 

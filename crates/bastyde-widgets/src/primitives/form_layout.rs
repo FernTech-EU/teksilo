@@ -451,10 +451,7 @@ mod tests {
         let form = tree.add(FormLayout::new());
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let info = tree.accessibility_node(form);
-        assert_eq!(
-            info.role(),
-            bastyde_core::accesskit::Role::GenericContainer
-        );
+        assert_eq!(info.role(), bastyde_core::accesskit::Role::GenericContainer);
     }
 
     #[test]

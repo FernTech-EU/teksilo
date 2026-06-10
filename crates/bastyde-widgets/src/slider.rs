@@ -489,7 +489,11 @@ mod tests {
         // centre (x = 100) is window x = 140 → value 50, independent of
         // the thumb radius.
         let b = tree.bounds(sid);
-        assert!((b.x - 40.0).abs() < 0.5, "slider should be offset, x={}", b.x);
+        assert!(
+            (b.x - 40.0).abs() < 0.5,
+            "slider should be offset, x={}",
+            b.x
+        );
         for ev in [
             WidgetEvent::PointerDown {
                 position: Point::new(140.0, 30.0),

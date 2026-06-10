@@ -17,9 +17,11 @@ use bastyde::widgets::{
 fn toast_row(archive: Option<Rc<NotificationArchiveModel>>) -> impl Widget + 'static {
     let mut row = HStack::new()
         .spacing(8.0)
-        .child(Button::new(tr!(ovr_toast_btn_info())).on_activate_fn(|ctx| {
-            ctx.show_toast(Toast::info(tr!(ovr_toast_info_msg())));
-        }))
+        .child(
+            Button::new(tr!(ovr_toast_btn_info())).on_activate_fn(|ctx| {
+                ctx.show_toast(Toast::info(tr!(ovr_toast_info_msg())));
+            }),
+        )
         .child(
             Button::new(tr!(ovr_toast_btn_success()))
                 .variant(ButtonVariant::Filled)
@@ -27,23 +29,30 @@ fn toast_row(archive: Option<Rc<NotificationArchiveModel>>) -> impl Widget + 'st
                     ctx.show_toast(Toast::success(tr!(ovr_toast_success_msg())));
                 }),
         )
-        .child(Button::new(tr!(ovr_toast_btn_warning())).on_activate_fn(|ctx| {
-            ctx.show_toast(
-                Toast::warning(tr!(ovr_toast_warning_msg())).body(tr!(ovr_toast_warning_body())),
-            );
-        }))
-        .child(Button::new(tr!(ovr_toast_btn_error())).on_activate_fn(|ctx| {
-            ctx.show_toast(
-                Toast::error(tr!(ovr_toast_error_msg()))
-                    .body(tr!(ovr_toast_error_body()))
-                    .action(ToastAction::primary(tr!(ovr_toast_error_action()), |_| {
-                        println!("[widget-catalog] show errors clicked");
-                    })),
-            );
-        }))
-        .child(Button::new(tr!(ovr_toast_btn_loading())).on_activate_fn(|ctx| {
-            ctx.show_toast(Toast::loading(tr!(ovr_toast_loading_msg())));
-        }))
+        .child(
+            Button::new(tr!(ovr_toast_btn_warning())).on_activate_fn(|ctx| {
+                ctx.show_toast(
+                    Toast::warning(tr!(ovr_toast_warning_msg()))
+                        .body(tr!(ovr_toast_warning_body())),
+                );
+            }),
+        )
+        .child(
+            Button::new(tr!(ovr_toast_btn_error())).on_activate_fn(|ctx| {
+                ctx.show_toast(
+                    Toast::error(tr!(ovr_toast_error_msg()))
+                        .body(tr!(ovr_toast_error_body()))
+                        .action(ToastAction::primary(tr!(ovr_toast_error_action()), |_| {
+                            println!("[widget-catalog] show errors clicked");
+                        })),
+                );
+            }),
+        )
+        .child(
+            Button::new(tr!(ovr_toast_btn_loading())).on_activate_fn(|ctx| {
+                ctx.show_toast(Toast::loading(tr!(ovr_toast_loading_msg())));
+            }),
+        )
         .child(Spacer::new());
     if let Some(archive) = archive {
         row = row.child(NotificationCenterButton::new(archive));
@@ -396,7 +405,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             ),
     );
     let archive = ctx.app_state::<Rc<NotificationArchiveModel>>().cloned();
-    let toast = section(ctx, lit!("Toast + NotificationCenterButton"), toast_row(archive));
+    let toast = section(
+        ctx,
+        lit!("Toast + NotificationCenterButton"),
+        toast_row(archive),
+    );
 
     ctx.add(
         VStack::new()

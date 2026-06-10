@@ -499,7 +499,12 @@ mod tests {
 
     struct NullPoster;
     impl AppEventPoster for NullPoster {
-        fn post_subscription_event(&self, _sub_id: SubscriptionId, _event: Box<dyn std::any::Any + Send>) {}
+        fn post_subscription_event(
+            &self,
+            _sub_id: SubscriptionId,
+            _event: Box<dyn std::any::Any + Send>,
+        ) {
+        }
         fn post_external(&self, _payload: Box<dyn std::any::Any + Send>) {}
     }
 
@@ -560,7 +565,12 @@ mod tests {
         let handle = NativeMenuHandle::new(backend.clone());
         let id = MenuItemId::next();
         handle.set_window_menu(win(1), sample_snapshot(id), HashMap::new(), poster());
-        handle.set_window_menu(win(2), sample_snapshot(MenuItemId::next()), HashMap::new(), poster());
+        handle.set_window_menu(
+            win(2),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
 
         handle.activate_window(win(2));
         assert_eq!(backend.active_window(), Some(win(2)));

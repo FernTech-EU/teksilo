@@ -401,11 +401,14 @@ impl<T: SpinValue> SpinBox<T> {
     /// and field from overlapping). Default: 120 dp, matching Qt
     /// `QSpinBox` sizeHint and Int UI form density.
     ///
-    /// ```ignore
-    /// SpinBox::new(v, 0, 9999).width(80.0)        // narrow
-    /// SpinBox::new(v, 0, 9999).width(200.0)       // wider
-    /// SpinBox::new(v, 0, 9999).fill_width()       // stretch to parent
-    /// SpinBox::new(v, 0, 9999).width_chars(5)     // "fits 5 digits"
+    /// ```rust
+    /// # use bastyde_widgets::SpinBox;
+    /// # use bastyde_core::signal::Signal;
+    /// # let v = Signal::new(0_i32);
+    /// let _w = SpinBox::new(v.clone(), 0, 9999).width(80.0);        // narrow
+    /// let _w = SpinBox::new(v.clone(), 0, 9999).width(200.0);       // wider
+    /// let _w = SpinBox::new(v.clone(), 0, 9999).fill_width();       // stretch to parent
+    /// let _w = SpinBox::new(v.clone(), 0, 9999).width_chars(5);     // "fits 5 digits"
     /// ```
     pub fn width(mut self, width: f32) -> Self {
         self.width_policy = WidthPolicy::Pixels(width.max(0.0));
@@ -418,9 +421,13 @@ impl<T: SpinValue> SpinBox<T> {
     /// `SharedTypesetter` the field draws with), so values stay
     /// right under runtime theme switches and HiDPI scale changes.
     ///
-    /// ```ignore
-    /// SpinBox::new(port, 0, 65_535).width_chars(5)          // 5 digits
-    /// SpinBox::new(pct, 0, 100).suffix(" %").width_chars(3) // 3 + " %"
+    /// ```rust
+    /// # use bastyde_widgets::SpinBox;
+    /// # use bastyde_core::signal::Signal;
+    /// # let port = Signal::new(8080_i32);
+    /// # let pct = Signal::new(0_i32);
+    /// let _w = SpinBox::new(port, 0, 65_535).width_chars(5);           // 5 digits
+    /// let _w = SpinBox::new(pct, 0, 100).suffix(" %").width_chars(3);  // 3 + " %"
     /// ```
     pub fn width_chars(mut self, chars: u32) -> Self {
         self.width_policy = WidthPolicy::Chars(chars);

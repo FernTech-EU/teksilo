@@ -297,7 +297,9 @@ impl GridLayoutStrategy for VirtualizedMasonry {
         } else {
             item_range.end
         };
-        self.placement.borrow_mut().invalidate(item_range.start, end);
+        self.placement
+            .borrow_mut()
+            .invalidate(item_range.start, end);
     }
 
     fn resize(&self, item_count: usize) {

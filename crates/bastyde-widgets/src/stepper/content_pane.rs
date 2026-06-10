@@ -46,7 +46,9 @@ impl StepPane {
 
 impl std::fmt::Debug for StepPane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StepPane").field("title", &self.title).finish()
+        f.debug_struct("StepPane")
+            .field("title", &self.title)
+            .finish()
     }
 }
 

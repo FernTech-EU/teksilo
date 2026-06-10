@@ -141,9 +141,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             move |y| {
                 let count = proxy_for_scroll.visible_count();
                 let (visible_start, visible_end) =
-                    metrics
-                        .borrow_mut()
-                        .visible_range(*y, vp_h.get(), count, 0);
+                    metrics.borrow_mut().visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ROWS);
                     let new_end = (visible_end + BUFFER_ROWS).min(count);
@@ -257,14 +255,10 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     let twist_node_id = entry.node_id;
                     let proxy_for_twist = proxy.clone();
                     let twist = ctx.add(
-                        TwistArrow::new(
-                            cp::TREE_TWIST_SIZE,
-                            entry.has_children,
-                            entry.is_expanded,
-                        )
-                        .on_click(move |_ctx| {
-                            proxy_for_twist.toggle(twist_node_id);
-                        }),
+                        TwistArrow::new(cp::TREE_TWIST_SIZE, entry.has_children, entry.is_expanded)
+                            .on_click(move |_ctx| {
+                                proxy_for_twist.toggle(twist_node_id);
+                            }),
                     );
                     // Build inside-out so each `ctx.add` happens
                     // outside the mutable borrow chain.
@@ -274,8 +268,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         .add_child(inner_id);
                     let twist_label_id = ctx.add(twist_and_label);
                     ctx.add(
-                        Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px)
-                            .child_id(twist_label_id),
+                        Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child_id(twist_label_id),
                     )
                 } else {
                     inner_id
@@ -398,8 +391,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             if anchor.abs() > 0.01 {
                 // Safe from place_children: the dirty flag is set but the
                 // binding flush already ran this pass — lands next frame.
-                self.scroll_y
-                    .set((self.scroll_y.get() + anchor).max(0.0));
+                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
             }
 
             // Realization re-check: corrected offsets may reveal viewport

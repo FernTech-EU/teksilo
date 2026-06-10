@@ -8,12 +8,12 @@
 
 use std::collections::HashMap;
 
+use bastyde_core::MenuItemId;
 use bastyde_core::ObserverHandle;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::Key;
 use bastyde_core::shortcut::KeyStroke;
 use bastyde_core::signal::Prop;
-use bastyde_core::MenuItemId;
 use bastyde_data::CheckState;
 use bastyde_platform::native_menu::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuActivation, NativeMenuHandle,
@@ -127,7 +127,14 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                 let h = handle.clone();
                 let id = item.id;
                 observers.push(sig.observe(move |v| {
-                    h.update_item(id, check_delta(if *v { NativeCheck::On } else { NativeCheck::Off }));
+                    h.update_item(
+                        id,
+                        check_delta(if *v {
+                            NativeCheck::On
+                        } else {
+                            NativeCheck::Off
+                        }),
+                    );
                 }));
             }
             MenuItemState::TriCheck(sig) => {
@@ -176,7 +183,9 @@ fn resolve_node(
             role: sm.role(),
             labels: sm.resolve_labels(),
         }),
-        MenuNode::Submenu { title, children, .. } => Some(NativeMenuNode::Submenu {
+        MenuNode::Submenu {
+            title, children, ..
+        } => Some(NativeMenuNode::Submenu {
             title: strip_title(&title.resolve_now()),
             children: children
                 .iter()

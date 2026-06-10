@@ -209,8 +209,8 @@ pub mod prelude {
     pub use crate::webview_install::BastydeAppBuilderWebViewExt;
     #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
     pub use bastyde_webview::{
-        WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId, WebViewRegistry,
-        WebViewStyle,
+        WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId,
+        WebViewRegistry, WebViewStyle,
     };
 
     // Native file dialogs. The extension trait brings

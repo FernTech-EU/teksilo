@@ -2472,7 +2472,18 @@ impl WidgetTree {
     /// will see the modified theme during layout and paint.
     /// The override function receives a mutable `Theme` to modify.
     ///
-    /// ```ignore
+    /// ```
+    /// # use bastyde_core::{Widget, LayoutResponse, LayoutContext, widget_tree::WidgetTree};
+    /// # use bastyde_canvas::{Size, SizeProposal};
+    /// # use bastyde_tokens::ColorTokens;
+    /// # #[derive(Debug)] struct MinWidget;
+    /// # impl Widget for MinWidget {
+    /// #     fn layout_response(&self, _: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+    /// #         Size::new(0.0, 0.0).into()
+    /// #     }
+    /// # }
+    /// # let mut tree = WidgetTree::new();
+    /// # let panel_id = tree.add(MinWidget);
     /// tree.set_theme_override(panel_id, |theme| {
     ///     theme.colors = ColorTokens::dark_default();
     /// });

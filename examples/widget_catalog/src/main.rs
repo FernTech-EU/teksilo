@@ -245,9 +245,11 @@ fn build_menu_bar() -> impl Widget + 'static {
         .menu(tr!(app_menu_help()), || {
             Box::new(
                 MenuList::new()
-                    .item(MenuItem::new(tr!(app_menu_documentation())).on_activate_fn(|_| {
-                        println!("Documentation: https://github.com/FernTech/bastyde");
-                    }))
+                    .item(
+                        MenuItem::new(tr!(app_menu_documentation())).on_activate_fn(|_| {
+                            println!("Documentation: https://github.com/FernTech/bastyde");
+                        }),
+                    )
                     .separator()
                     .item(MenuItem::new(tr!(app_menu_about())).on_activate_fn(|_| {
                         println!(

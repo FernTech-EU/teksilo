@@ -318,9 +318,7 @@ impl Root {
                                 .on_activate_fn(move |_ctx| {
                                     let n = counter.get();
                                     counter.set(n + 1);
-                                    items_add.push(format!(
-                                        "Message {n}\n· appended at runtime"
-                                    ));
+                                    items_add.push(format!("Message {n}\n· appended at runtime"));
                                 }),
                         ),
                 ),
@@ -336,8 +334,8 @@ impl Root {
                             text.color(TextRole::Secondary)
                         });
                     }
-                    let mut row = StandardListItem::new(lit!(format!("#{}", index + 1)))
-                        .selected(selected);
+                    let mut row =
+                        StandardListItem::new(lit!(format!("#{}", index + 1))).selected(selected);
                     row = row.trailing_slot(Padding::symmetric(6.0, 0.0).child(lines));
                     Box::new(row)
                 })

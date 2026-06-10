@@ -112,7 +112,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let bar = section(ctx, lit!("BarChart"), sized(560.0, 260.0, make_bar()));
     let line = section(ctx, lit!("LineChart"), sized(560.0, 260.0, make_line()));
-    let pie = section(ctx, lit!("PieChart (donut + center slot)"), sized(560.0, 280.0, make_pie()));
+    let pie = section(
+        ctx,
+        lit!("PieChart (donut + center slot)"),
+        sized(560.0, 280.0, make_pie()),
+    );
 
     ctx.add(
         VStack::new()

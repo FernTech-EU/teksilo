@@ -388,8 +388,7 @@ fn paint_widget_cached(
     // scale current when they were recorded; when the ambient scale
     // moved (a scene zoom crossed a quantization bucket), those quads
     // sample wrong-density bitmaps — treat the node as needing paint.
-    let needs_paint =
-        node.dirty.needs_paint || node.paint_raster_scale != this_raster_scale;
+    let needs_paint = node.dirty.needs_paint || node.paint_raster_scale != this_raster_scale;
 
     if needs_paint || node.cached_paint.is_none() {
         let resolved_theme = arena.resolve_theme(id, base_theme);
@@ -670,8 +669,7 @@ fn debug_validate_layout_keys(
         match tb.debug_validate_layout(*key) {
             GlyphValidation::Valid => {}
             GlyphValidation::StaleKey => {
-                let first_report =
-                    REPORTED_STALE_KEYS.with(|set| set.borrow_mut().insert(*key));
+                let first_report = REPORTED_STALE_KEYS.with(|set| set.borrow_mut().insert(*key));
                 if first_report {
                     eprintln!(
                         "[bastyde] WARNING: retained paint cache replays layout_key={key} \
@@ -838,9 +836,8 @@ mod tests {
         let backend_rc = std::rc::Rc::new(std::cell::RefCell::new(backend));
         let mut tree = WidgetTree::new()
             .with_theme(crate::presets::intui::light())
-            .with_text_backend(
-                backend_rc.clone() as std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>
-            );
+            .with_text_backend(backend_rc.clone()
+                as std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>);
 
         let root = tree.add(StackWidget::new());
         tree.add_child(root, TextPaintWidget); // A
@@ -875,8 +872,7 @@ mod tests {
 
     #[test]
     fn raster_scale_change_repaints_clean_descendants() {
-        let transform =
-            crate::signal::Signal::new(bastyde_canvas::Transform2D::scale(2.0, 2.0));
+        let transform = crate::signal::Signal::new(bastyde_canvas::Transform2D::scale(2.0, 2.0));
         let (mut tree, _backend_rc, layout_scales) = scaled_subtree_tree(transform.clone());
         let _ = tree.render();
         layout_scales.borrow_mut().clear();

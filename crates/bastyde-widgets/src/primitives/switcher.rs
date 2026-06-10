@@ -44,12 +44,15 @@ enum Slot {
 /// bounds (top-leading, RTL-aware). Hidden pages keep their subtree
 /// laid out but invisible via per-page `visible_when` bindings.
 ///
-/// ```ignore
+/// ```rust
+/// # use bastyde_widgets::primitives::{Switcher, TextWidget};
+/// # use bastyde_core::signal::Signal;
+/// # use bastyde_i18n::lit;
 /// let page = Signal::new(0_usize);
-/// Switcher::new(page.clone())
+/// let _w = Switcher::new(page.clone())
 ///     .child(TextWidget::new(lit!("Page 0")))   // built at startup
 ///     .child(TextWidget::new(lit!("Page 1")))   // built when page.set(1)
-///     .child(TextWidget::new(lit!("Page 2")))   // built when page.set(2)
+///     .child(TextWidget::new(lit!("Page 2")));  // built when page.set(2)
 /// ```
 pub struct Switcher {
     selected: Signal<usize>,

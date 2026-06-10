@@ -17,7 +17,12 @@ impl SceneView {
     /// mutator is `&self`, so a handler holding a clone can drive the scene
     /// directly (no `with_widget_mut` needed) and **all** views reconcile:
     ///
-    /// ```ignore
+    /// ```
+    /// # use bastyde_scene::{Scene, SceneView};
+    /// # use bastyde_canvas::Rect;
+    /// # let view = SceneView::new(Scene::new());
+    /// # let card_data = "example payload";
+    /// # let rect = Rect::new(0.0, 0.0, 200.0, 120.0);
     /// let model = view.model();          // cheap handle clone
     /// model.add_widget_item(card_data, rect);   // every view rebuilds it
     /// ```

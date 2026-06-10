@@ -26,9 +26,14 @@ fn embedded_tab_widget(selected: Signal<Option<TabId>>) -> TabWidget {
         )
         .static_tab(
             TabInfo::new().title(lit!("Details")),
-            body("Details — closable + reorderable + overflow tabs live in the tab_widget example."),
+            body(
+                "Details — closable + reorderable + overflow tabs live in the tab_widget example.",
+            ),
         )
-        .static_tab(TabInfo::new().title(lit!("Settings")), body("Settings — tab content."))
+        .static_tab(
+            TabInfo::new().title(lit!("Settings")),
+            body("Settings — tab content."),
+        )
 }
 
 pub fn title() -> LocalizedString {

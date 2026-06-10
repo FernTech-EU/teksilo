@@ -147,9 +147,7 @@ fn main() {
                                 .spacing(1.0)
                                 .child(TextWidget::new(lit!(row.name.clone())));
                             for line in row.desc.lines() {
-                                v = v.child(
-                                    TextWidget::new(lit!(line)).color(TextRole::Secondary),
-                                );
+                                v = v.child(TextWidget::new(lit!(line)).color(TextRole::Secondary));
                             }
                             Box::new(v)
                         })

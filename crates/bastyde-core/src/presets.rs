@@ -3,7 +3,7 @@
 //! Each submodule offers a `light()` and `dark()` constructor returning
 //! a fully populated `Theme`. Apps pick a preset explicitly:
 //!
-//! ```ignore
+//! ```
 //! use bastyde_core::presets::intui;
 //! let theme = intui::light();
 //! ```

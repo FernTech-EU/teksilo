@@ -8,7 +8,9 @@
 use bastyde::canvas::{Path, Point, Rect};
 use bastyde::prelude::*;
 use bastyde::widgets::{Button, Divider, FixedSize, Panel, TextWidget, VStack};
-use bastyde_scene::{GroupItem, PathItem, RectItem, Scene, SceneSelectionMode, SceneView, TextItem};
+use bastyde_scene::{
+    GroupItem, PathItem, RectItem, Scene, SceneSelectionMode, SceneView, TextItem,
+};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -129,7 +131,11 @@ fn sized_scene() -> FixedSize {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let scene = section(ctx, lit!("SceneView (pan / zoom · two tiers)"), sized_scene());
+    let scene = section(
+        ctx,
+        lit!("SceneView (pan / zoom · two tiers)"),
+        sized_scene(),
+    );
 
     ctx.add(
         VStack::new()

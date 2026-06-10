@@ -1335,7 +1335,10 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("a.delete")),
+            reg.find_conflict(
+                KeyStroke::new(Key::Delete, Modifiers::NONE),
+                Some("a.delete")
+            ),
             None,
             "Delete in a different panel scope is not a conflict"
         );
@@ -1348,7 +1351,10 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("a.delete")),
+            reg.find_conflict(
+                KeyStroke::new(Key::Delete, Modifiers::NONE),
+                Some("a.delete")
+            ),
             Some("a.delete2"),
             "same-scope same-chord is a real conflict"
         );
@@ -1363,14 +1369,19 @@ mod tests {
         // The global excludes itself and collides with all three scoped
         // bindings; HashMap order makes the exact id arbitrary, so just
         // require it found one of them.
-        let hit =
-            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("g.delete"));
+        let hit = reg.find_conflict(
+            KeyStroke::new(Key::Delete, Modifiers::NONE),
+            Some("g.delete"),
+        );
         assert!(
             matches!(hit, Some("a.delete" | "a.delete2" | "b.delete")),
             "a global chord conflicts with any scoped binding, got {hit:?}"
         );
         assert_eq!(
-            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("b.delete")),
+            reg.find_conflict(
+                KeyStroke::new(Key::Delete, Modifiers::NONE),
+                Some("b.delete")
+            ),
             Some("g.delete"),
             "a scoped binding conflicts with a global on the same chord"
         );

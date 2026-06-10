@@ -12,8 +12,6 @@ mod badge_style;
 mod banner_style;
 #[path = "styles/button_style.rs"]
 mod button_style;
-#[path = "styles/split_button_style.rs"]
-mod split_button_style;
 #[path = "styles/calendar_style.rs"]
 mod calendar_style;
 #[path = "styles/card_style.rs"]
@@ -68,6 +66,8 @@ mod slider_style;
 mod snackbar_style;
 #[path = "styles/spin_box_style.rs"]
 mod spin_box_style;
+#[path = "styles/split_button_style.rs"]
+mod split_button_style;
 #[path = "styles/standard_item_style.rs"]
 mod standard_item_style;
 #[path = "styles/tab_style.rs"]
@@ -100,7 +100,6 @@ pub use banner_style::{BannerSeverity, BannerStyle, BannerStyleConfig, SharedBan
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
 };
-pub use split_button_style::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 pub use calendar_style::{
     CalendarDayConfig, CalendarDayFill, CalendarHeaderConfig, CalendarStyle,
     CalendarZoomCellConfig, SharedCalendarStyle,
@@ -162,6 +161,7 @@ pub use slider_style::{
 };
 pub use snackbar_style::{SharedSnackbarStyle, SnackbarStyle, SnackbarStyleConfig};
 pub use spin_box_style::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig};
+pub use split_button_style::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };

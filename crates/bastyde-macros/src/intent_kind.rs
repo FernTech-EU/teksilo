@@ -16,7 +16,7 @@
 //!
 //! Generates:
 //!
-//! ```ignore
+//! ```text
 //! impl IntentKind for AppIntent {
 //!     fn into_intent(self) -> Intent {
 //!         let name: &'static str = match &self {

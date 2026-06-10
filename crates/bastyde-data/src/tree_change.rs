@@ -67,5 +67,4 @@ mod tests {
         assert_eq!(id1, id1_clone);
         assert_ne!(id1, id2);
     }
-
 }

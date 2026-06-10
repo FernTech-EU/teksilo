@@ -141,7 +141,11 @@ fn visit_history_back_is_non_sequential() {
     assert_eq!(ctrl.current(), 2);
     ctrl.back();
     layout(&mut t);
-    assert_eq!(ctrl.current(), 0, "Back pops the visit history, not index-1");
+    assert_eq!(
+        ctrl.current(),
+        0,
+        "Back pops the visit history, not index-1"
+    );
 }
 
 // ── validation gating ──────────────────────────────────────────────────────
@@ -161,7 +165,9 @@ fn validation_gates_next() {
 
     let update = t.sync_accessibility();
     assert!(
-        node_by_label(&update, "Next").expect("Next button").is_disabled(),
+        node_by_label(&update, "Next")
+            .expect("Next button")
+            .is_disabled(),
         "Next is disabled until the active step's gate is satisfied"
     );
 
@@ -169,7 +175,9 @@ fn validation_gates_next() {
     layout(&mut t);
     let update = t.sync_accessibility();
     assert!(
-        !node_by_label(&update, "Next").expect("Next button").is_disabled(),
+        !node_by_label(&update, "Next")
+            .expect("Next button")
+            .is_disabled(),
         "Next enables when the gate flips true"
     );
 }
@@ -281,14 +289,19 @@ fn finish_reads_form_values_and_skipped_introspection() {
 
     let ctrl = StepperController::new(3);
     let mut t = tree();
-    t.add(Stepper::new().controller(ctrl.clone()).steps(steps).on_finish({
-        let name = name.clone();
-        let plan = plan.clone();
-        let captured = captured.clone();
-        move |_ctx, ctrl| {
-            *captured.borrow_mut() = Some((name.get(), plan.get(), ctrl.skipped(2)));
-        }
-    }));
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(steps)
+            .on_finish({
+                let name = name.clone();
+                let plan = plan.clone();
+                let captured = captured.clone();
+                move |_ctx, ctrl| {
+                    *captured.borrow_mut() = Some((name.get(), plan.get(), ctrl.skipped(2)));
+                }
+            }),
+    );
     layout(&mut t);
 
     // Simulate user input + a choice.
@@ -322,7 +335,10 @@ fn a11y_strip_is_tablist_when_non_linear_else_list() {
     let update2 = t2.sync_accessibility();
     assert!(nodes_with_role(&update2, accesskit::Role::TabList).is_empty());
     assert_eq!(nodes_with_role(&update2, accesskit::Role::List).len(), 1);
-    assert_eq!(nodes_with_role(&update2, accesskit::Role::ListItem).len(), 3);
+    assert_eq!(
+        nodes_with_role(&update2, accesskit::Role::ListItem).len(),
+        3
+    );
 }
 
 #[test]
@@ -372,10 +388,16 @@ fn a11y_content_pane_labelled_by_indicator_no_dangling() {
         update.nodes.iter().map(|(id, _)| *id).collect();
     for (pid, node) in &update.nodes {
         for &target in node.controls() {
-            assert!(emitted.contains(&target), "node {pid:?} controls absent {target:?}");
+            assert!(
+                emitted.contains(&target),
+                "node {pid:?} controls absent {target:?}"
+            );
         }
         for &target in node.labelled_by() {
-            assert!(emitted.contains(&target), "node {pid:?} labelled_by absent {target:?}");
+            assert!(
+                emitted.contains(&target),
+                "node {pid:?} labelled_by absent {target:?}"
+            );
         }
     }
 }

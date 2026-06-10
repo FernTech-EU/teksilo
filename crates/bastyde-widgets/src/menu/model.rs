@@ -555,7 +555,9 @@ pub(crate) fn build_menu_list(nodes: &[MenuNode]) -> MenuList {
             MenuNode::Separator => {
                 list = list.separator();
             }
-            MenuNode::Submenu { title, children, .. } => {
+            MenuNode::Submenu {
+                title, children, ..
+            } => {
                 let children = children.clone();
                 list = list.item(MenuItem::submenu(title.clone(), move || {
                     Box::new(build_menu_list(&children))
@@ -581,7 +583,10 @@ mod tests {
                 m.item(MenuEntry::new(lit!("New"))).separator()
             })
             .standard(StandardMenuRole::Window);
-        assert!(model.version().get() > v0, "structural change bumps version");
+        assert!(
+            model.version().get() > v0,
+            "structural change bumps version"
+        );
         let nodes = model.nodes();
         assert_eq!(nodes.len(), 2);
         assert!(matches!(nodes[0], MenuNode::Submenu { .. }));
@@ -601,8 +606,7 @@ mod tests {
     #[test]
     fn push_item_into_submenu_by_id_and_remove() {
         let recent = bastyde_core::MenuItemId::next();
-        let model = MenuModel::new()
-            .menu_with_id(recent, lit!("File"), |m| m);
+        let model = MenuModel::new().menu_with_id(recent, lit!("File"), |m| m);
         let v0 = model.version().get();
 
         // Add into the addressed submenu.
@@ -655,9 +659,7 @@ mod tests {
     #[test]
     fn submenu_nesting_is_preserved() {
         let model = MenuModel::new().menu(lit!("File"), |m| {
-            m.submenu(lit!("Recent"), |s| {
-                s.item(MenuEntry::new(lit!("doc.txt")))
-            })
+            m.submenu(lit!("Recent"), |s| s.item(MenuEntry::new(lit!("doc.txt"))))
         });
         let nodes = model.nodes();
         let MenuNode::Submenu { children, .. } = &nodes[0] else {

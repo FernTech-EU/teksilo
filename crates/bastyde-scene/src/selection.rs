@@ -11,8 +11,14 @@
 //! so `SceneItem` paint code can render selected items differently
 //! by binding their colors / strokes to a derived signal:
 //!
-//! ```ignore
-//! let selected = view.selection().selection_signal();
+//! ```
+//! # use bastyde_scene::{SceneModel, SceneSelection, SceneSelectionMode};
+//! # use bastyde_canvas::{Point, Rect};
+//! # use bastyde_tokens::Color;
+//! # let model = SceneModel::new();
+//! # let card_id = model.add_item(bastyde_scene::RectItem::new(Rect::new(0.0, 0.0, 100.0, 80.0)), Point::ZERO);
+//! let selection = SceneSelection::new(SceneSelectionMode::Multi);
+//! let selected = selection.selection_signal();
 //! let stroke_color = selected.map(move |s| {
 //!     if s.contains(&card_id) { Color::BLUE } else { Color::TRANSPARENT }
 //! });

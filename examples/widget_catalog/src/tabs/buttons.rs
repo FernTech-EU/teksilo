@@ -149,9 +149,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let popover_icon = section(
         ctx,
         lit!("PopoverIconButton"),
-        PopoverIconButton::new(IconButton::add()).content(
-            TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
-        ),
+        PopoverIconButton::new(IconButton::add())
+            .content(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
     );
     let split = section(
         ctx,
@@ -203,9 +202,10 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 .child(TextWidget::new(tr!(btn_popover_body())).style(TextStyleRole::Small)),
         ),
     );
-    let popover_icon_widget = ctx.add(PopoverIconButton::new(IconButton::add()).content(
-        TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
-    ));
+    let popover_icon_widget = ctx.add(
+        PopoverIconButton::new(IconButton::add())
+            .content(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
+    );
 
     bati!(ctx => VStack {
             spacing: 20.0

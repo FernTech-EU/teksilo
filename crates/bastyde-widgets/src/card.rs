@@ -279,5 +279,4 @@ mod tests {
             "card should render shadow and/or background"
         );
     }
-
 }

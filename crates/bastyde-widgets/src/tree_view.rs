@@ -82,14 +82,20 @@ type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> B
 
 /// A virtualized hierarchical tree widget backed by a `TreeModel<T>`.
 ///
-/// ```ignore
-/// TreeView::new(tree_model, |item, entry, selected| {
+/// ```rust
+/// # use bastyde_widgets::{TreeView};
+/// # use bastyde_widgets::primitives::{HStack, Padding, TextWidget};
+/// # use bastyde_data::TreeModel;
+/// # use bastyde_i18n::lit;
+/// # struct Item { title: String }
+/// # let tree_model: TreeModel<Item> = TreeModel::new();
+/// let _w = TreeView::new(tree_model, |item, entry, _selected| {
 ///     let indent = entry.depth as f32 * 20.0;
 ///     Box::new(HStack::new()
 ///         .child(Padding::new(0.0, 0.0, 0.0, indent))
 ///         .child(TextWidget::new(lit!(&item.title))))
 /// })
-/// .item_height(28.0)
+/// .item_height(28.0);
 /// ```
 pub struct TreeView<T: 'static> {
     tree_slice: TreeSlice<T>,
@@ -166,15 +172,20 @@ impl<T: 'static> TreeView<T> {
     /// pulled in a single line — eliminating the need to manually
     /// clone the slice handle outside the closure.
     ///
-    /// ```ignore
-    /// TreeView::new_with_context(model, |item, entry, selected, ctx| {
+    /// ```rust
+    /// # use bastyde_widgets::{TreeView, StandardTreeItem};
+    /// # use bastyde_data::TreeModel;
+    /// # use bastyde_i18n::lit;
+    /// # struct Item { title: String }
+    /// # let model: TreeModel<Item> = TreeModel::new();
+    /// let _w = TreeView::new_with_context(model, |item, entry, selected, ctx| {
     ///     Box::new(
     ///         StandardTreeItem::new(lit!(&item.title))
     ///             .from_entry(entry)
     ///             .selected(selected)
     ///             .on_toggle_rc(ctx.toggle_callback())
     ///     )
-    /// })
+    /// });
     /// ```
     pub fn new_with_context(
         model: TreeModel<T>,
@@ -1133,8 +1144,7 @@ impl<T: 'static> Widget for TreeView<T> {
             if anchor.abs() > 0.01 {
                 // Safe from place_children: the dirty flag is set but the
                 // binding flush already ran this pass — lands next frame.
-                self.scroll_y
-                    .set((self.scroll_y.get() + anchor).max(0.0));
+                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
             }
 
             // Realization re-check: corrected offsets may reveal viewport
@@ -2255,11 +2265,7 @@ mod tests {
 
         // C spans 80..120; grab its center. Drop at y = 62: row B's top
         // third (60..60+20/3).
-        drag_item(
-            &mut wtree,
-            Point::new(50.0, 100.0),
-            Point::new(50.0, 62.0),
-        );
+        drag_item(&mut wtree, Point::new(50.0, 100.0), Point::new(50.0, 62.0));
 
         let order: Vec<&str> = (0..tree.root_count())
             .map(|i| tree.with_item(tree.root(i), |v| *v).unwrap())

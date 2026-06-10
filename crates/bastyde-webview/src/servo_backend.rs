@@ -253,7 +253,8 @@ impl WebViewHandle for ServoHandle {
         // No direct inline-HTML load on Servo's WebView; would need a data: URL.
     }
     fn eval(&self, script: &str) {
-        self.webview.evaluate_javascript(script.to_string(), |_result| {});
+        self.webview
+            .evaluate_javascript(script.to_string(), |_result| {});
     }
     fn post_message(&self, msg: &str) {
         // No built-in IPC channel; emulate Rust→JS via a dispatched event.
@@ -277,7 +278,8 @@ impl WebViewHandle for ServoHandle {
         self.webview.go_forward(1);
     }
     fn stop(&self) {
-        self.webview.evaluate_javascript("window.stop()".to_string(), |_r| {});
+        self.webview
+            .evaluate_javascript("window.stop()".to_string(), |_r| {});
     }
     fn set_visible(&self, visible: bool) {
         if visible {

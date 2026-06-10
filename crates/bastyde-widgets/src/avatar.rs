@@ -6,21 +6,26 @@
 //! presence indicator (Online / Offline / Away / Busy) and outer ring.
 //! Can be made activable to serve as a user-menu trigger.
 //!
-//! ```ignore
+//! ```rust
+//! # use bastyde_widgets::{Avatar, AvatarPresence, AvatarSize};
+//! # use bastyde_canvas::raster::RasterIcon;
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! # let face = RasterIcon::from_raw(vec![0u8; 4 * 4 * 4], 4, 4);
 //! // Image with a presence dot.
-//! Avatar::with_image(&face)
-//!     .alt("Jane Doe")
+//! let _w = Avatar::with_image(&face)
+//!     .alt(lit!("Jane Doe"))
 //!     .presence(AvatarPresence::Online)
-//!     .size(AvatarSize::Medium)
+//!     .size(AvatarSize::Medium);
 //!
 //! // Hash-tinted initials, auto-derived from a name.
-//! Avatar::with_name("Jane Doe").size(AvatarSize::Large)
+//! let _w = Avatar::with_name(lit!("Jane Doe")).size(AvatarSize::Large);
 //!
-//! // Click target — opens a user menu via an `AppIntent`.
-//! Avatar::with_image(&face)
-//!     .label("Open user menu")
-//!     .alt("Jane Doe")
-//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::OpenUserMenu))
+//! // Click target — opens a user menu via an intent.
+//! let _w = Avatar::with_image(&face)
+//!     .label(lit!("Open user menu"))
+//!     .alt(lit!("Jane Doe"))
+//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.open-user-menu")));
 //! ```
 //!
 //! The widget reuses `ImageWidget` for the image path and draws bg /

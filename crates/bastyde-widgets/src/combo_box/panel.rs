@@ -525,8 +525,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
             let search_id = ctx.add(search_input);
             self.search_input_slot.set(Some(search_id));
-            let search_wrapped =
-                ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id));
+            let search_wrapped = ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id));
             let col = VStack::new()
                 .spacing(0.0)
                 .add_child(search_wrapped)

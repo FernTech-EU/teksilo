@@ -76,10 +76,10 @@ pub mod snackbar;
 pub mod spin_box;
 pub mod spinner;
 pub mod split_button;
-pub mod stepper;
 pub mod split_view;
 pub mod standard_item;
 pub mod status_bar;
+pub mod stepper;
 pub mod styles;
 pub mod tab_widget;
 pub mod table_view;
@@ -129,13 +129,13 @@ pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
 pub use file_picker_field::{FilePickerField, FilePickerKind};
-pub use group_box::GroupBox;
-pub use group_header::GroupHeader;
-pub use hex_color_input::HexColorInput;
 pub use grid_view::{
     GridSectionProvider, GridSizing, GridTabTraversal, GridView, GroupingSections, ScrollAnchor,
     TileContext, grouping_sections,
 };
+pub use group_box::GroupBox;
+pub use group_header::GroupHeader;
+pub use hex_color_input::HexColorInput;
 pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
 pub use link::Link;
@@ -185,12 +185,12 @@ pub use spin_box::{
 };
 pub use spinner::Spinner;
 pub use split_button::SplitButton;
-pub use stepper::{
-    ChromePosition, Step, StepStatus, Stepper, StepperController, StepperOrientation, Wizard,
-};
 pub use split_view::SplitView;
 pub use standard_item::{StandardListItem, StandardTreeItem};
 pub use status_bar::StatusBar;
+pub use stepper::{
+    ChromePosition, Step, StepStatus, Stepper, StepperController, StepperOrientation, Wizard,
+};
 pub use tab_widget::{
     ContextMenuFactory, IconFactory as TabIconFactory, STATIC_KIND, StaticContentFactory, TabBar,
     TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
