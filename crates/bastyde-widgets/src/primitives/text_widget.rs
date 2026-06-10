@@ -1,8 +1,8 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use bastyde_canvas::text_backend::{HitTarget, TextLayout};
-use bastyde_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
+use bastyde_canvas::{Canvas, EllipsisMode, Rect, Size, SizeProposal, TextOverflow};
 
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::color_prop::{ColorProp, TextStyleProp};
@@ -56,17 +56,6 @@ pub struct TextWidget {
     /// closures via `Rc<RefCell<..>>` so taps can hit-test against the
     /// most recently measured spans.
     last_layout: Rc<RefCell<Option<TextLayout>>>,
-    /// Last paint bounds in window-local coordinates. Updated from
-    /// `paint()` (the only hook with access to bounds) and read from
-    /// the `on_tap` / `on_pointer_event` closures to convert the
-    /// window-local event position into widget-local before
-    /// hit-testing the layout spans.
-    ///
-    /// Necessary because the framework's tap/pointer handlers are
-    /// documented as receiving widget-local positions but actually
-    /// receive window-local — there is no transformation in
-    /// `dispatch_recognized_gesture` or `dispatch_to_widget`.
-    last_bounds: Rc<Cell<Rect>>,
     /// Currently-hovered link URL (shared with the pointer-event
     /// closure). Used to detect enter/leave transitions between link
     /// spans inside a single widget.
@@ -105,7 +94,6 @@ impl TextWidget {
             on_link_click: None,
             on_link_hover: None,
             last_layout: Rc::new(RefCell::new(None)),
-            last_bounds: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             hovered_link: Rc::new(RefCell::new(None)),
             a11y_hidden: false,
         }
@@ -275,11 +263,9 @@ impl Widget for TextWidget {
             let mut handler_set = HandlerSet::new();
             if let Some(on_click) = self.on_link_click.clone() {
                 let last_layout = self.last_layout.clone();
-                let last_bounds = self.last_bounds.clone();
                 handler_set = handler_set.on_tap(move |event, ctx| {
-                    let bounds = last_bounds.get();
-                    let pt = event.position;
-                    let local = Point::new(pt.x - bounds.x, pt.y - bounds.y);
+                    // `event.position` is already widget-local.
+                    let local = event.position;
                     if let Some(layout) = last_layout.borrow().as_ref()
                         && let Some(HitTarget::Link { url }) = layout.hit_test(local)
                     {
@@ -302,15 +288,14 @@ impl Widget for TextWidget {
             // Returns `Ignored` so the gesture arena still receives
             // PointerDown/Up and the on_tap handler keeps firing.
             let last_layout_for_pointer = self.last_layout.clone();
-            let last_bounds_for_pointer = self.last_bounds.clone();
             let hovered = self.hovered_link.clone();
             let on_hover = self.on_link_hover.clone();
             handler_set = handler_set.on_pointer_event(move |event, ctx| {
                 use bastyde_core::event::{EventResponse, WidgetEvent};
                 match event {
                     WidgetEvent::PointerMove { position } => {
-                        let bounds = last_bounds_for_pointer.get();
-                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        // `position` is already widget-local.
+                        let local = *position;
                         let layout_ref = last_layout_for_pointer.borrow();
                         let hit = layout_ref.as_ref().and_then(|l| l.hit_test(local));
                         let new_url = match &hit {
@@ -491,11 +476,6 @@ impl Widget for TextWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Stash bounds so the on_tap / on_pointer_event closures can
-        // convert window-local event positions into widget-local
-        // before hit-testing against the layout's spans.
-        self.last_bounds.set(bounds);
-
         let text = self.text.get();
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);

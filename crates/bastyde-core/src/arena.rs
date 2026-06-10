@@ -593,6 +593,57 @@ impl WidgetArena {
         effective
     }
 
+    /// Convert a **window-space** pointer position into the **widget-local**
+    /// coordinate space of `id`'s event handlers — i.e. relative to `id`'s
+    /// top-left, after undoing any transform scopes between the window and
+    /// `id`. This is the single conversion the dispatcher applies before
+    /// handing a position to `on_tap` / `on_drag` / `on_pointer_event`, so
+    /// every handler sees positions in its own local space.
+    ///
+    /// The transform handling mirrors [`Self::hit_test_recursive`] so the
+    /// position a handler receives is in the same space the hit-test used
+    /// to pick it:
+    /// * A **content** transform node (`content_transform`, e.g.
+    ///   `SceneView`) owns its transform and maps its content itself. The
+    ///   framework feeds such a node positions in its **parent-effective**
+    ///   space (the same space `hit_test_recursive` passes through
+    ///   `inv(transform)`), with **no** bounds-origin subtraction — the
+    ///   node's `view_transform` already accounts for its placement.
+    /// * Any other node (the 90%+ identity case, plus `Scale` / `Rotate`
+    ///   self-transforms) receives widget-local coordinates: undo the full
+    ///   transform chain including its own, then subtract its bounds
+    ///   origin so the result is relative to its top-left.
+    ///
+    /// In the common no-transform case this collapses to
+    /// `window_point - bounds.origin`.
+    pub fn local_pointer_position(
+        &self,
+        id: WidgetId,
+        window_point: bastyde_canvas::Point,
+    ) -> bastyde_canvas::Point {
+        let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
+        if content_transform {
+            // Parent-effective space, no origin subtraction (the node's
+            // own transform consumes these coordinates).
+            let to_parent = self
+                .parent(id)
+                .map(|p| self.effective_transform(p))
+                .unwrap_or(bastyde_canvas::Transform2D::IDENTITY);
+            return match to_parent.inverse() {
+                Some(inv) => inv.apply_point(window_point),
+                None => window_point,
+            };
+        }
+        let in_local = match self.effective_transform(id).inverse() {
+            Some(inv) => inv.apply_point(window_point),
+            // Degenerate transform: fall back to the raw point rather than
+            // dropping the event.
+            None => window_point,
+        };
+        let bounds = self.bounds(id);
+        bastyde_canvas::Point::new(in_local.x - bounds.x, in_local.y - bounds.y)
+    }
+
     /// Get all root-level widget IDs (widgets with no parent).
     pub fn roots(&self) -> Vec<WidgetId> {
         if self.roots_dirty {

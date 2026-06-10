@@ -28,6 +28,20 @@ use super::hit_test;
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
 
+/// Convert a **wrapper-node-local** pointer position (as delivered by the
+/// framework dispatch) into the **engine/body-local** space that
+/// text-typeset's `hit_test` expects. The body is inset within the
+/// wrapper, so reconstruct the window point (`position + node_origin`)
+/// and subtract the body origin (`viewport_origin`). At wrapper-origin 0
+/// this reduces to `position - viewport_origin`.
+fn to_engine_local(state: &SharedState, position: &Point) -> Point {
+    let st = state.borrow();
+    Point::new(
+        position.x + st.node_origin.x - st.viewport_origin.x,
+        position.y + st.node_origin.y - st.viewport_origin.y,
+    )
+}
+
 pub(super) fn handle_pointer_event(
     state: &SharedState,
     v_scrollbar_bounds: &Rc<Cell<Rect>>,
@@ -59,13 +73,7 @@ pub(super) fn handle_pointer_event(
                 return EventResponse::Ignored;
             }
             let shift = modifiers.shift();
-            let local = {
-                let st = state.borrow();
-                Point::new(
-                    position.x - st.viewport_origin.x,
-                    position.y - st.viewport_origin.y,
-                )
-            };
+            let local = to_engine_local(state, position);
             let hit = {
                 let st = state.borrow();
                 hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
@@ -150,13 +158,7 @@ pub(super) fn handle_pointer_event(
             if !is_dragging {
                 return EventResponse::Ignored;
             }
-            let local = {
-                let st = state.borrow();
-                Point::new(
-                    position.x - st.viewport_origin.x,
-                    position.y - st.viewport_origin.y,
-                )
-            };
+            let local = to_engine_local(state, position);
             // Clamp y into [2.0, viewport_height - 2.0] before
             // hit-testing so a drag that leaves the viewport still
             // resolves to a valid position on the edge line
@@ -259,10 +261,7 @@ pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut Event
 }
 
 fn tap_select(state: &SharedState, pos: Point, kind: SelectionType) {
-    let local = {
-        let st = state.borrow();
-        Point::new(pos.x - st.viewport_origin.x, pos.y - st.viewport_origin.y)
-    };
+    let local = to_engine_local(state, &pos);
     let hit = {
         let st = state.borrow();
         hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)

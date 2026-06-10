@@ -231,11 +231,10 @@ impl Widget for Slider {
                 if usable <= 0.0 {
                     return;
                 }
-                let start = match orientation {
-                    Orientation::Horizontal => bounds.x,
-                    Orientation::Vertical => bounds.y,
-                };
-                let t = ((pos - start - thumb_radius) / usable).clamp(0.0, 1.0);
+                // `pos` arrives widget-local (origin at the slider's own
+                // top-left), so the track starts at `thumb_radius`, not at
+                // `bounds.x` / `bounds.y`.
+                let t = ((pos - thumb_radius) / usable).clamp(0.0, 1.0);
                 let mut val = min + t * (max - min);
                 if let Some(s) = step
                     && s > 0.0
@@ -464,6 +463,51 @@ mod tests {
             (val - 50.0).abs() < 15.0,
             "track click at center should set value near 50, got {}",
             val
+        );
+    }
+
+    #[test]
+    fn track_click_sets_value_at_nonzero_origin() {
+        // Regression for the widget-local coordinate migration: a slider
+        // offset from the window origin must still map a click correctly.
+        use crate::primitives::{FixedSize, HStack};
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let value = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sid = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        let _row = tree.add(
+            HStack::new()
+                .child(FixedSize::new().bind_width(40.0).bind_height(60.0))
+                .add_child(sid),
+        );
+        tree.layout(SizeProposal::exact(240.0, 60.0));
+        tree.render();
+
+        // The slider sits at window x ∈ [40, 240] (width 200). Its local
+        // centre (x = 100) is window x = 140 → value 50, independent of
+        // the thumb radius.
+        let b = tree.bounds(sid);
+        assert!((b.x - 40.0).abs() < 0.5, "slider should be offset, x={}", b.x);
+        for ev in [
+            WidgetEvent::PointerDown {
+                position: Point::new(140.0, 30.0),
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+            WidgetEvent::PointerUp {
+                position: Point::new(140.0, 30.0),
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            },
+        ] {
+            tree.dispatch_event(ev);
+        }
+        assert!(
+            (value.get() - 50.0).abs() < 1.0,
+            "click at the offset slider's centre should set ~50, got {}",
+            value.get()
         );
     }
 

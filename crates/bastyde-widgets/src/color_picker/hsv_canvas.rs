@@ -123,9 +123,11 @@ impl Widget for HsvCanvas {
                 if bounds.width <= 0.0 || bounds.height <= 0.0 {
                     return;
                 }
-                let sat = ((x - bounds.x) / bounds.width).clamp(0.0, 1.0);
+                // `x` / `y` arrive widget-local (origin at the canvas's own
+                // top-left), so no `bounds.x` / `bounds.y` subtraction.
+                let sat = (x / bounds.width).clamp(0.0, 1.0);
                 // Visual convention: top = high value (bright), bottom = low value.
-                let val = (1.0 - (y - bounds.y) / bounds.height).clamp(0.0, 1.0);
+                let val = (1.0 - y / bounds.height).clamp(0.0, 1.0);
                 (set_hsv)(hue_for_drag.get(), sat, val);
             })
         };

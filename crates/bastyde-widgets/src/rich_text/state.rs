@@ -61,14 +61,22 @@ pub(crate) struct EditorState {
     pub viewport_ratio_y: Signal<f32>,
 
     // Viewport (widget bounds at last layout). Populated by `paint()`
-    // (since the editor is a leaf widget and `place_children` is
-    // never called). `viewport_origin` is the widget's top-left in
-    // window coordinates, used by event handlers to convert
-    // pointer positions (which arrive window-local) into the
-    // widget-local space text-typeset's `hit_test` expects.
+    // (since the editor body is a leaf widget and `place_children` is
+    // never called on it). `viewport_origin` is the **body's** top-left
+    // in window coordinates — the engine lays text out from there.
     pub viewport_width: f32,
     pub viewport_height: f32,
     pub viewport_origin: bastyde_canvas::Point,
+
+    // The **wrapper** node's top-left in window coordinates, recorded by
+    // the wrapper's `place_children`. Pointer positions now arrive
+    // wrapper-node-local (the framework converts once at dispatch), so to
+    // reach the body/engine space the handler reconstructs the window
+    // point (`position + node_origin`) and subtracts the body origin
+    // (`viewport_origin`): `local = position + node_origin -
+    // viewport_origin`. The body is inset within the wrapper, so the two
+    // origins differ.
+    pub node_origin: bastyde_canvas::Point,
 
     // Layout strategy state.
     pub needs_full_layout: bool,
@@ -408,6 +416,7 @@ impl EditorState {
             viewport_width: 0.0,
             viewport_height: 0.0,
             viewport_origin: bastyde_canvas::Point::ZERO,
+            node_origin: bastyde_canvas::Point::ZERO,
             needs_full_layout: true,
             last_relayout_block_id: None,
             content_dirty: true,

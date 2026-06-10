@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::gesture::{GestureEvent, RawPointerEvent};
+use crate::gesture::{GestureEvent, RawPointerEvent, TapEvent};
 
 /// Fire an `EventResponse`-returning handler from BOTH the external
 /// and own slots (in that order). Returns `Handled` if either did,
@@ -512,6 +512,95 @@ impl WidgetTree {
         self.dispatch_to_widget_returning_handled(target, event, ops);
     }
 
+    /// Rebuild `event` with any pointer position converted into `id`'s
+    /// **widget-local** space. Returns `None` for events that carry no
+    /// position, so the caller keeps the original event.
+    ///
+    /// This is the single point where the framework localizes pointer
+    /// coordinates. It runs once per node in both the preview and bubble
+    /// passes, and because both `on_pointer_event` and the gesture arena
+    /// read the position out of `event`, localizing it here makes
+    /// `on_tap` / `on_double_tap` / `on_long_press` / `on_drag` and
+    /// `on_pointer_event` all receive widget-local coordinates uniformly.
+    /// See [`WidgetArena::local_pointer_position`].
+    fn localize_event(&self, id: WidgetId, event: &WidgetEvent) -> Option<WidgetEvent> {
+        match event {
+            WidgetEvent::PointerDown {
+                position,
+                button,
+                modifiers,
+            } => Some(WidgetEvent::PointerDown {
+                position: self.arena.local_pointer_position(id, *position),
+                button: *button,
+                modifiers: *modifiers,
+            }),
+            WidgetEvent::PointerUp {
+                position,
+                button,
+                modifiers,
+            } => Some(WidgetEvent::PointerUp {
+                position: self.arena.local_pointer_position(id, *position),
+                button: *button,
+                modifiers: *modifiers,
+            }),
+            WidgetEvent::PointerMove { position } => Some(WidgetEvent::PointerMove {
+                position: self.arena.local_pointer_position(id, *position),
+            }),
+            WidgetEvent::Gesture { gesture } => Some(WidgetEvent::Gesture {
+                gesture: self.localize_gesture(id, gesture),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Convert every position / center field of a pre-recognized
+    /// [`GestureEvent`] into `id`'s widget-local space (`DragMoved.delta`
+    /// is relative and left untouched). Used for the platform gesture
+    /// path; arena-recognized gestures are already local because the
+    /// `RawPointerEvent` feeding the arena was localized by
+    /// [`Self::localize_event`].
+    fn localize_gesture(&self, id: WidgetId, gesture: &GestureEvent) -> GestureEvent {
+        let loc = |p: bastyde_canvas::Point| self.arena.local_pointer_position(id, p);
+        let tap = |t: &TapEvent| TapEvent::new(loc(t.position), t.button, t.modifiers);
+        match gesture {
+            GestureEvent::Tap(t) => GestureEvent::Tap(tap(t)),
+            GestureEvent::DoubleTap(t) => GestureEvent::DoubleTap(tap(t)),
+            GestureEvent::TripleTap(t) => GestureEvent::TripleTap(tap(t)),
+            GestureEvent::LongPress(t) => GestureEvent::LongPress(tap(t)),
+            GestureEvent::DragStarted { position, button } => GestureEvent::DragStarted {
+                position: loc(*position),
+                button: *button,
+            },
+            GestureEvent::DragMoved { position, delta } => GestureEvent::DragMoved {
+                position: loc(*position),
+                delta: *delta,
+            },
+            GestureEvent::DragEnded { position } => GestureEvent::DragEnded {
+                position: loc(*position),
+            },
+            GestureEvent::PinchStarted { center } => GestureEvent::PinchStarted {
+                center: loc(*center),
+            },
+            GestureEvent::PinchChanged {
+                center,
+                scale,
+                rotation,
+            } => GestureEvent::PinchChanged {
+                center: loc(*center),
+                scale: *scale,
+                rotation: *rotation,
+            },
+            GestureEvent::PinchEnded => GestureEvent::PinchEnded,
+            GestureEvent::Swipe {
+                direction,
+                velocity,
+            } => GestureEvent::Swipe {
+                direction: *direction,
+                velocity: *velocity,
+            },
+        }
+    }
+
     /// Same as `dispatch_to_widget` but returns `true` when any
     /// preview or bubble handler consumed the event. Used for keyboard
     /// events the framework wants to consume by default (Tab focus
@@ -537,6 +626,10 @@ impl WidgetTree {
 
         for &id in &ancestors {
             let mut ctx = self.make_event_context(&mut *ops);
+            // Convert any pointer position into this node's widget-local
+            // space before its handlers see it (see `localize_event`).
+            let localized = self.localize_event(id, event);
+            let event = localized.as_ref().unwrap_or(event);
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_preview(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
             } else {
@@ -557,11 +650,15 @@ impl WidgetTree {
         let mut is_target = true;
         while let Some(id) = current {
             let mut ctx = self.make_event_context(&mut *ops);
+            // Convert any pointer position into this node's widget-local
+            // space before its handlers (and its gesture arena) see it.
+            let localized = self.localize_event(id, event);
             let WidgetTree {
                 arena,
                 gesture_owners,
                 ..
             } = self;
+            let event = localized.as_ref().unwrap_or(event);
             let response = if let Some(node) = arena.get_mut(id) {
                 Self::try_handler_bubble(node, event, &mut ctx, is_target, id, gesture_owners)
                     .unwrap_or(EventResponse::Ignored)
@@ -1601,6 +1698,88 @@ mod tests {
         enabled.set(true);
         tree.click(child);
         assert!(tapped.get(), "re-enabling should restore dispatch");
+    }
+
+    #[test]
+    fn pointer_positions_are_widget_local_at_nonzero_origin() {
+        use crate::event::{Modifiers, PointerButton};
+        use crate::signal::Signal;
+        use crate::test_widgets::InsetWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // A 20px inset places the child at window origin (20, 20).
+        let tap_pos: Rc<Cell<Option<Point>>> = Rc::new(Cell::new(None));
+        let down_pos: Rc<Cell<Option<Point>>> = Rc::new(Cell::new(None));
+        let drag_pos: Rc<Cell<Option<Point>>> = Rc::new(Cell::new(None));
+        let (tp, dp, gp) = (tap_pos.clone(), down_pos.clone(), drag_pos.clone());
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(
+            FillWidget::new()
+                .on_tap(move |ev, _ctx| tp.set(Some(ev.position)))
+                .on_pointer_event(move |ev, _ctx| {
+                    if let WidgetEvent::PointerDown { position, .. } = ev {
+                        dp.set(Some(*position));
+                    }
+                    crate::event::EventResponse::Ignored
+                })
+                .on_drag(move |phase, _ctx| {
+                    use crate::gesture::DragPhase;
+                    match phase {
+                        DragPhase::Started { position, .. }
+                        | DragPhase::Moved { position, .. }
+                        | DragPhase::Ended { position } => gp.set(Some(position)),
+                    }
+                }),
+        );
+        let inset = tree.add(InsetWidget::new(20.0).set_child(child));
+        let _ = inset;
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert_eq!(tree.bounds(child).origin(), Point::new(20.0, 20.0));
+
+        // A tap at window (50, 40) must reach the handler as local (30, 20).
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 40.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            down_pos.get(),
+            Some(Point::new(30.0, 20.0)),
+            "on_pointer_event PointerDown must be widget-local"
+        );
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 40.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            tap_pos.get(),
+            Some(Point::new(30.0, 20.0)),
+            "on_tap position must be widget-local"
+        );
+
+        // A drag (down then a move past the recognizer threshold) must
+        // also deliver widget-local coordinates.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 40.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // First move crosses the recognizer threshold (DragStarted);
+        // the second reports a known DragMoved position.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(65.0, 55.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(90.0, 70.0),
+        });
+        assert_eq!(
+            drag_pos.get(),
+            Some(Point::new(70.0, 50.0)),
+            "on_drag position must be widget-local"
+        );
     }
 
     #[test]

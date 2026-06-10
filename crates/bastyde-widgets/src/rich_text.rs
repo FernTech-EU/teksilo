@@ -2537,6 +2537,13 @@ impl Widget for RichTextEditor {
         // bottom (horizontal) edges — collapsed to zero when the
         // axis policy is `Auto` and there's nothing to scroll.
         let sb_thickness = self::frame_loop::SCROLLBAR_THICKNESS;
+        {
+            // Record the wrapper node's window-space origin so the pointer
+            // handlers can reconstruct window coords from the now
+            // wrapper-node-local positions (see `State::node_origin`).
+            let mut st = self.state.borrow_mut();
+            st.node_origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+        }
         let st = self.state.borrow();
         let max_y = st.max_scroll_y.get();
         let max_x = st.max_scroll_x.get();
@@ -2569,7 +2576,15 @@ impl Widget for RichTextEditor {
                         bounds.y,
                     );
                     child.size = Size::new(sb_thickness, h);
-                    v_rect = Rect::new(child.origin.x, child.origin.y, sb_thickness, h);
+                    // Widget-local: pointer events arrive widget-local, so
+                    // the published bounds the press-bypass test compares
+                    // against must be local too (subtract the widget origin).
+                    v_rect = Rect::new(
+                        child.origin.x - bounds.x,
+                        child.origin.y - bounds.y,
+                        sb_thickness,
+                        h,
+                    );
                 } else {
                     child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
                     child.size = Size::ZERO;
@@ -2586,7 +2601,13 @@ impl Widget for RichTextEditor {
                         bounds.y + bounds.height - sb_thickness,
                     );
                     child.size = Size::new(w, sb_thickness);
-                    h_rect = Rect::new(child.origin.x, child.origin.y, w, sb_thickness);
+                    // Widget-local (see the v_scrollbar branch).
+                    h_rect = Rect::new(
+                        child.origin.x - bounds.x,
+                        child.origin.y - bounds.y,
+                        w,
+                        sb_thickness,
+                    );
                 } else {
                     child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
                     child.size = Size::ZERO;

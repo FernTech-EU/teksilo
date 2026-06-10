@@ -28,8 +28,7 @@ pub(crate) fn handle_pointer_event(
                 return EventResponse::Ignored;
             }
             let shift = modifiers.shift();
-            let local = to_local(state, position);
-            let hit = hit_test(state, &local);
+            let hit = hit_test(state, position);
             let Some(hit_pos) = hit else {
                 return EventResponse::Ignored;
             };
@@ -53,8 +52,7 @@ pub(crate) fn handle_pointer_event(
             if !is_dragging {
                 return EventResponse::Ignored;
             }
-            let local = to_local(state, position);
-            let hit = hit_test(state, &local);
+            let hit = hit_test(state, position);
             if let Some(hit_pos) = hit {
                 let st = state.borrow();
                 st.cursor.set_position(hit_pos, MoveMode::KeepAnchor);
@@ -85,8 +83,7 @@ pub(crate) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut Event
 }
 
 fn tap_select(state: &SharedState, pos: &Point, kind: SelectionType) {
-    let local = to_local(state, pos);
-    let hit = hit_test(state, &local);
+    let hit = hit_test(state, pos);
     if let Some(hit_pos) = hit {
         let st = state.borrow();
         st.cursor.set_position(hit_pos, MoveMode::MoveAnchor);
@@ -94,15 +91,6 @@ fn tap_select(state: &SharedState, pos: &Point, kind: SelectionType) {
         drop(st);
         sync_cursor_signals(state);
     }
-}
-
-/// Convert window-space pointer to widget-local coordinates.
-fn to_local(state: &SharedState, position: &Point) -> Point {
-    let st = state.borrow();
-    Point::new(
-        position.x - st.viewport_origin.x,
-        position.y - st.viewport_origin.y,
-    )
 }
 
 /// Hit-test in engine space. The engine lays out text from x=0 without
@@ -156,10 +144,18 @@ fn hit_test(state: &SharedState, local: &Point) -> Option<usize> {
 /// right-click *outside* the selection moves the caret to the click
 /// position so menu actions there target the new caret location.
 ///
-/// `position` is in widget-local coords (already transformed by the
-/// dispatch — same coords the new factory closure receives).
+/// `position` is **window-local**: the context-menu factory is invoked
+/// straight from the right-click `PointerDown` (not the localized
+/// gesture/pointer dispatch), so convert to field-local here via the
+/// field's `viewport_origin` before hit-testing.
 pub(crate) fn reposition_caret_for_context_menu(state: &SharedState, position: Point) {
-    let local = to_local(state, &position);
+    let local = {
+        let st = state.borrow();
+        Point::new(
+            position.x - st.viewport_origin.x,
+            position.y - st.viewport_origin.y,
+        )
+    };
     let Some(hit_pos) = hit_test(state, &local) else {
         return;
     };

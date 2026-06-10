@@ -316,13 +316,12 @@ impl Widget for ScrollBar {
                     ratio * available
                 };
                 let tl = thumb_length();
+                // Widget-local thumb rect (origin at the scrollbar's own
+                // top-left): event positions arrive widget-local, so the
+                // cross-axis origin is 0, not `bounds.x` / `bounds.y`.
                 match orientation {
-                    ScrollBarOrientation::Vertical => {
-                        Rect::new(bounds.x, bounds.y + offset, bounds.width, tl)
-                    }
-                    ScrollBarOrientation::Horizontal => {
-                        Rect::new(bounds.x + offset, bounds.y, tl, bounds.height)
-                    }
+                    ScrollBarOrientation::Vertical => Rect::new(0.0, offset, bounds.width, tl),
+                    ScrollBarOrientation::Horizontal => Rect::new(offset, 0.0, tl, bounds.height),
                 }
             }
         };

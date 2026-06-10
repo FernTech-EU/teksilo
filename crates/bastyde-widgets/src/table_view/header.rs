@@ -332,12 +332,15 @@ impl Widget for HeaderCell {
                 }
             })
             .on_pointer_event(move |event, ctx: &mut EventContext| {
-                // Pointer events deliver `position` in window coords;
-                // the resize-zone test and the press-state distance
-                // check both want cell-local x, so subtract the cell's
-                // window-space physical-left edge captured in
-                // `place_children`. `local_x` is therefore always in
-                // `[0, cell_w]` regardless of direction.
+                // Pointer events now deliver `position` in cell-local
+                // coords (the framework converts once at dispatch), so
+                // `local_x` is `position.x` directly. The resize math,
+                // however, wants a *window-space* x that stays stable
+                // across the relayouts a Live resize triggers (the cell's
+                // own leading edge moves under RTL) — reconstruct it as
+                // `position.x + cell_x0`, where `cell_x0` is the cell's
+                // window-space leading edge written by `place_children`
+                // (== this cell node's bounds origin).
                 let cell_x0 = cell_window_x.get();
                 // The column-resize boundary is shared with the *visual*
                 // neighbour: under LTR that's the column to the right
@@ -348,7 +351,7 @@ impl Widget for HeaderCell {
                 let rtl = ctx.is_rtl();
                 match event {
                     WidgetEvent::PointerMove { position } => {
-                        let local_x = position.x - cell_x0;
+                        let local_x = position.x;
                         // 1. Active resize: advance regardless of pointer
                         //    location (the pointer is captured). `delta`
                         //    is computed against the press's local x so
@@ -359,8 +362,9 @@ impl Widget for HeaderCell {
                         {
                             // Window-space delta — stable across the
                             // relayouts a Live resize triggers (see
-                            // ResizeState::start_pointer_x).
-                            let delta = position.x - state.start_pointer_x;
+                            // ResizeState::start_pointer_x). Reconstruct
+                            // window x from the now cell-local position.
+                            let delta = position.x + cell_x0 - state.start_pointer_x;
                             let signed = if rtl { -delta } else { delta };
                             let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
                             if policy == ColumnResizePolicy::Live {
@@ -415,7 +419,7 @@ impl Widget for HeaderCell {
                         button: PointerButton::Primary,
                         ..
                     } => {
-                        let local_x = position.x - cell_x0;
+                        let local_x = position.x;
                         let cell_w = widths_handle
                             .borrow()
                             .get(width_index)
@@ -430,7 +434,7 @@ impl Widget for HeaderCell {
                         if in_resize {
                             *resize_state.borrow_mut() = Some(ResizeState {
                                 col_id: col_id.clone(),
-                                start_pointer_x: position.x,
+                                start_pointer_x: position.x + cell_x0,
                                 start_width: cell_w,
                             });
                             is_resizing.set(true);
@@ -464,12 +468,12 @@ impl Widget for HeaderCell {
                         EventResponse::Handled
                     }
                     WidgetEvent::PointerUp { position, .. } => {
-                        // Resize commit / release. (Delta is window-space,
-                        // so no cell-local x is needed here.)
+                        // Resize commit / release. Delta is window-space
+                        // (reconstruct window x from cell-local position).
                         let taken = resize_state.borrow_mut().take();
                         if let Some(state) = taken {
                             if policy == ColumnResizePolicy::OnRelease {
-                                let delta = position.x - state.start_pointer_x;
+                                let delta = position.x + cell_x0 - state.start_pointer_x;
                                 let signed = if rtl { -delta } else { delta };
                                 let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
                                 write_width(&widths_signal, &state.col_id, new_w);

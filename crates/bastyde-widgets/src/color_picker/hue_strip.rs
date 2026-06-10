@@ -126,18 +126,20 @@ impl Widget for HueStrip {
             let set_hue = set_hue.clone();
             Rc::new(move |x: f32, y: f32| {
                 let bounds = cached_bounds.get();
+                // `x` / `y` arrive widget-local (origin at the strip's own
+                // top-left), so no `bounds.x` / `bounds.y` subtraction.
                 let t = match orientation {
                     Orientation::Vertical => {
                         if bounds.height <= 0.0 {
                             return;
                         }
-                        ((y - bounds.y) / bounds.height).clamp(0.0, 1.0)
+                        (y / bounds.height).clamp(0.0, 1.0)
                     }
                     Orientation::Horizontal => {
                         if bounds.width <= 0.0 {
                             return;
                         }
-                        ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
+                        (x / bounds.width).clamp(0.0, 1.0)
                     }
                 };
                 // Map 0..1 to 0..360 — clamp to 359.999 so wrap doesn't flip
