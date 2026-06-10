@@ -360,6 +360,13 @@ impl IconButton {
         self
     }
 
+    /// Whether an activation closure has been attached. Used by wrappers
+    /// (e.g. `PopoverWidget`) that overwrite the activate slot, so they
+    /// can warn when a caller-set handler is about to be discarded.
+    pub(crate) fn has_activate_handler(&self) -> bool {
+        self.action.is_some()
+    }
+
     /// Enable **surface-tint** bistate: clicking flips `state` and the
     /// background reads as `SurfaceRole::Selected` while `state == true`.
     /// The icon glyph is unchanged. Pin / select / lock-toggle pattern.
@@ -871,11 +878,24 @@ impl BuiltInIcons {
     }
 
     /// Set the global icon set. Call at app startup before creating any
-    /// built-in buttons. Can only be set once; subsequent calls are ignored.
-    /// Use [`defaults()`](Self::defaults) with struct update syntax to
-    /// override only specific icons.
+    /// built-in buttons. Can only be set **once**: the global is a
+    /// process-wide [`OnceLock`], so the first set wins and any later
+    /// call is ignored (and warns). It is also locked in the first time
+    /// [`global()`](Self::global) reads it, so set it before any built-in
+    /// button is created. Use [`defaults()`](Self::defaults) with struct
+    /// update syntax to override only specific icons.
     pub fn set_global(icons: Self) {
-        GLOBAL_ICONS.set(icons).ok();
+        if GLOBAL_ICONS.set(icons).is_err() {
+            // A second `set_global` (or one after the first `global()`
+            // read) silently has no effect — that is almost always a
+            // startup-ordering bug, so make it loud.
+            debug_assert!(
+                false,
+                "BuiltInIcons::set_global called more than once (or after the icon set was \
+                 first read); the later call is ignored"
+            );
+            warn_icons_already_set();
+        }
     }
 
     /// Access the registered global icon set, falling back to the
@@ -886,6 +906,27 @@ impl BuiltInIcons {
     pub(crate) fn global() -> &'static Self {
         GLOBAL_ICONS.get_or_init(Self::defaults)
     }
+}
+
+/// One-shot stderr warning when `BuiltInIcons::set_global` is called
+/// after the global set was already locked in. Thread-local flag keeps
+/// it from repeating. (Stderr rather than `log::warn!` to avoid adding a
+/// `log` dependency to bastyde-widgets — this is a setup error, matching
+/// the `toast` install warning convention.)
+fn warn_icons_already_set() {
+    thread_local! {
+        static WARNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    WARNED.with(|w| {
+        if !w.get() {
+            eprintln!(
+                "[bastyde-widgets::icon_button] BuiltInIcons::set_global(...) called after the \
+                 icon set was already locked in — the later call was ignored. Call set_global \
+                 once at startup, before any built-in button is created."
+            );
+            w.set(true);
+        }
+    });
 }
 
 // ── Default SVG icons ───────────────────────────────────────────────────────

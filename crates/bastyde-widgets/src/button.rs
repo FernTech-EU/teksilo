@@ -383,6 +383,13 @@ impl Button {
         self
     }
 
+    /// Whether an activation closure has been attached. Used by wrappers
+    /// (e.g. `PopoverWidget`) that overwrite the activate slot, so they
+    /// can warn when a caller-set handler is about to be discarded.
+    pub(crate) fn has_activate_handler(&self) -> bool {
+        self.action.is_some()
+    }
+
     /// Attach a tooltip that appears after a hover delay.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());

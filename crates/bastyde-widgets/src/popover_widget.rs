@@ -98,6 +98,12 @@ pub trait PopoverTrigger: Widget + Sized + 'static {
     fn with_has_popup(self, kind: HasPopup) -> Self;
     fn with_expanded_when(self, open: Signal<bool>) -> Self;
     fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self;
+
+    /// Whether the trigger already carries an activate handler. The
+    /// wrapper owns the activate slot (it opens the popover), so a
+    /// caller-set handler would be silently discarded — this lets
+    /// `build()` warn instead.
+    fn has_on_activate(&self) -> bool;
 }
 
 impl PopoverTrigger for Button {
@@ -122,6 +128,9 @@ impl PopoverTrigger for Button {
     }
     fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_activate_fn(f)
+    }
+    fn has_on_activate(&self) -> bool {
+        self.has_activate_handler()
     }
 }
 
@@ -156,6 +165,29 @@ impl PopoverTrigger for IconButton {
     fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_activate_fn(f)
     }
+    fn has_on_activate(&self) -> bool {
+        self.has_activate_handler()
+    }
+}
+
+/// One-shot stderr warning when a `PopoverWidget` trigger arrives with an
+/// activate handler that the wrapper will overwrite. Thread-local flag
+/// keeps it from repeating. (Stderr rather than `log::warn!` to avoid a
+/// `log` dependency on bastyde-widgets, matching the crate convention.)
+fn warn_trigger_activate_discarded() {
+    thread_local! {
+        static WARNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    WARNED.with(|w| {
+        if !w.get() {
+            eprintln!(
+                "[bastyde-widgets::popover] PopoverWidget overwrote the trigger's \
+                 on_activate_fn — the caller-set handler was discarded. Use on_open / \
+                 on_close, or observe open_signal, for trigger-side side effects."
+            );
+            w.set(true);
+        }
+    });
 }
 
 /// A trigger paired with a popover surface. See the module docs for the
@@ -406,6 +438,20 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .trigger
             .take()
             .expect("PopoverWidget trigger missing (build() called twice?)");
+
+        // The wrapper owns the trigger's activate slot (it opens the
+        // popover), so any caller-set `on_activate_fn` is about to be
+        // discarded. That is documented but easy to do by accident — make
+        // it loud. Use `on_open` / `on_close` (or observe `open_signal`)
+        // for trigger-side side effects instead.
+        if trigger.has_on_activate() {
+            debug_assert!(
+                false,
+                "PopoverWidget: the trigger's on_activate_fn is overwritten by the popover \
+                 wiring and will be discarded; use on_open / on_close instead"
+            );
+            warn_trigger_activate_discarded();
+        }
 
         let want_caret = self.show_disclosure_caret && !trigger.suppress_caret();
 
