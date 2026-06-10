@@ -55,6 +55,7 @@ use bastyde_tokens::{BorderRole, SurfaceRole};
 use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
@@ -148,6 +149,8 @@ pub struct TreeTable<T: 'static> {
     // Public reactive signals
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
@@ -210,6 +213,7 @@ impl<T: 'static> TreeTable<T> {
             on_row_activate: None,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
+            overscroll_behavior: OverscrollBehavior::default(),
             viewport_ratio_y: Signal::new(1.0),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
@@ -241,6 +245,14 @@ impl<T: 'static> TreeTable<T> {
     }
 
     // ── Builder ────────────────────────────────────────────────────────
+
+    /// Set the scroll-chaining behavior at the boundary (default
+    /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
+    /// disables chaining to an ancestor scrollable).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
+    }
 
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
@@ -716,19 +728,29 @@ impl<T: 'static> Widget for TreeTable<T> {
         };
 
         let handlers = HandlerSet::new()
-            .on_scroll(move |event, _ctx| match event {
-                bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        bastyde_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
-                        bastyde_core::event::ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    let current = scroll_y_for_wheel.get();
-                    let max = max_scroll_for_wheel.get();
-                    let new_y = (current + dy).clamp(0.0, max);
-                    scroll_y_for_wheel.set(new_y);
-                    EventResponse::Handled
+            .on_scroll({
+                let overscroll_behavior = self.overscroll_behavior;
+                move |event, _ctx| match event {
+                    bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
+                        let dy = match delta {
+                            bastyde_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
+                            bastyde_core::event::ScrollDelta::Pixels { y, .. } => *y,
+                        };
+                        let current = scroll_y_for_wheel.get();
+                        let max = max_scroll_for_wheel.get();
+                        let (new_y, moved) =
+                            crate::common::scroll::scroll_clamp_axis(current, dy, max);
+                        scroll_y_for_wheel.set(new_y);
+                        // Chain to an ancestor scrollable when fully
+                        // clamped (unless Contain), otherwise consume —
+                        // same contract as ListView/TreeView/TableView.
+                        crate::common::scroll::scroll_response(
+                            moved,
+                            overscroll_behavior == OverscrollBehavior::Contain,
+                        )
+                    }
+                    _ => EventResponse::Ignored,
                 }
-                _ => EventResponse::Ignored,
             })
             .on_key(keyboard::build_key_handler(key_cfg))
             .clips_children(true)
@@ -1546,6 +1568,120 @@ mod tests {
             .max_by(|a, b| a.y.partial_cmp(&b.y).unwrap())
             .expect("a body row");
         assert!(body_row2.x.abs() < 0.5, "LTR body row x={}", body_row2.x);
+    }
+
+    // ── Boundary scroll chaining ─────────────────────────────────────────
+
+    /// A TreeTable (40 root rows × 20 px in a ~120 px viewport) above a
+    /// filler inside an outer ScrollArea, so chaining from the inner
+    /// tree-table to the outer area is observable.
+    fn nested_tree_table_fixture(
+        inner: OverscrollBehavior,
+    ) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+        let model = TreeModel::new();
+        for i in 0..40 {
+            model.insert_root(i, "row");
+        }
+        let proxy = SortFilterTreeModel::new(model);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let tt = TreeTable::from_projection(proxy)
+            .add_column(name_col())
+            .show_header(false)
+            .row_height(20.0)
+            .overscroll_behavior(inner);
+        let inner_y = tt.scroll_y_signal().clone();
+        let tt_id = tree.add(tt);
+        let viewport = tree.add(
+            FixedSize::new()
+                .bind_width(220.0)
+                .bind_height(120.0)
+                .child_id(tt_id),
+        );
+        let filler = tree.add(
+            FixedSize::new()
+                .bind_width(220.0)
+                .bind_height(300.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal {
+            width: Some(220.0),
+            height: Some(150.0),
+        });
+        (tree, inner_y, outer_y)
+    }
+
+    #[test]
+    fn nested_tree_table_chains_to_outer_at_boundary() {
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, inner_y, outer_y) = nested_tree_table_fixture(OverscrollBehavior::Chain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal {
+            width: Some(220.0),
+            height: Some(150.0),
+        });
+        let inner_bottom = inner_y.get();
+        assert!(
+            inner_bottom > 0.0,
+            "inner tree-table should scroll down; got {inner_bottom}"
+        );
+        // A second wheel at the boundary must chain to the outer area.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal {
+            width: Some(220.0),
+            height: Some(150.0),
+        });
+        assert!(
+            (inner_y.get() - inner_bottom).abs() < 0.01,
+            "inner stays clamped at bottom"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "outer must scroll because the inner chained the boundary"
+        );
+    }
+
+    #[test]
+    fn nested_tree_table_contain_blocks_chaining() {
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, _inner_y, outer_y) = nested_tree_table_fixture(OverscrollBehavior::Contain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal {
+            width: Some(220.0),
+            height: Some(150.0),
+        });
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal {
+            width: Some(220.0),
+            height: Some(150.0),
+        });
+        assert!(
+            outer_y.get() < 0.01,
+            "Contain must prevent chaining: outer stays put"
+        );
     }
 
     // ── TreeBodyPane split + variable row heights ───────────────────────
