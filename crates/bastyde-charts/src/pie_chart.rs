@@ -355,12 +355,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         }
         let legend_band = legend_band_rect(bounds, self.legend_position, legend_size);
 
-        // Disc geometry.
+        // Disc geometry. `center` is window-space (paint draws there);
+        // the pointer handler receives widget-local positions, so cache a
+        // widget-local copy of the centre for hit-testing.
         let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot);
         if outer_radius <= 0.0 {
             return;
         }
-        *self.disc.borrow_mut() = (center, outer_radius, inner_radius);
+        let local_center = Point::new(center.x - bounds.x, center.y - bounds.y);
+        *self.disc.borrow_mut() = (local_center, outer_radius, inner_radius);
 
         // Paint slices.
         let palette = self.palette.get();

@@ -65,6 +65,11 @@ pub struct LineChart<T: Clone + 'static> {
     hit_index: Rc<RefCell<Vec<PointHit>>>,
     /// Plot rectangle (window-space), written during paint.
     plot_rect: Rc<RefCell<Rect>>,
+    /// Widget window-space origin, written during paint. Pointer events
+    /// arrive widget-local, so the handler reconstructs the window point
+    /// (`position + origin`) before comparing against the window-space
+    /// `plot_rect` / `hit_index.screen` (the latter is shared with paint).
+    origin: Rc<std::cell::Cell<Point>>,
 }
 
 impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
@@ -86,6 +91,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             hover: Signal::new(None),
             hit_index: Rc::new(RefCell::new(Vec::new())),
             plot_rect: Rc::new(RefCell::new(Rect::ZERO)),
+            origin: Rc::new(std::cell::Cell::new(Point::ZERO)),
         }
     }
 
@@ -173,9 +179,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         if self.show_hover_tooltip {
             let hit_index = self.hit_index.clone();
             let plot_rect = self.plot_rect.clone();
+            let origin = self.origin.clone();
             let hover = self.hover.clone();
             let handlers = HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
                 WidgetEvent::PointerMove { position } => {
+                    // `position` is widget-local; `plot_rect` and the
+                    // cached hit points are window-space, so reconstruct
+                    // the window point.
+                    let o = origin.get();
+                    let position = &Point::new(position.x + o.x, position.y + o.y);
                     let plot = *plot_rect.borrow();
                     if !plot.contains(*position) {
                         if hover.get().is_some() {
@@ -313,8 +325,9 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         if plot.width <= 0.0 || plot.height <= 0.0 {
             return;
         }
-        // Stash plot rect for the on_pointer_event handler.
+        // Stash plot rect + widget origin for the on_pointer_event handler.
         *self.plot_rect.borrow_mut() = plot;
+        self.origin.set(Point::new(bounds.x, bounds.y));
 
         // Final ticks fitted to the carved plot rect.
         let target = self
