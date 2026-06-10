@@ -299,10 +299,10 @@ impl Dispatch<WlDataSource, ()> for DndState {
                 let _ = state.conn.flush();
             }
             // The negotiated drag action (copy / move). Track for the outcome.
-            DataSourceEvent::Action { dnd_action } => {
-                if let WEnum::Value(action) = dnd_action {
-                    state.outbound_action = action;
-                }
+            DataSourceEvent::Action {
+                dnd_action: WEnum::Value(action),
+            } => {
+                state.outbound_action = action;
             }
             // The user released over a valid target.
             DataSourceEvent::DndDropPerformed => {
@@ -650,12 +650,7 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
                 // for our objects whenever *anyone* reads the socket, so we
                 // only drain our queue with `dispatch_pending` (no read) and
                 // poll on a short interval. Drag events arrive within one tick.
-                loop {
-                    match queue.dispatch_pending(&mut state) {
-                        Ok(_) => {}
-                        // Connection broken (app exiting) — stop the thread.
-                        Err(_) => break,
-                    }
+                while queue.dispatch_pending(&mut state).is_ok() {
                     // Start any outbound drags the guard requested.
                     state.process_outbound_commands();
                     // Flush any requests we queued (accept / receive / finish /

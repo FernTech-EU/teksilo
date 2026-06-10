@@ -7,8 +7,8 @@
 //! single / multi selection with 2D keyboard navigation, and is fully
 //! accessible (`Role::Grid` → `Role::GridCell`).
 //!
-//! The layout is pluggable via [`GridLayoutStrategy`](layout::strategy::GridLayoutStrategy);
-//! the stock [`UniformGrid`](layout::UniformGrid) gives fixed tile size /
+//! The layout is pluggable via `GridLayoutStrategy`;
+//! the stock [`UniformGrid`] gives fixed tile size /
 //! fixed column count / adaptive min-width grids. (Variable-row-height and
 //! waterfall strategies, plus marquee selection, drag-reorder, sections and
 //! sticky headers, are layered on in later phases.)
@@ -27,8 +27,8 @@ pub(crate) mod body_pane;
 pub(crate) mod drag;
 pub(crate) mod keyboard;
 pub mod layout;
-pub(crate) mod selection;
 pub mod sections;
+pub(crate) mod selection;
 #[cfg(test)]
 mod tests;
 
@@ -42,10 +42,10 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::signal::Signal;
+use bastyde_core::styles::GridViewStyle;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_core::styles::GridViewStyle;
 use bastyde_data::{DataChange, ListModel, SelectionMode, SelectionModel};
 use bastyde_tokens::SurfaceRole;
 
@@ -61,8 +61,8 @@ use layout::sectioned::SectionedGrid;
 use layout::strategy::GridLayoutStrategy;
 use layout::uniform::UniformGrid;
 use layout::variable_row::VariableRowGrid;
-use selection::{MarqueeConfig, MarqueeState, build_marquee_handler};
 use sections::{SectionData, SectionProvider};
+use selection::{MarqueeConfig, MarqueeState, build_marquee_handler};
 
 pub use sections::{GroupingSections, SectionProvider as GridSectionProvider, grouping_sections};
 
@@ -160,7 +160,15 @@ pub struct GridView<T: 'static> {
     // Drag-to-reorder + drop
     reorderable: bool,
     #[allow(clippy::type_complexity)]
-    on_item_drop: Option<Rc<dyn Fn(bastyde_core::drag_payload::DragPayload, usize, &mut bastyde_core::widget::EventContext) -> bool>>,
+    on_item_drop: Option<
+        Rc<
+            dyn Fn(
+                bastyde_core::drag_payload::DragPayload,
+                usize,
+                &mut bastyde_core::widget::EventContext,
+            ) -> bool,
+        >,
+    >,
     /// Insertion index during a reorder drag (painted by `GridOverlay`).
     insertion: Signal<Option<usize>>,
     model_id: usize,
@@ -592,8 +600,12 @@ impl<T: 'static> GridView<T> {
     /// the drop is accepted.
     pub fn on_item_drop(
         mut self,
-        f: impl Fn(bastyde_core::drag_payload::DragPayload, usize, &mut bastyde_core::widget::EventContext) -> bool
-            + 'static,
+        f: impl Fn(
+            bastyde_core::drag_payload::DragPayload,
+            usize,
+            &mut bastyde_core::widget::EventContext,
+        ) -> bool
+        + 'static,
     ) -> Self {
         self.on_item_drop = Some(Rc::new(f));
         self
@@ -616,7 +628,7 @@ impl<T: 'static> GridView<T> {
     pub fn tile_context_menu(
         mut self,
         f: impl Fn(usize, Point, &mut bastyde_core::widget::EventContext) -> Option<Box<dyn Widget>>
-            + 'static,
+        + 'static,
     ) -> Self {
         self.tile_context_menu = Some(Rc::new(f));
         self
@@ -663,9 +675,12 @@ impl<T: 'static> GridView<T> {
                 return self.strategy.as_ref().unwrap().clone();
             }
             let s: Rc<dyn GridLayoutStrategy> = match self.strategy_kind {
-                StrategyKind::Uniform => {
-                    Rc::new(UniformGrid::new(self.sizing, self.col_gap, self.row_gap, self.inset))
-                }
+                StrategyKind::Uniform => Rc::new(UniformGrid::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                )),
                 StrategyKind::VariableRow { estimated } => Rc::new(VariableRowGrid::new(
                     self.sizing,
                     self.col_gap,
@@ -707,8 +722,11 @@ impl<T: 'static> Widget for GridView<T> {
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // scroll_y at Relayout so place_children re-writes max_scroll/ratio.
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         ctx.register_animated_signal(&self.scroll_y);
 
         // Re-walk container a11y when selection / focus changes.

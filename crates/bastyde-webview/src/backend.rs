@@ -4,7 +4,7 @@
 //! surface — every realistic engine (WKWebView, WebView2, WebKitGTK, Servo)
 //! owns its own rendering and lives as a native subview *on top of* the wgpu
 //! pass. This module mirrors the established platform-backend pattern
-//! ([`FileDialogBackend`](bastyde_platform::file_dialog::FileDialogBackend) /
+//! (`FileDialogBackend` /
 //! `ExternalDndBackend`): a swappable [`WebViewBackend`] trait creates an
 //! engine-specific [`WebViewHandle`], and a per-app [`WebViewRegistry`]
 //! (registered in app-state) owns the backend and routes JS→Rust /
@@ -340,7 +340,11 @@ impl WebViewRegistry {
         // resurrect the dead callback. That marks `delivery_aborted`, and we
         // skip the reinsert below. (Today teardown is deferred so this never
         // fires, but the guard makes the invariant hold unconditionally.)
-        let entry = self.inner.callbacks.borrow_mut().remove(&payload.web_view_id);
+        let entry = self
+            .inner
+            .callbacks
+            .borrow_mut()
+            .remove(&payload.web_view_id);
         let Some(mut reg) = entry else {
             return;
         };
@@ -411,21 +415,56 @@ impl std::fmt::Debug for WebViewRegistry {
 /// real engine, window, or GPU.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WebViewOp {
-    Open { web_view_id: WebViewId },
-    SetBounds { web_view_id: WebViewId, bounds: Rect },
-    LoadUrl { web_view_id: WebViewId, url: String },
-    LoadHtml { web_view_id: WebViewId },
-    Eval { web_view_id: WebViewId, script: String },
-    PostMessage { web_view_id: WebViewId, msg: String },
-    Reload { web_view_id: WebViewId },
-    GoBack { web_view_id: WebViewId },
-    GoForward { web_view_id: WebViewId },
-    Stop { web_view_id: WebViewId },
-    SetVisible { web_view_id: WebViewId, visible: bool },
-    SetFocus { web_view_id: WebViewId },
-    OpenDevtools { web_view_id: WebViewId },
-    CloseDevtools { web_view_id: WebViewId },
-    Dropped { web_view_id: WebViewId },
+    Open {
+        web_view_id: WebViewId,
+    },
+    SetBounds {
+        web_view_id: WebViewId,
+        bounds: Rect,
+    },
+    LoadUrl {
+        web_view_id: WebViewId,
+        url: String,
+    },
+    LoadHtml {
+        web_view_id: WebViewId,
+    },
+    Eval {
+        web_view_id: WebViewId,
+        script: String,
+    },
+    PostMessage {
+        web_view_id: WebViewId,
+        msg: String,
+    },
+    Reload {
+        web_view_id: WebViewId,
+    },
+    GoBack {
+        web_view_id: WebViewId,
+    },
+    GoForward {
+        web_view_id: WebViewId,
+    },
+    Stop {
+        web_view_id: WebViewId,
+    },
+    SetVisible {
+        web_view_id: WebViewId,
+        visible: bool,
+    },
+    SetFocus {
+        web_view_id: WebViewId,
+    },
+    OpenDevtools {
+        web_view_id: WebViewId,
+    },
+    CloseDevtools {
+        web_view_id: WebViewId,
+    },
+    Dropped {
+        web_view_id: WebViewId,
+    },
 }
 
 /// Shared, cloneable recorder. Both the backend and the test hold a clone, so
@@ -614,9 +653,7 @@ impl WebViewBackend for MemoryWebViewBackend {
         // see what the widget asked to display.
         match attrs.source {
             Some(WebSource::Url(url)) => self.records.push(WebViewOp::LoadUrl { web_view_id, url }),
-            Some(WebSource::Html { .. }) => {
-                self.records.push(WebViewOp::LoadHtml { web_view_id })
-            }
+            Some(WebSource::Html { .. }) => self.records.push(WebViewOp::LoadHtml { web_view_id }),
             None => {}
         }
         Box::new(MemoryWebViewHandle {

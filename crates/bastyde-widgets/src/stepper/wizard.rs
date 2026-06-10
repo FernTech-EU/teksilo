@@ -1,4 +1,4 @@
-//! [`Wizard`] — a thin modal launcher around [`Stepper`](super::Stepper).
+//! [`Wizard`] — a thin modal launcher around [`Stepper`].
 //!
 //! Renders as a button (or a custom `.trigger(...)` widget) that opens a modal
 //! containing a `Stepper` built from the same [`Step`]s. The modal's Cancel and
@@ -18,9 +18,9 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
 
+use super::Stepper;
 use super::controller::StepperController;
 use super::step::Step;
-use super::Stepper;
 use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
 use crate::overlay_trigger::OverlayTrigger;
@@ -81,7 +81,7 @@ fn present_wizard(spec: &Rc<WizardSpec>, ctx: &mut EventContext) {
     );
 }
 
-/// A button (or custom trigger) that opens a modal [`Stepper`](super::Stepper).
+/// A button (or custom trigger) that opens a modal [`Stepper`].
 pub struct Wizard {
     label: LocalizedString,
     variant: ButtonVariant,

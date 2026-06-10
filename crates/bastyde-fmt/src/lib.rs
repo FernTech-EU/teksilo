@@ -88,7 +88,13 @@ pub fn format_file(source: &str, config: &FmtConfig) -> Result<String, FmtError>
     let mut out = source.to_string();
     for edit in edits {
         let body_src = &source[edit.body_range.clone()];
-        let formatted = format_block(body_src, config)?;
+        let formatted = match format_block(body_src, config) {
+            Ok(f) => f,
+            // Block is syntactically invalid (e.g. intentional fail-test).
+            // Leave it unchanged rather than aborting the entire file.
+            Err(FmtError::Parse(_)) => continue,
+            Err(e) => return Err(e),
+        };
         let reindented = reindent_block(&formatted, edit.base_indent);
         let with_endings = match line_ending {
             LineEnding::Lf => reindented,

@@ -16,7 +16,7 @@
 //!     .run();
 //! ```
 //!
-//! The install registers a [`WebViewRegistry`] into `app_state`. Every
+//! The install registers a `WebViewRegistry` into `app_state`. Every
 //! `WebView` widget reaches it via `ctx.app_state::<WebViewRegistry>()` to
 //! open its native engine subview, and `bastyde-app`'s `AppEvent::External`
 //! arm routes backend events back through `WebViewRegistry::deliver`.

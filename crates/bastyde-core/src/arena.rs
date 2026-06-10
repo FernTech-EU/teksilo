@@ -473,7 +473,7 @@ impl WidgetArena {
     /// Runs uncached (a dormant widget's size never enters the per-pass cache)
     /// and is re-entrant-safe (saves/restores the measuring flag). Calls
     /// `layout_response`, which must be idempotent (see
-    /// [`Widget::cacheable_layout`](crate::widget::Widget::cacheable_layout)).
+    /// [`Widget::cacheable_layout`]).
     pub(crate) fn measure_intrinsic(
         &self,
         id: WidgetId,
@@ -608,7 +608,7 @@ impl WidgetArena {
     /// handing a position to `on_tap` / `on_drag` / `on_pointer_event`, so
     /// every handler sees positions in its own local space.
     ///
-    /// The transform handling mirrors [`Self::hit_test_recursive`] so the
+    /// The transform handling mirrors `Self::hit_test_recursive` so the
     /// position a handler receives is in the same space the hit-test used
     /// to pick it:
     /// * A **content** transform node (`content_transform`, e.g.
@@ -1042,9 +1042,7 @@ impl WidgetArena {
     pub fn needs_rebuild_iter(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.nodes
             .iter()
-            .filter(|(_, n)| {
-                n.activation == ActivationState::Active && n.dirty.needs_rebuild
-            })
+            .filter(|(_, n)| n.activation == ActivationState::Active && n.dirty.needs_rebuild)
             .map(|(id, _)| id)
     }
 

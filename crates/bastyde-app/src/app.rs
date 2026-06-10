@@ -615,12 +615,7 @@ impl BastydeAppHandler {
         // registry routes through the per-window queue. Translate each
         // into the appropriate winit call.
         self.wm.drain_window_commands();
-        if had_locale
-            || had_theme
-            || had_commands
-            || had_modal_requests
-            || had_modal_dismissals
-        {
+        if had_locale || had_theme || had_commands || had_modal_requests || had_modal_dismissals {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }
@@ -956,7 +951,7 @@ impl BastydeAppHandler {
     }
 
     /// Drain queued post-mount actions for every window that has any, each
-    /// with a real [`EventContext`] (so `ctx.parent_window_handle()` resolves).
+    /// with a real [`EventContext`](bastyde_core::widget::EventContext) (so `ctx.parent_window_handle()` resolves).
     /// Modal-blocked windows are skipped — their actions (e.g. a WebView
     /// opening its native engine subview) stay queued until the modal closes,
     /// so a native surface can't appear over a modal. Cheap when nothing is
@@ -965,7 +960,9 @@ impl BastydeAppHandler {
     fn process_pending_mount_actions(&mut self, event_loop: &ActiveEventLoop) {
         let winit_ids = self.wm.winit_ids_with_pending_mount_actions();
         for winit_id in winit_ids {
-            self.run_in_window(winit_id, event_loop, |tree, ops| tree.run_mount_actions(ops));
+            self.run_in_window(winit_id, event_loop, |tree, ops| {
+                tree.run_mount_actions(ops)
+            });
         }
     }
 
@@ -2433,7 +2430,7 @@ impl BastydeAppBuilder {
     /// no-op elsewhere) into the app-state registry.
     ///
     /// Once installed, a [`MenuBar`](bastyde_widgets::MenuBar) built with
-    /// `from_model(..).native_on_macos(..)` mirrors its [`MenuModel`] into the
+    /// `from_model(..).native_on_macos(..)` mirrors its [`MenuModel`](bastyde_widgets::MenuModel) into the
     /// global menu bar on macOS, and item activations route back through the
     /// usual `Intent`/`Action` pipeline. The global menu follows window focus
     /// automatically (see the `WindowEvent::Focused` arm).

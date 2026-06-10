@@ -881,7 +881,7 @@ impl BuiltInIcons {
     /// built-in buttons. Can only be set **once**: the global is a
     /// process-wide [`OnceLock`], so the first set wins and any later
     /// call is ignored (and warns). It is also locked in the first time
-    /// [`global()`](Self::global) reads it, so set it before any built-in
+    /// `global()` reads it, so set it before any built-in
     /// button is created. Use [`defaults()`](Self::defaults) with struct
     /// update syntax to override only specific icons.
     pub fn set_global(icons: Self) {

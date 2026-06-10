@@ -1446,11 +1446,9 @@ impl WidgetCatalog for GridView<String> {
             Box::new(
                 crate::primitives::ZStack::new()
                     .child(RectWidget::new().background(bg))
-                    .child(
-                        Center::new().child(
-                            TextWidget::new(lit!(caption.to_string())).color(TextRole::Primary),
-                        ),
-                    ),
+                    .child(Center::new().child(
+                        TextWidget::new(lit!(caption.to_string())).color(TextRole::Primary),
+                    )),
             )
         }
         fn framed(grid: GridView<String>) -> Box<dyn Widget> {
@@ -1464,7 +1462,7 @@ impl WidgetCatalog for GridView<String> {
 
         fn adaptive() -> Box<dyn Widget> {
             framed(
-                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                GridView::new(items(40), |tc| tile_z(tc.item, tc.is_selected))
                     .sizing(GridSizing::Adaptive {
                         min_width: 90.0,
                         max_width: None,
@@ -1475,7 +1473,7 @@ impl WidgetCatalog for GridView<String> {
         }
         fn fixed_columns() -> Box<dyn Widget> {
             framed(
-                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                GridView::new(items(40), |tc| tile_z(tc.item, tc.is_selected))
                     .column_count(4, 64.0)
                     .spacing(8.0),
             )
@@ -1485,7 +1483,7 @@ impl WidgetCatalog for GridView<String> {
             let sel = SelectionModel::new(SelectionMode::Multi);
             sel.select(2);
             framed(
-                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                GridView::new(items(40), |tc| tile_z(tc.item, tc.is_selected))
                     .sizing(GridSizing::Adaptive {
                         min_width: 90.0,
                         max_width: None,
@@ -1499,7 +1497,7 @@ impl WidgetCatalog for GridView<String> {
             // `.item_height` drives the exact per-item height, so the tile
             // widget itself can stay plain.
             framed(
-                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                GridView::new(items(40), |tc| tile_z(tc.item, tc.is_selected))
                     .column_count(3, 64.0)
                     .waterfall(64.0)
                     .item_height(|i| 48.0 + (i % 5) as f32 * 18.0)

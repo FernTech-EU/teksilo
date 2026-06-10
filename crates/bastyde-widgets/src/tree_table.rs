@@ -19,7 +19,7 @@
 //! - Row drag-drop is NOT shipped here: insertion-vs-reparent UX
 //!   requires its own design pass and is out-of-scope.
 //!
-//! Rows live in a [`TreeBodyPane`](body_pane::TreeBodyPane) — a sibling
+//! Rows live in a `TreeBodyPane` — a sibling
 //! of the scrollbar, so buffer-exit / selection / expand rebuilds are
 //! never deferred mid-thumb-drag (see that module's doc).
 //!
@@ -971,12 +971,10 @@ impl<T: 'static> Widget for TreeTable<T> {
         // Visible row window for the paint passes — offset-table-driven
         // so variable heights paint correctly.
         let row_count = self.proxy.visible_count();
-        let (first_visible, last_visible) = self.row_metrics.borrow_mut().visible_range(
-            scroll_y,
-            body_height,
-            row_count,
-            0,
-        );
+        let (first_visible, last_visible) =
+            self.row_metrics
+                .borrow_mut()
+                .visible_range(scroll_y, body_height, row_count, 0);
 
         // Clip the root-painted row decorations (alt-row stripes,
         // selection bands, grid lines, focus ring) to the body band —

@@ -269,7 +269,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
 
     /// Reset window for keyboard type-ahead. Keystrokes more than `d` apart
     /// begin a fresh prefix; within `d` they extend it. Defaults to 500 ms,
-    /// matching [`MenuList::type_ahead_timeout`]. Pass `Duration::ZERO` to
+    /// matching [`MenuList::type_ahead_timeout`](crate::MenuList::type_ahead_timeout). Pass `Duration::ZERO` to
     /// treat each keystroke independently.
     pub fn type_ahead_timeout(mut self, d: Duration) -> Self {
         self.type_ahead_timeout = d;

@@ -162,10 +162,10 @@ impl Widget for SegmentCell {
         let color = self
             .selected
             .zip3(&self.focus_origin, &enabled)
-            .map(move |(sel, fo, en)| {
+            .map(move |(sel, foc, en)| {
                 if !*en {
                     TextRole::Disabled
-                } else if *sel == idx && fo.is_some() {
+                } else if *sel == idx && foc.is_some() {
                     TextRole::OnAccent
                 } else {
                     TextRole::Primary
@@ -225,7 +225,11 @@ impl Widget for SegmentCell {
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         // The parent SegmentedControl assigns exact bounds in
         // `place_children`; just claim the proposed envelope.
-        Size::new(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0)).into()
+        Size::new(
+            proposal.width.unwrap_or(0.0),
+            proposal.height.unwrap_or(0.0),
+        )
+        .into()
     }
 
     fn place_children(
@@ -298,8 +302,7 @@ impl SegmentedControl {
     /// `.segments([tr!(day()), tr!(week())])`; rich:
     /// `.segments([Segment::new(...).icon(...), ...])`.
     pub fn segments(mut self, segments: impl IntoIterator<Item = impl Into<Segment>>) -> Self {
-        self.segments
-            .extend(segments.into_iter().map(Into::into));
+        self.segments.extend(segments.into_iter().map(Into::into));
         self
     }
 
@@ -690,13 +693,11 @@ mod tests {
     fn keyboard_skips_disabled_segments() {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let sc = tree.add(
-            SegmentedControl::new(selected.clone()).segments([
-                Segment::new(lit!("A")),
-                Segment::new(lit!("B")).disabled(true),
-                Segment::new(lit!("C")),
-            ]),
-        );
+        let sc = tree.add(SegmentedControl::new(selected.clone()).segments([
+            Segment::new(lit!("A")),
+            Segment::new(lit!("B")).disabled(true),
+            Segment::new(lit!("C")),
+        ]));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         tree.focus(sc);
         // 0 -> (skip disabled 1) -> 2

@@ -828,7 +828,7 @@ impl bastyde_core::widget::Widget for Button {
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
         // A Button is rigid: it sizes to its content and does NOT shrink in an
-        // over-constrained row (a truncated action label like "Sav…" reads
+        // over-constrained row (a truncated action label reads
         // poorly — the desktop convention is to overflow excess actions into a
         // menu; see `Toolbar`). We therefore take only the content's SIZE and
         // drop its grow/shrink weights. The label still truncates if a caller

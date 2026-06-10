@@ -85,8 +85,7 @@ impl WidgetTree {
                     .count()
             };
             if nested_menu_overlays > 1 {
-                if let Some((_id, content_ids, focus_restore)) =
-                    self.overlay_manager.dismiss_top()
+                if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top()
                 {
                     self.dormant_dismissed_content(&content_ids, &mut *ops);
                     if let Some(restore_id) = focus_restore
@@ -1703,7 +1702,6 @@ mod tests {
     #[test]
     fn pointer_positions_are_widget_local_at_nonzero_origin() {
         use crate::event::{Modifiers, PointerButton};
-        use crate::signal::Signal;
         use crate::test_widgets::InsetWidget;
         use std::cell::Cell;
         use std::rc::Rc;

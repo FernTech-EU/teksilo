@@ -2,7 +2,7 @@
 //! "stepper"), and [`Wizard`], a thin modal launcher built on it.
 //!
 //! A stepper shows a **visible step-indicator strip** above (or beside) a
-//! content area driven by a [`Switcher`](crate::primitives::Switcher), with a
+//! content area driven by a [`Switcher`], with a
 //! footer of Back / Skip / Help / Next / Finish controls. It supports linear
 //! and **non-linear** (clickable) navigation, optional + skippable steps, per
 //! step validation gating, a generic chrome slot, and a
@@ -35,8 +35,8 @@
 //!     }});
 //! ```
 
-mod controller;
 mod content_pane;
+mod controller;
 mod footer;
 mod indicator;
 mod indicator_strip;
@@ -52,9 +52,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
 

@@ -276,9 +276,9 @@ pub struct WidgetTree {
     /// so the frame-tick effects run on the wake-up pass.
     pub(crate) pending_wake_at: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
     /// One-shot post-mount actions enqueued during `build()` via
-    /// [`BuildContext::run_after_mount`], drained by the app loop (and by
+    /// [`BuildContext::run_after_mount`](crate::BuildContext::run_after_mount), drained by the app loop (and by
     /// tests) through [`WidgetTree::run_mount_actions`] with a real
-    /// [`EventContext`](crate::widget::EventContext) — the only place a widget
+    /// [`EventContext`] — the only place a widget
     /// can read the OS parent handle / app-state / poster together after it is
     /// mounted. Used by widgets that own a native resource needing a window
     /// handle to initialise (a `WebView`'s engine subview).
@@ -492,9 +492,9 @@ impl WidgetTree {
     }
 
     /// Enqueue a one-shot action to run with a real
-    /// [`EventContext`](crate::widget::EventContext) after the current build,
+    /// [`EventContext`] after the current build,
     /// once the tree is mounted under its window. Used via
-    /// [`BuildContext::run_after_mount`]. Drained by
+    /// [`BuildContext::run_after_mount`](crate::BuildContext::run_after_mount). Drained by
     /// [`Self::run_mount_actions`].
     pub(crate) fn queue_mount_action(
         &mut self,
@@ -509,7 +509,7 @@ impl WidgetTree {
     }
 
     /// Drain and run every queued post-mount action with a fresh
-    /// [`EventContext`](crate::widget::EventContext) built over `ops`. The app
+    /// [`EventContext`] built over `ops`. The app
     /// loop calls this each iteration with a real `WindowOps` sink (so
     /// `ctx.parent_window_handle()` resolves); headless tests call it with a
     /// `NoopWindowOps`. Actions enqueued *by* an action (rare) are left for the
@@ -2536,11 +2536,7 @@ mod activation_signal_tests {
             Vec::new()
         }
 
-        fn layout_response(
-            &self,
-            proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> LayoutResponse {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             proposal.resolve(10.0, 10.0).into()
         }
     }
@@ -2561,11 +2557,7 @@ mod activation_signal_tests {
             Vec::new()
         }
 
-        fn layout_response(
-            &self,
-            proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> LayoutResponse {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             proposal.resolve(10.0, 10.0).into()
         }
     }
