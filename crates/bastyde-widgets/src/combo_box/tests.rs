@@ -193,6 +193,61 @@ fn type_ahead_no_match_keeps_selection() {
 }
 
 #[test]
+fn type_ahead_matches_accented_label() {
+    // Regression: typed char was lowercased via `to_ascii_lowercase`
+    // (a no-op on non-ASCII) while labels used full `to_lowercase`, so
+    // accented input never matched an accented label.
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(ComboBox::new(
+        vec!["Apple", "École", "Zürich"],
+        selected.clone(),
+    ));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    // Uppercase accented input matches the accented label.
+    tree.press_key(Key::Character('É'), bastyde_core::event::Modifiers::NONE);
+    assert_eq!(selected.get().as_deref(), Some("École"));
+
+    // Lowercase accented input matches too.
+    let selected2 = Signal::new(None::<String>);
+    let cb2 = tree.add(ComboBox::new(
+        vec!["Apple", "école", "Zürich"],
+        selected2.clone(),
+    ));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb2);
+    tree.press_key(Key::Character('é'), bastyde_core::event::Modifiers::NONE);
+    assert_eq!(selected2.get().as_deref(), Some("école"));
+}
+
+#[test]
+fn type_ahead_timeout_zero_treats_each_keystroke_independently() {
+    // With a zero reset window every keystroke starts a fresh prefix.
+    // "B" selects Banana; the following "L" begins a new prefix "l"
+    // (no item starts with it) instead of extending to "bl" → Blueberry.
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(
+        ComboBox::new(
+            vec!["Apple", "Banana", "Blueberry"],
+            selected.clone(),
+        )
+        .type_ahead_timeout(std::time::Duration::ZERO),
+    );
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::B, bastyde_core::event::Modifiers::NONE);
+    assert_eq!(selected.get().as_deref(), Some("Banana"));
+
+    tree.press_key(Key::L, bastyde_core::event::Modifiers::NONE);
+    // Prefix reset: "l" matches nothing, selection unchanged.
+    assert_eq!(selected.get().as_deref(), Some("Banana"));
+}
+
+#[test]
 fn enter_toggles_dropdown_open_close() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);

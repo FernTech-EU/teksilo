@@ -23,7 +23,7 @@
 use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
@@ -89,6 +89,11 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     max_visible_items: usize,
+    /// Type-ahead reset window: keystrokes more than this far apart start a
+    /// fresh prefix instead of extending the previous one. Mirrors
+    /// `MenuList::type_ahead_timeout`. A `Duration::ZERO` makes every
+    /// keystroke independent (used by tests).
+    type_ahead_timeout: Duration,
     /// When `true`, the dropdown panel includes a search field at the top
     /// and the list is filtered live against the query.
     searchable: bool,
@@ -162,6 +167,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             label: None,
             initial_enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
+            type_ahead_timeout: Duration::from_millis(500),
             searchable: false,
             filter: None,
             search_query: None,
@@ -258,6 +264,15 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Defaults to 8. Clamped to at least 1.
     pub fn max_visible_items(mut self, n: usize) -> Self {
         self.max_visible_items = n.max(1);
+        self
+    }
+
+    /// Reset window for keyboard type-ahead. Keystrokes more than `d` apart
+    /// begin a fresh prefix; within `d` they extend it. Defaults to 500 ms,
+    /// matching [`MenuList::type_ahead_timeout`]. Pass `Duration::ZERO` to
+    /// treat each keystroke independently.
+    pub fn type_ahead_timeout(mut self, d: Duration) -> Self {
+        self.type_ahead_timeout = d;
         self
     }
 
@@ -626,6 +641,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 // Type-ahead buffer: (prefix, last_keystroke_time)
                 let typeahead: Rc<RefCell<(String, Instant)>> =
                     Rc::new(RefCell::new((String::new(), Instant::now())));
+                let type_ahead_timeout = self.type_ahead_timeout;
                 // Helper: set selection to the item at `index` and update
                 // the cached hint in one shot.
                 let pick_at = {
@@ -793,11 +809,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             let ch = key.to_char().unwrap();
                             let mut ta = typeahead.borrow_mut();
                             let now = Instant::now();
-                            // Reset buffer if more than 500ms since last keystroke
-                            if now.duration_since(ta.1).as_millis() > 500 {
+                            // Reset the prefix once keystrokes fall outside the
+                            // type-ahead window.
+                            if now.duration_since(ta.1) > type_ahead_timeout {
                                 ta.0.clear();
                             }
-                            ta.0.push(ch.to_ascii_lowercase());
+                            // Full Unicode lowercasing so accented input (e.g.
+                            // 'É') matches accented labels — `to_ascii_lowercase`
+                            // is a no-op on non-ASCII and would never match.
+                            ta.0.extend(ch.to_lowercase());
                             ta.1 = now;
                             let prefix = ta.0.clone();
                             drop(ta);
