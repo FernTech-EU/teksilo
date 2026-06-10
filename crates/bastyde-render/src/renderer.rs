@@ -228,9 +228,15 @@ impl Renderer {
             });
 
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            // Linear, not Nearest: glyph quads can be drawn under a scale
+            // transform (SceneView zoom, Scale wrapper), where nearest
+            // magnification turns texels into hard squares. At identity
+            // transform texel↔pixel is 1:1 and linear sampling is a no-op.
+            // Safe for tinted text — the monochrome shader path ignores
+            // sampled RGB — and the 1px atlas gutter bounds bilinear bleed.
             let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
 
