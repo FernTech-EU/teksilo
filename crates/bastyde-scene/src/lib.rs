@@ -19,9 +19,9 @@
 //! — so OS gestures, reduced-motion snapping, and the four-gate idle
 //! scheduler fall out for free.
 //!
-//! See [`docs/bastyde-scene.md`](https://github.com/jacquetc/bastyde/blob/main/docs/bastyde-scene.md)
+//! See [`docs/bastyde-scene.md`](https://github.com/ferntech-eu/bastyde/blob/main/docs/bastyde-scene.md)
 //! for the user-facing reference and
-//! [`docs/bastyde-scene-a11y.md`](https://github.com/jacquetc/bastyde/blob/main/docs/bastyde-scene-a11y.md)
+//! [`docs/bastyde-scene-a11y.md`](https://github.com/ferntech-eu/bastyde/blob/main/docs/bastyde-scene-a11y.md)
 //! for the accessibility-shaping API.
 //!
 //! ## Quick start

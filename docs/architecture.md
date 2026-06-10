@@ -58,7 +58,7 @@ Bastyde splits internally into focused crates (see §25) each with a single conc
 
 ### 1.2 Reuse Strategy
 
-Bastyde builds on established crates rather than reinventing solved problems. **winit** for windowing and HiDPI; **wgpu** for GPU rendering; **text-document + text-typeset** for the rich text model and typesetting (rustybuzz shaping, swash rasterization, etagere atlas, unicode-linebreak, unicode-bidi); **AccessKit** for cross-platform a11y; **fluent-rs** for i18n; **tiny-skia** for Tier 3 path rasterization.
+Bastyde builds on established crates rather than reinventing solved problems. **winit** for windowing and HiDPI; **wgpu** for GPU rendering; **text-document + text-typeset** for the rich text model and typesetting (harfrust shaping, swash rasterization, etagere atlas, unicode-linebreak, unicode-bidi); **AccessKit** for cross-platform a11y; **fluent-rs** for i18n; **tiny-skia** for Tier 3 path rasterization.
 
 ---
 

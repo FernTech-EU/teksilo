@@ -6,7 +6,7 @@
 //! [`A11yOffScreenMode`] policy that decides which off-viewport items
 //! are still announced. The **logical-structural API** (groups,
 //! parents, relations, auto-graft, custom focus callbacks) layers
-//! over the top — see [`docs/bastyde-scene-a11y.md`](https://github.com/jacquetc/bastyde/blob/main/docs/bastyde-scene-a11y.md)
+//! over the top — see [`docs/bastyde-scene-a11y.md`](https://github.com/ferntech-eu/bastyde/blob/main/docs/bastyde-scene-a11y.md)
 //! for the full picture.
 //!
 //! Defaults are chosen so a quick prototype is accessible out of the

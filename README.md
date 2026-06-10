@@ -1,5 +1,5 @@
-![CI](https://img.shields.io/github/actions/workflow/status/jacquetc/fern-ui/ci.yml?branch=main&style=flat-square&label=CI)
-![audit](https://img.shields.io/github/actions/workflow/status/jacquetc/fern-ui/audit.yml?branch=main&style=flat-square&label=audit)
+![CI](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/ci.yml?branch=main&style=flat-square&label=CI)
+![audit](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/audit.yml?branch=main&style=flat-square&label=audit)
 [![license](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)](#license)
 
 # Bastyde
@@ -137,7 +137,7 @@ The rules under which Bastyde is built:
 
 **Tooltips.** Three tiers from one system: plain text, rich (inline markup + shortcut hint + expandable detail), and composite (arbitrary widget body). Rich and composite tooltips become focusable on dwell.
 
-**Animations.** Composable wrappers for the common cases (collapse, fade, slide, crossfade, blur, shake, pulse). Each respects the system "reduce motion" setting.
+**Animations.** Composable wrappers for the common cases (collapse, fade, slide, crossfade, blur, shake, pulse). The animation-owning wrappers honor the system "reduce motion" setting; the value-driven wrappers (`Blur`, `Rotate`) carry no motion of their own and delegate that gating to the caller's animate site (`to_or_snap`).
 
 **Drag and drop.** Intra-app DnD with typed payloads, drop indicators, and edge auto-scroll. Cross-application (OS) DnD is supported in both directions — inbound drops and outbound app-to-OS export.
 
@@ -166,7 +166,7 @@ cargo add bastyde
 Then read the examples:
 
 ```sh
-git clone https://github.com/ferntech/bastyde
+git clone https://github.com/ferntech-eu/bastyde
 cd bastyde
 cargo run -p simple-button      # the minimal app
 cargo run -p widget-catalog     # browse every widget
@@ -207,7 +207,7 @@ Bastyde is part of a small stack:
 
 - [text-document](https://github.com/jacquetc/text-document), the document model. **Required dependency.**
 - [text-typeset](https://github.com/jacquetc/text-typeset), the typesetting engine. **Required dependency.**
-- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture (Verticval Slice variant) in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
+- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture (Vertical Slice variant) in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
 
 ## Contributing
 
@@ -234,4 +234,4 @@ For priority bug fixes, written support, or an indemnification agreement, contac
 
 ## Acknowledgments
 
-Bastyde builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via rustybuzz), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
+Bastyde builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
