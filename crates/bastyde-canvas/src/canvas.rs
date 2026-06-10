@@ -395,6 +395,7 @@ impl Canvas {
             return false;
         };
         let mut backend = backend.borrow_mut();
+        debug_warn_raster_scale_mismatch("draw_text_layout", layout, &*backend);
         let glyphs = backend.ensure_glyphs(layout);
         if glyphs.is_empty() {
             return false;
@@ -429,6 +430,7 @@ impl Canvas {
             return false;
         };
         let mut backend = backend.borrow_mut();
+        debug_warn_raster_scale_mismatch("draw_text_layout_markup", layout, &*backend);
         let glyphs = backend.ensure_glyphs(layout);
         if glyphs.is_empty() {
             return false;
@@ -853,6 +855,33 @@ impl Canvas {
     }
 }
 
+/// Debug-build check for the retained-layout draw paths: a `TextLayout`
+/// produced under one ambient raster scale whose glyphs are drawn under
+/// another samples bitmaps of the wrong density (soft or over-sharp text
+/// under a scene zoom). Cosmetic, not corruption — log loudly instead of
+/// aborting; the fix is to re-layout at paint time (what `draw_text` /
+/// `draw_paragraph` do internally).
+#[cfg_attr(not(debug_assertions), allow(unused_variables))]
+fn debug_warn_raster_scale_mismatch(
+    caller: &str,
+    layout: &crate::text_backend::TextLayout,
+    backend: &dyn crate::text_backend::TextBackend,
+) {
+    #[cfg(debug_assertions)]
+    {
+        let ambient = backend.raster_scale();
+        if (layout.raster_scale - ambient).abs() > 0.001 {
+            eprintln!(
+                "[bastyde-canvas] {caller}: retained TextLayout (key {}) was produced at \
+                 raster_scale {} but is drawn at ambient raster_scale {ambient} — its glyphs \
+                 sample the wrong bitmap density. Re-layout in paint() instead of reusing a \
+                 measure-time layout.",
+                layout.layout_key, layout.raster_scale,
+            );
+        }
+    }
+}
+
 /// Convert a high-level `Paint` to a GPU-ready `(color, PaintData)` pair.
 fn paint_to_data(paint: &Paint) -> ([f32; 4], PaintData) {
     match paint {
@@ -1137,6 +1166,7 @@ mod tests {
             layout_key: 0,
             line_count: 1,
             spans: Vec::new(),
+            raster_scale: 1.0,
         };
         let mut canvas = Canvas::new();
         assert!(!canvas.draw_text_layout(&layout, Point::new(0.0, 0.0), Color::BLACK));

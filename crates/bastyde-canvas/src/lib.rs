@@ -24,5 +24,5 @@ pub use render_frame::{
 pub use svg::{SvgIcon, SvgParseError};
 pub use text_backend::{
     AtlasInfo, EllipsisMode, GlyphValidation, HitTarget, MockTextBackend, TextBackend, TextLayout,
-    TextLayoutSpan, TextOverflow, TextSpanKind,
+    TextLayoutSpan, TextOverflow, TextSpanKind, quantize_raster_scale,
 };

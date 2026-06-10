@@ -6,6 +6,7 @@ mod a11y;
 mod edge_cases;
 mod multi_view;
 mod nested;
+mod raster_scale_tests;
 mod runtime_mutation;
 
 use super::*;
@@ -3685,6 +3686,7 @@ fn item_cache_clears_on_glyph_epoch_change() {
                 layout_key: 1,
                 line_count: 1,
                 spans: Vec::new(),
+                raster_scale: 1.0,
             }
         }
         fn ensure_glyphs(

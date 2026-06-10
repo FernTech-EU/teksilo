@@ -32,6 +32,11 @@ struct LayoutCacheKey {
     font_weight: u32,
     max_width_bits: Option<u32>,
     mode: LayoutMode,
+    /// Ambient raster scale at layout time (f32 bits). Metrics are
+    /// identical across raster scales, but each entry's `layout_key`
+    /// indexes glyph quads baked at a specific bitmap density — entries
+    /// at different scales must not alias.
+    raster_scale_bits: u32,
 }
 
 impl LayoutCacheKey {
@@ -40,6 +45,7 @@ impl LayoutCacheKey {
         style: &TextStyle,
         max_width: Option<f32>,
         scale_factor: f32,
+        raster_scale: f32,
     ) -> Self {
         let scaled_size = style.size * scale_factor;
         Self {
@@ -49,6 +55,7 @@ impl LayoutCacheKey {
             font_weight: style.weight.0 as u32,
             max_width_bits: max_width.map(|w| (w * scale_factor).to_bits()),
             mode: LayoutMode::SingleLine,
+            raster_scale_bits: raster_scale.to_bits(),
         }
     }
 
@@ -58,6 +65,7 @@ impl LayoutCacheKey {
         max_width: f32,
         max_lines: Option<usize>,
         scale_factor: f32,
+        raster_scale: f32,
     ) -> Self {
         let scaled_size = style.size * scale_factor;
         let cap = max_lines
@@ -70,6 +78,7 @@ impl LayoutCacheKey {
             font_weight: style.weight.0 as u32,
             max_width_bits: Some((max_width * scale_factor).to_bits()),
             mode: LayoutMode::Paragraph(cap),
+            raster_scale_bits: raster_scale.to_bits(),
         }
     }
 }
@@ -133,6 +142,12 @@ pub struct TypesetterBridge {
     /// observes changed pixels. Each window renderer records the version
     /// it last uploaded; see [`AtlasInfo::version`].
     atlas_version: u64,
+    /// Ambient raster scale set by the paint walker for the widget
+    /// currently painting (see [`TextBackend::set_raster_scale`]).
+    /// Flows into every `label_flow.layout_*` call and into the layout
+    /// cache key — flipping it costs nothing, entries at different
+    /// scales coexist and age out via the normal touch/LRU machinery.
+    raster_scale: f32,
 }
 
 impl TypesetterBridge {
@@ -150,6 +165,7 @@ impl TypesetterBridge {
             rich_text_atlas_dirty: false,
             last_seen_eviction_epoch,
             atlas_version: 1,
+            raster_scale: 1.0,
         }
     }
 
@@ -372,6 +388,17 @@ impl TypesetterBridge {
         self.service.scale_factor()
     }
 
+    /// Ambient raster scale as last set by
+    /// [`TextBackend::set_raster_scale`] (the paint walker's
+    /// accumulated transform scale for the widget currently
+    /// painting). Rich-text widgets sync this into their own
+    /// `DocumentFlow` (`flow.set_raster_scale`) before `render`, so
+    /// document glyphs densify under a scene zoom exactly like the
+    /// label path.
+    pub fn ambient_raster_scale(&self) -> f32 {
+        self.raster_scale
+    }
+
     /// Line height (in logical pixels) of the registry's default
     /// font + size — `ascent + descent + leading`. Useful for
     /// widgets that need to size against an intrinsic line height
@@ -415,14 +442,30 @@ impl TextBackend for TypesetterBridge {
         }
     }
 
+    fn set_raster_scale(&mut self, raster_scale: f32) {
+        // No cache clearing: the layout cache keys on the raster scale,
+        // so entries at different scales coexist. Stale-scale glyph
+        // entries age out of text-typeset's atlas via the normal LRU.
+        self.raster_scale = if raster_scale > 0.0 { raster_scale } else { 1.0 };
+    }
+
+    fn raster_scale(&self) -> f32 {
+        self.raster_scale
+    }
+
     fn layout_single_line(
         &mut self,
         text: &str,
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let cache_key =
-            LayoutCacheKey::new_single_line(text, style, max_width, self.service.scale_factor());
+        let cache_key = LayoutCacheKey::new_single_line(
+            text,
+            style,
+            max_width,
+            self.service.scale_factor(),
+            self.raster_scale,
+        );
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -430,9 +473,13 @@ impl TextBackend for TypesetterBridge {
 
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: SingleLineResult =
-            self.label_flow
-                .layout_single_line(&mut self.service, text, &format, max_width);
+        let result: SingleLineResult = self.label_flow.layout_single_line(
+            &mut self.service,
+            text,
+            &format,
+            max_width,
+            self.raster_scale,
+        );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -447,6 +494,7 @@ impl TextBackend for TypesetterBridge {
             layout_key: key,
             line_count: 1,
             spans: Vec::new(),
+            raster_scale: self.raster_scale,
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
@@ -482,6 +530,7 @@ impl TextBackend for TypesetterBridge {
             max_width,
             max_lines,
             self.service.scale_factor(),
+            self.raster_scale,
         );
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
@@ -496,6 +545,7 @@ impl TextBackend for TypesetterBridge {
             &format,
             max_width,
             max_lines,
+            self.raster_scale,
         );
 
         let key = self.next_layout_key;
@@ -511,6 +561,7 @@ impl TextBackend for TypesetterBridge {
             layout_key: key,
             line_count: result.line_count.max(1),
             spans: Vec::new(),
+            raster_scale: self.raster_scale,
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
@@ -546,6 +597,7 @@ impl TextBackend for TypesetterBridge {
             font_weight: style.weight.0 as u32,
             max_width_bits: max_width.map(|w| (w * self.service.scale_factor()).to_bits()),
             mode: LayoutMode::SingleLineMarkup,
+            raster_scale_bits: self.raster_scale.to_bits(),
         };
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -559,6 +611,7 @@ impl TextBackend for TypesetterBridge {
             &tt_markup,
             &format,
             max_width,
+            self.raster_scale,
         );
 
         let key = self.next_layout_key;
@@ -586,6 +639,7 @@ impl TextBackend for TypesetterBridge {
                     byte_range: s.byte_range.clone(),
                 })
                 .collect(),
+            raster_scale: self.raster_scale,
         };
 
         self.layout_cache.insert(cache_key, layout.clone());
@@ -625,6 +679,7 @@ impl TextBackend for TypesetterBridge {
             font_weight: style.weight.0 as u32,
             max_width_bits: Some((max_width * self.service.scale_factor()).to_bits()),
             mode: LayoutMode::ParagraphMarkup(cap),
+            raster_scale_bits: self.raster_scale.to_bits(),
         };
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -639,6 +694,7 @@ impl TextBackend for TypesetterBridge {
             &format,
             max_width,
             max_lines,
+            self.raster_scale,
         );
 
         let key = self.next_layout_key;
@@ -666,6 +722,7 @@ impl TextBackend for TypesetterBridge {
                     byte_range: s.byte_range.clone(),
                 })
                 .collect(),
+            raster_scale: self.raster_scale,
         };
 
         self.layout_cache.insert(cache_key, layout.clone());
@@ -790,6 +847,56 @@ mod tests {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let layout = bridge.layout_single_line("", &TextStyle::default(), None);
         assert_eq!(layout.width, 0.0);
+    }
+
+    #[test]
+    fn set_raster_scale_produces_separate_cache_entries_and_layout_keys() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let style = TextStyle::default();
+
+        let at_one = bridge.layout_single_line("Hello", &style, None);
+        bridge.set_raster_scale(2.0);
+        let at_two = bridge.layout_single_line("Hello", &style, None);
+
+        // Metrics are raster-scale-independent…
+        assert!((at_one.width - at_two.width).abs() < 1e-3);
+        assert!((at_one.height - at_two.height).abs() < 1e-3);
+        // …but each scale owns its own cache entry / glyph set.
+        assert_ne!(at_one.layout_key, at_two.layout_key);
+        assert_eq!(at_one.raster_scale, 1.0);
+        assert_eq!(at_two.raster_scale, 2.0);
+
+        let q1 = bridge.ensure_glyphs(&at_one);
+        let q2 = bridge.ensure_glyphs(&at_two);
+        assert_eq!(q1.len(), q2.len());
+        assert!(!q1.is_empty());
+        // The 2x entry samples a denser bitmap: atlas rects grow, screen
+        // rects stay logical.
+        let (a1, a2) = (&q1[0], &q2[0]);
+        assert!(
+            a2.atlas[2] > a1.atlas[2] * 1.5,
+            "atlas w should roughly double: {} -> {}",
+            a1.atlas[2],
+            a2.atlas[2]
+        );
+        assert!((a1.screen[2] - a2.screen[2]).abs() <= 1.01);
+    }
+
+    #[test]
+    fn raster_scale_back_to_one_hits_original_cache() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let style = TextStyle::default();
+
+        let first = bridge.layout_single_line("Hello", &style, None);
+        bridge.set_raster_scale(2.0);
+        let scaled = bridge.layout_single_line("Hello", &style, None);
+        bridge.set_raster_scale(1.0);
+        let back = bridge.layout_single_line("Hello", &style, None);
+
+        // Returning to 1.0 must hit the original entry (no cache churn —
+        // set_raster_scale clears nothing).
+        assert_eq!(first.layout_key, back.layout_key);
+        assert_ne!(first.layout_key, scaled.layout_key);
     }
 
     /// Minimal BlockLayoutParams for driving a rich-text `DocumentFlow`

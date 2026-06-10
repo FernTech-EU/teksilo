@@ -26,6 +26,16 @@ impl SceneView {
             .unwrap_or(0);
         self.item_cache.borrow_mut().sync_glyph_epoch(glyph_epoch);
 
+        // Ambient text raster scale, set by the paint walker for this
+        // SceneView's content-transform scope (it already includes the
+        // view's zoom). Items whose own pushed transform carries an
+        // additional scale refine it below so their text rasterizes at
+        // the full effective density.
+        let ambient_raster_scale = canvas
+            .text_backend()
+            .map(|tb| tb.borrow().raster_scale())
+            .unwrap_or(1.0);
+
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
         let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
@@ -80,16 +90,33 @@ impl SceneView {
             // parent chain + view transform, then push a transform that —
             // composed with the outer view transform on the canvas —
             // collapses to a pure `Translate(screen_anchor)`.
-            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
-                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
-                let screen_anchor = view_transform.apply_point(scene_anchor);
-                let view_inv = view_transform
-                    .inverse()
-                    .unwrap_or_else(Transform2D::identity);
-                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv);
-                canvas.apply_transform(t);
-            } else {
-                canvas.apply_transform(local_to_scene);
+            let pushed_transform =
+                if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
+                    let scene_anchor = local_to_scene.apply_point(Point::ZERO);
+                    let screen_anchor = view_transform.apply_point(scene_anchor);
+                    let view_inv = view_transform
+                        .inverse()
+                        .unwrap_or_else(Transform2D::identity);
+                    Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv)
+                } else {
+                    local_to_scene
+                };
+            canvas.apply_transform(pushed_transform);
+            // Refine the ambient raster scale by the item's own pushed
+            // transform scale: a scaled item's text needs denser bitmaps
+            // (and a pixel-pinned IGNORES_TRANSFORMATIONS item, whose
+            // pushed transform carries `1/view_scale`, falls back toward
+            // 1.0 — it never zooms on screen). `quantize_raster_scale`
+            // is idempotent, so scale-1 transforms inherit the ambient
+            // value bit-identically and the backend is left untouched.
+            let item_raster_scale = bastyde_canvas::quantize_raster_scale(
+                ambient_raster_scale * pushed_transform.geometric_scale(),
+            );
+            let raster_scale_changed = item_raster_scale != ambient_raster_scale;
+            if raster_scale_changed
+                && let Some(tb) = canvas.text_backend()
+            {
+                tb.borrow_mut().set_raster_scale(item_raster_scale);
             }
             // Effective opacity composes through the parent chain. Pushed via
             // `set_opacity` / `restore_opacity` so the scope is balanced.
@@ -101,10 +128,17 @@ impl SceneView {
             if let Some(item) = scene.item(id) {
                 // Item-coordinate cache: replay a cached local-coord
                 // RenderFrame instead of re-running paint when the item opted
-                // into `CacheMode::ItemCoordinate`; record on a miss.
+                // into `CacheMode::ItemCoordinate`; record on a miss. The
+                // cache keys each entry by the raster scale it was recorded
+                // at, so a zoom that crossed a raster bucket re-records the
+                // frame against fresh-density bitmaps.
                 match item.cache_mode() {
                     crate::cache::CacheMode::ItemCoordinate => {
-                        let cached = self.item_cache.borrow().get(id).cloned();
+                        let cached = self
+                            .item_cache
+                            .borrow()
+                            .get(id, item_raster_scale)
+                            .cloned();
                         if let Some(frame) = cached {
                             canvas.draw_render_frame(&frame, Point::ZERO);
                         } else {
@@ -115,13 +149,20 @@ impl SceneView {
                             item.paint(&mut sub, &item_ctx);
                             let frame = sub.into_render_frame();
                             canvas.draw_render_frame(&frame, Point::ZERO);
-                            self.item_cache.borrow_mut().insert(id, frame);
+                            self.item_cache
+                                .borrow_mut()
+                                .insert(id, frame, item_raster_scale);
                         }
                     }
                     crate::cache::CacheMode::None => {
                         item.paint(canvas, &item_ctx);
                     }
                 }
+            }
+            if raster_scale_changed
+                && let Some(tb) = canvas.text_backend()
+            {
+                tb.borrow_mut().set_raster_scale(ambient_raster_scale);
             }
             if opacity_pushed {
                 canvas.restore_opacity();

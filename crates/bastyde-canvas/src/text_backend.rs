@@ -56,6 +56,15 @@ pub struct TextLayout {
     /// Per-span rectangles produced by the markup-aware layout path.
     /// Empty for plain-text layouts.
     pub spans: Vec<TextLayoutSpan>,
+    /// The backend's ambient raster scale at the time this layout was
+    /// produced (see [`TextBackend::set_raster_scale`]). Metrics are
+    /// raster-scale-independent, but the glyph quads behind
+    /// `layout_key` sample bitmaps of this density — drawing a
+    /// retained layout under a *different* ambient scale renders
+    /// soft/oversharp glyphs. `Canvas::draw_text_layout` debug-asserts
+    /// on the mismatch; widgets that retain layouts across paints
+    /// should re-layout when the scale changed.
+    pub raster_scale: f32,
 }
 
 /// One laid-out span inside a [`TextLayout`]. Populated by
@@ -107,6 +116,34 @@ impl TextLayout {
     }
 }
 
+/// Quantize an accumulated transform scale onto a geometric ladder of
+/// 1.25ⁿ steps, `n ∈ [0, 6]` (so the value lands in `[1.0, ~3.81]`),
+/// for use as the glyph raster densification under a scale transform
+/// (see [`TextBackend::set_raster_scale`]).
+///
+/// The ladder bounds the number of distinct atlas entries a continuous
+/// zoom gesture can create (7 buckets) and the bucket value is derived
+/// from an integer index, so the same input always yields the
+/// bit-identical f32 — cache keys stay stable across frames — and the
+/// function is idempotent (a bucket value maps to itself; the cap is
+/// clamped on the *index* so it is a ladder value too). Between buckets
+/// the residual GPU scaling is at most ~12%, invisible under the glyph
+/// atlas's linear filtering. Scales below 1 clamp to 1: zoomed-out text
+/// relies on linear minification rather than rasterizing below logical
+/// size.
+pub fn quantize_raster_scale(scale: f32) -> f32 {
+    if !scale.is_finite() || scale <= 1.0 {
+        return 1.0;
+    }
+    const STEP: f32 = 1.25;
+    /// 1.25⁶ ≈ 3.81 — the densest raster bucket. Deep zoom beyond it
+    /// rides linear magnification; an unbounded ladder would explode
+    /// atlas area quadratically.
+    const MAX_BUCKET: i32 = 6;
+    let bucket = ((scale.ln() / STEP.ln()).round() as i32).clamp(0, MAX_BUCKET);
+    STEP.powi(bucket)
+}
+
 /// Trait for text layout and glyph rasterization backends.
 /// Implemented by bastyde-text (wrapping text-typeset) for real rendering,
 /// and by a mock for headless tests.
@@ -115,6 +152,29 @@ pub trait TextBackend {
     /// Implementations should rasterize glyphs at `font_size * scale_factor`
     /// while returning metrics in logical pixels.
     fn set_scale_factor(&mut self, _scale_factor: f32) {}
+
+    /// Set the ambient raster scale for subsequent `layout_*` /
+    /// `ensure_glyphs` calls.
+    ///
+    /// The paint walker sets this to the accumulated (quantized) scale
+    /// of the transform scopes enclosing the widget being painted, so
+    /// text drawn under a scale transform (scene zoom, `Scale` wrapper)
+    /// rasterizes at `font_size × scale_factor × raster_scale` and
+    /// stays sharp once the GPU transform stretches it. Layout metrics
+    /// are raster-scale-independent — only the bitmaps behind the
+    /// returned quads densify — so this never causes reflow.
+    ///
+    /// Unlike [`set_scale_factor`](Self::set_scale_factor) this is
+    /// cheap to flip per widget: implementations key their caches by
+    /// it instead of clearing them. Backends without a glyph raster
+    /// (the mock) keep the default no-op.
+    fn set_raster_scale(&mut self, _raster_scale: f32) {}
+
+    /// Current ambient raster scale (see
+    /// [`set_raster_scale`](Self::set_raster_scale)). `1.0` = unscaled.
+    fn raster_scale(&self) -> f32 {
+        1.0
+    }
 
     /// Measure and layout a single line of text.
     fn layout_single_line(
@@ -301,6 +361,7 @@ impl TextBackend for MockTextBackend {
             layout_key: 0,
             line_count: 1,
             spans: Vec::new(),
+            raster_scale: 1.0,
         }
     }
 
@@ -323,6 +384,7 @@ impl TextBackend for MockTextBackend {
                 layout_key: 0,
                 line_count: 1,
                 spans: Vec::new(),
+                raster_scale: 1.0,
             };
         }
 
@@ -369,6 +431,7 @@ impl TextBackend for MockTextBackend {
             layout_key: 0,
             line_count,
             spans: Vec::new(),
+            raster_scale: 1.0,
         }
     }
 
@@ -393,6 +456,28 @@ impl TextBackend for MockTextBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quantize_raster_scale_ladder_properties() {
+        // Identity and zoom-out clamp to 1.0 (never rasterize below
+        // logical size).
+        assert_eq!(quantize_raster_scale(1.0), 1.0);
+        assert_eq!(quantize_raster_scale(0.5), 1.0);
+        assert_eq!(quantize_raster_scale(0.0), 1.0);
+        assert_eq!(quantize_raster_scale(f32::NAN), 1.0);
+        // Bucket values are exact powers of 1.25 (bit-stable cache keys).
+        assert_eq!(quantize_raster_scale(2.0), 1.25_f32.powi(3));
+        assert_eq!(quantize_raster_scale(3.0), 1.25_f32.powi(5));
+        // Deep zoom clamps to the top bucket (a ladder value, so the
+        // clamp preserves idempotence).
+        assert_eq!(quantize_raster_scale(10.0), 1.25_f32.powi(6));
+        // Idempotent: a bucket value maps to itself, so re-quantizing an
+        // already-quantized accumulated scale is a no-op.
+        for raw in [1.1, 1.5, 2.0, 2.7, 3.3, 5.0] {
+            let q = quantize_raster_scale(raw);
+            assert_eq!(quantize_raster_scale(q), q, "not idempotent at {raw}");
+        }
+    }
 
     #[test]
     fn mock_backend_measures_text() {

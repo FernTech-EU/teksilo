@@ -352,6 +352,11 @@ impl RichTextEngine {
     /// calls.
     pub fn with_render_frame<R>(&mut self, f: impl FnOnce(&RenderFrame) -> R) -> R {
         let mut bridge = self.shared.borrow_mut();
+        // Follow the walker-set ambient raster scale (scene zoom) so
+        // document glyphs densify like the label path. Layout is
+        // unaffected; the flow falls back to a full render when the
+        // scale changed since the last frame.
+        self.flow.set_raster_scale(bridge.ambient_raster_scale());
         let frame = self.flow.render(bridge.service_mut());
         f(frame)
     }
@@ -362,6 +367,7 @@ impl RichTextEngine {
         f: impl FnOnce(&RenderFrame) -> R,
     ) -> R {
         let mut bridge = self.shared.borrow_mut();
+        self.flow.set_raster_scale(bridge.ambient_raster_scale());
         let frame = self.flow.render_block_only(bridge.service_mut(), block_id);
         f(frame)
     }

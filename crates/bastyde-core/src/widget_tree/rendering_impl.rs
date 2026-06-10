@@ -1,5 +1,7 @@
 use super::*;
 
+use bastyde_canvas::quantize_raster_scale;
+
 /// Accessibility preferences passed through the paint recursion.
 struct A11yPaintPrefs {
     high_contrast: bool,
@@ -140,6 +142,9 @@ impl WidgetTree {
                 // Root starts enabled; the walker ANDs in each node's
                 // own `enabled_state` as it descends.
                 true,
+                // Root is at screen scale; transform scopes below
+                // multiply in their own scale.
+                1.0,
             );
         }
 
@@ -160,6 +165,9 @@ impl WidgetTree {
                 // anchor was disabled — overlays receive their own
                 // explicit enabled-state if they need one.
                 true,
+                // Overlays render at screen scale regardless of their
+                // anchor's transform scopes.
+                1.0,
             );
         }
 
@@ -217,6 +225,13 @@ impl WidgetTree {
 /// value to children. This is the single mechanism by which leaf widgets see
 /// the arena's enabled-state at paint time without needing to walk ancestors
 /// themselves (`PaintContext` carries no `WidgetId` or arena reference).
+///
+/// `accumulated_raster_scale` is the quantized product of every ancestor
+/// transform scope's scale (start `1.0` at root). The walker multiplies in
+/// this node's own transform scale, sets the result as the text backend's
+/// ambient raster scale around the node's paint (so text drawn here
+/// rasterizes densely enough for the GPU transform that will stretch it),
+/// stamps it on the node's paint cache, and forwards it to children.
 #[allow(clippy::too_many_arguments)]
 fn paint_widget_cached(
     arena: &mut WidgetArena,
@@ -230,6 +245,7 @@ fn paint_widget_cached(
     overlay_skip: &std::collections::HashSet<WidgetId>,
     layout_direction: crate::environment::LayoutDirection,
     parent_effective_enabled: bool,
+    accumulated_raster_scale: f32,
 ) {
     if !arena.is_active(id) {
         return;
@@ -328,6 +344,25 @@ fn paint_widget_cached(
     let clips = node.clips_children;
     let content_transform = node.content_transform;
     let bounds = node.bounds;
+
+    // Accumulated raster scale for this node and its subtree: multiply
+    // the ancestors' scale by this node's own transform scale (a
+    // SceneView zoom or a `Scale` wrapper) and re-quantize. Text painted
+    // inside the scope rasterizes at this density so the GPU transform
+    // lands a ~1:1 texel-to-pixel mapping instead of stretching a 1×
+    // bitmap. Pure translations/rotations have `geometric_scale() == 1`
+    // and inherit the parent value bit-identically.
+    let this_raster_scale = match push_transform {
+        Some(t) => quantize_raster_scale(accumulated_raster_scale * t.geometric_scale()),
+        None => accumulated_raster_scale,
+    };
+    // The backend currently holds the parent's ambient scale (root
+    // callers start at 1.0; every recursion level restores on exit), so
+    // it only needs touching when this node's scale differs.
+    let raster_scale_changed = this_raster_scale != accumulated_raster_scale;
+    if raster_scale_changed && let Some(tb) = text_backend {
+        tb.borrow_mut().set_raster_scale(this_raster_scale);
+    }
     // A *content* transform (a SceneView's pan/zoom) leaves the node's bounds a
     // fixed parent-space viewport and only moves the content. Emit its clip
     // BEFORE the transform so the renderer scissors to that fixed viewport
@@ -349,13 +384,18 @@ fn paint_widget_cached(
     }
 
     let node = arena.get(id).expect("node id is active (guarded above)");
-    let needs_paint = node.dirty.needs_paint;
+    // A clean widget's cached frames bake glyph quads at the raster
+    // scale current when they were recorded; when the ambient scale
+    // moved (a scene zoom crossed a quantization bucket), those quads
+    // sample wrong-density bitmaps — treat the node as needing paint.
+    let needs_paint =
+        node.dirty.needs_paint || node.paint_raster_scale != this_raster_scale;
 
     if needs_paint || node.cached_paint.is_none() {
         let resolved_theme = arena.resolve_theme(id, base_theme);
         let ctx = PaintContext {
             theme: &resolved_theme,
-            scale_factor: 1.0,
+            scale_factor: this_raster_scale,
             layout_direction,
             effective_enabled: this_effective_enabled,
             prefers_high_contrast: a11y_prefs.high_contrast,
@@ -376,6 +416,7 @@ fn paint_widget_cached(
         frame.merge(&widget_frame);
         if let Some(node) = arena.get_mut(id) {
             node.cached_paint = Some(widget_frame);
+            node.paint_raster_scale = this_raster_scale;
         }
     } else {
         let node = arena.get(id).expect("node id is active (guarded above)");
@@ -470,6 +511,7 @@ fn paint_widget_cached(
             overlay_skip,
             layout_direction,
             this_effective_enabled,
+            this_raster_scale,
         );
     }
 
@@ -489,7 +531,7 @@ fn paint_widget_cached(
             let resolved_theme = arena_ref.resolve_theme(id, base_theme);
             let ctx = PaintContext {
                 theme: &resolved_theme,
-                scale_factor: 1.0,
+                scale_factor: this_raster_scale,
                 layout_direction,
                 effective_enabled: this_effective_enabled,
                 prefers_high_contrast: a11y_prefs.high_contrast,
@@ -518,10 +560,17 @@ fn paint_widget_cached(
             .map(|n| n.cached_post_paint.is_some())
             .unwrap_or(false);
         if needs_paint || !has_post_cache {
+            // Children restored the backend to this node's ambient scale
+            // on their way out; re-assert defensively so post_paint text
+            // (e.g. a SceneView's foreground lightweight items) can't
+            // bake at a child-leaked scale.
+            if raster_scale_changed && let Some(tb) = text_backend {
+                tb.borrow_mut().set_raster_scale(this_raster_scale);
+            }
             let resolved_theme = arena.resolve_theme(id, base_theme);
             let ctx = PaintContext {
                 theme: &resolved_theme,
-                scale_factor: 1.0,
+                scale_factor: this_raster_scale,
                 layout_direction,
                 effective_enabled: this_effective_enabled,
                 prefers_high_contrast: a11y_prefs.high_contrast,
@@ -586,6 +635,12 @@ fn paint_widget_cached(
             .draw_order
             .push(bastyde_canvas::DrawCommand::EndBlurredSubtree);
     }
+
+    // Unwind the ambient raster scale to the parent's value so siblings
+    // painted after this subtree see their own ancestor scale.
+    if raster_scale_changed && let Some(tb) = text_backend {
+        tb.borrow_mut().set_raster_scale(accumulated_raster_scale);
+    }
 }
 
 /// Debug-build corruption catcher: before a retained paint frame is
@@ -646,17 +701,44 @@ mod tests {
     /// Headless text backend that records every `touch_layout` call and
     /// hands out layouts with a fixed non-zero `layout_key`, so tests
     /// can assert that paint-cache reuse keeps glyph timestamps fresh.
+    /// Also tracks the ambient raster scale (`set_raster_scale`) and the
+    /// scale every `layout_single_line` call ran under, so walker tests
+    /// can assert the set/restore discipline around transform scopes.
+    #[derive(Default)]
     struct RecordingTextBackend {
         touched: std::rc::Rc<std::cell::RefCell<Vec<u64>>>,
+        raster_scale: f32,
+        /// Ambient raster scale observed by each `layout_single_line`
+        /// call, in call order.
+        layout_scales: std::rc::Rc<std::cell::RefCell<Vec<f32>>>,
+    }
+
+    impl RecordingTextBackend {
+        fn new(touched: std::rc::Rc<std::cell::RefCell<Vec<u64>>>) -> Self {
+            Self {
+                touched,
+                raster_scale: 1.0,
+                layout_scales: Default::default(),
+            }
+        }
     }
 
     impl bastyde_canvas::TextBackend for RecordingTextBackend {
+        fn set_raster_scale(&mut self, raster_scale: f32) {
+            self.raster_scale = raster_scale;
+        }
+
+        fn raster_scale(&self) -> f32 {
+            self.raster_scale
+        }
+
         fn layout_single_line(
             &mut self,
             text: &str,
             _style: &bastyde_tokens::TextStyle,
             _max_width: Option<f32>,
         ) -> bastyde_canvas::TextLayout {
+            self.layout_scales.borrow_mut().push(self.raster_scale);
             bastyde_canvas::TextLayout {
                 width: text.len() as f32 * 8.0,
                 height: 16.0,
@@ -667,6 +749,7 @@ mod tests {
                 layout_key: 42,
                 line_count: 1,
                 spans: Vec::new(),
+                raster_scale: self.raster_scale,
             }
         }
 
@@ -710,9 +793,7 @@ mod tests {
     #[test]
     fn full_frame_cache_hit_touches_layout_keys() {
         let touched = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let backend = RecordingTextBackend {
-            touched: touched.clone(),
-        };
+        let backend = RecordingTextBackend::new(touched.clone());
         let mut tree = WidgetTree::new()
             .with_theme(crate::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(backend)));
@@ -733,6 +814,117 @@ mod tests {
              touched = {:?}",
             touched.borrow()
         );
+    }
+
+    /// Shared fixture: a root stack with a text leaf before, inside, and
+    /// after a transform-scoped wrapper:
+    ///
+    /// ```text
+    /// root Stack
+    /// ├── TextPaintWidget          (A, screen scale)
+    /// ├── Stack [transform]        (wrapper)
+    /// │   └── TextPaintWidget      (B, scaled)
+    /// └── TextPaintWidget          (C, screen scale)
+    /// ```
+    fn scaled_subtree_tree(
+        transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
+    ) -> (
+        WidgetTree,
+        std::rc::Rc<std::cell::RefCell<RecordingTextBackend>>,
+        std::rc::Rc<std::cell::RefCell<Vec<f32>>>,
+    ) {
+        let backend = RecordingTextBackend::new(Default::default());
+        let layout_scales = backend.layout_scales.clone();
+        let backend_rc = std::rc::Rc::new(std::cell::RefCell::new(backend));
+        let mut tree = WidgetTree::new()
+            .with_theme(crate::presets::intui::light())
+            .with_text_backend(
+                backend_rc.clone() as std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>
+            );
+
+        let root = tree.add(StackWidget::new());
+        tree.add_child(root, TextPaintWidget); // A
+        let wrapper = tree.add_child(root, StackWidget::new());
+        tree.add_child(wrapper, TextPaintWidget); // B
+        tree.add_child(root, TextPaintWidget); // C
+        tree.set_transform(wrapper, transform);
+
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        (tree, backend_rc, layout_scales)
+    }
+
+    #[test]
+    fn walker_sets_raster_scale_for_scaled_subtree_and_restores() {
+        let (mut tree, backend_rc, layout_scales) =
+            scaled_subtree_tree(bastyde_canvas::Transform2D::scale(2.0, 2.0));
+        let _ = tree.render();
+
+        // Paint order is child order: A (screen), B (inside the 2x
+        // scope, quantized onto the 1.25^n ladder), C (screen again —
+        // the wrapper restored the ambient scale on exit).
+        let expected_b = 1.25_f32.powi(3); // quantize(2.0)
+        assert_eq!(
+            layout_scales.borrow().as_slice(),
+            &[1.0, expected_b, 1.0],
+            "text inside the transform scope must lay out at the quantized \
+             scale; siblings before/after at screen scale"
+        );
+        // The walk unwound to the root ambient scale.
+        assert_eq!(backend_rc.borrow().raster_scale, 1.0);
+    }
+
+    #[test]
+    fn raster_scale_change_repaints_clean_descendants() {
+        let transform =
+            crate::signal::Signal::new(bastyde_canvas::Transform2D::scale(2.0, 2.0));
+        let (mut tree, _backend_rc, layout_scales) = scaled_subtree_tree(transform.clone());
+        let _ = tree.render();
+        layout_scales.borrow_mut().clear();
+
+        // Zoom changes: only the wrapper node is dirtied (RepaintOnly
+        // binding); its text child B stays clean — the raster-scale
+        // stamp on B's paint cache must force the repaint anyway.
+        transform.set(bastyde_canvas::Transform2D::scale(3.0, 3.0));
+        let _ = tree.render();
+        assert_eq!(
+            layout_scales.borrow().as_slice(),
+            &[1.25_f32.powi(5)],
+            "the clean text leaf inside the scope must re-rasterize at the \
+             new quantized scale (A and C stay cached: no layout calls)"
+        );
+
+        // And back down to identity: B re-bakes once more at 1.0.
+        layout_scales.borrow_mut().clear();
+        transform.set(bastyde_canvas::Transform2D::IDENTITY);
+        let _ = tree.render();
+        assert_eq!(layout_scales.borrow().as_slice(), &[1.0]);
+
+        // Steady state: nothing dirty, no scale movement → full-frame
+        // cache hit, zero layout calls.
+        layout_scales.borrow_mut().clear();
+        let _ = tree.render();
+        assert!(layout_scales.borrow().is_empty());
+    }
+
+    #[test]
+    fn nested_scale_transforms_multiply() {
+        let backend = RecordingTextBackend::new(Default::default());
+        let layout_scales = backend.layout_scales.clone();
+        let mut tree = WidgetTree::new()
+            .with_theme(crate::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(backend)));
+
+        // outer [2x] → inner [1.5x] → text. Accumulation:
+        // quantize(2.0) = 1.25^3, then quantize(1.25^3 × 1.5) = 1.25^5.
+        let outer = tree.add(StackWidget::new());
+        let inner = tree.add_child(outer, StackWidget::new());
+        tree.add_child(inner, TextPaintWidget);
+        tree.set_transform(outer, bastyde_canvas::Transform2D::scale(2.0, 2.0));
+        tree.set_content_transform(inner, bastyde_canvas::Transform2D::scale(1.5, 1.5));
+
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+        assert_eq!(layout_scales.borrow().as_slice(), &[1.25_f32.powi(5)]);
     }
 
     #[test]

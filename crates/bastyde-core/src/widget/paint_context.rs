@@ -6,6 +6,15 @@ use crate::widget_id::WidgetId;
 /// Context available during painting.
 pub struct PaintContext<'a> {
     pub theme: &'a crate::styles::Theme,
+    /// Accumulated (quantized) scale of the transform scopes enclosing
+    /// this widget — `1.0` outside any scale transform, the zoom-derived
+    /// raster ladder value inside a `SceneView` / `Scale` wrapper. This
+    /// is the ambient text raster scale the walker has already set on
+    /// the shared `TextBackend`; widgets normally don't need it (text
+    /// drawn via `Canvas::draw_text` / `draw_paragraph` picks it up
+    /// automatically), but resolution-dependent custom paint can read
+    /// it to densify its own raster content. NOT the HiDPI device scale
+    /// — that lives on the renderer/text-service.
     pub scale_factor: f32,
     /// Active layout direction. Used by widgets that have to resolve
     /// Leading/Trailing semantics into geometric Left/Right at paint

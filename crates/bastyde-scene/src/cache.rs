@@ -41,9 +41,17 @@ pub enum CacheMode {
 /// observer can both touch it.
 #[derive(Debug, Default)]
 pub struct ItemCoordinateCache {
-    /// `id` → cached RenderFrame in **local item coordinates**.
-    /// Looked up by the paint walk; dropped on geometry change.
-    entries: HashMap<ItemId, RenderFrame>,
+    /// `id` → cached RenderFrame in **local item coordinates**, plus
+    /// the text raster scale the frame was recorded at. Looked up by
+    /// the paint walk; dropped on geometry change. The scale rides
+    /// along because glyph quads in the frame sample bitmaps of that
+    /// density: when the item's effective raster scale moves (the
+    /// view's zoom crossed a raster bucket, or the item's own
+    /// transform scale changed), [`get`](Self::get) misses and the
+    /// item re-records against fresh bitmaps. The arena-level
+    /// `paint_raster_scale` stamp can't reach frames cached here, so
+    /// the scale must be part of this cache's own validity.
+    entries: HashMap<ItemId, (RenderFrame, f32)>,
     /// [`TextBackend::glyph_epoch`](bastyde_canvas::TextBackend::glyph_epoch)
     /// as of the last paint pass that consulted this cache. Cached
     /// frames bake glyph atlas UVs; when the backend evicts or resets
@@ -71,14 +79,21 @@ impl ItemCoordinateCache {
         self.entries.contains_key(&id)
     }
 
-    /// Borrow the cached frame for `id`, if any.
-    pub fn get(&self, id: ItemId) -> Option<&RenderFrame> {
-        self.entries.get(&id)
+    /// Borrow the cached frame for `id`, if any — provided it was
+    /// recorded at `raster_scale`. A scale mismatch reads as a miss:
+    /// the caller re-records and [`insert`](Self::insert) replaces the
+    /// stale entry.
+    pub fn get(&self, id: ItemId, raster_scale: f32) -> Option<&RenderFrame> {
+        self.entries
+            .get(&id)
+            .filter(|(_, baked)| *baked == raster_scale)
+            .map(|(frame, _)| frame)
     }
 
-    /// Insert (or replace) a cached frame for `id`.
-    pub fn insert(&mut self, id: ItemId, frame: RenderFrame) {
-        self.entries.insert(id, frame);
+    /// Insert (or replace) a cached frame for `id`, recorded at
+    /// `raster_scale`.
+    pub fn insert(&mut self, id: ItemId, frame: RenderFrame, raster_scale: f32) {
+        self.entries.insert(id, (frame, raster_scale));
     }
 
     /// Evict `id`'s entry. Called on `ItemChange::LocalBoundsChanged`
@@ -137,7 +152,7 @@ mod tests {
         let mut c = ItemCoordinateCache::new();
         let id = fresh_id();
         assert!(!c.contains(id));
-        c.insert(id, RenderFrame::default());
+        c.insert(id, RenderFrame::default(), 1.0);
         assert!(c.contains(id));
         assert_eq!(c.len(), 1);
         c.evict(id);
@@ -149,7 +164,7 @@ mod tests {
     fn sync_glyph_epoch_clears_on_change_only() {
         let mut c = ItemCoordinateCache::new();
         let id = fresh_id();
-        c.insert(id, RenderFrame::default());
+        c.insert(id, RenderFrame::default(), 1.0);
 
         // Same epoch as the initial one (0): entries survive.
         assert!(!c.sync_glyph_epoch(0));
@@ -162,8 +177,27 @@ mod tests {
         assert!(c.is_empty());
 
         // Same epoch again: a refilled cache survives.
-        c.insert(id, RenderFrame::default());
+        c.insert(id, RenderFrame::default(), 1.0);
         assert!(!c.sync_glyph_epoch(1));
         assert!(c.contains(id));
+    }
+
+    #[test]
+    fn get_misses_on_raster_scale_mismatch() {
+        let mut c = ItemCoordinateCache::new();
+        let id = fresh_id();
+        c.insert(id, RenderFrame::default(), 1.0);
+
+        // Hit at the recorded scale.
+        assert!(c.get(id, 1.0).is_some());
+        // The zoom crossed a raster bucket: the entry's glyph quads
+        // sample bitmaps of the old density — read as a miss so the
+        // item re-records.
+        assert!(c.get(id, 1.953_125).is_none());
+        // Replacing re-records at the new scale.
+        c.insert(id, RenderFrame::default(), 1.953_125);
+        assert!(c.get(id, 1.953_125).is_some());
+        assert!(c.get(id, 1.0).is_none());
+        assert_eq!(c.len(), 1);
     }
 }

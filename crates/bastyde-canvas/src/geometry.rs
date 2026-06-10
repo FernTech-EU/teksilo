@@ -331,6 +331,19 @@ impl Transform2D {
         *self == Self::IDENTITY
     }
 
+    /// Overall scale magnitude of the linear part: `sqrt(|det|)`, the
+    /// geometric mean of the two axis scales. Rotation-invariant (a pure
+    /// rotation returns `1.0`); anisotropic scales average. Used by the
+    /// paint walker to derive the glyph raster densification for content
+    /// under a scale transform — area is what determines how many screen
+    /// pixels a glyph covers, so the geometric mean is the right single
+    /// number for an anisotropic transform too.
+    pub fn geometric_scale(&self) -> f32 {
+        let [a, b, c, d, _, _] = self.m;
+        let det = (a * d - c * b).abs();
+        if det.is_finite() { det.sqrt() } else { 1.0 }
+    }
+
     /// Inverse of the affine transform, or `None` if the linear part is
     /// singular (determinant zero — a degenerate scale that collapses an
     /// axis). Used by hit-testing to map a screen-space point back into a

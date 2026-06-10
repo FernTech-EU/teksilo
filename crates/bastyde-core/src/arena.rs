@@ -185,6 +185,13 @@ pub struct WidgetNode {
     /// `draw_order` (after the child subtree). Reused on the same
     /// `needs_paint` gate.
     pub(crate) cached_post_paint: Option<RenderFrame>,
+    /// The ambient raster scale `cached_paint` / `cached_post_paint`
+    /// were baked at (the paint walker's accumulated transform scale,
+    /// quantized). Glyph quads in those frames reference bitmaps of
+    /// that density; when the walker's current scale differs (a scene
+    /// zoom crossed a quantization bucket), the cached frames are
+    /// treated as `needs_paint` even though the widget itself is clean.
+    pub(crate) paint_raster_scale: f32,
     /// The `WidgetTree::paint_epoch` at which this widget's bounds were
     /// last observed inside the window viewport by the paint pass.
     /// The animation scheduler uses this to pause looping animations
@@ -295,6 +302,7 @@ impl WidgetNode {
             blur_prop: None,
             cached_paint: None,
             cached_post_paint: None,
+            paint_raster_scale: 1.0,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
