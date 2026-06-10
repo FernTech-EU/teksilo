@@ -81,6 +81,19 @@ pub enum ShortcutScope {
     Scoped(WidgetId),
 }
 
+/// Whether two shortcut scopes can be active at the same time — the
+/// basis for [`ShortcutRegistry::find_conflict`]. A `Global` shortcut is
+/// active everywhere, so it can collide with anything; two `Scoped`
+/// shortcuts collide only when scoped to the same widget. (Distinct
+/// `Scoped` ids whose subtrees happen to nest are treated as disjoint —
+/// the registry has no tree to prove containment.)
+fn scopes_can_collide(a: ShortcutScope, b: ShortcutScope) -> bool {
+    match (a, b) {
+        (ShortcutScope::Scoped(x), ShortcutScope::Scoped(y)) => x == y,
+        _ => true,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shortcut
 // ---------------------------------------------------------------------------
@@ -767,25 +780,46 @@ impl ShortcutRegistry {
         items.into_iter()
     }
 
-    /// Find the first shortcut id currently bound to `keystroke`,
-    /// excluding `excluding_id` if given. Used by settings UIs to
-    /// auto-unbind conflicts when the user rebinds a chord. Includes
-    /// disabled shortcuts — a chord is "taken" regardless of whether
-    /// its current binding is live.
+    /// Find the first shortcut id that **genuinely** conflicts with
+    /// `keystroke`, excluding `excluding_id` if given. Used by settings
+    /// UIs to auto-unbind conflicts when the user rebinds a chord.
+    /// Includes disabled shortcuts — a chord is "taken" regardless of
+    /// whether its current binding is live.
+    ///
+    /// **Scope-aware.** Two shortcuts only conflict when they could be
+    /// simultaneously active: either one is [`ShortcutScope::Global`]
+    /// (active everywhere), or both are [`ShortcutScope::Scoped`] to the
+    /// **same** widget. Two shortcuts scoped to *different* widgets —
+    /// e.g. a `Delete` binding in two separate panels — are **not** a
+    /// conflict, because the dispatcher resolves them by focus. (The
+    /// registry can't see the tree, so two different `Scoped` ids are
+    /// assumed disjoint; the rare genuinely-nested overlap is left
+    /// unflagged, erring toward allowing the binding.)
+    ///
+    /// When `excluding_id` is `None` (or names an unregistered id) the
+    /// "self" scope is unknown, so every same-chord shortcut is flagged
+    /// — the safe, conservative fallback.
     pub fn find_conflict(
         &self,
         keystroke: KeyStroke,
         excluding_id: Option<&str>,
     ) -> Option<&'static str> {
+        let self_scope = excluding_id
+            .and_then(|eid| self.defaults.get(eid))
+            .map(|s| s.scope);
         self.defaults.iter().find_map(|(&id, shortcut)| {
             if excluding_id == Some(id) {
                 return None;
             }
             let (primary, secondary) = self.resolved_keystrokes(id, shortcut);
-            if primary == Some(keystroke) || secondary == Some(keystroke) {
-                Some(id)
-            } else {
-                None
+            if primary != Some(keystroke) && secondary != Some(keystroke) {
+                return None;
+            }
+            // Chord matches — apply the scope rule. With no known self
+            // scope, flag unconditionally (conservative fallback).
+            match self_scope {
+                Some(self_scope) if !scopes_can_collide(self_scope, shortcut.scope) => None,
+                _ => Some(id),
             }
         })
     }
@@ -1276,6 +1310,69 @@ mod tests {
         assert_eq!(
             reg.find_conflict(KeyStroke::ctrl(Key::X), Some("a")),
             Some("b")
+        );
+    }
+
+    #[test]
+    fn find_conflict_is_scope_aware() {
+        use slotmap::KeyData;
+        let panel_a: WidgetId = KeyData::from_ffi(11).into();
+        let panel_b: WidgetId = KeyData::from_ffi(22).into();
+
+        let mut reg = ShortcutRegistry::new();
+        // Same chord (Delete) scoped to two different panels — legitimate,
+        // resolved by focus at runtime, NOT a conflict.
+        reg.register(
+            Shortcut::new("a.delete")
+                .scope_to(panel_a)
+                .primary(KeyStroke::new(Key::Delete, Modifiers::NONE))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("b.delete")
+                .scope_to(panel_b)
+                .primary(KeyStroke::new(Key::Delete, Modifiers::NONE))
+                .build(),
+        );
+        assert_eq!(
+            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("a.delete")),
+            None,
+            "Delete in a different panel scope is not a conflict"
+        );
+
+        // A second shortcut scoped to the SAME panel IS a conflict.
+        reg.register(
+            Shortcut::new("a.delete2")
+                .scope_to(panel_a)
+                .primary(KeyStroke::new(Key::Delete, Modifiers::NONE))
+                .build(),
+        );
+        assert_eq!(
+            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("a.delete")),
+            Some("a.delete2"),
+            "same-scope same-chord is a real conflict"
+        );
+
+        // A Global shortcut on the same chord collides with everything.
+        reg.register(
+            Shortcut::new("g.delete")
+                .global()
+                .primary(KeyStroke::new(Key::Delete, Modifiers::NONE))
+                .build(),
+        );
+        // The global excludes itself and collides with all three scoped
+        // bindings; HashMap order makes the exact id arbitrary, so just
+        // require it found one of them.
+        let hit =
+            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("g.delete"));
+        assert!(
+            matches!(hit, Some("a.delete" | "a.delete2" | "b.delete")),
+            "a global chord conflicts with any scoped binding, got {hit:?}"
+        );
+        assert_eq!(
+            reg.find_conflict(KeyStroke::new(Key::Delete, Modifiers::NONE), Some("b.delete")),
+            Some("g.delete"),
+            "a scoped binding conflicts with a global on the same chord"
         );
     }
 
