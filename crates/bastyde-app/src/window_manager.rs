@@ -80,6 +80,14 @@ pub(crate) struct ManagedWindow {
     /// `WindowStateService` is registered. Dropped when the window
     /// is removed from `WindowManager::windows`.
     pub _persist_handles: Vec<bastyde_core::ObserverHandle>,
+    /// Glyph-atlas content version last uploaded to THIS window's
+    /// renderer (`AtlasInfo::version`). Each window compares this
+    /// against the shared bridge's current version on its own redraw
+    /// and re-uploads when behind — the version model replaces
+    /// consume-once dirty semantics so several windows all converge on
+    /// the same atlas content. `0` = nothing uploaded yet; stays `0`
+    /// (unused) when the `text` feature is off.
+    pub atlas_uploaded_version: u64,
 }
 
 /// Manages multiple application windows.
@@ -521,6 +529,8 @@ impl WindowManager {
             self.a11y_prefs.text_scale_factor,
         );
 
+        #[cfg_attr(not(feature = "text"), allow(unused_mut))]
+        let mut primed_atlas_version: u64 = 0;
         #[cfg(feature = "text")]
         {
             if let Some(ref typesetter) = self.typesetter {
@@ -528,23 +538,29 @@ impl WindowManager {
                 tree = tree.with_text_backend(typesetter.as_text_backend());
 
                 // Prime the new window's GPU atlas from the shared
-                // typesetter. The dirty-flag path in `handle_redraw_requested`
-                // only uploads when `atlas_info()` reports pending changes;
-                // a window created after the atlas already contains every
+                // typesetter. The versioned path in
+                // `handle_redraw_requested` only uploads when this
+                // window's `atlas_uploaded_version` lags the bridge; a
+                // window created after the atlas already contains every
                 // glyph it needs (e.g. reopening a modal with the same
                 // labels) would otherwise render text against an empty
-                // per-window atlas texture.
-                let (w, h, pixels) = {
+                // per-window atlas texture. Read-only access on purpose:
+                // calling `atlas_info` here would consume the pending
+                // text-activity flag and the eviction-epoch delta that
+                // belong to the creating window's in-flight redraw.
+                let (w, h, pixels, version) = {
                     let bridge = typesetter.bridge().borrow();
                     let service = bridge.service();
                     (
                         service.atlas_width(),
                         service.atlas_height(),
                         service.atlas_pixels().to_vec(),
+                        bridge.atlas_version(),
                     )
                 };
                 if w > 0 && h > 0 {
                     pw.renderer_mut().upload_atlas(w, h, &pixels);
+                    primed_atlas_version = version;
                 }
             }
         }
@@ -639,6 +655,7 @@ impl WindowManager {
             ime_allowed: None,
             ime_purpose: None,
             _persist_handles: persist_handles,
+            atlas_uploaded_version: primed_atlas_version,
         };
 
         self.windows.insert(winit_id, managed);
@@ -1020,8 +1037,10 @@ impl WindowManager {
         self.windows.values()
     }
 
-    /// Mutably iterate over all managed windows.
-    #[allow(dead_code)]
+    /// Mutably iterate over all managed windows. During a redraw the
+    /// current window is taken out of the map (`take_managed`), so this
+    /// yields every OTHER window — which is exactly what the glyph-atlas
+    /// eviction recovery wants when broadcasting paint invalidation.
     pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut ManagedWindow> {
         self.windows.values_mut()
     }

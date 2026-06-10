@@ -71,24 +71,29 @@ impl StreamBuffer {
     /// Upload `data` at the current write cursor and advance the cursor.
     ///
     /// Returns `Some((buffer, offset, len_bytes))` on success, or `None`
-    /// if [`ensure_capacity`](Self::ensure_capacity) was never called. The
-    /// caller should slice the returned buffer at `offset..offset + len`
-    /// when binding.
+    /// if [`ensure_capacity`](Self::ensure_capacity) was never called OR
+    /// the write would overflow the buffer's capacity. The caller should
+    /// slice the returned buffer at `offset..offset + len` when binding.
     ///
-    /// Panics if `data.len() + write_offset > capacity_bytes`; the caller
-    /// must size the buffer correctly up-front via `ensure_capacity`.
+    /// An overflow means the frame-start sizing undercounted this
+    /// pipeline's quads (see `stream_quad_counts` in `renderer.rs`).
+    /// Debug builds assert with the accounting details; release builds
+    /// skip the batch — a dropped draw is recoverable, whereas
+    /// forwarding an out-of-bounds `write_buffer` to wgpu is a
+    /// validation error that kills the device.
     pub fn write(&self, queue: &wgpu::Queue, data: &[u8]) -> Option<(&wgpu::Buffer, u64, u64)> {
         let buf = self.buffer.as_ref()?;
         let offset = self.write_offset.get();
         let len = data.len() as u64;
-        debug_assert!(
-            offset + len <= self.capacity_bytes,
-            "StreamBuffer overflow: {} + {} > {} ({})",
-            offset,
-            len,
-            self.capacity_bytes,
-            self.label
-        );
+        if offset + len > self.capacity_bytes {
+            debug_assert!(
+                false,
+                "StreamBuffer overflow: {} + {} > {} ({}) — frame-start quad count \
+                 undercounted this pipeline; the batch is dropped",
+                offset, len, self.capacity_bytes, self.label
+            );
+            return None;
+        }
         queue.write_buffer(buf, offset, data);
         self.write_offset.set(offset + len);
         Some((buf, offset, len))

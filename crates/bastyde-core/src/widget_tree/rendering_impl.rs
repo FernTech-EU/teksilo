@@ -79,6 +79,24 @@ impl WidgetTree {
                     frame.anim_params.clear();
                     frame.anim_params.extend_from_slice(src);
                 }
+                // Refresh the text backend's glyph timestamps for every
+                // layout baked into the reused frame — same contract as
+                // the per-widget cached_paint path below. Without this,
+                // a window that idles on the full-frame cache while
+                // text work elsewhere (another window, or measure-only
+                // layout passes) advances the atlas generation would
+                // have its still-visible glyphs evicted and their atlas
+                // slots reused, garbling the cached quads.
+                if !frame.layout_keys.is_empty()
+                    && let Some(tb) = &self.text_backend
+                {
+                    let mut tb = tb.borrow_mut();
+                    for key in &frame.layout_keys {
+                        tb.touch_layout(*key);
+                    }
+                    #[cfg(debug_assertions)]
+                    debug_validate_layout_keys(&*tb, &frame.layout_keys, None);
+                }
                 return std::rc::Rc::clone(cached);
             }
         }
@@ -376,6 +394,8 @@ fn paint_widget_cached(
                 for key in &cached.layout_keys {
                     tb.touch_layout(*key);
                 }
+                #[cfg(debug_assertions)]
+                debug_validate_layout_keys(&*tb, &cached.layout_keys, Some(id));
             }
             frame.merge(cached);
         }
@@ -528,6 +548,8 @@ fn paint_widget_cached(
                 for key in &cached.layout_keys {
                     tb.touch_layout(*key);
                 }
+                #[cfg(debug_assertions)]
+                debug_validate_layout_keys(&*tb, &cached.layout_keys, Some(id));
             }
             frame.merge(cached);
         }
@@ -566,11 +588,205 @@ fn paint_widget_cached(
     }
 }
 
+/// Debug-build corruption catcher: before a retained paint frame is
+/// replayed, verify that every layout baked into it still matches the
+/// live glyph atlas.
+///
+/// A `RectMismatch` means the frame's glyph quads reference atlas pixels
+/// that were evicted and reused — replaying them draws the wrong
+/// characters (the historical "random text corruption fixed by a
+/// repaint" bug). That is always a missing cache-invalidation path, so
+/// abort with a diagnostic. A `StaleKey` (backend forgot the layout
+/// entirely — its caches were cleared after this frame was baked) is the
+/// same bug class but can transiently occur around legitimate wholesale
+/// clears, so it logs loudly (once per key) instead of aborting.
+#[cfg(debug_assertions)]
+fn debug_validate_layout_keys(
+    tb: &dyn bastyde_canvas::TextBackend,
+    layout_keys: &[u64],
+    widget: Option<WidgetId>,
+) {
+    use bastyde_canvas::GlyphValidation;
+    std::thread_local! {
+        static REPORTED_STALE_KEYS: std::cell::RefCell<std::collections::HashSet<u64>> =
+            std::cell::RefCell::new(std::collections::HashSet::new());
+    }
+    for key in layout_keys {
+        match tb.debug_validate_layout(*key) {
+            GlyphValidation::Valid => {}
+            GlyphValidation::StaleKey => {
+                let first_report =
+                    REPORTED_STALE_KEYS.with(|set| set.borrow_mut().insert(*key));
+                if first_report {
+                    eprintln!(
+                        "[bastyde] WARNING: retained paint cache replays layout_key={key} \
+                         (widget={widget:?}) that the text backend no longer knows — the \
+                         frame survived a backend cache clear, so a paint-cache \
+                         invalidation path is likely missing."
+                    );
+                }
+            }
+            GlyphValidation::RectMismatch => {
+                panic!(
+                    "stale glyph UVs in retained paint cache (layout_key={key}, \
+                     widget={widget:?}): cached quads no longer match the live glyph \
+                     atlas — a cache-invalidation path is missing"
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_widgets::{FillWidget, StackWidget};
     use bastyde_tokens::{Color, CornerRadius};
+
+    /// Headless text backend that records every `touch_layout` call and
+    /// hands out layouts with a fixed non-zero `layout_key`, so tests
+    /// can assert that paint-cache reuse keeps glyph timestamps fresh.
+    struct RecordingTextBackend {
+        touched: std::rc::Rc<std::cell::RefCell<Vec<u64>>>,
+    }
+
+    impl bastyde_canvas::TextBackend for RecordingTextBackend {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            _style: &bastyde_tokens::TextStyle,
+            _max_width: Option<f32>,
+        ) -> bastyde_canvas::TextLayout {
+            bastyde_canvas::TextLayout {
+                width: text.len() as f32 * 8.0,
+                height: 16.0,
+                ascent: 12.0,
+                descent: 4.0,
+                underline_offset: 1.0,
+                underline_thickness: 1.0,
+                layout_key: 42,
+                line_count: 1,
+                spans: Vec::new(),
+            }
+        }
+
+        fn ensure_glyphs(
+            &mut self,
+            _layout: &bastyde_canvas::TextLayout,
+        ) -> Vec<bastyde_canvas::GlyphQuad> {
+            Vec::new()
+        }
+
+        fn touch_layout(&mut self, layout_key: u64) {
+            self.touched.borrow_mut().push(layout_key);
+        }
+    }
+
+    /// Leaf widget that draws one line of text so its emitted frame
+    /// carries a `layout_key`.
+    #[derive(Debug)]
+    struct TextPaintWidget;
+
+    impl Widget for TextPaintWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(100.0, 20.0).into()
+        }
+
+        fn paint(
+            &self,
+            bounds: bastyde_canvas::Rect,
+            canvas: &mut bastyde_canvas::Canvas,
+            _ctx: &PaintContext,
+        ) {
+            let style = bastyde_tokens::TextStyle::default();
+            let _ = canvas.draw_text("hello", bounds, &style, Color::BLACK);
+        }
+    }
+
+    #[test]
+    fn full_frame_cache_hit_touches_layout_keys() {
+        let touched = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let backend = RecordingTextBackend {
+            touched: touched.clone(),
+        };
+        let mut tree = WidgetTree::new()
+            .with_theme(crate::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(backend)));
+        tree.add(TextPaintWidget);
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        // First render paints for real; no cache reuse yet.
+        let _ = tree.render();
+        touched.borrow_mut().clear();
+
+        // Nothing is dirty: this render takes the full-frame early-out.
+        // The reused frame's layout keys must still be touched, or the
+        // backend's LRU ages out glyphs that are on screen.
+        let _ = tree.render();
+        assert!(
+            touched.borrow().contains(&42),
+            "full-frame cache hit must touch_layout every baked layout key; \
+             touched = {:?}",
+            touched.borrow()
+        );
+    }
+
+    #[test]
+    fn invalidate_all_paints_clears_post_paint_cache() {
+        /// Widget that draws chrome in the foreground pass so the walker
+        /// populates `cached_post_paint`.
+        #[derive(Debug)]
+        struct PostPaintWidget;
+
+        impl Widget for PostPaintWidget {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(50.0, 50.0).into()
+            }
+
+            fn wants_post_paint(&self) -> bool {
+                true
+            }
+
+            fn post_paint(
+                &self,
+                bounds: bastyde_canvas::Rect,
+                canvas: &mut bastyde_canvas::Canvas,
+                _ctx: &PaintContext,
+            ) {
+                canvas.fill_rect(bounds, Color::RED);
+            }
+        }
+
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let id = tree.add(PostPaintWidget);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let _ = tree.render();
+        assert!(
+            tree.arena
+                .get(id)
+                .and_then(|n| n.cached_post_paint.as_ref())
+                .is_some(),
+            "render must populate cached_post_paint for a post-painting widget"
+        );
+
+        tree.invalidate_all_paints();
+        assert!(
+            tree.arena
+                .get(id)
+                .and_then(|n| n.cached_post_paint.as_ref())
+                .is_none(),
+            "invalidate_all_paints must clear cached_post_paint too — a retained \
+             post-paint frame can hold stale glyph UVs after atlas eviction"
+        );
+    }
 
     #[derive(Debug)]
     struct ThemeAwareWidget;

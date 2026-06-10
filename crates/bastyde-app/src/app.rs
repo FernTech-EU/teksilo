@@ -1399,18 +1399,41 @@ impl BastydeAppHandler {
 
         #[cfg(feature = "text")]
         {
-            let atlas = self.typesetter.bridge().borrow_mut().atlas_info();
-            if atlas.dirty && atlas.width > 0 && atlas.height > 0 {
+            let atlas = self
+                .typesetter
+                .bridge()
+                .borrow_mut()
+                .atlas_info(managed.atlas_uploaded_version);
+            if atlas.version != managed.atlas_uploaded_version
+                && atlas.width > 0
+                && atlas.height > 0
+            {
                 managed.platform_window.renderer_mut().upload_atlas(
                     atlas.width,
                     atlas.height,
                     &atlas.pixels,
                 );
+                managed.atlas_uploaded_version = atlas.version;
             }
 
             if atlas.glyphs_evicted {
+                // Glyphs were evicted since the previous atlas_info call
+                // (any path: snapshot scan, rich-text render scan, or
+                // scale-factor reset). Every retained paint frame in
+                // EVERY window may hold quads whose atlas UVs now point
+                // at recycled slots — and invalidate_cache() below clears
+                // the bridge's layout/glyph caches, which also kills the
+                // touch_layout keep-alive for frames baked before the
+                // clear. Invalidate all windows, not just the current
+                // one; the others re-render at their own requested
+                // redraw with fresh layouts and pull the current atlas
+                // pixels through the version comparison above.
                 self.typesetter.bridge().borrow_mut().invalidate_cache();
                 managed.tree.invalidate_all_paints();
+                for other in self.wm.iter_mut() {
+                    other.tree.invalidate_all_paints();
+                    other.platform_window.request_redraw();
+                }
                 // Re-render after atlas invalidation with a real ops
                 // sink so rebuild-triggered handlers on this recovery
                 // path can still open windows.
@@ -1423,13 +1446,30 @@ impl BastydeAppHandler {
                     current_arc.clone(),
                 );
                 frame = managed.tree.render_with_ops(&mut ops);
-                let atlas2 = self.typesetter.bridge().borrow_mut().atlas_info();
-                if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0 {
+                let atlas2 = self
+                    .typesetter
+                    .bridge()
+                    .borrow_mut()
+                    .atlas_info(managed.atlas_uploaded_version);
+                // The recovery re-render cannot legitimately evict again
+                // (the eviction scan's generation-cadence gate just
+                // reset), but atlas_info consumes the epoch delta — a
+                // report here would be silently lost, so check the
+                // assumption instead of assuming it.
+                debug_assert!(
+                    !atlas2.glyphs_evicted,
+                    "glyph eviction during eviction recovery — epoch delta would be lost"
+                );
+                if atlas2.version != managed.atlas_uploaded_version
+                    && atlas2.width > 0
+                    && atlas2.height > 0
+                {
                     managed.platform_window.renderer_mut().upload_atlas(
                         atlas2.width,
                         atlas2.height,
                         &atlas2.pixels,
                     );
+                    managed.atlas_uploaded_version = atlas2.version;
                 }
             }
         }

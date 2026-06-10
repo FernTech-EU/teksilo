@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bastyde_canvas::GlyphQuad;
 use bastyde_canvas::text_backend::{
-    AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
+    AtlasInfo, GlyphValidation, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
 };
 use bastyde_tokens::TextStyle;
 use text_typeset::atlas::cache::GlyphCacheKey;
@@ -122,12 +122,25 @@ pub struct TypesetterBridge {
     /// call forces the bridge to report the atlas as dirty one
     /// more time.
     rich_text_atlas_dirty: bool,
+    /// `TextFontService::eviction_epoch()` as of the previous
+    /// `atlas_info()` call. Comparing against the live epoch reports
+    /// evictions from EVERY internal path — the snapshot-driven scan,
+    /// the scan at the start of every rich-text `render()`
+    /// (`build_render_frame`), and the wholesale reset on scale-factor
+    /// change — not just the snapshot's own `glyphs_evicted` flag.
+    last_seen_eviction_epoch: u64,
+    /// Monotonic atlas content version, bumped whenever `atlas_info()`
+    /// observes changed pixels. Each window renderer records the version
+    /// it last uploaded; see [`AtlasInfo::version`].
+    atlas_version: u64,
 }
 
 impl TypesetterBridge {
     pub fn new() -> Self {
+        let service = TextFontService::new();
+        let last_seen_eviction_epoch = service.eviction_epoch();
         Self {
-            service: TextFontService::new(),
+            service,
             label_flow: DocumentFlow::new(),
             default_font: None,
             next_layout_key: 1,
@@ -135,6 +148,8 @@ impl TypesetterBridge {
             glyph_cache: HashMap::new(),
             had_text_activity: false,
             rich_text_atlas_dirty: false,
+            last_seen_eviction_epoch,
+            atlas_version: 1,
         }
     }
 
@@ -251,32 +266,61 @@ impl TypesetterBridge {
     /// when text work happened since the last call — this prevents
     /// aging out glyphs that are still visible but cached (idle
     /// app scenario).
-    pub fn atlas_info(&mut self) -> AtlasInfo {
-        let snapshot = self.service.atlas_snapshot(self.had_text_activity);
+    ///
+    /// `seen_version` is the [`AtlasInfo::version`] the caller last
+    /// uploaded (0 for a fresh consumer). Pixels are cloned into the
+    /// result only when the caller is behind, so several windows can
+    /// each pull the current atlas at their own redraw without the
+    /// first caller consuming it for everyone — and a clean-atlas
+    /// frame still skips the ~1 MB memcpy (profiling the animations
+    /// example showed an unconditional clone dominating self-time at
+    /// ~6 % during shader-driven animations).
+    ///
+    /// `glyphs_evicted` is derived from
+    /// [`TextFontService::eviction_epoch`], so it reports evictions
+    /// from every path — the snapshot scan below, the scan inside
+    /// every rich-text `render()`, and scale-factor resets — not just
+    /// the snapshot's own flag. On `true`, the caller must invalidate
+    /// every retained paint cache in every window.
+    pub fn atlas_info(&mut self, seen_version: u64) -> AtlasInfo {
+        let (snapshot_dirty, width, height) = {
+            let snapshot = self.service.atlas_snapshot(self.had_text_activity);
+            (snapshot.dirty, snapshot.width, snapshot.height)
+        };
         let rich_dirty = self.rich_text_atlas_dirty;
         self.rich_text_atlas_dirty = false;
         self.had_text_activity = false;
-        let dirty = snapshot.dirty || rich_dirty;
-        // Only copy the atlas pixels when the renderer is actually
-        // going to upload them. Callers consult `dirty` first and
-        // skip `upload_atlas` otherwise — so a clean-atlas frame no
-        // longer pays for a ~1 MB memcpy (512×512×4 or larger).
-        // Profiling the animations example showed this clone
-        // dominating self-time at ~6 % during shader-driven
-        // animations, purely because it ran at the ~30 Hz frame
-        // rate even though nothing in the atlas had changed.
-        let pixels = if dirty {
-            snapshot.pixels.to_vec()
+        let dirty = snapshot_dirty || rich_dirty;
+        if dirty {
+            self.atlas_version = self.atlas_version.wrapping_add(1);
+        }
+        let pixels = if seen_version != self.atlas_version {
+            self.service.atlas_pixels().to_vec()
         } else {
             Vec::new()
         };
+
+        let epoch = self.service.eviction_epoch();
+        let glyphs_evicted = epoch != self.last_seen_eviction_epoch;
+        self.last_seen_eviction_epoch = epoch;
+
         AtlasInfo {
             dirty,
-            width: snapshot.width,
-            height: snapshot.height,
+            width,
+            height,
             pixels,
-            glyphs_evicted: snapshot.glyphs_evicted,
+            version: self.atlas_version,
+            glyphs_evicted,
         }
+    }
+
+    /// Current atlas content version (see [`AtlasInfo::version`]),
+    /// without consuming any pending dirty/eviction state. Used when a
+    /// consumer primes itself outside the per-frame `atlas_info` flow —
+    /// e.g. a freshly created window uploading the current atlas pixels
+    /// directly — and needs the matching version stamp.
+    pub fn atlas_version(&self) -> u64 {
+        self.atlas_version
     }
 
     /// Convert a bastyde-tokens TextStyle to a text-typeset TextFormat.
@@ -677,6 +721,44 @@ impl TextBackend for TypesetterBridge {
             self.service.touch_glyphs(keys);
         }
     }
+
+    fn glyph_epoch(&self) -> u64 {
+        self.service.eviction_epoch()
+    }
+
+    fn debug_validate_layout(&self, layout_key: u64) -> GlyphValidation {
+        let Some((quads, keys)) = self.glyph_cache.get(&layout_key) else {
+            // The bridge's caches were cleared (eviction recovery or
+            // scale-factor change) after these quads were baked. A
+            // retained paint replaying them outlived an invalidation
+            // that should have reached it.
+            return GlyphValidation::StaleKey;
+        };
+        // `quads` and `keys` are parallel arrays: every layout_* path
+        // stores `result.glyphs` mapped 1:1 alongside
+        // `result.glyph_keys`, both produced by the same shaping pass.
+        debug_assert_eq!(quads.len(), keys.len());
+        for (quad, key) in quads.iter().zip(keys.iter()) {
+            // Zero-size quads (whitespace / .notdef placeholders) have
+            // no atlas residency requirement.
+            if quad.atlas[2] <= 0.0 || quad.atlas[3] <= 0.0 {
+                continue;
+            }
+            let Some(rect) = self.service.peek_glyph_rect(key) else {
+                return GlyphValidation::RectMismatch;
+            };
+            let baked = [
+                quad.atlas[0] as u32,
+                quad.atlas[1] as u32,
+                quad.atlas[2] as u32,
+                quad.atlas[3] as u32,
+            ];
+            if rect != baked {
+                return GlyphValidation::RectMismatch;
+            }
+        }
+        GlyphValidation::Valid
+    }
 }
 
 #[cfg(test)]
@@ -708,6 +790,182 @@ mod tests {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let layout = bridge.layout_single_line("", &TextStyle::default(), None);
         assert_eq!(layout.width, 0.0);
+    }
+
+    /// Minimal BlockLayoutParams for driving a rich-text `DocumentFlow`
+    /// through the bridge's shared service, the way `RichTextEngine` does.
+    fn make_test_block(
+        id: usize,
+        text: &str,
+    ) -> text_typeset::layout::block::BlockLayoutParams {
+        use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
+        BlockLayoutParams {
+            block_id: id,
+            position: 0,
+            text: text.to_string(),
+            fragments: vec![FragmentParams {
+                text: text.to_string(),
+                offset: 0,
+                length: text.len(),
+                font_family: None,
+                font_weight: None,
+                font_bold: None,
+                font_italic: None,
+                font_point_size: None,
+                underline_style: text_typeset::UnderlineStyle::None,
+                overline: false,
+                strikeout: false,
+                is_link: false,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: None,
+                tooltip: None,
+                vertical_alignment: text_typeset::VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
+                features: Vec::new(),
+            }],
+            alignment: text_typeset::layout::paragraph::Alignment::Left,
+            top_margin: 0.0,
+            bottom_margin: 0.0,
+            left_margin: 0.0,
+            right_margin: 0.0,
+            text_indent: 0.0,
+            list_marker: String::new(),
+            list_indent: 0.0,
+            tab_positions: vec![],
+            line_height_multiplier: None,
+            non_breakable_lines: false,
+            hyphenation: None,
+            checkbox: None,
+            background_color: None,
+        }
+    }
+
+    /// Regression test for the corruption root cause: evictions that
+    /// happen inside `build_render_frame` (every rich-text `render()` —
+    /// i.e. every keystroke in any text field) used to bump only the
+    /// service's eviction epoch; `atlas_info` passed through just the
+    /// snapshot's own `glyphs_evicted` flag, so the app-level recovery
+    /// (invalidate every retained paint) never fired and stale glyph
+    /// UVs stayed on screen until a forced repaint.
+    #[test]
+    fn atlas_info_reports_render_path_evictions() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+
+        // A label whose glyphs live in the shared atlas…
+        let layout = bridge.layout_single_line("Hello", &TextStyle::default(), None);
+        let _ = bridge.ensure_glyphs(&layout);
+        // …with the baseline atlas state consumed.
+        let baseline = bridge.atlas_info(0);
+        assert!(
+            !baseline.glyphs_evicted,
+            "nothing can have been evicted yet"
+        );
+
+        // Drive a rich-text DocumentFlow through the shared service,
+        // exactly like RichTextEngine, far past the LRU idle window
+        // (120 generations) + scan cadence (60). The label's glyphs are
+        // never touched, so build_render_frame evicts them mid-loop.
+        let mut flow = DocumentFlow::new();
+        flow.set_viewport(800.0, 600.0);
+        flow.layout_blocks(bridge.service_mut(), vec![make_test_block(1, "zzzz")]);
+        for _ in 0..250 {
+            let _ = flow.render(bridge.service_mut());
+        }
+
+        let info = bridge.atlas_info(baseline.version);
+        assert!(
+            info.glyphs_evicted,
+            "evictions performed inside build_render_frame (rich-text render path) \
+             must surface through AtlasInfo::glyphs_evicted"
+        );
+    }
+
+    #[test]
+    fn atlas_info_version_semantics() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let layout = bridge.layout_single_line("Hi", &TextStyle::default(), None);
+        let _ = bridge.ensure_glyphs(&layout);
+
+        // First consumer, never uploaded: gets pixels + a version stamp.
+        let first = bridge.atlas_info(0);
+        assert!(first.version > 0);
+        assert!(
+            !first.pixels.is_empty(),
+            "a consumer at version 0 must receive the atlas pixels"
+        );
+
+        // Same consumer, up to date, no new text work: no pixels.
+        let second = bridge.atlas_info(first.version);
+        assert_eq!(second.version, first.version, "clean frame must not bump");
+        assert!(
+            second.pixels.is_empty(),
+            "an up-to-date consumer must not pay the pixel memcpy"
+        );
+
+        // A second window that never uploaded still gets pixels — the
+        // first consumer must not have consumed them for everyone
+        // (the old consume-once dirty-flag bug).
+        let lagging = bridge.atlas_info(0);
+        assert_eq!(lagging.version, first.version);
+        assert!(
+            !lagging.pixels.is_empty(),
+            "a lagging consumer must receive pixels even after another \
+             consumer already pulled this version"
+        );
+
+        // New rasterization dirties the atlas: version bumps, pixels flow.
+        let layout2 = bridge.layout_single_line("WXYZ", &TextStyle::default(), None);
+        let _ = bridge.ensure_glyphs(&layout2);
+        let third = bridge.atlas_info(first.version);
+        assert!(third.version > first.version);
+        assert!(!third.pixels.is_empty());
+    }
+
+    #[test]
+    fn debug_validate_layout_catches_stale_rect() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let layout = bridge.layout_single_line("Hi", &TextStyle::default(), None);
+
+        // Untouched layout: every glyph resident at its baked rect.
+        assert_eq!(
+            bridge.debug_validate_layout(layout.layout_key),
+            GlyphValidation::Valid
+        );
+
+        // Move one resident glyph's atlas rect underneath the baked
+        // quads (what slot reuse after eviction does).
+        let key = {
+            let (quads, keys) = bridge
+                .glyph_cache
+                .get(&layout.layout_key)
+                .expect("layout entry exists");
+            quads
+                .iter()
+                .zip(keys.iter())
+                .find(|(q, _)| q.atlas[2] > 0.0 && q.atlas[3] > 0.0)
+                .map(|(_, k)| *k)
+                .expect("at least one glyph with atlas residency")
+        };
+        assert!(bridge.service_mut().debug_set_glyph_rect(&key, [499, 499, 1, 1]));
+        assert_eq!(
+            bridge.debug_validate_layout(layout.layout_key),
+            GlyphValidation::RectMismatch,
+            "a moved atlas rect under baked quads is definite corruption"
+        );
+
+        // After a wholesale cache clear, the key is unknown — the
+        // retained-frame-outlived-a-clear signature.
+        bridge.invalidate_cache();
+        assert_eq!(
+            bridge.debug_validate_layout(layout.layout_key),
+            GlyphValidation::StaleKey
+        );
     }
 
     #[test]

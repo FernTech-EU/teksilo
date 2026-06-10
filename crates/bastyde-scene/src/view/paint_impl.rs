@@ -14,6 +14,18 @@ impl SceneView {
         bounds: Rect,
         band: crate::scene::SceneLayer,
     ) {
+        // Glyph-epoch gate: cached item frames bake glyph atlas UVs, and
+        // this cache lives outside the widget arena, so the framework's
+        // eviction recovery (`invalidate_all_paints`) cannot reach it.
+        // Instead, every paint pass compares the backend's eviction
+        // epoch and drops all entries when it moved — the items repaint
+        // below with fresh UVs in the same pass.
+        let glyph_epoch = canvas
+            .text_backend()
+            .map(|tb| tb.borrow().glyph_epoch())
+            .unwrap_or(0);
+        self.item_cache.borrow_mut().sync_glyph_epoch(glyph_epoch);
+
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
         let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));

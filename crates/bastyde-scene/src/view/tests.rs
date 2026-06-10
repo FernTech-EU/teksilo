@@ -3653,6 +3653,114 @@ fn cache_mode_item_coordinate_avoids_repeat_paints() {
 }
 
 #[test]
+fn item_cache_clears_on_glyph_epoch_change() {
+    // Cached item frames bake glyph-atlas UVs, and the item cache lives
+    // outside the widget arena — `invalidate_all_paints` (the app-level
+    // eviction recovery) can't reach it. The epoch gate in `paint_band`
+    // must drop every entry when the text backend reports a moved glyph
+    // epoch, forcing the items to repaint with fresh UVs.
+    use crate::cache::CacheMode;
+    use crate::item::{SceneItem, SceneItemPaintContext};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// Text backend whose glyph epoch the test controls.
+    struct EpochBackend {
+        epoch: Rc<Cell<u64>>,
+    }
+    impl bastyde_canvas::TextBackend for EpochBackend {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            _style: &bastyde_tokens::TextStyle,
+            _max_width: Option<f32>,
+        ) -> bastyde_canvas::TextLayout {
+            bastyde_canvas::TextLayout {
+                width: text.len() as f32 * 8.0,
+                height: 16.0,
+                ascent: 12.0,
+                descent: 4.0,
+                underline_offset: 1.0,
+                underline_thickness: 1.0,
+                layout_key: 1,
+                line_count: 1,
+                spans: Vec::new(),
+            }
+        }
+        fn ensure_glyphs(
+            &mut self,
+            _layout: &bastyde_canvas::TextLayout,
+        ) -> Vec<bastyde_canvas::GlyphQuad> {
+            Vec::new()
+        }
+        fn glyph_epoch(&self) -> u64 {
+            self.epoch.get()
+        }
+    }
+
+    #[derive(Debug)]
+    struct CachedRect {
+        bounds: Rect,
+        count: Rc<Cell<u32>>,
+    }
+    impl SceneItem for CachedRect {
+        fn local_bounds(&self) -> Rect {
+            self.bounds
+        }
+        fn set_local_bounds(&mut self, b: Rect) {
+            self.bounds = b;
+        }
+        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext) {
+            self.count.set(self.count.get() + 1);
+            canvas.fill_rect(self.bounds, bastyde_tokens::Color::new(1.0, 0.0, 0.0, 1.0));
+        }
+        fn cache_mode(&self) -> CacheMode {
+            CacheMode::ItemCoordinate
+        }
+    }
+
+    let epoch = Rc::new(Cell::new(0_u64));
+    let count = Rc::new(Cell::new(0_u32));
+    let mut scene = Scene::new();
+    let _id = scene.add_item(
+        CachedRect {
+            bounds: Rect::new(10.0, 10.0, 30.0, 30.0),
+            count: count.clone(),
+        },
+        Point::ZERO,
+    );
+
+    let mut tree = WidgetTree::new().with_text_backend(std::rc::Rc::new(
+        std::cell::RefCell::new(EpochBackend {
+            epoch: epoch.clone(),
+        }),
+    ));
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    assert_eq!(count.get(), 1);
+    assert_eq!(view_handle(&tree, view_id).item_cache_len(), 1);
+
+    // Stable epoch: pan nudge repaints the view, the item replays from
+    // cache.
+    view_handle(&tree, view_id).set_pan(Vec2::new(10.0, 0.0));
+    let _ = tree.render();
+    assert_eq!(count.get(), 1, "stable epoch must keep the cache");
+
+    // Epoch moved (atlas eviction): the gate must drop the cache and the
+    // item must repaint with fresh state.
+    epoch.set(1);
+    view_handle(&tree, view_id).set_pan(Vec2::new(20.0, 0.0));
+    let _ = tree.render();
+    assert_eq!(
+        count.get(),
+        2,
+        "a moved glyph epoch must clear the item cache and force repaint"
+    );
+    assert_eq!(view_handle(&tree, view_id).item_cache_len(), 1);
+}
+
+#[test]
 fn cache_evicts_on_invalidate() {
     // After explicit invalidate, the next paint pass must re-record.
     use crate::cache::CacheMode;

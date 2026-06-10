@@ -182,18 +182,78 @@ pub trait TextBackend {
     /// Implementations that don't maintain a glyph cache (the mock
     /// backend) can leave the default no-op.
     fn touch_layout(&mut self, _layout_key: u64) {}
+
+    /// Monotonic counter bumped every time the backend's glyph atlas
+    /// drops or relocates entries (LRU eviction, scale-factor reset).
+    ///
+    /// Any cache that retains glyph quads across frames *outside* the
+    /// widget arena's `cached_paint` (e.g. the scene per-item cache)
+    /// must compare this against the epoch it stored at bake time and
+    /// rebuild when it moved — baked-in atlas UVs may now point at
+    /// pixels owned by unrelated glyphs. Backends without a glyph
+    /// cache never bump it.
+    fn glyph_epoch(&self) -> u64 {
+        0
+    }
+
+    /// Debug-build corruption check: verify that the glyph quads the
+    /// backend handed out for `layout_key` still match the live glyph
+    /// atlas.
+    ///
+    /// Called (under `cfg(debug_assertions)`) by the widget-tree
+    /// renderer whenever a retained paint cache is replayed without
+    /// re-running `paint()`. See [`GlyphValidation`] for how callers
+    /// should react to each outcome. Backends without a glyph cache
+    /// keep the default (always [`GlyphValidation::Valid`]).
+    fn debug_validate_layout(&self, _layout_key: u64) -> GlyphValidation {
+        GlyphValidation::Valid
+    }
+}
+
+/// Outcome of [`TextBackend::debug_validate_layout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlyphValidation {
+    /// Every glyph of the layout is resident in the atlas at exactly the
+    /// rectangle baked into the retained quads.
+    Valid,
+    /// The backend no longer knows this layout key (its layout/glyph
+    /// caches were cleared since the quads were baked). A retained paint
+    /// that outlives a wholesale cache clear is the signature of a
+    /// missing invalidation path — suspicious, but transitional frames
+    /// around legitimate clears (scale-factor change) can hit it too, so
+    /// callers should log loudly rather than abort.
+    StaleKey,
+    /// At least one glyph was evicted or now occupies a different atlas
+    /// rectangle than the one baked into the retained quads. Replaying
+    /// those quads draws the wrong pixels — definite corruption; callers
+    /// should abort (debug builds) with a diagnostic.
+    RectMismatch,
 }
 
 /// Atlas information from the text backend for GPU upload.
 #[derive(Debug, Clone)]
 pub struct AtlasInfo {
+    /// True when the atlas pixels changed since the previous
+    /// `atlas_info` call (any caller). Kept for single-consumer call
+    /// sites; multi-window callers should rely on `version` instead.
     pub dirty: bool,
     pub width: u32,
     pub height: u32,
+    /// Atlas pixels, populated only when the caller's `seen_version`
+    /// lags `version` (the caller needs to upload). Empty otherwise to
+    /// avoid a ~1 MB memcpy per clean frame.
     pub pixels: Vec<u8>,
-    /// True when glyph eviction occurred — callers that cache glyph output
-    /// (e.g. paint caches) must invalidate, since evicted atlas space may
-    /// be reused by future glyph allocations.
+    /// Monotonic atlas content version. Each consumer (window renderer)
+    /// records the version it last uploaded and passes it back as
+    /// `seen_version`; a difference means "upload `pixels` now". This
+    /// replaces consume-once dirty semantics so several windows can all
+    /// converge on the same atlas content.
+    pub version: u64,
+    /// True when glyph eviction occurred since the previous `atlas_info`
+    /// call — regardless of which internal path evicted (snapshot-driven
+    /// or render-driven). Callers that cache glyph output (paint caches)
+    /// must invalidate, since evicted atlas space may be reused by future
+    /// glyph allocations.
     pub glyphs_evicted: bool,
 }
 

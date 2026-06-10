@@ -44,6 +44,16 @@ pub struct ItemCoordinateCache {
     /// `id` → cached RenderFrame in **local item coordinates**.
     /// Looked up by the paint walk; dropped on geometry change.
     entries: HashMap<ItemId, RenderFrame>,
+    /// [`TextBackend::glyph_epoch`](bastyde_canvas::TextBackend::glyph_epoch)
+    /// as of the last paint pass that consulted this cache. Cached
+    /// frames bake glyph atlas UVs; when the backend evicts or resets
+    /// glyphs it bumps the epoch, and every entry here must be dropped
+    /// before being replayed — the baked UVs may now point at pixels
+    /// owned by unrelated glyphs. This cache lives outside the widget
+    /// arena, so the framework-level `invalidate_all_paints` recovery
+    /// cannot reach it; the epoch gate in `paint_band` is what keeps
+    /// it honest.
+    glyph_epoch: u64,
 }
 
 impl ItemCoordinateCache {
@@ -75,6 +85,26 @@ impl ItemCoordinateCache {
     /// or any other invalidation.
     pub fn evict(&mut self, id: ItemId) {
         self.entries.remove(&id);
+    }
+
+    /// Drop every entry. Called when the glyph epoch moves (see
+    /// [`sync_glyph_epoch`](Self::sync_glyph_epoch)).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Compare the text backend's current glyph epoch against the one
+    /// recorded on the last paint pass; on a change, drop every cached
+    /// frame (their baked atlas UVs may reference recycled slots) and
+    /// record the new epoch. Returns `true` when the cache was cleared.
+    pub fn sync_glyph_epoch(&mut self, current_epoch: u64) -> bool {
+        if self.glyph_epoch == current_epoch {
+            return false;
+        }
+        self.glyph_epoch = current_epoch;
+        let had_entries = !self.entries.is_empty();
+        self.clear();
+        had_entries
     }
 
     /// Number of cached entries (diagnostics / tests).
@@ -113,5 +143,27 @@ mod tests {
         c.evict(id);
         assert!(!c.contains(id));
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn sync_glyph_epoch_clears_on_change_only() {
+        let mut c = ItemCoordinateCache::new();
+        let id = fresh_id();
+        c.insert(id, RenderFrame::default());
+
+        // Same epoch as the initial one (0): entries survive.
+        assert!(!c.sync_glyph_epoch(0));
+        assert!(c.contains(id));
+
+        // Epoch moved (glyph eviction / scale reset): everything drops —
+        // the cached frames' baked atlas UVs may reference recycled slots.
+        assert!(c.sync_glyph_epoch(1));
+        assert!(!c.contains(id));
+        assert!(c.is_empty());
+
+        // Same epoch again: a refilled cache survives.
+        c.insert(id, RenderFrame::default());
+        assert!(!c.sync_glyph_epoch(1));
+        assert!(c.contains(id));
     }
 }

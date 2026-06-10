@@ -386,40 +386,15 @@ impl Renderer {
         }
 
         // Grow persistent streaming buffers to fit this frame's worst case.
-        // Upper bound per pipeline = `items * 4 vertices` because every
-        // drawable produces exactly 4 vertices. The shared index buffer
-        // sizes to the largest per-pipeline quad count so one index stream
-        // serves all pipelines.
-        // The rect pipeline draws both `DrawCommand::Decoration` (Tier-1
-        // rects) AND `DrawCommand::CosmeticLine` (each hairline emits one
-        // 4-vertex quad through the same rect stream — see the CosmeticLine
-        // arm in the draw walk). Both must be counted here or the rect stream
-        // is under-sized and overflows on the first cosmetic-line-heavy frame
-        // (e.g. a tiled hairline grid). GPU-path + debug-assert only, so
-        // headless RenderFrame tests don't catch it.
-        let rect_quads = frame.decorations.len() + frame.cosmetic_lines.len();
-        let sdf_quads = frame.shapes.len();
-        // Each blur scope produces one composite-blit quad on End,
-        // emitted via the quad pipeline. Account for it in the stream
-        // sizing so `composite_blur_quad` can `.write` without growing.
-        let composite_quads = frame
-            .draw_order
-            .iter()
-            .filter(|c| matches!(c, bastyde_canvas::DrawCommand::BeginBlurredSubtree { .. }))
-            .count();
-        let quad_quads =
-            frame.glyphs.len() + frame.paths.len() + frame.images.len() + composite_quads;
-        let shadow_quads = frame.shadows.len();
-        let anim_proc_quads = frame
-            .animated_quads
-            .iter()
-            .filter(|a| matches!(a.class, bastyde_canvas::AnimatedQuadClass::Procedural))
-            .count();
-        let max_quads = rect_quads
-            .max(sdf_quads)
-            .max(quad_quads)
-            .max(shadow_quads)
-            .max(anim_proc_quads);
+        let counts = stream_quad_counts(frame);
+        let StreamQuadCounts {
+            rect: rect_quads,
+            sdf: sdf_quads,
+            quad: quad_quads,
+            shadow: shadow_quads,
+            anim_proc: anim_proc_quads,
+        } = counts;
+        let max_quads = counts.max();
 
         self.streams.rect.ensure_capacity(
             &self.device,
@@ -2630,6 +2605,66 @@ fn create_shadow_pipeline(
     })
 }
 
+/// Per-pipeline quad counts for one frame's stream-buffer sizing.
+///
+/// Upper bound per pipeline = `quads * 4 vertices` because every
+/// drawable produces exactly 4 vertices. Every count here must match
+/// what the draw walk actually writes into the corresponding
+/// [`StreamBuffer`](crate::stream_buffer::StreamBuffer) — an
+/// undercount overflows the buffer at write time (debug assert +
+/// dropped draws; see `StreamBuffer::write`). Kept as a pure function
+/// of the frame so the accounting is unit-testable headlessly (the
+/// GPU path has no headless coverage).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StreamQuadCounts {
+    pub rect: usize,
+    pub sdf: usize,
+    pub quad: usize,
+    pub shadow: usize,
+    pub anim_proc: usize,
+}
+
+impl StreamQuadCounts {
+    /// The largest per-pipeline count — sizes the shared index buffer
+    /// so one index stream serves all pipelines.
+    pub fn max(&self) -> usize {
+        self.rect
+            .max(self.sdf)
+            .max(self.quad)
+            .max(self.shadow)
+            .max(self.anim_proc)
+    }
+}
+
+/// Count the quads each pipeline's stream buffer must hold for `frame`.
+///
+/// - `rect` draws both `DrawCommand::Decoration` (Tier-1 rects) AND
+///   `DrawCommand::CosmeticLine` (each hairline emits one 4-vertex quad
+///   through the same rect stream — see the CosmeticLine arm in the
+///   draw walk).
+/// - `quad` covers glyphs, paths, images, plus one composite-blit quad
+///   per blur scope (`BeginBlurredSubtree`), emitted on End.
+/// - `anim_proc` covers BOTH animated-quad classes: `Procedural` quads
+///   batch into `anim_proc_batch`, but `Sprite` quads ALSO write their
+///   4 vertices into the same `streams.anim_proc` buffer (one
+///   individually-bound draw each). Counting only `Procedural` here
+///   undersized the buffer whenever a sprite-animated icon was on
+///   screen, overflowing the stream at write time.
+pub(crate) fn stream_quad_counts(frame: &RenderFrame) -> StreamQuadCounts {
+    let composite_quads = frame
+        .draw_order
+        .iter()
+        .filter(|c| matches!(c, bastyde_canvas::DrawCommand::BeginBlurredSubtree { .. }))
+        .count();
+    StreamQuadCounts {
+        rect: frame.decorations.len() + frame.cosmetic_lines.len(),
+        sdf: frame.shapes.len(),
+        quad: frame.glyphs.len() + frame.paths.len() + frame.images.len() + composite_quads,
+        shadow: frame.shadows.len(),
+        anim_proc: frame.animated_quads.len(),
+    }
+}
+
 /// Build the procedural-animation pipeline plus its per-slot uniform
 /// buffer, bind group, and bind-group layout. The layout is returned
 /// so the sprite pipeline can reuse it as its `group 0`. Buffer is
@@ -2808,6 +2843,52 @@ mod tests {
     use bastyde_canvas::render_frame::{DrawCommand, GlyphQuad, PaintData, ShapeKind, ShapeQuad};
 
     use super::*;
+
+    #[test]
+    fn stream_quad_counts_includes_sprite_anim_quads() {
+        // Regression test for the anim_proc undercount: Sprite-class
+        // animated quads write 4 vertices into the SAME stream buffer
+        // as Procedural ones (each sprite draws individually, but the
+        // bytes land in `streams.anim_proc`). Sizing for Procedural
+        // only overflowed the stream whenever a sprite-animated icon
+        // was on screen.
+        use bastyde_canvas::render_frame::{AnimatedQuadClass, AnimatedQuadDraw};
+
+        let mut frame = RenderFrame::new();
+        for slot in 0..3 {
+            frame.animated_quads.push(AnimatedQuadDraw {
+                screen: [0.0, 0.0, 10.0, 10.0],
+                slot,
+                class: AnimatedQuadClass::Procedural,
+            });
+        }
+        for slot in 3..5 {
+            frame.animated_quads.push(AnimatedQuadDraw {
+                screen: [0.0, 0.0, 10.0, 10.0],
+                slot,
+                class: AnimatedQuadClass::Sprite {
+                    image_name: "icon".to_string(),
+                },
+            });
+        }
+        frame.glyphs.push(GlyphQuad {
+            screen: [0.0, 0.0, 8.0, 8.0],
+            atlas: [0.0, 0.0, 2.0, 2.0],
+            color: [1.0; 4],
+            is_color: false,
+        });
+
+        let counts = stream_quad_counts(&frame);
+        assert_eq!(
+            counts.anim_proc, 5,
+            "anim_proc stream must be sized for BOTH Procedural and Sprite quads"
+        );
+        assert_eq!(counts.quad, 1);
+        assert_eq!(counts.rect, 0);
+        assert_eq!(counts.sdf, 0);
+        assert_eq!(counts.shadow, 0);
+        assert_eq!(counts.max(), 5, "index buffer sizes to the largest stream");
+    }
 
     #[test]
     fn glyph_quad_renders_over_shape_in_offscreen_target() {

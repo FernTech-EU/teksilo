@@ -356,6 +356,16 @@ Three shader pipelines in bastyde-render: the **quad pipeline** (textured quads 
 
 Three atlas textures serve different purposes. The **glyph atlas** is owned by the shared Typesetter (from text-typeset), containing rasterized glyph bitmaps. The **shape atlas** stores Tier 3 rasterized path results from tiny-skia. The **image atlas** (or texture array) stores application images. All use LRU eviction — dormant widgets' entries age out naturally.
 
+#### Glyph atlas lifecycle and the eviction contract
+
+Glyph quads bake **atlas pixel coordinates** at paint time, and the framework retains painted output at several layers (per-widget `cached_paint` / `cached_post_paint`, the assembled `cached_frame`, the scene per-item cache). LRU eviction can therefore invalidate quads that are still being replayed — the contract that keeps this sound has three legs:
+
+1. **Keep-alive.** Every replay of a retained frame calls `TextBackend::touch_layout` for each of the frame's `layout_keys` (per-widget cache hits, post-paint cache hits, and the full-frame early-out in `rendering_impl.rs`), refreshing the glyphs' LRU timestamps so on-screen glyphs never age out.
+2. **Eviction reporting.** `TextFontService::eviction_epoch` is the single source of truth: it is bumped by *every* eviction path — the `atlas_snapshot` scan, the scan at the start of every rich-text `render()` (`build_render_frame`), and the wholesale reset on scale-factor change. `TypesetterBridge::atlas_info` compares it against a last-seen value and reports `glyphs_evicted`; the app-level recovery in `bastyde-app` then clears the bridge caches and calls `invalidate_all_paints` on **every** window (the bridge and atlas are shared process-wide), requesting redraws. Caches living outside the widget arena (the scene `ItemCoordinateCache`) instead self-gate on `TextBackend::glyph_epoch` at paint time.
+3. **Versioned uploads.** Each window's renderer owns its own GPU atlas texture. `atlas_info(seen_version)` carries a monotonic content `version`; a window uploads (and receives pixels) only when its recorded `atlas_uploaded_version` lags. This replaces consume-once dirty semantics, so several windows all converge on the same atlas content instead of the first caller consuming the upload for everyone.
+
+**Debug-build corruption catcher.** In debug builds, every evicted atlas rectangle is poison-filled magenta (text-typeset), so any stale-UV sampling is visually unmistakable; and every retained-frame replay validates its layouts via `TextBackend::debug_validate_layout` — a glyph whose live atlas rect no longer matches the baked quads aborts with a diagnostic (`RectMismatch`), and a layout the backend no longer knows logs a loud warning (`StaleKey`). Release builds compile all of this out.
+
 ### 17.5 Dirty Tracking
 
 Each widget has a dirty flag at two granularities: **needs relayout** (size may have changed) and **needs repaint** (appearance changed, size unchanged). Clean widgets replay cached Canvas output without recomputation.
