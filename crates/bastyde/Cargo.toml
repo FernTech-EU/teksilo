@@ -177,7 +177,7 @@ bastyde-widgets = { workspace = true, optional = true }
 # restores the out-of-the-box behavior, and downstream apps that use
 # `default-features = false` on bastyde get a clean slate with no
 # Noto fonts bundled.
-bastyde-text = { path = "../bastyde-text", version = "0.6.1", optional = true, default-features = false }
+bastyde-text = { path = "../bastyde-text", version = "0.6.2", optional = true, default-features = false }
 bastyde-i18n = { workspace = true, optional = true }
 bastyde-inspector = { workspace = true, optional = true }
 bastyde-webview = { workspace = true, optional = true }

@@ -75,7 +75,7 @@ thiserror = { workspace = true }
 # level, so font selection stays an app-level decision driven through
 # the umbrella's `fonts-*` features. The base Inter font is always
 # embedded by bastyde-text regardless.
-bastyde-text = { path = "../bastyde-text", version = "0.6.1", default-features = false }
+bastyde-text = { path = "../bastyde-text", version = "0.6.2", default-features = false }
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"
