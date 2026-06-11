@@ -24,6 +24,8 @@ locale-ar = العربية
 # ── Theme switcher ──────────────────────────────────────────────────────
 theme-label = Thème
 theme-tooltip = Basculer entre les thèmes clair et sombre.
+os-theme-label = Thème système
+os-theme-tooltip = Suivre les couleurs du thème du bureau (accent, surfaces, texte).
 
 # ── Tab titles ──────────────────────────────────────────────────────────
 tab-palette-title = Palette

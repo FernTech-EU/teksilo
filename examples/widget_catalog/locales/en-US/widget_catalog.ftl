@@ -28,6 +28,8 @@ locale-ar = العربية
 # ── Theme switcher ──────────────────────────────────────────────────────
 theme-label = Theme
 theme-tooltip = Toggle between light and dark theme.
+os-theme-label = OS theme
+os-theme-tooltip = Follow the current desktop theme colors (accent, surfaces, text).
 
 # ── Tab titles ──────────────────────────────────────────────────────────
 tab-palette-title = Palette

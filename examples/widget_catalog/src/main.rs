@@ -203,12 +203,34 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
             });
         });
 
+    // OS theme — pull the live desktop theme colors (accent, surfaces,
+    // text) and overlay them onto the matching intui base. Same
+    // construction as the app's `ThemeMode::Native` path; here it's
+    // driven on demand by a button so the catalog can show it off
+    // regardless of how the app was launched.
+    let os_theme_btn = Button::new(tr!(os_theme_label()))
+        .variant(ButtonVariant::Ghost)
+        .tooltip(tr!(os_theme_tooltip()))
+        .on_activate_fn(|ctx| {
+            let os = bastyde::platform::os_theme::query_os_theme_colors();
+            let base = if os.color_scheme.is_dark() {
+                bastyde::presets::intui::dark()
+            } else {
+                bastyde::presets::intui::light()
+            };
+            ctx.set_theme(Theme {
+                colors: bastyde::tokens::ColorTokens::from_os_colors(&os),
+                ..base
+            });
+        });
+
     let trailing = HStack::new()
         .spacing(4.0)
         .child(en_btn)
         .child(fr_btn)
         .child(ar_btn)
-        .child(theme_btn);
+        .child(theme_btn)
+        .child(os_theme_btn);
 
     TitleBar::new(host)
         .height(40.0)
