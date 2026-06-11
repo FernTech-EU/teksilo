@@ -54,13 +54,13 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: next-${{ matrix.name }}
-
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
 
       - name: Build
         run: cargo build --workspace --all-targets

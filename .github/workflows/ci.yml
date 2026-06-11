@@ -69,13 +69,13 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux
-
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
 
       - name: Build
         run: cargo build --workspace --all-targets
@@ -105,13 +105,13 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.name }}
-
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
 
       - name: Build
         run: cargo build --workspace --all-targets
@@ -145,14 +145,13 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: check-${{ matrix.name }}
-
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
-
       - name: Check
         run: cargo check --workspace --all-targets ${{ matrix.flags }}
 
@@ -170,11 +169,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
       - name: Strip path dependencies
         uses: ./.github/actions/strip-path-deps
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Check documentation
         env:
@@ -213,11 +212,11 @@ jobs:
         with:
           components: clippy
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
       - name: Strip path dependencies
         uses: ./.github/actions/strip-path-deps
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings -A deprecated
