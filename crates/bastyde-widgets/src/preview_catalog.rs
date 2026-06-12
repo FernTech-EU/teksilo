@@ -20,7 +20,7 @@
 //!   GroupHeader, IconButton, Snackbar, Breadcrumb, Toolbar,
 //!   StatusBar, Accordion, RadioGroup, SplitButton.
 //! - Tier C (data-driven / structural): ListView, TreeView, MenuList,
-//!   ScrollArea, SplitView, TabWidget, ToolBox, Repeater.
+//!   ScrollArea, Splitter, TabWidget, ToolBox, Repeater.
 //! - Skipped (modal / event-heavy / overlay-driven): Dialog,
 //!   MessageBox, Popover, Wizard, MenuBar, MenuContext, TitleBar,
 //!   ShortcutSettings, ImageWidget. These need additional context
@@ -47,9 +47,9 @@ use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, GridSizing, GridView, GroupBox, GroupHeader,
     IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar,
-    RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton,
-    SplitView, StandardListItem, StandardTreeItem, StatusBar, TabWidget, Toggle, ToolBox, Toolbar,
-    TreeView,
+    Orientation, PaneDescriptor, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider,
+    Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar,
+    TabWidget, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1790,22 +1790,21 @@ impl WidgetCatalog for ScrollArea {
 register_widget_catalog_at!("crates/bastyde-widgets/src/scroll_area.rs", ScrollArea);
 
 // ---------------------------------------------------------------------------
-// SplitView
+// Splitter
 // ---------------------------------------------------------------------------
 
-impl WidgetCatalog for SplitView {
+impl WidgetCatalog for Splitter {
     fn id() -> &'static str {
-        "split_view"
+        "splitter"
     }
     fn group() -> &'static str {
         "Containers"
     }
     fn display_name() -> &'static str {
-        "SplitView"
+        "Splitter"
     }
     fn variants() -> Vec<PreviewVariant> {
         fn build_horizontal() -> Box<dyn Widget> {
-            let split = Signal::new(0.4_f32);
             let left = Panel::new()
                 .background(SurfaceRole::Sunken)
                 .padding(12.0)
@@ -1818,16 +1817,47 @@ impl WidgetCatalog for SplitView {
                 FixedSize::new()
                     .bind_width(420.0_f32)
                     .bind_height(220.0_f32)
-                    .child(SplitView::new(split).first(left).second(right)),
+                    .child(
+                        Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
+                            .pane(left)
+                            .pane(right),
+                    ),
             )
         }
-        vec![PreviewVariant::scenario("horizontal", build_horizontal)]
+        fn build_three_pane() -> Box<dyn Widget> {
+            let model = SplitterModel::from_panes(
+                vec![
+                    PaneDescriptor::new().size(120.0).collapsible(true).stretch(0.0),
+                    PaneDescriptor::new().stretch(1.0),
+                    PaneDescriptor::new().size(120.0).collapsible(true).stretch(0.0),
+                ],
+                Orientation::Horizontal,
+            );
+            let pane = |label: &str, role| {
+                Panel::new()
+                    .background(role)
+                    .padding(12.0)
+                    .child(sample_text(label))
+            };
+            Box::new(
+                FixedSize::new().bind_width(480.0_f32).bind_height(220.0_f32).child(
+                    Splitter::new(model)
+                        .pane(pane("Sidebar", SurfaceRole::Sunken))
+                        .pane(pane("Editor", SurfaceRole::Raised))
+                        .pane(pane("Inspector", SurfaceRole::Sunken)),
+                ),
+            )
+        }
+        vec![
+            PreviewVariant::scenario("horizontal", build_horizontal),
+            PreviewVariant::scenario("three_pane", build_three_pane),
+        ]
     }
     fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!("crates/bastyde-widgets/src/split_view.rs", SplitView);
+register_widget_catalog_at!("crates/bastyde-widgets/src/splitter.rs", Splitter);
 
 // ---------------------------------------------------------------------------
 // TabWidget

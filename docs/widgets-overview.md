@@ -110,7 +110,7 @@ Themed framing, sectioning, and window-level structure.
 - [ToolBox](../crates/bastyde-widgets/src/tool_box.rs) — vertically stacked collapsible pages, exactly one expanded (Qt `QToolBox` analog).
 - [ScrollArea](../crates/bastyde-widgets/src/scroll_area.rs) — viewport with overlay or permanent scrollbars (`ScrollBarMode`, `ScrollBarPolicy`).
 - [ScrollBar](../crates/bastyde-widgets/src/scroll_bar.rs) — standalone scrollbar, drag/track-click/keyboard.
-- [SplitView](../crates/bastyde-widgets/src/split_view.rs) — two-pane resizable splitter with drag handle.
+- [Splitter](../crates/bastyde-widgets/src/splitter.rs) — N-pane resizable splitter with draggable, collapsible dividers, per-pane stretch, and a serializable `SplitterModel`. See [docs/splitter.md](splitter.md).
 - [TabWidget](../crates/bastyde-widgets/src/tab_widget.rs) — tab bar + content switcher; data-source-driven `TabBar<T>` underneath. See [tab-widget.md](tab-widget.md).
 - [Wizard](../crates/bastyde-widgets/src/wizard.rs) — multi-step flow with header, footer, and step switching (`WizardStep`).
 - [Breadcrumb](../crates/bastyde-widgets/src/breadcrumb.rs) — clickable path segments with chevron separators (`BreadcrumbItem`). **Automatic overflow**: when too narrow the middle crumbs collapse into a trailing-of-root `…` `MenuList` dropdown (Windows Explorer / web breadcrumb pattern) while the root + current crumb stay; `is_overflowing()` signal. RTL-aware separators (chevron mirrors). Built on `measure_intrinsic` + `MenuList::item_when`.

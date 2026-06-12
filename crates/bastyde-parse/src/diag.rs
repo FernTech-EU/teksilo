@@ -75,7 +75,6 @@ pub fn is_category_b_widget(ident: &str) -> bool {
         ident,
         "Card"
             | "Accordion"
-            | "SplitView"
             | "TitleBar"
             | "DialogContent"
             | "Breadcrumb"
@@ -95,7 +94,6 @@ fn category_b_slot_hint(ident: &str) -> &'static str {
     match ident {
         "Card" => "content",
         "Accordion" => "content",
-        "SplitView" => "first",
         "TitleBar" => "leading",
         "DialogContent" => "body",
         "Breadcrumb" => "item",

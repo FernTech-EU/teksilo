@@ -119,6 +119,10 @@ directory.
 
 ## Specialized widgets
 
+- [splitter.md](splitter.md) — N-pane `Splitter` with draggable, collapsible
+  dividers, per-pane stretch, animated collapse (four triggers), a shared
+  serializable `SplitterModel`, and a Tier-3 `SplitterStyle`. The building
+  block for the future `DockingLayout`.
 - [table-view.md](table-view.md) — virtualized `TableView` and `TreeTable`
   (multi-column, sort/filter, drag-resize, drag-reorder, full keyboard
   navigation).

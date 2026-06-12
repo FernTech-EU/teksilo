@@ -70,7 +70,7 @@ pub(crate) struct EventHandlers {
     /// every strict ancestor of the target (root → parent-of-target) for
     /// `PointerMove` / `PointerDown` / `PointerUp` and `Scroll`; an ancestor
     /// returning `EventResponse::Handled` consumes the event and stops it
-    /// reaching the target. This is what lets a `SplitView` divider or a tab
+    /// reaching the target. This is what lets a `Splitter` divider or a tab
     /// bar claim a drag/wheel before a descendant `ScrollArea` does.
     ///
     /// `PointerEnter` / `PointerLeave` are deliberately **excluded** from the

@@ -76,7 +76,7 @@ pub mod snackbar;
 pub mod spin_box;
 pub mod spinner;
 pub mod split_button;
-pub mod split_view;
+pub mod splitter;
 pub mod standard_item;
 pub mod status_bar;
 pub mod stepper;
@@ -185,7 +185,12 @@ pub use spin_box::{
 };
 pub use spinner::Spinner;
 pub use split_button::SplitButton;
-pub use split_view::SplitView;
+pub use splitter::{
+    PaneDescriptor, PaneSnapshot, PaneState, Splitter, SplitterModel, SplitterState,
+};
+// `Splitter`'s public API takes an `Orientation`; re-export it so callers
+// don't need a separate `bastyde_tokens` import.
+pub use bastyde_tokens::Orientation;
 pub use standard_item::{StandardListItem, StandardTreeItem};
 pub use status_bar::StatusBar;
 pub use stepper::{

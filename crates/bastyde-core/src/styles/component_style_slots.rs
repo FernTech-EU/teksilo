@@ -32,7 +32,8 @@ use crate::styles::{
     SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
     SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
     SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
-    SharedSplitButtonStyle, SharedStandardItemStyle, SharedTabStyle, SharedTableStyle,
+    SharedSplitButtonStyle, SharedSplitterStyle, SharedStandardItemStyle, SharedTabStyle,
+    SharedTableStyle,
     SharedTextInputStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
     SharedWebViewStyle,
 };
@@ -44,6 +45,7 @@ use crate::styles::{
 pub struct ComponentStyleSlots {
     pub button: Option<SharedButtonStyle>,
     pub split_button: Option<SharedSplitButtonStyle>,
+    pub splitter: Option<SharedSplitterStyle>,
     pub icon_button: Option<SharedIconButtonStyle>,
     pub toggle: Option<SharedToggleStyle>,
     pub checkbox: Option<SharedCheckboxStyle>,
@@ -90,6 +92,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
         f.debug_struct("ComponentStyleSlots")
             .field("button", &self.button.is_some())
             .field("split_button", &self.split_button.is_some())
+            .field("splitter", &self.splitter.is_some())
             .field("icon_button", &self.icon_button.is_some())
             .field("toggle", &self.toggle.is_some())
             .field("checkbox", &self.checkbox.is_some())
@@ -144,6 +147,7 @@ impl PartialEq for ComponentStyleSlots {
         }
         rc_eq(&self.button, &other.button)
             && rc_eq(&self.split_button, &other.split_button)
+            && rc_eq(&self.splitter, &other.splitter)
             && rc_eq(&self.icon_button, &other.icon_button)
             && rc_eq(&self.toggle, &other.toggle)
             && rc_eq(&self.checkbox, &other.checkbox)

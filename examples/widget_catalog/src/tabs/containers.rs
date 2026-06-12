@@ -6,8 +6,8 @@ use bastyde::tokens::Orientation;
 use bastyde::widgets::scroll_bar::ScrollBarOrientation;
 use bastyde::widgets::{
     Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Padding, Panel,
-    ScrollArea, ScrollBar, SplitView, TabId, TabInfo, TabWidget, TextWidget, ToolBox, ToolBoxItem,
-    VStack,
+    ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabInfo, TabWidget, TextWidget, ToolBox,
+    ToolBoxItem, VStack,
 };
 
 use crate::shared::{Signals, color_cell, section, tab_header};
@@ -171,20 +171,18 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 sb_vp,
             )),
     );
-    let split_value = ctx.signal(0.5_f32);
     let split = section(
         ctx,
-        lit!("SplitView"),
+        lit!("Splitter"),
         FixedSize::new()
             .bind_width(360.0_f32)
             .bind_height(120.0_f32)
             .child(
-                SplitView::new(split_value)
-                    .orientation(Orientation::Horizontal)
-                    .first(Panel::new().background(SurfaceRole::AccentSubtle).child(
+                Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
+                    .pane(Panel::new().background(SurfaceRole::AccentSubtle).child(
                         TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small),
                     ))
-                    .second(Panel::new().background(SurfaceRole::Raised).child(
+                    .pane(Panel::new().background(SurfaceRole::Raised).child(
                         TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small),
                     )),
             ),
@@ -267,16 +265,14 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         sb_max,
         sb_vp,
     ));
-    let split_value = ctx.signal(0.5_f32);
     let splitview_widget = ctx.add(
-        SplitView::new(split_value)
-            .orientation(Orientation::Horizontal)
-            .first(
+        Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
+            .pane(
                 Panel::new()
                     .background(SurfaceRole::AccentSubtle)
                     .child(TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small)),
             )
-            .second(
+            .pane(
                 Panel::new()
                     .background(SurfaceRole::Raised)
                     .child(TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small)),
@@ -435,7 +431,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new(lit!("SplitView")) {
+                TextWidget::new(lit!("Splitter")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

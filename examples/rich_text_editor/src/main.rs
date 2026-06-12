@@ -69,7 +69,9 @@ mod highlighters;
 use bastyde::prelude::*;
 use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
 use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
-use bastyde::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
+use bastyde::widgets::{
+    Button, Expand, HStack, Orientation, PaneDescriptor, Spacer, Splitter, SplitterModel, Toolbar,
+};
 
 use format_toolbar::FormatToolbar;
 use highlight_controls::HighlightControls;
@@ -397,7 +399,15 @@ fn main() {
                     let toolbar = FormatToolbar::new(&editor);
                     let highlight_controls = HighlightControls::new(&doc);
                     let doc_preview = doc.clone();
-                    let split = Signal::new(0.55);
+                    // Editor | preview, ~55 / 45 split that grows
+                    // proportionally on resize (both panes stretch).
+                    let layout = SplitterModel::from_panes(
+                        vec![
+                            PaneDescriptor::new().stretch(55.0),
+                            PaneDescriptor::new().stretch(45.0),
+                        ],
+                        Orientation::Horizontal,
+                    );
                     tree.add(
                         bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
@@ -405,7 +415,7 @@ fn main() {
                             .child(highlight_controls)
                             .child(
                                 Expand::new().child(
-                                    SplitView::new(split).first(editor).second(
+                                    Splitter::new(layout).pane(editor).pane(
                                         // The preview stays bare of highlights:
                                         // `read_only` defaults to
                                         // `show_highlights(false)`. A read-only

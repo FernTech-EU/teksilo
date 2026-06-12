@@ -2,7 +2,7 @@
 //!
 //! `AppState` is a `Clone` bundle of signals consumed by every pane.
 //! `PreviewerRoot` is the actual composite widget that builds the
-//! 4-way layout (toolbar over a 3-pane SplitView) inside its
+//! 4-way layout (toolbar over a 3-pane Splitter) inside its
 //! `build()`.
 //!
 //! The bare minimum is the navigator widget list; the full 4-pane
@@ -20,7 +20,9 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_preview::{KnobOverrides, KnobValues, PreviewVariant};
-use bastyde_widgets::{Center, Expand, SplitView, TextWidget, VStack};
+use bastyde_widgets::{
+    Center, Expand, Orientation, PaneDescriptor, Splitter, SplitterModel, TextWidget, VStack,
+};
 
 use crate::canvas::PreviewCanvas;
 use crate::inspector::build_inspector;
@@ -245,7 +247,7 @@ impl Default for AppState {
 }
 
 /// Top-level previewer composite. Holds the [`AppState`] and builds
-/// the toolbar + 3-pane SplitView layout.
+/// the toolbar + 3-pane Splitter layout.
 pub struct PreviewerRoot {
     state: Option<AppState>,
     initial_widget: Option<String>,
@@ -330,23 +332,23 @@ impl Widget for PreviewerRoot {
         let canvas = ctx.add(PreviewCanvas::new(state.clone()));
         let inspector = build_inspector(ctx, &state);
 
-        // Right inner split: canvas | inspector.
-        let right_split_pos = ctx.signal(0.72_f32);
-        let right_split = SplitView::new(right_split_pos)
-            .min_first_size(360.0)
-            .min_second_size(260.0)
-            .first_id(canvas)
-            .second_id(inspector);
-        let right_split_id = ctx.add(right_split);
-
-        // Outer split: navigator | (canvas+inspector).
-        let outer_split_pos = ctx.signal(0.20_f32);
-        let outer_split = SplitView::new(outer_split_pos)
-            .min_first_size(180.0)
-            .min_second_size(640.0)
-            .first_id(navigator)
-            .second_id(right_split_id);
-        let outer_split_id = ctx.add(outer_split);
+        // Three-pane split: navigator | canvas | inspector. The canvas
+        // (stretch 1) absorbs window-resize slack; the side panes keep
+        // their pixel widths.
+        let layout = SplitterModel::from_panes(
+            vec![
+                PaneDescriptor::new().size(260.0).min_size(180.0).stretch(0.0),
+                PaneDescriptor::new().min_size(360.0).stretch(1.0),
+                PaneDescriptor::new().size(320.0).min_size(260.0).stretch(0.0),
+            ],
+            Orientation::Horizontal,
+        );
+        let outer_split_id = ctx.add(
+            Splitter::new(layout)
+                .pane_id(navigator)
+                .pane_id(canvas)
+                .pane_id(inspector),
+        );
 
         // Wrap the split in `Expand::vertical()` so the
         // VStack gives it all remaining vertical space below the

@@ -68,6 +68,8 @@ mod snackbar_style;
 mod spin_box_style;
 #[path = "styles/split_button_style.rs"]
 mod split_button_style;
+#[path = "styles/splitter_style.rs"]
+mod splitter_style;
 #[path = "styles/standard_item_style.rs"]
 mod standard_item_style;
 #[path = "styles/tab_style.rs"]
@@ -162,6 +164,7 @@ pub use slider_style::{
 pub use snackbar_style::{SharedSnackbarStyle, SnackbarStyle, SnackbarStyleConfig};
 pub use spin_box_style::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig};
 pub use split_button_style::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
+pub use splitter_style::{SharedSplitterStyle, SplitterStyle, SplitterStyleConfig};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
