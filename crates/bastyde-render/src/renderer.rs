@@ -230,10 +230,15 @@ impl Renderer {
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             // Linear, not Nearest: glyph quads can be drawn under a scale
             // transform (SceneView zoom, Scale wrapper), where nearest
-            // magnification turns texels into hard squares. At identity
-            // transform texel↔pixel is 1:1 and linear sampling is a no-op.
-            // Safe for tinted text — the monochrome shader path ignores
-            // sampled RGB — and the 1px atlas gutter bounds bilinear bleed.
+            // magnification turns texels into hard squares. Glyph origins
+            // are fractional (shaping advances, scroll), so linear is NOT
+            // automatically a no-op at identity — quads that map 1:1 onto
+            // their atlas bitmap are pixel-snapped at vertex emission
+            // (`QuadVertex::from_glyph_quad_transformed`), which makes
+            // linear sampling exact there; only residually scaled quads
+            // (mid-bucket zoom) actually filter. Safe for tinted text —
+            // the monochrome shader path ignores sampled RGB — and the
+            // 1px atlas gutter bounds bilinear bleed.
             let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
@@ -923,18 +928,19 @@ impl Renderer {
                                     let Some(glyph) = frame.glyphs.get(*idx) else {
                                         continue;
                                     };
-                                    let verts = QuadVertex::from_glyph_quad(
+                                    // Transform is applied (and 1:1 quads
+                                    // pixel-snapped) inside the constructor.
+                                    let verts = QuadVertex::from_glyph_quad_transformed(
                                         glyph,
                                         scale_factor,
                                         atlas.width,
                                         atlas.height,
+                                        &current_transform,
                                     );
                                     for v in &verts {
-                                        let tp =
-                                            apply_transform_pixel(v.position, &current_transform);
                                         quad_batch.push(QuadVertex {
                                             position: pixel_to_ndc(
-                                                tp,
+                                                v.position,
                                                 viewport_width,
                                                 viewport_height,
                                             ),
@@ -2964,5 +2970,93 @@ mod tests {
             "expected glyph pixel to be visible over shape, got {:?}",
             blue_only
         );
+    }
+
+    #[test]
+    fn fractional_origin_glyph_renders_pixel_exact() {
+        // Regression test for the linear-sampler blur / bottom-row crop:
+        // glyph origins are fractional (shaping advances, scroll), and
+        // with a bilinear atlas sampler an unsnapped 1:1 quad feathers
+        // every edge and fades its last bitmap row into the transparent
+        // atlas gutter (visibly cropping the bottom of "c"/"e"). The
+        // pixel snap in `from_glyph_quad_transformed` must land the quad
+        // on the integer grid so linear sampling is exact: interior
+        // pixels fully opaque, surrounding pixels fully transparent.
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("bastyde_render_snap_test_device"),
+        ) else {
+            return;
+        };
+
+        // 4×4 atlas: a 3×3 fully-opaque white glyph bitmap at (0,0); the
+        // remaining row/column transparent (the allocator's 1px gutter).
+        let mut atlas = [0u8; 4 * 4 * 4];
+        for y in 0..3 {
+            for x in 0..3 {
+                let i = (y * 4 + x) * 4;
+                atlas[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+        renderer.upload_atlas(4, 4, &atlas);
+
+        let mut frame = RenderFrame::new();
+        // Fractional origin; the snap lands it at (10, 11).
+        frame.glyphs.push(GlyphQuad {
+            screen: [10.4, 10.6, 3.0, 3.0],
+            atlas: [0.0, 0.0, 3.0, 3.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+            is_color: false,
+        });
+        frame.draw_order.push(DrawCommand::Glyph(0));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bastyde_render_snap_test_target"),
+            size: wgpu::Extent3d {
+                width: 32,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        renderer.render(&frame, &view, 1.0, 32, 32, [0.0, 0.0, 0.0, 0.0]);
+
+        let pixels = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
+        let alpha = |x: usize, y: usize| pixels[(y * 32 + x) * 4 + 3];
+
+        // Interior pixels exactly opaque — in particular the BOTTOM row
+        // (y = 13), the one the unsnapped bilinear kernel used to fade
+        // into the gutter.
+        for y in 11..14 {
+            for x in 10..13 {
+                assert_eq!(
+                    alpha(x, y),
+                    255,
+                    "interior pixel ({x},{y}) must be fully opaque — \
+                     bilinear edge feathering means the snap did not fire"
+                );
+            }
+        }
+        // The one-pixel ring around the quad exactly transparent — no
+        // feathered halo on any side.
+        for y in 10..15 {
+            for x in 9..14 {
+                let inside = (10..13).contains(&x) && (11..14).contains(&y);
+                if !inside {
+                    assert_eq!(
+                        alpha(x, y),
+                        0,
+                        "ring pixel ({x},{y}) must be untouched — \
+                         the snapped quad must not bleed past its bitmap"
+                    );
+                }
+            }
+        }
     }
 }

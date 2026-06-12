@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use bastyde_canvas::render_frame::PaintData;
-use bastyde_canvas::{DecorationRect, GlyphQuad, ShadowQuad, ShapeQuad};
+use bastyde_canvas::{DecorationRect, GlyphQuad, ShadowQuad, ShapeQuad, Transform2D};
 
 /// Convert a single sRGB channel (0..1) to linear light (0..1).
 ///
@@ -50,15 +50,59 @@ pub struct QuadVertex {
     pub _pad: u32,
 }
 
+/// Off-diagonal tolerance below which a transform counts as axis-aligned
+/// for glyph pixel-snapping. Matrix composition leaves float dust on `b`/`c`;
+/// any intentional rotation puts `|sin θ|` there, far above this bound.
+const GLYPH_SNAP_AXIS_EPS: f32 = 1e-4;
+
+/// Tolerance (in physical pixels) between the transformed glyph quad size
+/// and its atlas bitmap size for the quad to count as 1:1. Tight enough
+/// that residual mid-bucket zoom scaling (≥1% on any glyph bigger than
+/// ~6 px) never snaps, loose enough to absorb the float error of the
+/// logical→physical round-trip (`bitmap / (sf·rs) · sf · scale`).
+const GLYPH_SNAP_SIZE_EPS: f32 = 1.0 / 16.0;
+
+/// Apply a 2D affine transform to a physical-pixel position.
+/// Same convention as the renderer: `m = [a, b, c, d, tx, ty]` maps
+/// `(x, y) → (a·x + c·y + tx, b·x + d·y + ty)`.
+#[inline]
+fn apply_affine(p: [f32; 2], t: &Transform2D) -> [f32; 2] {
+    let [a, b, c, d, tx, ty] = t.m;
+    [a * p[0] + c * p[1] + tx, b * p[0] + d * p[1] + ty]
+}
+
 impl QuadVertex {
-    /// Convert a glyph quad to 4 vertices (two triangles via index buffer).
-    /// Applies scale_factor to screen coordinates.
-    /// Atlas coordinates are in pixels and normalized to 0..1 using atlas dimensions.
-    pub fn from_glyph_quad(
+    /// Convert a glyph quad to 4 vertices (two triangles via index buffer),
+    /// applying `scale_factor` (logical → physical pixels) and the current
+    /// affine `transform` (linear part unitless, translation already in
+    /// physical pixels). Atlas coordinates are in texels and normalized to
+    /// 0..1 using the atlas dimensions. Returned positions are in physical
+    /// pixels — the caller converts to NDC; it must NOT transform again.
+    ///
+    /// **Pixel-snap invariant.** The glyph atlas is sampled with bilinear
+    /// filtering so the residual GPU scaling between raster-scale buckets
+    /// (≤ ~12%, see `quantize_raster_scale`) stays smooth. Bilinear is only
+    /// loss-free when each texel maps exactly onto one framebuffer pixel,
+    /// and glyph origins are inherently fractional: shaping pen advances,
+    /// widget offsets, and scroll positions are all fractional floats. An
+    /// unsnapped origin makes the 2×2 kernel mix neighboring texels at
+    /// every edge (uniform blur) and bleed the glyph's last row into the
+    /// transparent atlas gutter (visibly cropping the bottom of letters
+    /// like "c"/"e"). So whenever the transformed quad maps 1:1 onto its
+    /// atlas bitmap — axis-aligned transform and transformed size equal to
+    /// the bitmap size within [`GLYPH_SNAP_SIZE_EPS`] — the origin is
+    /// rounded to the integer pixel grid and the opposite corner pinned at
+    /// exactly `origin + bitmap size`, making linear sampling an identity.
+    /// This covers identity, fractional DPI, pure translations, and
+    /// exact-bucket zoom (e.g. a 1.25× transform over a 1.25-bucket
+    /// raster). Rotated or residually scaled quads (mid-bucket zoom) skip
+    /// the snap and ride bilinear filtering as intended.
+    pub fn from_glyph_quad_transformed(
         quad: &GlyphQuad,
         scale_factor: f32,
         atlas_width: u32,
         atlas_height: u32,
+        transform: &Transform2D,
     ) -> [QuadVertex; 4] {
         let [x, y, w, h] = quad.screen;
         let [ax, ay, aw, ah] = quad.atlas;
@@ -74,6 +118,25 @@ impl QuadVertex {
         let v0 = ay / ah_f;
         let u1 = (ax + aw) / aw_f;
         let v1 = (ay + ah) / ah_f;
+
+        let [a, b, c, d, _, _] = transform.m;
+        let axis_aligned = b.abs() < GLYPH_SNAP_AXIS_EPS && c.abs() < GLYPH_SNAP_AXIS_EPS;
+        let one_to_one = axis_aligned
+            && (a * sw - aw).abs() < GLYPH_SNAP_SIZE_EPS
+            && (d * sh - ah).abs() < GLYPH_SNAP_SIZE_EPS;
+        let positions: [[f32; 2]; 4] = if one_to_one {
+            let [ox, oy] = apply_affine([sx, sy], transform);
+            let ox = ox.round();
+            let oy = oy.round();
+            [[ox, oy], [ox + aw, oy], [ox + aw, oy + ah], [ox, oy + ah]]
+        } else {
+            [
+                apply_affine([sx, sy], transform),
+                apply_affine([sx + sw, sy], transform),
+                apply_affine([sx + sw, sy + sh], transform),
+                apply_affine([sx, sy + sh], transform),
+            ]
+        };
 
         // Color emoji glyphs carry their RGB in the atlas bitmap. Mark
         // them with a per-vertex flag so the fragment shader can sample
@@ -92,28 +155,28 @@ impl QuadVertex {
 
         [
             QuadVertex {
-                position: [sx, sy],
+                position: positions[0],
                 tex_coord: [u0, v0],
                 color,
                 flags,
                 _pad: 0,
             },
             QuadVertex {
-                position: [sx + sw, sy],
+                position: positions[1],
                 tex_coord: [u1, v0],
                 color,
                 flags,
                 _pad: 0,
             },
             QuadVertex {
-                position: [sx + sw, sy + sh],
+                position: positions[2],
                 tex_coord: [u1, v1],
                 color,
                 flags,
                 _pad: 0,
             },
             QuadVertex {
-                position: [sx, sy + sh],
+                position: positions[3],
                 tex_coord: [u0, v1],
                 color,
                 flags,
@@ -555,15 +618,35 @@ mod tests {
     use bastyde_canvas::{DecorationKind, GradientStop, PaintData, ShapeKind, StrokeSpace};
     use bastyde_tokens::Color;
 
+    /// Build a glyph quad with the given screen rect and atlas rect.
+    fn glyph(screen: [f32; 4], atlas: [f32; 4], is_color: bool) -> GlyphQuad {
+        GlyphQuad {
+            screen,
+            atlas,
+            color: [1.0, 1.0, 1.0, 1.0],
+            is_color,
+        }
+    }
+
+    fn assert_pos_near(actual: [f32; 2], expected: [f32; 2]) {
+        assert!(
+            (actual[0] - expected[0]).abs() < 1e-3 && (actual[1] - expected[1]).abs() < 1e-3,
+            "position {actual:?} != expected {expected:?}"
+        );
+    }
+
     #[test]
     fn glyph_quad_to_vertices() {
-        let quad = GlyphQuad {
-            screen: [10.0, 20.0, 30.0, 40.0],
-            atlas: [0.0, 0.0, 64.0, 64.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-            is_color: false,
-        };
-        let verts = QuadVertex::from_glyph_quad(&quad, 1.0, 256, 256);
+        // Quad size (30×40) ≠ atlas size (64×64) → no snap; identity
+        // transform passes positions through unchanged.
+        let quad = glyph([10.0, 20.0, 30.0, 40.0], [0.0, 0.0, 64.0, 64.0], false);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            1.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
         assert_eq!(verts.len(), 4);
         assert_eq!(verts[0].position, [10.0, 20.0]);
         assert_eq!(verts[1].position, [40.0, 20.0]); // x + w
@@ -575,15 +658,174 @@ mod tests {
 
     #[test]
     fn scale_factor_applied_to_glyph_coords() {
-        let quad = GlyphQuad {
-            screen: [10.0, 20.0, 30.0, 40.0],
-            atlas: [0.0, 0.0, 128.0, 128.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-            is_color: false,
-        };
-        let verts = QuadVertex::from_glyph_quad(&quad, 2.0, 256, 256);
+        // Physical size 60×80 ≠ atlas 128×128 → no snap.
+        let quad = glyph([10.0, 20.0, 30.0, 40.0], [0.0, 0.0, 128.0, 128.0], false);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            2.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
         assert_eq!(verts[0].position, [20.0, 40.0]);
         assert_eq!(verts[1].position, [80.0, 40.0]);
+    }
+
+    #[test]
+    fn glyph_snap_identity_fractional_origin() {
+        // 1:1 quad (30×40 == atlas 30×40) at a fractional origin: the
+        // origin rounds to the pixel grid and the far corner is pinned at
+        // exactly origin + bitmap size.
+        let quad = glyph([10.3, 20.7, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], false);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            1.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
+        assert_eq!(verts[0].position, [10.0, 21.0]);
+        assert_eq!(verts[1].position, [40.0, 21.0]);
+        assert_eq!(verts[2].position, [40.0, 61.0]);
+        assert_eq!(verts[3].position, [10.0, 61.0]);
+    }
+
+    #[test]
+    fn glyph_snap_hidpi_scale_factor() {
+        // sf=2: logical 16×16 → physical 32×32 == atlas bitmap. Fractional
+        // logical origin (5.7, 8.3) → physical (11.4, 16.6) → snaps to
+        // (11, 17).
+        let quad = glyph([5.7, 8.3, 16.0, 16.0], [0.0, 0.0, 32.0, 32.0], false);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            2.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
+        assert_eq!(verts[0].position, [11.0, 17.0]);
+        assert_eq!(verts[2].position, [43.0, 49.0]);
+    }
+
+    #[test]
+    fn glyph_snap_fractional_dpi() {
+        // sf=1.25 (Linux fractional scaling): logical 20×20 → physical
+        // 25×25 == atlas bitmap. Origin (4.2, 7.8) → (5.25, 9.75) →
+        // snaps to (5, 10).
+        let quad = glyph([4.2, 7.8, 20.0, 20.0], [0.0, 0.0, 25.0, 25.0], false);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            1.25,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
+        assert_eq!(verts[0].position, [5.0, 10.0]);
+        assert_eq!(verts[2].position, [30.0, 35.0]);
+    }
+
+    #[test]
+    fn glyph_snap_exact_bucket_zoom() {
+        // A 1.25× zoom transform over a raster_scale=1.25 bucket: the
+        // bitmap is 1.25× denser (atlas 50×50 for a 20×20-logical glyph at
+        // sf=2 → pre-transform physical 40×40), so the transformed size
+        // (1.25·40 = 50) matches the bitmap exactly → snap fires even
+        // under zoom. Fractional translation rounds away.
+        let quad = glyph([4.0, 8.0, 20.0, 20.0], [0.0, 0.0, 50.0, 50.0], false);
+        let zoom = Transform2D {
+            m: [1.25, 0.0, 0.0, 1.25, 3.3, 7.8],
+        };
+        let verts = QuadVertex::from_glyph_quad_transformed(&quad, 2.0, 256, 256, &zoom);
+        // origin: (1.25·8 + 3.3, 1.25·16 + 7.8) = (13.3, 27.8) → (13, 28)
+        assert_eq!(verts[0].position, [13.0, 28.0]);
+        assert_eq!(verts[2].position, [63.0, 78.0]);
+    }
+
+    #[test]
+    fn glyph_no_snap_mid_bucket_residual() {
+        // A 1.1× zoom over a 1.25-bucket raster: transformed size
+        // (1.1·40 = 44) ≠ bitmap (50) → residual GPU scaling, no snap;
+        // all corners go through the plain affine transform.
+        let quad = glyph([4.0, 8.0, 20.0, 20.0], [0.0, 0.0, 50.0, 50.0], false);
+        let zoom = Transform2D {
+            m: [1.1, 0.0, 0.0, 1.1, 3.3, 7.8],
+        };
+        let verts = QuadVertex::from_glyph_quad_transformed(&quad, 2.0, 256, 256, &zoom);
+        assert_pos_near(verts[0].position, [1.1 * 8.0 + 3.3, 1.1 * 16.0 + 7.8]);
+        assert_pos_near(verts[2].position, [1.1 * 48.0 + 3.3, 1.1 * 56.0 + 7.8]);
+    }
+
+    #[test]
+    fn glyph_no_snap_rotation() {
+        // Rotated transform (b, c ≠ 0) never snaps, even at matching size.
+        let quad = glyph([10.0, 20.0, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], false);
+        let (s, c) = (0.1_f32.sin(), 0.1_f32.cos());
+        let rot = Transform2D {
+            m: [c, s, -s, c, 0.0, 0.0],
+        };
+        let verts = QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &rot);
+        assert_pos_near(
+            verts[0].position,
+            [c * 10.0 - s * 20.0, s * 10.0 + c * 20.0],
+        );
+        assert_pos_near(
+            verts[2].position,
+            [c * 40.0 - s * 60.0, s * 40.0 + c * 60.0],
+        );
+    }
+
+    #[test]
+    fn glyph_snap_translation_only_transform() {
+        // Pure fractional translation (e.g. scroll offset) still maps 1:1
+        // → snapped.
+        let quad = glyph([10.3, 20.0, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], false);
+        let pan = Transform2D {
+            m: [1.0, 0.0, 0.0, 1.0, 5.7, 3.2],
+        };
+        let verts = QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &pan);
+        // origin: (10.3 + 5.7, 20.0 + 3.2) = (16.0, 23.2) → (16, 23)
+        assert_eq!(verts[0].position, [16.0, 23.0]);
+        assert_eq!(verts[2].position, [46.0, 63.0]);
+    }
+
+    #[test]
+    fn glyph_snap_color_emoji_flag_preserved() {
+        let quad = glyph([10.3, 20.7, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], true);
+        let verts = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            1.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
+        assert_eq!(verts[0].position, [10.0, 21.0]);
+        for v in &verts {
+            assert_eq!(v.flags, QUAD_FLAG_COLOR_GLYPH);
+        }
+    }
+
+    #[test]
+    fn glyph_uvs_independent_of_snapping() {
+        // UVs come from the atlas rect alone — identical whether the
+        // position path snapped or not.
+        let quad = glyph([10.3, 20.7, 30.0, 40.0], [16.0, 32.0, 30.0, 40.0], false);
+        let snapped = QuadVertex::from_glyph_quad_transformed(
+            &quad,
+            1.0,
+            256,
+            256,
+            &Transform2D::IDENTITY,
+        );
+        let residual = Transform2D {
+            m: [1.1, 0.0, 0.0, 1.1, 0.0, 0.0],
+        };
+        let unsnapped =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &residual);
+        for (a, b) in snapped.iter().zip(unsnapped.iter()) {
+            assert_eq!(a.tex_coord, b.tex_coord);
+        }
+        assert_eq!(snapped[0].tex_coord, [16.0 / 256.0, 32.0 / 256.0]);
+        assert_eq!(snapped[2].tex_coord, [46.0 / 256.0, 72.0 / 256.0]);
     }
 
     #[test]
