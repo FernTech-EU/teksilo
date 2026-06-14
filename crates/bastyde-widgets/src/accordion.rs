@@ -1,9 +1,11 @@
 //! Accordion — a collapsible section with clickable header.
 //!
-//! Content visibility is animated via `MaxSize::bind_max_height()` with an
-//! animated `Signal<f32>`. When collapsed, max_height animates to 0; when
-//! expanded, it animates to a large value (content sizes naturally within).
-//! V2 attached handlers — no event() override.
+//! Default (non-fill) mode animates the disclosure with the `Collapse` widget
+//! (vertical) or `visible_when` dormancy (horizontal). Fill mode — used by
+//! `DockingLayout` panes — has no internal animation: the header + a `FillBody`
+//! fill the slot the enclosing Splitter pane gives, and the *Splitter pane*
+//! animates the collapse by folding to the header. V2 attached handlers — no
+//! event() override.
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -17,8 +19,16 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
-use crate::primitives::{HStack, IconWidget, Spacer, TextWidget, VStack};
+use crate::primitives::{HStack, IconWidget, MinSize, Spacer, TextWidget, VStack};
+use crate::tool_box::RotatedLabel;
 use bastyde_i18n::LocalizedString;
+
+/// Fixed header extent (px) along the main axis in [`Accordion::fill`] mode, so
+/// a collapsed dock pane is exactly the header with no content sliver.
+pub(crate) const ACCORDION_FILL_HEADER_EXTENT: f32 = 30.0;
+/// The size a fill-mode accordion's enclosing Splitter pane collapses to —
+/// the header extent plus the header→body gap. See `place_fill`.
+pub(crate) const ACCORDION_FILL_COLLAPSED_EXTENT: f32 = ACCORDION_FILL_HEADER_EXTENT + 2.0;
 
 // ---------------------------------------------------------------------------
 // AccordionRegion — thin wrapper that exposes Role::Region for aria-controls.
@@ -90,6 +100,20 @@ pub const ACCORDION_INDICATOR_SIZE: f32 = 12.0;
 pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
 pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 
+/// Orientation of an [`Accordion`]: how its header sits relative to its
+/// content. [`Vertical`](AccordionOrientation::Vertical) (the default) is a
+/// horizontal header row above the content; [`Horizontal`](AccordionOrientation::Horizontal)
+/// is a narrow vertical header **strip** (rotated-90° label, left/right
+/// chevron) beside the content — used by top/bottom dock sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccordionOrientation {
+    /// Header row above the content (default).
+    #[default]
+    Vertical,
+    /// Vertical header strip beside the content.
+    Horizontal,
+}
+
 /// A collapsible section with a clickable header that toggles content visibility.
 ///
 /// Content must be pre-registered via `content_id(id)`.
@@ -113,6 +137,22 @@ pub struct Accordion {
     /// Optional override for the header title's text style. Defaults
     /// to `theme.typography.body` when `None`.
     title_style: Option<TextStyle>,
+    /// Header orientation (default [`AccordionOrientation::Vertical`]).
+    orientation: AccordionOrientation,
+    /// When set, the expanded content **fills** the accordion's allotted space
+    /// for a fixed-size slot (e.g. a Splitter pane), with an **animated**
+    /// collapse — rather than the default natural-height disclosure. See
+    /// [`Accordion::fill`].
+    fill: bool,
+    /// Optional drag-source hook: when set, a drag gesture starting on the
+    /// header fires this (it typically calls `ctx.start_drag(...)`). Tap-to-
+    /// toggle still works — the gesture arena disambiguates.
+    on_header_drag: Option<std::rc::Rc<dyn Fn(&mut EventContext)>>,
+    /// Fill-mode layout state: the header + animated body are direct children
+    /// laid out by the accordion itself (so the body fills the leftover *and*
+    /// animates). `None` in the default (VStack-rooted) mode.
+    fill_header_id: Option<WidgetId>,
+    fill_body_id: Option<WidgetId>,
 }
 
 impl Accordion {
@@ -126,7 +166,43 @@ impl Accordion {
             region_id: None,
             title_color: None,
             title_style: None,
+            orientation: AccordionOrientation::Vertical,
+            fill: false,
+            on_header_drag: None,
+            fill_header_id: None,
+            fill_body_id: None,
         }
+    }
+
+    /// Set the header orientation (default [`AccordionOrientation::Vertical`]).
+    pub fn orientation(mut self, orientation: AccordionOrientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Shorthand for [`Accordion::orientation`]`(`[`AccordionOrientation::Horizontal`]`)`.
+    pub fn horizontal(mut self) -> Self {
+        self.orientation = AccordionOrientation::Horizontal;
+        self
+    }
+
+    /// Make the expanded content **fill** the accordion's allotted space (the
+    /// leftover after the header) — instead of the default natural-height
+    /// disclosure — while keeping the collapse/expand **animated**. Use when the
+    /// accordion lives in a fixed-size slot such as a Splitter pane (a dock
+    /// panel): the content lays out at exactly the available size (no narrow
+    /// content, no overflow) and the header tween still plays. Default `false`.
+    pub fn fill(mut self, fill: bool) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    /// Make the header a **drag source**: a drag gesture starting on it fires
+    /// `f` (which should begin a drag, e.g. `ctx.start_drag(source, payload)`).
+    /// Tap-to-toggle is unaffected — the gesture arena tells a tap from a drag.
+    pub fn on_header_drag(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_header_drag = Some(std::rc::Rc::new(f));
+        self
     }
 
     /// Override the header foreground color used for the title text and
@@ -187,34 +263,63 @@ impl Widget for Accordion {
             None => TextRole::Primary.into(),
         };
 
-        // Header: title + spacer + chevron icon
-        // Use two chevrons with visible_when so the icon updates reactively
-        let chevron_down_id = ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
-        let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
-        ctx.visible_when(chevron_down_id, expanded.clone());
-        ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
+        let horizontal = self.orientation == AccordionOrientation::Horizontal;
 
-        // Custom override wins; otherwise use the Body role so the title
-        // tracks typography changes across themes.
-        let title_widget = TextWidget::new(self.title.clone()).bind_color(header_fg);
-        let title_widget = if let Some(style) = self.title_style.clone() {
-            title_widget.style(style)
+        // Header: a horizontal row (vertical orientation) or a narrow vertical
+        // strip with a rotated label (horizontal orientation). Two chevrons
+        // toggled by `visible_when` so the glyph updates reactively.
+        let header = if horizontal {
+            // Vertical strip: [chevron_left|right] [rotated title] [spacer].
+            // Chevron points right while collapsed (content opens to the
+            // right), left once expanded.
+            let chevron_left_id =
+                ctx.add(IconWidget::chevron_left(16.0).bind_color(header_fg.clone()));
+            let chevron_right_id =
+                ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
+            ctx.visible_when(chevron_left_id, expanded.clone());
+            ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
+            let title_id = ctx.add(RotatedLabel::new(
+                self.title.clone(),
+                Signal::new(TextRole::Primary),
+            ));
+            let spacer_id = ctx.add(Spacer::new());
+            ctx.add(
+                VStack::new()
+                    .spacing(8.0)
+                    .add_child(chevron_left_id)
+                    .add_child(chevron_right_id)
+                    .add_child(title_id)
+                    .add_child(spacer_id),
+            )
         } else {
-            title_widget.style(TextStyleRole::Body)
-        };
-        let title_widget = title_widget.single_line().a11y_hidden();
-        let title_id = ctx.add(title_widget);
-        let spacer_id = ctx.add(Spacer::new());
+            let chevron_down_id =
+                ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
+            let chevron_right_id =
+                ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
+            ctx.visible_when(chevron_down_id, expanded.clone());
+            ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
-        let header = ctx.add(
-            HStack::new()
-                .spacing(8.0)
-                .add_child(title_id)
-                .add_child(spacer_id)
-                .add_child(chevron_down_id)
-                .add_child(chevron_right_id),
-        );
+            // Custom override wins; otherwise use the Body role so the title
+            // tracks typography changes across themes.
+            let title_widget = TextWidget::new(self.title.clone()).bind_color(header_fg);
+            let title_widget = if let Some(style) = self.title_style.clone() {
+                title_widget.style(style)
+            } else {
+                title_widget.style(TextStyleRole::Body)
+            };
+            let title_widget = title_widget.single_line().a11y_hidden();
+            let title_id = ctx.add(title_widget);
+            let spacer_id = ctx.add(Spacer::new());
+
+            ctx.add(
+                HStack::new()
+                    .spacing(8.0)
+                    .add_child(title_id)
+                    .add_child(spacer_id)
+                    .add_child(chevron_down_id)
+                    .add_child(chevron_right_id),
+            )
+        };
 
         // Int UI focus convention: an accent-colored border
         // appears on the header row itself on keyboard focus
@@ -243,24 +348,54 @@ impl Widget for Accordion {
                 .add_child(header),
         );
 
-        let mut vstack = VStack::new().spacing(2.0).add_child(header_with_ring);
-        if let Some(content_id) = self.content_id {
-            // Wrap content in AccordionRegion (Role::Region) so AT can navigate
-            // to the content via the header's aria-controls relationship.
-            let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
-            self.region_id = Some(region_id);
-
-            // Disclosure animation is handled by `Collapse`, which
-            // observes `expanded` and tweens both height and width
-            // (width gate prevents the natural-width balloon that
-            // would otherwise push tooltip-footer siblings off the row
-            // mid-tween).
-            let wrapper = ctx.add(Collapse::new(self.expanded.clone()).child_id(region_id));
-            vstack = vstack.add_child(wrapper);
+        if self.fill {
+            // Fill mode: the header + a `FillBody` are laid out by the accordion
+            // itself (custom layout below) so the content **fills** the leftover
+            // the enclosing Splitter pane gives it. The collapse *animation* is
+            // the Splitter pane resizing (driven externally by the `expanded`
+            // signal) — not this widget. The header carries a fixed minimum
+            // extent so a fully-collapsed pane is exactly the header.
+            let header = if horizontal {
+                ctx.add(MinSize::new(ACCORDION_FILL_HEADER_EXTENT, 0.0).child_id(header_with_ring))
+            } else {
+                ctx.add(MinSize::new(0.0, ACCORDION_FILL_HEADER_EXTENT).child_id(header_with_ring))
+            };
+            self.fill_header_id = Some(header);
+            if let Some(content_id) = self.content_id {
+                let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
+                self.region_id = Some(region_id);
+                let body = ctx.add(FillBody::new(region_id));
+                self.fill_body_id = Some(body);
+            }
+        } else {
+            // Default: the classic VStack/HStack root.
+            // - horizontal → dormancy (Collapse only animates height).
+            // - vertical → the animated `Collapse` disclosure.
+            let content_wrapper = self.content_id.map(|content_id| {
+                let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
+                self.region_id = Some(region_id);
+                if horizontal {
+                    ctx.visible_when(region_id, self.expanded.clone());
+                    region_id
+                } else {
+                    ctx.add(Collapse::new(self.expanded.clone()).child_id(region_id))
+                }
+            });
+            let root = if horizontal {
+                let mut hstack = HStack::new().spacing(2.0).add_child(header_with_ring);
+                if let Some(w) = content_wrapper {
+                    hstack = hstack.add_child(w);
+                }
+                ctx.add(hstack)
+            } else {
+                let mut vstack = VStack::new().spacing(2.0).add_child(header_with_ring);
+                if let Some(w) = content_wrapper {
+                    vstack = vstack.add_child(w);
+                }
+                ctx.add(vstack)
+            };
+            self.root_child_id = Some(root);
         }
-
-        let root = ctx.add(vstack);
-        self.root_child_id = Some(root);
 
         // --- V2 attached handlers ---
         // Handlers just flip `expanded`; the inner `Collapse` widget
@@ -269,7 +404,7 @@ impl Widget for Accordion {
         let expanded_key = self.expanded.clone();
         let kb_focused_focus = kb_focused.clone();
 
-        let handler_set = HandlerSet::new()
+        let mut handler_set = HandlerSet::new()
             .on_tap({
                 move |_pos, _ctx: &mut EventContext| {
                     expanded_tap.set(!expanded_tap.get());
@@ -303,9 +438,18 @@ impl Widget for Accordion {
             .focusable(true)
             .cursor(CursorIcon::Pointer);
 
+        // Optional drag source on the header (e.g. a dock panel's drag handle).
+        if let Some(drag) = self.on_header_drag.clone() {
+            handler_set = handler_set.on_drag(move |phase, ctx| {
+                if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                    (drag)(ctx);
+                }
+            });
+        }
+
         ctx.apply_self_handlers(handler_set);
 
-        vec![root]
+        self.child_ids()
     }
 
     fn layout_response(
@@ -313,6 +457,12 @@ impl Widget for Accordion {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        if self.fill {
+            // Fill the allotted slot (the dock pane forces our bounds anyway).
+            return proposal
+                .resolve(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0))
+                .into();
+        }
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -326,8 +476,12 @@ impl Widget for Accordion {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        if self.fill {
+            self.place_fill(bounds, children, ctx);
+            return;
+        }
         for child in children.iter_mut() {
             child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
             child.size = Size::new(bounds.width, bounds.height);
@@ -347,7 +501,171 @@ impl Widget for Accordion {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        self.child_ids()
+    }
+
+    fn clips_children(&self) -> bool {
+        // Fill mode clips so a collapsing body never bleeds past the pane.
+        self.fill
+    }
+}
+
+impl Accordion {
+    /// The accordion's children — `[header, body]` in fill mode (laid out by
+    /// `place_fill`), else the single VStack/HStack root.
+    fn child_ids(&self) -> Vec<WidgetId> {
+        if self.fill {
+            let mut ids = Vec::with_capacity(2);
+            ids.extend(self.fill_header_id);
+            ids.extend(self.fill_body_id);
+            ids
+        } else {
+            self.root_child_id.into_iter().collect()
+        }
+    }
+
+    /// Custom fill-mode layout: the header sits at the top (vertical) or the
+    /// leading edge (horizontal); the `FillBody` takes the leftover the
+    /// enclosing Splitter pane gives this accordion and clips to it. There is no
+    /// internal tween — the Splitter pane folding to the header *is* the
+    /// collapse animation.
+    fn place_fill(&self, bounds: Rect, children: &mut [WidgetPlacement], ctx: &LayoutContext) {
+        const GAP: f32 = 2.0;
+        let Some(header_id) = self.fill_header_id else {
+            return;
+        };
+        let horizontal = self.orientation == AccordionOrientation::Horizontal;
+
+        // Header extent along the main axis (height for vertical, width for
+        // horizontal); it fills the cross axis.
+        let header_size = ctx
+            .child_size(
+                header_id,
+                if horizontal {
+                    SizeProposal {
+                        width: None,
+                        height: Some(bounds.height),
+                    }
+                } else {
+                    SizeProposal {
+                        width: Some(bounds.width),
+                        height: None,
+                    }
+                },
+            )
+            .unwrap_or(Size::ZERO);
+
+        // children order matches `child_ids()`: [header, body?].
+        let header_rect = if horizontal {
+            Rect::new(bounds.x, bounds.y, header_size.width, bounds.height)
+        } else {
+            Rect::new(bounds.x, bounds.y, bounds.width, header_size.height)
+        };
+        if let Some(c) = children.first_mut() {
+            c.origin = header_rect.origin();
+            c.size = header_rect.size();
+        }
+
+        let Some(body_id) = self.fill_body_id else {
+            return;
+        };
+        // Leftover for the body, and the proposal that makes the `FillBody`
+        // fill (and clip to) that leftover.
+        let (body_origin, body_proposal) = if horizontal {
+            let leftover = (bounds.width - header_size.width - GAP).max(0.0);
+            (
+                bastyde_canvas::Point::new(header_rect.right() + GAP, bounds.y),
+                SizeProposal {
+                    width: Some(leftover),
+                    height: Some(bounds.height),
+                },
+            )
+        } else {
+            let leftover = (bounds.height - header_size.height - GAP).max(0.0);
+            (
+                bastyde_canvas::Point::new(bounds.x, header_rect.bottom() + GAP),
+                SizeProposal {
+                    width: Some(bounds.width),
+                    height: Some(leftover),
+                },
+            )
+        };
+        let body_size = ctx.child_size(body_id, body_proposal).unwrap_or(Size::ZERO);
+        if let Some(c) = children.get_mut(1) {
+            c.origin = body_origin;
+            c.size = body_size;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FillBody — the fill-mode content body of a dock-panel Accordion: it fills
+// whatever leftover the accordion gives it (which the enclosing Splitter pane
+// animates as the panel collapses / expands) and clips any overflow. Absorbs
+// taps/drags so only the accordion header toggles / drags / moves the panel.
+// The collapse *animation* is the Splitter pane resizing, not this widget.
+// ---------------------------------------------------------------------------
+
+struct FillBody {
+    content_id: WidgetId,
+}
+
+impl FillBody {
+    fn new(content_id: WidgetId) -> Self {
+        Self { content_id }
+    }
+}
+
+impl std::fmt::Debug for FillBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FillBody").finish()
+    }
+}
+
+impl Widget for FillBody {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Absorb taps + drags the content's own children didn't handle, so a
+        // tap/drag on empty panel body never reaches the accordion header.
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .on_tap(|_e, _ctx| {})
+                .on_drag(|_phase, _ctx| {}),
+        );
+        vec![self.content_id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        // Fill the leftover the accordion proposes (bounded on both axes).
+        proposal
+            .resolve(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.content_id]
     }
 }
 
@@ -532,5 +850,139 @@ mod tests {
             expanded_height,
             collapsed_height
         );
+    }
+
+    // ─── fill / drag / orientation (dock panel features) ────────────────
+
+    #[test]
+    fn fill_accordion_header_toggles_but_content_tap_does_not() {
+        use crate::primitives::TextWidget;
+        use bastyde_core::event::{Modifiers, PointerButton};
+
+        fn tap_at(tree: &mut WidgetTree, p: bastyde_canvas::Point) {
+            tree.dispatch_event(WidgetEvent::PointerDown {
+                position: p,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+            tree.dispatch_event(WidgetEvent::PointerUp {
+                position: p,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+        }
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let content = tree.add(TextWidget::new(lit!("dock body")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded.clone())
+                .fill(true)
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+
+        // A tap on the header (top of the accordion) toggles.
+        let b = tree.bounds(acc);
+        tap_at(&mut tree, bastyde_canvas::Point::new(b.x + 20.0, b.y + 6.0));
+        assert!(!expanded.get(), "header tap collapses");
+        tap_at(&mut tree, bastyde_canvas::Point::new(b.x + 20.0, b.y + 6.0));
+        assert!(expanded.get(), "header tap re-expands");
+
+        // A tap deep in the content area is absorbed — it must NOT toggle.
+        tap_at(&mut tree, bastyde_canvas::Point::new(b.x + 110.0, b.y + 200.0));
+        assert!(expanded.get(), "content tap does not collapse the panel");
+    }
+
+    #[test]
+    fn fill_accordion_header_drag_fires_hook() {
+        use crate::primitives::TextWidget;
+        use std::cell::Cell as StdCell;
+        use std::rc::Rc;
+        let dragged = Rc::new(StdCell::new(false));
+        let sink = dragged.clone();
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let content = tree.add(TextWidget::new(lit!("dock body")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded)
+                .fill(true)
+                .on_header_drag(move |_ctx| sink.set(true))
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+        let b = tree.bounds(acc);
+        let from = bastyde_canvas::Point::new(b.x + 20.0, b.y + 6.0);
+        tree.drag(from, bastyde_canvas::Point::new(from.x + 130.0, from.y + 30.0));
+        assert!(dragged.get(), "dragging the header fires on_header_drag");
+    }
+
+    #[test]
+    fn fill_accordion_body_fills_the_leftover() {
+        use crate::primitives::TextWidget;
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let content = tree.add(TextWidget::new(lit!("dock body")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded)
+                .fill(true)
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+        // children = [header, body]; the body fills the leftover after the
+        // header, so header + body ≈ the pane. (The collapse animation is the
+        // enclosing Splitter pane resizing — verified in the splitter tests.)
+        let header_h = tree.bounds(tree.children(acc)[0]).height;
+        let body_h = tree.bounds(tree.children(acc)[1]).height;
+        assert!(
+            (header_h + body_h - 300.0).abs() < 6.0,
+            "header({header_h}) + body({body_h}) should fill the 300px pane"
+        );
+        assert!(body_h > 200.0, "body fills most of the pane, got {body_h}");
+    }
+
+    #[test]
+    fn fill_accordion_body_stays_within_the_pane() {
+        use crate::primitives::{FixedSize, TextWidget};
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        // Content far taller than the pane.
+        let content = tree.add(
+            FixedSize::new()
+                .bind_width(80.0_f32)
+                .bind_height(900.0_f32)
+                .child(TextWidget::new(lit!("x"))),
+        );
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded)
+                .fill(true)
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+        // The collapse body never extends past the pane bottom (the oversized
+        // content is clipped, not spilled).
+        let body = tree.children(acc)[1];
+        assert!(
+            tree.bounds(body).bottom() <= 300.5,
+            "body bottom {} must stay within the 300px pane",
+            tree.bounds(body).bottom()
+        );
+    }
+
+    #[test]
+    fn horizontal_fill_accordion_builds() {
+        use crate::primitives::TextWidget;
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let content = tree.add(TextWidget::new(lit!("c")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded)
+                .horizontal()
+                .fill(true)
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(320.0, 120.0));
+        let b = tree.bounds(acc);
+        assert!(b.width > 0.0 && b.height > 0.0, "horizontal accordion builds");
     }
 }

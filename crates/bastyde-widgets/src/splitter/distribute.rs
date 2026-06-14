@@ -41,9 +41,15 @@ pub fn distribute(available: f32, panes: &[PaneSnapshot], progress: &[f32]) -> V
         let p = panes[i];
         let prog = progress.get(i).copied().unwrap_or(1.0).clamp(0.0, 1.0);
         let (req, lo, hi) = if p.collapsed {
-            // While collapsing/collapsed a pane may dip below its min and
-            // must not exceed its stored size.
-            (p.stored_size * prog, 0.0, p.stored_size)
+            // The pane tweens between its `collapsed_size` (fully collapsed,
+            // prog 0 — usually 0, but e.g. an accordion header height) and its
+            // stored size (prog 1). `collapsed_size` is a *floor*: even if the
+            // stored size is smaller (a stretch-grown pane whose stored size is
+            // a tiny fallback until first dragged), a collapsed pane never folds
+            // below its header. It may dip below its min while collapsing.
+            let c = p.collapsed_size;
+            let top = p.stored_size.max(c);
+            (c + (top - c) * prog, 0.0, top)
         } else {
             (
                 p.stored_size,
@@ -170,12 +176,44 @@ mod tests {
             max_size: max,
             stretch,
             collapsed,
+            collapsed_size: 0.0,
             visible: true,
         }
     }
 
     fn ones(n: usize) -> Vec<f32> {
         vec![1.0; n]
+    }
+
+    #[test]
+    fn collapsed_pane_folds_to_collapsed_size_not_zero() {
+        // A collapsed pane with `collapsed_size = 30` folds to 30 (e.g. an
+        // accordion header), not 0; the freed space goes to its sibling. On
+        // expand (progress 1) it restores to its stored size.
+        let mut p0 = pane(200.0, 50.0, None, 1.0, true);
+        p0.collapsed_size = 30.0;
+        let p1 = pane(200.0, 50.0, None, 1.0, false);
+
+        // Fully collapsed (progress 0).
+        let collapsed = distribute(400.0, &[p0, p1], &[0.0, 1.0]);
+        assert!(
+            approx(collapsed[0], 30.0),
+            "collapsed pane folds to 30, got {}",
+            collapsed[0]
+        );
+        assert!(
+            approx(collapsed[1], 370.0),
+            "sibling absorbs the freed space, got {}",
+            collapsed[1]
+        );
+
+        // Expanded (progress 1) → restores stored size.
+        let expanded = distribute(400.0, &[p0, p1], &[1.0, 1.0]);
+        assert!(
+            approx(expanded[0], 200.0),
+            "expands back to stored size, got {}",
+            expanded[0]
+        );
     }
 
     fn approx(a: f32, b: f32) -> bool {

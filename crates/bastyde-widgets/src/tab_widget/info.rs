@@ -14,9 +14,11 @@
 
 use std::rc::Rc;
 
-use bastyde_core::widget::Widget;
+use bastyde_canvas::Point;
+use bastyde_core::widget::{EventContext, Widget};
 use bastyde_i18n::LocalizedString;
 
+use super::delegate::ContextMenuFactory;
 use crate::IconWidget;
 use crate::tooltip::RichTooltipSource;
 
@@ -68,6 +70,10 @@ pub struct TabInfo {
     /// framework can't reliably auto-detect at build time (children
     /// are built lazily). Default: `false`.
     pub(crate) focusable_panel: bool,
+    /// Optional per-tab context menu (right-click the tab header). Same
+    /// shape as the delegate's `context_menu`; for dynamic tabs this is
+    /// the per-handle way to attach one.
+    pub(crate) context_menu: Option<ContextMenuFactory>,
 }
 
 impl std::fmt::Debug for TabInfo {
@@ -82,6 +88,7 @@ impl std::fmt::Debug for TabInfo {
             .field("pinned", &self.pinned)
             .field("initial_enabled", &self.initial_enabled)
             .field("focusable_panel", &self.focusable_panel)
+            .field("has_context_menu", &self.context_menu.is_some())
             .finish()
     }
 }
@@ -100,7 +107,20 @@ impl TabInfo {
             pinned: false,
             initial_enabled: true,
             focusable_panel: false,
+            context_menu: None,
         }
+    }
+
+    /// Attach a per-tab context menu (right-click the tab header). The
+    /// factory receives the click position (tab-local) and a full
+    /// [`EventContext`], and returns `Some(menu)` to mount or `None` to
+    /// decline (falling through to an ancestor). Cloned per header build.
+    pub fn context_menu(
+        mut self,
+        f: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.context_menu = Some(Rc::new(f));
+        self
     }
 
     /// Set the tab's title. Accepts `tr!(...)`, a literal string,

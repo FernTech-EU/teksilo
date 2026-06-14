@@ -81,7 +81,7 @@ mod tests;
 
 pub use bar::{
     DEFAULT_BAR_SLOT_SPACING, DEFAULT_MAX_TAB_WIDTH, DEFAULT_MIN_TAB_WIDTH,
-    DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar,
+    DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar, TabBarDragData,
 };
 use bastyde_i18n::LocalizedString;
 pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabSizing};
@@ -223,6 +223,10 @@ pub struct TabWidget {
     dyn_pane_ids: HashMap<TabId, WidgetId>,
 
     // Bar configuration — forwarded to the inner TabBar.
+    /// Optional tab-strip height override (the strip's cross-axis extent).
+    /// `None` keeps the style's `editor_tab_height`. Set via
+    /// [`Self::tab_bar_height`] / [`Self::compact_bar`].
+    tab_bar_height: Option<f32>,
     /// Reactive sizing strategy. `None` until `.tab_sizing(...)`
     /// or `.sizing_signal(...)` is called; defaulted by the bar
     /// (`TabSizing::Shared`) otherwise. When a signal is bound,
@@ -271,8 +275,31 @@ pub struct TabWidget {
     on_external_drop: Option<Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>>,
     bar_leading_slot: Option<BarSlot>,
     bar_trailing_slot: Option<BarSlot>,
+    /// Tab-strip visibility policy. See [`TabBarVisibility`].
+    bar_visibility: TabBarVisibility,
 
     root_child_id: Option<WidgetId>,
+}
+
+/// Controls whether a [`TabWidget`]'s tab strip is shown.
+///
+/// The default is [`Always`](TabBarVisibility::Always) — fully
+/// back-compatible with the historical behaviour. [`WhenMultiple`](
+/// TabBarVisibility::WhenMultiple) hides the strip while a single tab
+/// is present (the content fills the whole area) and shows it again
+/// once a second tab appears; the evaluation is reactive because a
+/// dynamic-model mutation already rebuilds the `TabWidget`.
+/// [`Never`](TabBarVisibility::Never) always hides the strip (the
+/// selector lives elsewhere — e.g. a docking activity rail).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabBarVisibility {
+    /// Always render the tab strip (historical default).
+    #[default]
+    Always,
+    /// Show the strip only when two or more tabs are present.
+    WhenMultiple,
+    /// Never render the strip; the content fills the whole area.
+    Never,
 }
 
 impl std::fmt::Debug for TabWidget {
@@ -321,8 +348,34 @@ impl TabWidget {
             on_external_drop: None,
             bar_leading_slot: None,
             bar_trailing_slot: None,
+            tab_bar_height: None,
+            bar_visibility: TabBarVisibility::Always,
             root_child_id: None,
         }
+    }
+
+    /// Set the tab-strip visibility policy (default
+    /// [`TabBarVisibility::Always`]). Use [`TabBarVisibility::WhenMultiple`]
+    /// to hide the strip while a single tab is present, or
+    /// [`TabBarVisibility::Never`] when an external selector (e.g. a
+    /// docking activity rail) drives selection.
+    pub fn bar_visibility(mut self, visibility: TabBarVisibility) -> Self {
+        self.bar_visibility = visibility;
+        self
+    }
+
+    /// Override the tab-strip height (its cross-axis extent). `None` /
+    /// unset keeps the style's `editor_tab_height` (50 dp). Use for a denser
+    /// strip — e.g. dock side panels.
+    pub fn tab_bar_height(mut self, dp: f32) -> Self {
+        self.tab_bar_height = Some(dp.max(0.0));
+        self
+    }
+
+    /// Shorthand for a **compact** (38 dp) tab strip — denser than the standard
+    /// 50 dp editor strip. Equivalent to `self.tab_bar_height(38.0)`.
+    pub fn compact_bar(self) -> Self {
+        self.tab_bar_height(38.0)
     }
 
     /// Configure the bar to render vertically — pills stacked
@@ -765,6 +818,7 @@ impl TabWidget {
         delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
             h.info.composite_tooltip.as_ref().map(|factory| factory())
         }));
+        delegate = delegate.context_menu(|_, h: &TabHandle| h.info.context_menu.clone());
         delegate
     }
 
@@ -1058,13 +1112,8 @@ impl Widget for TabWidget {
         });
 
         // Internal model fed to the inner TabBar — a snapshot of
-        // the unified handle list. Rebuilds when dynamic_model
-        // mutates (via the version signal above).
-        let internal_model = ListModel::from_vec(all_handles.clone());
-
-        // Translate `TabInfo` fields into the TabDelegate's
-        // closure-shaped accessors.
-        let delegate = self.build_delegate();
+        // the unified handle list (built inside the `show_bar` block
+        // below, since it is consumed only by the bar).
 
         // Shared panel-id buffer: the Switcher writes panel widget
         // ids into it as panes are added; the bar's headers read
@@ -1078,75 +1127,104 @@ impl Widget for TabWidget {
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(total)));
 
-        // Build + configure the inner TabBar. Selection is plumbed
-        // through as id-based — the bar maintains its own private
-        // index-side signal and bridges the two internally.
-        let mut bar = match orientation {
-            TabBarOrientation::Horizontal => TabBar::horizontal(
-                internal_model,
-                delegate,
-                self.selected_id.clone(),
-                |_, h: &TabHandle| h.id,
-            ),
-            TabBarOrientation::Vertical => TabBar::vertical(
-                internal_model,
-                delegate,
-                self.selected_id.clone(),
-                |_, h: &TabHandle| h.id,
-            ),
-        }
-        .with_panel_ids(panel_ids.clone())
-        .with_header_ids(header_ids.clone());
+        // Decide whether the tab strip is shown this build. Reactive
+        // for `WhenMultiple`: a dynamic-model mutation rebuilds the
+        // widget (the version observer above), so `total` is current.
+        let show_bar = match self.bar_visibility {
+            TabBarVisibility::Always => true,
+            TabBarVisibility::Never => false,
+            TabBarVisibility::WhenMultiple => total >= 2,
+        };
 
+        // Bind the sizing signal at the TabWidget level (not inside the
+        // `show_bar` block) so a sizing change still rebuilds the widget even
+        // while the strip is hidden (`WhenMultiple` with a single tab) — the
+        // new mode is then applied the moment the bar reappears.
         if let Some(ref sizing) = self.sizing {
-            // Bind at Rebuild level so flipping the signal triggers
-            // a TabWidget rebuild that picks up the new sizing
-            // mode. Memoized panes survive — only the bar is
-            // rebuilt with the new layout.
             sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
-            bar = bar.tab_sizing(sizing.get());
-        }
-        if let Some(ref bg) = self.tab_surface_role {
-            bar = bar.tab_surface_role(bg.clone());
-        }
-        if let Some(role) = self.selected_text_role {
-            bar = bar.selected_text_role(role);
-        }
-        if let Some(role) = self.idle_text_role {
-            bar = bar.idle_text_role(role);
-        }
-        if let Some(w) = self.min_tab_width {
-            bar = bar.min_tab_width(w);
-        }
-        if let Some(w) = self.max_tab_width {
-            bar = bar.max_tab_width(w);
-        }
-        if let Some(w) = self.pinned_tab_width {
-            bar = bar.pinned_tab_width(w);
-        }
-        if let Some(s) = self.show_scroll_arrows {
-            bar = bar.show_scroll_arrows(s);
-        }
-        if let Some(s) = self.show_overflow_dropdown {
-            bar = bar.show_overflow_dropdown(s);
-        }
-        if self.reorderable {
-            bar = bar.reorderable(true);
         }
 
-        // Wrap the bar's index-shaped callbacks into the app's
-        // id-shaped callbacks (close / reorder / pin / transfer / drop).
-        bar = self.wire_bar_callbacks(bar, &index_to_id, static_count);
+        // Build + configure the inner TabBar — only when the strip is
+        // shown (`bar_visibility`). Skipped entirely otherwise so the
+        // bar's slot widgets aren't allocated as orphans. `internal_model`
+        // and `delegate` are constructed here because they are consumed
+        // only by the bar.
+        let bar_id: Option<WidgetId> = if show_bar {
+            let internal_model = ListModel::from_vec(all_handles.clone());
+            let delegate = self.build_delegate();
 
-        if let Some(ref mut slot) = self.bar_leading_slot {
-            let id = slot.resolve(ctx);
-            bar = bar.bar_leading_slot_id(id);
-        }
-        if let Some(ref mut slot) = self.bar_trailing_slot {
-            let id = slot.resolve(ctx);
-            bar = bar.bar_trailing_slot_id(id);
-        }
-        let bar_id = ctx.add(bar);
+            // Selection is plumbed through as id-based — the bar
+            // maintains its own private index-side signal and bridges
+            // the two internally.
+            let mut bar = match orientation {
+                TabBarOrientation::Horizontal => TabBar::horizontal(
+                    internal_model,
+                    delegate,
+                    self.selected_id.clone(),
+                    |_, h: &TabHandle| h.id,
+                ),
+                TabBarOrientation::Vertical => TabBar::vertical(
+                    internal_model,
+                    delegate,
+                    self.selected_id.clone(),
+                    |_, h: &TabHandle| h.id,
+                ),
+            }
+            .with_panel_ids(panel_ids.clone())
+            .with_header_ids(header_ids.clone());
+
+            if let Some(ref sizing) = self.sizing {
+                // The rebuild-triggering binding is installed above (outside
+                // this block); here we just apply the current mode to the bar.
+                bar = bar.tab_sizing(sizing.get());
+            }
+            if let Some(ref bg) = self.tab_surface_role {
+                bar = bar.tab_surface_role(bg.clone());
+            }
+            if let Some(role) = self.selected_text_role {
+                bar = bar.selected_text_role(role);
+            }
+            if let Some(role) = self.idle_text_role {
+                bar = bar.idle_text_role(role);
+            }
+            if let Some(h) = self.tab_bar_height {
+                bar = bar.tab_bar_height(h);
+            }
+            if let Some(w) = self.min_tab_width {
+                bar = bar.min_tab_width(w);
+            }
+            if let Some(w) = self.max_tab_width {
+                bar = bar.max_tab_width(w);
+            }
+            if let Some(w) = self.pinned_tab_width {
+                bar = bar.pinned_tab_width(w);
+            }
+            if let Some(s) = self.show_scroll_arrows {
+                bar = bar.show_scroll_arrows(s);
+            }
+            if let Some(s) = self.show_overflow_dropdown {
+                bar = bar.show_overflow_dropdown(s);
+            }
+            if self.reorderable {
+                bar = bar.reorderable(true);
+            }
+
+            // Wrap the bar's index-shaped callbacks into the app's
+            // id-shaped callbacks (close / reorder / pin / transfer / drop).
+            bar = self.wire_bar_callbacks(bar, &index_to_id, static_count);
+
+            if let Some(ref mut slot) = self.bar_leading_slot {
+                let id = slot.resolve(ctx);
+                bar = bar.bar_leading_slot_id(id);
+            }
+            if let Some(ref mut slot) = self.bar_trailing_slot {
+                let id = slot.resolve(ctx);
+                bar = bar.bar_trailing_slot_id(id);
+            }
+            Some(ctx.add(bar))
+        } else {
+            None
+        };
 
         // Build (or reuse) the content panes — static + dynamic, both
         // memoized so internal state survives sibling rebuilds.
@@ -1173,11 +1251,14 @@ impl Widget for TabWidget {
         // unspecified proposal, instead of reporting 0.
         let content_id = ctx.add(Expand::new().respect_intrinsic().child_id(switcher_id));
 
-        let root_id = match orientation {
-            TabBarOrientation::Horizontal => {
+        // When the strip is hidden (`bar_visibility`), the content
+        // fills the whole area — no bar/content stack is needed.
+        let root_id = match (bar_id, orientation) {
+            (None, _) => content_id,
+            (Some(bar_id), TabBarOrientation::Horizontal) => {
                 ctx.add(VStack::new().add_child(bar_id).add_child(content_id))
             }
-            TabBarOrientation::Vertical => ctx.add(
+            (Some(bar_id), TabBarOrientation::Vertical) => ctx.add(
                 crate::primitives::HStack::new()
                     .add_child(bar_id)
                     .add_child(content_id),

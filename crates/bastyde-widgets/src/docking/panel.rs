@@ -1,0 +1,789 @@
+//! The panel / content layer of [`DockingLayout`](super::DockingLayout):
+//! the app-facing [`DockWidget`] declaration, the content-factory registry,
+//! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →
+//! draggable dock panels (with five-zone drop targets).
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use bastyde_canvas::{Rect, Size, SizeProposal};
+use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::binding::BindingLevel;
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::{DragPayload, DropFeedback};
+use bastyde_core::signal::Signal;
+use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::{LocalizedString, lit};
+use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
+
+use crate::accordion::{Accordion, AccordionOrientation};
+use crate::drop_target::DropTarget;
+use crate::icon_button::IconButton;
+use crate::popover_widget::PopoverIconButton;
+use crate::primitives::{Center, IconWidget, RectWidget, TextWidget, ZStack};
+use crate::splitter::Splitter;
+use bastyde_core::overlay::OverlayPlacement;
+
+use super::drag::{
+    DockDragData, DockDropOverlay, DropZone, compute_drop_zone, dropped_dock_tab,
+    dropped_dock_widget,
+};
+use super::geometry::DockSide;
+use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
+use super::model::{
+    DockIconFactory, DockOpenLocation, DockTabId, DockTabView, DockWidgetId, DockWidgetMeta,
+    DockingModel, side_orientation,
+};
+
+/// Builds a dock widget's content on demand (keyed by its [`DockWidgetId`]).
+pub type DockContentFactory = Rc<dyn Fn(DockWidgetId) -> Box<dyn Widget>>;
+
+/// App-facing declaration of a dock widget: identity, chrome metadata, and a
+/// lazy content factory. Collect these on [`DockingLayout::dock`](super::DockingLayout::dock).
+pub struct DockWidget {
+    id: DockWidgetId,
+    title: LocalizedString,
+    icon: Option<DockIconFactory>,
+    closable: bool,
+    default: DockOpenLocation,
+    factory: DockContentFactory,
+}
+
+impl DockWidget {
+    /// Declare a dock widget. `factory` builds its content the first time the
+    /// dock appears (and after it is closed and re-opened).
+    pub fn new<W: Widget + 'static>(
+        id: DockWidgetId,
+        title: impl Into<LocalizedString>,
+        factory: impl Fn(DockWidgetId) -> W + 'static,
+    ) -> Self {
+        Self {
+            id,
+            title: title.into(),
+            icon: None,
+            closable: true,
+            default: DockOpenLocation::side(DockSide::Leading),
+            factory: Rc::new(move |i| Box::new(factory(i)) as Box<dyn Widget>),
+        }
+    }
+
+    /// Set the dock's tab / rail icon.
+    pub fn icon(mut self, f: impl Fn() -> IconWidget + 'static) -> Self {
+        self.icon = Some(Rc::new(f));
+        self
+    }
+
+    /// Whether the dock shows a close affordance (default `true`).
+    pub fn closable(mut self, closable: bool) -> Self {
+        self.closable = closable;
+        self
+    }
+
+    /// The location used when the dock is opened via `toggle` / `reveal`
+    /// without an explicit target.
+    pub fn default_location(mut self, loc: DockOpenLocation) -> Self {
+        self.default = loc;
+        self
+    }
+
+    pub(crate) fn id(&self) -> DockWidgetId {
+        self.id
+    }
+
+    pub(crate) fn into_parts(self) -> (DockWidgetId, DockWidgetMeta, DockContentFactory) {
+        (
+            self.id,
+            DockWidgetMeta {
+                title: self.title,
+                icon: self.icon,
+                closable: self.closable,
+                min_size: None,
+                default: self.default,
+            },
+            self.factory,
+        )
+    }
+}
+
+/// Registry of content factories, owned by the layout, shared into the panel
+/// widgets so closed-then-reopened docks rebuild fresh content.
+#[derive(Default)]
+pub(crate) struct DockContentRegistry {
+    factories: HashMap<DockWidgetId, DockContentFactory>,
+}
+
+impl std::fmt::Debug for DockContentRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockContentRegistry")
+            .field("factories", &self.factories.len())
+            .finish()
+    }
+}
+
+impl DockContentRegistry {
+    pub(crate) fn insert(&mut self, id: DockWidgetId, factory: DockContentFactory) {
+        self.factories.insert(id, factory);
+    }
+    pub(crate) fn build(&self, id: DockWidgetId) -> Option<Box<dyn Widget>> {
+        self.factories.get(&id).map(|f| f(id))
+    }
+}
+
+/// A shared handle to the content-factory registry, passed down so each dock
+/// panel builds its content **in-context** (where it is placed), avoiding
+/// cross-build-context parenting.
+pub(crate) type DockContent = Rc<RefCell<DockContentRegistry>>;
+
+/// Kind tag for a side's dynamic dock tabs (so `dynamic_tab` registers them).
+const DOCK_TAB_KIND: &str = "__dock_tab__";
+
+/// The dynamic-tab payload carried by a side's `TabWidget` — identifies the
+/// DockTab so cross-side whole-tab drag (`accept_external_tabs`) can relocate
+/// it via [`DockingModel::move_tab`].
+#[derive(Clone, Copy)]
+struct DockTabPayload {
+    tab_id: DockTabId,
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockSidePanel — a side's content: optional in-side tab strip + Switcher.
+// ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub(crate) struct DockSidePanel {
+    side: DockSide,
+    model: DockingModel,
+    content: DockContent,
+    root: Option<WidgetId>,
+}
+
+impl DockSidePanel {
+    pub(crate) fn new(side: DockSide, model: DockingModel, content: DockContent) -> Self {
+        Self {
+            side,
+            model,
+            content,
+            root: None,
+        }
+    }
+}
+
+/// The drop target shown when a side has **no** docks, so a revealed-but-empty
+/// side (opened from a toolbar button, the rail, or a drag-reveal strip) still
+/// accepts content. Accepts a whole tab (`DockTabDragData` → `move_tab`) or a
+/// single dock (`DockDragData` → `move_dock`); both reveal the side.
+fn empty_side_drop_target(
+    ctx: &mut BuildContext,
+    model: &DockingModel,
+    side: DockSide,
+) -> WidgetId {
+    let text = ctx.add(
+        TextWidget::new(lit!("Drop a panel here"))
+            .style(TextStyleRole::Body)
+            .color(TextRole::Secondary),
+    );
+    let label = ctx.add(Center::new().child_id(text));
+    let m = model.clone();
+    ctx.add(
+        DropTarget::new()
+            .child_id(label)
+            .accept_when(|p| dropped_dock_tab(p).is_some() || dropped_dock_widget(p).is_some())
+            .on_drop(move |p, _pos, ctx| {
+                if let Some(tab_id) = dropped_dock_tab(&p) {
+                    m.move_tab(tab_id, side, 0);
+                    m.set_side_visible(side, true);
+                    ctx.request_accessibility_update();
+                    true
+                } else if let Some(dock_id) = dropped_dock_widget(&p) {
+                    m.move_dock(dock_id, DockOpenLocation::side(side));
+                    m.set_side_visible(side, true);
+                    ctx.request_accessibility_update();
+                    true
+                } else {
+                    false
+                }
+            }),
+    )
+}
+
+impl Widget for DockSidePanel {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        use crate::tab_widget::{TabBarVisibility, TabHandle, TabId, TabInfo, TabWidget};
+        use bastyde_data::ListModel;
+        use std::any::Any;
+        use std::num::NonZeroU64;
+
+        let all_tabs = self.model.side_tabs(self.side);
+        if all_tabs.is_empty() {
+            // A side with no docks. When it's visible (revealed from a button,
+            // the rail, or a drag-reveal strip) it shows a drop target so the
+            // first dock can be dragged in; when hidden it's dormant anyway.
+            let drop = empty_side_drop_target(ctx, &self.model, self.side);
+            self.root = Some(drop);
+            return vec![drop];
+        }
+
+        // Rebuild the strip when this side's tab-display mode flips (context-menu
+        // "Tab size": text / icon / icon + text).
+        let self_id = ctx.self_id();
+        self.model.tab_display_signal(self.side).bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::Rebuild,
+        );
+        let display = self.model.side_tab_display(self.side);
+
+        // Stable TabWidget id per dock tab (dock tab ids start at 1).
+        let to_tab_id = |t: &DockTabView| {
+            TabId::from_raw(NonZeroU64::new(t.id.raw()).unwrap_or(NonZeroU64::MIN))
+        };
+        // model-index → TabId for the whole side (selection maps through it).
+        let all_tab_ids: Vec<TabId> = all_tabs.iter().map(&to_tab_id).collect();
+
+        // Only non-hidden tabs render in the strip; remember each shown tab's
+        // model index (visible-position → model-index) for selection + drop
+        // routing.
+        let model_indices: Vec<usize> = all_tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !t.hidden)
+            .map(|(i, _)| i)
+            .collect();
+        let presentation = self.model.side_presentation(self.side);
+        if model_indices.is_empty()
+            && presentation == super::model::TabPresentation::Rail
+        {
+            // Every activity hidden in Rail presentation: the activity rail (with
+            // its own background menu) is the restore affordance — blank content.
+            let empty = ctx.add(RectWidget::new().background(SurfaceRole::Transparent));
+            self.root = Some(empty);
+            return vec![empty];
+        }
+        // In Strip presentation we still build the bar below — even with zero
+        // visible tabs — so its trailing "hidden activities" hamburger can
+        // restore them (right-clicking a tab is impossible when none show).
+
+        let dock_selected = self.model.side_selected_tab_signal(self.side);
+        let initial = all_tab_ids
+            .get(dock_selected.get().min(all_tab_ids.len().saturating_sub(1)))
+            .copied();
+        let tw_selected: Signal<Option<TabId>> = ctx.signal(initial);
+
+        // model → TabWidget: map the selected model index to its TabId (the
+        // selection never lands on a hidden tab).
+        {
+            let ids = all_tab_ids.clone();
+            let tw = tw_selected.clone();
+            ctx.effect(&dock_selected, move |&idx| {
+                let target = ids.get(idx).copied();
+                if tw.get() != target {
+                    tw.set(target);
+                }
+            });
+        }
+        // TabWidget → model (an in-strip click) — position-independent so a
+        // hidden tab in the middle doesn't shift the mapping.
+        {
+            let model = self.model.clone();
+            let side = self.side;
+            ctx.effect(&tw_selected, move |maybe| {
+                if let Some(tid) = maybe {
+                    model.select_tab_by_id(side, DockTabId::from_raw(tid.raw().get()));
+                }
+            });
+        }
+
+        // Rail presentation → the in-side strip is hidden (the activity rail is
+        // the selector). Strip → always show the real TabWidget bar (so even a
+        // single-panel side reads as a TabWidget tab, not a custom title bar).
+        let bar_visibility = match presentation {
+            super::model::TabPresentation::Rail => TabBarVisibility::Never,
+            super::model::TabPresentation::Strip => TabBarVisibility::Always,
+        };
+        // No visible tab → no tab to right-click, so the bar needs a trailing
+        // hamburger to reach the activities menu. When at least one tab shows,
+        // its own right-click menu already lists (and restores) the hidden ones.
+        let needs_hamburger = model_indices.is_empty();
+
+        // Build the visible tabs as a dynamic `ListModel<TabHandle>` so a whole
+        // tab can be dragged between sides via TabWidget's `accept_external_tabs`.
+        // Tabs are not closable (you hide the side / move the dock, you don't
+        // close a view container from its tab). Each tab carries a context menu
+        // and renders per the side's tab-display mode.
+        let mut handles: Vec<TabHandle> = Vec::with_capacity(model_indices.len());
+        for &model_i in &model_indices {
+            let tab = &all_tabs[model_i];
+            let label = tab
+                .title
+                .clone()
+                .or_else(|| {
+                    self.model
+                        .side_active_dock(self.side, model_i)
+                        .and_then(|d| self.model.dock_title(d))
+                })
+                .unwrap_or_else(|| lit!("Panel"));
+            let icon_factory = self
+                .model
+                .side_active_dock(self.side, model_i)
+                .and_then(|d| self.model.dock_icon(d));
+            let want_icon = display.shows_icon() && icon_factory.is_some();
+
+            // Always keep the title available as a tooltip (so an icon-only tab
+            // is still identifiable on hover).
+            let mut info = TabInfo::new().closable(false).tooltip(label.clone());
+            // Title: shown for Text / IconText, and as a fallback when an
+            // icon-only tab has no icon (so it never renders blank).
+            if display.shows_text() || !want_icon {
+                info = info.title(label.clone());
+            } else {
+                info = info.no_title();
+            }
+            if want_icon {
+                let icf = icon_factory.clone().expect("want_icon implies Some");
+                info = info.icon(move || (icf)());
+            }
+            {
+                let m = self.model.clone();
+                let menu_side = self.side;
+                let tid = tab.id;
+                info = info.context_menu(move |_pos, _ctx| {
+                    Some(Box::new(activity_context_menu(
+                        &m,
+                        menu_side,
+                        tid,
+                        DockMenuKind::Strip,
+                    )))
+                });
+            }
+            handles.push(TabHandle::dynamic(
+                to_tab_id(tab),
+                DOCK_TAB_KIND,
+                info,
+                DockTabPayload { tab_id: tab.id },
+            ));
+        }
+        let list: ListModel<TabHandle> = ListModel::from_vec(handles);
+
+        let side = self.side;
+        let factory_model = self.model.clone();
+        let factory_content = self.content.clone();
+        let recv_model = self.model.clone();
+        let reorder_model = self.model.clone();
+        // The bar deals in *visible* positions; translate them back to model
+        // tab indices (a no-op when nothing is hidden) for `move_tab`.
+        let reorder_indices = model_indices.clone();
+        let recv_indices = model_indices.clone();
+        let total_tabs = all_tab_ids.len();
+
+        let mut tw = TabWidget::new(tw_selected)
+            .bar_visibility(bar_visibility)
+            // Dock side strips use the denser compact (38 dp) tab bar,
+            // with each tab sized to its own content (not a shared width).
+            .compact_bar()
+            .tab_sizing(crate::tab_widget::TabSizing::Independent)
+            .dynamic_model(list)
+            .dynamic_tab::<DockTabPayload>(DOCK_TAB_KIND, move |_handle, payload| {
+                match factory_model.tab_view_by_id(payload.tab_id) {
+                    Some((tside, view)) => Box::new(DockTabContentWidget::new(
+                        tside,
+                        view,
+                        factory_model.clone(),
+                        factory_content.clone(),
+                    )) as Box<dyn Widget>,
+                    None => Box::new(RectWidget::new().background(SurfaceRole::Transparent)),
+                }
+            })
+            .reorderable(true)
+            .accept_external_tabs(true)
+            // Same-side reorder.
+            .on_reorder(move |tid, dest, _ctx| {
+                let at = reorder_indices.get(dest).copied().unwrap_or(total_tabs);
+                reorder_model.move_tab(DockTabId::from_raw(tid.raw().get()), side, at);
+            })
+            // Cross-side drop: relocate the whole tab to this side.
+            .on_tab_received(move |handle, idx, ctx| {
+                if let Some(p) = (handle.payload.as_ref() as &dyn Any)
+                    .downcast_ref::<DockTabPayload>()
+                {
+                    let at = recv_indices.get(idx).copied().unwrap_or(total_tabs);
+                    recv_model.move_tab(p.tab_id, side, at);
+                    ctx.request_accessibility_update();
+                }
+            })
+            // The source side: `move_tab` (above) already removed the tab
+            // from the model; the rebuild reconciles this side's list.
+            .on_transfer_out(|_tid, _ctx| {});
+
+        // When activities are hidden, a trailing **hamburger** in the bar opens
+        // the activities checklist (the restore affordance — and the only one
+        // left once *every* activity is hidden and no tab can be right-clicked).
+        if needs_hamburger {
+            let m = self.model.clone();
+            let hb_side = self.side;
+            tw = tw.bar_trailing_slot(
+                PopoverIconButton::new(IconButton::menu().tooltip(lit!("Hidden activities")))
+                    .content(background_menu(&m, hb_side, DockMenuKind::Strip))
+                    .placement(OverlayPlacement::BelowPreferred),
+            );
+        }
+        let root = ctx.add(tw);
+        self.root = Some(root);
+
+        // Side-level drop target for a whole-tab drag (an activity-rail button
+        // or a tab header from another side). A drop landing on a *pane* is
+        // consumed by that `DockPanePane` (split / stack); a drop landing on
+        // the **tab bar** (or any non-pane chrome) bubbles up to here and
+        // relocates the tab to the end of this side.
+        let drop_model = self.model.clone();
+        let drop_side = self.side;
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .on_drag_hover(move |_payload, _pos, _ctx| {
+                    // Accept silently; the drop is routed in `on_drop`. (A pane
+                    // under the pointer paints its own five-zone overlay; the
+                    // bar just needs to register as a valid target.)
+                    DropFeedback::NoFeedback
+                })
+                .on_drop(move |payload, _pos, ctx| {
+                    // A drop landing on non-pane chrome (the strip, gaps): a tab
+                    // relocates to this side; a single dock joins it too.
+                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                        let at = drop_model.tab_count(drop_side);
+                        drop_model.move_tab(tab_id, drop_side, at);
+                        ctx.request_accessibility_update();
+                        true
+                    } else if let Some(dock_id) = dropped_dock_widget(&payload) {
+                        drop_model.move_dock(dock_id, DockOpenLocation::side(drop_side));
+                        ctx.request_accessibility_update();
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use bastyde_core::accesskit::Role;
+        builder.set_role(Role::Complementary);
+        builder.set_name(super::a11y::side_label(self.side).resolve_now());
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockTabContentWidget — one tab's Splitter of panes.
+// ───────────────────────────────────────────────────────────────────────
+
+struct DockTabContentWidget {
+    side: DockSide,
+    tab: DockTabView,
+    model: DockingModel,
+    content: DockContent,
+    root: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for DockTabContentWidget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockTabContentWidget")
+            .field("side", &self.side)
+            .field("panes", &self.tab.panes.len())
+            .finish()
+    }
+}
+
+impl DockTabContentWidget {
+    fn new(side: DockSide, tab: DockTabView, model: DockingModel, content: DockContent) -> Self {
+        Self {
+            side,
+            tab,
+            model,
+            content,
+            root: None,
+        }
+    }
+
+    /// Build a dock's content widget in-context via the registry.
+    fn build_dock_content(&self, ctx: &mut BuildContext, dock: DockWidgetId) -> WidgetId {
+        match self.content.borrow().build(dock) {
+            Some(w) => ctx.add_boxed(w),
+            None => ctx.add(TextWidget::new(lit!("(missing content)"))),
+        }
+    }
+}
+
+impl Widget for DockTabContentWidget {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Find this tab's index in the side for drop-routing.
+        let tab_idx = self
+            .model
+            .side_tabs(self.side)
+            .iter()
+            .position(|t| t.id == self.tab.id)
+            .unwrap_or(0);
+
+        let root = if self.tab.panes.len() <= 1 {
+            // Single pane: render the dock bare (a 1-pane Splitter is
+            // degenerate). The side's tab / rail is its header.
+            match self.tab.panes.first() {
+                Some(dock) => {
+                    let inner = self.build_pane_inner(ctx, *dock, 0, None);
+                    ctx.add(DockPanePane::new(self.side, tab_idx, 0, self.model.clone(), inner))
+                }
+                None => ctx.add(RectWidget::new().background(SurfaceRole::Transparent)),
+            }
+        } else {
+            // Split panes: each dock is its own Accordion, separated by the
+            // Splitter. Collapsing an accordion collapses its Splitter pane.
+            let splitter_model = self.tab.splitter.clone();
+            let mut splitter = Splitter::new(splitter_model.clone());
+            for (pane_idx, dock) in self.tab.panes.iter().enumerate() {
+                let inner = self.build_pane_inner(ctx, *dock, pane_idx, Some(&splitter_model));
+                let pane_widget = ctx.add(DockPanePane::new(
+                    self.side,
+                    tab_idx,
+                    pane_idx,
+                    self.model.clone(),
+                    inner,
+                ));
+                splitter = splitter.pane_id(pane_widget);
+            }
+            ctx.add(splitter)
+        };
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
+}
+
+impl DockTabContentWidget {
+    /// Render one pane = one dock.
+    ///
+    /// A **sole** pane (`splitter == None`) is rendered bare — the side's tab /
+    /// rail is already its header. A **split** pane is wrapped in an
+    /// [`Accordion`] whose draggable header titles the dock, is the drag handle,
+    /// and collapses the dock on click. The accordion fills the pane (`fill`);
+    /// toggling it **collapses its Splitter pane** to just the header (siblings
+    /// grow), and re-expands it to the same size — wired here via the pane's
+    /// `expanded` signal driving `SplitterModel::set_collapsed`.
+    fn build_pane_inner(
+        &self,
+        ctx: &mut BuildContext,
+        dock: DockWidgetId,
+        pane_idx: usize,
+        splitter: Option<&crate::splitter::SplitterModel>,
+    ) -> WidgetId {
+        let content = self.build_dock_content(ctx, dock);
+        let Some(splitter) = splitter else {
+            return content;
+        };
+        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        // Initial expanded state follows the Splitter (so a rebuild preserves a
+        // collapsed pane); toggling drives the pane collapse/expand.
+        let expanded = ctx.signal(!splitter.is_collapsed(pane_idx));
+        splitter.set_collapsed_size(
+            pane_idx,
+            crate::accordion::ACCORDION_FILL_COLLAPSED_EXTENT,
+        );
+        {
+            let sp = splitter.clone();
+            ctx.effect(&expanded, move |&e| {
+                sp.set_collapsed(pane_idx, !e);
+            });
+        }
+        ctx.add(
+            Accordion::new(title, expanded)
+                .orientation(
+                    if side_orientation(self.side) == bastyde_tokens::Orientation::Vertical {
+                        AccordionOrientation::Vertical
+                    } else {
+                        AccordionOrientation::Horizontal
+                    },
+                )
+                .fill(true)
+                .on_header_drag(move |ctx| {
+                    ctx.start_drag(content, DragPayload::typed(DockDragData { dock_id: dock }));
+                })
+                .content_id(content),
+        )
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockPanePane — a Splitter pane that is a five-zone drop target.
+// ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+struct DockPanePane {
+    side: DockSide,
+    tab_idx: usize,
+    pane_idx: usize,
+    model: DockingModel,
+    inner: WidgetId,
+    zone: Signal<Option<DropZone>>,
+    self_size: Rc<Cell<Size>>,
+    root: Option<WidgetId>,
+}
+
+impl DockPanePane {
+    fn new(
+        side: DockSide,
+        tab_idx: usize,
+        pane_idx: usize,
+        model: DockingModel,
+        inner: WidgetId,
+    ) -> Self {
+        Self {
+            side,
+            tab_idx,
+            pane_idx,
+            model,
+            inner,
+            zone: Signal::new(None),
+            self_size: Rc::new(Cell::new(Size::ZERO)),
+            root: None,
+        }
+    }
+}
+
+impl Widget for DockPanePane {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let overlay = ctx.add(DockDropOverlay::new(self.zone.clone()));
+        let root = ctx.add(ZStack::new().add_child(self.inner).add_child(overlay));
+        self.root = Some(root);
+
+        let side = self.side;
+        let tab_idx = self.tab_idx;
+        let pane_idx = self.pane_idx;
+        let model = self.model.clone();
+        let zone_hover = self.zone.clone();
+        let zone_leave = self.zone.clone();
+        let zone_drop = self.zone.clone();
+        let size_hover = self.self_size.clone();
+        let size_drop = self.self_size.clone();
+
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .on_drag_hover(move |payload, pos, _ctx| {
+                    // Only a single DockWidget splits/stacks a pane (the
+                    // five-zone overlay: centre = stack, edge fifths = split). A
+                    // whole tab always relocates to the side regardless of where
+                    // it lands, so it shows no per-zone overlay.
+                    if dropped_dock_widget(payload).is_some() {
+                        let z = compute_drop_zone(pos, size_hover.get());
+                        zone_hover.set(Some(z));
+                    }
+                    DropFeedback::NoFeedback
+                })
+                .on_drag_leave(move |_ctx| zone_leave.set(None))
+                .on_drop(move |payload, pos, ctx| {
+                    if let Some(dock) = dropped_dock_widget(&payload) {
+                        let z = compute_drop_zone(pos, size_drop.get());
+                        match z {
+                            // Centre = join this tab as another Splitter pane;
+                            // an edge = split before / after the target pane.
+                            DropZone::Center => model.stack_into_tab(dock, side, tab_idx),
+                            DropZone::SplitLeading | DropZone::SplitTop => {
+                                model.split_into_tab(dock, side, tab_idx, pane_idx, true)
+                            }
+                            DropZone::SplitTrailing | DropZone::SplitBottom => {
+                                model.split_into_tab(dock, side, tab_idx, pane_idx, false)
+                            }
+                        }
+                        zone_drop.set(None);
+                        ctx.request_accessibility_update();
+                        true
+                    } else if let Some(tab_id) = dropped_dock_tab(&payload) {
+                        // A whole tab always relocates to this side (it never
+                        // splits a pane — only a single DockWidget does).
+                        let at = model.tab_count(side);
+                        model.move_tab(tab_id, side, at);
+                        zone_drop.set(None);
+                        ctx.request_accessibility_update();
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        ctx.child_size(self.inner, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        self.self_size.set(bounds.size());
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
+}

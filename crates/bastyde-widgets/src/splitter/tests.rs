@@ -35,6 +35,46 @@ fn h_model(sizes: &[f32]) -> SplitterModel {
 }
 
 #[test]
+fn collapsed_pane_with_collapsed_size_keeps_a_sliver_live() {
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(200.0)
+                .min_size(0.0)
+                .stretch(0.0)
+                .collapsed_size(32.0),
+            PaneDescriptor::new().size(200.0).min_size(0.0).stretch(1.0),
+        ],
+        Orientation::Vertical,
+    );
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(80.0, 300.0))
+            .pane(FixedLeaf(80.0, 100.0)),
+    );
+    tree.layout(SizeProposal::exact(200.0, 400.0));
+
+    model.set_collapsed_immediate(0, true);
+    tree.layout(SizeProposal::exact(200.0, 400.0));
+
+    let pane0 = tree.child_widget(root, 0);
+    let pb = tree.bounds(pane0);
+    assert!(
+        pb.height > 20.0 && pb.height < 45.0,
+        "collapsed pane folds to ~32 (collapsed_size), got {}",
+        pb.height
+    );
+    // The pane's content must stay LIVE (clipped sliver), not dormant.
+    let content = tree.child_widget(pane0, 0);
+    assert!(
+        tree.bounds(content).height > 1.0,
+        "collapsed-pane content (the sliver) must stay live, got {}",
+        tree.bounds(content).height
+    );
+}
+
+#[test]
 fn horizontal_places_panes_and_dividers() {
     let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
     let model = h_model(&[avail * 0.25, avail * 0.75]);
@@ -506,6 +546,41 @@ fn hiding_a_pane_removes_pane_and_its_gutter() {
     assert!(
         tree.bounds(tree.child_widget(root, 2)).width > 396.0,
         "remaining pane fills the whole container (no gutter)"
+    );
+}
+
+#[test]
+fn hiding_a_pane_with_a_collapsed_size_floor_still_folds_to_zero() {
+    // A pane can carry a `collapsed_size` floor (so *collapse* folds it to a
+    // header sliver) AND be *hidden* via `set_pane_visible`. Hiding must remove
+    // it entirely — the collapse floor applies to collapse, not to visibility.
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(200.0)
+                .min_size(0.0)
+                .stretch(0.0)
+                .collapsed_size(32.0),
+            PaneDescriptor::new().size(200.0).min_size(0.0).stretch(1.0),
+        ],
+        Orientation::Vertical,
+    );
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(80.0, 300.0))
+            .pane(FixedLeaf(80.0, 100.0)),
+    );
+    tree.layout(SizeProposal::exact(200.0, 400.0));
+
+    model.set_pane_visible(0, false);
+    tree.tick_animations(std::time::Duration::from_millis(400));
+    tree.layout(SizeProposal::exact(200.0, 400.0));
+
+    assert!(
+        tree.bounds(tree.child_widget(root, 0)).height < 2.0,
+        "hidden pane folds fully to 0 despite its collapsed_size floor, got {}",
+        tree.bounds(tree.child_widget(root, 0)).height
     );
 }
 

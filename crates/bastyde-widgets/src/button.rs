@@ -1,8 +1,8 @@
 //! Production-quality Button widget — V2 Widget using Signal-based reactivity.
 //!
 //! Addresses all architectural requirements:
-//! - Non-generic (closure-based type erasure, Approach B)
-//! - Signal-based reactive state (V2 API)
+//! - Non-generic (closure-based type erasure)
+//! - Signal-based reactive state
 //! - Theme resolved at paint time (not captured at build time)
 //! - V2 attached handlers (HandlerSet) — no event() override
 //! - Bindings auto-registered via register_bindings (no manual bind_to)

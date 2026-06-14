@@ -893,7 +893,7 @@ impl OverlayManager {
     }
 
     /// Get the topmost overlay.
-    #[allow(dead_code)] // V2 API: used for overlay z-ordering and focus management
+    #[allow(dead_code)] // used for overlay z-ordering and focus management
     pub(crate) fn topmost(&self) -> Option<&ActiveOverlay> {
         self.stack.last()
     }

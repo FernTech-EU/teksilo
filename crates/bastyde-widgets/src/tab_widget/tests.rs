@@ -1338,6 +1338,38 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
 }
 
 #[test]
+fn compact_tab_bar_height_overrides_editor_height() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let model = ListModel::from_vec(vec![
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("A")), ()),
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("B")), ()),
+    ]);
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(
+        TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
+            .tab_bar_height(38.0)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    // Leave the height unconstrained so the bar takes its NATURAL height (what
+    // a TabWidget allocates) rather than being stretched to a forced extent.
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+
+    let h = tree.bounds(bar_id).height;
+    assert!(
+        (h - 38.0).abs() < 1.0,
+        "compact bar should be 38 dp tall, got {h}"
+    );
+    // …and well under the 50 dp default.
+    assert!(h < crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT);
+}
+
+#[test]
 fn tab_widget_vertical_compose_lays_bar_on_leading_edge() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -1981,6 +2013,116 @@ fn non_tab_payload_rejected_without_handler() {
     let to = header_center(&tree, bar_id, 0);
     tree.drag(from, to);
     assert_eq!(model.len(), 1, "non-tab drop without a handler is a no-op");
+}
+
+// ─── bar_visibility ─────────────────────────────────────────────────
+
+/// Recursively report whether any node in `id`'s subtree carries the
+/// given accessibility role.
+fn subtree_has_role(tree: &WidgetTree, id: WidgetId, role: accesskit::Role) -> bool {
+    if tree.accessibility_node(id).role() == role {
+        return true;
+    }
+    tree.children(id)
+        .iter()
+        .any(|&c| subtree_has_role(tree, c, role))
+}
+
+#[test]
+fn bar_visibility_always_shows_strip() {
+    use crate::tab_widget::TabBarVisibility;
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .bar_visibility(TabBarVisibility::Always),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "Always must render the TabList strip"
+    );
+}
+
+#[test]
+fn bar_visibility_never_hides_strip() {
+    use crate::tab_widget::TabBarVisibility;
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .bar_visibility(TabBarVisibility::Never),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        !subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "Never must not render any TabList strip"
+    );
+}
+
+#[test]
+fn bar_visibility_when_multiple_is_reactive_and_preserves_content() {
+    use crate::tab_widget::TabBarVisibility;
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let pane_builds = Rc::new(Cell::new(0));
+    let model: ListModel<TabHandle> = ListModel::from_vec(vec![TabHandle::dynamic(
+        TabId::fresh(),
+        "doc",
+        TabInfo::new().title(label("Only")),
+        (),
+    )]);
+
+    let pb = pane_builds.clone();
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected.clone())
+            .dynamic_tab::<()>("doc", move |_h, _s| {
+                pb.set(pb.get() + 1);
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
+            .dynamic_model(model.clone())
+            .bar_visibility(TabBarVisibility::WhenMultiple),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    // One tab → strip hidden.
+    assert!(
+        !subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "WhenMultiple hides the strip at a single tab"
+    );
+    assert_eq!(pane_builds.get(), 1, "the sole pane builds once");
+
+    // Add a second tab → strip appears (reactive via the rebuild).
+    model.push(TabHandle::dynamic(
+        TabId::fresh(),
+        "doc",
+        TabInfo::new().title(label("Second")),
+        (),
+    ));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "WhenMultiple shows the strip once a second tab appears"
+    );
+    // The first pane's content survives the 1→2 strip toggle (memoized).
+    assert_eq!(
+        pane_builds.get(),
+        2,
+        "only the newly-added pane builds; the first is preserved across the toggle"
+    );
+
+    // Remove back down to one → strip hides again.
+    let _ = model.remove(1);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        !subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "WhenMultiple hides the strip again at a single tab"
+    );
+    assert_eq!(pane_builds.get(), 2, "no pane rebuild on the 2→1 toggle");
 }
 
 // ─── Suppress unused-warning when only some tests run ───────────────

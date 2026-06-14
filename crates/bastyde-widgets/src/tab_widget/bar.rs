@@ -153,6 +153,8 @@ pub struct TabBar<T: 'static> {
     max_tab_width: f32,
     pinned_tab_width: f32,
     spacing: f32,
+    /// Optional tab-strip cross-axis extent override (compact bars).
+    tab_height: Option<f32>,
 
     /// Uniform surface color/role applied to every tab header in the
     /// strip — selected, idle, and hovered all paint the same fill,
@@ -395,6 +397,7 @@ impl<T: 'static> TabBar<T> {
             max_tab_width: DEFAULT_MAX_TAB_WIDTH,
             pinned_tab_width: DEFAULT_PINNED_TAB_WIDTH,
             spacing: DEFAULT_TAB_SPACING,
+            tab_height: None,
             tab_surface_role: None,
             selected_text_role: TextRole::Primary,
             idle_text_role: TextRole::Secondary,
@@ -446,6 +449,14 @@ impl<T: 'static> TabBar<T> {
     /// regardless of this knob.
     pub fn min_tab_width(mut self, dp: f32) -> Self {
         self.min_tab_width = dp.max(0.0);
+        self
+    }
+
+    /// Override the tab-strip cross-axis extent (the strip height for a
+    /// horizontal bar; the per-tab pill height for a vertical one). `None`
+    /// keeps the style's `editor_tab_height`. Use for a compact bar.
+    pub fn tab_bar_height(mut self, dp: f32) -> Self {
+        self.tab_height = Some(dp.max(0.0));
         self
     }
 
@@ -1160,9 +1171,11 @@ impl<T: 'static> Widget for TabBar<T> {
             // `editor_tab_height` is the outer bounds height of a
             // tab header — the focus-ring envelope is reserved
             // inside (see `TabHeader::intrinsic_height`), so the
-            // bar's preferred row height is exactly the token.
+            // bar's preferred row height is exactly the token (or the
+            // `tab_bar_height` override for a compact strip).
             (
-                crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT,
+                self.tab_height
+                    .unwrap_or(crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT),
                 theme.motion.duration_normal,
                 theme.motion.easing_standard,
             )
@@ -1184,6 +1197,7 @@ impl<T: 'static> Widget for TabBar<T> {
             min_extent: self.min_tab_width,
             max_extent: self.max_tab_width,
             spacing: self.spacing,
+            tab_height: self.tab_height,
             header_bounds_buf: header_bounds_buf.clone(),
             row_bounds_buf: row_bounds_buf.clone(),
         };
@@ -1766,6 +1780,10 @@ struct TabHeaderRow {
     min_extent: f32,
     max_extent: f32,
     spacing: f32,
+    /// Optional per-tab extent override along the bar's cross axis (the tab
+    /// strip height for a horizontal bar; the per-tab pill height for a
+    /// vertical one). `None` → the style's `editor_tab_height`.
+    tab_height: Option<f32>,
     /// Per-tab bounds in world coords, populated by `place_children`.
     /// Shared with the bar's drop handlers via `Rc<RefCell<...>>`;
     /// the bar reads this to compute drop-insertion position for an
@@ -1777,6 +1795,13 @@ struct TabHeaderRow {
 }
 
 impl TabHeaderRow {
+    /// The per-tab cross-axis extent: the explicit override (compact bars) or
+    /// the style's `editor_tab_height`.
+    fn tab_extent(&self, ctx: &LayoutContext) -> f32 {
+        self.tab_height
+            .unwrap_or_else(|| TabHeader::intrinsic_height(ctx))
+    }
+
     fn compute_extents(&self, viewport_main: Option<f32>, ctx: &LayoutContext) -> Vec<f32> {
         let n = self.header_ids.len();
         if n == 0 {
@@ -1802,7 +1827,7 @@ impl TabHeaderRow {
                         // IntelliJ do. Use the intrinsic per-tab
                         // height (`editor_tab_height`) so vertical
                         // tabs match horizontal tabs in size.
-                        TabHeader::intrinsic_height(ctx)
+                        self.tab_extent(ctx)
                     }
                 };
                 vec![target; n]
@@ -1818,7 +1843,7 @@ impl TabHeaderRow {
                     };
                     let fallback = match self.axis {
                         TabBarOrientation::Horizontal => self.min_extent,
-                        TabBarOrientation::Vertical => TabHeader::intrinsic_height(ctx),
+                        TabBarOrientation::Vertical => self.tab_extent(ctx),
                     };
                     let raw = raw.unwrap_or(fallback);
                     // [min, max] are width-defaulted (96 / 240) and
@@ -1861,7 +1886,7 @@ impl Widget for TabHeaderRow {
                 // turn the strip into a tall band with the pills
                 // floating in the middle. Clamping here keeps the
                 // tab strip exactly token-sized.
-                let intrinsic = TabHeader::intrinsic_height(ctx);
+                let intrinsic = self.tab_extent(ctx);
                 let height = proposal
                     .height
                     .map(|h| h.min(intrinsic))

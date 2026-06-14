@@ -25,7 +25,7 @@ Em-dashes and middle dots in quoted source strings are preserved verbatim. The "
 
 ## 1. Design Principles
 
-The `bati!` macro is a thin syntactic transform. It is not a new runtime, not a new type system, and not a new reactivity model. Every `bati!` block desugars to a sequence of builder calls against the Bastyde V2 API. There is no hidden allocation, no intermediate virtual tree, no diff step. The macro's only job is to remove syntactic noise from code that already expresses a widget tree.
+The `bati!` macro is a thin syntactic transform. It is not a new runtime, not a new type system, and not a new reactivity model. Every `bati!` block desugars to a sequence of builder calls against Bastyde API. There is no hidden allocation, no intermediate virtual tree, no diff step. The macro's only job is to remove syntactic noise from code that already expresses a widget tree.
 
 Five rules bind the design.
 

@@ -75,6 +75,12 @@ pub struct PaneDescriptor {
     pub collapsible: bool,
     /// Initial collapsed state.
     pub collapsed: bool,
+    /// The main-axis size a collapsed pane folds down to (default `0` ⇒ fully
+    /// gone). Set this to keep a sliver visible while collapsed — e.g. an
+    /// accordion's header height, so the pane shrinks to just its header and
+    /// can be re-expanded from there. The pane restores to its prior size on
+    /// expand regardless.
+    pub collapsed_size: f32,
     /// Whether the pane is present at all. Unlike `collapsed` (which folds
     /// the pane but keeps its grabbable gutter), a hidden pane removes both
     /// the pane *and* an adjacent gutter from the layout — it reads as
@@ -92,6 +98,7 @@ impl Default for PaneDescriptor {
             stretch: 1.0,
             collapsible: false,
             collapsed: false,
+            collapsed_size: 0.0,
             visible: true,
         }
     }
@@ -125,6 +132,12 @@ impl PaneDescriptor {
         self.collapsed = collapsed;
         self
     }
+    /// Size a collapsed pane folds down to (default `0`). See
+    /// [`collapsed_size`](Self::collapsed_size).
+    pub fn collapsed_size(mut self, px: f32) -> Self {
+        self.collapsed_size = px.max(0.0);
+        self
+    }
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
@@ -143,6 +156,7 @@ struct PaneEntry {
     stretch: f32,
     collapsible: bool,
     collapsed: bool,
+    collapsed_size: f32,
     visible: bool,
 }
 
@@ -160,6 +174,7 @@ impl PaneEntry {
             stretch: d.stretch.max(0.0),
             collapsible: d.collapsible,
             collapsed: d.collapsed,
+            collapsed_size: d.collapsed_size.max(0.0),
             visible: d.visible,
         }
     }
@@ -174,6 +189,7 @@ pub struct PaneSnapshot {
     pub max_size: Option<f32>,
     pub stretch: f32,
     pub collapsed: bool,
+    pub collapsed_size: f32,
     pub visible: bool,
 }
 
@@ -331,6 +347,17 @@ impl SplitterModel {
         self.bump_version();
     }
 
+    /// Like [`set_stored_size`](Self::set_stored_size) but **without** a version
+    /// bump — for writes made from inside a layout/effect pass that is already
+    /// relaying out (e.g. capturing the displayed size as the collapse
+    /// reference), where a bump would re-enter the effect.
+    pub fn set_stored_size_silent(&self, index: usize, size: f32) {
+        let mut inner = self.0.borrow_mut();
+        if let Some(p) = inner.panes.get_mut(index) {
+            p.stored_size = size.max(0.0);
+        }
+    }
+
     /// Set both sides of handle `index` (panes `index` and `index+1`) in
     /// one mutation — a single version bump, so a drag produces exactly
     /// one relayout per move.
@@ -412,6 +439,16 @@ impl SplitterModel {
     pub fn toggle_collapsed(&self, index: usize) {
         let current = self.is_collapsed(index);
         self.set_collapsed(index, !current);
+    }
+
+    /// Set the size pane `index` folds down to when collapsed (default `0`).
+    /// See [`PaneDescriptor::collapsed_size`]. No version bump on its own — it
+    /// only affects the next collapse.
+    pub fn set_collapsed_size(&self, index: usize, px: f32) {
+        let mut inner = self.0.borrow_mut();
+        if let Some(p) = inner.panes.get_mut(index) {
+            p.collapsed_size = px.max(0.0);
+        }
     }
 
     fn set_collapsed_inner(&self, index: usize, collapsed: bool, animate: bool) {
@@ -589,6 +626,16 @@ impl SplitterModel {
             .map(|p| p.collapsible)
             .unwrap_or(false)
     }
+    /// The size pane `index` folds to when collapsed (default `0`). See
+    /// [`PaneDescriptor::collapsed_size`].
+    pub fn collapsed_size(&self, index: usize) -> f32 {
+        self.0
+            .borrow()
+            .panes
+            .get(index)
+            .map(|p| p.collapsed_size)
+            .unwrap_or(0.0)
+    }
     pub fn is_collapsed(&self, index: usize) -> bool {
         self.0
             .borrow()
@@ -628,6 +675,7 @@ impl SplitterModel {
                 max_size: p.max_size,
                 stretch: p.stretch,
                 collapsed: p.collapsed,
+                collapsed_size: p.collapsed_size,
                 visible: p.visible,
             })
             .collect()

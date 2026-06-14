@@ -122,7 +122,11 @@ directory.
 - [splitter.md](splitter.md) — N-pane `Splitter` with draggable, collapsible
   dividers, per-pane stretch, animated collapse (four triggers), a shared
   serializable `SplitterModel`, and a Tier-3 `SplitterStyle`. The building
-  block for the future `DockingLayout`.
+  block for `DockingLayout`.
+- [docking.md](docking.md) — VS Code-style `DockingLayout`: a centre slot +
+  four collapsible/splittable/draggable side regions, per-corner ownership, an
+  activity rail, drag-to-dock five-zone overlay, and a cloneable serializable
+  `DockingModel` with `export_state`/`import_state`.
 - [table-view.md](table-view.md) — virtualized `TableView` and `TreeTable`
   (multi-column, sort/filter, drag-resize, drag-reorder, full keyboard
   navigation).

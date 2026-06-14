@@ -27,10 +27,10 @@
 //!     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use bastyde_canvas::{Rect, SizeProposal};
+use bastyde_canvas::{Point, Rect, Size, SizeProposal, Transform2D};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
@@ -45,17 +45,32 @@ use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
-    Divider, FixedSize, HStack, IconWidget, MaxSize, MinSize, RectWidget, Spacer, TextWidget,
+    Divider, FixedSize, HStack, IconWidget, MinSize, RectWidget, Spacer, TextWidget,
     VStack, ZStack,
 };
 use crate::tooltip::{
     RichTooltipSource, TooltipContent, TooltipWidget, attach_rich_tooltip_source,
 };
 
-// Large sentinel value used when binding `MaxSize::max_height` / `max_width`
-// to mean "no upper bound" — the clamp in `MaxSize` reduces this to the
-// child's intrinsic size. Mirrors the constant in [`Accordion`].
-const UNBOUNDED: f32 = 10_000.0;
+
+/// Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
+///
+/// [`Vertical`](ToolBoxOrientation::Vertical) (the default) stacks sections
+/// top-to-bottom with horizontal headers and an up/down chevron — the
+/// classic `QToolBox`. [`Horizontal`](ToolBoxOrientation::Horizontal) lays
+/// sections left-to-right; each header becomes a narrow **vertical strip**
+/// with its label rotated 90° and a left/right chevron. The horizontal form
+/// is used by side-docks anchored to the top/bottom edges (where the wide,
+/// short region calls for vertical header strips).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolBoxOrientation {
+    /// Sections stacked top-to-bottom; horizontal headers (default).
+    #[default]
+    Vertical,
+    /// Sections arranged left-to-right; vertical header strips with
+    /// rotated labels and left/right chevrons.
+    Horizontal,
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -205,6 +220,11 @@ pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 
+/// `selected` value meaning "no section open" — used only in
+/// [`ToolBox::collapsible`] mode (every section collapsed). Out of range of any
+/// real index, so [`ToolBoxPanel`] treats every panel as inactive.
+const COLLAPSED_SENTINEL: usize = usize::MAX;
+
 /// A vertical container of collapsible sections with exactly one expanded
 /// at a time — the Int UI / `QToolBox` pattern.
 ///
@@ -215,6 +235,20 @@ pub struct ToolBox {
     selected: Signal<usize>,
     items: Vec<ToolBoxItem>,
     show_dividers: bool,
+    orientation: ToolBoxOrientation,
+    /// When set, the active section's panel **fills** the ToolBox's allotted
+    /// space instead of sizing to its content's natural extent. See
+    /// [`ToolBox::fill`].
+    fill: bool,
+    /// When set, clicking the **active** header collapses it (all sections may
+    /// be closed at once). See [`ToolBox::collapsible`].
+    collapsible: bool,
+    /// Optional drag-source hook: when set, each section header becomes a
+    /// drag source. Fired (with the section index) when a drag gesture
+    /// *starts* on a header — the callback typically calls
+    /// `ctx.start_drag(...)`. Tap-to-select still works (the gesture arena
+    /// disambiguates a tap from a drag).
+    header_drag: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -224,8 +258,64 @@ impl ToolBox {
             selected,
             items: Vec::new(),
             show_dividers: false,
+            orientation: ToolBoxOrientation::Vertical,
+            fill: false,
+            collapsible: false,
+            header_drag: None,
             root_child_id: None,
         }
+    }
+
+    /// Set the section arrangement orientation (default
+    /// [`ToolBoxOrientation::Vertical`]).
+    pub fn orientation(mut self, orientation: ToolBoxOrientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Make the active section's panel **fill** the ToolBox's allotted space
+    /// rather than size to its content's natural extent.
+    ///
+    /// With `fill` on, the active panel stretches to the full cross axis and
+    /// flexes / shrinks (and clips) along the main axis, so a ToolBox placed
+    /// in a bounded region lays its content out at *exactly* the available
+    /// size — the `QToolBox` convention. A panel whose content carries a
+    /// trailing `Spacer` therefore pins a bottom toolbar to the visible
+    /// bottom edge instead of overflowing past it.
+    ///
+    /// Default `false` (the panel keeps its content's natural size — the
+    /// historical behaviour, appropriate when the ToolBox itself lives inside
+    /// a scroll area).
+    pub fn fill(mut self, fill: bool) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    /// Allow **collapsing** the active section: clicking (or Enter/Space on, or
+    /// the AT `Collapse` action of) the already-expanded header closes it, so
+    /// *all* sections can be collapsed at once. A subsequent click re-expands.
+    ///
+    /// Default `false` — the classic "exactly one section open" behaviour. This
+    /// is what makes a **single-section** ToolBox a plain collapsible panel
+    /// (header toggles its content), e.g. a dock panel.
+    pub fn collapsible(mut self, collapsible: bool) -> Self {
+        self.collapsible = collapsible;
+        self
+    }
+
+    /// Shorthand for [`ToolBox::orientation`]`(`[`ToolBoxOrientation::Horizontal`]`)`.
+    pub fn horizontal(mut self) -> Self {
+        self.orientation = ToolBoxOrientation::Horizontal;
+        self
+    }
+
+    /// Make each section header a drag source. `f` is invoked (with the
+    /// section index) when a drag gesture *starts* on a header; it should
+    /// begin a drag (e.g. `ctx.start_drag(source, payload)`). Tapping a
+    /// header still selects it — the gesture arena tells a tap from a drag.
+    pub fn on_header_drag(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self {
+        self.header_drag = Some(Rc::new(f));
+        self
     }
 
     /// Append an item with an inline content widget. Convenience wrapper
@@ -307,7 +397,6 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 // ToolBoxHeader — one button-like row per item
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
 struct ToolBoxHeader {
     label: LocalizedString,
     index: usize,
@@ -337,7 +426,22 @@ struct ToolBoxHeader {
     pending_trailing: Option<Box<dyn Widget>>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip: Option<RichTooltipSource>,
+    orientation: ToolBoxOrientation,
+    /// When set, clicking the active header collapses it (see
+    /// [`ToolBox::collapsible`]).
+    collapsible: bool,
+    on_header_drag: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for ToolBoxHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolBoxHeader")
+            .field("index", &self.index)
+            .field("orientation", &self.orientation)
+            .field("draggable", &self.on_header_drag.is_some())
+            .finish()
+    }
 }
 
 impl ToolBoxHeader {
@@ -354,6 +458,9 @@ impl ToolBoxHeader {
         pending_trailing: Option<Box<dyn Widget>>,
         tooltip_text: Option<LocalizedString>,
         rich_tooltip: Option<RichTooltipSource>,
+        orientation: ToolBoxOrientation,
+        collapsible: bool,
+        on_header_drag: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     ) -> Self {
         Self {
             label,
@@ -367,6 +474,9 @@ impl ToolBoxHeader {
             pending_trailing,
             tooltip_text,
             rich_tooltip,
+            orientation,
+            collapsible,
+            on_header_drag,
             root_child_id: None,
         }
     }
@@ -462,77 +572,106 @@ impl Widget for ToolBoxHeader {
                 SurfaceRole::Transparent
             }
         });
+        let is_horizontal = self.orientation == ToolBoxOrientation::Horizontal;
+
+        // Selection indicator: a 1 dp accent bar on the header's leading
+        // edge — a vertical bar for a vertical toolbox, a top bar for a
+        // horizontal (vertical-strip) header.
         let indicator_rect_id = ctx.add(RectWidget::new().background(indicator_bg));
-        let indicator_id = ctx.add(
-            FixedSize::new()
-                .bind_width(TOOL_BOX_INDICATOR_THICKNESS)
-                .child_id(indicator_rect_id),
-        );
+        let indicator_id = if is_horizontal {
+            ctx.add(
+                FixedSize::new()
+                    .bind_height(TOOL_BOX_INDICATOR_THICKNESS)
+                    .child_id(indicator_rect_id),
+            )
+        } else {
+            ctx.add(
+                FixedSize::new()
+                    .bind_width(TOOL_BOX_INDICATOR_THICKNESS)
+                    .child_id(indicator_rect_id),
+            )
+        };
 
-        // Optional leading-slot widget. Registered here so its id can be
-        // inserted before the label.
+        // Optional leading / trailing slot widgets.
         let leading_id = self.pending_leading.take().map(|w| ctx.add_boxed(w));
-
-        // Label — single-line, clips with ellipsis if the header is
-        // narrower than the text.
-        let label_id = ctx.add(
-            TextWidget::new(self.label.clone())
-                .bind_color(text_role.clone())
-                .style(TextStyleRole::Body)
-                .single_line()
-                .a11y_hidden(),
-        );
-
+        let trailing_id = self.pending_trailing.take().map(|w| ctx.add_boxed(w));
         let spacer_id = ctx.add(Spacer::new());
 
-        // Optional trailing-slot widget. Registered here so its id can
-        // be placed between the spacer and the chevrons.
-        let trailing_id = self.pending_trailing.take().map(|w| ctx.add_boxed(w));
+        // Compose the header content along the appropriate axis.
+        let padded_content_id = if is_horizontal {
+            // Vertical strip, top → bottom:
+            //   [indicator] [leading?] [chevron L/R] [rotated label] [trailing?] [spacer]
+            // Chevron points right while collapsed (content expands to the
+            // trailing side) and left once expanded.
+            let chevron_right_id = ctx
+                .add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            let chevron_left_id = ctx
+                .add(IconWidget::chevron_left(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            ctx.visible_when(chevron_left_id, is_selected.clone());
+            ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
+            let label_id = ctx.add(RotatedLabel::new(self.label.clone(), text_role));
 
-        // Two chevron glyphs toggled via `visible_when` — cheaper than
-        // re-rendering a single glyph at runtime.
-        let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
-        let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role));
-        ctx.visible_when(chevron_down_id, is_selected.clone());
-        ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
+            let mut col = VStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
+            col = col.add_child(indicator_id);
+            if let Some(id) = leading_id {
+                col = col.add_child(id);
+            }
+            col = col
+                .add_child(chevron_left_id)
+                .add_child(chevron_right_id)
+                .add_child(label_id);
+            if let Some(id) = trailing_id {
+                col = col.add_child(id);
+            }
+            col = col.add_child(spacer_id);
+            let col_id = ctx.add(col);
+            ctx.add(
+                crate::primitives::Padding::symmetric(TOOL_BOX_HEADER_PADDING_HORIZONTAL, 0.0)
+                    .child_id(col_id),
+            )
+        } else {
+            // Horizontal row:
+            //   [indicator] [leading?] [label] [spacer] [trailing?] [chevron]
+            let label_id = ctx.add(
+                TextWidget::new(self.label.clone())
+                    .bind_color(text_role.clone())
+                    .style(TextStyleRole::Body)
+                    .single_line()
+                    .a11y_hidden(),
+            );
+            let chevron_down_id = ctx
+                .add(IconWidget::chevron_down(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            let chevron_right_id =
+                ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role));
+            ctx.visible_when(chevron_down_id, is_selected.clone());
+            ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
-        // Compose the header row:
-        //   [indicator] [leading?] [label] [spacer] [trailing?] [chevron]
-        let mut row = HStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
-        row = row.add_child(indicator_id);
-        if let Some(id) = leading_id {
-            row = row.add_child(id);
-        }
-        row = row.add_child(label_id).add_child(spacer_id);
-        if let Some(id) = trailing_id {
-            row = row.add_child(id);
-        }
-        row = row.add_child(chevron_down_id).add_child(chevron_right_id);
-        let row_id = ctx.add(row);
+            let mut row = HStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
+            row = row.add_child(indicator_id);
+            if let Some(id) = leading_id {
+                row = row.add_child(id);
+            }
+            row = row.add_child(label_id).add_child(spacer_id);
+            if let Some(id) = trailing_id {
+                row = row.add_child(id);
+            }
+            row = row.add_child(chevron_down_id).add_child(chevron_right_id);
+            let row_id = ctx.add(row);
+            // The indicator sits inset by the container's padding (IntelliJ
+            // Settings convention).
+            ctx.add(
+                crate::primitives::Padding::symmetric(0.0, TOOL_BOX_HEADER_PADDING_HORIZONTAL)
+                    .child_id(row_id),
+            )
+        };
 
-        // Wrap the row in horizontal padding. The indicator sits at
-        // `x = padding_horizontal` inside the header rather than flush
-        // to the widget's leading edge — this matches how IntelliJ's
-        // Settings panels render their selection bar (inset from the
-        // row edge by the container's padding).
-        let padded_row_id = ctx.add(
-            crate::primitives::Padding::symmetric(0.0, TOOL_BOX_HEADER_PADDING_HORIZONTAL)
-                .child_id(row_id),
-        );
-
-        // Background fills the whole header row.
+        // Background fills the whole header.
         let bg_rect_id = ctx.add(RectWidget::new().bind_background(bg_role));
 
         // Focus-border rect is inset by half the focus stroke width on
         // every side so the centred stroke fits *entirely* inside the
-        // ZStack bounds. Without the inset the stroke bleeds outside and
-        // the VStack (or a sibling row) clips the outer half, so the
-        // ring appears truncated on all four edges. Wrapping the rect
-        // in a `Padding(focus_ring_width / 2)` gives it bounds that,
-        // when stroked with `focus_ring_width`, reach the ZStack edge
-        // exactly.
+        // ZStack bounds (otherwise the parent clips the outer half and the
+        // ring reads as truncated).
         let focus_inset = focus_ring_width * 0.5;
         let focus_rect_id = ctx.add(
             RectWidget::new()
@@ -545,11 +684,16 @@ impl Widget for ToolBoxHeader {
             ZStack::new()
                 .add_child(bg_rect_id)
                 .add_child(focus_padded_id)
-                .add_child(padded_row_id),
+                .add_child(padded_content_id),
         );
 
-        // Enforce the Int UI 28 dp row height.
-        let root_id = ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id));
+        // Enforce the Int UI 28 dp extent on the cross axis: min height
+        // for a horizontal header row, min width for a vertical strip.
+        let root_id = if is_horizontal {
+            ctx.add(MinSize::new(TOOL_BOX_HEADER_MIN_HEIGHT, 0.0).child_id(zstack_id))
+        } else {
+            ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id))
+        };
         self.root_child_id = Some(root_id);
 
         // Attach tooltip if configured. Plain and rich are mutually
@@ -565,6 +709,7 @@ impl Widget for ToolBoxHeader {
         }
 
         // --- V2 attached handlers on the header's own node ---
+        let collapsible = self.collapsible;
         let selected_tap = self.selected.clone();
         let selected_key = self.selected.clone();
         let selected_access = self.selected.clone();
@@ -576,9 +721,13 @@ impl Widget for ToolBoxHeader {
         let interaction_for_focus = interaction.clone();
         let focus_origin_for_focus = focus_origin.clone();
 
-        let handler_set = HandlerSet::new()
+        let mut handler_set = HandlerSet::new()
             .on_tap(move |_pos, _ctx| {
-                selected_tap.set(idx);
+                if collapsible && selected_tap.get() == idx {
+                    selected_tap.set(COLLAPSED_SENTINEL);
+                } else {
+                    selected_tap.set(idx);
+                }
                 interaction_for_tap.set(HeaderInteraction::Hovered);
             })
             .on_hover(move |entered, _ctx| {
@@ -617,7 +766,11 @@ impl Widget for ToolBoxHeader {
                         key: Key::Space | Key::Enter,
                         ..
                     } => {
-                        selected_key.set(idx);
+                        if collapsible && selected_key.get() == idx {
+                            selected_key.set(COLLAPSED_SENTINEL);
+                        } else {
+                            selected_key.set(idx);
+                        }
                         interaction_for_key.set(HeaderInteraction::Hovered);
                         EventResponse::Handled
                     }
@@ -678,10 +831,15 @@ impl Widget for ToolBoxHeader {
                         selected_access.set(idx);
                         EventResponse::Handled
                     }
-                    // Exclusive disclosure: collapsing the active section
-                    // without picking a replacement would violate the
-                    // invariant. Swallow.
-                    bastyde_core::accesskit::Action::Collapse => EventResponse::Handled,
+                    bastyde_core::accesskit::Action::Collapse => {
+                        // Collapsible: close the active section. Otherwise
+                        // exclusive disclosure forbids collapsing the only open
+                        // section — swallow.
+                        if collapsible && selected_access.get() == idx {
+                            selected_access.set(COLLAPSED_SENTINEL);
+                        }
+                        EventResponse::Handled
+                    }
                     _ => EventResponse::Ignored,
                 }
             })
@@ -691,6 +849,17 @@ impl Widget for ToolBoxHeader {
             // arena gates whether it actually does.
             .focusable(true)
             .cursor(CursorIcon::Pointer);
+
+        // Drag source: when configured, a drag gesture starting on this
+        // header fires the hook with the section index. Tap-to-select is
+        // unaffected — the gesture arena disambiguates tap from drag.
+        if let Some(drag) = self.on_header_drag.clone() {
+            handler_set = handler_set.on_drag(move |phase, ctx| {
+                if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                    (drag)(idx, ctx);
+                }
+            });
+        }
 
         ctx.apply_self_handlers(handler_set);
 
@@ -768,6 +937,12 @@ struct ToolBoxPanel {
     selected: Signal<usize>,
     index: usize,
     content: Option<PendingChild>,
+    /// When set, the active panel fills its allotted space (see
+    /// [`ToolBox::fill`]); the inner content is held directly (no `MaxSize`
+    /// clamp) and the cross-/main-axis behaviour is computed in
+    /// [`ToolBoxPanel::layout_response`].
+    fill: bool,
+    orientation: ToolBoxOrientation,
     root_child_id: Option<WidgetId>,
 }
 
@@ -777,12 +952,16 @@ impl ToolBoxPanel {
         selected: Signal<usize>,
         index: usize,
         content: PendingChild,
+        fill: bool,
+        orientation: ToolBoxOrientation,
     ) -> Self {
         Self {
             label,
             selected,
             index,
             content: Some(content),
+            fill,
+            orientation,
             root_child_id: None,
         }
     }
@@ -795,25 +974,21 @@ impl Widget for ToolBoxPanel {
             PendingChild::Deferred(w) => ctx.add_boxed(w),
         };
 
+        // An inactive section's content is parked **dormant** (out of
+        // layout / paint / focus / AT) via `visible_when`, instead of being
+        // laid out and clamped to zero. A clamped-to-zero panel still lays its
+        // content out (overflowing the 0-px slot), which the inspector flags
+        // and which costs real layout work; dormancy avoids both. ToolBox
+        // section swaps are instant (no animation), so there's nothing to
+        // tween — dormancy is the right tool.
         let idx = self.index;
-        // `MaxSize` clamps the child to `min(max, intrinsic)`. `UNBOUNDED`
-        // is a large constant that effectively says "no upper limit"; the
-        // child's natural size wins. `0.0` collapses the panel fully.
         let is_selected = self.selected.map(move |s| *s == idx);
-        let height_prop = is_selected.map(|sel| if *sel { UNBOUNDED } else { 0.0 });
-        // Also clamp width so a collapsed panel's intrinsic width does
-        // not leak into the parent's size_that_fits via the VStack —
-        // same trick Accordion uses ([accordion.rs:200-208]).
-        let width_prop = is_selected.map(|sel| if *sel { UNBOUNDED } else { 0.0 });
-
-        let root = ctx.add(
-            MaxSize::new(UNBOUNDED, UNBOUNDED)
-                .bind_max_width(width_prop)
-                .bind_max_height(height_prop)
-                .child_id(content_id),
-        );
-        self.root_child_id = Some(root);
-        vec![root]
+        ctx.visible_when(content_id, is_selected);
+        self.root_child_id = Some(content_id);
+        // Re-measure the panel when the active section changes.
+        self.selected
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        vec![content_id]
     }
 
     fn layout_response(
@@ -821,12 +996,33 @@ impl Widget for ToolBoxPanel {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        if let Some(root) = self.root_child_id
-            && let Some(size) = ctx.child_size(root, proposal)
-        {
-            return (size).into();
+        let Some(root) = self.root_child_id else {
+            return proposal.resolve(0.0, 0.0).into();
+        };
+
+        // Inactive → zero (the content is dormant, contributing nothing).
+        if self.selected.get() != self.index {
+            return Size::ZERO.into();
         }
-        proposal.resolve(0.0, 0.0).into()
+
+        let content = ctx.child_size(root, proposal).unwrap_or(Size::ZERO);
+        if self.fill {
+            // Active: fill the cross axis and report flex + shrink on the main
+            // axis so the parent stack grows / shrinks us into the leftover
+            // space. `min = 0` lets us shrink fully under over-constraint; the
+            // content is clipped (`clips_children`) if it can't fit.
+            let size = match self.orientation {
+                ToolBoxOrientation::Vertical => {
+                    Size::new(proposal.width.unwrap_or(content.width), content.height)
+                }
+                ToolBoxOrientation::Horizontal => {
+                    Size::new(content.width, proposal.height.unwrap_or(content.height))
+                }
+            };
+            return bastyde_core::widget::LayoutResponse::shrinkable(size, Size::ZERO, 1.0)
+                .with_flex(1.0);
+        }
+        content.into()
     }
 
     fn place_children(
@@ -842,15 +1038,22 @@ impl Widget for ToolBoxPanel {
         }
     }
 
+    fn clips_children(&self) -> bool {
+        // Fill mode clips so an over-tall active panel (or a collapsed
+        // zero-size one) never bleeds past its slot. Natural mode keeps the
+        // historical non-clipping behaviour.
+        self.fill
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use bastyde_core::accesskit::Role;
         // `Region` is the ARIA role for a labelled landmark section. Used
         // by screen readers to announce the panel as "Region: <label>".
         builder.set_role(Role::Region);
         builder.set_name(self.label.resolve_now());
-        // Collapsed panels must be hidden from AT — they're kept in the
-        // widget tree for animation purposes, but their content is at
-        // height=0 and should not be navigable by screen readers.
+        // Collapsed panels are hidden from AT. Their content is parked dormant
+        // (`visible_when`), so it's already out of the AT tree; this also hides
+        // the panel landmark node itself so a collapsed section isn't announced.
         if self.selected.get() != self.index {
             builder.set_hidden();
         }
@@ -864,6 +1067,130 @@ impl Widget for ToolBoxPanel {
 // ---------------------------------------------------------------------------
 // ToolBox Widget impl
 // ---------------------------------------------------------------------------
+// RotatedLabel — a single-line label painted rotated 90° for horizontal
+// (vertical-strip) ToolBox headers. The footprint is the label's natural
+// size with width/height swapped; the label glyphs are rotated via a
+// transform scope while the header rect itself stays axis-aligned, so
+// hit-testing / layout / drag all work in normal coordinates.
+// ---------------------------------------------------------------------------
+
+/// `T(pivot) · R(theta) · T(-pivot)` — rotation about a world-space pivot.
+fn pivoted_rotation(pivot: Point, theta: f32) -> Transform2D {
+    let (s, c) = theta.sin_cos();
+    Transform2D {
+        m: [
+            c,
+            s,
+            -s,
+            c,
+            pivot.x * (1.0 - c) + pivot.y * s,
+            pivot.y * (1.0 - c) - pivot.x * s,
+        ],
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct RotatedLabel {
+    label: LocalizedString,
+    color: Signal<TextRole>,
+    child_id: Option<WidgetId>,
+    natural: Cell<Size>,
+    transform_signal: Option<Signal<Transform2D>>,
+}
+
+impl RotatedLabel {
+    pub(crate) fn new(label: LocalizedString, color: Signal<TextRole>) -> Self {
+        Self {
+            label,
+            color,
+            child_id: None,
+            natural: Cell::new(Size::ZERO),
+            transform_signal: None,
+        }
+    }
+}
+
+impl Widget for RotatedLabel {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let child = ctx.add(
+            TextWidget::new(self.label.clone())
+                .bind_color(self.color.clone())
+                .style(TextStyleRole::Body)
+                .single_line()
+                .a11y_hidden(),
+        );
+        self.child_id = Some(child);
+        let t = ctx.signal(Transform2D::IDENTITY);
+        ctx.set_transform(ctx.self_id(), t.clone());
+        self.transform_signal = Some(t);
+        vec![child]
+    }
+
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        // Measure the label at its single-line intrinsic size, then swap
+        // width/height for the rotated footprint.
+        let natural = self
+            .child_id
+            .and_then(|id| {
+                ctx.child_size(
+                    id,
+                    SizeProposal {
+                        width: None,
+                        height: None,
+                    },
+                )
+            })
+            .unwrap_or(Size::ZERO);
+        self.natural.set(natural);
+        Size::new(natural.height, natural.width).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        let natural = self.natural.get();
+        // Centre the (un-rotated) child on the slot centre; a 90° rotation
+        // about that centre maps its W×H onto the slot's H×W exactly.
+        let cx = bounds.x + bounds.width * 0.5;
+        let cy = bounds.y + bounds.height * 0.5;
+        let origin = Point::new(cx - natural.width * 0.5, cy - natural.height * 0.5);
+        for child in children.iter_mut() {
+            child.origin = origin;
+            child.size = natural;
+        }
+        if let Some(t) = &self.transform_signal {
+            // -90°: text reads bottom-to-top (the desktop convention for a
+            // leading-edge vertical tab/strip).
+            t.set(pivoted_rotation(
+                Point::new(cx, cy),
+                -std::f32::consts::FRAC_PI_2,
+            ));
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        false
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // The header node carries the accessible name; the rotated label
+        // is decorative chrome.
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 impl Widget for ToolBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -875,9 +1202,16 @@ impl Widget for ToolBox {
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(items.len())));
 
-        let mut vstack = VStack::new().spacing(0.0);
+        let orientation = self.orientation;
         let show_dividers = self.show_dividers;
         let item_count = items.len();
+
+        // Collect the ordered child ids, then wrap in a VStack (vertical)
+        // or HStack (horizontal). Each section contributes its header then
+        // its panel; the panel collapses to zero on the main axis when
+        // inactive (it already clamps *both* axes), so a collapsed
+        // horizontal section shrinks to just its header strip.
+        let mut child_ids: Vec<WidgetId> = Vec::with_capacity(item_count * 3);
 
         for (index, item) in items.into_iter().enumerate() {
             let label = item.label.clone();
@@ -893,6 +1227,9 @@ impl Widget for ToolBox {
                 item.trailing,
                 item.tooltip_text,
                 item.rich_tooltip,
+                orientation,
+                self.collapsible,
+                self.header_drag.clone(),
             ));
             header_ids.borrow_mut().push(header_id);
 
@@ -901,18 +1238,42 @@ impl Widget for ToolBox {
                 self.selected.clone(),
                 index,
                 item.content,
+                self.fill,
+                orientation,
             ));
             panel_ids.borrow_mut().push(panel_id);
 
-            vstack = vstack.add_child(header_id).add_child(panel_id);
+            child_ids.push(header_id);
+            child_ids.push(panel_id);
 
             if show_dividers && index + 1 < item_count {
-                let divider_id = ctx.add(Divider::new().color(BorderRole::Divider));
-                vstack = vstack.add_child(divider_id);
+                // The divider runs across the section boundary: a
+                // horizontal toolbox needs a vertical divider and vice
+                // versa.
+                let divider = match orientation {
+                    ToolBoxOrientation::Vertical => Divider::new(),
+                    ToolBoxOrientation::Horizontal => Divider::vertical(),
+                };
+                child_ids.push(ctx.add(divider.color(BorderRole::Divider)));
             }
         }
 
-        let root = ctx.add(vstack);
+        let root = match orientation {
+            ToolBoxOrientation::Vertical => {
+                let mut stack = VStack::new().spacing(0.0);
+                for id in child_ids {
+                    stack = stack.add_child(id);
+                }
+                ctx.add(stack)
+            }
+            ToolBoxOrientation::Horizontal => {
+                let mut stack = HStack::new().spacing(0.0);
+                for id in child_ids {
+                    stack = stack.add_child(id);
+                }
+                ctx.add(stack)
+            }
+        };
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -1309,5 +1670,255 @@ mod tests {
         let info = t.accessibility_node(disabled);
         assert!(!info.actions().contains(&accesskit::Action::Click));
         assert!(!info.actions().contains(&accesskit::Action::Expand));
+    }
+
+    // ─── orientation + drag ────────────────────────────────────────────
+
+    #[test]
+    fn vertical_orientation_stacks_top_to_bottom() {
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .item(lit!("A"), TextWidget::new(lit!("a")))
+                .item(lit!("B"), TextWidget::new(lit!("b"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 600.0));
+        let h0 = t.bounds(header_id(&t, tb, 0));
+        let h1 = t.bounds(header_id(&t, tb, 1));
+        assert!(h1.y > h0.y, "vertical headers stack top→bottom");
+        // Header is a wide, short row.
+        assert!(h0.width > h0.height, "vertical header is a horizontal row");
+    }
+
+    #[test]
+    fn horizontal_orientation_lays_sections_left_to_right() {
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .horizontal()
+                .item(lit!("Terminal"), TextWidget::new(lit!("term")))
+                .item(lit!("Problems"), TextWidget::new(lit!("prob")))
+                .item(lit!("Output"), TextWidget::new(lit!("out"))),
+        );
+        t.layout(SizeProposal::exact(900.0, 220.0));
+
+        let h0 = t.bounds(header_id(&t, tb, 0));
+        let h1 = t.bounds(header_id(&t, tb, 1));
+        let h2 = t.bounds(header_id(&t, tb, 2));
+        assert!(
+            h0.x < h1.x && h1.x < h2.x,
+            "horizontal headers run left→right: {} {} {}",
+            h0.x,
+            h1.x,
+            h2.x
+        );
+        // Each header is a tall, narrow vertical strip.
+        assert!(
+            h0.height > h0.width,
+            "horizontal header is a vertical strip ({}×{})",
+            h0.width,
+            h0.height
+        );
+        assert!(
+            h0.width <= TOOL_BOX_HEADER_MIN_HEIGHT + 24.0,
+            "strip stays narrow (got width {})",
+            h0.width
+        );
+    }
+
+    #[test]
+    fn horizontal_collapsed_panel_has_zero_main_extent() {
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .horizontal()
+                .item(lit!("A"), TextWidget::new(lit!("aaaa")))
+                .item(lit!("B"), TextWidget::new(lit!("bbbb"))),
+        );
+        t.layout(SizeProposal::exact(900.0, 220.0));
+        // Section 0 is selected → its panel has width; section 1's panel
+        // collapses to zero width.
+        assert!(t.bounds(panel_id(&t, tb, 0)).width > 0.0);
+        assert!(t.bounds(panel_id(&t, tb, 1)).width.abs() < 0.5);
+    }
+
+    #[test]
+    fn header_drag_hook_fires_with_section_index() {
+        use std::cell::Cell as StdCell;
+        let dragged: Rc<StdCell<Option<usize>>> = Rc::new(StdCell::new(None));
+        let selected = Signal::new(0_usize);
+        let sink = dragged.clone();
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .on_header_drag(move |idx, _ctx| sink.set(Some(idx)))
+                .item(lit!("A"), TextWidget::new(lit!("a")))
+                .item(lit!("B"), TextWidget::new(lit!("b"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 600.0));
+
+        let h1 = t.bounds(header_id(&t, tb, 1));
+        let from = bastyde_canvas::Point::new(h1.x + h1.width * 0.5, h1.y + h1.height * 0.5);
+        // Drag well past the threshold to trigger DragPhase::Started.
+        t.drag(from, bastyde_canvas::Point::new(from.x + 120.0, from.y + 40.0));
+        assert_eq!(
+            dragged.get(),
+            Some(1),
+            "dragging header #1 must fire the hook with index 1"
+        );
+    }
+
+    // ─── fill mode ─────────────────────────────────────────────────────
+
+    #[test]
+    fn fill_active_panel_fills_width_and_leftover_height() {
+        // A narrow-content section in a tall box: with `.fill(true)` the
+        // active panel stretches to the full width and grows into the leftover
+        // height after the headers, so the ToolBox fills its slot exactly.
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .fill(true)
+                .item(lit!("A"), TextWidget::new(lit!("a")))
+                .item(lit!("B"), TextWidget::new(lit!("b"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 400.0));
+
+        // The ToolBox fills the proposed height exactly (no under-fill gap,
+        // no overflow).
+        assert!(
+            (t.bounds(tb).height - 400.0).abs() < 1.0,
+            "fill ToolBox should occupy its full slot height, got {}",
+            t.bounds(tb).height
+        );
+
+        let panel_a = t.bounds(panel_id(&t, tb, 0));
+        // Active panel fills the cross axis (width).
+        assert!(
+            panel_a.width > 290.0,
+            "active panel should fill the width, got {}",
+            panel_a.width
+        );
+        // …and grows into the leftover main-axis space (well beyond a single
+        // text line).
+        assert!(
+            panel_a.height > 200.0,
+            "active panel should grow into leftover height, got {}",
+            panel_a.height
+        );
+        // Inactive panel stays collapsed.
+        assert!(
+            t.bounds(panel_id(&t, tb, 1)).height < 0.5,
+            "inactive panel collapsed"
+        );
+    }
+
+    #[test]
+    fn fill_active_panel_does_not_overflow_oversized_content() {
+        // A section whose content wants 1000 px in a 200 px box: with
+        // `.fill(true)` the active panel shrinks to fit (and clips) instead of
+        // pushing the ToolBox past its slot — so a bottom toolbar inside the
+        // content never lands below the visible area.
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tall = FixedSize::new()
+            .bind_width(120.0_f32)
+            .bind_height(1000.0_f32)
+            .child(TextWidget::new(lit!("x")));
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .fill(true)
+                .item(lit!("A"), tall)
+                .item(lit!("B"), TextWidget::new(lit!("b"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 200.0));
+
+        assert!(
+            (t.bounds(tb).height - 200.0).abs() < 1.0,
+            "fill ToolBox must not overflow its slot, got {}",
+            t.bounds(tb).height
+        );
+        let panel_a = t.bounds(panel_id(&t, tb, 0));
+        assert!(
+            panel_a.height < 200.0,
+            "oversized active panel shrinks to fit, got {}",
+            panel_a.height
+        );
+    }
+
+    #[test]
+    fn non_fill_panel_keeps_natural_size() {
+        // Without `.fill`, the historical behaviour stands: the active panel
+        // sizes to its content's natural extent (a short text line), leaving
+        // the box partly empty rather than stretching.
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .item(lit!("A"), TextWidget::new(lit!("a")))
+                .item(lit!("B"), TextWidget::new(lit!("b"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        // Natural mode: the active panel is just a text line tall, far short
+        // of the 400 px slot.
+        assert!(
+            t.bounds(panel_id(&t, tb, 0)).height < 100.0,
+            "non-fill panel keeps natural height, got {}",
+            t.bounds(panel_id(&t, tb, 0)).height
+        );
+    }
+
+    // ─── collapsible mode ──────────────────────────────────────────────
+
+    #[test]
+    fn collapsible_active_header_click_collapses_then_reexpands() {
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .collapsible(true)
+                .item(lit!("A"), TextWidget::new(lit!("aaa")))
+                .item(lit!("B"), TextWidget::new(lit!("bbb"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        assert!(t.bounds(panel_id(&t, tb, 0)).height > 0.0, "A starts expanded");
+
+        // Click the active header → collapse it (all sections closed).
+        t.click(header_id(&t, tb, 0));
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        assert!(
+            t.bounds(panel_id(&t, tb, 0)).height < 0.5,
+            "active header click collapses its content"
+        );
+        assert!(t.bounds(panel_id(&t, tb, 1)).height < 0.5, "B stays collapsed");
+
+        // Click again → re-expand.
+        t.click(header_id(&t, tb, 0));
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        assert!(t.bounds(panel_id(&t, tb, 0)).height > 0.0, "re-expands on next click");
+    }
+
+    #[test]
+    fn non_collapsible_active_header_click_stays_open() {
+        // Default (exclusive): clicking the active header keeps it open.
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .item(lit!("A"), TextWidget::new(lit!("aaa")))
+                .item(lit!("B"), TextWidget::new(lit!("bbb"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        t.click(header_id(&t, tb, 0));
+        t.layout(SizeProposal::exact(300.0, 400.0));
+        assert_eq!(selected.get(), 0);
+        assert!(
+            t.bounds(panel_id(&t, tb, 0)).height > 0.0,
+            "non-collapsible active section stays open"
+        );
     }
 }

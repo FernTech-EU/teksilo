@@ -29,6 +29,7 @@ pub mod date_edit;
 pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
+pub mod docking;
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;
@@ -99,7 +100,7 @@ mod preview_catalog;
 
 pub use tooltip::TooltipWidget;
 
-pub use accordion::Accordion;
+pub use accordion::{Accordion, AccordionOrientation};
 pub use animations::{
     Blur, Collapse, Crossfade, Cycle, Fade, Pulse, Rotate, Scale, ScaleOrigin, Shake, Slide,
     SlideEdge, SmoothSize, SmoothSizeAxes,
@@ -126,6 +127,11 @@ pub use date_edit::DateEdit;
 pub use date_range_edit::DateRangeEdit;
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
+pub use docking::{
+    CornerOwners, DockCorner, DockLayoutState, DockOpenLocation, DockOpenMode, DockRail,
+    DockRailItemSize, DockRailSlot, DockSide, DockTabDisplay, DockTabId, DockWidget, DockWidgetId,
+    DockingLayout, DockingModel, TabPresentation,
+};
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
 pub use file_picker_field::{FilePickerField, FilePickerKind};
@@ -198,7 +204,8 @@ pub use stepper::{
 };
 pub use tab_widget::{
     ContextMenuFactory, IconFactory as TabIconFactory, STATIC_KIND, StaticContentFactory, TabBar,
-    TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
+    TabBarOrientation, TabBarVisibility, TabDelegate, TabHandle, TabId, TabInfo, TabSizing,
+    TabWidget,
 };
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
@@ -213,7 +220,7 @@ pub use toast::{
     ToastHost, ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity, ToastSurface,
 };
 pub use toggle::Toggle;
-pub use tool_box::{ToolBox, ToolBoxItem};
+pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
 pub use toolbar::{
     Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
 };

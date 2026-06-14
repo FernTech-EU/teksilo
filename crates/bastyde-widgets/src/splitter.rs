@@ -250,13 +250,22 @@ impl Widget for Splitter {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
             self.pane_inner_ids.push(child_id);
-            // Effective visibility = collapse × visible. Content goes dormant
-            // when the pane is collapsed OR hidden.
+            // Effective visibility = collapse × visible. Drives the ClipPane's
+            // shrink.
             let effective = self.progress[i]
                 .zip(&self.visible_progress[i])
                 .map(|(c, v)| c * v);
+            // Content goes dormant when the pane is collapsed OR hidden —
+            // EXCEPT a pane with a non-zero `collapsed_size` keeps a visible
+            // sliver while collapsed (e.g. an accordion header), so it must stay
+            // live then and only drop out when truly hidden.
+            let keeps_sliver = self.model.collapsed_size(i) > COLLAPSED_VISIBLE_EPSILON;
             if let Some(inner) = child_id {
-                let vis = effective.map(|p| *p > COLLAPSED_VISIBLE_EPSILON);
+                let vis = if keeps_sliver {
+                    self.visible_progress[i].map(|v| *v > COLLAPSED_VISIBLE_EPSILON)
+                } else {
+                    effective.map(|p| *p > COLLAPSED_VISIBLE_EPSILON)
+                };
                 ctx.visible_when(inner, vis);
             }
             let full_main = Rc::new(Cell::new(0.0_f32));
@@ -315,6 +324,7 @@ impl Widget for Splitter {
         let visible_progress = self.visible_progress.clone();
         let prev_c = self.prev_collapsed.clone();
         let prev_v = self.prev_visible.clone();
+        let layout_sizes = self.layout_sizes.clone();
         ctx.effect(&self.model.version(), move |_| {
             let animate = model.consume_animate_flag();
             // Collapse changes.
@@ -326,6 +336,18 @@ impl Widget for Splitter {
                     if prev.get(i).copied() != Some(now) {
                         if i < prev.len() {
                             prev[i] = now;
+                        }
+                        if now {
+                            // Capture the pane's current *displayed* size as the
+                            // stored size, so the tween animates from where it
+                            // actually is (and restores there) — independent of
+                            // any tiny fallback stored size from a stretch-grown
+                            // pane that was never dragged.
+                            if let Some(&disp) = layout_sizes.borrow().get(i)
+                                && disp > model.collapsed_size(i)
+                            {
+                                model.set_stored_size_silent(i, disp);
+                            }
                         }
                         let target = if now { 0.0 } else { 1.0 };
                         if animate {
@@ -445,14 +467,29 @@ impl Widget for Splitter {
         let total_gutter: f32 = gutter_w.iter().sum();
         let available = (self.main_extent(bounds) - total_gutter).max(0.0);
 
-        // A hidden pane shrinks like a collapsed one; combine both tweens.
+        let collapse_p: Vec<f32> = self.progress.iter().map(|s| s.get()).collect();
+        // A hidden pane shrinks like a collapsed one; combine both tweens. A
+        // pane mid-tween (`progress < 1`) keeps using the collapse path even
+        // after its flag flips back to expanded, so **expanding animates** too
+        // (otherwise `distribute` would jump straight to `stored_size`).
         let mut snapshots = self.model.pane_snapshots();
-        for s in snapshots.iter_mut() {
-            if !s.visible {
+        for (i, s) in snapshots.iter_mut().enumerate() {
+            let vis = vis_p.get(i).copied().unwrap_or(1.0);
+            let prog = collapse_p.get(i).copied().unwrap_or(1.0);
+            // Hidden (or mid-hide) panes fold *fully to zero* — the visibility
+            // tween removes the pane and its gutter. Collapse, by contrast,
+            // folds only to `collapsed_size` (e.g. an accordion-header sliver).
+            // So when a pane is being hidden its `collapsed_size` floor must be
+            // dropped, otherwise a pane that is both collapse-floored and hidden
+            // would stop at the sliver instead of disappearing.
+            let hiding = !s.visible || vis < 1.0 - 0.001;
+            if hiding || prog < 1.0 - 0.001 {
                 s.collapsed = true;
             }
+            if hiding {
+                s.collapsed_size = 0.0;
+            }
         }
-        let collapse_p: Vec<f32> = self.progress.iter().map(|s| s.get()).collect();
         let combined: Vec<f32> = (0..n)
             .map(|i| {
                 collapse_p.get(i).copied().unwrap_or(1.0) * vis_p.get(i).copied().unwrap_or(1.0)

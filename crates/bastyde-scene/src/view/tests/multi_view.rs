@@ -1,6 +1,6 @@
 //! Multi-view: two `SceneView`s over one shared [`SceneModel`].
 //!
-//! Exercises Approach B — a shared `Rc<RefCell<Scene>>` handle plus a per-view
+//! A shared `Rc<RefCell<Scene>>` handle plus a per-view
 //! heavyweight delegate. Mutating the model once must reconcile **every**
 //! attached view's arena independently; each view builds its own widget
 //! instances; cameras and per-view default selection stay independent; a

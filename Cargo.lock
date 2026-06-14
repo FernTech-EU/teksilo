@@ -2455,6 +2455,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "docking"
+version = "0.6.2"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
