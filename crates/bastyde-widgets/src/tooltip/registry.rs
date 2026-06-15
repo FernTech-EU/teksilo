@@ -5,8 +5,8 @@
 //! metadata that rich-tooltip widgets resolve at hover time.
 //!
 //! Two entry points:
-//! - [`TooltipContent::new`] (plus `.with_more` / `.with_shortcut_label`)
-//!   builds an entry at app boot.
+//! - [`TooltipContent::new`] (plus `.with_more` / `.with_shortcut_label`
+//!   / `.for_shortcut`) builds an entry at app boot.
 //! - [`install_tooltip_registry`] freezes a `Vec<TooltipContent>` into a
 //!   thread-local registry that the tooltip widget reads from.
 //!
@@ -34,9 +34,14 @@ use bastyde_i18n::LocalizedString;
 /// by the Accordion disclosure inside a sticky rich tooltip) and a
 /// keyboard shortcut hint.
 ///
-/// The shortcut is currently a literal label override. Registry-backed
-/// auto-lookup against the new `ShortcutRegistry` lands via a
-/// shortcut-id field once registry-backed lookup is wired.
+/// A shortcut hint may be supplied two ways: `shortcut_label` is a
+/// literal override used verbatim, while `shortcut_id` binds to a
+/// registered shortcut — the tooltip widget reads the effective primary
+/// keystroke from the tree's
+/// [`ShortcutRegistry`](bastyde_core::shortcut::ShortcutRegistry) via
+/// `ctx.effective_shortcut(id)`, formats it with `format_keystroke`, and
+/// refreshes on user rebinds via `ctx.shortcut_version()`. A
+/// `shortcut_label` takes precedence over `shortcut_id` when both are set.
 ///
 /// [`MenuItem`]: crate::menu_item::MenuItem
 pub struct TooltipContent {
@@ -300,6 +305,7 @@ mod tests {
     }
 
     // NOTE: `with_command_stores_type_erased_ref` test removed along
-    // with the `command` field; registry-backed shortcut resolution
-    // returns once registry-backed shortcut lookup is wired.
+    // with the `command` field. Registry-backed shortcut resolution is
+    // exercised in the `RichTooltipWidget` build path (see tooltip/rich.rs),
+    // which reads `ctx.effective_shortcut(id)` and binds `shortcut_version`.
 }
