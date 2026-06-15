@@ -157,6 +157,17 @@ rail; the rendered width tracks the mode. Any external widget can react to the
 switch by binding `model.rail_size_mode_signal(side) -> Signal<DockRailItemSize>`
 (the same signal a rail slot reads to resize itself).
 
+**The rail is a drop target, like a `TabWidget` that reorders + accepts
+external tabs.** While a dock tab (a rail item or a tab-strip header from any
+side) or a single dock (a split-pane header) is dragged over the rail, it paints
+an **insertion line** between items, and on drop relocates the activity to that
+position: dragging one of the rail's *own* items reorders the side's tabs
+(`move_tab`, same source/target side), a tab from *another* side moves here
+(`move_tab`), and a single dock becomes a new activity at the drop position
+(`promote_to_tab`). Dropping on a hidden side's rail reveals it. An empty
+Rail-presentation side accepts the first drop this way too (its content area is
+otherwise blank).
+
 ## Context menus
 
 Right-click a **rail item** or a **dock tab** for the per-activity menu (wired
@@ -220,11 +231,15 @@ pane: drop on the **centre** to stack (append a Splitter pane to that tab), on a
 **edge fifth** (capped at 48 px so the centre stays reachable) to split before /
 after the target pane. Foreign / non-dock payloads are ignored. The drop routes
 to `model.stack_into_tab` / `split_into_tab`. Drag a **tab-strip header** — or an
-**activity-rail button** — to move (or reorder) the whole tab; dropping it on a
-pane splits/stacks there, while dropping it on another side's **tab bar** (or any
-non-pane chrome) relocates the tab to the end of that side. The Splitter
-re-derives orientation for the destination side. Programmatic relocation:
-`move_dock` / `promote_to_tab` / `move_tab`.
+**activity-rail item** — to move (or reorder) the whole tab; dropping it on a
+pane splits/stacks there, on another side's **tab bar** inserts it at the drop
+position (the bar paints the insertion line — this works for a rail item too,
+via the tab bar's `on_external_drop`), on an **activity rail** inserts it at the
+line the rail paints (reordering within the side, or accepting the tab from
+another side — see *Activity rail* above), and on any other non-pane chrome
+relocates it to the end of that side. The Splitter re-derives orientation for the
+destination side. Programmatic relocation: `move_dock` / `promote_to_tab` /
+`move_tab`.
 
 ## Programmatic open-from-outside
 

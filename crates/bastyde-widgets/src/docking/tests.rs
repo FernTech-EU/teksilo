@@ -868,6 +868,232 @@ fn context_menu_is_only_on_tabs_not_on_pane_content() {
 }
 
 #[test]
+fn dragging_a_rail_item_reorders_within_the_side() {
+    // An internal move (like a TabWidget reorder): drag one of the leading
+    // rail's activity items past the other and the side's tab order flips.
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0); // Rail presentation
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    // Two activities (one dock each) on the leading rail.
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a, "A is first");
+
+    // Drag A's rail item down past B → A relocates to the end of the side.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    let from = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+    let to = Point::new(ab.x + ab.width / 2.0, bb.y + bb.height + 10.0);
+    t.drag(from, to);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        b,
+        "dragging A's rail item past B reordered the side (B is now first)"
+    );
+}
+
+#[test]
+fn dropping_a_tab_on_another_sides_rail_moves_it() {
+    // An external activity (like a TabWidget `accept_external_tabs`): drag the
+    // leading rail's item and drop it on the *trailing* rail — the whole tab
+    // relocates to the trailing side.
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.set_side_rail(DockSide::Trailing, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Trailing));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(model.dock_location(a).unwrap().side, DockSide::Leading);
+
+    // Drag A's leading rail item onto the trailing rail (drop on its B item).
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    let from = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+    let to = Point::new(bb.x + bb.width / 2.0, bb.y + bb.height / 2.0);
+    t.drag(from, to);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.dock_location(a).unwrap().side,
+        DockSide::Trailing,
+        "dropping A on the trailing rail moved its activity to the trailing side"
+    );
+    assert!(
+        !model.is_side_visible(DockSide::Leading),
+        "the emptied leading side hides"
+    );
+}
+
+#[test]
+fn dragging_a_rail_item_onto_another_sides_tab_bar_moves_it() {
+    // A rail activity (carrying `DockTabDragData`) dropped on another side's
+    // *tab strip*. The strip's TabWidget bar is the drop target and only speaks
+    // its own `TabBarDragData<TabHandle>` natively, so without the dock's
+    // `on_external_drop` wiring the drag would be silently rejected.
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0); // Leading = rail
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let (c, dwc) = dock("Ccc");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb)
+            .dock(dwc),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading)); // rail item
+    model.open_dock(b, DockOpenLocation::side(DockSide::Bottom)); // strip
+    model.open_dock(c, DockOpenLocation::side(DockSide::Bottom).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(model.dock_location(a).unwrap().side, DockSide::Leading);
+
+    // Drag A's leading rail item onto the bottom side's tab strip (B's header).
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_tab = find_role_name(&t, root, Role::Tab, "Bbb").expect("B strip tab");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_tab);
+    t.drag(
+        Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0),
+        Point::new(bb.x + bb.width / 2.0, bb.y + bb.height / 2.0),
+    );
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.dock_location(a).unwrap().side,
+        DockSide::Bottom,
+        "the rail activity moved onto the bottom side's tab bar"
+    );
+    assert_eq!(model.tab_count(DockSide::Bottom), 3);
+}
+
+#[test]
+fn import_a_tab_to_the_rail_then_reorder_it_inside_the_rail() {
+    // Repro: import an activity from another side onto a rail, THEN drag it to a
+    // new position inside that same rail. The second (internal) move must not
+    // crash (it did: an unbounded selection-sync feedback loop).
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.set_side_rail(DockSide::Trailing, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let (c, dwc) = dock("Ccc");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb)
+            .dock(dwc),
+    );
+    // Trailing already has two activities (B, C); A starts on Leading.
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Trailing));
+    model.open_dock(c, DockOpenLocation::side(DockSide::Trailing).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Import A onto the trailing rail (drop on its B item).
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    t.drag(
+        Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0),
+        Point::new(bb.x + bb.width / 2.0, bb.y + bb.height / 2.0),
+    );
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_eq!(model.dock_location(a).unwrap().side, DockSide::Trailing);
+
+    // Now reorder A *inside* the trailing rail: drag it to the end.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item on trailing");
+    let c_item = find_role_name(&t, root, Role::Tab, "Ccc").expect("C rail item");
+    let ab = t.bounds(a_item);
+    let cb = t.bounds(c_item);
+    t.drag(
+        Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0),
+        Point::new(cb.x + cb.width / 2.0, cb.y + cb.height + 10.0),
+    );
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // No crash; A is still on the trailing side.
+    assert_eq!(model.dock_location(a).unwrap().side, DockSide::Trailing);
+}
+
+#[test]
+fn import_a_tab_to_a_strip_then_reorder_it_does_not_loop() {
+    // The same latent selection-sync feedback loop reached the strip path too
+    // (shared `DockSidePanel` effects): import an activity onto a strip side,
+    // then reorder it within that side's tab strip.
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let (c, dwc) = dock("Ccc");
+    let mut t = tree();
+    // Drives the model directly (the loop was in selection sync), so the tree
+    // root id isn't needed.
+    let _root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb)
+            .dock(dwc),
+    );
+    // Bottom is a Strip side with two tabs; A starts on Leading.
+    model.open_dock(b, DockOpenLocation::side(DockSide::Bottom));
+    model.open_dock(c, DockOpenLocation::side(DockSide::Bottom).new_tab());
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Move A's whole tab onto Bottom (programmatic — same `move_tab` the strip
+    // drop uses), then reorder it within Bottom. Neither must loop.
+    let a_tab = model.dock_location(a).unwrap();
+    let a_tab_id = model.side_tabs(a_tab.side)[a_tab.tab_idx].id;
+    model.move_tab(a_tab_id, DockSide::Bottom, 0);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    model.move_tab(a_tab_id, DockSide::Bottom, 2);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(model.dock_location(a).unwrap().side, DockSide::Bottom);
+    assert_eq!(model.tab_count(DockSide::Bottom), 3);
+}
+
+#[test]
 fn hamburger_restores_activities_when_all_hidden_in_strip() {
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
 

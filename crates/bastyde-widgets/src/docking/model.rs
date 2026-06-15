@@ -1246,6 +1246,19 @@ impl DockingModel {
         tab.panes.first().copied()
     }
 
+    /// The id of the tab at `idx` in a side's full tab list. The live inverse
+    /// of [`select_tab_by_id`](Self::select_tab_by_id) — the strip's
+    /// index → id selection sync uses it so both directions resolve against the
+    /// *current* order and agree across a reorder (a build-time snapshot would
+    /// disagree and feed back unboundedly).
+    pub(crate) fn side_tab_id_at(&self, side: DockSide, idx: usize) -> Option<DockTabId> {
+        let inner = self.0.borrow();
+        inner
+            .sides
+            .get(&side)
+            .and_then(|st| st.tabs.get(idx).map(|t| t.id))
+    }
+
     // ─── persistence ───────────────────────────────────────────────────
 
     /// Serialize the user-controllable layout state (sizes / visibility /

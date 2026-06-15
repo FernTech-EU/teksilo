@@ -14,20 +14,24 @@
 //!   dormant and reached through a caller-chosen **overflow item** (an icon)
 //!   that opens a popover list of the overflowed entries.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use bastyde_canvas::{Rect, SizeProposal};
-use bastyde_core::DragPayload;
+use bastyde_canvas::{Canvas, Rect, SizeProposal};
+use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::gesture::DragPhase;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use bastyde_core::widget::{
+    CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
-use bastyde_tokens::{HAlignment, SurfaceRole, TextRole, TextStyleRole};
+use bastyde_tokens::{BorderRole, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::popover_widget::PopoverIconButton;
@@ -37,9 +41,16 @@ use crate::primitives::{
 use crate::tool_box::RotatedLabel;
 
 use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
-use super::drag::DockTabDragData;
+use super::drag::{DockTabDragData, dropped_dock_tab, dropped_dock_widget};
 use super::geometry::DockSide;
 use super::model::{DockIconFactory, DockRailItemSize, DockTabId, DockingModel};
+
+/// Shared sink each rail item upserts its `(visible position, world bounds)`
+/// into during layout, so the bar's drop handler can compute an insertion
+/// index from the pointer position. Keyed by visible position so a stale entry
+/// for a now-overflowed item is filtered out (the handler only considers
+/// positions below the current shown count).
+type RailItemBounds = Rc<RefCell<Vec<(usize, Rect)>>>;
 
 /// Factory for a rail slot widget (rebuilt on each rail rebuild).
 ///
@@ -176,6 +187,18 @@ pub(crate) struct DockActivityBar {
     /// layout (everything visible).
     visible_count: Signal<usize>,
     item_count: usize,
+    /// Per-item world bounds (visible position → rect), populated by the rail
+    /// items during layout; read by the drop handler to place the insertion
+    /// line and compute the drop index. Like a TabBar that accepts external
+    /// tabs + internal reorders, the rail is a drop target for whole dock tabs
+    /// (`move_tab`) and single docks (`promote_to_tab`).
+    item_bounds: RailItemBounds,
+    /// The rail's own world bounds, recorded in `place_children` so the drop
+    /// handler can translate the item world rects into bar-local space.
+    self_bounds: Rc<Cell<Rect>>,
+    /// Bar-local y of the active drop insertion line (`None` = no drag over the
+    /// rail). Painted by the `RailDropIndicator` overlay.
+    drop_indicator: Signal<Option<f32>>,
     root: Option<WidgetId>,
 }
 
@@ -195,6 +218,9 @@ impl DockActivityBar {
             config,
             visible_count: Signal::new(usize::MAX),
             item_count: 0,
+            item_bounds: Rc::new(RefCell::new(Vec::new())),
+            self_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            drop_indicator: Signal::new(None),
             root: None,
         }
     }
@@ -247,6 +273,11 @@ impl Widget for DockActivityBar {
         // One item per *non-hidden* tab. The item keeps its model tab index
         // (for selection); overflow parking uses its position among the shown
         // items, so a hidden tab in the middle doesn't leave a phantom slot.
+        // `model_indices` maps each shown position → model tab index, so the
+        // drop handler can translate a visible insertion position into a
+        // `move_tab` index (a hidden tab in the middle shifts nothing).
+        self.item_bounds.borrow_mut().clear();
+        let mut model_indices: Vec<usize> = Vec::with_capacity(tabs.len());
         let mut items: Vec<WidgetId> = Vec::with_capacity(tabs.len());
         let mut pos = 0usize;
         for (model_i, tab) in tabs.iter().enumerate() {
@@ -255,6 +286,7 @@ impl Widget for DockActivityBar {
             }
             let p = pos;
             pos += 1;
+            model_indices.push(model_i);
             let icon = self
                 .model
                 .side_active_dock(self.side, model_i)
@@ -267,6 +299,7 @@ impl Widget for DockActivityBar {
             let id = ctx.add(DockRailItem::new(
                 self.side,
                 model_i,
+                p,
                 tab.id,
                 icon,
                 label,
@@ -275,6 +308,7 @@ impl Widget for DockActivityBar {
                 selected.clone(),
                 visible.clone(),
                 self.model.clone(),
+                self.item_bounds.clone(),
             ));
             ctx.visible_when(id, visible_count.map(move |c| p < *c));
             items.push(id);
@@ -317,7 +351,15 @@ impl Widget for DockActivityBar {
 
         let column_id = ctx.add(column);
         let padded = ctx.add(Padding::uniform(RAIL_PADDING).child_id(column_id));
-        let root = ctx.add(ZStack::new().add_child(bg).add_child(padded));
+        // Insertion-line overlay (topmost) — painted while a dock tab / dock
+        // widget is dragged over the rail.
+        let indicator = ctx.add(RailDropIndicator::new(self.drop_indicator.clone()));
+        let root = ctx.add(
+            ZStack::new()
+                .add_child(bg)
+                .add_child(padded)
+                .add_child(indicator),
+        );
         self.root = Some(root);
 
         // Right-click on empty rail space → the activities checklist + Activity
@@ -325,9 +367,74 @@ impl Widget for DockActivityBar {
         // is hidden, and to resize the rail).
         let menu_model = self.model.clone();
         let menu_side = self.side;
-        ctx.apply_self_handlers(HandlerSet::new().context_menu(move |_pos, _ctx| {
-            Some(Box::new(background_menu(&menu_model, menu_side, DockMenuKind::Rail)))
-        }));
+        // Drag-and-drop: the rail accepts external activities (a whole tab
+        // dragged from another side's rail / strip → `move_tab`, a single dock
+        // → `promote_to_tab`) AND internal moves (dragging one of its own rail
+        // items reorders the side's tabs — same `move_tab`, the source-side ==
+        // target-side path). The insertion index comes from the pointer vs the
+        // recorded item bounds; the overlay paints the line.
+        let side = self.side;
+        let model = self.model.clone();
+        let item_bounds_hover = self.item_bounds.clone();
+        let item_bounds_drop = self.item_bounds.clone();
+        let self_bounds_hover = self.self_bounds.clone();
+        let self_bounds_drop = self.self_bounds.clone();
+        let indicator_hover = self.drop_indicator.clone();
+        let indicator_leave = self.drop_indicator.clone();
+        let indicator_drop = self.drop_indicator.clone();
+        let visible_count_hover = self.visible_count.clone();
+        let visible_count_drop = self.visible_count.clone();
+        let model_indices_hover = model_indices.clone();
+        let model_indices_drop = model_indices;
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .context_menu(move |_pos, _ctx| {
+                    Some(Box::new(background_menu(&menu_model, menu_side, DockMenuKind::Rail)))
+                })
+                .on_drag_hover(move |payload, pos, _ctx| {
+                    if dropped_dock_tab(payload).is_none() && dropped_dock_widget(payload).is_none()
+                    {
+                        indicator_hover.set(None);
+                        return DropFeedback::NoFeedback;
+                    }
+                    let bar = self_bounds_hover.get();
+                    let shown =
+                        shown_items(&item_bounds_hover, &model_indices_hover, &visible_count_hover);
+                    let (_, line_y) = rail_insertion(pos.y, &shown, bar.y, bar.height);
+                    indicator_hover.set(Some(line_y));
+                    DropFeedback::InsertionLine {
+                        y: line_y,
+                        width: bar.width,
+                    }
+                })
+                .on_drag_leave(move |_ctx| indicator_leave.set(None))
+                .on_drop(move |payload, pos, ctx| {
+                    indicator_drop.set(None);
+                    let bar = self_bounds_drop.get();
+                    let shown =
+                        shown_items(&item_bounds_drop, &model_indices_drop, &visible_count_drop);
+                    let (vpos, _) = rail_insertion(pos.y, &shown, bar.y, bar.height);
+                    // Visible insertion position → model tab index; past the
+                    // last shown item ⇒ the side's end.
+                    let at = model_indices_drop
+                        .get(vpos)
+                        .copied()
+                        .unwrap_or_else(|| model.tab_count(side));
+                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                        model.move_tab(tab_id, side, at);
+                        model.set_side_visible(side, true);
+                        ctx.request_accessibility_update();
+                        true
+                    } else if let Some(dock_id) = dropped_dock_widget(&payload) {
+                        model.promote_to_tab(dock_id, side, at);
+                        model.set_side_visible(side, true);
+                        ctx.request_accessibility_update();
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
 
         vec![root]
     }
@@ -346,6 +453,9 @@ impl Widget for DockActivityBar {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Record the rail's world bounds so the drop handler can translate the
+        // item world rects (recorded by the rail items) into bar-local space.
+        self.self_bounds.set(bounds);
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -393,6 +503,123 @@ impl Widget for DockActivityBar {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root.into_iter().collect()
+    }
+}
+
+/// Snapshot the currently-shown rail items (visible position, world bounds),
+/// sorted by position, dropping any stale entry beyond the live shown count
+/// (an item parked by overflow keeps a lingering bound until it next lays out).
+fn shown_items(
+    bounds: &RailItemBounds,
+    model_indices: &[usize],
+    visible_count: &Signal<usize>,
+) -> Vec<(usize, Rect)> {
+    let shown = model_indices.len().min(visible_count.get());
+    let mut out: Vec<(usize, Rect)> = bounds
+        .borrow()
+        .iter()
+        .filter(|(p, _)| *p < shown)
+        .copied()
+        .collect();
+    out.sort_by_key(|(p, _)| *p);
+    out
+}
+
+/// Given the pointer's bar-local y, the shown items (sorted by position, world
+/// bounds), and the bar's world origin/height, return the visible insertion
+/// position (`0..=count`) and the indicator's bar-local y.
+fn rail_insertion(
+    local_y: f32,
+    shown: &[(usize, Rect)],
+    bar_origin_y: f32,
+    bar_height: f32,
+) -> (usize, f32) {
+    if shown.is_empty() {
+        return (0, (RAIL_PADDING).min(bar_height));
+    }
+    // Insertion position = number of items whose vertical centre is above the
+    // pointer.
+    let mut vpos = shown.len();
+    for (i, (_, b)) in shown.iter().enumerate() {
+        let center = (b.y + b.height * 0.5) - bar_origin_y;
+        if local_y < center {
+            vpos = i;
+            break;
+        }
+    }
+    let line_y = if vpos == 0 {
+        let top = shown[0].1.y - bar_origin_y;
+        (top - RAIL_ITEM_SPACING * 0.5).max(0.0)
+    } else if vpos >= shown.len() {
+        let last = &shown[shown.len() - 1].1;
+        (last.y + last.height - bar_origin_y + RAIL_ITEM_SPACING * 0.5).min(bar_height)
+    } else {
+        let prev = &shown[vpos - 1].1;
+        let next = &shown[vpos].1;
+        let prev_bottom = prev.y + prev.height - bar_origin_y;
+        let next_top = next.y - bar_origin_y;
+        (prev_bottom + next_top) * 0.5
+    };
+    (vpos, line_y.clamp(0.0, bar_height))
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// RailDropIndicator — the horizontal insertion line painted over the rail.
+// ───────────────────────────────────────────────────────────────────────
+
+/// A pure-decoration overlay (topmost child of the rail's ZStack) that paints a
+/// horizontal accent line at the bar-local y in its `y` signal — the rail's
+/// equivalent of a `TabBar` insertion indicator. Paints nothing when `y` is
+/// `None`. Pointer events pass straight through so the rail items below stay
+/// interactive.
+struct RailDropIndicator {
+    y: Signal<Option<f32>>,
+    color: ColorProp,
+}
+
+impl std::fmt::Debug for RailDropIndicator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RailDropIndicator").finish()
+    }
+}
+
+impl RailDropIndicator {
+    fn new(y: Signal<Option<f32>>) -> Self {
+        Self {
+            y,
+            color: ColorProp::from(BorderRole::Accent),
+        }
+    }
+}
+
+impl Widget for RailDropIndicator {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.y
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::RepaintOnly);
+        ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let Some(y) = self.y.get() else {
+            return;
+        };
+        let color = self.color.resolve(ctx.theme, true);
+        let t = 2.0;
+        let yy = bounds.y + y - t * 0.5;
+        // Inset a touch from the rail's padding so the line reads as "between
+        // items", not flush to the edge.
+        let x = bounds.x + RAIL_PADDING;
+        let w = (bounds.width - RAIL_PADDING * 2.0).max(0.0);
+        canvas.fill_rect(Rect::new(x, yy, w, t), color);
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
     }
 }
 
@@ -489,6 +716,9 @@ impl Widget for DockOverflowMenu {
 struct DockRailItem {
     side: DockSide,
     index: usize,
+    /// Position among the *shown* (non-hidden) items — the key the drop
+    /// handler indexes by when computing an insertion position.
+    pos: usize,
     tab_id: DockTabId,
     icon: Option<DockIconFactory>,
     label: LocalizedString,
@@ -499,6 +729,9 @@ struct DockRailItem {
     selected: Signal<usize>,
     visible: Signal<bool>,
     model: DockingModel,
+    /// The bar's shared item-bounds sink; this item upserts its world bounds
+    /// (keyed by `pos`) here each layout pass.
+    bounds_sink: RailItemBounds,
     root: Option<WidgetId>,
 }
 
@@ -515,6 +748,7 @@ impl DockRailItem {
     fn new(
         side: DockSide,
         index: usize,
+        pos: usize,
         tab_id: DockTabId,
         icon: Option<DockIconFactory>,
         label: LocalizedString,
@@ -523,10 +757,12 @@ impl DockRailItem {
         selected: Signal<usize>,
         visible: Signal<bool>,
         model: DockingModel,
+        bounds_sink: RailItemBounds,
     ) -> Self {
         Self {
             side,
             index,
+            pos,
             tab_id,
             icon,
             label,
@@ -535,6 +771,7 @@ impl DockRailItem {
             selected,
             visible,
             model,
+            bounds_sink,
             root: None,
         }
     }
@@ -661,6 +898,16 @@ impl Widget for DockRailItem {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Upsert this item's world bounds (keyed by its shown position) so the
+        // bar's drop handler can compute an insertion line.
+        {
+            let mut sink = self.bounds_sink.borrow_mut();
+            if let Some(slot) = sink.iter_mut().find(|(p, _)| *p == self.pos) {
+                slot.1 = bounds;
+            } else {
+                sink.push((self.pos, bounds));
+            }
+        }
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -772,5 +1019,31 @@ impl Widget for DockOverflowRow {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rail_insertion_picks_the_gap_under_the_pointer() {
+        // Three items stacked at world y = 100 / 142 / 184 (40 tall each); the
+        // bar's world origin y is 100, height 300, so item local centres are
+        // 20 / 62 / 104.
+        let items = vec![
+            (0usize, Rect::new(100.0, 100.0, 40.0, 40.0)),
+            (1, Rect::new(100.0, 142.0, 40.0, 40.0)),
+            (2, Rect::new(100.0, 184.0, 40.0, 40.0)),
+        ];
+        assert_eq!(rail_insertion(5.0, &items, 100.0, 300.0).0, 0, "above all → front");
+        assert_eq!(rail_insertion(40.0, &items, 100.0, 300.0).0, 1, "past item 0 → 1");
+        assert_eq!(rail_insertion(70.0, &items, 100.0, 300.0).0, 2, "past item 1 → 2");
+        assert_eq!(rail_insertion(290.0, &items, 100.0, 300.0).0, 3, "below all → end");
+    }
+
+    #[test]
+    fn rail_insertion_on_empty_rail_is_front() {
+        assert_eq!(rail_insertion(50.0, &[], 0.0, 100.0).0, 0);
     }
 }

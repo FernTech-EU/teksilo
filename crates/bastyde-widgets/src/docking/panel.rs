@@ -279,13 +279,23 @@ impl Widget for DockSidePanel {
             .copied();
         let tw_selected: Signal<Option<TabId>> = ctx.signal(initial);
 
-        // model → TabWidget: map the selected model index to its TabId (the
-        // selection never lands on a hidden tab).
+        // model → TabWidget: map the selected model index to its TabId,
+        // resolved against the **live** model (not the build-time `all_tab_ids`
+        // snapshot). This is the exact inverse of effect 2's live id → index
+        // lookup, so the round-trip is the identity and the equality guards
+        // stop the chain at once. A stale snapshot here would disagree with
+        // effect 2 after a reorder (idx 1 → snapshot id B, id B → live idx 2,
+        // idx 2 → snapshot id A, …) and feed back unboundedly — the
+        // "Signal notification nested 257 deep" panic when an activity is
+        // imported onto a side and then reordered within it.
         {
-            let ids = all_tab_ids.clone();
+            let model = self.model.clone();
+            let side = self.side;
             let tw = tw_selected.clone();
             ctx.effect(&dock_selected, move |&idx| {
-                let target = ids.get(idx).copied();
+                let target = model
+                    .side_tab_id_at(side, idx)
+                    .map(|id| TabId::from_raw(NonZeroU64::new(id.raw()).unwrap_or(NonZeroU64::MIN)));
                 if tw.get() != target {
                     tw.set(target);
                 }
@@ -376,6 +386,8 @@ impl Widget for DockSidePanel {
         // tab indices (a no-op when nothing is hidden) for `move_tab`.
         let reorder_indices = model_indices.clone();
         let recv_indices = model_indices.clone();
+        let ext_indices = model_indices.clone();
+        let ext_model = self.model.clone();
         let total_tabs = all_tab_ids.len();
 
         let mut tw = TabWidget::new(tw_selected)
@@ -419,7 +431,29 @@ impl Widget for DockSidePanel {
             })
             // The source side: `move_tab` (above) already removed the tab
             // from the model; the rebuild reconciles this side's list.
-            .on_transfer_out(|_tid, _ctx| {});
+            .on_transfer_out(|_tid, _ctx| {})
+            // A drop from a source that ISN'T a peer `TabBar<TabHandle>` — an
+            // **activity-rail item** (`DockTabDragData`) or a single dock (a
+            // split-pane header, `DockDragData`). The native `on_tab_received`
+            // path only fires for `TabBarDragData<TabHandle>`; without this the
+            // bar would be the drop target (`find_drop_target_at_or_above` stops
+            // at the first handler) and silently reject the rail drag. `idx` is
+            // this bar's visible insertion position → model tab index.
+            .on_external_drop(move |payload, idx, ctx| {
+                let at = ext_indices.get(idx).copied().unwrap_or(total_tabs);
+                if let Some(tab_id) = dropped_dock_tab(payload) {
+                    ext_model.move_tab(tab_id, side, at);
+                    ctx.request_accessibility_update();
+                    true
+                } else if let Some(dock_id) = dropped_dock_widget(payload) {
+                    // A lone dock becomes a new activity at the drop position.
+                    ext_model.promote_to_tab(dock_id, side, at);
+                    ctx.request_accessibility_update();
+                    true
+                } else {
+                    false
+                }
+            });
 
         // When activities are hidden, a trailing **hamburger** in the bar opens
         // the activities checklist (the restore affordance — and the only one
