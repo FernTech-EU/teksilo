@@ -14,7 +14,9 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_i18n::lit;
 
-use super::{DockOpenLocation, DockSide, DockWidget, DockWidgetId, DockingLayout, DockingModel};
+use super::{
+    DockOpenLocation, DockPolicy, DockSide, DockWidget, DockWidgetId, DockingLayout, DockingModel,
+};
 
 #[derive(Debug)]
 struct FixedLeaf(f32, f32);
@@ -1140,5 +1142,345 @@ fn hamburger_restores_activities_when_all_hidden_in_strip() {
         t.active_overlays().len(),
         1,
         "the hamburger opens the activities/restore menu"
+    );
+}
+
+// ── Lock-down policy + per-side disable ────────────────────────────────────
+
+#[test]
+fn disabling_a_rail_side_builds_no_rail_and_rejects_docks() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.set_side_enabled(DockSide::Leading, false);
+    let (id, dw) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dw),
+    );
+
+    // Placement to a disabled side is rejected.
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(!model.is_dock_open(id), "a disabled side rejects placement");
+    assert!(
+        !subtree_has_role(&t, root, Role::TabList),
+        "no activity rail is built for a disabled side"
+    );
+    let center = t.children(root)[0];
+    assert!(
+        (t.bounds(center).width - 1000.0).abs() < 1.0,
+        "the centre reclaims the disabled side's space (got x={})",
+        t.bounds(center).width
+    );
+
+    // Re-enable → the rail returns and the dock can be placed.
+    model.set_side_enabled(DockSide::Leading, true);
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(model.is_dock_open(id), "a re-enabled side accepts the dock");
+    assert_eq!(model.dock_location(id).unwrap().side, DockSide::Leading);
+    assert!(
+        subtree_has_role(&t, root, Role::TabList),
+        "the rail returns when the side is re-enabled"
+    );
+}
+
+#[test]
+fn locking_activity_drag_freezes_rail_reorder() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.set_policy(DockPolicy {
+        allow_activity_drag: false,
+        ..Default::default()
+    });
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a, "A is first");
+
+    // Drag A's rail item past B — with activity drag locked the rail item is not
+    // a drag source, so nothing happens.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    t.drag(
+        Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0),
+        Point::new(ab.x + ab.width / 2.0, bb.y + bb.height + 10.0),
+    );
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        a,
+        "locked activity drag: the rail order is unchanged"
+    );
+}
+
+/// Drag dock A's split-pane accordion header onto the leading rail and return
+/// the side it ends up on. With dock drag allowed it is promoted to the rail;
+/// locked, the header is no drag handle so it stays put.
+fn dock_drag_lands_on(locked: bool) -> DockSide {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Trailing, 48.0);
+    if locked {
+        model.set_policy(DockPolicy {
+            allow_dock_drag: false,
+            ..Default::default()
+        });
+    }
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let (c, dwc) = dock("Ccc");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb)
+            .dock(dwc),
+    );
+    // A + B stacked on the leading side → a *vertical* split: each pane is an
+    // accordion whose header is a strip across the top (so the drag start point
+    // below lands on the header, not the content). C lives on the trailing rail
+    // so the rail is laid out at full thickness as the drop target.
+    model.open_dock(c, DockOpenLocation::side(DockSide::Trailing));
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let header = find_role_name(&t, root, Role::Button, "Aaa").expect("A accordion header");
+    let rail = find_role_name(&t, root, Role::TabList, "Trailing activity bar")
+        .expect("the trailing rail");
+    let hb = t.bounds(header);
+    let rb = t.bounds(rail);
+    t.drag(
+        Point::new(hb.x + hb.width / 2.0, hb.y + 6.0),
+        Point::new(rb.x + rb.width / 2.0, rb.y + rb.height / 2.0),
+    );
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    model.dock_location(a).unwrap().side
+}
+
+#[test]
+fn locking_dock_drag_freezes_the_split_pane_header() {
+    assert_eq!(
+        dock_drag_lands_on(false),
+        DockSide::Trailing,
+        "dock drag allowed: the header drag promotes A onto the trailing rail"
+    );
+    assert_eq!(
+        dock_drag_lands_on(true),
+        DockSide::Leading,
+        "dock drag locked: the header is no drag handle, A stays on leading"
+    );
+}
+
+#[test]
+fn locking_side_collapse_keeps_the_side_but_api_still_hides() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.set_policy(DockPolicy {
+        allow_side_collapse: false,
+        ..Default::default()
+    });
+    let (a, dwa) = dock("Aaa");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(model.is_side_visible(DockSide::Leading));
+
+    // Clicking the active rail item normally hides the side — locked, it stays.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    t.click(a_item);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(
+        model.is_side_visible(DockSide::Leading),
+        "locked side collapse: clicking the active rail item does not hide the side"
+    );
+
+    // The programmatic API is NOT gated (scope = user affordances only).
+    model.set_side_visible(DockSide::Leading, false);
+    assert!(
+        !model.is_side_visible(DockSide::Leading),
+        "the programmatic set_side_visible still hides a collapse-locked side"
+    );
+}
+
+#[test]
+fn programmatic_api_bypasses_a_fully_locked_layout() {
+    let model = DockingModel::new();
+    model.set_policy(DockPolicy::locked());
+    let (a, dwa) = dock("Aaa");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Bottom));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let tab = model.side_tabs(DockSide::Bottom)[0].id;
+    // Hiding an activity is locked for the USER, but the app may still do it.
+    model.set_tab_hidden(tab, true);
+    assert!(
+        model.is_tab_hidden(tab),
+        "set_tab_hidden works programmatically even under DockPolicy::locked()"
+    );
+}
+
+#[test]
+fn dock_context_menus_respect_the_policy() {
+    use super::context_menu::{DockMenuKind, activity_context_menu};
+
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Aaa");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Bottom));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let tab_id = model.side_tabs(DockSide::Bottom)[0].id;
+
+    // Default policy: both "Hide" and "Move to" rows are present.
+    let menu = activity_context_menu(&model, DockSide::Bottom, tab_id, DockMenuKind::Strip);
+    let m1 = t.add(menu);
+    t.layout(SizeProposal::exact(400.0, 600.0));
+    assert!(
+        find_named(&t, m1, "Move to").is_some(),
+        "default: 'Move to' is present"
+    );
+    assert!(
+        find_named(&t, m1, "Hide \"Aaa\"").is_some(),
+        "default: 'Hide' is present"
+    );
+
+    // Locked: both user affordances drop out.
+    model.set_policy(DockPolicy::locked());
+    let menu = activity_context_menu(&model, DockSide::Bottom, tab_id, DockMenuKind::Strip);
+    let m2 = t.add(menu);
+    t.layout(SizeProposal::exact(400.0, 600.0));
+    assert!(
+        find_named(&t, m2, "Move to").is_none(),
+        "locked: no 'Move to' (activity drag off)"
+    );
+    assert!(
+        find_named(&t, m2, "Hide \"Aaa\"").is_none(),
+        "locked: no 'Hide' (activity hide off)"
+    );
+}
+
+#[test]
+fn setting_the_policy_live_re_gates_the_widgets() {
+    // The demo's "Lock Layout" toggle: `set_policy` after mount must rebuild and
+    // re-gate. Prove the rail reorder works first, then locks after the flip.
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Default policy: dragging A past B reorders.
+    let drag_a_past_b = |t: &mut WidgetTree| {
+        let a_item = find_role_name(t, root, Role::Tab, "Aaa").expect("A rail item");
+        let b_item = find_role_name(t, root, Role::Tab, "Bbb").expect("B rail item");
+        let ab = t.bounds(a_item);
+        let bb = t.bounds(b_item);
+        t.drag(
+            Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0),
+            Point::new(ab.x + ab.width / 2.0, bb.y + bb.height + 10.0),
+        );
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+    };
+    drag_a_past_b(&mut t);
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        b,
+        "default: dragging A past B reorders the rail"
+    );
+
+    // Lock the layout LIVE — the rebuild must re-gate the rail.
+    model.set_policy(DockPolicy::locked());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let before = model.side_tabs(DockSide::Leading)[0].panes[0];
+    drag_a_past_b(&mut t);
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        before,
+        "after set_policy(locked): the live rebuild froze the rail reorder"
+    );
+}
+
+#[test]
+fn disabling_a_side_with_docks_hides_then_restores_them() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Bottom));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Bottom).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(count_role(&t, root, Role::Tab) >= 2, "two tabs render initially");
+
+    // Disable the bottom side: its content is gone, but the docks remain in the
+    // model.
+    model.set_side_enabled(DockSide::Bottom, false);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_eq!(
+        count_role(&t, root, Role::Tab),
+        0,
+        "a disabled side renders no tabs"
+    );
+    assert_eq!(model.tab_count(DockSide::Bottom), 2, "docks stay in the model");
+    assert!(model.is_dock_open(a) && model.is_dock_open(b));
+
+    // Re-enable → the docks reappear.
+    model.set_side_enabled(DockSide::Bottom, true);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(
+        count_role(&t, root, Role::Tab) >= 2,
+        "re-enabling the side restores its tabs"
     );
 }

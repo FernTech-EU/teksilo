@@ -19,9 +19,9 @@
 use bastyde::core::Signal;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Badge, Button, DockCorner, DockOpenLocation, DockRail, DockRailItemSize, DockSide, DockWidget,
-    DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton, IconButtonSize,
-    IconWidget, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    Badge, Button, DockCorner, DockOpenLocation, DockPolicy, DockRail, DockRailItemSize, DockSide,
+    DockWidget, DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton,
+    IconButtonSize, IconWidget, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
 
 #[derive(Debug)]
@@ -342,6 +342,8 @@ impl DockingDemo {
         let status_x = self.status.clone();
         let status_i = self.status.clone();
         let corner_flag = self.bottom_corner_to_leading.clone();
+        let model_lock = self.model.clone();
+        let locked = Signal::new(false);
         let is_dark = Signal::new(false);
 
         Toolbar::new().child(
@@ -373,6 +375,20 @@ impl DockingDemo {
                                 DockSide::Bottom
                             },
                         );
+                    }),
+                )
+                .child(
+                    // Lock the layout for the end user (no drag / collapse /
+                    // hide). The toolbar buttons above still work — they drive
+                    // the model programmatically.
+                    Button::new(lit!("Lock Layout")).on_activate_fn(move |_| {
+                        let now_locked = !locked.get();
+                        locked.set(now_locked);
+                        model_lock.set_policy(if now_locked {
+                            DockPolicy::locked()
+                        } else {
+                            DockPolicy::default()
+                        });
                     }),
                 )
                 .child(Spacer::new())

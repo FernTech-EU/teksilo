@@ -34,8 +34,8 @@ mod tests;
 
 pub use geometry::{CornerOwners, DockCorner, DockSide, DockingRects, SideLayout, SideRects};
 pub use model::{
-    DockIconFactory, DockLoc, DockOpenLocation, DockOpenMode, DockRailItemSize, DockTabDisplay,
-    DockTabId, DockWidgetId, DockingModel, TabPresentation,
+    DockIconFactory, DockLoc, DockOpenLocation, DockOpenMode, DockPolicy, DockRailItemSize,
+    DockTabDisplay, DockTabId, DockWidgetId, DockingModel, TabPresentation,
 };
 pub use activity_bar::{DockRail, DockRailSlot};
 pub use panel::{DockContentFactory, DockWidget};
@@ -125,6 +125,20 @@ impl DockingLayout {
         self
     }
 
+    /// Lock down end-user layout edits (sugar for [`DockingModel::set_policy`]).
+    /// See [`DockPolicy`].
+    pub fn policy(self, policy: DockPolicy) -> Self {
+        self.model.set_policy(policy);
+        self
+    }
+
+    /// Disable a side (sugar for [`DockingModel::set_side_enabled`]`(side, false)`):
+    /// it renders nothing, reserves no space, and rejects docks.
+    pub fn disable_side(self, side: DockSide) -> Self {
+        self.model.set_side_enabled(side, false);
+        self
+    }
+
     /// Set the centre content by a pre-registered id.
     pub fn center_id(mut self, id: WidgetId) -> Self {
         self.center_id = Some(id);
@@ -181,6 +195,18 @@ impl Widget for DockingLayout {
         let anim = ctx.animate().collapse().standard();
 
         for side in SIDES_ORDER {
+            // A disabled side renders nothing and reserves no space. Push three
+            // transparent placeholders so the fixed child order
+            // (`[center, (content, rail, handle) × 4]`) the placement code
+            // indexes by stays intact; `place_children` gives it zero extent.
+            if !self.model.is_side_enabled(side) {
+                let blank = || RectWidget::new().background(SurfaceRole::Transparent);
+                ordered.push(ctx.add(blank()));
+                ordered.push(ctx.add(blank()));
+                ordered.push(ctx.add(blank()));
+                continue;
+            }
+
             let visible = self.model.side_visible_signal(side);
             let progress = ctx.animated_signal(if visible.get() { 1.0 } else { 0.0 });
             progress.bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
@@ -274,7 +300,7 @@ impl Widget for DockingLayout {
             min_h += c.height.min(80.0);
         }
         for side in SIDES_ORDER {
-            if self.model.is_side_visible(side) {
+            if self.model.is_side_enabled(side) && self.model.is_side_visible(side) {
                 let extent = self.model.side_min_size(side)
                     + DOCK_GUTTER
                     + self.model.side_rail_thickness(side);
@@ -303,6 +329,18 @@ impl Widget for DockingLayout {
         let rtl = ctx.is_rtl();
 
         let side_layout = |side: DockSide| -> SideLayout {
+            // A disabled side contributes nothing (its placeholders are placed
+            // at the zero rect compute_rects returns; the centre reclaims it).
+            if !self.model.is_side_enabled(side) {
+                return SideLayout {
+                    size: 0.0,
+                    visible_progress: 0.0,
+                    gutter: DOCK_GUTTER,
+                    min_size: 0.0,
+                    rail_thickness: 0.0,
+                    has_rail: false,
+                };
+            }
             let p = self
                 .progress
                 .get(&side)

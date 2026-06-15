@@ -131,7 +131,7 @@ pub use date_range_edit::DateRangeEdit;
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
 pub use docking::{
-    CornerOwners, DockCorner, DockLayoutState, DockOpenLocation, DockOpenMode, DockRail,
+    CornerOwners, DockCorner, DockLayoutState, DockOpenLocation, DockOpenMode, DockPolicy, DockRail,
     DockRailItemSize, DockRailSlot, DockSide, DockTabDisplay, DockTabId, DockWidget, DockWidgetId,
     DockingLayout, DockingModel, TabPresentation,
 };

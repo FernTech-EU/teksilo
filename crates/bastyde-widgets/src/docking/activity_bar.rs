@@ -846,44 +846,52 @@ impl Widget for DockRailItem {
         }
 
         let self_id = ctx.self_id();
+        let policy = self.model.policy();
         let model = self.model.clone();
         let selected = self.selected.clone();
         let visible = self.visible.clone();
         let side = self.side;
         let tab_id = self.tab_id;
         let menu_model = self.model.clone();
-        ctx.apply_self_handlers(
-            HandlerSet::new()
-                .on_tap(move |_e, _ctx| {
-                    if selected.get() == idx && visible.get() {
-                        model.set_side_visible(side, false);
-                    } else {
-                        model.select_tab(side, idx);
-                        model.set_side_visible(side, true);
-                    }
-                })
-                .on_drag(move |phase, ctx| {
-                    if let DragPhase::Started { .. } = phase {
-                        ctx.start_drag(
-                            self_id,
-                            DragPayload::typed(DockTabDragData {
-                                tab_id,
-                                source_side: side,
-                            }),
-                        );
-                    }
-                })
-                .context_menu(move |_pos, _ctx| {
-                    Some(Box::new(activity_context_menu(
-                        &menu_model,
-                        side,
-                        tab_id,
-                        DockMenuKind::Rail,
-                    )))
-                })
-                .focusable(true)
-                .cursor(CursorIcon::Pointer),
-        );
+        let allow_collapse = policy.allow_side_collapse;
+        let mut handlers = HandlerSet::new().on_tap(move |_e, _ctx| {
+            if selected.get() == idx && visible.get() {
+                // Click on the active item hides the side — unless collapsing is
+                // locked, in which case it stays shown (a no-op).
+                if allow_collapse {
+                    model.set_side_visible(side, false);
+                }
+            } else {
+                model.select_tab(side, idx);
+                model.set_side_visible(side, true);
+            }
+        });
+        // Drag a rail item to reorder / move the activity — only when allowed.
+        if policy.allow_activity_drag {
+            handlers = handlers.on_drag(move |phase, ctx| {
+                if let DragPhase::Started { .. } = phase {
+                    ctx.start_drag(
+                        self_id,
+                        DragPayload::typed(DockTabDragData {
+                            tab_id,
+                            source_side: side,
+                        }),
+                    );
+                }
+            });
+        }
+        handlers = handlers
+            .context_menu(move |_pos, _ctx| {
+                Some(Box::new(activity_context_menu(
+                    &menu_model,
+                    side,
+                    tab_id,
+                    DockMenuKind::Rail,
+                )))
+            })
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
+        ctx.apply_self_handlers(handlers);
         vec![root]
     }
 

@@ -244,6 +244,44 @@ relocates it to the end of that side. The Splitter re-derives orientation for th
 destination side. Programmatic relocation: `move_dock` / `promote_to_tab` /
 `move_tab`.
 
+## Locking the layout (`DockPolicy`) + disabling sides
+
+Serious apps ship a **fixed** chrome the user can't tear apart. A [`DockPolicy`]
+(app-declared, **not persisted**) gates the end-user affordances — the
+**programmatic API keeps working**, so the app's own "Toggle panel" button,
+`open_dock`, `set_tab_hidden`, etc. still drive the locked layout.
+
+```rust
+use bastyde::widgets::{DockPolicy, DockSide};
+
+// Fully lock, then disable a side the app doesn't use:
+model.set_policy(DockPolicy::locked());          // no user drag / collapse / hide
+model.set_side_enabled(DockSide::Top, false);    // Top renders nothing, rejects docks
+
+// …or pick individual locks (default = everything allowed):
+model.set_policy(DockPolicy { allow_side_collapse: false, ..Default::default() });
+
+// Builder sugar on DockingLayout:
+DockingLayout::new(model).policy(DockPolicy::locked()).disable_side(DockSide::Top)
+```
+
+| Flag (default `true`) | When `false`, the user can no longer… |
+| --- | --- |
+| `allow_activity_drag` | drag rail items / tab headers to reorder or move activities, nor use the context-menu **Move to**. |
+| `allow_dock_drag` | drag a single dock out of a split pane (its accordion header stops being a drag handle). |
+| `allow_side_collapse` | hide/collapse a side — the resize handle still **resizes** but no longer snaps shut, double-click / Home / Enter / AccessKit-Collapse are inert, and clicking the active rail item no longer hides the side. |
+| `allow_activity_hide` | hide an activity (the context-menu **Hide** item + the checklist are gone). |
+
+**Disabling a side** (`set_side_enabled(side, false)`, reactive) makes it render
+nothing, reserve no space, drop out of the AT tree, and **reject placement /
+moves** to it — `open_dock` / `move_tab` / `promote_to_tab` / `split_into_tab` /
+`stack_into_tab` targeting it become no-ops. Docks already on it stay in the
+model and reappear when you re-enable it. (This single guard *is* programmatic —
+rejecting placement is the point of disabling.)
+
+Policy and side-enable are app-config like `rail_thickness` / `min_size`: re-apply
+them each run (and after `import_state`); they aren't in `DockLayoutState`.
+
 ## Programmatic open-from-outside
 
 The model is the single source of truth, so panels open from anywhere (a side

@@ -72,33 +72,48 @@ pub(crate) fn activity_context_menu(
         .map(|v| tab_label(model, v))
         .unwrap_or_else(|| lit!("Panel"));
 
+    // Policy gates the user affordances: hiding an activity (Hide item +
+    // checklist) and relocating one (Move to). The size / display submenu is an
+    // appearance pref and always shown. `has_items` keeps separators tidy as
+    // sections drop out.
+    let policy = model.policy();
     let mut list = MenuList::new();
+    let mut has_items = false;
 
     // Hide "<activity>".
-    {
+    if policy.allow_activity_hide {
         let m = model.clone();
         let hide_label = lit!(format!("Hide \"{}\"", this_label.resolve_now()));
         list = list.item(
             MenuItem::new(hide_label).on_activate_fn(move |_| m.set_tab_hidden(tab_id, true)),
         );
+        has_items = true;
     }
 
-    list = list.separator();
-
     // Move to ▸ <other sides>.
-    {
+    if policy.allow_activity_drag {
+        if has_items {
+            list = list.separator();
+        }
         let m = model.clone();
         list = list.item(MenuItem::submenu(lit!("Move to"), move || {
             Box::new(move_to_submenu(&m, side, tab_id))
         }));
+        has_items = true;
     }
 
-    list = list.separator();
+    // Checkable list of this side's activities (hide / restore).
+    if policy.allow_activity_hide {
+        if has_items {
+            list = list.separator();
+        }
+        list = activity_checkitems(list, model, side, &tabs);
+        has_items = true;
+    }
 
-    // Checkable list of this side's activities.
-    list = activity_checkitems(list, model, side, &tabs);
-
-    list = list.separator();
+    if has_items {
+        list = list.separator();
+    }
 
     // Activity bar size (rail) / Tab size (strip).
     list = match kind {
@@ -124,8 +139,13 @@ pub(crate) fn activity_context_menu(
 /// to restore an activity after every item has been hidden.
 pub(crate) fn background_menu(model: &DockingModel, side: DockSide, kind: DockMenuKind) -> MenuList {
     let tabs = model.side_tabs(side);
-    let mut list = activity_checkitems(MenuList::new(), model, side, &tabs);
-    list = list.separator();
+    // The checklist is the hide / restore affordance — omit it when activity
+    // hiding is locked (leaving just the appearance submenu).
+    let mut list = MenuList::new();
+    if model.policy().allow_activity_hide {
+        list = activity_checkitems(list, model, side, &tabs);
+        list = list.separator();
+    }
     let m = model.clone();
     match kind {
         DockMenuKind::Rail => list.item(MenuItem::submenu(lit!("Activity bar size"), move || {

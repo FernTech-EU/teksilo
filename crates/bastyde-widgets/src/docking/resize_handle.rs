@@ -168,6 +168,10 @@ impl Widget for DockResizeHandle {
         }
 
         let side = self.side;
+        // Policy: when collapsing is locked the handle still RESIZES, but its
+        // hide affordances (snap-past-min, double-click, Home / Enter, AccessKit
+        // Collapse) are suppressed. Show actions (End / Expand) stay.
+        let allow_collapse = self.model.policy().allow_side_collapse;
         let model = self.model.clone();
         let container_bounds = self.container_bounds.clone();
         let self_bounds = self.self_bounds.clone();
@@ -244,12 +248,13 @@ impl Widget for DockResizeHandle {
                     let rail = model.side_rail_thickness(side);
                     let new_size = main - rail - drag_offset.get();
                     let min = model.side_min_size(side);
-                    if new_size < min - SNAP_OFFSET {
+                    if allow_collapse && new_size < min - SNAP_OFFSET {
                         model.set_side_visible_immediate(side, false);
                         is_dragging_h.set(false);
                         ctx.release_pointer();
                         return EventResponse::Handled;
                     }
+                    // Collapse locked: clamp at min instead of snapping shut.
                     model.set_side_size(side, new_size.max(min));
                     EventResponse::Handled
                 }
@@ -264,8 +269,8 @@ impl Widget for DockResizeHandle {
             });
         }
 
-        // Double-click to hide.
-        {
+        // Double-click to hide (suppressed when collapsing is locked).
+        if allow_collapse {
             let model = model.clone();
             handlers = handlers.on_double_tap(move |_e, _ctx| {
                 model.set_side_visible(side, false);
@@ -280,7 +285,9 @@ impl Widget for DockResizeHandle {
                     WidgetEvent::KeyDown { key, .. } => match (side.is_horizontal_axis(), key) {
                         (true, Key::ArrowLeft) | (false, Key::ArrowUp) => Some(-KEYBOARD_STEP),
                         (true, Key::ArrowRight) | (false, Key::ArrowDown) => Some(KEYBOARD_STEP),
-                        (_, Key::Home) => {
+                        // Home collapses, Enter toggles — both suppressed when
+                        // collapsing is locked. End (show) always works.
+                        (_, Key::Home) if allow_collapse => {
                             model.set_side_visible(side, false);
                             return EventResponse::Handled;
                         }
@@ -288,7 +295,7 @@ impl Widget for DockResizeHandle {
                             model.set_side_visible(side, true);
                             return EventResponse::Handled;
                         }
-                        (_, Key::Enter) => {
+                        (_, Key::Enter) if allow_collapse => {
                             model.toggle_side_visible(side);
                             return EventResponse::Handled;
                         }
@@ -322,7 +329,7 @@ impl Widget for DockResizeHandle {
                         model.set_side_size(side, (model.side_size(side) - KEYBOARD_STEP).max(min));
                         EventResponse::Handled
                     }
-                    Action::Collapse => {
+                    Action::Collapse if allow_collapse => {
                         model.set_side_visible(side, false);
                         EventResponse::Handled
                     }

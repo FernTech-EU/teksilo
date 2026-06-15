@@ -169,6 +169,57 @@ impl DockTabDisplay {
     }
 }
 
+/// App-declared policy that **locks down end-user layout edits** on a
+/// [`DockingLayout`](super::DockingLayout). Each flag removes a *user
+/// affordance* only — the programmatic [`DockingModel`] API (a "Toggle panel"
+/// button, `open_dock`, `set_tab_hidden`, …) keeps working regardless, so the
+/// app can still drive the layout it has locked for the user.
+///
+/// App-declared each run (like `rail_thickness` / `min_size` / [`DockRail`](super::DockRail))
+/// — **not** persisted in [`DockLayoutState`](super::DockLayoutState). Set it with
+/// [`DockingModel::set_policy`]. Default = everything allowed; [`DockPolicy::locked`]
+/// = everything forbidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DockPolicy {
+    /// The user may drag activities (rail items / tab headers) to reorder them
+    /// or move them between sides, and relocate them via the context-menu
+    /// "Move to" submenu. Default `true`.
+    pub allow_activity_drag: bool,
+    /// The user may drag a single dock out of a split pane (its accordion
+    /// header is a drag handle). Default `true`.
+    pub allow_dock_drag: bool,
+    /// The user may hide / collapse a whole side — via the resize handle
+    /// (drag-past-min snap, double-click, keyboard) or by clicking the active
+    /// activity-rail item. Default `true`.
+    pub allow_side_collapse: bool,
+    /// The user may hide an activity from the context menu. Default `true`.
+    pub allow_activity_hide: bool,
+}
+
+impl Default for DockPolicy {
+    fn default() -> Self {
+        Self {
+            allow_activity_drag: true,
+            allow_dock_drag: true,
+            allow_side_collapse: true,
+            allow_activity_hide: true,
+        }
+    }
+}
+
+impl DockPolicy {
+    /// A fully **locked** layout — no user drag, no collapse, no activity hide.
+    /// The app's programmatic API still drives it.
+    pub fn locked() -> Self {
+        Self {
+            allow_activity_drag: false,
+            allow_dock_drag: false,
+            allow_side_collapse: false,
+            allow_activity_hide: false,
+        }
+    }
+}
+
 /// Static metadata for a registered dock widget. App-declared; reconstructed
 /// each run (never serialized).
 pub(crate) struct DockWidgetMeta {
@@ -205,6 +256,10 @@ pub(crate) struct SideState {
     pub size: f32,
     pub min_size: f32,
     pub visible: bool,
+    /// App policy: a **disabled** side renders nothing, reserves no space, is
+    /// not a drop target, and rejects placement / moves to it (its docks stay
+    /// in the model and reappear when re-enabled). Default `true`.
+    pub enabled: bool,
     pub visible_sig: Signal<bool>,
     pub selected_tab_sig: Signal<usize>,
     /// Activity-bar item size for this side's rail: `0` = the rail's configured
@@ -282,6 +337,7 @@ fn default_side_state(side: DockSide) -> SideState {
         size,
         min_size: min,
         visible: false,
+        enabled: true,
         visible_sig: Signal::new(false),
         selected_tab_sig: Signal::new(0),
         rail_size_sig: Signal::new(DockRailItemSize::Default as usize),
@@ -295,6 +351,9 @@ struct Inner {
     locations: HashMap<DockWidgetId, DockLoc>,
     open_sigs: HashMap<DockWidgetId, Signal<bool>>,
     corners: CornerOwners,
+    /// App-declared lock policy (not persisted). Read by the widgets in
+    /// `build()` to gate user affordances.
+    policy: DockPolicy,
     /// Bumped on **structural** change (tab / pane / section / side
     /// add-remove) — the widget binds it at `BindingLevel::Rebuild`.
     version: Signal<u64>,
@@ -355,6 +414,7 @@ impl DockingModel {
             locations: HashMap::new(),
             open_sigs: HashMap::new(),
             corners: CornerOwners::default(),
+            policy: DockPolicy::default(),
             version: Signal::new(0),
             geometry_version: Signal::new(0),
             animate_next: true,
@@ -481,6 +541,53 @@ impl DockingModel {
             }
         }
         self.relayout();
+    }
+
+    // ─── policy / per-side enable (app-declared lock-down) ─────────────────
+
+    /// Set the app's [`DockPolicy`] — locks down end-user layout edits (the
+    /// programmatic API keeps working). Structural → rebuild.
+    pub fn set_policy(&self, policy: DockPolicy) {
+        let changed = {
+            let mut inner = self.0.borrow_mut();
+            let changed = inner.policy != policy;
+            inner.policy = policy;
+            changed
+        };
+        if changed {
+            self.notify();
+        }
+    }
+
+    /// The app's current [`DockPolicy`] (cheap `Copy`; read by the widgets in
+    /// `build()` to gate their user affordances).
+    pub fn policy(&self) -> DockPolicy {
+        self.0.borrow().policy
+    }
+
+    /// Enable / disable a whole side. A disabled side renders nothing, reserves
+    /// no space, is not a drop target, and rejects placement / moves to it; its
+    /// docks stay in the model and reappear when re-enabled. Structural →
+    /// rebuild.
+    pub fn set_side_enabled(&self, side: DockSide, enabled: bool) {
+        let changed = {
+            let mut inner = self.0.borrow_mut();
+            match inner.sides.get_mut(&side) {
+                Some(st) if st.enabled != enabled => {
+                    st.enabled = enabled;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.notify();
+        }
+    }
+
+    /// Whether a side is enabled (default `true`).
+    pub fn is_side_enabled(&self, side: DockSide) -> bool {
+        self.0.borrow().sides.get(&side).is_none_or(|s| s.enabled)
     }
 
     /// Show / hide a whole side (animated).
@@ -760,6 +867,9 @@ impl DockingModel {
                 debug_assert!(false, "open_dock on unregistered dock {id:?}");
                 return;
             }
+            if !Self::side_accepts(&inner, loc.side) {
+                return; // disabled side rejects placement
+            }
             // Ensure-open semantics: re-opening a dock already on the target
             // side is a no-op (no version churn). Moving across sides, and the
             // explicit promote/split/move mutators, still re-place it.
@@ -770,6 +880,12 @@ impl DockingModel {
             Self::place(&mut inner, id, loc);
         }
         self.notify();
+    }
+
+    /// Whether `side` accepts placement (disabled sides reject it). Read from
+    /// an already-borrowed `Inner` by the placement mutators.
+    fn side_accepts(inner: &Inner, side: DockSide) -> bool {
+        inner.sides.get(&side).is_none_or(|s| s.enabled)
     }
 
     fn place(inner: &mut Inner, id: DockWidgetId, loc: DockOpenLocation) {
@@ -821,7 +937,7 @@ impl DockingModel {
     pub fn promote_to_tab(&self, id: DockWidgetId, side: DockSide, at_tab: usize) {
         {
             let mut inner = self.0.borrow_mut();
-            if !inner.docks.contains_key(&id) {
+            if !inner.docks.contains_key(&id) || !Self::side_accepts(&inner, side) {
                 return;
             }
             // Already its own sole tab on this side at this index → no-op.
@@ -865,7 +981,7 @@ impl DockingModel {
     ) {
         {
             let mut inner = self.0.borrow_mut();
-            if !inner.docks.contains_key(&id) {
+            if !inner.docks.contains_key(&id) || !Self::side_accepts(&inner, side) {
                 return;
             }
             // Drop-on-self: splitting the pane a dock already solely occupies
@@ -904,7 +1020,7 @@ impl DockingModel {
     pub fn stack_into_tab(&self, id: DockWidgetId, side: DockSide, tab_idx: usize) {
         {
             let mut inner = self.0.borrow_mut();
-            if !inner.docks.contains_key(&id) {
+            if !inner.docks.contains_key(&id) || !Self::side_accepts(&inner, side) {
                 return;
             }
             // Drop-on-self: a dock that is already the sole pane of this tab.
@@ -979,6 +1095,9 @@ impl DockingModel {
     pub fn move_tab(&self, tab_id: DockTabId, target_side: DockSide, at_tab: usize) {
         {
             let mut inner = self.0.borrow_mut();
+            if !Self::side_accepts(&inner, target_side) {
+                return; // disabled side rejects moves
+            }
             // Find + remove the tab from its current side.
             let mut found: Option<(DockSide, usize)> = None;
             for side in DockSide::ALL {

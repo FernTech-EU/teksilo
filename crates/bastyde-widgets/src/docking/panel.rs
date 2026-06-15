@@ -383,16 +383,13 @@ impl Widget for DockSidePanel {
         let side = self.side;
         let factory_model = self.model.clone();
         let factory_content = self.content.clone();
-        let recv_model = self.model.clone();
-        let reorder_model = self.model.clone();
         // The bar deals in *visible* positions; translate them back to model
         // tab indices (a no-op when nothing is hidden) for `move_tab`.
-        let reorder_indices = model_indices.clone();
-        let recv_indices = model_indices.clone();
         let ext_indices = model_indices.clone();
         let ext_model = self.model.clone();
         let total_tabs = all_tab_ids.len();
 
+        let policy = self.model.policy();
         let mut tw = TabWidget::new(tw_selected)
             .bar_visibility(bar_visibility)
             // Dock side strips use the denser compact (38 dp) tab bar, each tab
@@ -415,33 +412,15 @@ impl Widget for DockSidePanel {
                     None => Box::new(RectWidget::new().background(SurfaceRole::Transparent)),
                 }
             })
-            .reorderable(true)
-            .accept_external_tabs(true)
-            // Same-side reorder.
-            .on_reorder(move |tid, dest, _ctx| {
-                let at = reorder_indices.get(dest).copied().unwrap_or(total_tabs);
-                reorder_model.move_tab(DockTabId::from_raw(tid.raw().get()), side, at);
-            })
-            // Cross-side drop: relocate the whole tab to this side.
-            .on_tab_received(move |handle, idx, ctx| {
-                if let Some(p) = (handle.payload.as_ref() as &dyn Any)
-                    .downcast_ref::<DockTabPayload>()
-                {
-                    let at = recv_indices.get(idx).copied().unwrap_or(total_tabs);
-                    recv_model.move_tab(p.tab_id, side, at);
-                    ctx.request_accessibility_update();
-                }
-            })
-            // The source side: `move_tab` (above) already removed the tab
-            // from the model; the rebuild reconciles this side's list.
-            .on_transfer_out(|_tid, _ctx| {})
             // A drop from a source that ISN'T a peer `TabBar<TabHandle>` — an
             // **activity-rail item** (`DockTabDragData`) or a single dock (a
             // split-pane header, `DockDragData`). The native `on_tab_received`
             // path only fires for `TabBarDragData<TabHandle>`; without this the
             // bar would be the drop target (`find_drop_target_at_or_above` stops
             // at the first handler) and silently reject the rail drag. `idx` is
-            // this bar's visible insertion position → model tab index.
+            // this bar's visible insertion position → model tab index. (Kept
+            // unconditionally — when a lock is on, the gated source simply never
+            // produces the matching payload, so the branch is inert.)
             .on_external_drop(move |payload, idx, ctx| {
                 let at = ext_indices.get(idx).copied().unwrap_or(total_tabs);
                 if let Some(tab_id) = dropped_dock_tab(payload) {
@@ -457,6 +436,36 @@ impl Widget for DockSidePanel {
                     false
                 }
             });
+        // Activity drag-and-drop (reorder within a side + transfer between
+        // sides) is a user affordance — gate it on the policy. When off, the
+        // tab headers are neither drag sources nor reorder/transfer targets.
+        if policy.allow_activity_drag {
+            let reorder_model = self.model.clone();
+            let recv_model = self.model.clone();
+            let reorder_indices = model_indices.clone();
+            let recv_indices = model_indices.clone();
+            tw = tw
+                .reorderable(true)
+                .accept_external_tabs(true)
+                // Same-side reorder.
+                .on_reorder(move |tid, dest, _ctx| {
+                    let at = reorder_indices.get(dest).copied().unwrap_or(total_tabs);
+                    reorder_model.move_tab(DockTabId::from_raw(tid.raw().get()), side, at);
+                })
+                // Cross-side drop: relocate the whole tab to this side.
+                .on_tab_received(move |handle, idx, ctx| {
+                    if let Some(p) = (handle.payload.as_ref() as &dyn Any)
+                        .downcast_ref::<DockTabPayload>()
+                    {
+                        let at = recv_indices.get(idx).copied().unwrap_or(total_tabs);
+                        recv_model.move_tab(p.tab_id, side, at);
+                        ctx.request_accessibility_update();
+                    }
+                })
+                // The source side: `move_tab` (above) already removed the tab
+                // from the model; the rebuild reconciles this side's list.
+                .on_transfer_out(|_tid, _ctx| {});
+        }
 
         // When activities are hidden, a trailing **hamburger** in the bar opens
         // the activities checklist (the restore affordance — and the only one
@@ -682,21 +691,23 @@ impl DockTabContentWidget {
                 sp.set_collapsed(pane_idx, !e);
             });
         }
-        ctx.add(
-            Accordion::new(title, expanded)
-                .orientation(
-                    if side_orientation(self.side) == bastyde_tokens::Orientation::Vertical {
-                        AccordionOrientation::Vertical
-                    } else {
-                        AccordionOrientation::Horizontal
-                    },
-                )
-                .fill(true)
-                .on_header_drag(move |ctx| {
-                    ctx.start_drag(content, DragPayload::typed(DockDragData { dock_id: dock }));
-                })
-                .content_id(content),
-        )
+        let mut accordion = Accordion::new(title, expanded)
+            .orientation(
+                if side_orientation(self.side) == bastyde_tokens::Orientation::Vertical {
+                    AccordionOrientation::Vertical
+                } else {
+                    AccordionOrientation::Horizontal
+                },
+            )
+            .fill(true);
+        // The accordion header is the dock's drag handle — only when the policy
+        // allows dragging a single dock out of a split pane.
+        if self.model.policy().allow_dock_drag {
+            accordion = accordion.on_header_drag(move |ctx| {
+                ctx.start_drag(content, DragPayload::typed(DockDragData { dock_id: dock }));
+            });
+        }
+        ctx.add(accordion.content_id(content))
     }
 }
 
