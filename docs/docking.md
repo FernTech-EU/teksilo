@@ -219,6 +219,8 @@ let active  = model.side_selected_tab_signal(side);  // Signal<usize>
 
 ## Persistence
 
+The model gives you the two halves directly:
+
 ```rust
 let state: DockLayoutState = model.export_state();   // serde + Versioned
 model.import_state(&state);                          // restore (also reset-to-default)
@@ -228,9 +230,87 @@ Only **user-controllable** state is serialized (per-side size / visibility /
 presentation / selection and the full tab → arrangement tree, plus corner
 owners). App-config — rail thickness, minimums, content factories, closable — is
 declared each run and reconstructed (Qt `saveState` parity). On import, unknown
-dock ids are dropped, emptied panes/tabs pruned, selections clamped. Persist via
-`SettingsFile<DockLayoutState>` (compose every dock layout + splitter into one
-workspace struct rather than one file each).
+dock ids are dropped, emptied panes/tabs pruned, selections clamped.
+
+### Saving / restoring with `bastyde-settings`
+
+`DockLayoutState` is `Versioned + Serialize + Deserialize + Default + Clone`,
+which is exactly what [`SettingsFile<T>`](settings.md) needs — so the disk side
+is a debounced, atomic, corrupt-file-quarantining projection of the model.
+
+**1. Load once at startup** (missing file → `default()`; corrupt file →
+quarantined to `<path>.broken-<ts>` + `default()`):
+
+```rust
+use bastyde::settings::{AppPaths, SettingsFile};
+use bastyde::widgets::DockLayoutState;
+use bastyde_settings::Migrator;
+use std::time::Duration;
+
+let paths = AppPaths::new("com", "FernTech", "Bastyde").expect("config dir");
+let dock_file = SettingsFile::<DockLayoutState>::load(
+    paths.config_file("docking.toml"),
+    Duration::from_millis(500),   // write debounce
+    &Migrator::new(),             // v1: no migration steps yet
+).expect("load docking layout");
+```
+
+**2. Restore *after* the docks are registered.** `import_state` drops unknown
+dock ids, so register the panels first (the `.dock(..)` builder registers
+eagerly), then import:
+
+```rust
+let layout = DockingLayout::new(model.clone())
+    .center(editor)
+    .dock(DockWidget::new(explorer, lit!("Explorer"), |_| ExplorerPanel::new()))
+    .dock(DockWidget::new(terminal, lit!("Terminal"), |_| TerminalPanel::new()));
+// docks are now registered → safe to restore:
+model.import_state(&dock_file.snapshot());
+// `import_state(&DockLayoutState::default())` is also the reset-to-default path.
+```
+
+**3. Auto-save on change.** Bind one effect (in the root widget's `build()`) to
+the model's two version signals — `version()` (structural: open / close / move /
+split) and `geometry_version()` (size / visibility / corners / presentation).
+`SettingsFile` debounces, so bursts coalesce into a single write:
+
+```rust
+let combined = model.version().zip(&model.geometry_version());
+let file = dock_file.clone();
+let m = model.clone();
+ctx.effect(&combined, move |_| {
+    let _ = file.replace(m.export_state());   // schedules a debounced atomic write
+});
+```
+
+A **selection-only** change (`select_tab`) bumps neither version — it's captured
+on the next structural/geometry change, or call `dock_file.flush_now()` on window
+close. Bind the per-side `model.side_selected_tab_signal(side)` too if you want
+selection persisted live.
+
+**Compose, don't sprinkle files.** Prefer **one workspace file** over one per
+dock layout / splitter. Since `SplitterState` and `DockLayoutState` are both
+`Versioned` serde DTOs, wrap them and restore each piece via its own
+`import_state`:
+
+```rust
+#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+struct WorkspaceLayout {
+    version: u32,
+    docking: DockLayoutState,
+    sidebar_split: SplitterState,
+}
+impl Versioned for WorkspaceLayout {
+    const CURRENT_VERSION: u32 = 1;
+    fn version(&self) -> u32 { self.version }
+    fn set_version(&mut self, v: u32) { self.version = v; }
+}
+// one SettingsFile<WorkspaceLayout>.
+```
+
+The dock layout is the **content** state; *window* geometry (position / size) is
+separate and handled automatically by `WindowConfig::id(..)` +
+`SettingsBundle::with_window_state(true)` — see [settings.md](settings.md).
 
 ## Scope & non-goals (v1)
 
