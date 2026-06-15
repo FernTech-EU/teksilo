@@ -22,6 +22,33 @@ use crate::knob::{KnobSpec, KnobValues};
 use crate::source_loc::SourceLoc;
 use crate::variant::PreviewVariant;
 use bastyde_core::widget::Widget;
+use bastyde_core::widget_id::WidgetId;
+
+/// How a catalog widget accepts children. Drives the designer's outline
+/// rendering and the runtime [`WidgetCatalog::build_with_children`]
+/// factory. Default is [`WidgetCategory::Leaf`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetCategory {
+    /// No children — a leaf control (Button, TextWidget, Slider, …).
+    Leaf,
+    /// Ordered bare children (VStack, HStack, ZStack, Grid, Padding, …).
+    ContainerA,
+    /// Named slots (Card → header/content/footer; Dialog; TabWidget; …).
+    ContainerB,
+}
+
+/// One child handed to [`WidgetCatalog::build_with_children`]: a
+/// pre-registered widget id plus, for [`WidgetCategory::ContainerB`]
+/// parents, the name of the slot it fills (`None` for the ordered
+/// children of a [`WidgetCategory::ContainerA`] parent).
+#[derive(Debug, Clone)]
+pub struct SlottedChild {
+    /// The named slot this child fills (`ContainerB`), or `None` for an
+    /// ordered bare child (`ContainerA`).
+    pub slot: Option<String>,
+    /// The pre-registered child widget, already inserted in the arena.
+    pub id: WidgetId,
+}
 
 /// Static-method trait implemented by widget authors.
 pub trait WidgetCatalog: 'static {
@@ -50,6 +77,43 @@ pub trait WidgetCatalog: 'static {
     /// the variant name to handle `Scenario` paths and otherwise builds
     /// via the knob values for `Knobs` variants.
     fn build(variant: &str, knobs: &KnobValues) -> Box<dyn Widget>;
+
+    /// An icon widget for the navigator palette and the designer's
+    /// outline tree. `None` (the default) leaves the consumer to
+    /// substitute a generic fallback. Returns a `Box<dyn Widget>` (not
+    /// an `IconWidget`) so this crate stays free of any widgets-crate
+    /// dependency.
+    fn icon() -> Option<Box<dyn Widget>> {
+        None
+    }
+
+    /// How this widget accepts children. The default,
+    /// [`WidgetCategory::Leaf`], is correct for every control; container
+    /// widgets override it.
+    fn category() -> WidgetCategory {
+        WidgetCategory::Leaf
+    }
+
+    /// Named slots for a [`WidgetCategory::ContainerB`] widget (e.g.
+    /// `Card` → `["header", "content", "footer"]`). Empty for `Leaf` and
+    /// `ContainerA`.
+    fn slots() -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Build with pre-registered children injected. `ContainerA` folds
+    /// `children` as ordered bare children; `ContainerB` routes each by
+    /// its `slot` name; `Leaf` ignores them. The default ignores
+    /// `children` and delegates to [`build`](Self::build), so non-container
+    /// widgets need no override.
+    fn build_with_children(
+        variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let _ = children;
+        Self::build(variant, knobs)
+    }
 }
 
 /// Object-safe trait collected by `inventory`. Each implementor is a
@@ -63,6 +127,25 @@ pub trait CatalogEntry: Sync {
     fn variants(&self) -> Vec<PreviewVariant>;
     fn knobs(&self) -> KnobSpec;
     fn build(&self, variant: &str, knobs: &KnobValues) -> Box<dyn Widget>;
+
+    fn icon(&self) -> Option<Box<dyn Widget>> {
+        None
+    }
+    fn category(&self) -> WidgetCategory {
+        WidgetCategory::Leaf
+    }
+    fn slots(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn build_with_children(
+        &self,
+        variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let _ = children;
+        self.build(variant, knobs)
+    }
 }
 
 inventory::collect!(&'static dyn CatalogEntry);
@@ -136,6 +219,25 @@ macro_rules! __register_widget_catalog_with {
                     knobs: &$crate::KnobValues,
                 ) -> ::std::boxed::Box<dyn $crate::__widget::Widget> {
                     <$t as $crate::WidgetCatalog>::build(variant, knobs)
+                }
+                fn icon(
+                    &self,
+                ) -> ::std::option::Option<::std::boxed::Box<dyn $crate::__widget::Widget>> {
+                    <$t as $crate::WidgetCatalog>::icon()
+                }
+                fn category(&self) -> $crate::WidgetCategory {
+                    <$t as $crate::WidgetCatalog>::category()
+                }
+                fn slots(&self) -> &'static [&'static str] {
+                    <$t as $crate::WidgetCatalog>::slots()
+                }
+                fn build_with_children(
+                    &self,
+                    variant: &str,
+                    knobs: &$crate::KnobValues,
+                    children: ::std::vec::Vec<$crate::SlottedChild>,
+                ) -> ::std::boxed::Box<dyn $crate::__widget::Widget> {
+                    <$t as $crate::WidgetCatalog>::build_with_children(variant, knobs, children)
                 }
             }
             static __ENTRY: __Entry = __Entry;

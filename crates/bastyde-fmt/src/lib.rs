@@ -27,6 +27,12 @@ mod visit;
 use proc_macro2::TokenStream;
 use std::str::FromStr;
 
+// Re-exports for downstream tooling (e.g. `bastyde-designer`) that needs
+// to locate, scan, and re-indent `bati!` blocks rather than just format
+// whole files.
+pub use trivia::{Trivia, TriviaKind, scan as scan_trivia};
+pub use visit::{BatiMacroEdit, find_bastyde_macros};
+
 /// Formatter configuration. Empty in v1; reserved for future style knobs.
 #[derive(Debug, Default, Clone)]
 pub struct FmtConfig {}
@@ -145,7 +151,7 @@ fn normalize_to_crlf(s: &str) -> String {
 /// `base_indent` spaces. Newlines emitted by the formatter remain
 /// `\n`-only — line-ending normalization (LF↔CRLF) is the caller's
 /// responsibility.
-fn reindent_block(body: &str, base_indent: usize) -> String {
+pub fn reindent_block(body: &str, base_indent: usize) -> String {
     if base_indent == 0 || !body.contains('\n') {
         return body.to_string();
     }

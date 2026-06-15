@@ -30,16 +30,20 @@
 //!   (intent registry, modal manager, raster resources) the catalog
 //!   does not provide.
 
+mod icons;
+
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
 use bastyde_i18n::lit;
 use bastyde_preview::{
-    KnobOverrides, KnobSpec, KnobValues, PreviewVariant, WidgetCatalog, register_widget_catalog_at,
+    KnobOverrides, KnobSpec, KnobValues, PreviewVariant, SlottedChild, WidgetCatalog,
+    WidgetCategory, register_widget_catalog_at,
 };
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
-    Center, FixedSize, HStack, IconWidget, Padding, Spacer, TextWidget, VStack,
+    Center, Expand, FixedSize, Grid, HStack, IconWidget, Padding, Spacer, TextWidget, TrackSize,
+    VStack, ZStack,
 };
 // MaxSize / RectWidget are available for catalog impls in the section
 // below; not every impl needs them, so the import carries
@@ -52,7 +56,7 @@ use crate::{
     IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar,
     Orientation, PaneDescriptor, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider,
     Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar,
-    TabWidget, Toggle, ToolBox, Toolbar, TreeView,
+    TabWidget, TextInput, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -116,8 +120,417 @@ impl WidgetCatalog for Button {
         }
         Box::new(b)
     }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::button())
+    }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/button.rs", Button);
+
+// =========================================================================
+// Layout primitives (designer-facing — ContainerA / Leaf, with runtime
+// `build_with_children` so the designer's interpreted canvas can nest them)
+// =========================================================================
+
+impl WidgetCatalog for VStack {
+    fn id() -> &'static str {
+        "vstack"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "VStack"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new().f32_("spacing", "Spacing", 8.0, 0.0, 48.0)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            VStack::new()
+                .spacing(knobs.f32_("spacing").get())
+                .child(sample_text("Item 1"))
+                .child(sample_text("Item 2"))
+                .child(sample_text("Item 3")),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::vstack())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut s = VStack::new().spacing(knobs.f32_("spacing").get());
+        for c in children {
+            s = s.add_child(c.id);
+        }
+        Box::new(s)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/vstack.rs", VStack);
+
+impl WidgetCatalog for HStack {
+    fn id() -> &'static str {
+        "hstack"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "HStack"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new().f32_("spacing", "Spacing", 8.0, 0.0, 48.0)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            HStack::new()
+                .spacing(knobs.f32_("spacing").get())
+                .child(sample_text("A"))
+                .child(sample_text("B"))
+                .child(sample_text("C")),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::hstack())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut s = HStack::new().spacing(knobs.f32_("spacing").get());
+        for c in children {
+            s = s.add_child(c.id);
+        }
+        Box::new(s)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/hstack.rs", HStack);
+
+impl WidgetCatalog for ZStack {
+    fn id() -> &'static str {
+        "zstack"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "ZStack"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            ZStack::new()
+                .child(RectWidget::new().background(SurfaceRole::Raised))
+                .child(Center::new().child(sample_text("ZStack"))),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::zstack())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        _knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut s = ZStack::new();
+        for c in children {
+            s = s.add_child(c.id);
+        }
+        Box::new(s)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/zstack.rs", ZStack);
+
+impl WidgetCatalog for Grid {
+    fn id() -> &'static str {
+        "grid"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "Grid"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            .choice("columns", "Columns", &["1", "2", "3", "4"], 1)
+            .f32_("gap", "Gap", 8.0, 0.0, 32.0)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        let cols = knobs.choice("columns").get() + 1;
+        let gap = knobs.f32_("gap").get();
+        let mut g = Grid::new()
+            .columns(vec![TrackSize::Fractional(1.0); cols])
+            .column_gap(gap)
+            .row_gap(gap);
+        for i in 1..=6 {
+            g = g.child(sample_text(&format!("{i}")));
+        }
+        Box::new(g)
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::grid())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let cols = knobs.choice("columns").get() + 1;
+        let gap = knobs.f32_("gap").get();
+        let mut g = Grid::new()
+            .columns(vec![TrackSize::Fractional(1.0); cols])
+            .column_gap(gap)
+            .row_gap(gap);
+        for c in children {
+            g = g.add_child(c.id);
+        }
+        Box::new(g)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/grid.rs", Grid);
+
+impl WidgetCatalog for Padding {
+    fn id() -> &'static str {
+        "padding"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "Padding"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new().f32_("amount", "Amount", 16.0, 0.0, 48.0)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(Padding::uniform(knobs.f32_("amount").get()).child(sample_text("Padded content")))
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::padding())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut p = Padding::uniform(knobs.f32_("amount").get());
+        if let Some(c) = children.into_iter().next() {
+            p = p.child_id(c.id);
+        }
+        Box::new(p)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/padding.rs", Padding);
+
+impl WidgetCatalog for Expand {
+    fn id() -> &'static str {
+        "expand"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "Expand"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new().f32_("flex", "Flex", 1.0, 0.0, 4.0)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            FixedSize::new()
+                .bind_width(220.0_f32)
+                .bind_height(60.0_f32)
+                .child(
+                    Expand::new()
+                        .flex(knobs.f32_("flex").get())
+                        .child(RectWidget::new().background(SurfaceRole::AccentSubtle)),
+                ),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::expand())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut e = Expand::new().flex(knobs.f32_("flex").get());
+        if let Some(c) = children.into_iter().next() {
+            e = e.child_id(c.id);
+        }
+        Box::new(e)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/expand.rs", Expand);
+
+impl WidgetCatalog for Center {
+    fn id() -> &'static str {
+        "center"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "Center"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            FixedSize::new()
+                .bind_width(200.0_f32)
+                .bind_height(80.0_f32)
+                .child(Center::new().child(sample_text("Centered"))),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::center())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        _knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut c0 = Center::new();
+        if let Some(c) = children.into_iter().next() {
+            c0 = c0.child_id(c.id);
+        }
+        Box::new(c0)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/center.rs", Center);
+
+impl WidgetCatalog for Spacer {
+    fn id() -> &'static str {
+        "spacer"
+    }
+    fn group() -> &'static str {
+        "Layout"
+    }
+    fn display_name() -> &'static str {
+        "Spacer"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            HStack::new()
+                .child(sample_text("L"))
+                .child(Spacer::new())
+                .child(sample_text("R")),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::spacer())
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/spacer.rs", Spacer);
+
+impl WidgetCatalog for TextWidget {
+    fn id() -> &'static str {
+        "text_widget"
+    }
+    fn group() -> &'static str {
+        "Display"
+    }
+    fn display_name() -> &'static str {
+        "Text"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new().text("text", "Text", "Label")
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            TextWidget::new(lit!(knobs.text("text").get()))
+                .style(TextStyleRole::Body)
+                .color(TextRole::Primary),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::text_widget())
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/text_widget.rs", TextWidget);
+
+impl WidgetCatalog for TextInput {
+    fn id() -> &'static str {
+        "text_input"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "TextInput"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            .text("value", "Value", "")
+            .text("placeholder", "Placeholder", "Type here…")
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        Box::new(
+            FixedSize::new().bind_width(220.0_f32).child(
+                TextInput::new(knobs.text("value"))
+                    .placeholder(lit!(knobs.text("placeholder").get())),
+            ),
+        )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::text_input())
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/text_input.rs", TextInput);
 
 // ---------------------------------------------------------------------------
 // Checkbox
@@ -151,6 +564,9 @@ impl WidgetCatalog for Checkbox {
         let checked = knobs.bool_("checked");
         let enabled = knobs.bool_("enabled").get();
         Box::new(Checkbox::new(checked).label(lit!(label)).enabled(enabled))
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::checkbox())
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/checkbox.rs", Checkbox);
@@ -236,6 +652,9 @@ impl WidgetCatalog for Toggle {
         let enabled = knobs.bool_("enabled").get();
         Box::new(Toggle::new(on).label(lit!(label)).enabled(enabled))
     }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::toggle())
+    }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/toggle.rs", Toggle);
 
@@ -303,6 +722,9 @@ impl WidgetCatalog for Slider {
             Box::new(s)
         };
         widget
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::slider())
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/slider.rs", Slider);
@@ -691,6 +1113,9 @@ impl WidgetCatalog for ComboBox<String> {
         }
         Box::new(cb)
     }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::combo_box())
+    }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/combo_box.rs", ComboBox<String>);
 
@@ -946,6 +1371,33 @@ impl WidgetCatalog for Card {
         }
         Box::new(card)
     }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::card())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerB
+    }
+    fn slots() -> &'static [&'static str] {
+        &["header", "content", "footer"]
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut card = Card::new()
+            .background(knobs.surface_role("background"))
+            .corner_radius(knobs.f32_("corner_radius").get())
+            .padding(knobs.f32_("padding").get());
+        for c in children {
+            match c.slot.as_deref() {
+                Some("header") => card = card.header_id(c.id),
+                Some("footer") => card = card.footer_id(c.id),
+                _ => card = card.content_id(c.id),
+            }
+        }
+        Box::new(card)
+    }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/card.rs", Card);
 
@@ -1002,6 +1454,28 @@ impl WidgetCatalog for Panel {
                 .padding(knobs.f32_("padding").get())
                 .child(sample_text(&knobs.text("content").get())),
         )
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::panel())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        let mut p = Panel::new()
+            .background(knobs.surface_role("background"))
+            .border_color(knobs.border_role("border_color"))
+            .border_width(knobs.f32_("border_width").get())
+            .corner_radius(knobs.f32_("corner_radius").get())
+            .padding(knobs.f32_("padding").get());
+        if let Some(c) = children.into_iter().next() {
+            p = p.child_id(c.id);
+        }
+        Box::new(p)
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/panel.rs", Panel);
@@ -1789,6 +2263,22 @@ impl WidgetCatalog for ScrollArea {
     fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
         scenario_for::<Self>(variant)
     }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::scroll_area())
+    }
+    fn category() -> WidgetCategory {
+        WidgetCategory::ContainerA
+    }
+    fn build_with_children(
+        _variant: &str,
+        _knobs: &KnobValues,
+        children: Vec<SlottedChild>,
+    ) -> Box<dyn Widget> {
+        match children.into_iter().next() {
+            Some(c) => Box::new(ScrollArea::from_id(c.id)),
+            None => Box::new(ScrollArea::new()),
+        }
+    }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/scroll_area.rs", ScrollArea);
 
@@ -2254,4 +2744,111 @@ mod secure_input_family {
         "crates/bastyde-widgets/src/password_field.rs",
         PasswordField
     );
+}
+
+#[cfg(all(test, feature = "preview"))]
+mod build_with_children_tests {
+    use super::*;
+    use bastyde_canvas::SizeProposal;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_preview::{CatalogEntry, KnobValues, SlottedChild, WidgetCategory, find_by_id};
+
+    fn knobs_for(entry: &dyn CatalogEntry) -> KnobValues {
+        KnobValues::from_spec(&entry.knobs(), None)
+    }
+
+    /// Collect every descendant id under `root` (exclusive).
+    fn descendants(tree: &WidgetTree, root: bastyde_core::widget_id::WidgetId) -> Vec<bastyde_core::widget_id::WidgetId> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            for ch in tree.children(n) {
+                out.push(ch);
+                stack.push(ch);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn leaf_button_default_ignores_children() {
+        let entry = find_by_id("button").expect("button registered");
+        assert_eq!(entry.category(), WidgetCategory::Leaf);
+        assert!(entry.icon().is_some());
+        let knobs = knobs_for(entry);
+        let mut tree = WidgetTree::new();
+        let stray = tree.add(TextWidget::new(lit!("x")));
+        let w = entry.build_with_children(
+            "default",
+            &knobs,
+            vec![SlottedChild { slot: None, id: stray }],
+        );
+        let id = tree.add_boxed(w);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        // The leaf default ignores injected children — the stray is not adopted.
+        assert!(!descendants(&tree, id).contains(&stray));
+    }
+
+    #[test]
+    fn vstack_container_a_wires_ordered_children() {
+        let entry = find_by_id("vstack").expect("vstack registered");
+        assert_eq!(entry.category(), WidgetCategory::ContainerA);
+        assert!(entry.icon().is_some());
+        let knobs = knobs_for(entry);
+        let mut tree = WidgetTree::new();
+        let a = tree.add(TextWidget::new(lit!("A")));
+        let b = tree.add(TextWidget::new(lit!("B")));
+        let c = tree.add(TextWidget::new(lit!("C")));
+        let w = entry.build_with_children(
+            "default",
+            &knobs,
+            vec![
+                SlottedChild { slot: None, id: a },
+                SlottedChild { slot: None, id: b },
+                SlottedChild { slot: None, id: c },
+            ],
+        );
+        let id = tree.add_boxed(w);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.children(id), vec![a, b, c]);
+    }
+
+    #[test]
+    fn card_container_b_routes_named_slots() {
+        let entry = find_by_id("card").expect("card registered");
+        assert_eq!(entry.category(), WidgetCategory::ContainerB);
+        assert_eq!(entry.slots(), &["header", "content", "footer"][..]);
+        let knobs = knobs_for(entry);
+        let mut tree = WidgetTree::new();
+        let header = tree.add(TextWidget::new(lit!("H")));
+        let content = tree.add(TextWidget::new(lit!("C")));
+        let footer = tree.add(TextWidget::new(lit!("F")));
+        let w = entry.build_with_children(
+            "default",
+            &knobs,
+            vec![
+                SlottedChild { slot: Some("header".into()), id: header },
+                SlottedChild { slot: Some("content".into()), id: content },
+                SlottedChild { slot: Some("footer".into()), id: footer },
+            ],
+        );
+        let id = tree.add_boxed(w);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let all = descendants(&tree, id);
+        assert!(all.contains(&header), "header slot wired");
+        assert!(all.contains(&content), "content slot wired");
+        assert!(all.contains(&footer), "footer slot wired");
+    }
+
+    #[test]
+    fn curated_widgets_have_icons() {
+        for id in [
+            "vstack", "hstack", "zstack", "grid", "padding", "expand", "center", "spacer",
+            "button", "text_widget", "checkbox", "text_input", "toggle", "combo_box", "slider",
+            "card", "panel", "scroll_area",
+        ] {
+            let entry = find_by_id(id).unwrap_or_else(|| panic!("{id} registered"));
+            assert!(entry.icon().is_some(), "{id} should have an icon");
+        }
+    }
 }
