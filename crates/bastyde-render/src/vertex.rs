@@ -93,7 +93,7 @@ impl QuadVertex {
     /// transparent atlas gutter (visibly cropping the bottom of letters
     /// like "c"/"e"). So whenever the transformed quad maps 1:1 onto its
     /// atlas bitmap — axis-aligned transform and transformed size equal to
-    /// the bitmap size within [`GLYPH_SNAP_SIZE_EPS`] — the origin is
+    /// the bitmap size within `GLYPH_SNAP_SIZE_EPS` — the origin is
     /// rounded to the integer pixel grid and the opposite corner pinned at
     /// exactly `origin + bitmap size`, making linear sampling an identity.
     /// This covers identity, fractional DPI, pure translations, and

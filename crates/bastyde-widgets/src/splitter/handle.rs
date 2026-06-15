@@ -8,7 +8,8 @@
 //! snap-to-collapse (+ drag-back restore), double-click and keyboard
 //! collapse of the adjacent collapsible pane, keyboard / AccessKit resize,
 //! and the `Role::Splitter` accessibility node. The visual chrome is
-//! delegated to the active [`SplitterStyle`]; this widget routes input and
+//! delegated to the active [`SplitterStyle`](bastyde_core::styles::SplitterStyle);
+//! this widget routes input and
 //! sizes the body to the model's gutter thickness × the cross axis.
 //!
 //! Boundary math runs in *container-main-local* coordinates (0 at the

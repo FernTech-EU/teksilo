@@ -3,7 +3,7 @@
 
 //! [`DockingModel`] — the shared, cloneable, serializable handle that backs a
 //! [`DockingLayout`](super::DockingLayout). Mirrors the
-//! [`SplitterModel`](crate::splitter::SplitterModel) / `SceneModel` pattern:
+//! [`SplitterModel`] / `SceneModel` pattern:
 //! an `Rc<RefCell<…>>` with `&self` mutators that drop the borrow before
 //! bumping `version`, so observers run with the model unlocked.
 

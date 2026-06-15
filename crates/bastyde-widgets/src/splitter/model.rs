@@ -183,8 +183,8 @@ impl PaneEntry {
     }
 }
 
-/// Immutable per-pane view handed to the pure
-/// [`distribute`](super::distribute::distribute) sizing function.
+/// Immutable per-pane view handed to the pure `distribute` sizing
+/// function (the internal `splitter::distribute` engine).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PaneSnapshot {
     pub stored_size: f32,
