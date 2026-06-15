@@ -1,10 +1,11 @@
 //! Spatial index for [`Scene`](crate::Scene) items.
 //!
-//! `GridHashIndex` (default) is a uniform grid hash; an R-tree alternative
-//! behind the same trait. The trait is deliberately small — three
-//! mutating operations (`insert`, `remove`, `query`) plus two query
-//! methods (`contains`, `len`) — so swapping implementations is a
-//! one-line change in [`Scene::with_index`](crate::Scene::with_index).
+//! `GridHashIndex` is the only shipped implementation — a uniform grid
+//! hash. The `SpatialIndex` trait is deliberately small — three mutating
+//! operations (`insert`, `remove`, `query`) plus two query methods
+//! (`contains`, `len`) — so an application that needs different behaviour
+//! (e.g. an R-tree) can supply its own implementation in a one-line change
+//! via [`Scene::with_index`](crate::Scene::with_index).
 //!
 //! ## Why grid hash first
 //!
@@ -16,8 +17,10 @@
 //!   candidates from the cells the rect overlaps.
 //! - Pathological case (one giant item that spans hundreds of cells)
 //!   is rare and easily worked around by raising `cell_size` for
-//!   that scene; an R-tree handles non-uniform density better and is
-//!   an editor-style fallback for many overlapping items.
+//!   that scene. A custom `SpatialIndex` would handle non-uniform
+//!   density better — an R-tree, say, for an editor with many
+//!   overlapping items — but none ships; the trait is the place to
+//!   add one.
 //!
 //! Default `cell_size` is `256.0` logical pixels — large enough that
 //! typical card-sized items (~200 px) bucket into 1–4 cells and small
