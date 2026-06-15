@@ -40,9 +40,10 @@ pub struct DockSideState {
     pub selected_tab: usize,
     #[serde(default)]
     pub tabs: Vec<DockTabState>,
-    /// Activity-bar item size: `false` = configured/default, `true` = compact.
+    /// Activity-bar item size: `0` = configured/default, `1` = compact,
+    /// `2` = icon + 90°-rotated label.
     #[serde(default)]
-    pub rail_compact: bool,
+    pub rail_size: usize,
     /// Dock-tab display mode: `0` = text, `1` = icon, `2` = icon + text.
     #[serde(default)]
     pub tab_display: usize,
@@ -56,7 +57,7 @@ impl Default for DockSideState {
             visible: false,
             selected_tab: 0,
             tabs: Vec::new(),
-            rail_compact: false,
+            rail_size: 0,
             tab_display: 0,
         }
     }
@@ -135,7 +136,7 @@ mod tests {
                         hidden: true,
                     },
                 ],
-                rail_compact: true,
+                rail_size: 2,
                 tab_display: 2,
             },
             trailing: DockSideState::default(),

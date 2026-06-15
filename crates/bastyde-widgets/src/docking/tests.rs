@@ -557,6 +557,235 @@ fn hiding_an_activity_drops_its_strip_tab() {
 }
 
 #[test]
+fn changing_tab_display_mode_rebuilds_the_strip() {
+    use super::DockTabDisplay;
+
+    // An icon-less dock — the case the docking example ships, and the one that
+    // looked like "the Tab size menu does nothing". The visible chrome changes
+    // per mode (so the tab width changes), but the tab's *accessible name* must
+    // stay "Terminal" in every mode (the displayed initial is a visual only).
+    let model = DockingModel::new();
+    let a_id = DockWidgetId::fresh();
+    let dwa = DockWidget::new(a_id, lit!("Terminal"), |_| FixedLeaf(120.0, 120.0));
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a_id, DockOpenLocation::side(DockSide::Bottom));
+
+    // The tab header keeps the accessible name "Terminal" in every mode.
+    let tab_width = |t: &WidgetTree, root: WidgetId| -> f32 {
+        let tab = find_role_name(t, root, Role::Tab, "Terminal")
+            .expect("the tab header keeps its accessible name in every display mode");
+        t.bounds(tab).width
+    };
+
+    // Text mode (default): the full title is shown — the tab is wide.
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::Text);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_text = tab_width(&t, root);
+
+    // Icon-only: even an icon-less dock visibly changes — it shows the title's
+    // initial letter, so the tab is narrower than the full title.
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::Icon);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_icon = tab_width(&t, root);
+    assert!(
+        w_icon < w_text,
+        "icon-less Icon mode shows the compact initial — narrower ({w_icon} < {w_text})"
+    );
+
+    // Icon + Text restores the full title → wider again than the initial.
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::IconText);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_icontext = tab_width(&t, root);
+    assert!(
+        w_icontext > w_icon,
+        "icon + text restores the full title — wider than the initial ({w_icontext} > {w_icon})"
+    );
+}
+
+#[test]
+fn icon_only_tab_sizes_to_its_icon() {
+    use super::DockTabDisplay;
+    use crate::primitives::IconWidget;
+
+    // A dock *with* an icon: icon-only mode must shrink the tab to its icon
+    // instead of clamping to the editor-tab minimum, and icon+text must be
+    // wider than text-only (the icon is accounted for).
+    let model = DockingModel::new();
+    let a_id = DockWidgetId::fresh();
+    let dwa = DockWidget::new(a_id, lit!("Terminal"), |_| FixedLeaf(120.0, 120.0))
+        .icon(|| IconWidget::checkmark(16.0));
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a_id, DockOpenLocation::side(DockSide::Bottom));
+
+    let tab_width = |t: &WidgetTree, root: WidgetId| -> f32 {
+        let tab = find_first_role(t, root, Role::Tab).expect("a strip tab renders");
+        t.bounds(tab).width
+    };
+
+    // Text-only.
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::Text);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_text = tab_width(&t, root);
+
+    // Icon-only must be strictly narrower (sized to the icon, not the text min).
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::Icon);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_icon = tab_width(&t, root);
+    assert!(
+        w_icon < w_text,
+        "icon-only tab ({w_icon}) must be narrower than the text tab ({w_text})"
+    );
+
+    // Icon + text must be wider than BOTH icon-only and text-only — the icon's
+    // width is genuinely added to the label's (the bug was icon+text == text).
+    model.set_side_tab_display(DockSide::Bottom, DockTabDisplay::IconText);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let w_icontext = tab_width(&t, root);
+    assert!(
+        w_icontext > w_icon,
+        "icon + text ({w_icontext}) must be wider than icon-only ({w_icon})"
+    );
+    assert!(
+        w_icontext > w_text,
+        "icon + text ({w_icontext}) must be wider than text-only ({w_text}) — \
+         the icon's width is added"
+    );
+}
+
+#[test]
+fn rail_strip_width_follows_the_size_mode() {
+    use super::{DockRail, DockRailItemSize};
+    use crate::icon_button::IconButtonSize;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(DockRail::new(DockSide::Leading).size(IconButtonSize::Large)),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // The rail (Role::TabList) is the activity-bar strip; its width is the rail
+    // thickness.
+    let rail = find_first_role(&t, root, Role::TabList).expect("a rail renders");
+    let w_default = t.bounds(rail).width;
+
+    // Compact must make the whole strip narrower — not just its items.
+    model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let rail = find_first_role(&t, root, Role::TabList).expect("the rail still renders");
+    let w_compact = t.bounds(rail).width;
+
+    assert!(
+        w_compact < w_default,
+        "the activity bar itself shrinks in Compact ({w_compact} < {w_default})"
+    );
+}
+
+#[test]
+fn rail_slot_resizes_with_the_activity_bar_size() {
+    use super::{DockRail, DockRailItemSize};
+    use crate::icon_button::{IconButton, IconButtonSize};
+    use crate::primitives::IconWidget;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // The slot factory derives its size from the rail's mode signal and records
+    // it each time it runs (the rail rebuilds its slots on a mode change).
+    let seen: Rc<Cell<Option<IconButtonSize>>> = Rc::new(Cell::new(None));
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let a_id = DockWidgetId::fresh();
+    let dwa = DockWidget::new(a_id, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0));
+    let mut t = tree();
+    let seen_in = seen.clone();
+    let rail_mode = model.rail_size_mode_signal(DockSide::Leading);
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .size(IconButtonSize::Large)
+                    .bottom_slot(move || {
+                        let size = if rail_mode.get() == DockRailItemSize::Compact {
+                            IconButtonSize::Compact
+                        } else {
+                            IconButtonSize::Large
+                        };
+                        seen_in.set(Some(size));
+                        IconButton::new(IconWidget::checkmark(16.0)).size(size)
+                    }),
+            ),
+    );
+    model.open_dock(a_id, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Default mode → the rail's configured Large size reaches the slot.
+    assert_eq!(seen.get(), Some(IconButtonSize::Large), "slot gets the rail size");
+
+    // Switching to Compact rebuilds the rail and re-hands the slot the new size.
+    model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_eq!(
+        seen.get(),
+        Some(IconButtonSize::Compact),
+        "the slot adapts to the new activity-bar size"
+    );
+}
+
+#[test]
+fn labeled_rail_mode_grows_the_item_for_a_rotated_title() {
+    use super::DockRailItemSize;
+    use crate::primitives::IconWidget;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0); // Rail presentation
+    let a_id = DockWidgetId::fresh();
+    let dwa = DockWidget::new(a_id, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0))
+        .icon(|| IconWidget::checkmark(18.0));
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa),
+    );
+    model.open_dock(a_id, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Default (icon-only) rail item: roughly the icon square.
+    let item = find_first_role(&t, root, Role::Tab).expect("a rail item renders");
+    let h_default = t.bounds(item).height;
+
+    // Icon + 90° label: the item must grow taller to seat the rotated title
+    // beneath the icon.
+    model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let item = find_first_role(&t, root, Role::Tab).expect("the rail item still renders");
+    let h_labeled = t.bounds(item).height;
+
+    assert!(
+        h_labeled > h_default,
+        "labeled rail item ({h_labeled}) must be taller than the icon-only item ({h_default})"
+    );
+}
+
+#[test]
 fn right_clicking_a_rail_item_opens_a_context_menu() {
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
 

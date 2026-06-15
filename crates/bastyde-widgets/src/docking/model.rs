@@ -111,15 +111,29 @@ impl DockOpenLocation {
 /// Activity-bar item size for a side's rail (context-menu "Activity bar size").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DockRailItemSize {
-    /// The rail's configured size (`DockRail::size`).
+    /// The rail's configured size (`DockRail::size`); icon only, title on hover.
     Default = 0,
-    /// Compact items ([`IconButtonSize::Compact`](crate::icon_button::IconButtonSize::Compact)).
+    /// Compact items ([`IconButtonSize::Compact`](crate::icon_button::IconButtonSize::Compact));
+    /// icon only, title on hover.
     Compact = 1,
+    /// Icon at the configured size **plus** a 90°-rotated title beneath it (the
+    /// vertical-accordion look). The title shows inline, so no hover tooltip.
+    Labeled = 2,
 }
 
 impl DockRailItemSize {
     fn from_usize(v: usize) -> Self {
-        if v == 1 { Self::Compact } else { Self::Default }
+        match v {
+            1 => Self::Compact,
+            2 => Self::Labeled,
+            _ => Self::Default,
+        }
+    }
+
+    /// Whether this mode paints the title inline (rotated) rather than only as a
+    /// hover tooltip.
+    pub fn shows_label(self) -> bool {
+        matches!(self, Self::Labeled)
     }
 }
 
@@ -611,6 +625,17 @@ impl DockingModel {
     /// Set a side's activity-bar item size (reactive → the rail rebuilds).
     pub fn set_side_rail_size(&self, side: DockSide, size: DockRailItemSize) {
         self.rail_size_signal(side).set(size as usize);
+    }
+
+    /// Reactive activity-bar **size mode** for a side — fires whenever the user
+    /// switches Default / Compact / Icon + Label (via the context menu or
+    /// [`set_side_rail_size`](Self::set_side_rail_size)). Bind it to adapt any
+    /// external widget — a rail's slotted controls, an app toolbar — to the
+    /// rail's current item size. (The rail rebuilds its slots on every change,
+    /// so a slot factory that reads this signal stays in step.)
+    pub fn rail_size_mode_signal(&self, side: DockSide) -> Signal<DockRailItemSize> {
+        self.rail_size_signal(side)
+            .map(|v| DockRailItemSize::from_usize(*v))
     }
 
     /// The reactive tab-display mode for a side (`0`/`1`/`2`). The tab strip
@@ -1248,7 +1273,7 @@ impl DockingModel {
                         hidden: tab.hidden,
                     })
                     .collect(),
-                rail_compact: st.rail_size_sig.get() == DockRailItemSize::Compact as usize,
+                rail_size: st.rail_size_sig.get().min(DockRailItemSize::Labeled as usize),
                 tab_display: st.tab_display_sig.get(),
             }
         };
@@ -1310,11 +1335,8 @@ impl DockingModel {
                     st.visible = dto.visible && !tabs.is_empty();
                     st.selected_tab = selected_tab;
                     st.tabs = tabs;
-                    st.rail_size_sig.set(if dto.rail_compact {
-                        DockRailItemSize::Compact as usize
-                    } else {
-                        DockRailItemSize::Default as usize
-                    });
+                    st.rail_size_sig
+                        .set(dto.rail_size.min(DockRailItemSize::Labeled as usize));
                     st.tab_display_sig.set(dto.tab_display.min(2));
                 }
             };
@@ -1742,10 +1764,32 @@ mod tests {
         m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
         assert_eq!(m.side_rail_size(DockSide::Leading), DockRailItemSize::Compact);
         assert_eq!(rail_sig.get(), 1, "signal reflects the change (drives rebuild)");
+        assert!(!DockRailItemSize::Compact.shows_label());
+
+        // The third "icon + 90° label" rail mode.
+        m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
+        assert_eq!(m.side_rail_size(DockSide::Leading), DockRailItemSize::Labeled);
+        assert_eq!(rail_sig.get(), 2, "labeled mode drives a rebuild too");
+        assert!(DockRailItemSize::Labeled.shows_label());
+        assert!(!DockRailItemSize::Default.shows_label());
 
         m.set_side_tab_display(DockSide::Leading, DockTabDisplay::IconText);
         assert_eq!(m.side_tab_display(DockSide::Leading), DockTabDisplay::IconText);
         assert_eq!(disp_sig.get(), 2);
+    }
+
+    #[test]
+    fn rail_size_mode_signal_tracks_the_mode() {
+        use crate::docking::DockRailItemSize;
+        let m = model();
+        // The public signal external widgets (rail slots, toolbars) bind to.
+        let sig = m.rail_size_mode_signal(DockSide::Leading);
+        assert_eq!(sig.get(), DockRailItemSize::Default);
+
+        m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
+        assert_eq!(sig.get(), DockRailItemSize::Compact, "mode signal fires");
+        m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
+        assert_eq!(sig.get(), DockRailItemSize::Labeled);
     }
 
     #[test]
@@ -1758,7 +1802,7 @@ mod tests {
         m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
         let tb = m.side_tabs(DockSide::Leading)[1].id;
         m.set_tab_hidden(tb, true);
-        m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
+        m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
         m.set_side_tab_display(DockSide::Leading, DockTabDisplay::Icon);
 
         let state = m.export_state();
@@ -1781,7 +1825,7 @@ mod tests {
         m2.import_state(&state);
 
         assert!(m2.is_tab_hidden(tb), "hidden activity restored");
-        assert_eq!(m2.side_rail_size(DockSide::Leading), DockRailItemSize::Compact);
+        assert_eq!(m2.side_rail_size(DockSide::Leading), DockRailItemSize::Labeled);
         assert_eq!(m2.side_tab_display(DockSide::Leading), DockTabDisplay::Icon);
     }
 }

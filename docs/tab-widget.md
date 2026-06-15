@@ -25,7 +25,7 @@ can rely on.
 use bastyde::data::ListModel;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    TabBarOrientation, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
+    TabBarOrientation, TabDisplayMode, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
     TextWidget, VStack,
 };
 
@@ -355,6 +355,47 @@ The two orientations apply Shared sizing differently:
 Reactive: `TabWidget::sizing_signal(Signal<TabSizing>)` rebinds at
 `BindingLevel::Rebuild` so toggling Shared ↔ Independent is a one-line
 operation from a toolbar button.
+
+---
+
+## Tab display mode — icon / text / icon + text
+
+Each tab declares both a title and (optionally) an icon; a **bar-level**
+`TabDisplayMode` decides what is painted, so an app can offer a "tab size"
+toggle (VS Code's panel / activity-bar convention) without rebuilding the tabs
+by hand:
+
+```rust
+pub enum TabDisplayMode {
+    Auto,      // render each tab as its TabInfo declares (default; back-compat)
+    Text,      // title only — icons hidden even when present
+    Icon,      // icon only — title promoted to the hover tooltip
+    IconText,  // icon + title
+}
+```
+
+Set it statically with `TabWidget::tab_display(mode)` or reactively with
+`TabWidget::tab_display_signal(Signal<TabDisplayMode>)` (bound at
+`BindingLevel::Rebuild`, like `sizing_signal`).
+
+Mode-specific behaviour:
+
+- **`Icon`** blanks the visible label so the header **sizes to its icon**
+  (`Independent` sizing) instead of padding out to a text width, and promotes
+  the title to the tooltip when the caller set none. A tab with **no icon**
+  falls back to its title's **initial letter**, so the mode is never blank.
+- **`Text`** drops the icon; **`IconText`** keeps both (and so does `Auto`,
+  which is the identity transform — they differ only in intent).
+- The content `TabPanel` keeps its real title as its AT name in every mode, so
+  a screen reader navigating to the panel still hears the full name even when
+  the chrome is icon-only. The **tab header** also keeps the original title as
+  its AT name (the visible label is a presentation detail).
+- Icon-only sizing is still floored by `min_tab_width` (the bar's row clamps
+  every tab to it). With the default editor-tab minimum an icon-only tab won't
+  shrink much; set a small `min_tab_width(..)` (as `DockingLayout` does) for a
+  compact, content-sized icon strip.
+
+This is what `DockingLayout` builds its per-side "Tab size" menu on.
 
 ---
 

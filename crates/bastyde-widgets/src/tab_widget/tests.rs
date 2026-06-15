@@ -87,6 +87,133 @@ fn label(s: &str) -> LocalizedString {
 // ─── TabWidget — static-only construction ───────────────────────────
 
 #[test]
+fn icon_only_tab_centers_its_icon() {
+    use crate::IconWidget;
+    use crate::tab_widget::TabDisplayMode;
+
+    fn first_tab(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+        if tree.accessibility_node(id).role() == accesskit::Role::Tab
+            && tree.bounds(id).height > 0.0
+        {
+            return Some(id);
+        }
+        tree.children(id).iter().find_map(|&c| first_tab(tree, c))
+    }
+    // Smallest roughly-square leaf in the subtree — the icon glyph (background
+    // / indicator rects are full-width, the icon is a small square).
+    fn icon_leaf(tree: &WidgetTree, id: WidgetId, best: &mut Option<bastyde_canvas::Rect>) {
+        let kids = tree.children(id);
+        if kids.is_empty() {
+            let b = tree.bounds(id);
+            let squarish = (b.width - b.height).abs() < 6.0;
+            if b.width > 4.0 && b.width < 40.0 && squarish {
+                if best.is_none_or(|cur| b.width < cur.width) {
+                    *best = Some(b);
+                }
+            }
+        }
+        for &c in kids.iter() {
+            icon_leaf(tree, c, best);
+        }
+    }
+
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    // Content-sized (Independent, the dock's mode): the tab sizes to icon +
+    // padding, so the lone icon must (a) still render and (b) sit centred.
+    let root = tree.add(
+        TabWidget::new(selected)
+            .tab_display(TabDisplayMode::Icon)
+            .tab_sizing(TabSizing::Independent)
+            .min_tab_width(20.0)
+            .static_tab(
+                TabInfo::new()
+                    .title(label("Alpha"))
+                    .icon(|| IconWidget::checkmark(16.0)),
+                FixedLeaf(120.0, 48.0),
+            )
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    let tab = first_tab(&tree, root).expect("an icon-only tab renders");
+    let tb = tree.bounds(tab);
+    // The icon must still be laid out with real bounds (it must not vanish).
+    let mut icon = None;
+    icon_leaf(&tree, tab, &mut icon);
+    let icon = icon.expect("the icon glyph still renders in icon-only mode");
+    assert!(
+        icon.width > 4.0 && icon.height > 4.0,
+        "the icon has real bounds ({}×{})",
+        icon.width,
+        icon.height
+    );
+    let icon_cx = icon.x + icon.width / 2.0;
+    let tab_cx = tb.x + tb.width / 2.0;
+    assert!(
+        (icon_cx - tab_cx).abs() < 3.0,
+        "the lone icon is centred: icon_cx={icon_cx}, tab_cx={tab_cx}"
+    );
+}
+
+#[test]
+fn tab_display_signal_flips_icon_text_live() {
+    use crate::IconWidget;
+    use crate::tab_widget::TabDisplayMode;
+
+    fn tab_named(tree: &WidgetTree, id: WidgetId, name: &str) -> Option<WidgetId> {
+        let n = tree.accessibility_node(id);
+        if n.role() == accesskit::Role::Tab
+            && n.name() == Some(name)
+            && tree.bounds(id).height > 0.0
+        {
+            return Some(id);
+        }
+        tree.children(id)
+            .iter()
+            .find_map(|&c| tab_named(tree, c, name))
+    }
+
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mode = Signal::new(TabDisplayMode::Text);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected.clone())
+            .tab_display_signal(mode.clone())
+            .tab_sizing(TabSizing::Independent)
+            // A compact floor so an icon-only tab can shrink below the default
+            // editor-tab minimum (the bar's row clamps to `min_tab_width`).
+            .min_tab_width(20.0)
+            .static_tab(
+                TabInfo::new()
+                    .title(label("Alpha"))
+                    .icon(|| IconWidget::checkmark(16.0)),
+                FixedLeaf(120.0, 48.0),
+            )
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let text_tab = tab_named(&tree, root, "Alpha").expect("text mode names the tab 'Alpha'");
+    let w_text = tree.bounds(text_tab).width;
+
+    // Flipping the bound signal must rebuild the bar live into icon-only: the
+    // tab shrinks to its icon, but its *accessible name* stays "Alpha" (the
+    // title moved to the tooltip — a screen reader must still identify it).
+    mode.set(TabDisplayMode::Icon);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let icon_tab = tab_named(&tree, root, "Alpha")
+        .expect("icon mode keeps the accessible name 'Alpha' (a11y, not a visual)");
+    let w_icon = tree.bounds(icon_tab).width;
+    assert!(
+        w_icon < w_text,
+        "flipping tab_display_signal to Icon shrinks the tab to its icon live \
+         ({w_icon} < {w_text})"
+    );
+}
+
+#[test]
 fn static_tab_initial_selection_lands_on_first_tab() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());

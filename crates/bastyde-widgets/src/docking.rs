@@ -183,6 +183,15 @@ impl Widget for DockingLayout {
             progress.bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
             self.progress.insert(side, progress.clone());
 
+            // A rail size-mode change (Default / Compact / Labeled) changes the
+            // rail strip's width → relayout so the activity bar itself follows
+            // the switch, not just its items.
+            self.model.rail_size_signal(side).bind_to(
+                self_id,
+                ctx.binding_registry(),
+                BindingLevel::Relayout,
+            );
+
             // Animate progress toward the side's visibility.
             {
                 let spec = anim.clone();
@@ -296,12 +305,23 @@ impl Widget for DockingLayout {
                 .get(&side)
                 .map(|s| s.get())
                 .unwrap_or(if self.model.is_side_visible(side) { 1.0 } else { 0.0 });
+            // The rail strip width follows the side's size mode (it shrinks for
+            // Compact), derived from the rail's configured item size.
+            let rail_thickness = if self.model.side_has_rail(side) {
+                let mode = self.model.side_rail_size(side);
+                self.rails
+                    .get(&side)
+                    .map(|r| r.effective_thickness(mode))
+                    .unwrap_or_else(|| DockRail::new(side).effective_thickness(mode))
+            } else {
+                0.0
+            };
             SideLayout {
                 size: self.model.side_size(side),
                 visible_progress: p,
                 gutter: DOCK_GUTTER,
                 min_size: self.model.side_min_size(side),
-                rail_thickness: self.model.side_rail_thickness(side),
+                rail_thickness,
                 has_rail: self.model.side_has_rail(side),
             }
         };
@@ -319,6 +339,7 @@ impl Widget for DockingLayout {
             side_layout(DockSide::Top),
             side_layout(DockSide::Bottom),
             self.model.corners(),
+            rtl,
         );
         let leading = if rtl { rects.trailing } else { rects.leading };
         let trailing = if rtl { rects.leading } else { rects.trailing };

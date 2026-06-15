@@ -49,12 +49,12 @@ use bastyde_tokens::Easing;
 use crate::list_source::ListSource;
 use crate::primitives::FixedSize;
 use crate::scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
-use crate::tab_widget::delegate::{TabBarOrientation, TabDelegate, TabSizing};
+use crate::tab_widget::delegate::{TabBarOrientation, TabDelegate, TabDisplayMode, TabSizing};
 use crate::tab_widget::header::{HeaderShared, TabHeader, TabHeaderConfig};
 use crate::tab_widget::id::TabId;
 use crate::{
-    Button, ButtonVariant, Expand, HStack, IconButton, IconButtonSize, IconLocation, IconWidget,
-    ListView, Panel, PopoverButton,
+    Button, ButtonVariant, Expand, HStack, IconButton, IconButtonSize, IconWidget, ListView, Panel,
+    PopoverIconButton,
 };
 use bastyde_core::accesskit::HasPopup;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole};
@@ -149,6 +149,7 @@ pub struct TabBar<T: 'static> {
 
     orientation: TabBarOrientation,
     sizing: TabSizing,
+    tab_display: TabDisplayMode,
     min_tab_width: f32,
     max_tab_width: f32,
     pinned_tab_width: f32,
@@ -393,6 +394,7 @@ impl<T: 'static> TabBar<T> {
             selected: Signal::new(0_usize),
             orientation,
             sizing: TabSizing::Shared,
+            tab_display: TabDisplayMode::Auto,
             min_tab_width: DEFAULT_MIN_TAB_WIDTH,
             max_tab_width: DEFAULT_MAX_TAB_WIDTH,
             pinned_tab_width: DEFAULT_PINNED_TAB_WIDTH,
@@ -434,6 +436,14 @@ impl<T: 'static> TabBar<T> {
     /// Override the per-tab sizing strategy. See [`TabSizing`].
     pub fn tab_sizing(mut self, mode: TabSizing) -> Self {
         self.sizing = mode;
+        self
+    }
+
+    /// Choose what every tab shows — icon, label, or both. See
+    /// [`TabDisplayMode`]. Default [`TabDisplayMode::Auto`] (render each tab as
+    /// its `TabInfo` declares).
+    pub fn tab_display(mut self, mode: TabDisplayMode) -> Self {
+        self.tab_display = mode;
         self
     }
 
@@ -1025,11 +1035,20 @@ impl<T: 'static> Widget for TabBar<T> {
             let close_handler_for_tab = close_handler.clone();
             let header = (self.source.with_item_fn)(i, &|item| -> Box<dyn Widget> {
                 let label = self.delegate.resolve_label(i, item);
+                // Capture the *original* title (pre display-mode transform) so
+                // the overflow dropdown / a11y always read the real name even in
+                // icon-only mode.
                 *label_capture_clone.borrow_mut() = Some(label.clone());
                 let icon = self.delegate.resolve_icon(i, item);
                 let leading_slot = self.delegate.resolve_leading(i, item);
                 let trailing_slot = self.delegate.resolve_trailing(i, item);
                 let tooltip = self.delegate.resolve_tooltip(i, item);
+                // Preserve the original title as the accessible name before the
+                // display mode may blank the visible label (icon-only tabs).
+                let at_name = label.clone();
+                // Apply the bar-level display mode (icon / text / icon+text).
+                let (label, icon, tooltip) =
+                    apply_tab_display(self.tab_display, label, icon, tooltip);
                 let rich_tooltip = self.delegate.resolve_rich_tooltip(i, item);
                 let composite_tooltip = self.delegate.resolve_composite_tooltip(i, item);
                 let context_menu_factory = self.delegate.resolve_context_menu(i, item);
@@ -1110,6 +1129,7 @@ impl<T: 'static> Widget for TabBar<T> {
 
                 Box::new(TabHeader::new(TabHeaderConfig {
                     label,
+                    at_name,
                     icon,
                     leading_slot,
                     trailing_slot,
@@ -1326,7 +1346,7 @@ impl<T: 'static> Widget for TabBar<T> {
             outer_children.push(arrow_id);
         }
 
-        // Overflow dropdown — a chevron-down `PopoverButton` whose
+        // Overflow dropdown — a chevron-down `PopoverIconButton` whose
         // popover content is a `ListView` mirroring the full tab
         // list. Activating an item sets `selected_id` and dismisses
         // the popover.
@@ -1973,6 +1993,38 @@ impl Widget for TabHeaderRow {
 
 // ─── Scroll arrow + overflow dropdown construction ───────────────────
 
+/// Apply a bar-level [`TabDisplayMode`] to one tab's resolved label / icon /
+/// tooltip. Icon-only modes blank the displayed label (the header then sizes to
+/// the icon) and promote the title to the hover tooltip; with no icon they fall
+/// back to the title's initial letter so the tab is never blank.
+fn apply_tab_display(
+    mode: TabDisplayMode,
+    label: LocalizedString,
+    icon: Option<IconWidget>,
+    tooltip: Option<LocalizedString>,
+) -> (LocalizedString, Option<IconWidget>, Option<LocalizedString>) {
+    match mode {
+        // Render as declared (Auto) or both when available (IconText) — there
+        // is nothing to force-add, so these are identical transforms.
+        TabDisplayMode::Auto | TabDisplayMode::IconText => (label, icon, tooltip),
+        // Title only — drop the icon.
+        TabDisplayMode::Text => (label, None, tooltip),
+        // Icon only — blank the displayed label, promote the title to the
+        // tooltip, and fall back to the initial letter when there is no icon.
+        TabDisplayMode::Icon => {
+            let resolved = label.clone().resolve_now();
+            let tip =
+                tooltip.or_else(|| (!resolved.trim().is_empty()).then(|| label.clone()));
+            if icon.is_some() {
+                (lit!(""), icon, tip)
+            } else {
+                let initial: String = resolved.chars().take(1).collect();
+                (lit!(initial), None, tip)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ScrollArrowKind {
     Leading,
@@ -2078,10 +2130,13 @@ fn build_overflow_dropdown(
 ) -> WidgetId {
     let _ = ctx;
     let icon_size = crate::styles::recipe_button_style::BUTTON_ICON_SIZE;
-    let trigger = Button::new(lit!(""))
-        .variant(ButtonVariant::Ghost)
-        .text_role(icon_role)
-        .icon(IconWidget::chevron_down(icon_size), IconLocation::Leading)
+    // Same square, icon-sized control as the scroll arrows (an `IconButton`, not
+    // a label-less `Button` that pads out around the glyph) so it stays adapted
+    // to its icon and consistent in both bar orientations.
+    let trigger = IconButton::new(IconWidget::chevron_down(icon_size))
+        .embedded()
+        .size(IconButtonSize::Compact)
+        .icon_role(icon_role)
         .tooltip(lit!("Show all tabs"));
 
     // Cap each row at the dropdown height so a click still hits a
@@ -2131,7 +2186,7 @@ fn build_overflow_dropdown(
         .child(sized);
 
     ctx.add(
-        PopoverButton::new(trigger)
+        PopoverIconButton::new(trigger)
             // `surface` is already a chromed `Panel` (Raised) — opt out
             // of the auto popover surface to avoid double-chroming.
             .content(surface)

@@ -84,7 +84,7 @@ pub use bar::{
     DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar, TabBarDragData,
 };
 use bastyde_i18n::LocalizedString;
-pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabSizing};
+pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabDisplayMode, TabSizing};
 pub use handle::{STATIC_KIND, TabHandle};
 pub use id::TabId;
 pub use info::{IconFactory, TabInfo};
@@ -234,6 +234,11 @@ pub struct TabWidget {
     /// [`BindingLevel::Rebuild`]
     /// so toggling the signal swaps Shared ↔ Independent live.
     sizing: Option<Signal<TabSizing>>,
+    /// Reactive tab display mode (icon / text / icon+text). `None` until
+    /// `.tab_display(...)` / `.tab_display_signal(...)`; defaulted by the bar
+    /// ([`TabDisplayMode::Auto`]) otherwise. Bound at [`BindingLevel::Rebuild`]
+    /// like `sizing`, so flipping it swaps what the tabs show live.
+    tab_display: Option<Signal<TabDisplayMode>>,
     /// Surface color/role applied to **every** tab — selected, idle,
     /// and hovered all use this one value, so the strip reads as
     /// visually uniform. Set via [`Self::tab_surface_role`].
@@ -330,6 +335,7 @@ impl TabWidget {
             dynamic_model: None,
             dyn_pane_ids: HashMap::new(),
             sizing: None,
+            tab_display: None,
             tab_surface_role: None,
             selected_text_role: None,
             idle_text_role: None,
@@ -566,6 +572,22 @@ impl TabWidget {
     /// preserved.
     pub fn sizing_signal(mut self, signal: Signal<TabSizing>) -> Self {
         self.sizing = Some(signal);
+        self
+    }
+
+    /// Choose what every tab shows — icon, label, or both
+    /// ([`TabDisplayMode`]). Static value; stored as a `Signal` so it can be
+    /// retrofitted to [`Self::tab_display_signal`].
+    pub fn tab_display(mut self, mode: TabDisplayMode) -> Self {
+        self.tab_display = Some(Signal::new(mode));
+        self
+    }
+
+    /// Bind the tab display mode to an external signal — flipping it swaps
+    /// icon / text / icon+text live (the bar rebuilds, memoized panes survive),
+    /// with no rebuild on the parent's part. Bound at `BindingLevel::Rebuild`.
+    pub fn tab_display_signal(mut self, signal: Signal<TabDisplayMode>) -> Self {
+        self.tab_display = Some(signal);
         self
     }
 
@@ -1143,6 +1165,12 @@ impl Widget for TabWidget {
         if let Some(ref sizing) = self.sizing {
             sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
         }
+        // Same treatment for the display mode: a flip rebuilds the widget so the
+        // bar re-derives its headers (icon ↔ text) even while the strip is
+        // hidden, applying the moment it reappears.
+        if let Some(ref display) = self.tab_display {
+            display.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+        }
 
         // Build + configure the inner TabBar — only when the strip is
         // shown (`bar_visibility`). Skipped entirely otherwise so the
@@ -1177,6 +1205,9 @@ impl Widget for TabWidget {
                 // The rebuild-triggering binding is installed above (outside
                 // this block); here we just apply the current mode to the bar.
                 bar = bar.tab_sizing(sizing.get());
+            }
+            if let Some(ref display) = self.tab_display {
+                bar = bar.tab_display(display.get());
             }
             if let Some(ref bg) = self.tab_surface_role {
                 bar = bar.tab_surface_role(bg.clone());

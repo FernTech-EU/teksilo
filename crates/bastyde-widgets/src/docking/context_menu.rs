@@ -11,7 +11,7 @@
 //! ☑ <activity>            (one checkable row per activity in this side)
 //! ☑ <activity>
 //! ──────────────
-//! Activity bar size    ▸  Default / Compact      (rail item)
+//! Activity bar size    ▸  Default / Compact / Icon + Label   (rail item)
 //!   – or –
 //! Tab size             ▸  Text / Icon / Icon + Text   (dock tab)
 //! ```
@@ -184,7 +184,8 @@ fn rail_size_submenu(model: &DockingModel, side: DockSide) -> MenuList {
     let sig = model.rail_size_signal(side);
     MenuList::new()
         .item(MenuItem::new(lit!("Default")).radio(0, sig.clone()))
-        .item(MenuItem::new(lit!("Compact")).radio(1, sig))
+        .item(MenuItem::new(lit!("Compact")).radio(1, sig.clone()))
+        .item(MenuItem::new(lit!("Icon + Label")).radio(2, sig))
 }
 
 /// Tab-display radio submenu, bound straight to the side's reactive tab-display

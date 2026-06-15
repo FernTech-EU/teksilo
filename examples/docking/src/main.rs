@@ -16,9 +16,9 @@
 use bastyde::core::Signal;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Badge, Button, DockCorner, DockOpenLocation, DockRail, DockSide, DockWidget, DockWidgetId,
-    DockingLayout, DockingModel, Expand, HStack, IconButton, IconButtonSize, IconWidget, Panel,
-    ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    Badge, Button, DockCorner, DockOpenLocation, DockRail, DockRailItemSize, DockSide, DockWidget,
+    DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton, IconButtonSize,
+    IconWidget, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
 
 #[derive(Debug)]
@@ -39,6 +39,96 @@ struct DemoIds {
     terminal: DockWidgetId,
     problems: DockWidgetId,
     properties: DockWidgetId,
+}
+
+/// Which demo dock an [`dock_icon`] glyph is for.
+#[derive(Clone, Copy)]
+enum DockIcon {
+    Explorer,
+    Search,
+    Terminal,
+    Problems,
+    Properties,
+}
+
+/// Distinct flat glyphs for the demo docks — built as tintable filled
+/// line-paths so the activity rail and the Icon / Icon + Text tab modes show
+/// real icons (not just the title's initial). Designed in a 24-unit box.
+fn dock_icon(kind: DockIcon, size: f32) -> IconWidget {
+    use bastyde::canvas::{Path, Point};
+    let u = size / 24.0;
+    let p = |x: f32, y: f32| Point::new(x * u, y * u);
+    let mut path = Path::new();
+    match kind {
+        DockIcon::Explorer => {
+            // A folder with a tab.
+            path.move_to(p(3.0, 6.0));
+            path.line_to(p(9.0, 6.0));
+            path.line_to(p(11.0, 8.5));
+            path.line_to(p(21.0, 8.5));
+            path.line_to(p(21.0, 19.0));
+            path.line_to(p(3.0, 19.0));
+            path.close();
+        }
+        DockIcon::Search => {
+            // A magnifier: an octagonal "lens" disc plus a handle.
+            let (cx, cy, r) = (10.0_f32, 10.0_f32, 5.5_f32);
+            let d = r * 0.41;
+            let lens = [
+                (cx - d, cy - r),
+                (cx + d, cy - r),
+                (cx + r, cy - d),
+                (cx + r, cy + d),
+                (cx + d, cy + r),
+                (cx - d, cy + r),
+                (cx - r, cy + d),
+                (cx - r, cy - d),
+            ];
+            path.move_to(p(lens[0].0, lens[0].1));
+            for pt in &lens[1..] {
+                path.line_to(p(pt.0, pt.1));
+            }
+            path.close();
+            path.move_to(p(14.0, 14.0));
+            path.line_to(p(20.0, 18.5));
+            path.line_to(p(18.5, 20.0));
+            path.line_to(p(13.0, 15.0));
+            path.close();
+        }
+        DockIcon::Terminal => {
+            // A ">" prompt chevron over an underscore.
+            path.move_to(p(7.0, 7.0));
+            path.line_to(p(13.0, 12.0));
+            path.line_to(p(7.0, 17.0));
+            path.line_to(p(8.8, 17.0));
+            path.line_to(p(14.8, 12.0));
+            path.line_to(p(8.8, 7.0));
+            path.close();
+            path.move_to(p(13.0, 16.0));
+            path.line_to(p(19.0, 16.0));
+            path.line_to(p(19.0, 17.6));
+            path.line_to(p(13.0, 17.6));
+            path.close();
+        }
+        DockIcon::Problems => {
+            // A warning triangle.
+            path.move_to(p(12.0, 4.0));
+            path.line_to(p(21.0, 20.0));
+            path.line_to(p(3.0, 20.0));
+            path.close();
+        }
+        DockIcon::Properties => {
+            // Three stacked bars (a properties / sliders list).
+            for y in [6.5_f32, 11.5, 16.5] {
+                path.move_to(p(4.0, y));
+                path.line_to(p(20.0, y));
+                path.line_to(p(20.0, y + 2.2));
+                path.line_to(p(4.0, y + 2.2));
+                path.close();
+            }
+        }
+    }
+    IconWidget::from_path(path, size)
 }
 
 fn list_panel(title: &str, items: &[&str]) -> impl Widget {
@@ -85,6 +175,9 @@ impl DockingDemo {
         };
         // The leading side is an activity rail; the trailing/bottom use strips.
         model.set_side_rail(DockSide::Leading, 48.0);
+        // Showcase the "icon + 90°-rotated label" rail mode (right-click the
+        // rail → Activity bar size → Default / Compact / Icon + Label to switch).
+        model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
         Self {
             model,
             saved: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -110,6 +203,11 @@ impl Widget for DockingDemo {
              activity rail).",
         );
 
+        // The rail's size mode drives the slotted settings button: a slot binds
+        // `rail_size_mode_signal` and the rail rebuilds its slots when the mode
+        // flips (right-click the rail → Activity bar size).
+        let rail_mode = self.model.rail_size_mode_signal(DockSide::Leading);
+
         let layout = DockingLayout::new(self.model.clone())
             .center(editor)
             // Style the leading activity rail: Large items, a logo on top, a
@@ -119,10 +217,20 @@ impl Widget for DockingDemo {
                 DockRail::new(DockSide::Leading)
                     .size(IconButtonSize::Large)
                     .top_slot(|| TextWidget::new(lit!("◆")).style(TextStyleRole::BodyBold))
-                    .bottom_slot(|| {
-                        IconButton::new(IconWidget::chevron_up(20.0))
-                            .size(IconButtonSize::Large)
-                            .tooltip(lit!("Settings"))
+                    // Match the rail's item size (Large, shrinking to Compact).
+                    .bottom_slot({
+                        let rail_mode = rail_mode.clone();
+                        move || {
+                            let size = if rail_mode.get() == DockRailItemSize::Compact {
+                                IconButtonSize::Compact
+                            } else {
+                                IconButtonSize::Large
+                            };
+                            let glyph = if size == IconButtonSize::Compact { 14.0 } else { 20.0 };
+                            IconButton::new(IconWidget::chevron_up(glyph))
+                                .size(size)
+                                .tooltip(lit!("Settings"))
+                        }
                     })
                     .overflow_icon(|| IconWidget::chevron_down(18.0)),
             )
@@ -130,30 +238,35 @@ impl Widget for DockingDemo {
                 DockWidget::new(ids.explorer, lit!("Explorer"), |_| {
                     list_panel("Explorer", &["src", "crates", "examples", "docs", "Cargo.toml"])
                 })
+                .icon(|| dock_icon(DockIcon::Explorer, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Leading)),
             )
             .dock(
                 DockWidget::new(ids.search, lit!("Search"), |_| {
                     list_panel("Search results", &["main.rs:42", "model.rs:17", "geometry.rs:9"])
                 })
+                .icon(|| dock_icon(DockIcon::Search, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Leading)),
             )
             .dock(
                 DockWidget::new(ids.terminal, lit!("Terminal"), |_| {
                     text_panel("Terminal", "$ cargo run -p docking\n   Compiling …")
                 })
+                .icon(|| dock_icon(DockIcon::Terminal, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Bottom)),
             )
             .dock(
                 DockWidget::new(ids.problems, lit!("Problems"), |_| {
                     list_panel("Problems", &["warning: unused import", "note: 0 errors"])
                 })
+                .icon(|| dock_icon(DockIcon::Problems, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Bottom)),
             )
             .dock(
                 DockWidget::new(ids.properties, lit!("Properties"), |_| {
                     list_panel("Properties", &["Name", "Type", "Layout", "Accessibility"])
                 })
+                .icon(|| dock_icon(DockIcon::Properties, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Trailing)),
             );
 

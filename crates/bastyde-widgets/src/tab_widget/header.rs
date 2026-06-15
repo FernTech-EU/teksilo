@@ -81,9 +81,20 @@ pub(crate) struct TabHeader {
     /// `BindingLevel::AccessibilityOnly` in `build()` so the
     /// framework dirties the AT cache on update.
     label_signal: Option<Signal<String>>,
+    /// Accessible name — the original title, preserved even when `label` is
+    /// blanked for an icon-only display mode (see `accessibility()`).
+    at_name: LocalizedString,
     icon: Option<IconWidget>,
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
+    /// Content presence + icon extent captured at construction — `build()`
+    /// **moves** the icon / slots out (`take()`), so the layout methods can no
+    /// longer read `self.icon` etc. These mirror them for width estimation and
+    /// icon-only detection.
+    has_icon: bool,
+    icon_extent: f32,
+    has_leading: bool,
+    has_trailing: bool,
     tooltip: Option<LocalizedString>,
     /// Optional rich-tooltip source — registry key or inline content.
     /// Mutually exclusive with `tooltip` and `composite_tooltip`.
@@ -182,6 +193,10 @@ impl std::fmt::Debug for TabHeader {
 
 pub(crate) struct TabHeaderConfig {
     pub label: LocalizedString,
+    /// The tab's accessible name — the *original* title, even when the visible
+    /// `label` is blanked for an icon-only display mode. Keeps the AT name
+    /// meaningful when the chrome shows only an icon.
+    pub at_name: LocalizedString,
     pub icon: Option<IconWidget>,
     pub leading_slot: Option<Box<dyn Widget>>,
     pub trailing_slot: Option<Box<dyn Widget>>,
@@ -209,12 +224,24 @@ pub(crate) struct TabHeaderConfig {
 
 impl TabHeader {
     pub(crate) fn new(cfg: TabHeaderConfig) -> Self {
+        // Snapshot content presence + icon size before the fields are moved in —
+        // `build()` later `take()`s the icon and slots, so the layout methods
+        // can't read them.
+        let has_icon = cfg.icon.is_some();
+        let icon_extent = cfg.icon.as_ref().map(|i| i.display_size()).unwrap_or(0.0);
+        let has_leading = cfg.leading_slot.is_some();
+        let has_trailing = cfg.trailing_slot.is_some();
         Self {
             label: cfg.label,
             label_signal: None,
+            at_name: cfg.at_name,
             icon: cfg.icon,
             leading_slot: cfg.leading_slot,
             trailing_slot: cfg.trailing_slot,
+            has_icon,
+            icon_extent,
+            has_leading,
+            has_trailing,
             tooltip: cfg.tooltip,
             rich_tooltip: cfg.rich_tooltip,
             composite_tooltip: cfg.composite_tooltip,
@@ -241,8 +268,36 @@ impl TabHeader {
         }
     }
 
+    /// An icon-only tab — no visible title text, but an icon or leading slot.
+    /// Sized to its icon instead of the text-tab minimum, so an icon button
+    /// doesn't pad out to a full label width. (Pinned tabs are handled
+    /// separately with a fixed width.) Uses the construction-time presence
+    /// flags, since `build()` has already moved the icon / slots out.
+    fn is_icon_only(&self) -> bool {
+        let label = self
+            .label_signal
+            .as_ref()
+            .map(|s| s.get())
+            .unwrap_or_else(|| self.label.clone().resolve_now());
+        label.trim().is_empty() && (self.has_icon || self.has_leading)
+    }
+
     fn estimate_natural_width(&self, ctx: &LayoutContext) -> f32 {
         let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
+        use crate::styles::recipe_button_style as btn;
+
+        // Icon-only: a square-ish tab — the glyph + horizontal padding only (no
+        // label, no trailing-spacer gap), so it shrinks to the icon instead of
+        // padding out to a text width.
+        if self.is_icon_only() {
+            let glyph = if self.has_icon {
+                self.icon_extent
+            } else {
+                btn::BUTTON_ICON_SIZE
+            };
+            return glyph + pad_h * 2.0;
+        }
+
         // Resolve the label once for measurement. Cheap: a literal
         // resolves to a clone; a translated key looks up Fluent.
         let label = self
@@ -263,22 +318,24 @@ impl TabHeader {
         } else {
             label.len() as f32 * FALLBACK_CHAR_WIDTH
         };
-        use crate::styles::recipe_button_style as btn;
-        let icon_size = self
-            .icon
-            .as_ref()
-            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
-            .unwrap_or(0.0);
-        let leading_size = self
-            .leading_slot
-            .as_ref()
-            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
-            .unwrap_or(0.0);
-        let trailing_size = self
-            .trailing_slot
-            .as_ref()
-            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
-            .unwrap_or(0.0);
+        // `build()` has moved the icon / slots out, so reserve their width from
+        // the construction-time snapshot (the real icon extent, not a constant —
+        // an icon larger than `BUTTON_ICON_SIZE` was previously under-reserved).
+        let icon_size = if self.has_icon {
+            self.icon_extent + INNER_GAP
+        } else {
+            0.0
+        };
+        let leading_size = if self.has_leading {
+            btn::BUTTON_ICON_SIZE + INNER_GAP
+        } else {
+            0.0
+        };
+        let trailing_size = if self.has_trailing {
+            btn::BUTTON_ICON_SIZE + INNER_GAP
+        } else {
+            0.0
+        };
         // The non-pinned row always carries a flexible `Spacer` after the
         // label (it pins trailing controls to the edge / absorbs Shared
         // slack). It contributes zero width, but the row's HStack still
@@ -288,8 +345,9 @@ impl TabHeader {
         let spacer_gap = if self.pinned { 0.0 } else { INNER_GAP };
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
-        (text_width + icon_size + leading_size + trailing_size + spacer_gap + pad_h * 2.0)
-            .max(NATURAL_MIN_WIDTH)
+        let content =
+            text_width + icon_size + leading_size + trailing_size + spacer_gap + pad_h * 2.0;
+        content.max(NATURAL_MIN_WIDTH)
     }
 
     pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
@@ -381,6 +439,12 @@ impl Widget for TabHeader {
             }
         });
 
+        // An icon-only display tab renders like a pinned tab: just the centred
+        // icon, no label / spacer / close button (the title lives in the tooltip
+        // + the AT name). This avoids the empty-label inter-child gaps that
+        // otherwise pushed the lone icon off-centre.
+        let icon_only = self.is_icon_only();
+
         if let Some(icon) = self.icon.take() {
             // Icon tint follows the same role — selected tab gets
             // a primary-tinted icon, idle gets secondary, disabled
@@ -390,7 +454,16 @@ impl Widget for TabHeader {
             row = row.add_child(id);
         }
 
-        if !self.pinned {
+        if self.pinned || icon_only {
+            // Just the centred icon — no label / spacer / close button.
+            // Pinned tabs promote the title into a tooltip so the icon stays
+            // identifiable on hover (icon-only *display* tabs already had this
+            // handled by the bar's display-mode transform, which also respects a
+            // caller-set tooltip, so we don't clobber it here).
+            if self.pinned {
+                self.tooltip = Some(self.at_name.clone());
+            }
+        } else {
             if let Some(slot) = self.leading_slot.take() {
                 let id = ctx.add_boxed(slot);
                 row = row.add_child(id);
@@ -450,13 +523,6 @@ impl Widget for TabHeader {
                 ctx.visible_when(close_id, visible_when);
                 row = row.add_child(close_id);
             }
-        } else {
-            // Pinned: promote the label into a tooltip so the user
-            // can still identify the tab on hover. Take precedence
-            // over any tooltip already configured (the explicit one
-            // is rare for pinned tabs and would otherwise drop the
-            // label entirely).
-            self.tooltip = Some(self.label.clone());
         }
 
         // Wrap the row in a Padding for breathing room.
@@ -467,6 +533,10 @@ impl Widget for TabHeader {
         //   padding would push the icon off-center). Wrap in
         //   `Center` so the icon sits exactly in the middle of the
         //   bounds regardless of the pill width.
+        // - Icon-only display tab: just the icon row with the standard padding.
+        //   The tab sizes to `icon + 2·pad_h`, so the lone icon fills the padded
+        //   box exactly and the symmetric padding centres it (no extra `Center`
+        //   wrapper — that layer broke the icon's paint).
         let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
         let inner_id = if self.pinned {
             let centered = crate::primitives::Center::new().child(row);
@@ -794,9 +864,15 @@ impl Widget for TabHeader {
         } else {
             match proposal.width {
                 Some(w) => w,
-                None => self
-                    .estimate_natural_width(ctx)
-                    .clamp(self.min_width, self.max_width),
+                None => {
+                    let natural = self.estimate_natural_width(ctx);
+                    if self.is_icon_only() {
+                        // Size to the icon; the text-tab minimum doesn't apply.
+                        natural.min(self.max_width)
+                    } else {
+                        natural.clamp(self.min_width, self.max_width)
+                    }
+                }
             }
         };
         Size::new(width, height).into()
@@ -824,12 +900,22 @@ impl Widget for TabHeader {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Tab);
-        let resolved = self
-            .label_signal
-            .as_ref()
-            .map(|s| s.get())
-            .unwrap_or_else(|| self.label.clone().resolve_now());
-        builder.set_name(&resolved);
+        // The accessible name is the *original* title (`at_name`), not the
+        // visible `label` — so an icon-only tab (whose visible label is blanked)
+        // is still announced by name. Fall back to the plain tooltip, then the
+        // visible label. A locale change refreshes this via the AccessibilityOnly
+        // locale binding installed in `build()`.
+        let mut name = self.at_name.clone().resolve_now();
+        if name.trim().is_empty() {
+            name = self
+                .tooltip
+                .as_ref()
+                .map(|t| t.clone().resolve_now())
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| self.label_signal.as_ref().map(|s| s.get()))
+                .unwrap_or_else(|| self.label.clone().resolve_now());
+        }
+        builder.set_name(&name);
         // Framework a11y walker auto-emits `set_disabled()` when
         // `arena.is_enabled(self_id) == false`. We base advertised
         // actions on the structural per-tab flag so a disabled tab

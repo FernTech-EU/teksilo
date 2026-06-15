@@ -432,6 +432,13 @@ impl IconWidget {
         self
     }
 
+    /// The on-screen square extent (dp) this icon renders at — its
+    /// `display_size`. Lets a container reserve the right width without
+    /// laying the icon out first.
+    pub(crate) fn display_size(&self) -> f32 {
+        self.display_size
+    }
+
     /// Create a scaled copy of the path to fit within the given bounds.
     fn scaled_path(&self, bounds: Rect) -> Path {
         // For SVG sources, use SvgIcon::to_path_in_rect which handles

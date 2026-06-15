@@ -7,14 +7,20 @@
 //! per-corner ownership, and the [`DockingLayout`](super::DockingLayout)
 //! widget places its children from the result.
 //!
-//! Each side contributes three sub-rectangles along the axis pointing toward
-//! the centre: an always-visible **rail** strip (the activity bar) on the
-//! outer edge, a resizable/collapsible **content** rect inboard of it, and a
-//! **handle** (resize gutter) between the content and the centre. A hidden
-//! side keeps its rail (the reopen affordance) but drops its content and
-//! handle. Everything is clamped non-negative, so no container size — down to
-//! `0×0` or smaller-than-the-sum-of-minimums — can produce a negative or
-//! overlapping rectangle.
+//! Each side contributes three sub-rectangles: an always-visible **rail** strip
+//! (the activity bar), a resizable/collapsible **content** rect, and a
+//! **handle** (resize gutter) between the content and the centre. For the
+//! **leading / trailing** columns the rail hugs the outer thickness edge with
+//! the content inboard. For the **top / bottom** bands the (always vertical)
+//! rail is instead a **column on the leading cross-edge** (left in LTR, right
+//! in RTL) with the content inboard to its side — so it does not add to the
+//! band depth. A hidden **leading / trailing** side keeps its rail (the reopen
+//! affordance) but drops its content and handle; a hidden **top / bottom** band
+//! collapses **completely** (rail included — a vertical rail can't stand alone
+//! in a zero-depth band), so the app reveals it again via an external button.
+//! Everything is clamped non-negative, so no container size — down to `0×0` or
+//! smaller-than-the-sum-of-minimums — can produce a negative or overlapping
+//! rectangle.
 
 use bastyde_canvas::Rect;
 use serde::{Deserialize, Serialize};
@@ -183,14 +189,30 @@ impl SideLayout {
     }
 
     /// Total extent the side occupies toward the centre (rail + content +
-    /// gutter).
+    /// gutter). Used for the **leading / trailing** columns, where the rail sits
+    /// on the main (thickness) axis.
     fn total_extent(&self) -> f32 {
         self.rail_extent() + self.content_extent() + self.gutter_extent()
     }
 
-    /// Whether the side occupies any space (rail or content present).
+    /// Depth a **top / bottom** band occupies toward the centre. Their (vertical)
+    /// rail sits on the *cross* (leading) edge as a column, so it does **not**
+    /// add to the band depth — that's content + gutter. A hidden top / bottom
+    /// band collapses **completely** (the vertical rail can't stand alone in a
+    /// zero-depth band the way a leading/trailing rail can in a full-height
+    /// column) — the app offers an external button to reveal it again.
+    fn band_depth(&self) -> f32 {
+        self.content_extent() + self.gutter_extent()
+    }
+
+    /// Whether a leading / trailing column occupies any space.
     fn present(&self) -> bool {
         self.total_extent() > EPS
+    }
+
+    /// Whether a top / bottom band occupies any space.
+    fn band_present(&self) -> bool {
+        self.band_depth() > EPS
     }
 }
 
@@ -239,9 +261,10 @@ fn effective_owner(
     }
 }
 
-/// Compute the five region rectangles (LTR). The caller swaps `leading` and
+/// Compute the five region rectangles. The caller swaps `leading` and
 /// `trailing` on the way in and the resulting `leading`/`trailing` on the way
-/// out for RTL.
+/// out for RTL; `rtl` is passed through only to place a top / bottom band's
+/// (vertical) rail on the leading cross-edge (left in LTR, right in RTL).
 pub fn compute_rects(
     container: Rect,
     leading: SideLayout,
@@ -249,6 +272,7 @@ pub fn compute_rects(
     top: SideLayout,
     bottom: SideLayout,
     owners: CornerOwners,
+    rtl: bool,
 ) -> DockingRects {
     let x = container.x;
     let y = container.y;
@@ -259,8 +283,8 @@ pub fn compute_rects(
     // more than the container in either axis (centre shrinks to zero first).
     let mut l = leading.total_extent();
     let mut r = trailing.total_extent();
-    let mut t = top.total_extent();
-    let mut b = bottom.total_extent();
+    let mut t = top.band_depth();
+    let mut b = bottom.band_depth();
     if l + r > w {
         let scale = if l + r > 0.0 { w / (l + r) } else { 0.0 };
         l *= scale;
@@ -275,8 +299,8 @@ pub fn compute_rects(
     let present = |side: DockSide| match side {
         DockSide::Leading => leading.present(),
         DockSide::Trailing => trailing.present(),
-        DockSide::Top => top.present(),
-        DockSide::Bottom => bottom.present(),
+        DockSide::Top => top.band_present(),
+        DockSide::Bottom => bottom.band_present(),
     };
     let eff = |corner: DockCorner| effective_owner(corner, &owners, present);
 
@@ -342,55 +366,83 @@ pub fn compute_rects(
     let center = Rect::new(x + l, y + t, (w - l - r).max(0.0), (h - t - b).max(0.0));
 
     DockingRects {
-        leading: split_side(DockSide::Leading, leading_region, &leading, l),
-        trailing: split_side(DockSide::Trailing, trailing_region, &trailing, r),
-        top: split_side(DockSide::Top, top_region, &top, t),
-        bottom: split_side(DockSide::Bottom, bottom_region, &bottom, b),
+        leading: split_side(DockSide::Leading, leading_region, &leading, l, rtl),
+        trailing: split_side(DockSide::Trailing, trailing_region, &trailing, r, rtl),
+        top: split_side(DockSide::Top, top_region, &top, t, rtl),
+        bottom: split_side(DockSide::Bottom, bottom_region, &bottom, b, rtl),
         center,
     }
 }
 
-/// Split a side's outer region into rail / content / handle sub-rects, laid
-/// out along the inset axis (toward the centre). `total` is the (possibly
-/// scaled-down) band extent; the three parts are scaled to fit it.
-fn split_side(side: DockSide, region: Rect, layout: &SideLayout, total: f32) -> SideRects {
+/// Split a side's outer region into rail / content / handle sub-rects.
+///
+/// Leading / trailing lay them out along the thickness axis (`[rail │ content │
+/// handle]`), the rail on the outer edge. Top / bottom put the (vertical) rail
+/// as a **column on the leading cross-edge** (left in LTR, right in RTL) and
+/// split content / handle along the band depth to its inboard side. `total` is
+/// the (possibly clamped) band extent.
+fn split_side(side: DockSide, region: Rect, layout: &SideLayout, total: f32, rtl: bool) -> SideRects {
     if total <= EPS || region.width <= 0.0 || region.height <= 0.0 {
         // Rail-only sides still get a rail rect when there is room.
         if layout.rail_extent() > EPS && region.width > 0.0 && region.height > 0.0 {
-            return rail_only(side, region, layout.rail_extent().min(extent_along(side, region)));
+            return rail_only(side, region, layout.rail_extent().min(extent_along(side, region)), rtl);
         }
         return SideRects::ZERO;
     }
 
-    // Distribute the (possibly clamped) `total` across rail / content / gutter
-    // preserving their proportions.
-    let raw_total = layout.total_extent();
-    let scale = if raw_total > 0.0 { total / raw_total } else { 0.0 };
-    let rail = layout.rail_extent() * scale;
-    let content = layout.content_extent() * scale;
-    let gutter = layout.gutter_extent() * scale;
-
     match side {
-        DockSide::Leading => SideRects {
-            rail: Rect::new(region.x, region.y, rail, region.height),
-            content: Rect::new(region.x + rail, region.y, content, region.height),
-            handle: Rect::new(region.x + rail + content, region.y, gutter, region.height),
-        },
-        DockSide::Trailing => SideRects {
-            handle: Rect::new(region.x, region.y, gutter, region.height),
-            content: Rect::new(region.x + gutter, region.y, content, region.height),
-            rail: Rect::new(region.x + gutter + content, region.y, rail, region.height),
-        },
-        DockSide::Top => SideRects {
-            rail: Rect::new(region.x, region.y, region.width, rail),
-            content: Rect::new(region.x, region.y + rail, region.width, content),
-            handle: Rect::new(region.x, region.y + rail + content, region.width, gutter),
-        },
-        DockSide::Bottom => SideRects {
-            handle: Rect::new(region.x, region.y, region.width, gutter),
-            content: Rect::new(region.x, region.y + gutter, region.width, content),
-            rail: Rect::new(region.x, region.y + gutter + content, region.width, rail),
-        },
+        DockSide::Leading | DockSide::Trailing => {
+            // The rail is on the main (thickness) axis; rail + content + gutter
+            // share the band width, scaled to fit `total`.
+            let raw = layout.total_extent();
+            let scale = if raw > 0.0 { total / raw } else { 0.0 };
+            let rail = layout.rail_extent() * scale;
+            let content = layout.content_extent() * scale;
+            let gutter = layout.gutter_extent() * scale;
+            match side {
+                DockSide::Leading => SideRects {
+                    rail: Rect::new(region.x, region.y, rail, region.height),
+                    content: Rect::new(region.x + rail, region.y, content, region.height),
+                    handle: Rect::new(region.x + rail + content, region.y, gutter, region.height),
+                },
+                _ => SideRects {
+                    handle: Rect::new(region.x, region.y, gutter, region.height),
+                    content: Rect::new(region.x + gutter, region.y, content, region.height),
+                    rail: Rect::new(region.x + gutter + content, region.y, rail, region.height),
+                },
+            }
+        }
+        DockSide::Top | DockSide::Bottom => {
+            // Vertical rail = a column on the leading cross-edge; content + handle
+            // fill the rest, split along the band depth (`total`).
+            let rail_w = layout.rail_extent().min(region.width);
+            let body_w = (region.width - rail_w).max(0.0);
+            // Leading edge: left in LTR, right in RTL.
+            let (rail_x, body_x) = if rtl {
+                (region.x + body_w, region.x)
+            } else {
+                (region.x, region.x + rail_w)
+            };
+            let raw_depth = layout.content_extent() + layout.gutter_extent();
+            let scale = if raw_depth > 0.0 { total / raw_depth } else { 0.0 };
+            let content = layout.content_extent() * scale;
+            let gutter = layout.gutter_extent() * scale;
+            let rail = Rect::new(rail_x, region.y, rail_w, region.height);
+            match side {
+                // Top: content on top, handle below it (inboard, toward centre).
+                DockSide::Top => SideRects {
+                    rail,
+                    content: Rect::new(body_x, region.y, body_w, content),
+                    handle: Rect::new(body_x, region.y + content, body_w, gutter),
+                },
+                // Bottom: handle on top (inboard, toward centre), content below.
+                _ => SideRects {
+                    rail,
+                    handle: Rect::new(body_x, region.y, body_w, gutter),
+                    content: Rect::new(body_x, region.y + gutter, body_w, content),
+                },
+            }
+        }
     }
 }
 
@@ -402,14 +454,18 @@ fn extent_along(side: DockSide, region: Rect) -> f32 {
     }
 }
 
-/// A side with only its rail present (content hidden).
-fn rail_only(side: DockSide, region: Rect, rail: f32) -> SideRects {
+/// A side with only its rail present (content hidden). Leading / trailing rails
+/// hug the outer thickness edge; top / bottom rails are a column on the leading
+/// cross-edge (left in LTR, right in RTL).
+fn rail_only(side: DockSide, region: Rect, rail: f32, rtl: bool) -> SideRects {
     let mut rects = SideRects::ZERO;
     rects.rail = match side {
         DockSide::Leading => Rect::new(region.x, region.y, rail, region.height),
         DockSide::Trailing => Rect::new(region.x + region.width - rail, region.y, rail, region.height),
-        DockSide::Top => Rect::new(region.x, region.y, region.width, rail),
-        DockSide::Bottom => Rect::new(region.x, region.y + region.height - rail, region.width, rail),
+        DockSide::Top | DockSide::Bottom => {
+            let rail_x = if rtl { region.x + region.width - rail } else { region.x };
+            Rect::new(rail_x, region.y, rail, region.height)
+        }
     };
     rects
 }
@@ -450,6 +506,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert_eq!(r.center, container());
     }
@@ -463,6 +520,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert_eq!(r.leading.content.x, 0.0);
         assert!((r.leading.content.width - 200.0).abs() < 0.01);
@@ -480,6 +538,7 @@ mod tests {
             shown(100.0),
             shown(120.0),
             CornerOwners::default(),
+            false,
         );
         // Default: top/bottom own corners → they span full width.
         assert_eq!(r.top.content.x, 0.0);
@@ -503,6 +562,7 @@ mod tests {
             shown(100.0),
             SideLayout::empty(),
             owners,
+            false,
         );
         // Leading now extends to y=0; top starts after the leading column.
         assert_eq!(r.leading.content.y, 0.0);
@@ -521,6 +581,7 @@ mod tests {
             shown(100.0),
             SideLayout::empty(),
             owners,
+            false,
         );
         assert_eq!(r.top.content.x, 0.0, "top fills since its corner-owner is gone");
     }
@@ -536,6 +597,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert!((r.leading.content.width - 100.0).abs() < 0.01);
         assert!(r.leading.handle.width > 0.0, "gutter present while expanding");
@@ -558,6 +620,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert!((r.leading.rail.width - 48.0).abs() < 0.01, "rail persists");
         assert!(r.leading.content.width.abs() < 0.01, "content hidden");
@@ -582,6 +645,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert_eq!(r.leading.rail.x, 0.0);
         assert!((r.leading.rail.width - 48.0).abs() < 0.01);
@@ -589,6 +653,97 @@ mod tests {
         assert!((r.leading.content.width - 200.0).abs() < 0.01);
         assert!((r.leading.handle.x - 248.0).abs() < 0.01);
         assert!((r.center.x - 254.0).abs() < 0.01);
+    }
+
+    /// A top/bottom side with a rail.
+    fn band_with_rail(progress: f32) -> SideLayout {
+        SideLayout {
+            size: 100.0,
+            visible_progress: progress,
+            gutter: 6.0,
+            min_size: 80.0,
+            rail_thickness: 48.0,
+            has_rail: true,
+        }
+    }
+
+    #[test]
+    fn top_rail_is_a_leading_column_not_a_band() {
+        let r = compute_rects(
+            container(),
+            SideLayout::empty(),
+            SideLayout::empty(),
+            band_with_rail(1.0),
+            SideLayout::empty(),
+            CornerOwners::default(),
+            false,
+        );
+        // Rail is a vertical column on the leading (left) edge, spanning the
+        // band depth (content + gutter = 106), NOT a horizontal band.
+        assert_eq!(r.top.rail.x, 0.0);
+        assert!((r.top.rail.width - 48.0).abs() < 0.01);
+        assert!((r.top.rail.height - 106.0).abs() < 0.01);
+        // Content is inboard to the right of the rail.
+        assert!((r.top.content.x - 48.0).abs() < 0.01);
+        assert!((r.top.content.width - (1000.0 - 48.0)).abs() < 0.01);
+        assert!((r.top.content.height - 100.0).abs() < 0.01);
+        // The rail does not push the centre down — only content + gutter do.
+        assert!((r.center.y - 106.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn top_rail_column_mirrors_to_the_right_in_rtl() {
+        let r = compute_rects(
+            container(),
+            SideLayout::empty(),
+            SideLayout::empty(),
+            band_with_rail(1.0),
+            SideLayout::empty(),
+            CornerOwners::default(),
+            true,
+        );
+        assert!((r.top.rail.x - (1000.0 - 48.0)).abs() < 0.01, "rail on the right in RTL");
+        assert_eq!(r.top.content.x, 0.0, "content on the left in RTL");
+    }
+
+    #[test]
+    fn hidden_top_with_rail_fully_collapses() {
+        let r = compute_rects(
+            container(),
+            SideLayout::empty(),
+            SideLayout::empty(),
+            band_with_rail(0.0),
+            SideLayout::empty(),
+            CornerOwners::default(),
+            false,
+        );
+        // A hidden top/bottom band hides its vertical rail too (no persistent
+        // column) — the app reveals it again via an external button.
+        assert!(r.top.rail.height.abs() < 0.01, "no rail column when hidden");
+        assert!(r.top.content.height.abs() < 0.01, "no content when hidden");
+        assert_eq!(r.center.y, 0.0, "centre fills — no top inset");
+        assert!((r.center.height - 800.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn bottom_rail_column_keeps_handle_inboard() {
+        let r = compute_rects(
+            container(),
+            SideLayout::empty(),
+            SideLayout::empty(),
+            SideLayout::empty(),
+            band_with_rail(1.0),
+            CornerOwners::default(),
+            false,
+        );
+        // Rail column on the leading edge; band pinned to the container bottom.
+        assert_eq!(r.bottom.rail.x, 0.0);
+        assert!((r.bottom.rail.width - 48.0).abs() < 0.01);
+        // The resize handle sits at the band's TOP (inboard, toward centre),
+        // right of the rail; content is below it.
+        assert!((r.bottom.handle.x - 48.0).abs() < 0.01);
+        assert!((r.bottom.handle.y - (800.0 - 106.0)).abs() < 0.01);
+        assert!(r.bottom.content.y > r.bottom.handle.y, "content below the inboard handle");
     }
 
     #[test]
@@ -608,6 +763,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         // Trailing band: handle | content | rail, rail flush to the right edge.
         assert!((r.trailing.rail.right() - 1000.0).abs() < 0.01);
@@ -625,6 +781,7 @@ mod tests {
             shown(100.0),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         assert!((r.leading.handle.height - r.leading.content.height).abs() < 0.01);
         assert!((r.leading.handle.y - r.leading.content.y).abs() < 0.01);
@@ -641,6 +798,7 @@ mod tests {
             big,
             big,
             CornerOwners::default(),
+            false,
         );
         assert!(r.center.width >= 0.0);
         assert!(r.center.height >= 0.0);
@@ -657,6 +815,7 @@ mod tests {
             shown(100.0),
             shown(100.0),
             CornerOwners::default(),
+            false,
         );
         assert_eq!(r.center, Rect::new(0.0, 0.0, 0.0, 0.0));
     }
@@ -675,6 +834,7 @@ mod tests {
             shown(80.0),
             shown(80.0),
             owners,
+            false,
         );
         assert!(r.leading.content.height >= 0.0);
     }
@@ -688,6 +848,7 @@ mod tests {
             shown(100.0),
             shown(120.0),
             CornerOwners::default(),
+            false,
         );
         let b = compute_rects(
             container(),
@@ -696,6 +857,7 @@ mod tests {
             shown(100.0),
             shown(120.0),
             CornerOwners::default(),
+            false,
         );
         assert_eq!(a, b);
     }
@@ -723,6 +885,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         let rtl = compute_rects(
             container(),
@@ -731,6 +894,7 @@ mod tests {
             SideLayout::empty(),
             SideLayout::empty(),
             CornerOwners::default(),
+            false,
         );
         // In RTL the (logical) leading band has trailing's geometry mirrored.
         assert!((ltr.leading.content.width - rtl.trailing.content.width).abs() < 0.01);

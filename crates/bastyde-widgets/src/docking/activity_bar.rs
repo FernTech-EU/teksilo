@@ -27,20 +27,26 @@ use bastyde_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, Wi
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
-use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
+use bastyde_tokens::{HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
+use crate::tool_box::RotatedLabel;
 
 use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
 use super::drag::DockTabDragData;
 use super::geometry::DockSide;
-use super::model::{DockIconFactory, DockTabId, DockingModel};
+use super::model::{DockIconFactory, DockRailItemSize, DockTabId, DockingModel};
 
 /// Factory for a rail slot widget (rebuilt on each rail rebuild).
+///
+/// A slot that wants to match the rail's current item size binds
+/// [`DockingModel::rail_size_mode_signal`](super::DockingModel::rail_size_mode_signal)
+/// — the rail rebuilds its slots whenever the size mode changes, so reading the
+/// signal in the factory is enough to keep the slot in step.
 pub type DockRailSlot = Rc<dyn Fn() -> Box<dyn Widget>>;
 
 /// Map an [`IconButtonSize`] to the rail item's square extent (dp).
@@ -59,6 +65,12 @@ fn item_extent(size: IconButtonSize) -> f32 {
 const RAIL_ITEM_SPACING: f32 = 2.0;
 /// Padding around the rail's item column.
 const RAIL_PADDING: f32 = 4.0;
+/// Rough vertical room a Labeled item's rotated title needs beyond its icon
+/// square, used only by the overflow capacity estimate.
+const LABELED_TITLE_ALLOWANCE: f32 = 72.0;
+/// Top breathing room above a Labeled item's rotated title (so its top
+/// character isn't flush against the rail item's top edge).
+const LABELED_TOP_MARGIN: f32 = 6.0;
 
 // ───────────────────────────────────────────────────────────────────────
 // DockRail — app-facing configuration of a side's activity rail.
@@ -107,13 +119,19 @@ impl DockRail {
         self
     }
 
-    /// Widget pinned **above** the items (e.g. a logo / hamburger).
+    /// Widget pinned **above** the items (e.g. a logo / hamburger). To track the
+    /// rail's item size, bind
+    /// [`DockingModel::rail_size_mode_signal`](super::DockingModel::rail_size_mode_signal)
+    /// inside the factory.
     pub fn top_slot<W: Widget + 'static>(mut self, f: impl Fn() -> W + 'static) -> Self {
         self.top_slot = Some(Rc::new(move || Box::new(f()) as Box<dyn Widget>));
         self
     }
 
-    /// Widget pinned at the **bottom** of the rail (e.g. settings / account).
+    /// Widget pinned at the **bottom** of the rail (e.g. settings / account). To
+    /// track the rail's item size, bind
+    /// [`DockingModel::rail_size_mode_signal`](super::DockingModel::rail_size_mode_signal)
+    /// inside the factory.
     pub fn bottom_slot<W: Widget + 'static>(mut self, f: impl Fn() -> W + 'static) -> Self {
         self.bottom_slot = Some(Rc::new(move || Box::new(f()) as Box<dyn Widget>));
         self
@@ -129,6 +147,19 @@ impl DockRail {
 
     pub(crate) fn side(&self) -> DockSide {
         self.side
+    }
+
+    /// The rail strip's effective thickness for a size `mode` — the item extent
+    /// (Compact shrinks it; Default / Labeled keep the configured size) plus the
+    /// rail's padding. Drives the side's rail width so the activity bar itself
+    /// follows the Default / Compact / Icon + Label switch, not just its items.
+    pub(crate) fn effective_thickness(&self, mode: DockRailItemSize) -> f32 {
+        let size = if matches!(mode, DockRailItemSize::Compact) {
+            IconButtonSize::Compact
+        } else {
+            self.size
+        };
+        item_extent(size) + RAIL_PADDING * 2.0
     }
 }
 
@@ -168,18 +199,29 @@ impl DockActivityBar {
         }
     }
 
-    /// The effective rail-item size: the configured size, or compact when this
-    /// side's `rail_size` selector is set to compact.
+    /// The effective rail-item size: compact items shrink the glyph; Default and
+    /// Labeled both keep the rail's configured icon size (Labeled just adds a
+    /// rotated title beneath).
     fn effective_item_size(&self) -> IconButtonSize {
-        if self.model.rail_size_signal(self.side).get() == 1 {
-            IconButtonSize::Compact
-        } else {
-            self.config.size
+        match self.model.side_rail_size(self.side) {
+            DockRailItemSize::Compact => IconButtonSize::Compact,
+            DockRailItemSize::Default | DockRailItemSize::Labeled => self.config.size,
         }
     }
 
     fn effective_item_extent(&self) -> f32 {
         item_extent(self.effective_item_size())
+    }
+
+    /// Per-item vertical stride used by the overflow capacity estimate. Labeled
+    /// items are taller (icon + rotated title), so reserve extra room — a rough
+    /// allowance, since each title's length differs.
+    fn item_stride(&self) -> f32 {
+        let mut s = self.effective_item_extent() + RAIL_ITEM_SPACING;
+        if self.model.side_rail_size(self.side).shows_label() {
+            s += LABELED_TITLE_ALLOWANCE;
+        }
+        s
     }
 }
 
@@ -199,6 +241,7 @@ impl Widget for DockActivityBar {
         let visible = self.model.side_visible_signal(self.side);
         let tabs = self.model.side_tabs(self.side);
         let extent = self.effective_item_extent();
+        let labeled = self.model.side_rail_size(self.side).shows_label();
         let visible_count = self.visible_count.clone();
 
         // One item per *non-hidden* tab. The item keeps its model tab index
@@ -228,6 +271,7 @@ impl Widget for DockActivityBar {
                 icon,
                 label,
                 extent,
+                labeled,
                 selected.clone(),
                 visible.clone(),
                 self.model.clone(),
@@ -311,8 +355,7 @@ impl Widget for DockActivityBar {
         // optional slots, and (if overflowing) the overflow trigger are
         // reserved. Slots are treated as roughly one item tall — a good
         // estimate for a square rail glyph.
-        let extent = self.effective_item_extent();
-        let stride = extent + RAIL_ITEM_SPACING;
+        let stride = self.item_stride();
         if stride <= 0.0 {
             return;
         }
@@ -450,6 +493,9 @@ struct DockRailItem {
     icon: Option<DockIconFactory>,
     label: LocalizedString,
     extent: f32,
+    /// Labeled mode: paint a 90°-rotated title under the icon (no tooltip).
+    /// Icon-only modes attach the title as a hover tooltip instead.
+    labeled: bool,
     selected: Signal<usize>,
     visible: Signal<bool>,
     model: DockingModel,
@@ -473,6 +519,7 @@ impl DockRailItem {
         icon: Option<DockIconFactory>,
         label: LocalizedString,
         extent: f32,
+        labeled: bool,
         selected: Signal<usize>,
         visible: Signal<bool>,
         model: DockingModel,
@@ -484,6 +531,7 @@ impl DockRailItem {
             icon,
             label,
             extent,
+            labeled,
             selected,
             visible,
             model,
@@ -520,14 +568,42 @@ impl Widget for DockRailItem {
             )
         };
         let centered = ctx.add(Center::new().child_id(glyph));
-        let sized = ctx.add(
+        let icon_box = ctx.add(
             FixedSize::new()
                 .bind_width(self.extent)
                 .bind_height(self.extent)
                 .child_id(centered),
         );
-        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(sized));
+
+        // Labeled mode: a 90°-rotated title above the icon square (the
+        // vertical-accordion look). The title is painted, so no tooltip. Icon
+        // modes show the icon alone and surface the title as a hover tooltip.
+        let content = if self.labeled {
+            let label = ctx.add(RotatedLabel::new(
+                self.label.clone(),
+                Signal::new(TextRole::Secondary),
+            ));
+            let stack = ctx.add(
+                VStack::new()
+                    .alignment(HAlignment::Center)
+                    .spacing(2.0)
+                    .add_child(label)
+                    .add_child(icon_box),
+            );
+            // A bit of top breathing room so the rotated title's top character
+            // isn't flush against the rail item's top edge.
+            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child_id(stack))
+        } else {
+            icon_box
+        };
+        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
         self.root = Some(root);
+
+        if !self.labeled {
+            let tip = ctx.add(crate::tooltip::TooltipWidget::new(self.label.clone()));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tip, delay);
+        }
 
         let self_id = ctx.self_id();
         let model = self.model.clone();

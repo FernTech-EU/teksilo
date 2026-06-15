@@ -127,15 +127,35 @@ the **active** item hides the side. The rail stays visible while the side is
 hidden — it is the reopen affordance.
 
 The rail is a **vertical** column of one icon per tab, **pushed to the top**.
-Style it with `DockingLayout::rail(DockRail::new(side)…)`:
+It hugs each side's **leading edge**: for the leading / trailing columns that's
+the outer (window) edge; for the **top / bottom** bands the vertical rail is a
+**column on the leading cross-edge** (left in LTR, right in RTL) with the dock
+content inboard to its side — so a top/bottom rail reads like a leading rail
+rather than a thin horizontal strip. A hidden **leading / trailing** side keeps
+its rail visible (the reopen affordance); a hidden **top / bottom** band
+collapses completely (rail included — a vertical rail can't stand in a
+zero-depth band), so reveal it again from an external control (a toolbar
+"toggle panel" button, `set_side_visible(side, true)`, or `reveal_dock`). Style
+it with `DockingLayout::rail(DockRail::new(side)…)`:
 
 - `.size(IconButtonSize)` — one size for every item (Compact … Hero).
 - `.top_slot(|| …)` / `.bottom_slot(|| …)` — fixed widgets pinned above the items
   and at the very bottom (a logo on top, settings/account at the bottom — the VS
-  Code convention).
+  Code convention). To make a slotted control track the rail's item size, bind
+  `model.rail_size_mode_signal(side)` inside the factory and map it to an
+  `IconButton::size`; the rail rebuilds its slots whenever the size mode changes,
+  so reading the signal keeps the slot in step (the factory stays a plain
+  `Fn() -> impl Widget`, like every other slot).
 - `.overflow_icon(|| IconWidget…)` — when the items don't all fit, the surplus
   are parked **dormant** and reached through this caller-chosen trigger, which
   opens a popover list of the overflowed entries.
+
+**The rail width follows the size mode.** Switching Default / Compact / Icon +
+Label resizes the whole strip (the rail thickness is derived from the effective
+item size), not just the items. `set_side_rail(side, thickness)` enables the
+rail; the rendered width tracks the mode. Any external widget can react to the
+switch by binding `model.rail_size_mode_signal(side) -> Signal<DockRailItemSize>`
+(the same signal a rail slot reads to resize itself).
 
 ## Context menus
 
@@ -150,7 +170,7 @@ Move to              ▸  <the other sides>
 ☑ <activity>            (one checkable row per activity in this side)
 ☑ <activity>
 ──────────────
-Activity bar size    ▸  Default / Compact       (rail item)
+Activity bar size    ▸  Default / Compact / Icon + Label   (rail item)
   – or –
 Tab size             ▸  Text / Icon / Icon + Text   (dock tab)
 ```
@@ -168,9 +188,25 @@ Tab size             ▸  Text / Icon / Icon + Text   (dock tab)
   placed with `BelowPreferred`, so it flips above / clamps to stay on-screen even
   for a bottom-docked bar. The menu lives **only** on tabs, rail items, and the
   `DockActivityBar` — never on panes, accordions, or dock content.
-- **Activity bar size** (`DockRailItemSize::{Default, Compact}`) and **Tab size**
-  (`DockTabDisplay::{Text, Icon, IconText}`) are per-side, reactive, and
-  persisted. The rail / strip rebind and re-render when they change.
+- **Activity bar size** (`DockRailItemSize::{Default, Compact, Labeled}`) and
+  **Tab size** (`DockTabDisplay::{Text, Icon, IconText}`) are per-side, reactive,
+  and persisted. The rail / strip rebind and re-render when they change.
+
+**Icons, titles, and tooltips.** Every dock declares a title (`DockWidget::new`)
+and, optionally, an icon (`DockWidget::icon`). Both the rail and the tab strip
+use them per the size / display mode:
+
+- **Rail** — `Default` / `Compact` show the icon alone (the title is a hover
+  **tooltip**); `Labeled` adds a 90°-rotated title beneath the icon (the
+  vertical-accordion look — no tooltip, the title is on screen). A dock with no
+  icon falls back to its title's initial letter as the glyph.
+- **Strip** — the side's `DockTabDisplay` maps straight onto the `TabWidget`'s
+  [`TabDisplayMode`](tab-widget.md#tab-display-mode--icon--text--icon--text):
+  `Icon` shows the icon alone (title → tooltip) and the tab **sizes to its
+  icon**, `Text` the title, `IconText` both (the tab grows to fit the icon). An
+  **icon-less** dock in `Icon` mode falls back to its title's initial letter
+  (the full title stays in the tooltip + the content panel's AT name), so the
+  mode is never a silent no-op.
 
 Drive any of it from outside the menu too: `model.set_tab_hidden(tab, ..)`,
 `model.set_side_rail_size(side, ..)`, `model.set_side_tab_display(side, ..)`,

@@ -211,7 +211,9 @@ fn empty_side_drop_target(
 
 impl Widget for DockSidePanel {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use crate::tab_widget::{TabBarVisibility, TabHandle, TabId, TabInfo, TabWidget};
+        use crate::tab_widget::{
+            TabBarVisibility, TabDisplayMode, TabHandle, TabId, TabInfo, TabWidget,
+        };
         use bastyde_data::ListModel;
         use std::any::Any;
         use std::num::NonZeroU64;
@@ -226,15 +228,20 @@ impl Widget for DockSidePanel {
             return vec![drop];
         }
 
-        // Rebuild the strip when this side's tab-display mode flips (context-menu
-        // "Tab size": text / icon / icon + text).
+        // Rebuild the strip when this side's tab-display pref flips (context
+        // menu "Tab size"). The bar then re-derives its headers in the chosen
+        // mode (a scoped, content-preserving rebuild).
         let self_id = ctx.self_id();
         self.model.tab_display_signal(self.side).bind_to(
             self_id,
             ctx.binding_registry(),
             BindingLevel::Rebuild,
         );
-        let display = self.model.side_tab_display(self.side);
+        let display = match self.model.side_tab_display(self.side) {
+            super::model::DockTabDisplay::Icon => TabDisplayMode::Icon,
+            super::model::DockTabDisplay::IconText => TabDisplayMode::IconText,
+            super::model::DockTabDisplay::Text => TabDisplayMode::Text,
+        };
 
         // Stable TabWidget id per dock tab (dock tab ids start at 1).
         let to_tab_id = |t: &DockTabView| {
@@ -329,20 +336,13 @@ impl Widget for DockSidePanel {
                 .model
                 .side_active_dock(self.side, model_i)
                 .and_then(|d| self.model.dock_icon(d));
-            let want_icon = display.shows_icon() && icon_factory.is_some();
 
-            // Always keep the title available as a tooltip (so an icon-only tab
-            // is still identifiable on hover).
-            let mut info = TabInfo::new().closable(false).tooltip(label.clone());
-            // Title: shown for Text / IconText, and as a fallback when an
-            // icon-only tab has no icon (so it never renders blank).
-            if display.shows_text() || !want_icon {
-                info = info.title(label.clone());
-            } else {
-                info = info.no_title();
-            }
-            if want_icon {
-                let icf = icon_factory.clone().expect("want_icon implies Some");
+            // Each tab declares its title + icon; the bar's reactive
+            // `tab_display` (wired below from the side's "Tab size" pref) decides
+            // what's painted — icon, text, or both — and handles the icon-only
+            // sizing, tooltip promotion, and icon-less initial-letter fallback.
+            let mut info = TabInfo::new().closable(false).title(label.clone());
+            if let Some(icf) = icon_factory {
                 info = info.icon(move || (icf)());
             }
             {
@@ -380,10 +380,14 @@ impl Widget for DockSidePanel {
 
         let mut tw = TabWidget::new(tw_selected)
             .bar_visibility(bar_visibility)
-            // Dock side strips use the denser compact (38 dp) tab bar,
-            // with each tab sized to its own content (not a shared width).
+            // Dock side strips use the denser compact (38 dp) tab bar, each tab
+            // sized to its own content (not a shared width) — and a compact min
+            // so an icon-only tab shrinks to its icon and an icon + text tab
+            // grows to fit both, instead of all clamping to the editor-tab min.
             .compact_bar()
             .tab_sizing(crate::tab_widget::TabSizing::Independent)
+            .tab_display(display)
+            .min_tab_width(40.0)
             .dynamic_model(list)
             .dynamic_tab::<DockTabPayload>(DOCK_TAB_KIND, move |_handle, payload| {
                 match factory_model.tab_view_by_id(payload.tab_id) {

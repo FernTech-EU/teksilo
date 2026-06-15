@@ -83,6 +83,29 @@ pub enum TabSizing {
     Independent,
 }
 
+/// Bar-level control over what each tab shows — its icon, its label, or both.
+///
+/// Each tab still declares both a title and (optionally) an icon; this mode
+/// decides which are painted, so a caller can offer a "tab size" toggle
+/// (VS Code's activity-bar / panel convention) without rebuilding the tabs by
+/// hand. Icon-only tabs size to their icon (they don't pad out to a text
+/// width), and the full title is promoted to the hover tooltip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabDisplayMode {
+    /// Render each tab exactly as its [`TabInfo`](super::TabInfo) declares —
+    /// the title if set, the icon if set. The default; preserves per-tab
+    /// `no_title()` control.
+    #[default]
+    Auto,
+    /// Title only — icons are hidden even when present.
+    Text,
+    /// Icon only — the title becomes the hover tooltip. A tab with no icon
+    /// falls back to its title's initial letter so the mode is never blank.
+    Icon,
+    /// Icon + title.
+    IconText,
+}
+
 /// Type alias for label-resolving callbacks.
 type LabelFn<T> = Box<dyn Fn(usize, &T) -> LocalizedString>;
 /// Type alias for icon-resolving callbacks.

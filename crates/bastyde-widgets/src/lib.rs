@@ -204,8 +204,8 @@ pub use stepper::{
 };
 pub use tab_widget::{
     ContextMenuFactory, IconFactory as TabIconFactory, STATIC_KIND, StaticContentFactory, TabBar,
-    TabBarOrientation, TabBarVisibility, TabDelegate, TabHandle, TabId, TabInfo, TabSizing,
-    TabWidget,
+    TabBarOrientation, TabBarVisibility, TabDelegate, TabDisplayMode, TabHandle, TabId, TabInfo,
+    TabSizing, TabWidget,
 };
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
