@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Bastyde analytics adapter for the home-grown
 //! [`bastyde-collector`](../../../bastyde-collector) gRPC backend.
 //!

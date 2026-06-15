@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Scale` — wraps a child and animates a uniform 2D scale on its
 //! entire subtree when an external `Prop<bool>` toggles. Drives a
 //! `progress: Signal<f32>` ∈ [0, 1] (0 = invisible, 1 = at rest) and

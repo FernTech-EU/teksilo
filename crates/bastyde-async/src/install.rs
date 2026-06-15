@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `install_async()` — the builder hook that wires the executor into the app.
 
 use bastyde_app::BastydeAppBuilder;

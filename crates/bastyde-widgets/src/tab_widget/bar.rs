@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TabBar<T>` — header strip driven by a data source.
 //!
 //! Horizontal and vertical orientations, with shared / independent

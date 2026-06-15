@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §9.2: a bare child element inside a Category B widget (Card
 //! here) produces a targeted hint pointing at a slot instead of the
 //! generic "no method named `child`" compiler error.

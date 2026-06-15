@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ColorPicker showcase — every layout / configuration of the new
 //! color-selection widgets in one scrollable window.
 //!

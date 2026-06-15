@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tri-state checkbox value, used by `Checkbox` and `TreeCheckedModel`.
 //!
 //! Lives in `bastyde-data` (not `bastyde-widgets`) so the data-layer tree

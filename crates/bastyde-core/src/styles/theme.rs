@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The complete theme aggregator.
 //!
 //! `Theme` lives in `bastyde-core` (not `bastyde-tokens`) so the per-widget

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `I18nConfig` — application-facing builder for the i18n runtime.
 
 use std::path::PathBuf;

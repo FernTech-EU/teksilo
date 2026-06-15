@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-fmt-lsp` — minimal Language Server Protocol server for the
 //! `bati!` DSL formatter.
 //!

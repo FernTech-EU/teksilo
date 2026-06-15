@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Bastyde Widget Catalog — English (source) translations.
 #
 # Keys use kebab-case at the Fluent layer; Rust call sites use the

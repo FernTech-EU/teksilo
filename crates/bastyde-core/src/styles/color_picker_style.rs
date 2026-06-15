@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `ColorPicker`. See `docs/styling-system.md`.
 //!
 //! The trait owns only **container chrome and layout arrangement**.

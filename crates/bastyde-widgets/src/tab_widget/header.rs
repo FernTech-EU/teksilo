@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TabHeader` — one tab's chrome (icon + leading slot + label + trailing slot),
 //! plus background/indicator/focus-ring painting and the input handlers.
 //!

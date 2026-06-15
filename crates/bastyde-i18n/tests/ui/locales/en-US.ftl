@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Shared fixture for trybuild UI test cases. Every test case points at
 # this file via the `BASTYDE_I18N_SOURCE_PATH` env var that the test
 # runner exports before invoking trybuild.

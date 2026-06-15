@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Inputs tab — Checkbox, RadioButton, Toggle, Slider, SegmentedControl, ComboBox.
 
 use bastyde::prelude::*;

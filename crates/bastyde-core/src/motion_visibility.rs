@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared visibility predicates used by every motion subsystem
 //! (the looping-tween [`AnimationScheduler`](crate::animation::AnimationScheduler),
 //! the shader-driven [`AnimatedQuadRegistry`](crate::animated_quad::AnimatedQuadRegistry),

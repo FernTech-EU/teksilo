@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Accessibility Overrides Reference
 
 Bastyde widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)` — Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, Panel marks itself `set_hidden()` when it's `a11y_presentational`, etc. That covers ~95% of cases. The remaining 5% — when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor — is where **builder-level accessibility overrides** come in.

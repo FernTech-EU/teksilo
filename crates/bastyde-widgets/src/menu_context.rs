@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! MenuContext — shared navigation state for the menu hierarchy.
 //!
 //! Created by `MenuBar` during `build()` and passed to `MenuOverlayHost` and

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! # bastyde-async-std — async-std reactor for Bastyde's async executor
 //!
 //! Thin adapter over [`bastyde-async`](bastyde_async). Unlike Tokio, async-std

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DateTimeEdit` — single unified control for picking a `DateTime`.
 //!
 //! Visually one widget: a single bordered frame containing a date

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Pulse` — a wrapper widget that pulses its child's opacity between
 //! a `min` and `max` value on a fixed period, sine-shaped.
 //!

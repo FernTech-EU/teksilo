@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`ImageItem`] — a raster image at a local-coord rectangle.
 
 use accesskit::Role;

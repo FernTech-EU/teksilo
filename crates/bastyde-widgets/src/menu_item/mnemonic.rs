@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Mnemonic-marker parsing for menu labels.
 //!
 //! Bastyde uses the Win32 / Qt convention: a single `&` in the label

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-row checkbox state for collection widgets.
 //!
 //! Parallels [`crate::SelectionModel`]. Selection (which row is the

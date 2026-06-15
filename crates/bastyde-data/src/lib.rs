@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Data model abstractions for Bastyde.
 //!
 //! Provides reactive collection types (`ListModel<T>`, `TreeModel<T>`) and

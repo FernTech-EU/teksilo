@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Bastyde Milestones
 
 **Companion to:** architecture.md, bastyde-code-examples.md  

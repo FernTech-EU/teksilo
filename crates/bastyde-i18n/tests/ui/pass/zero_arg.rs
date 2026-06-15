@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `tr!` with a zero-argument key that exists in the fixture.
 
 use bastyde_i18n::tr;

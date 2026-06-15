@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless lifecycle tests for `WebView`, driven entirely against the
 //! `MemoryWebViewBackend` — no GPU, no window, no real engine.
 //!

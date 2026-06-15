@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `PopoverWidget<T>` — a generic trigger that opens a popover when
 //! activated, plus the [`PopoverButton`] / [`PopoverIconButton`] aliases.
 //!

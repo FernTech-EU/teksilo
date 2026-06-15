@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Branching widget types and child-insertion trait for the `bati!` DSL.
 //!
 //! `BatiBranch{,3,4}` are two-, three-, and four-way sum types over Widget

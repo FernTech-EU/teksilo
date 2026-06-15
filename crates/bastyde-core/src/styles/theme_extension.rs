@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Typed extension registry attached to a [`Theme`](crate::styles::Theme).
 //!
 //! Apps and downstream crates use this to attach typed values that the

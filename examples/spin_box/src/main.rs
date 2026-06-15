@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! SpinBox demo — exercises every `SpinBox` feature in one window.
 //!
 //! Run with: `cargo run -p spin-box`.

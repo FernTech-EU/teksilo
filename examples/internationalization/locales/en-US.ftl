@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # English (source language). The `tr!` proc macro validates every
 # invocation in this crate against this file at compile time.
 

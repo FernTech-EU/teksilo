@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Slide` — wraps a child and slides it in or out from a chosen
 //! edge when an external `Signal<bool>` toggles. Common patterns:
 //! drawers, snackbars, side panels, banner notifications.

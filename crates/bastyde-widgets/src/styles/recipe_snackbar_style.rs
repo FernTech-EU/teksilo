@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SnackbarStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSnackbarStyle` ships the IntUI snackbar chrome: the

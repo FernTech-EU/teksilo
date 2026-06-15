@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Captured source location for a registered widget catalog entry.
 //!
 //! Populated by the `register_widget_catalog!` macro at expansion time

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! HTTP transport — ureq, sync, called only from the worker thread.
 
 use std::time::Duration;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Visual dwell indicator for the rich-tooltip sticky-on-dwell UX.
 //!
 //! Sits in the top-right corner of a rich tooltip surface and reports

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! System clipboard integration for the rich text editor.
 //!
 //! Three free functions — `copy`, `cut`, `paste` — implement the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `InspectorShell` — the composing widget that wraps a window's user
 //! root in the inspector's UI surface.
 //!

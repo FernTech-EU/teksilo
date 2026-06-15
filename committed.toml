@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 style="conventional"
 ignore_author_re="dependabot"
 merge_commit = false

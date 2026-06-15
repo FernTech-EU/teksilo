@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Layout direction derivation from a `LanguageIdentifier`.
 
 use bastyde_core::environment::LayoutDirection;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! InputDialog — a `QInputDialog`-style modal that prompts the user for
 //! a single string. Built on the same `present_modal` infrastructure as
 //! [`MessageBox`](crate::message_box::MessageBox), with a [`TextInput`]

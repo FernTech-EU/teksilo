@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Layout primitives tab — every container/spacing primitive in
 //! `bastyde_widgets::primitives`.
 

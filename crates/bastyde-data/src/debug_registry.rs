@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Debug-only registry of named data models for the Bastyde inspector.
 //!
 //! The registry is a thread-local `Vec<(String, Weak<dyn ModelDebug>)>`.

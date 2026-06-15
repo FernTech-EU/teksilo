@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Showcase for the five widgets shipped together: Banner,
 //! CommandLinkButton, SearchField, FilePickerField, and InputDialog.
 //!

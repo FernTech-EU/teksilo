@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Wayland external drag-and-drop backend (`wl_data_device`).
 //!
 //! winit (0.30) does not implement Wayland drag-and-drop, so there is no

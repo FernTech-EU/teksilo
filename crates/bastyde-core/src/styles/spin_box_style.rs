@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `SpinBox`. See `docs/styling-system.md`.
 //!
 //! `SpinBox` composes a themed `TextInputField` with an optional pair

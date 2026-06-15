@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Rich text editor widget.
 //!
 //! See [`§27.10` of the architecture doc](../../../../../docs/architecture.md)

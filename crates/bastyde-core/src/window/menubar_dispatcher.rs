@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Window-level menubar key dispatcher.
 //!
 //! Allows a single `MenuBar` per window to intercept F10 and

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Visual highlight + selected-bounds tracker for the inspector.
 
 use bastyde_canvas::{Canvas, Rect, SizeProposal};

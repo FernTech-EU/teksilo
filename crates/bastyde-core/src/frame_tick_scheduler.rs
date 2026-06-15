@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-frame-effect scheduler.
 //!
 //! Tracks widgets that have registered an arbitrary per-frame effect

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tab registry — defines the canonical list of tabs and exposes a
 //! pair of `(classic, bati)` builder functions for each.
 //!

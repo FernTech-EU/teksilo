@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! RadioButton — mutually exclusive selection within a group.
 //!
 //! Non-generic: uses `usize` for values. Multiple RadioButtons share a

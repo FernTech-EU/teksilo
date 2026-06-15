@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SpinBoxStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSpinBoxStyle::make_body` ports the IntUI spin-box chrome:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Top-edge resize handle for the inspector panel.
 //!
 //! A 6-pixel-tall horizontal strip sitting between the user-root area

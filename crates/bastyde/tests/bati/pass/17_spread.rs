@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.5: `..expr` inlines an iterator of WidgetIds as children,
 //! using statement-sequence lowering.
 

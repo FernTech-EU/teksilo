@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `NotificationCenterButton` — bell icon with unread-count badge,
 //! opening the notification log as a popover.
 //!

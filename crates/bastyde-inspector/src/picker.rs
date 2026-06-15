@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Picker tool — captures a click and resolves it to a `WidgetId` on
 //! the next layout pass. See `InspectorState::picker_mode` and
 //! `InspectorState::pending_pick_point`.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Idle callback system for incremental work between frames.
 //!
 //! Operations that take 5–50ms (too short for a background thread, too long

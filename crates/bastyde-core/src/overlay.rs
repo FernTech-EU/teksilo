@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Overlay system for tooltips, dropdown menus, context menus, and popovers.
 //!
 //! Overlays render outside the normal layout hierarchy. They float above the

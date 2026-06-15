@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! OS-reported theme colors — pure data types with no platform logic.
 //!
 //! Populated by `bastyde-platform::os_theme`, consumed by

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! A non-virtualized dynamic collection widget.
 //!
 //! `Repeater` creates one child widget per item in a `ListModel<T>`.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`TabHandle`] — the runtime entity that lives in a tab list.
 //!
 //! Carries a stable [`TabId`], its presentation [`TabInfo`], a

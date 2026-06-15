@@ -1,4 +1,7 @@
 #![allow(
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
     clippy::type_complexity,
     clippy::too_many_arguments,
     clippy::collapsible_if,

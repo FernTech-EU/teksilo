@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ToolBox — a vertical stack of collapsible sections, exactly one expanded
 //! at a time.
 //!

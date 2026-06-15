@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Native (OS) Menu Bar
 
 Bastyde can mirror a menu into the platform's **native** menu surface — the

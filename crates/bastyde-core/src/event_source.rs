@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Backend event subscription infrastructure (architecture §9.4).
 //!
 //! Widgets subscribe to external event sources (database change notifiers,

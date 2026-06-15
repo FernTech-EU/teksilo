@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Native file-dialog showcase.
 //!
 //! Demonstrates all four operations exposed by

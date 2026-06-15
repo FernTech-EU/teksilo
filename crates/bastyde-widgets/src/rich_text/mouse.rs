@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Pointer and scroll dispatch for the rich text editor.
 //!
 //! Owns three handler entry points that the widget installs in

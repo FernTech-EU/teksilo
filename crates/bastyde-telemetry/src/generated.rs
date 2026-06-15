@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Hand-written framework-event emitters.
 //!
 //! This module is the stand-in for what will eventually be

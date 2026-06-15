@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! GroupBox — titled cluster of controls in Int UI / Jewel style.
 //!
 //! A bold title (optionally preceded by a checkbox) sits above an indented

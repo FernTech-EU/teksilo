@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Toolbar pane (top).
 //!
 //! Theme picker, background mode, and locale dropdown. Theme and

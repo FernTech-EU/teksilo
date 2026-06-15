@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-tab presentation metadata.
 //!
 //! [`TabInfo`] is the bundle of "what does this tab look like?"

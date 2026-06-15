@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Generic, runtime-agnostic delivery of a one-shot main-thread callback that
 //! runs with a *fresh* [`EventContext`] bound to a window's tree.
 //!

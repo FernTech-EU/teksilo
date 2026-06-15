@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Hand-rolled CLI parser for the widget catalog.
 //!
 //! Three flags, ~20 lines of logic — clap is overkill.

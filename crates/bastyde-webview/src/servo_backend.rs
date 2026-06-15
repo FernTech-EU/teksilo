@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ServoBackend` — best-effort pure-Rust engine backend (Linux/Wayland) via
 //! the [`servo`] crate. Gated behind the `servo-backend` feature.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.2, §3.4: element with explicit constructor, positional arg,
 //! and a body of single-argument properties.
 //!

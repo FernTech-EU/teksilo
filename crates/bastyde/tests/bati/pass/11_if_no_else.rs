@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.1: `if cond { Elem }` without an `else` arm lowers to
 //! `.child_opt(if cond { Some(Elem::new()) } else { None })`. The
 //! parent must expose a `.child_opt(Option<W>)` method — stacks do.

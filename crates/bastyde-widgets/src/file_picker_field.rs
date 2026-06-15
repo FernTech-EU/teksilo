@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! FilePickerField — a [`TextInput`] preset
 //! with a trailing **Browse…** button that opens a native file dialog
 //! and writes the chosen path back into the bound text signal.

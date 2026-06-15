@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Multi-view: two `SceneView`s over one shared [`SceneModel`].
 //!
 //! A shared `Rc<RefCell<Scene>>` handle plus a per-view

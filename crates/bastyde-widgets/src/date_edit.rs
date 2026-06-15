@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DateEdit` — text input + calendar popover, bound to `Signal<Option<Date>>`.
 //!
 //! A single-line editable date field. The underlying surface is a

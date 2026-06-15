@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Image texture manager: maps image names to GPU textures for DrawCommand::Image rendering.
 
 use std::collections::HashMap;

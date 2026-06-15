@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.4 multi-argument property form: `name: arg1, arg2` desugars
 //! to `.name(arg1, arg2)` — the TitleBar `.border(color, width)` pattern.
 //! Commas continue the arg list while on the same line as the previous

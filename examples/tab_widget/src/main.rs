@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! TabWidget showcase — exercises every capability of the rewritten
 //! TabWidget / TabBar pair:
 //!

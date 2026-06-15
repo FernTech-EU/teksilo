@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `MonthsGrid` + `YearsGrid` — the coarser-grain bodies the calendar
 //! shows when [`CalendarMode`] is `Months` or
 //! `Years`. Both are 4×3 grids of clickable cells:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Shake` — wraps a child and plays a damped horizontal oscillation
 //! whenever an external trigger `Signal<u32>` is bumped. The classic
 //! invalid-input feedback: wrong password, failed form validation,

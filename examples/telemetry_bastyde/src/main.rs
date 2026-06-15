@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `telemetry-bastyde` example — demonstrates `bastyde-analytics-bastyde`
 //! against a localhost `bastyde-collector` instance.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-column filter popover UI.
 //!
 //! `HeaderCell` renders a small filter glyph (the unconditional

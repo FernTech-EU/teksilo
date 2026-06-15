@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Settings tab — ShortcutSettings + live PrivacySettings (telemetry consent UI).
 
 use bastyde::prelude::*;

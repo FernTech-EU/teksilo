@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `tr!` with a single named argument matching the message signature.
 
 use bastyde_i18n::{I18nConfig, I18nManager, tr};

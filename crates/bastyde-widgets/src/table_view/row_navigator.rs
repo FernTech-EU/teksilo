@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Trait abstracting per-row navigation for `TableView` and `TreeTable`.
 //!
 //! Flat tables answer arrow-up/down by stepping a contiguous index;

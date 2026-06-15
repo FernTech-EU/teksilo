@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Layout Primitives
 
 **Companion to:** [architecture.md](architecture.md) §2 (Layout Model)

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`OverscrollBehavior`] — boundary scroll-chaining policy.
 //!
 //! Shared by every scrollable surface (the `bastyde-widgets` scrollables —

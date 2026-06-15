@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Token generation — converts a validated `Schema` into `proc_macro2::TokenStream`.
 
 use proc_macro2::{Ident, Span, TokenStream};

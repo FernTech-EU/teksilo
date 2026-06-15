@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `tr!` accepting nested `::` paths, validated against a directory
 //! walk of `nested_fixture/`. The test runner sets
 //! `BASTYDE_I18N_SOURCE_DIR` to the fixture before invoking trybuild.

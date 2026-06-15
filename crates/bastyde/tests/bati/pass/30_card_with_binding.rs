@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §7.9 stop-gate: a Card with a bound slot widget. Exercises
 //! body-wide features: Category B slots, slot binding with `_id`
 //! routing, element-valued slots, nested element body, and binding

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Keyboard dispatch for the text input widget.
 //!
 //! Simplified from `rich_text::keyboard`: no vertical navigation, no

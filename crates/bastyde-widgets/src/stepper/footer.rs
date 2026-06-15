@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`StepperFooter`] — the navigation bar: Back / Skip / Help / Next / Finish
 //! (+ optional Cancel). Next is gated reactively on the active step's
 //! completion signal via [`Signal::flat_map`], and runs any imperative

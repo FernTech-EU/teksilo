@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DropdownPanel` — the overlay-content widget shown when the combo
 //! is open. Owns the Tab / ArrowDown / ArrowUp key handling, the
 //! `TextInput`-backed search field, and the inner `FilteredItemList`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accessibility tab — AccessKit info for the selected widget.
 
 use std::cell::RefCell;

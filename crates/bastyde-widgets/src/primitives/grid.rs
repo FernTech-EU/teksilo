@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Grid — a 2D layout container with row and column tracks.
 //!
 //! Supports fixed, fractional, and auto-sized tracks. Children are placed

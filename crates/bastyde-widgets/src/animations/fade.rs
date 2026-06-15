@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Fade` — a wrapper widget that animates its child between hidden
 //! (opacity 0) and visible (opacity 1) when an external
 //! `Signal<bool>` toggles.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Bridge from a [`MenuModel`] to the platform native menu (`bastyde-platform`'s
 //! [`NativeMenuHandle`]).
 //!

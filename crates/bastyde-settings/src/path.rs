@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! OS-correct path resolution for application config and data dirs.
 //!
 //! Wraps `etcetera`'s native [`AppStrategy`] so the rest of the crate

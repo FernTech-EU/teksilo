@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! AspectRatio — a single-child wrapper that constrains layout to a fixed
 //! width-to-height ratio.
 

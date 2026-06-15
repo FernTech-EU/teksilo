@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Semantic color roles.
 //!
 //! Role enums let widgets name *what* a color represents rather than *which

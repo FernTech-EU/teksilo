@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Bastyde i18n showcase
 
 Phase H demo from the §12 internationalization implementation. Run it:

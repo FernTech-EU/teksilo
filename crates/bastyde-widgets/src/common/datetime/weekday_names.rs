@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Localized weekday names — `tr_widget!` keys grouped by width.
 
 use jiff::civil::Weekday;

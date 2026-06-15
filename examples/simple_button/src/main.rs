@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! First Milestone Demo: a single button in a window.
 //!
 //! Run with: `cargo run -p simple-button`

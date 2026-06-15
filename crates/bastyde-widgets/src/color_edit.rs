@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ColorEdit` — compact field-style color picker trigger that opens
 //! a popover containing a [`ColorPicker`].
 //!

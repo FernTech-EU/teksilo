@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `ListContainerStyle` impl.
 //!
 //! IntUI's list/tree container chrome is just the drag-insertion

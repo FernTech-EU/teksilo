@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Light vs Dark surface declaration.
 //!
 //! Required field on every [`Theme`](crate::styles::Theme). Drives:

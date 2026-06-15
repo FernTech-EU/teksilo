@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-platform implementations of [`bastyde_core::PlatformTitleBarHost`].
 //!
 //! Each backend lives in its own submodule under `title_bar_host/`. The

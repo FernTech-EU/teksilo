@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Stable per-tab identifiers.
 //!
 //! [`TabId`] is the identity of a tab as it lives, dies, reorders,

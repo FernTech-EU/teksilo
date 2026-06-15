@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Registry helpers — thin wrappers over `inventory::iter` for the
 //! previewer's typical lookup paths.
 

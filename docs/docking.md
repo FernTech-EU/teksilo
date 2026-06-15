@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # DockingLayout
 
 `DockingLayout` is a VS Code-style **dockable layout**: a fixed **centre** slot

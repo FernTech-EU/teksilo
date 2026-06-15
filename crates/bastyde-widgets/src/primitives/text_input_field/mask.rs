@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Input-mask grammar (Qt-compatible subset).
 //!
 //! Adopts the well-known `QLineEdit::setInputMask` grammar so masks

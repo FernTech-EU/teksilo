@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ToastRegistry` — the app-singleton service handle.
 //!
 //! Registered into the app-state registry by `install_toast(opts)`

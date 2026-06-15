@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Multi-window management.
 //!
 //! The `WindowManager` maintains a collection of active windows, each with its

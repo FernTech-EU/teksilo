@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 //!
 //! `GridView` is the photo-gallery / icon-view / file-manager-grid /

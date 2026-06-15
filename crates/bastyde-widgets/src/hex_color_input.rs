@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `HexColorInput` — single-line `#RRGGBB[AA]` color editor.
 //!
 //! A specialization of [`TextInput`] that wires an input mask, a

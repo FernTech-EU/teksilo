@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Backend abstraction for [`WebView`](crate::WebView).
 //!
 //! A web view is the one widget that cannot render into Bastyde's wgpu

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`IndicatorStrip`] — the row (horizontal) or column (vertical) of step
 //! markers. Emits `Role::TabList` (non-linear) or `Role::List` (linear) with
 //! the matching `aria-orientation`, and records each marker's `WidgetId` into

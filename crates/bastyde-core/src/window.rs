@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Window identity and per-window state.
 //!
 //! [`BastydeWindowId`] is the opaque, `Copy` id allocated by the app-level

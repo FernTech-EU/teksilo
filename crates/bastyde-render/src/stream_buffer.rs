@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Persistent per-pipeline streaming buffers.
 //!
 //! Each frame, the renderer accumulates vertex data into per-pipeline

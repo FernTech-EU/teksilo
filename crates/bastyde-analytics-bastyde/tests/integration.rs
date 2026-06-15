@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end smoke test: spin up an in-process tonic server, point
 //! the BastydeAdapter at it, fire events, confirm acks and Parquet
 //! files. Mirrors the structure of the Plausible adapter integration

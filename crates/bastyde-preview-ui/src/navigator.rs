@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Navigator pane (left).
 //!
 //! Lists registered widget catalog entries grouped by `entry.group()`,

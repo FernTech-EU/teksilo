@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `BannerStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeBannerStyle` ships the IntUI banner chrome: a per-severity

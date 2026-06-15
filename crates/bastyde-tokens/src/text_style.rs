@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use serde::{Deserialize, Serialize};
 
 /// Font weight as a numeric value (100-900) following CSS conventions.

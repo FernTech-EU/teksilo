@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Minimal test widgets for bastyde-core's headless tests.
 //! These live in bastyde-core (not bastyde-widgets) to avoid a circular dependency.
 //! They exercise the Widget trait without bringing in real rendering.

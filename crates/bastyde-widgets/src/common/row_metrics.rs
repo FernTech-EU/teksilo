@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! 1-D row-layout abstraction for the virtualizing row widgets
 //! (`ListView`, `TreeView`, `TableView`, `TreeTable`).
 //!

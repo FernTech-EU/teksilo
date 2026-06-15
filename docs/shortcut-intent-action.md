@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Shortcut / Intent / Action Reference
 
 Bastyde's input-to-behavior pipeline has three first-class concepts:

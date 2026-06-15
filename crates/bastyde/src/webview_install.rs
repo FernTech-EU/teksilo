@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `install_web_view` — wire the WebView subsystem into a `BastydeAppBuilder`.
 //!
 //! Mirrors the `BastydeAppBuilderToastExt` pattern: the extension trait and

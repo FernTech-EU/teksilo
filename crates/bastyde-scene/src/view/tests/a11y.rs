@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Coverage for the Scene-side a11y data model.
 //!
 //! The walker that builds AT nodes lives in `accessibility_impl.rs`

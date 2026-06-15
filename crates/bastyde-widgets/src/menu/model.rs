@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The [`MenuModel`] data type and its builders.
 
 use std::cell::{Ref, RefCell};

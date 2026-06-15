@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-node checkbox state for a `TreeModel<T>`, with optional
 //! descendant→ancestor tristate aggregation.
 //!

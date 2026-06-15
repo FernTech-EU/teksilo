@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared scroll-chaining helpers for the scrollable widgets.
 //!
 //! All scrollable widgets ([`ScrollArea`](crate::ScrollArea),

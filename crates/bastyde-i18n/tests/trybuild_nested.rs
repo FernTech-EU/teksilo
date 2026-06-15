@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Trybuild UI test for the nested directory layout (architecture
 //! §12.2.3). A separate test binary from `tests/trybuild.rs` because
 //! each sets a different `BASTYDE_I18N_SOURCE_*` env var and we rely on

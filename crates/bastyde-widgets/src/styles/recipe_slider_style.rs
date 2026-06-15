@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SliderStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSliderStyle` ships the IntUI look out of the box. The visual

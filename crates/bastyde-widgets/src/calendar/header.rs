@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `CalendarHeader` — month navigation strip: prev / "Month Year" / next.
 
 use bastyde_i18n::lit;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `PrivacySettings` — user-facing widget for telemetry consent.
 //!
 //! Embeddable in any container (typically a `Dialog` for first-run

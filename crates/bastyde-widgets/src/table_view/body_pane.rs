@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `BodyPane<T>` — the virtualized row pane underneath the header.
 //!
 //! Splitting this out of `TableView`'s root widget is a deliberate

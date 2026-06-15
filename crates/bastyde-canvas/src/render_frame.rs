@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use std::borrow::Cow;
 
 use crate::geometry::{Rect, Transform2D};

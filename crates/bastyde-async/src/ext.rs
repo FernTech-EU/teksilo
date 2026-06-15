@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ctx.spawn_local(...)` — the extension trait that adds the spawn methods to
 //! [`EventContext`], pulling the [`AsyncRuntimeHandle`] out of app-state.
 

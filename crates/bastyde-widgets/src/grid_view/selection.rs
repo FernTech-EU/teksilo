@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Rubber-band (marquee) selection for `GridView`.
 //!
 //! A drag starting on the empty background (not on a tile) sweeps out a

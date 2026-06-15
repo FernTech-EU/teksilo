@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! X11 fallback. The X11 server protocol cannot give us the equivalent of
 //! Windows' DWM extended frame or Wayland's `xdg_toplevel.move` without
 //! either reimplementing window-manager hints by hand (out of scope) or

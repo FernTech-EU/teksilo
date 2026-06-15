@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # TableView and TreeTable
 
 Two production-grade tabular widgets for Bastyde: a flat

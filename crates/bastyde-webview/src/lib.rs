@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-webview` — an embeddable [`WebView`] widget for Bastyde.
 //!
 //! A web view is the one widget that **cannot** render into Bastyde's wgpu

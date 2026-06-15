@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Shader-driven animated quads — procedural kinds (no texture).
 //
 // Each quad carries a `slot` per vertex (flat-interpolated) that the

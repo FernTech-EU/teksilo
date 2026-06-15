@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-scene` — pannable / zoomable scene viewport for Bastyde.
 //!
 //! A sub-toolkit for **scene-based applications** — story corkboards,

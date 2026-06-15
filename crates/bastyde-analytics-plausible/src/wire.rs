@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Plausible JSON wire format.
 //!
 //! Plausible's `/api/event` endpoint expects a JSON body with the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TreeBodyPane<T>` — the virtualized row pane underneath `TreeTable`'s
 //! header.
 //!

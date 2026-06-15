@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Panel — a themed container with background, border, corner radius, and padding.
 //!
 //! Like Qt's QFrame: a single-child wrapper that provides visual framing.

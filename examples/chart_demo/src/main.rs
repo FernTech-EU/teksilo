@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Chart Demo: BarChart, LineChart, PieChart with donut + center slot.
 //!
 //! Run with: `cargo run -p chart-demo`

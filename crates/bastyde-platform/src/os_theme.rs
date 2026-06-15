@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! OS theme detection — reads colors directly from desktop environment
 //! configuration files and settings.
 //!

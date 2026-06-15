@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end tests for the Plausible adapter.
 //!
 //! Exercises the full flow against a tiny mock HTTP server bound to

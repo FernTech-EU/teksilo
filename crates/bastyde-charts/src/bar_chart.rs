@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! BarChart — vertical or horizontal bars, one or more series.
 //!
 //! PR 1 ships vertical / single-series only. Grouped multi-series, horizontal

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Bastyde Widget Catalog — every public widget, classic vs `bati!` side-by-side.
 //!
 //! Run with: `cargo run -p widget-catalog`

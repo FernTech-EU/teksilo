@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Toggle — an animated on/off switch.
 //!
 //! The widget itself is a thin event-handler wrapper that delegates

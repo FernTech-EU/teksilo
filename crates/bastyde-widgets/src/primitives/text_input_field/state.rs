@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared mutable state for a single `TextInput` instance.
 //!
 //! Mirrors the `Rc<RefCell<State>>` pattern from

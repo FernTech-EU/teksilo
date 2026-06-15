@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DisclosureCaret` — a 6×6 dp right triangle painted in the
 //! bottom-right corner of a popover trigger to indicate "this opens a
 //! menu, not a single-action button". Shared between

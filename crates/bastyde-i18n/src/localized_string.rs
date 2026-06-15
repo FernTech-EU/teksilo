@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `LocalizedString` — the developer-facing handle the `tr!` macro produces.
 //!
 //! It packages a closure that resolves to a `String`. Calling `to_signal()`

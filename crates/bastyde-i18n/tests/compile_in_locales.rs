@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Integration test for the `compile_in_locales!` declarative sugar
 //! (architecture §12.4). Verifies that the macro expansion produces a
 //! slice of the same shape as `compile_in` expects, and that an

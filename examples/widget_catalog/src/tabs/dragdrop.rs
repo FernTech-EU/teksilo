@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Drag & Drop tab — DropZone (standalone target) + DropTarget
 //! (wrapping container). Cannibalized from the `file-drop` example.
 //! OS file drops are live once `install_external_dnd()` is wired (it

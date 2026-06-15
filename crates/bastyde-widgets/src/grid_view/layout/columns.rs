@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared column geometry for grid strategies.
 //!
 //! Every strategy derives its column count and per-column `(x, width)` the

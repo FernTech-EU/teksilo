@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Data Collections example — Milestone 6 showcase.
 //!
 //! Demonstrates all Milestone 6 features:

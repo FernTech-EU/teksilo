@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Minimal LSP types used by this server.
 //!
 //! Only the request/response shapes we actually emit. Incoming params

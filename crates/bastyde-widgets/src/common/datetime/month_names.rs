@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Localized month names — `tr_widget!` keys grouped by width.
 
 /// Long month name key (e.g. "January"). Month is `1..=12`; out-of-range

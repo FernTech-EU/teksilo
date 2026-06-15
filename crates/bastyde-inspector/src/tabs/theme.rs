@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Theme tab — preset switcher (Light / Dark) + JSON Export / Import +
 //! per-color editor.
 //!

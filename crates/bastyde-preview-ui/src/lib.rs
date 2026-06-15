@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! GUI for Bastyde's widget previewer.
 //!
 //! This crate is a *library*. Per-application binaries

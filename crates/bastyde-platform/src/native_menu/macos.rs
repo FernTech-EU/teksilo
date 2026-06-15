@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! macOS native menu backend.
 //!
 //! Mirrors a [`NativeMenuSnapshot`] into the global menu bar via

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Property-argument parser.
 //!
 //! Spec §3.4 + §3.3 + §6.1. A property argument is one of:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Handler-attachment properties (`on_tap`, `context_menu`, `cursor`,
 //! `focusable`, …) wrap the widget in `WidgetWithHandlers<T>`, which
 //! doesn't expose per-widget methods like `.child()` or `.spacing()`.

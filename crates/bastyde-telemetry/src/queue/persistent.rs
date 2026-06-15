@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! redb-backed `EventQueue` that survives process restart.
 //!
 //! Single table, key = monotonic `u64` (FIFO order = ascending key

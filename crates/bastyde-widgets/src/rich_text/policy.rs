@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Policy bundles for RichTextEditor construction presets.
 //!
 //! A `PolicyBundle` captures every decision that varies between the

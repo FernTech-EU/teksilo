@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `Recipe*Style` impls — the IntUI look ships here. Apps that
 //! want a different design language write their own `impl FooStyle`
 //! blocks (per-call via `Foo::style(...)` or theme-wide via

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 pub(crate) mod blur;
 pub mod image_manager;
 pub mod path_atlas;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Virtualized waterfall (Pinterest-style) grid strategy.
 //!
 //! Fixed/adaptive column count, per-item variable height, shortest-column

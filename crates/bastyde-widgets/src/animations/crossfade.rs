@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Crossfade` — when an external `Signal<K>` changes, the
 //! previous content fades out while the new content fades in over
 //! the same window. Like [`Switcher`](crate::primitives::Switcher),

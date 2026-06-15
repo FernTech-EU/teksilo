@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ComboBox — dropdown selection widget.
 //!
 //! Generic over the item type `T: Clone + PartialEq + 'static`. Selection is

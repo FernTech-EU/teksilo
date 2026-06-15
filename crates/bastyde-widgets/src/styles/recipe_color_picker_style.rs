@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `ColorPickerStyle` impl + the picker's design tokens.
 //!
 //! Design tokens for `ColorPicker` live as `pub const`s on this module.

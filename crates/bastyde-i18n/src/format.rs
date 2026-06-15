@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Locale-aware number and date/time formatting.
 //!
 //! Two consumer paths share one ICU4X layer:

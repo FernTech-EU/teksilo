@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `ListView` and `TreeView` container
 //! chrome (shared trait — both widgets paint the same kind of insertion
 //! line). See `docs/styling-system.md`.

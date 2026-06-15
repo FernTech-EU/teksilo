@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.6 expression-producing form: `rust { ... expr }` (no trailing
 //! `;`) produces a widget value used as a child.
 

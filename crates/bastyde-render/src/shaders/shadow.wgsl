@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Shadow shader — renders soft box shadows using SDF + Gaussian blur approximation.
 
 struct VertexInput {

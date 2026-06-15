@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless tests for `GridView` (Phase 1: uniform grid).
 //!
 //! No GPU / display server needed — exercises virtualization, column-count

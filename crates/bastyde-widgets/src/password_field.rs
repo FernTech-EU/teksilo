@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `PasswordField` — secure single-line text entry with a reveal
 //! toggle, masking, Caps Lock warning, and clipboard protection.
 //!

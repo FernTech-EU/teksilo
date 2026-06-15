@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `scene-corkboard` — `bastyde-scene` multi-view + delegate demo.
 //!
 //! **Two `SceneView` panes share one `SceneModel`.** A story corkboard is shown

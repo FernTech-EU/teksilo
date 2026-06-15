@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! MasonryLayout — a variable-height grid that packs children into the
 //! shortest column (Pinterest-style).
 

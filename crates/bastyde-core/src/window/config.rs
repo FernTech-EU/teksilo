@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Configuration for creating a new window.
 //!
 //! Consumed by either the app builder's "initial window" at startup or

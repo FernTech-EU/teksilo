@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Lowering: walk the IR and emit builder-call token streams.
 //!
 //! Two emission shapes:

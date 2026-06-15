@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use super::*;
 
 // App-global stash for the typed payload of an in-flight app-originated OS

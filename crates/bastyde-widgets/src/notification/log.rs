@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `NotificationLog` — the persistent-archive UI.
 //!
 //! Composition: `VStack { toolbar, ScrollArea { day_bucket_sections },

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Arabic runtime translation. The language tag `ar-SA` triggers the
 # RTL layout direction via `bastyde_i18n::rtl_from_locale`.
 

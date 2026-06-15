@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! App-level window-operation sink.
 //!
 //! [`WindowOps`] is the trait implemented by the app-level window

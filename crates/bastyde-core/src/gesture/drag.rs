@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use bastyde_canvas::{Point, Vec2};
 
 use crate::event::PointerButton;

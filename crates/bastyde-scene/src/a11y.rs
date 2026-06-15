@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accessibility policies for [`SceneView`](crate::SceneView).
 //!
 //! Two layers cooperate. The **visual-default** path emits AT nodes

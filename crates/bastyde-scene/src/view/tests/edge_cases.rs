@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Defensive coverage for scene-graph edge cases the audit
 //! flagged as untested: NaN / infinite coordinates, the
 //! self-parent / cycle case explicitly documented as unchecked

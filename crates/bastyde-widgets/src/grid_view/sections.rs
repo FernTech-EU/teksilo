@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Section grouping for `GridView`.
 //!
 //! A [`SectionProvider`] partitions the flat model into named sections; the

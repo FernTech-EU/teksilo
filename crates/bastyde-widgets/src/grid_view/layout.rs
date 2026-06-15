@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Layout strategies for [`GridView`](crate::grid_view::GridView).
 //!
 //! See `GridLayoutStrategy` for the contract and the module

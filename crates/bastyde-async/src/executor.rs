@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! A tiny single-threaded (`!Send`) cooperative task executor, driven once per
 //! event-loop turn by the [`on_loop_tick`](bastyde_app::BastydeAppBuilder::on_loop_tick)
 //! hook in `bastyde-app`.

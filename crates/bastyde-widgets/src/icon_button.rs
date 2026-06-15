@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! IconButton — a square, icon-only, flat-surface button.
 //!
 //! Five sizes covering both **embedded** use (inside another widget's

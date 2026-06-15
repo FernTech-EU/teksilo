@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Compile-time-validating resource embedding proc macro for Bastyde.
 //!
 //! Provides `res!` which embeds a file into the binary, validates its

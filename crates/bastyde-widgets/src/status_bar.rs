@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! StatusBar — a horizontal bar at the bottom for status information.
 
 use bastyde_canvas::{Rect, Size, SizeProposal};

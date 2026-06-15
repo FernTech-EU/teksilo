@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Card — a Panel with shadow and optional header/content/footer slots.
 //!
 //! Card composes its chrome (shadow + background + corner radius +

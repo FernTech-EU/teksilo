@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Selection types for `TableView` and `TreeTable`.
 //!
 //! For row selection (`SingleRow` / `MultiRow`) the table re-uses the

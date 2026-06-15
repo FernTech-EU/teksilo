@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Charts tab — BarChart, LineChart, PieChart (donut + center slot).
 //! Cannibalized from the `chart-demo` example. Charts live in the
 //! `bastyde-charts` crate (same tier as `bastyde-widgets`).

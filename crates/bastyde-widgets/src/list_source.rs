@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Type-erased data source for list-backed widgets.
 //!
 //! Wraps both `ListModel<T>` and any `ListDataSource<Item = T>` behind a

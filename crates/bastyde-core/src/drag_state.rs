@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Drag session state and drop feedback types.
 //!
 //! A `DragSession` is created when a widget calls `EventContext::start_drag()`

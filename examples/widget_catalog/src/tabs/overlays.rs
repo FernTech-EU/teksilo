@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Overlays tab — Tooltip (cascading 3-tier showcase), Popover, Dialog,
 //! MessageBox, Snackbar, Shadow.
 

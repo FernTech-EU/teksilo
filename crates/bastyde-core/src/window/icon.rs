@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Window icon.
 //!
 //! A raw RGBA8 bitmap plus dimensions. The app-level window manager

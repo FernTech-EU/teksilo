@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`SceneModel`] — a shared, cloneable handle to a [`Scene`].
 //!
 //! Mirrors the `ListModel = Rc<RefCell<ListModelInner>>` pattern from

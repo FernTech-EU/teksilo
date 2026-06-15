@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Data Models tab — registered models from `bastyde_data::debug_registry`.
 //!
 //! Lists every registered model's name + kind + len. Click a row to

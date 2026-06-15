@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`Step`] — one page of a [`Stepper`](crate::stepper::Stepper), plus the
 //! per-step [`StepStatus`] state model (Material/Ant/Flutter-style).
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SegmentedControlStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSegmentedControlStyle` ports the IntUI segmented-control

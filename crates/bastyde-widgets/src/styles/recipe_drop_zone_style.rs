@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `DropZoneStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeDropZoneStyle` ships the IntUI drop-zone chrome: a rounded,

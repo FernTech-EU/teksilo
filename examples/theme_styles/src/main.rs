@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Demonstrates the four-tier styling system in action — particularly
 //! the typed slot bag (`theme.style_slots.<widget>`) and per-call
 //! `.style(...)` overrides that landed with the styling refactor.

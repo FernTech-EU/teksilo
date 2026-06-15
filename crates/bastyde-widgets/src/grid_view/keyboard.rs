@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! 2D keyboard navigation for `GridView`.
 //!
 //! Mirrors `table_view/keyboard.rs` but for a flat-model tile grid: arrow

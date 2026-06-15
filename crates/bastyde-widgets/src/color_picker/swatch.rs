@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ColorSwatch` — single clickable color cell with `Role::ColorWell`.
 //!
 //! Public widget so apps can compose their own swatch rows / palettes

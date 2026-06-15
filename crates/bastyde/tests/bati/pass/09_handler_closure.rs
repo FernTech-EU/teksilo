@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.5: handler attachment is just a property whose value is a
 //! closure. The macro does not modify closure syntax — `move`, capture
 //! semantics, and arity stay as the user wrote them.

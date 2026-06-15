@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `DateEditStyle` impl + date-edit family design tokens.
 //!
 //! Design tokens for the date-edit family live as `pub const`s on this

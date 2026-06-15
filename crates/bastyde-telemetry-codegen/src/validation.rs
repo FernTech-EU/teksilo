@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Compile-time validation of the parsed schema.
 
 use crate::manifest::{EventDef, PropDef, Schema};

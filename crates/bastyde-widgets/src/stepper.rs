@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`Stepper`] — a modern, embeddable step-flow widget (Material/Ant/Flutter
 //! "stepper"), and [`Wizard`], a thin modal launcher built on it.
 //!

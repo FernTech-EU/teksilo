@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `AvatarStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeAvatarStyle` ports the IntUI avatar chrome exactly: the

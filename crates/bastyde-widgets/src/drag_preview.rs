@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Small composing widget used by `ListView` / `TreeView` to wrap the
 //! delegate-built preview passed to `EventContext::start_drag_with_preview`.
 //!

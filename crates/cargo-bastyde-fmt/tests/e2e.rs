@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end tests for the `cargo-bastyde-fmt` binary.
 //!
 //! Each test invokes the compiled binary against a temp dir of fixture

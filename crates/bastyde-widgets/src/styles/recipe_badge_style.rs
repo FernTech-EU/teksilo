@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `BadgeStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeBadgeStyle` ships the IntUI badge chrome: a fully-rounded

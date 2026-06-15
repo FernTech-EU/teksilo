@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §7.6: Dialog's `content` factory closure contains an inner
 //! `bati!(...)` call. The inner invocation lowers to a widget value
 //! that flows through the closure's return.

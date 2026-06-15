@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Spinner` — a shader-driven circular-arc loading indicator.
 //!
 //! Uses the same per-slot uniform-buffer pipeline as

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `DropTargetStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeDropTargetStyle` ships the IntUI drop-target chrome: the wrapped

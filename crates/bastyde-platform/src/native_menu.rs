@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Native (OS) menu service.
 //!
 //! Mirrors a logical menu tree (the `bastyde-widgets` `MenuModel`) into the

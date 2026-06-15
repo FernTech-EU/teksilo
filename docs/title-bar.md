@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # TitleBar Reference
 
 Bastyde replaces the native OS title bar with a widget-level one when an application opts into custom chrome. The title bar is a single cross-platform widget ([`TitleBar`](../crates/bastyde-widgets/src/title_bar.rs)); the window-manipulation plumbing (drag, zoom, close, inset measurements) lives behind a per-OS trait ([`PlatformTitleBarHost`](../crates/bastyde-core/src/window_chrome.rs)). The widget never touches `NSWindow`, `HWND`, or `xdg_toplevel` directly.

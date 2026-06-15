@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Smoke tests against bati! blocks lifted from the workspace examples.
 
 use bastyde_fmt::{FmtConfig, format_block};

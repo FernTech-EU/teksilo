@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Buttons tab — Button (×3 variants × states), IconButton, CommandLinkButton,
 //! PopoverButton, PopoverIconButton, SplitButton.
 

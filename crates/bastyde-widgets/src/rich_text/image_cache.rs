@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Image resource cache for RichTextEditor.
 //!
 //! Inline images in a `TextDocument` are referenced by name. The cache

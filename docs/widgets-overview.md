@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Bastyde Widget Catalog
 
 A categorized index of every widget that ships in the workspace. One line

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Minimal read-only XML DOM over `quick-xml`'s event stream.
 //!
 //! The SVG icon parser ([`crate::svg`]) recurses over a tree and reads

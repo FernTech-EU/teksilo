@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Integration tests for the `tr!` proc macro exported by
 //! `bastyde-i18n-macros`. Validates end-to-end behavior: compile-time key
 //! checking against `bastyde-i18n/locales/en-US.ftl`, runtime resolution

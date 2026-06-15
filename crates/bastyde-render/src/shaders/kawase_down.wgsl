@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Dual-Kawase blur — downsample pass.
 //
 // Samples the input texture at four diagonal offsets around each

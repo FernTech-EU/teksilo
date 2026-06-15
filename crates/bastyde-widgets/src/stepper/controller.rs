@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`StepperController`] — a shared, cloneable handle that drives a
 //! [`Stepper`](crate::stepper::Stepper) and lets app code reset / jump /
 //! introspect it from the outside.

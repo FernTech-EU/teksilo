@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-telemetry-codegen` — compile-time codegen for Bastyde telemetry.
 //!
 //! Consumes a YAML event manifest at build time and expands to:

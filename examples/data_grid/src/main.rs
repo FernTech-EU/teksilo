@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `data_grid` — flat `TableView` showcase.
 //!
 //! Run with: `cargo run -p data-grid`

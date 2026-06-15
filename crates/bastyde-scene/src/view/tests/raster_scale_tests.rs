@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Raster-scale integration: text painted inside a zoomed `SceneView`
 //! must lay out under the quantized ambient raster scale (set by the
 //! paint walker from the view's content-transform scope), so its glyphs

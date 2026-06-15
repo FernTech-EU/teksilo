@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Slider — a draggable value selector.
 //!
 //! The widget itself owns input handling (drag, keyboard, accessibility

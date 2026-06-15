@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `install_toast` — wire the Toast system into a `BastydeAppBuilder`.
 //!
 //! Mirrors the `BastydeAppBuilderInspectorExt` pattern (see

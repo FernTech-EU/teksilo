@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Integration tests for the Phase B i18n wiring on `BastydeAppBuilder` and
 //! `HeadlessApp`. Verifies that:
 //!

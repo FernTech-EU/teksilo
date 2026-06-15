@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ShortcutSettings — user-facing widget for browsing and rebinding
 //! application shortcuts.
 //!

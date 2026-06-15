@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DockingLayout` — a VS Code-style dockable layout: a fixed centre slot
 //! (the app's main content) surrounded by four collapsible, splittable,
 //! draggable side regions (leading / trailing / top / bottom), backed by a

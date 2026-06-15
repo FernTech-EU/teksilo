@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use serde::{Deserialize, Serialize};
 
 /// Horizontal alignment — respects LayoutDirection for Leading/Trailing.

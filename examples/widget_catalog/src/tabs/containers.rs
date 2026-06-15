@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Containers tab — Panel, Card, GroupBox, GroupHeader, Accordion, ToolBox,
 //! ScrollArea, ScrollBar, SplitView.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Sectioned uniform grid: a header row above each section's tile band.
 //!
 //! Wraps the uniform column geometry and interleaves a fixed-height header

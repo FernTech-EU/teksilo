@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 /// How focus was acquired — used for `:focus-visible` behavior.
 /// Only show focus ring when focus was gained via keyboard, not pointer click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

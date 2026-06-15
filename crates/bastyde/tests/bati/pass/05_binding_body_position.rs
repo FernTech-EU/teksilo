@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.3: a body-position binding `name = Element` hoists to the
 //! enclosing bati! block as `let name = ctx.add(...)` and attaches via
 //! `.add_child(name)` on the parent. The binding's id is in scope for

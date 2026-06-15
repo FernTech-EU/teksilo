@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ColorProp` — the unified input type for widget color builders.
 //!
 //! A `ColorProp` is one of:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Integration tests for the `PrivacySettings` widget.
 //!
 //! Verifies that programmatic interactions with `ConsentStore` (matching

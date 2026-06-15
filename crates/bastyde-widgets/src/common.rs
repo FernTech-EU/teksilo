@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Cross-widget shared infrastructure.
 //!
 //! Helpers and types reused by more than one widget in `bastyde-widgets` but

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use bastyde_i18n::LocalizedString;
 use bastyde_i18n::lit;
 use std::cell::Cell;

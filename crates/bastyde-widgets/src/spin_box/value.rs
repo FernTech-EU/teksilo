@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SpinValue` trait — abstracts numeric primitives for `SpinBox`.
 //!
 //! Implemented for `i32`, `i64`, `u32`, `u64`, `usize`, `f32`, `f64`.

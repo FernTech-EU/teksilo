@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Compile-time-validating proc macros for Bastyde's i18n runtime.
 //!
 //! This crate exports `tr!` and `tr_widget!`, the two proc macros that

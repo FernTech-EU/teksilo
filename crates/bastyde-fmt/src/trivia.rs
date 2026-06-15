@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Byte-range trivia scanner.
 //!
 //! `syn::ParseStream` discards comments and whitespace before they reach

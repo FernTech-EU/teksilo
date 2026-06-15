@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Calendar` — month-grid date picker, standalone widget.
 //!
 //! A self-contained calendar with month/year navigation, a 6×7 day grid,

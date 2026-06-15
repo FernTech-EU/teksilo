@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Drag and Drop
 
 **Companion to:** [architecture.md §14](architecture.md), [events-and-gestures.md](events-and-gestures.md)

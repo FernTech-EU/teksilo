@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Native file-dialog service.
 //!
 //! This module provides an async, parent-aware, testable file-dialog

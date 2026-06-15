@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.3: `match` at body position dispatches to `BatiBranchN`
 //! based on arm count. Three distinct-type arms lower via BatiBranch3.
 

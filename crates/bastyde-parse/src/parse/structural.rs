@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Parsers for structural body items: `if` / `match` / `for` / `..spread`.
 //!
 //! Each form's body is a single bati element (spec §5.1–§5.3). Users

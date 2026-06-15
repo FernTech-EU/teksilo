@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Validation pipeline shared by `TextInputField` and the composites
 //! that render its feedback (`TextInput`, `DateEdit`, `TimeEdit`,
 //! `DateTimeEdit`).

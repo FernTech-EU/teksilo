@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`PathItem`] — vector path with optional fill and stroke.
 //!
 //! Stroke-only paths use a per-segment distance hit-test so users can

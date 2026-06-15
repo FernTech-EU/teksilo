@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `cargo bastyde-fmt` — formatter for `bati!` DSL blocks in Rust source.
 //!
 //! Run as a cargo subcommand: `cargo bastyde-fmt [paths...]`

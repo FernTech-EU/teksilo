@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `Calendar`. See `docs/styling-system.md`.
 //!
 //! Multi-method trait because `Calendar` paints three distinct cell

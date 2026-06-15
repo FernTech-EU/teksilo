@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Knob specs and knob value containers.
 //!
 //! `KnobSpec` is a static, declarative description of which properties

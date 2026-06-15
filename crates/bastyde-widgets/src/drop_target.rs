@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DropTarget` — a transparent wrapping drop container.
 //!
 //! Where [`DropZone`](crate::drop_zone::DropZone) is a *standalone* "drop files

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SettingsFile<T>` — typed single-struct persistence.
 //!
 //! Used when the persisted shape is a known struct (recents, window

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Layered drop-shadow helper for elevated surfaces.
 //!
 //! Composes two [`Shadow`]s underneath a rounded rect:

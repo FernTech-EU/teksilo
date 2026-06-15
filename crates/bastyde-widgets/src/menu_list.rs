@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! MenuList — a vertical container for MenuItem and MenuSeparator widgets.
 //!
 //! Provides a themed surface (background, border, corner radius) and

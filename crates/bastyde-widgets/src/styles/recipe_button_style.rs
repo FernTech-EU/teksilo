@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `ButtonStyle` impl driven by `ButtonRecipe` data per
 //! variant. Holds a `HashMap<ButtonVariant, ButtonRecipe>` and looks
 //! up the recipe at paint time.

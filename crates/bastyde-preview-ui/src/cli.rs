@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Command-line argument parsing for previewer binaries.
 //!
 //! The expected shape — wired up by each consuming binary's `main()`:

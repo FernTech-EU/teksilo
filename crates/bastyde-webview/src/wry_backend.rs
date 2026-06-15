@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `WryBackend` — production engine backend (macOS WKWebView / Windows
 //! WebView2 / Linux-X11 WebKitGTK) via the [`wry`] crate.
 //!

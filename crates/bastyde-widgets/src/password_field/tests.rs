@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless tests for `PasswordField` — masking semantics surfaced
 //! through the accessibility tree (the observable, plaintext-free
 //! contract), plus build/layout smoke coverage.

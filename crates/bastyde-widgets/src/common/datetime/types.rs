@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Stable type aliases for the date/time types used across the four
 //! datetime widgets. Routes through `jiff` today; swap-friendly because
 //! the widgets never name `jiff` directly.

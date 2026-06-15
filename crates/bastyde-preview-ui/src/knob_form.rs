@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Knob form generator — turns a `KnobSpec` plus a runtime
 //! `KnobValues` into a column of editor rows that drive the runtime
 //! signals on user input.

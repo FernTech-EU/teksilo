@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Styling tab — the four-tier styling ladder in one place.
 //!
 //! - **Tier 1 — Variants.** Every themable widget exposes a closed

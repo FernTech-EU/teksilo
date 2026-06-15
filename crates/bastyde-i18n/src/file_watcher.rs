@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `notify`-based hot-reload watcher for `runtime_override` `.ftl` files.
 //!
 //! Architecture §12.6: the translator workflow starts the application

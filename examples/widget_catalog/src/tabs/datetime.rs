@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Date & Time tab — Calendar, DateEdit, TimeEdit, DateTimeEdit, DateRangeEdit.
 
 use bastyde::prelude::*;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`GroupItem`] — labelled box / logical AT container.
 //!
 //! Visually a labelled rectangle with optional fill, stroke, and

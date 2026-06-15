@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! SVG path `d` attribute parser.
 //!
 //! Converts an SVG path data string into a sequence of [`PathCommand`]s.

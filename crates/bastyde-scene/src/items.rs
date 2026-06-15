@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Built-in `SceneItem` implementations.
 //!
 //! Five lightweight items cover the common decoration cases:

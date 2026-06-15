@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Keyboard dispatch for the rich text editor.
 //!
 //! This module owns the full `KeyDown` / `ImeComposition` / `ImeCommit` dispatch: navigation

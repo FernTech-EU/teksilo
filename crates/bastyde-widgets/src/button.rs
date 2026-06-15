@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Production-quality Button widget — V2 Widget using Signal-based reactivity.
 //!
 //! Addresses all architectural requirements:

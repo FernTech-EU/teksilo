@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Animation scheduler — drives `Signal<f32>` values smoothly over time.
 //!
 //! The scheduler stores active animations and advances them each frame.

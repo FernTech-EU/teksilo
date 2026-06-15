@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Runtime loader for the platform's installed color-emoji font.
 //!
 //! Enabled by the `system-emoji` Cargo feature. Unlike the embedded

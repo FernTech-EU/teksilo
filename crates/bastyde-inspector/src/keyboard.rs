@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Panel-scoped keyboard shortcuts for the inspector.
 //!
 //! `PanelShortcutHost` wraps the panel content and registers all

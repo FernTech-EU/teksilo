@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Middle and leading ellipsis truncation helpers.
 //!
 //! Given a text, style, and pixel width budget, return the display string

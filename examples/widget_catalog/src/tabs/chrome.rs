@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Chrome tab — Toolbar, StatusBar, Banner, Breadcrumb, Wizard.
 
 use bastyde::prelude::*;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-settings` — persistent, reactive user preferences for Bastyde.
 //!
 //! Two persistence shapes share one storage backbone:

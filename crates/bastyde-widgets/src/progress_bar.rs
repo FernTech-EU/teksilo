@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ProgressBar — a bar showing progress from 0.0 to 1.0.
 //!
 //! Determinate / indeterminate, horizontal / vertical. The stationary

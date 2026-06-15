@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Blur` — a wrapper widget that applies a Gaussian-equivalent blur
 //! to its child subtree, driven by a `Prop<f32>` radius (in logical
 //! pixels).

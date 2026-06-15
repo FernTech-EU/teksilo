@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! LineChart — points connected by polylines, single or multi-series.
 //!
 //! Lines, optional point markers, axes, grid, and legend, plus optional area

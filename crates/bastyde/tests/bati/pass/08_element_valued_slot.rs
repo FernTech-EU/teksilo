@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.4: multi-argument property where the second arg is a full
 //! bati element — the TabWidget `tab: "name", Card { ... }`
 //! pattern. The `Card { ... }` body uses DSL syntax (named slots via

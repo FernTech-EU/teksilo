@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 ![CI](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/ci.yml?branch=main&style=flat-square&label=CI)
 ![audit](https://img.shields.io/github/actions/workflow/status/ferntech-eu/bastyde/audit.yml?branch=main&style=flat-square&label=audit)
 [![license](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)](#license)

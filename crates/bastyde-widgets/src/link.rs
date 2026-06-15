@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Link — a clickable text label with underline.
 //!
 //! Follows the Button pattern for interaction but renders as underlined text.

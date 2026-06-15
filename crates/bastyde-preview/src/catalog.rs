@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `WidgetCatalog` trait — the user-facing trait that widget authors
 //! implement to register a widget for previewing.
 //!

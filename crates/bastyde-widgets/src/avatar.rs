@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Avatar` — circular (or rounded-square / square) user-identity widget.
 //!
 //! Displays either a person's image (clipped to the configured shape via

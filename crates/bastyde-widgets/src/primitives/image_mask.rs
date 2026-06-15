@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Anti-aliased alpha masking for raster images — circle / rounded-square
 //! / square coverage applied in-place to RGBA8 pixel buffers.
 //!

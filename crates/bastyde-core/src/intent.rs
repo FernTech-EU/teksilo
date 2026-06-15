@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Runtime intents dispatched by shortcuts and programmatic callers.
 //!
 //! An [`Intent`] is the unit of "something wants to happen" in the

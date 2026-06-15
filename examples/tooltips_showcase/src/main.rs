@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tooltips showcase — three-tier cascading demo.
 //!
 //! Run with: `cargo run -p tooltips-showcase`

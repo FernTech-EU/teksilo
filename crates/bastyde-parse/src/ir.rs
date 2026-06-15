@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Intermediate representation for the `bati!` DSL.
 //!
 //! The parser builds an IR tree; the lowering walks the tree and emits

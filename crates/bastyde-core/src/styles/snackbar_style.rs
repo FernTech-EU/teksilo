@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `Snackbar`. See `docs/styling-system.md`.
 //!
 //! Themes the snackbar surface — the high-contrast notification panel

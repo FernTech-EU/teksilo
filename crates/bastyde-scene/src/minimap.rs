@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`SceneMinimap`] — a small thumbnail of a [`Scene`](crate::Scene)
 //! showing all items as dots / rects scaled down, with an overlay
 //! highlighting the currently visible viewport rectangle.

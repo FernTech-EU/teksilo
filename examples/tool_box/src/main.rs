@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ToolBox example — a vertical palette of exclusive-disclosure sections
 //! styled per Int UI.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Phase H demo — §12 internationalization showcase.
 //!
 //! Run with: `cargo run -p internationalization`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Windows external drag-and-drop backend (OLE `IDropTarget`).
 //!
 //! winit registers its own OLE drop target on the window and reports drops

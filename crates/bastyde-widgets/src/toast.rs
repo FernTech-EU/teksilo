@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Toast notification — stackable, action-rich, severity-aware floating
 //! notification (the "upgrade path" from [`Snackbar`](crate::snackbar)).
 //!

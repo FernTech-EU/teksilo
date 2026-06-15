@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Free functions the `tr!` / `tr_widget!` macros expand into.
 //!
 //! Each function reaches the active `I18nManager` through the thread-local

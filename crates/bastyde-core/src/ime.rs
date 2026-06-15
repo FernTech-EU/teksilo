@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Input-method-editor (IME) descriptors attached to widget nodes.
 //!
 //! A focusable node carries an optional [`ImeContext`]. Its **presence**

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 pub use bastyde_app as app;
 pub use bastyde_canvas as canvas;
 pub use bastyde_core as core;

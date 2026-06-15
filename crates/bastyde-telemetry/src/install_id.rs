@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Pseudonymous-mode install identifier.
 //!
 //! [`InstallId`] is a stable random UUID v4 generated at first run,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! FormLayout — a two-column form layout where children are added as
 //! label/field pairs, with support for full-width rows.
 

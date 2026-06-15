@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # bastyde-widgets framework strings — French translation.
 #
 # Runtime-only: applications that register this locale via

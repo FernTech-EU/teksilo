@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Typed `Rc<dyn FooStyle>` slot bag — the theme-wide override channel
 //! for the four-tier styling system.
 //!

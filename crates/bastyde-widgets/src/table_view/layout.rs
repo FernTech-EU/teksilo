@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Column-width resolution + per-pane horizontal layout.
 //!
 //! `ColumnSolver` resolves a list of `ColumnWidth` declarations against

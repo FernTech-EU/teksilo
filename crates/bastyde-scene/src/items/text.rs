@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`TextItem`] — unstyled text in a local-coord rectangle.
 //!
 //! Text content can be a static string or a live `Signal<String>`;

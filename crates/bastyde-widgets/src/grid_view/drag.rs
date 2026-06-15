@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Drag-to-reorder for `GridView`.
 //!
 //! Each tile can start a typed [`GridViewDragData`] drag; the container is a

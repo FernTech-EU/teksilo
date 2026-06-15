@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Validates the cooperative Tokio integration headlessly (no winit loop): a
 //! `tokio::time::sleep` awaited on the main-thread executor must resolve,
 //! driven by the background runtime's timer driver, when each tick runs inside

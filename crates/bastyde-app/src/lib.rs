@@ -1,4 +1,6 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
 
 pub mod app;
 pub mod default_post_root;

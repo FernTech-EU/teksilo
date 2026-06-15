@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Recursive `.rs` file discovery.
 //!
 //! Walks a directory tree depth-first, yielding every `*.rs` file.

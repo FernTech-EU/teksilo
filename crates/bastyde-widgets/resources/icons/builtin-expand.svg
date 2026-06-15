@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
   <polyline points="10,2 14,2 14,6"/>
   <line x1="14" y1="2" x2="9" y2="7"/>

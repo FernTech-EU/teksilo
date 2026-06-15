@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Over-constraint handling showcase — graceful shrink, layout priority,
 //! height-for-width, and the inspector's overflow overlay.
 //!

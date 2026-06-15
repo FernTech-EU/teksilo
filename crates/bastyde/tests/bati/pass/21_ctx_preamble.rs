@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §2: the `bati!(ctx => ...)` preamble wraps the root in
 //! `ctx.add(...)` and returns a `WidgetId`.
 

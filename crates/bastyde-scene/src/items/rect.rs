@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`RectItem`] — filled / stroked rectangle in local item coords.
 
 use accesskit::Role;

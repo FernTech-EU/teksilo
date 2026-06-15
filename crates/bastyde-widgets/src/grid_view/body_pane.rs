@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `GridBodyPane<T>` — the virtualized tile pane.
 //!
 //! Like `TableView`'s `BodyPane`, this is a **sibling** of the scrollbar

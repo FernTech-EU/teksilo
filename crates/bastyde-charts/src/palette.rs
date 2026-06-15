@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Series color palette resolution.
 //!
 //! Charts pick per-series colors in this priority order:

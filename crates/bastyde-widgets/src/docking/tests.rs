@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless widget-level integration tests for [`DockingLayout`](super::DockingLayout):
 //! build a real layout in a `WidgetTree`, lay it out, and assert the geometry
 //! and accessibility wiring.

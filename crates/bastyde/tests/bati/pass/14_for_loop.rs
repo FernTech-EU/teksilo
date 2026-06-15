@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.2: `for pat in iter { Elem }` lowers to
 //! `.children(iter.map(|pat| Elem::new()))`. Optional `let` bindings
 //! inside the for-body are emitted as statements inside the closure.

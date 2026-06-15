@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.4: a `let` at body position introduces a computed value
 //! used by subsequent body items. Switches the enclosing element to
 //! statement-sequence lowering form.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared text-measurement helpers.
 //!
 //! `Canvas::draw_text` truncates with "…" when the supplied rect width is

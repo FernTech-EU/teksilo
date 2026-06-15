@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `LinkStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeLinkStyle` ships the IntUI link chrome: idle / hover /

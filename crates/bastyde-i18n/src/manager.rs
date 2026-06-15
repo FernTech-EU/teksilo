@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `I18nManager` — owns Fluent bundles and the active-locale signals.
 
 use std::cell::RefCell;

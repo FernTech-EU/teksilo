@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-item animation helpers for [`SceneItem`](crate::SceneItem)
 //! authors.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `AlphaStrip` — 1D opacity slider with a checkerboard background +
 //! tinted gradient overlay.
 //!

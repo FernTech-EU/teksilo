@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Divider — a themed separator line.
 //!
 //! A thin line that separates content visually. Horizontal by default.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Pure region-geometry engine for [`DockingLayout`](super::DockingLayout).
 //!
 //! A docking layout is a *border layout with configurable corners* — exactly

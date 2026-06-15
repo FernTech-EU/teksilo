@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Extension traits exposing settings services on `BuildContext` and
 //! `EventContext`.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Type::Variant` at a property-value position is parsed as a Rust
 //! expression (enum variant access), not as a bati element. The two-
 //! UpperCamel-segment shape is the syntactic signal.

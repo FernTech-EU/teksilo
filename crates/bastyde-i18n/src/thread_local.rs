@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Thread-local handle to the active `I18nManager`.
 //!
 //! `BastydeAppBuilder` calls `install` once at startup, after constructing the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Animated icon decoding: animated WebP → frame sequence.
 
 use std::time::Duration;

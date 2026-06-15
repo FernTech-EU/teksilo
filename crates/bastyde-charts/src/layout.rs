@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared plot-area layout math used by BarChart and LineChart.
 //!
 //! Computes the inner plot rect after carving off space for axis labels,

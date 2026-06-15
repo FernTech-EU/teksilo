@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Shader-driven animated quads — sprite-atlas kinds.
 //
 // Same vertex shape and uniform buffer as anim_procedural.wgsl, with

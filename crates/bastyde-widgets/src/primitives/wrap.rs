@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Wrap — a horizontal flow layout that wraps children to the next line
 //! when they exceed the available width.
 

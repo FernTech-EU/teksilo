@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Window placement enum.
 //!
 //! A single unified type covers the four placement modes every modern

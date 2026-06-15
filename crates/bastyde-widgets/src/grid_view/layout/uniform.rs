@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The uniform-tile grid strategy: every row has the same fixed height.
 //!
 //! This is the exact, O(1) common case — photo galleries, icon views,

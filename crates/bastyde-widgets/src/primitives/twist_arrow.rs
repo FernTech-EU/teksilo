@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Small interactive chevron that toggles a tree node's expansion.
 //!
 //! Renders a right-pointing arrow when collapsed, down-pointing when

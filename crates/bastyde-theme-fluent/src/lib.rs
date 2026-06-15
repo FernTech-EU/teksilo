@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Fluent (Windows 11) theme preset for Bastyde.
 //!
 //! **Stub.** The constructors return a `bastyde_core::Theme` shaped from

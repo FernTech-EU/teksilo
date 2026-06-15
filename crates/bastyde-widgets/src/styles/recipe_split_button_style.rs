@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SplitButtonStyle` impl for `SplitButton`.
 //!
 //! Owns the shared frame chrome (background fill, border, corner radius,

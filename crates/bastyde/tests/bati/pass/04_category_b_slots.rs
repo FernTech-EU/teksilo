@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §4.2: Category B widgets use named slot methods rather than
 //! `.child()`. Slot values can be full elements with their own body —
 //! no special syntax needed, just `slot: Element { ... }`.

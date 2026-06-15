@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `WidgetCatalog` impls for `bastyde-widgets`.
 //!
 //! Gated behind the `preview` Cargo feature so production builds and

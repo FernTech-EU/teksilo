@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! PasswordField demo — a sign-in form plus an echo-mode showcase.
 //!
 //! Run with: `cargo run -p password-field`.

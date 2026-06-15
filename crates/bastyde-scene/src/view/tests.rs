@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Sub-modules — added in Unit 9 to fill the audit-flagged
 // coverage gaps without bulk-moving the existing legacy tests
 // out of this file. The mechanical split of the legacy section

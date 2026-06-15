@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! N-pane split container with draggable, collapsible dividers.
 //!
 //! `Splitter` arranges `N ≥ 2` panes along one axis (per [`Orientation`])

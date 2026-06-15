@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tab migration — drag a tab from one `TabWidget` into another.
 //!
 //! Two small tabbed groups sit side by side, each backed by its own

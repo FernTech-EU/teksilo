@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Inspector state persistence via `bastyde_settings::SettingsStore`.
 //!
 //! Wired by `state::install`'s post-root closure on each window. The

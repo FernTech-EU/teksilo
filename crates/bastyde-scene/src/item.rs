@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The [`SceneItem`] trait and its supporting context types.
 //!
 //! Lightweight items live in a [`Scene`](crate::Scene) without arena

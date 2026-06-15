@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless integration tests for the read-only `RichTextEditor`.
 //!
 //! These tests drive the widget through its public surface: add it to a

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `WebView`. See `docs/styling-system.md`.
 //!
 //! A `WebView` paints almost nothing itself — the actual page is drawn by a

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Axis configuration and tick generation.
 //!
 //! `nice_ticks` implements the Wilkinson / Heckbert nice-numbers algorithm

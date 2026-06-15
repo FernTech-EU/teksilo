@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Toast Notification Reference
 
 `bastyde_widgets::toast` ships the Bastyde notification system: stackable,

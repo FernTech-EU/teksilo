@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Toolbar row that switches a live `SyntaxHighlighter` on the shared
 //! `TextDocument`.
 //!

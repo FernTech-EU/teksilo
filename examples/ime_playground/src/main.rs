@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! IME playground — exercise the full input-method pipeline without an OS IME.
 //!
 //! Run with: `cargo run -p ime-playground`.

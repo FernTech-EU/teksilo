@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`SceneView`] — the viewport widget that hosts a [`Scene`] and
 //! places its items at scene coordinates.
 //!

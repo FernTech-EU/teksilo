@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Path atlas: CPU rasterizes paths with tiny-skia, caches results in a texture atlas with LRU eviction.
 
 use std::collections::HashMap;

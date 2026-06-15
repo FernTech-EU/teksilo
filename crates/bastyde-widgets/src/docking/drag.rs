@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Drag-and-drop plumbing for [`DockingLayout`](super::DockingLayout):
 //! the two typed payloads, the five-zone hit-test, and the signal-driven
 //! drop-zone overlay. The actual mutations are routed by the panel / tab

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SettingsKey<bool>` constants for the per-scope toggles.
 //!
 //! These keys live in the **app's** `SettingsStore` (i.e. `general.toml`),

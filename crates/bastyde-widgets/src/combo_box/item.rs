@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DropdownItem` — the row widget for a single entry in the dropdown
 //! panel, plus the `build_default_item` helper used when the caller
 //! hasn't supplied a custom `render_item` closure.

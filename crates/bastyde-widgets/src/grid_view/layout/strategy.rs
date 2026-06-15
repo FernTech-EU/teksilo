@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The pluggable layout strategy that drives `GridView<T>`'s virtualization.
 //!
 //! A `GridLayoutStrategy` answers every geometric question the

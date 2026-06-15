@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The pure N-pane sizing engine.
 //!
 //! [`distribute`] projects the model's stored pixel sizes onto the

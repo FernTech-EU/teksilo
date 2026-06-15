@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Compile-fail: `__` inside a path segment is reserved as the
 //! nested-module separator, so the macro refuses to accept it.
 

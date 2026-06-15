@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-locale defaults: first day of week + segment-pattern.
 //!
 //! Hand-curated for the top ~25 locales, matching CLDR. Any locale not

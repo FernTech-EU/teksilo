@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! PieChart — circular value slices.
 //!
 //! Pie and donut share the same widget. `inner_radius_ratio == 0.0` is a

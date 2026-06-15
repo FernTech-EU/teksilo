@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tests for `bastyde_fmt::format_file` — finding `bati!` invocations in a
 //! Rust source file and reformatting them in place while leaving
 //! surrounding source untouched.

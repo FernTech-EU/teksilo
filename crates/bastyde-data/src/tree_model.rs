@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Concrete reactive tree. Owns a hierarchy of items in a flat arena
 //! (SlotMap) with parent-child links. Mutations emit `TreeChange` automatically.
 //! Cloneable for shared access.

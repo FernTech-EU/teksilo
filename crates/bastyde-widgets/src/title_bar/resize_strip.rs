@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! A thin invisible widget that forwards a window resize gesture to the
 //! platform host when the user presses the primary button inside it. Used
 //! to build a 6-px resize frame around a borderless window on Wayland.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Auto save / restore of window geometry, driven by the
 //! [`WindowStateService`] registered
 //! via `BastydeAppBuilder::settings(...)`.

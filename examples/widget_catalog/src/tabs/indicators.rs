@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Indicators tab — read-only status: ProgressBar, Spinner, Link, Badge, Avatar.
 //!
 //! `classic()` constructs every widget with imperative builder calls

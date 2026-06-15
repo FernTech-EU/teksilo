@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Process-unique identifier for a menu item.
 //!
 //! A [`MenuItemId`] is the stable token that ties a logical menu item (declared

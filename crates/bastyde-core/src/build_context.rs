@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! BuildContext — context available during Widget::build().
 //!
 //! Provides Signal-based APIs for creating reactive state, registering

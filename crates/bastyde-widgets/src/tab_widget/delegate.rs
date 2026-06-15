@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-tab metadata extraction for `TabBar<T>` and `TabWidget<T>`.
 //!
 //! `TabDelegate<T>` is a struct of closures the tab bar invokes against

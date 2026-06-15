@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `PopoverStyle` impl driven by paint-recipe data.
 //!
 //! `RecipePopoverStyle` constructs the IntUI `PopoverSurface`

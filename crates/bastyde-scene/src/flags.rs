@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-item behavior flags.
 //!
 //! [`ItemFlags`] is a bitset packed into a `u32`. Each flag opts an

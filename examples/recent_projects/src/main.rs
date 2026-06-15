@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Recent Projects Demo — end-to-end exercise of `bastyde-settings`.
 //!
 //! Run with: `cargo run -p recent-projects`

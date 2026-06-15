@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Inspector state and installation logic — debug builds only.
 
 use bastyde_app::{BastydeAppBuilder, DefaultPostRoot};

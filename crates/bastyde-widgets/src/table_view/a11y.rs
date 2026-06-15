@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accessibility wrappers for `TableView` / `TreeTable`.
 //!
 //! AccessKit's table semantics work by labelling individual nodes with

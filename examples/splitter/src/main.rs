@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Splitter` showcase — the N-pane, collapsible, serializable split
 //! container that replaces the old two-pane `SplitView`.
 //!

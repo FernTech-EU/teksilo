@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Validates async-std integration headlessly: an `async_std::task::sleep`
 //! awaited on the main-thread executor must resolve via async-std's global
 //! reactor — with NO runtime-context guard around the tick.

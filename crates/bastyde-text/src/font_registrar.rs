@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Font registration abstraction for rich-text widgets.
 //!
 //! Every rich-text widget renders against a shared

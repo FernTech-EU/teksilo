@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Bastyde Widget Catalog — Arabic translations.
 #
 # المفاتيح بصيغة kebab-case في طبقة Fluent، وتُحوَّل إلى snake_case في

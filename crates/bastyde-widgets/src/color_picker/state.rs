@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Internal state for [`ColorPicker`](super::ColorPicker).
 //!
 //! `ColorComponents` is constructed once in the picker's `build()` and

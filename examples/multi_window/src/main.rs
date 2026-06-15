@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Multi-Window Demo — exercises the new per-window `WindowState` +
 //! `EventContext::open_window` API end-to-end.
 //!

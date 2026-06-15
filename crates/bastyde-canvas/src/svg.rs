@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! SVG parsing: load SVG icons as [`Path`] geometry for rendering.
 //!
 //! The main entry point is [`SvgIcon::parse`], which takes an SVG string

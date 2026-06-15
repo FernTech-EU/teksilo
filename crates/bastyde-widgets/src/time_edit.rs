@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TimeEdit` — text input for time-of-day, bound to `Signal<Option<Time>>`.
 //!
 //! Single-line editable time field with strftime-pattern parse/format

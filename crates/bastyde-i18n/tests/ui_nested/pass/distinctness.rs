@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Verifies that the option-B nested-separator scheme prevents
 //! collisions between paths that would all have mapped to the same
 //! Fluent key under the old dash-joining behavior. Each of the four

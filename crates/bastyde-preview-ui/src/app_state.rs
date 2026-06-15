@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared app state and the previewer's root widget.
 //!
 //! `AppState` is a `Clone` bundle of signals consumed by every pane.

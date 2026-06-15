@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-async` demo — imperative async inside UI handlers.
 //!
 //! Run with: `cargo run -p async-demo`

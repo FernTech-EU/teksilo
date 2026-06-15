@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Element parser: `Type[::ctor][(args)] [{ body }]`.
 
 use proc_macro2::Span;

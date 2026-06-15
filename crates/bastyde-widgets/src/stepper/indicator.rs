@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`StepIndicator`] — one step's marker in the indicator strip: a numbered
 //! status circle followed by the step title (Ant/MUI horizontal-steps layout).
 //!

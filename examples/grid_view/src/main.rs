@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `grid_view` — virtualized 2D tile grid showcase.
 //!
 //! Run with: `cargo run -p grid-view`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Trait for large or external datasets that cannot be held in memory.
 //!
 //! `ListDataSource` is an escape hatch for cases where the data is too large

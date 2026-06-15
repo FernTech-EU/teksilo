@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Variable-row-height grid: each row is sized to its tallest tile.
 //!
 //! Columns are uniform (same policy as [`UniformGrid`](super::uniform::UniformGrid)),

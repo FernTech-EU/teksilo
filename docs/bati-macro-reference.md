@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # `bati!` Macro Reference
 
 A block-structured DSL for Bastyde widget trees. `bati!` is a thin syntactic

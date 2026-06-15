@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # The `bati!` Language Specification (v3)
 
 **Status:** Design draft, revision 3

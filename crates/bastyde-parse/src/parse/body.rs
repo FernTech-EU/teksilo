@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Body parser: sequence of body items inside `{ ... }`.
 //!
 //! Dispatches by two-token lookahead per spec §3.1 "commit on distinctive

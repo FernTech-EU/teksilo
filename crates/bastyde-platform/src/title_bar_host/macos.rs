@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! macOS title bar host. Uses `objc2-app-kit` to inspect the `NSWindow`
 //! behind the winit window: we measure the standard traffic-light cluster
 //! at construction time to reserve the correct leading inset. Drag stays on

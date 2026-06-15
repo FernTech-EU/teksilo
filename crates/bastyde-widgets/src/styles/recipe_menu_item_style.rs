@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `MenuItemStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeMenuItemStyle` ships the IntUI menu-row chrome:

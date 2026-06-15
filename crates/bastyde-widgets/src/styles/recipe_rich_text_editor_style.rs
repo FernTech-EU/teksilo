@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `RichTextEditorStyle` impl.
 //!
 //! Frames the editor viewport in a TextInput-like border + padding +

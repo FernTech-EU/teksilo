@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Wayland title bar host. Pure delegation to winit's `Window` API: the
 //! compositor handles drag, resize, and the system window menu via the
 //! standard xdg-shell protocol, so we don't need any FFI of our own.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Animations Kit — interactive showcase for every animation
 //! primitive shipped to date. Each section demonstrates one piece of
 //! the animation surface and doubles as a visual regression baseline:

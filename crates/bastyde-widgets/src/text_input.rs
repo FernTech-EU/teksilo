@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TextInput` — styled single-line text field composite.
 //!
 //! Wraps the [`TextInputField`]

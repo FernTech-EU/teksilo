@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Runtime add / remove / move / pure-a11y reconciliation for `SceneView`.
 //!
 //! Exercises the visual + (separate) AccessKit self-reconciliation wired in

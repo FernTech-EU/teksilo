@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use bastyde_canvas::Point;
 use bastyde_core::event::{Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
 use bastyde_core::gesture::{GestureEvent, TapEvent};

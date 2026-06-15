@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Windows custom title-bar host.
 //!
 //! Replaces the native frame with the widget-tree-painted title bar

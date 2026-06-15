@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! OTLP/HTTP logs wire format (JSON encoding of the OpenTelemetry
 //! `ExportLogsServiceRequest` proto).
 //!

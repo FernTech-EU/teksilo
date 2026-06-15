@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `TabStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeTabStyle` ships the IntUI editor-tab look: an accent

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The `bati!` DSL proc-macro for Bastyde widget trees.
 //!
 //! See `docs/bati-language-spec-v3.md` for the surface language. This

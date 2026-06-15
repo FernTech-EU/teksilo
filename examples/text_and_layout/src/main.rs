@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Milestone 2: Text and Layout Fundamentals
 //!
 //! A window with multiple widgets arranged in nested layouts, demonstrating

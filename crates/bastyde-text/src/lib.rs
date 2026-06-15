@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 pub mod shared_typesetter;
 pub mod typesetter_bridge;
 

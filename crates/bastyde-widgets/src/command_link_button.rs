@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! CommandLinkButton — large two-line button with icon, title, and
 //! subtitle. Used for wizard landing screens, onboarding choices, and
 //! any "card-shaped CTA" pattern.

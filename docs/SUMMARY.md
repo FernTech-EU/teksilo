@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Bastyde Documentation Index
 
 Reference and design documents for Bastyde. All paths are relative to this

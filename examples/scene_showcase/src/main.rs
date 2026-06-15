@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `scene-showcase` — comprehensive demo of every `bastyde-scene` capability.
 //!
 //! One pannable / zoomable scene divided into eight labelled sections.

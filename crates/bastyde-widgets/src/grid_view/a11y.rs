@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accessibility wrappers for `GridView` tiles.
 //!
 //! Each realized tile is wrapped in a [`TileA11y`] node carrying

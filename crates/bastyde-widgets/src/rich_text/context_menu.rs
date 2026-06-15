@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default right-click context menu for `RichTextEditor`.
 //!
 //! Uses the framework's built-in

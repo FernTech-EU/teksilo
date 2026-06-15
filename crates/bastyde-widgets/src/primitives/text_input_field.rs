@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TextInputField` — editable single-line text surface primitive.
 //!
 //! This is the raw editing primitive that powers the styled

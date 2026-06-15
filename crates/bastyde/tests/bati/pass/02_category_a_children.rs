@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.6, §4.1: bare child elements at body position lower to
 //! `.child(...)` calls on the parent.
 

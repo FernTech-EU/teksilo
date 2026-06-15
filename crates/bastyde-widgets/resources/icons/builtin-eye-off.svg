@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
   <!-- Closed eyelid: a thin crescent arching downward, like a sleeping eye. -->
   <path d="M1 7 Q8 12 15 7 Q8 10 1 7 Z"/>

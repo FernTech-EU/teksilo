@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §2: without `ctx =>`, `bati!(...)` returns a widget value
 //! suitable for passing into `.child(...)` or storing in a `let`.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use crate::styles::Theme;
 
 /// Layout direction for RTL/LTR support.

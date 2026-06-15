@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Distinctness fixture — four keys that all would have collided to
 # `foo-bar-baz` under the old dash-joining scheme. Under option B
 # each maps to its own key:

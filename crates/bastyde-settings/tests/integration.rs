@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end integration tests:
 //!   * Multi-process style reopen (state persists across `Drop`).
 //!   * The `SettingsBundle` -> `OpenedSettings` pipeline.

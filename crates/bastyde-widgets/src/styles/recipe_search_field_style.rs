@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SearchFieldStyle` impl + design tokens.
 //!
 //! Design tokens for `SearchField` live as `pub const`s on this module.

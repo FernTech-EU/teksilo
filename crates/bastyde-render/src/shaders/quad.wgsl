@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 // Textured quad shader (Tier 1 — glyphs and images).
 //
 // The quad pipeline has two fragment paths, selected per-vertex via the

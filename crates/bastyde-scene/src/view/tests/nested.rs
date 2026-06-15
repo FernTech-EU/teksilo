@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Coverage for nested `SceneView`s — the chart-style layout
 //! where an outer view holds fixed axis chrome and an inner
 //! view holds the free-pan / free-zoom data area. Per Unit 3,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Hit-test helpers and context-target classification.
 //!
 //! Pointer positions arrive in widget-local screen space. text-typeset's

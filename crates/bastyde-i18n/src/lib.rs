@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Internationalization runtime for Bastyde.
 //!
 //! Implements §12 of `docs/architecture.md`. This crate is the

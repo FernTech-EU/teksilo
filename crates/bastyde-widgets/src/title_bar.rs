@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Custom window title bar widget.
 //!
 //! `TitleBar` replaces a window's native chrome with a horizontal bar that

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared helpers for querying Linux desktop settings via subprocess calls.
 //!
 //! Used by both `accessibility_prefs` and `os_theme` modules.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! SearchField — a [`TextInput`] preset
 //! configured for search workflows: leading magnifier glyph, default-on
 //! clear-X, and an optional anchored suggestions popover with keyboard

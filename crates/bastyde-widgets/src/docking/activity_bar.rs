@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DockActivityBar` — the tailored VS Code-style **vertical** icon rail. One
 //! item per tab of a side; clicking an inactive item selects + shows the side,
 //! clicking the active item hides the side. Always visible (it lives in the

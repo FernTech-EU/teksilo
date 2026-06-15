@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Locale tab — switch the active locale on the fly.
 //!
 //! Lists every locale declared in `I18nConfig::supported_locales`

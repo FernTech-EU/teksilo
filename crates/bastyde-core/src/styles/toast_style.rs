@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 style protocol for `Toast`. See `docs/styling-system.md`.
 //!
 //! Themes the floating toast surface — the per-severity card the

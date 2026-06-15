@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Declarative menu model — a single source of truth for both the in-window
 //! [`MenuBar`](crate::menu_bar::MenuBar) and the platform's native menu bar
 //! (`NSMenu` on macOS).

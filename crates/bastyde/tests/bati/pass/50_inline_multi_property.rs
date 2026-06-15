@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Body items can be comma-separated on a single line.
 //!
 //! `Panel { padding: 8.0, color: RED }` parses as two properties, the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SplitterHandle` — one draggable divider between pane `i` and pane
 //! `i+1` of an N-pane [`Splitter`](super::Splitter).
 //!

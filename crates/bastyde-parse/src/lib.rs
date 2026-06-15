@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Parser and IR for the `bati!` DSL.
 //!
 //! Extracted from `bastyde-macros` so non-proc-macro consumers (notably

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end integration test for the telemetry pipeline.
 //!
 //! Exercises the full chain from `BastydeAppBuilder::telemetry(...)` →

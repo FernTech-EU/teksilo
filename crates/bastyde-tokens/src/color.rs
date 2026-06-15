@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use serde::{Deserialize, Serialize};
 
 /// A color represented as four f32 components (red, green, blue, alpha) in the range 0.0..=1.0.

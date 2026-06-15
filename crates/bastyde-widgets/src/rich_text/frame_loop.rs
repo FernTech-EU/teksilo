@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The editor's per-frame effect body.
 //!
 //! Follows the numbered steps in §27.10.3 of the architecture doc.

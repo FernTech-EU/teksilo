@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `StepButton` — private helper widget for `SpinBox`.
 //!
 //! A small non-focusable button stacked inside a `SpinBox`'s

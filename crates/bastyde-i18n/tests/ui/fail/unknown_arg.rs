@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Compile-fail: `welcome` only declares `$name`, not `$extra`.
 
 use bastyde_i18n::tr;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Constructor-call lowering for chain-form elements.
 
 use proc_macro2::TokenStream as TokenStream2;

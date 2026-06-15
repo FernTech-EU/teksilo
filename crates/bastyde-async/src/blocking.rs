@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`spawn_blocking`] — run a blocking closure on a throwaway OS thread and
 //! await its result on the main-thread executor, with **zero** async runtime.
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 """Build every Bastyde example in release mode and bundle the resulting
 binaries into a single .tar.gz archive.
 

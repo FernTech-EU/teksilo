@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-row container widget — `Role::Row`, lays its cells horizontally
 //! using a shared column-width handle owned by the parent table.
 //!

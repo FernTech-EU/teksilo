@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.1: `if cond { A } else { B }` lowers via `BatiBranch<L, R>`
 //! so the two arms can produce different widget types from the same
 //! child position.

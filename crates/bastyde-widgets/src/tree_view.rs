@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Virtualized hierarchical tree widget.
 //!
 //! `TreeView` displays a `TreeModel<T>` as an indented, expandable/collapsible

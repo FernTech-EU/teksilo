@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # French runtime translation. Missing keys fall back to en-US at runtime.
 
 window-title = Démo d'internationalisation

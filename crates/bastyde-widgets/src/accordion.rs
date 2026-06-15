@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accordion — a collapsible section with clickable header.
 //!
 //! Default (non-fill) mode animates the disclosure with the `Collapse` widget

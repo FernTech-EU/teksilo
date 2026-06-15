@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Headless tests for the main-thread executor: drive `tick()` manually (no
 //! winit loop) and assert futures advance, offload, and cancel correctly.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! ScrollBar — pointer + keyboard affordance for scrolling a `ScrollArea`.
 //!
 //! The widget itself owns interaction (drag, track click, keyboard,

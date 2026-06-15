@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Off-screen PNG snapshot of the current canvas.
 //!
 //! Reuses the production `bastyde-render::Renderer` against a detached

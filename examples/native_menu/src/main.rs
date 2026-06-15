@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Native (OS) menu bar
 //!
 //! Demonstrates [`MenuBar::from_model`] + [`MenuBar::native_on_macos`]: one

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `TableStyle` impl + table-family design tokens.
 //!
 //! Design tokens for the table family live as `pub const`s on this

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ColorPicker` — embeddable composite color selector.
 //!
 //! Combines a 2D HSV canvas, 1D hue and alpha strips, RGB and HSV

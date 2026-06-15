@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Chart design tokens — relocated from `theme.components.chart` into
 //! this standalone module. Charts pull their
 //! *colours* from theme roles + `ColorTokens::chart_palette`; this

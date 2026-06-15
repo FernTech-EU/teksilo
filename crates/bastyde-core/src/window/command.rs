@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Private queue element produced by `WindowState` observers.
 //!
 //! When an app-side signal write fires its observer, the observer pushes

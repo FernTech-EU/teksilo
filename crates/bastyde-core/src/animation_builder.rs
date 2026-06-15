@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `AnimationSpec` — fluent ergonomic façade over `Signal::animate_to`
 //! / `animate_looping` / `try_animate_with_options`.
 //!

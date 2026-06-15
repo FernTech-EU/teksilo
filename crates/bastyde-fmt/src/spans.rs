@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Byte-range utilities shared between the printer and the host-file
 //! visitor. Walk a `proc_macro2::TokenStream` and compute the union of
 //! its leaf-token byte ranges in the original source.

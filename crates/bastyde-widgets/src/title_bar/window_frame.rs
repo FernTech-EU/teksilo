@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! A borderless-window frame: an invisible overlay of resize strips and
 //! corner cells along the four edges of a single content widget.
 //!

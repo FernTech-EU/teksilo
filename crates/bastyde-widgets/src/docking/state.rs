@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Serializable layout state for [`DockingModel`](super::DockingModel).
 //!
 //! Only **user-controllable** values are persisted (per-side size /

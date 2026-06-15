@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Flexible drag region inside a `TitleBar`.
 //!
 //! Captures pointer events that are not consumed by inner content and

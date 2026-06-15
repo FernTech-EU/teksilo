@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Checkbox — a togglable checkbox with optional label and tristate support.
 //!
 //! Two modes:

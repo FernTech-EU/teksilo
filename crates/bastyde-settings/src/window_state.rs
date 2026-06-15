@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Built-in service: per-window geometry persistence.
 //!
 //! Apps that want their windows to come back at the same place and

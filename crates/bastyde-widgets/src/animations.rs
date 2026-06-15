@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Animation wrapper widgets — subtree wrappers that drive a
 //! framework `Signal<f32>` to animate a paint-time property
 //! (opacity, transform, layout slot) on the wrapped child.

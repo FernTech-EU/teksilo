@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `DialogStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeDialogStyle` ships the IntUI modal chrome:

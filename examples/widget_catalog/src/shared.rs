@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared state and helpers for the widget catalog.
 //!
 //! `Signals` is the single bundle of reactive values that every tab

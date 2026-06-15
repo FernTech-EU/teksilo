@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Widget-owned units of behavior bound to named intents.
 //!
 //! An [`Action`] lives on a widget alongside its event handlers. When

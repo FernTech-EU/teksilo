@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Canvas pane — the centre of the previewer.
 //!
 //! `PreviewCanvas` is a custom rebuilding widget. Switcher (which would

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 /// Cursor icon for the mouse pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorIcon {

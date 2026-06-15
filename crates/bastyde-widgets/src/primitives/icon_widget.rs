@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! IconWidget — a vector or raster icon rendered at a configurable size.
 //!
 //! Supports multiple source formats:

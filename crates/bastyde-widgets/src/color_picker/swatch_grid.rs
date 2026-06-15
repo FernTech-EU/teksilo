@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SwatchGrid` — Role::Grid container of color swatches with arrow-key
 //! roving focus, mirroring the Calendar widget's grid pattern.
 //!

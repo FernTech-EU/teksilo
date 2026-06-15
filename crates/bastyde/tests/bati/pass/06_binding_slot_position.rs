@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.3 + §A.3: a binding at a Category B slot position hoists
 //! the binding and routes the slot to the `_id` twin.
 //! `header: title = Widget { ... }` desugars to:

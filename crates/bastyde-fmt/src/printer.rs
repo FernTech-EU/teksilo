@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Pretty-printer: walk the IR and emit formatted source.
 //!
 //! Layout rules (v1):

@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Reactive Theme Reference
 
 > This doc covers the **reactive** layer — how `Theme` flows through

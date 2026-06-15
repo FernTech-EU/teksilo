@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `HueStrip` — 1D hue slider rendered from a CPU-generated 256×1
 //! rainbow texture.
 //!

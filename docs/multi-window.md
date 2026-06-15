@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Multi-Window Reference
 
 Bastyde's multi-window system is **signal-driven** and **synchronous**.

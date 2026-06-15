@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ChartSeries<T>` and `ChartDatum<T>` — the data shapes consumed by every
 //! chart in this crate.
 //!

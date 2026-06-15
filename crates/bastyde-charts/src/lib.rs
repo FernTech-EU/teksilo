@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-charts` — BarChart, LineChart, and PieChart for Bastyde.
 //!
 //! All three render via the existing [`bastyde_canvas`] Path / fill_rect /

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The [`Scene`] data model.
 //!
 //! Scene holds a flat list of items (heavyweight `Widget`s and

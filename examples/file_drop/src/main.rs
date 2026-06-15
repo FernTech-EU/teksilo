@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Drag-and-drop showcase — inbound, outbound, and wrapping targets.
 //!
 //! **Inbound (OS → app).** Two [`DropZone`]s accept files (and text / URLs)

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! In-app debug inspector for Bastyde.
 //!
 //! See `docs/inspector.md` for a user-facing reference. This crate is

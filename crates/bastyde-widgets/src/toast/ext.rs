@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Extension methods on [`EventContext`] for showing and dismissing
 //! toasts. Mirrors the `EventContextFileDialogExt` pattern from
 //! `bastyde-platform`.

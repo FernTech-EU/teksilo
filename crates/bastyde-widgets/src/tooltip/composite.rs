@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `CompositeTooltipWidget` — third-tier tooltip that hosts an arbitrary
 //! widget tree as its body.
 //!

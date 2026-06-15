@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # TabWidget and TabBar
 
 Two cooperating widgets for tabbed content in Bastyde: a header-only

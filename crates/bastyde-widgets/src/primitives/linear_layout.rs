@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared main-then-cross negotiation for the linear stack containers.
 //!
 //! `HStack` and `VStack` differ only in which axis is the *main* (distribution)

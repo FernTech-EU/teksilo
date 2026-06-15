@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Diagnostic helpers for the `bati!` macro.
 //!
 //! Every `compile_error!` emitted by expansion runs through these

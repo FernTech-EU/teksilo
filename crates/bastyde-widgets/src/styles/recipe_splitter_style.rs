@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `SplitterStyle` impl — the IntUI divider-handle look.
 //!
 //! Reproduces the old `SplitView` chrome: a thin static line at the

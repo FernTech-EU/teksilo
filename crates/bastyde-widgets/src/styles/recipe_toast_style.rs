@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `ToastStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeToastStyle` ships the IntUI toast chrome: a per-severity

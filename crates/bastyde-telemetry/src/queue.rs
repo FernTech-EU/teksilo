@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Event queue — `EventQueue` trait + two impls.
 //!
 //! Adapters that buffer events for later transmission depend on the

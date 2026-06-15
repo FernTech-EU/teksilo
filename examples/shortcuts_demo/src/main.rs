@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shortcuts Demo — end-to-end Action + Intent proof, with typed payloads.
 //!
 //! Run with: `cargo run -p shortcuts-demo`

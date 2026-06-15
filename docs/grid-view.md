@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # GridView — Virtualized 2D Tile Grid
 
 `GridView<T>` is the photo-gallery / icon-view / file-manager-grid /

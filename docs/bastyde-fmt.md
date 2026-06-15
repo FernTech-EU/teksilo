@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # `cargo bastyde-fmt` — formatter for `bati!` blocks
 
 `rustfmt` treats macro bodies as opaque token streams and won't descend

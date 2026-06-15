@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end tests covering the inspector → user-root event path.
 //!
 //! These tests reproduce in headless mode the regression noted by the

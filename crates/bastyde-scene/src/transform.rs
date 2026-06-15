@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Transform helpers for `SceneView` and `Scene`.
 //!
 //! Two flavours of transform live in bastyde-scene:

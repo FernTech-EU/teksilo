@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Platform- and locale-aware formatting for [`KeyStroke`]s.
 //!
 //! - On macOS, the returned string uses the traditional symbol

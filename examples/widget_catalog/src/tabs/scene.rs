@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Scene tab — a compact `SceneView` showcasing both tiers: lightweight
 //! paint-only items (RectItem / PathItem / TextItem / GroupItem) and a
 //! heavyweight `Panel` card with a real `Button` placed at scene

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 """
 Check or apply SPDX license headers across the repository.
 
@@ -97,10 +100,15 @@ SKIP_BASENAMES: set[str] = {
 
 # Path prefix substrings (relative to repo root) that mark vendored or
 # generated trees we never rewrite.
+#
+# `.claude/` holds agent tooling (skill definitions, project instructions),
+# not licensable source. Its SKILL.md files open with YAML frontmatter that
+# must be the very first line, so a header inserted above it breaks parsing.
 SKIP_PATH_SUBSTRINGS: tuple[str, ...] = (
     "target/",
     "dist/",
     ".git/",
+    ".claude/",
     "vendor/",
     "node_modules/",
 )

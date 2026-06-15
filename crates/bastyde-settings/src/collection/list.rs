@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`PersistedListModel<T>`] — bridge between a reactive
 //! [`ListModel<T>`](bastyde_data::ListModel) and a [`SettingsFile`].
 //!

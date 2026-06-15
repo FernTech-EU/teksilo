@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! RadioGroup — invisible layout container that groups `RadioButton`s
 //! and wires their accessibility metadata.
 //!

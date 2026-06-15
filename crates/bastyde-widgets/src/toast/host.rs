@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ToastHost` — invisible sibling widget that owns the toast queue.
 //!
 //! Installed by `install_toast(opts)` in the `bastyde` umbrella. The

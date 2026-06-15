@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shortcuts tab — registered shortcuts and their effective keystrokes.
 
 use std::cell::RefCell;

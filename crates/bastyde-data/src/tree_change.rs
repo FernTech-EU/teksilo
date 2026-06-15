@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Change notifications and node identifiers for tree collections.
 
 /// Opaque identifier for a node in a `TreeModel`.

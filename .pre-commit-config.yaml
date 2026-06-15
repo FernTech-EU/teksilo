@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -19,3 +22,11 @@ repos:
     hooks:
     - id: committed
       stages: [commit-msg]
+  - repo: local
+    hooks:
+    - id: spdx-headers
+      name: SPDX headers
+      entry: python3 tools/check_spdx_headers.py --check
+      language: system
+      pass_filenames: false
+      stages: [commit]

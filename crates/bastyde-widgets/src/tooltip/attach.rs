@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Rich-tooltip attachment helpers.
 //!
 //! Widgets call [`attach_rich_tooltip`] (or [`attach_rich_tooltip_content`])

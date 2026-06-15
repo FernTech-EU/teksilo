@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # Fixture file for bastyde-i18n's own tr! macro tests. Applications have
 # their own locales/en-US.ftl; this one only contains keys referenced by
 # bastyde-i18n/tests/tr_macro.rs.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! SplitButton — a button split into two regions sharing a single frame.
 //!
 //! The left region is the **default action**: it shows the label of the

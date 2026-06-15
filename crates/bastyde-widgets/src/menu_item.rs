@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! MenuItem widget — a single item in a menu or context menu.
 //!
 //! Non-generic, closure-based command erasure (same pattern as Button).

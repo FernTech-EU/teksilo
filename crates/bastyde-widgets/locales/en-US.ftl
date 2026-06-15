@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
 # bastyde-widgets framework strings.
 #
 # These are the English source-language messages for framework-internal

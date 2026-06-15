@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! GroupHeader — a horizontal section header: label followed by a trailing
 //! rule line that fills the remaining width.
 //!

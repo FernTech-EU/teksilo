@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Formatter for the `bati!` DSL.
 //!
 //! Pure library — the CLI lives in `cargo-bastyde-fmt`. Two entry points:

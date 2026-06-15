@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Integration tests for the full `TelemetryBundle` lifecycle.
 //!
 //! Covers the end-to-end flow with a `StubReporter` standing in for

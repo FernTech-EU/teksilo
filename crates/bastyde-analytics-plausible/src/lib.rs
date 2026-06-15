@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-analytics-plausible` — Plausible adapter for bastyde-telemetry.
 //!
 //! Privacy posture: **anonymous-by-design**. The adapter transmits no

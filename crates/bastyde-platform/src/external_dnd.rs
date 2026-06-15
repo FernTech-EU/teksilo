@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! External (OS) drag-and-drop service.
 //!
 //! Lets a window accept drops that originate **outside** the application —

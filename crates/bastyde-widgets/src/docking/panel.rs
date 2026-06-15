@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The panel / content layer of [`DockingLayout`](super::DockingLayout):
 //! the app-facing [`DockWidget`] declaration, the content-factory registry,
 //! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →

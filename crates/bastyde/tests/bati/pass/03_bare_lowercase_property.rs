@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §3.4 bare-lowercase-identifier rule: a body item consisting of a
 //! single lowercase ident is an argument-free method call. Typical use:
 //! `Expand { fills_stack }`.

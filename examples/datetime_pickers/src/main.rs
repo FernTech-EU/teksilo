@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Calendar / DateEdit / TimeEdit / DateTimeEdit gallery.
 //!
 //! Run with: `cargo run -p datetime-pickers`.

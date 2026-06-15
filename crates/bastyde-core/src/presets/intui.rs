@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! IntUI preset — JetBrains-flavored starting-point design language.
 //!
 //! Surfaces are role-differentiated (not elevation-based). 1 dp universal

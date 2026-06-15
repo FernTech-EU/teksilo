@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Concrete reactive list. Owns items as `Vec<T>` behind `Rc<RefCell<>>`.
 //! Mutations emit `DataChange` automatically. Cloneable for shared access.
 

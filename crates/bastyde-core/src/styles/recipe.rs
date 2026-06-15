@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-2 paint-recipe primitives — Shape, Fill, Border, Shadow,
 //! per-state envelope, and the [`WidgetState`] enum the envelope
 //! resolves against.

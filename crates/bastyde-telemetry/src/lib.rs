@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `bastyde-telemetry` — privacy-respecting product analytics for Bastyde.
 //!
 //! This crate ships the foundational pieces:

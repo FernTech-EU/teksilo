@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end test that drives the compiled `bastyde-fmt-lsp` binary
 //! through a complete `initialize → didOpen → formatting → shutdown →
 //! exit` exchange. Validates the LSP framing layer and the dispatch

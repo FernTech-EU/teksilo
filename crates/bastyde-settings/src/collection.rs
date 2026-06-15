@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Persistence bridges for `bastyde-data` collection models.
 //!
 //! Each submodule wraps a `*Model<T>` so its mutations are mirrored to

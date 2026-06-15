@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! # bastyde-tokio — Tokio reactor for Bastyde's async executor
 //!
 //! Thin adapter over [`bastyde-async`](bastyde_async): it installs the same

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `cargo bastyde-telemetry-lint` — schema-drift linter for bastyde-telemetry
 //! event manifests.
 //!

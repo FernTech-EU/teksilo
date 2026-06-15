@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared lookahead helpers for the body and property parsers.
 
 use syn::parse::ParseStream;

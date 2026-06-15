@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`StepPane`] — wraps one step's content widget and emits a
 //! `Role::TabPanel` named by the step title and `aria-labelledby` its indicator
 //! (mirrors `TabPane` in `tab_widget`). The W3C APG step pattern: the active

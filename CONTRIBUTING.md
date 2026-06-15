@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Contributing to Bastyde
 
 Thank you for your interest in contributing to Bastyde! This document provides guidelines and information for contributors.

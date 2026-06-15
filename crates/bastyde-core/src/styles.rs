@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Bastyde's theming system: [`Theme`] aggregator, [`ThemeAppearance`]
 //! flag, typed [`ThemeExtensions`] registry, Tier 2 paint-recipe
 //! primitives, and Tier 3 per-widget style trait protocols.

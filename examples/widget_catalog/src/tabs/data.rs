@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Data tab — the full data-driven family, all live:
 //! Repeater, ListView, StandardListItem, StandardTreeItem, TreeView,
 //! TableView, TreeTable, GridView. The heavyweights are cannibalized

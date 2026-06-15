@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `UsageReporter` trait and consent enums.
 //!
 //! The trait is **synchronous**. Adapters that perform

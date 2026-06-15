@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SmoothSize` — auto-sizes the slot to fit the child's intrinsic
 //! size, but tweens the change instead of jumping. The "empty panel
 //! that suddenly must grow gracefully to accept new content" pattern.

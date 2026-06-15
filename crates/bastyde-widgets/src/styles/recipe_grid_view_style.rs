@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default [`GridViewStyle`] impl — the stock IntUI grid decoration.
 //!
 //! Every method falls through to the trait's default recipe (focus ring =

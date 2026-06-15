@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! M2 demo for the custom `TitleBar` widget.
 //!
 //! Run with: `cargo run -p title-bar-demo`

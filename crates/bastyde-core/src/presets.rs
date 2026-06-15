@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Built-in [`Theme`](crate::styles::Theme) presets.
 //!
 //! Each submodule offers a `light()` and `dark()` constructor returning

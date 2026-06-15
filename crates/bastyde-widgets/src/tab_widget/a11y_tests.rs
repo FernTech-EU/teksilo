@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 use bastyde_canvas::SizeProposal;
 use bastyde_core::accessibility::node_id_to_widget_id;
 use bastyde_core::accesskit;

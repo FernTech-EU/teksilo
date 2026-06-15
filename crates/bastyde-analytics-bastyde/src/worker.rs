@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Background worker holding the tonic Channel and the bidi Ingest
 //! stream. The UI thread sends [`WorkerCommand`]s via a tokio mpsc;
 //! the worker drains the [`EventQueue`], batches into `EventBatch`

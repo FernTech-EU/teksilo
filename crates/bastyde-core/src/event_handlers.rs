@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Attached event handlers for V2 widgets.
 //!
 //! `EventHandlers` stores optional closures for each handler type.

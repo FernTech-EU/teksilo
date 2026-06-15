@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The bati! body form replaces method chains on widgets. Instead of
 //! `item: MenuItem::new("Run").on_activate(cmd).tooltip("...")`,
 //! the idiomatic syntax is `item: MenuItem::new("Run") { on_activate: cmd; tooltip: "..." }`

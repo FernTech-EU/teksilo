@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Cumulative row-offset table for variable-height virtualization.
 //!
 //! `PrefixSumOffsets` maps row index → content-space top-y in O(log n) (and

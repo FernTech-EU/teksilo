@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Trybuild UI tests for the `bati!` proc macro.
 //!
 //! Each test case under `tests/bastyde/pass/` is expected to compile

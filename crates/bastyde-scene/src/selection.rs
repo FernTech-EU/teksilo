@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Selection model for `Scene` items.
 //!
 //! Mirrors the API of `bastyde_data::SelectionModel` but keyed by

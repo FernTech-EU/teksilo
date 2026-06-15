@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Rich text editor demo with a live preview pane.
 //!
 //! Milestone 8b of §27.10. Shows the editable preset

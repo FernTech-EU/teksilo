@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Virtualized scrollable list widget.
 //!
 //! `ListView` creates widget subtrees only for the items currently visible in

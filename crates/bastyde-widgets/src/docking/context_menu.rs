@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Shared context menus for dock activities (rail items + tab-strip tabs) and
 //! the activity-bar background.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Individual lint checks applied to the manifest and source tree.
 
 use std::collections::{BTreeMap, HashMap};

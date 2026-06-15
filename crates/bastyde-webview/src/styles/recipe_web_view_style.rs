@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default [`WebViewStyle`] implementation reading IntUI tokens, plus the
 //! tiny core-only overlay leaf it builds.
 //!

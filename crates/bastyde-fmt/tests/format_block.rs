@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! End-to-end tests for `bastyde_fmt::format_block`.
 //!
 //! Each test passes a `bati!` body string through the formatter and

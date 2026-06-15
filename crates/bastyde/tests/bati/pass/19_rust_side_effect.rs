@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §5.6 side-effect form: `rust { ...; }` (last stmt ends with `;`)
 //! runs for its side effects and produces no children. Forces
 //! statement-sequence lowering on the enclosing element.

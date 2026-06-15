@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Two-row formatting toolbar for the rich_text_editor example.
 //!
 //! Built against [`bastyde::widgets::rich_text::EditorHandle`], which

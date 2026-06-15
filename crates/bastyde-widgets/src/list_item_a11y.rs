@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Thin accessibility wrapper for list/tree item widgets.
 //!
 //! Wraps a delegate-created widget with the correct AccessKit role

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The minimize / maximize / close button cluster on the trailing edge of
 //! a `TitleBar`. Rendered only when
 //! [`PlatformTitleBarHost::renders_custom_controls`] is `true`

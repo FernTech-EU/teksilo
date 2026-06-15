@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §9.1: a property whose name doesn't match a builder method on
 //! the type surfaces the compiler's method-resolution error under the
 //! property ident.

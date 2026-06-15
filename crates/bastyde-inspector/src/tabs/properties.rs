@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Properties tab — key/value rows for the selected widget plus a
 //! Copy button that writes the formatted dump to the clipboard.
 //!

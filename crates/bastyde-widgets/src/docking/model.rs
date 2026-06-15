@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`DockingModel`] — the shared, cloneable, serializable handle that backs a
 //! [`DockingLayout`](super::DockingLayout). Mirrors the
 //! [`SplitterModel`](crate::splitter::SplitterModel) / `SceneModel` pattern:

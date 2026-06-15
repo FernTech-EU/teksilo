@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Banner — persistent inline status strip (info / success / warning / error).
 //!
 //! A non-transient, full-width callout for app-level conditions: deprecation

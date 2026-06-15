@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `SpinBox` — numeric input with increment/decrement buttons.
 //!
 //! A generic composite over [`SpinValue`]

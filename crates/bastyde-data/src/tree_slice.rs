@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-view flattened projection of a `TreeModel`.
 //!
 //! `TreeSlice` owns expand/collapse state independently — two `TreeView`

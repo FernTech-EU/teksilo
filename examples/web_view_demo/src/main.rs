@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `web-view-demo` — showcase for the embeddable [`WebView`] widget.
 //!
 //! The WebView lives inside a tabbed layout (a `Switcher`) so the demo makes

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `Cycle` — show one of N children at a time, advancing on a fixed
 //! period. The "rotating loading tip" / status display pattern.
 //!

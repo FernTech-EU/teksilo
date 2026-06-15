@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Unified reactivity primitives for Bastyde.
 //!
 //! `Signal<T>` is the single reactive type. `Prop<T>` is the widget

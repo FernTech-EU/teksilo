@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §7.7 stop-gate: the internationalization translation mixes
 //! declarative elements, `let` bindings at body position, and a
 //! side-effect `rust { ... }` block. Exercises the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Safe-triangle submenu hover-gate geometry.
 //!
 //! When a submenu opens, the user moves the pointer diagonally

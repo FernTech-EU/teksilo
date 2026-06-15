@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Internal state types, accessor struct, and pure helpers shared
 //! between the public `ComboBox` widget, the `DropdownPanel` overlay
 //! content, and the per-row `DropdownItem`.

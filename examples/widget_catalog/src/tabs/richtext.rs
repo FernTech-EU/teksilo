@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Rich Text tab — RichTextEditor::editor (intrinsic min/max-lines
 //! sizing, the messenger-composer pattern) + RichTextEditor::read_only.
 //! Cannibalized from the `rich-text-editor` / `rich-text-viewer`

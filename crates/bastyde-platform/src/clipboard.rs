@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! System clipboard abstraction.
 //!
 //! Widgets do not talk to `arboard` directly — they hold a `ClipboardHandle`

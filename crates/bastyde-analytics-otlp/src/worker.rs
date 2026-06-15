@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Background worker — drains the queue, batches into one OTLP
 //! `ExportLogsServiceRequest` per flush, retries on transient
 //! failure with exponential backoff.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `ValidationStrip` — small inline text rendered below a text field
 //! to surface a validation outcome.
 //!

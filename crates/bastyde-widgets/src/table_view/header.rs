@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Sticky header strip + per-column header cells.
 //!
 //! `HeaderCell` lays out as

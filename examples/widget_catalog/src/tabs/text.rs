@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Text tab — TextInput, SpinBox, SearchField, PasswordField, FilePickerField, InputDialog.
 
 use bastyde::prelude::*;

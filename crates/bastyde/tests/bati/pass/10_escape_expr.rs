@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Spec §6.1: `#{ expr }` escape. The expression is
 //! expected to evaluate to a `WidgetId`. At body position it lowers to
 //! `.add_child(expr)`; at slot-value position it forces the `_id`

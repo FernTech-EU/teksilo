@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `DockingLayout` showcase — a VS Code-style IDE shell.
 //!
 //! Demonstrates the full docking stack:

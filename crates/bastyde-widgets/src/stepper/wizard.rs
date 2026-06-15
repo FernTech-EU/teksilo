@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! [`Wizard`] — a thin modal launcher around [`Stepper`].
 //!
 //! Renders as a button (or a custom `.trigger(...)` widget) that opens a modal

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Run-loop: discover files, format each, write or check-only.
 //!
 //! Atomic writes: the formatted text goes into a `NamedTempFile` next

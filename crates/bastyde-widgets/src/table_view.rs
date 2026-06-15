@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! `TableView<T>` — generic, virtualized, accessible tabular widget.
 //!
 //! Built atop the [`ListModel<T>`](bastyde_data::ListModel) /

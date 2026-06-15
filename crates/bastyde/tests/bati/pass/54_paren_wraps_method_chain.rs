@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Method chains inside a property value must be wrapped in parens
 //! when the receiver is an UpperCamel-rooted path — the outer `(`
 //! bypasses `peek_element_start` (which requires an Ident as the

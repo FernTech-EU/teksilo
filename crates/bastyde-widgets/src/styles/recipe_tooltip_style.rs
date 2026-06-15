@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Default `TooltipStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeTooltipStyle` paints the IntUI tooltip chrome — `shadow_xs`

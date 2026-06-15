@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Per-item event handlers, cursor and tooltip overrides.
 //!
 //! [`SceneItemHandlerSet`] is the lightweight-tier counterpart to

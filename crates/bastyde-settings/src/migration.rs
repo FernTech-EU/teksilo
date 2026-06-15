@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Schema migrations for persisted files.
 //!
 //! Every persisted struct carries a `version: u32` (via [`Versioned`]).

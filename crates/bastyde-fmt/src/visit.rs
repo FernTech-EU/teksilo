@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Find `bati!(...)` macro invocations in a Rust source file.
 //!
 //! Returned edits carry the byte range of the macro body (the contents

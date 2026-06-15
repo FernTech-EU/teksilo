@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Palette tab — exhaustive showcase of `SurfaceRole`, `TextRole`, and
 //! the editor-pane roles. Includes a rich-text + emoji pangram so
 //! color-emoji font fallback is visibly exercised under each theme.
