@@ -409,6 +409,21 @@ impl<T: 'static> TreeSliceHandle<T> {
         &self.tree
     }
 
+    /// Expand every node with children — see [`TreeSlice::expand_all`]. Useful
+    /// after a model rebuild reassigns `NodeId`s (the old expand set no longer
+    /// matches), to keep the view fully expanded.
+    pub fn expand_all(&self) {
+        {
+            let mut exp = self.expanded.borrow_mut();
+            let root_count = self.tree.root_count();
+            for i in 0..root_count {
+                let root = self.tree.root(i);
+                TreeSlice::<T>::expand_subtree_recursive(&self.tree, root, &mut exp);
+            }
+        }
+        self.reflatten_and_notify();
+    }
+
     /// See [`TreeSlice::first_changed_index`].
     pub fn first_changed_index(&self) -> Option<usize> {
         self.divergence.get()
@@ -576,6 +591,18 @@ mod tests {
 
         slice.collapse_all();
         assert_eq!(slice.visible_count(), 3);
+    }
+
+    #[test]
+    fn handle_expand_all_matches_slice() {
+        let tree = sample_tree();
+        let slice = TreeSlice::new(tree);
+        let handle = slice.handle();
+
+        assert_eq!(slice.visible_count(), 3); // roots collapsed
+        handle.expand_all();
+        // A, A1, A1a, A2, B, B1, C — visible through the shared slice.
+        assert_eq!(slice.visible_count(), 7);
     }
 
     #[test]
