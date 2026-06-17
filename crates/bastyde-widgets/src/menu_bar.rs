@@ -1218,6 +1218,185 @@ mod tests {
         out
     }
 
+    /// Collect the RGB (0..=255) of every glyph painted by a one-pass
+    /// render of a light-themed MenuBar carrying `&File` / `&Edit`. In a
+    /// bare tree the only text is the two trigger labels, so the returned
+    /// colours ARE the trigger label colours. `use_model` switches between
+    /// the direct `.menu()` builder and the `from_model` path.
+    fn light_menubar_trigger_glyph_rgb(use_model: bool) -> Vec<[u32; 3]> {
+        let mut t = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        t.set_window_state(WindowState::new(WindowStateInit {
+            id: BastydeWindowId::new(1),
+            string_id: Some("test".to_string()),
+            placement: WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: false,
+            resizable: true,
+            always_on_top: false,
+        }));
+        if use_model {
+            let model = crate::menu::MenuModel::new()
+                .menu(lit!("&File"), |m| m)
+                .menu(lit!("&Edit"), |m| m);
+            t.add(MenuBar::from_model(model));
+        } else {
+            t.add(
+                MenuBar::new()
+                    .menu(lit!("&File"), || Box::new(MenuList::new()))
+                    .menu(lit!("&Edit"), || Box::new(MenuList::new())),
+            );
+        }
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        let frame = t.render();
+        frame
+            .glyphs
+            .iter()
+            .map(|g| {
+                [
+                    (g.color[0] * 255.0).round() as u32,
+                    (g.color[1] * 255.0).round() as u32,
+                    (g.color[2] * 255.0).round() as u32,
+                ]
+            })
+            .collect()
+    }
+
+    /// Regression: the top-level trigger labels must paint in the ACTIVE
+    /// theme's `text_primary`, never a stale constructor-default theme.
+    ///
+    /// Historical bug: a light-launched app rendered the "File" / "Edit"
+    /// trigger labels in the *dark* theme's grey `text_primary` (#BDBFC5),
+    /// invisible on a light bar, while the dropdowns rendered fine. Cause:
+    /// the trigger colour is a `theme_signal.map(...)` derived signal, and
+    /// `WidgetTree::with_theme` updated the cached `Theme` (seen by
+    /// `ctx.theme()` / role resolution) but NOT `theme_signal`, which stayed
+    /// at the constructor default. The first `set_theme` (e.g. a dark→light
+    /// toggle) re-aligned the signal, which is why the bug self-healed on a
+    /// theme switch. Fixed by keeping `theme` + `theme_signal` in lockstep
+    /// and defaulting the constructor to light. Covers both trigger build
+    /// paths.
+    #[test]
+    fn trigger_labels_paint_in_active_theme_color() {
+        let rgb_of = |c: bastyde_tokens::Color| {
+            let a = c.to_array();
+            [
+                (a[0] * 255.0).round() as u32,
+                (a[1] * 255.0).round() as u32,
+                (a[2] * 255.0).round() as u32,
+            ]
+        };
+        let light_rgb = rgb_of(bastyde_core::presets::intui::light().colors.text_primary);
+        let dark_rgb = rgb_of(bastyde_core::presets::intui::dark().colors.text_primary);
+        assert_ne!(light_rgb, dark_rgb, "presets must differ for this test to mean anything");
+
+        for use_model in [false, true] {
+            let glyphs = light_menubar_trigger_glyph_rgb(use_model);
+            assert!(
+                !glyphs.is_empty(),
+                "expected trigger label glyphs (use_model={use_model})"
+            );
+            for rgb in &glyphs {
+                assert_eq!(
+                    *rgb, light_rgb,
+                    "trigger label glyph must use the active (light) theme's text_primary, \
+                     not a stale constructor-default theme (use_model={use_model})"
+                );
+            }
+        }
+    }
+
+    /// A `MockTextBackend` wrapper that models the typesetter's glyph-cache
+    /// eviction: while `evicted` is set, `ensure_glyphs` returns nothing
+    /// (as the real bridge does once a cached layout's glyphs are dropped),
+    /// and `layout_single_line` clears the flag (re-shaping repopulates the
+    /// cache, mirroring the real bridge). Lets a headless test reproduce the
+    /// "menu labels vanish under atlas pressure" bug deterministically.
+    struct EvictingTextBackend {
+        inner: bastyde_canvas::MockTextBackend,
+        evicted: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl bastyde_canvas::TextBackend for EvictingTextBackend {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            style: &bastyde_tokens::TextStyle,
+            max_width: Option<f32>,
+        ) -> bastyde_canvas::TextLayout {
+            // Re-shaping repopulates the glyph cache → no longer evicted.
+            self.evicted.set(false);
+            self.inner.layout_single_line(text, style, max_width)
+        }
+
+        fn ensure_glyphs(
+            &mut self,
+            layout: &bastyde_canvas::TextLayout,
+        ) -> Vec<bastyde_canvas::GlyphQuad> {
+            if self.evicted.get() {
+                Vec::new()
+            } else {
+                self.inner.ensure_glyphs(layout)
+            }
+        }
+    }
+
+    /// Regression: a trigger label must keep rendering after the typesetter
+    /// evicts its cached layout's glyphs. Under atlas pressure (a text-heavy
+    /// window) the renderer's eviction-recovery path clears the bridge's
+    /// glyph cache and re-paints WITHOUT re-laying-out, so `MenuLabel`'s
+    /// retained `TextLayout` no longer resolves and `draw_text_layout` draws
+    /// nothing — the labels silently vanished until the next relayout (a
+    /// theme switch). The fix re-shapes through `draw_text` when the cached
+    /// draw produces no glyphs.
+    #[test]
+    fn trigger_labels_survive_glyph_cache_eviction() {
+        let evicted = std::rc::Rc::new(std::cell::Cell::new(false));
+        let backend = EvictingTextBackend {
+            inner: bastyde_canvas::MockTextBackend::new(),
+            evicted: evicted.clone(),
+        };
+        let mut t = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(backend)));
+        t.set_window_state(WindowState::new(WindowStateInit {
+            id: BastydeWindowId::new(1),
+            string_id: Some("test".to_string()),
+            placement: WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: false,
+            resizable: true,
+            always_on_top: false,
+        }));
+        t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new())),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        let glyphs_initial = t.render().glyphs.len();
+        assert!(glyphs_initial > 0, "trigger labels must render initially");
+
+        // Mimic the eviction-recovery path: the bridge's glyph cache is
+        // cleared (so the retained layout's glyphs are gone) and the tree
+        // is re-painted WITHOUT a relayout.
+        evicted.set(true);
+        t.invalidate_all_paints();
+        let glyphs_after = t.render().glyphs.len();
+        assert!(
+            glyphs_after > 0,
+            "trigger labels must survive glyph-cache eviction (re-shape fallback); \
+             got {glyphs_after} glyphs after eviction"
+        );
+    }
+
     #[test]
     fn menubar_emits_role_menubar() {
         let mut t = tree_with_window();

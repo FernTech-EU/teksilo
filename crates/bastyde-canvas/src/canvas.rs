@@ -401,6 +401,17 @@ impl Canvas {
         debug_warn_raster_scale_mismatch("draw_text_layout", layout, &*backend);
         let glyphs = backend.ensure_glyphs(layout);
         if glyphs.is_empty() {
+            // A retained layout that measured to non-zero width but now
+            // resolves to zero glyphs means its glyphs were evicted from
+            // the backend's cache (atlas pressure, scale-factor reset).
+            // This is recoverable — the caller MUST re-shape (`draw_text`)
+            // or re-layout when we return `false`, otherwise the text
+            // silently vanishes until the next relayout. Warn in debug so a
+            // new cached-layout widget that forgets the fallback surfaces
+            // loudly instead of dropping text. NOT a panic: the condition
+            // is legitimate at runtime and correctly-written callers handle
+            // it (see `MenuLabel::paint`).
+            debug_warn_evicted_layout("draw_text_layout", layout);
             return false;
         }
         self.frame.layout_keys.push(layout.layout_key);
@@ -880,6 +891,30 @@ fn debug_warn_raster_scale_mismatch(
                  sample the wrong bitmap density. Re-layout in paint() instead of reusing a \
                  measure-time layout.",
                 layout.layout_key, layout.raster_scale,
+            );
+        }
+    }
+}
+
+/// Debug-only warning when a retained [`TextLayout`](crate::text_backend::TextLayout)
+/// that measured to non-zero width resolves to zero glyphs — i.e. its glyphs were
+/// evicted from the backend's glyph cache since it was laid out. Callers of
+/// `draw_text_layout` must treat the `false` return as "re-shape needed" (e.g.
+/// fall back to `draw_text`), or the text silently disappears until the next
+/// relayout. A zero-width layout (empty / whitespace-only) legitimately produces
+/// no glyphs and is not flagged.
+#[cfg_attr(not(debug_assertions), allow(unused_variables))]
+fn debug_warn_evicted_layout(caller: &str, layout: &crate::text_backend::TextLayout) {
+    #[cfg(debug_assertions)]
+    {
+        if layout.width > 0.0 {
+            eprintln!(
+                "[bastyde-canvas] {caller}: retained TextLayout (key {}) resolved to zero \
+                 glyphs despite measuring {:.1}px wide — its glyphs were evicted from the \
+                 backend cache. The caller must re-shape (e.g. fall back to draw_text) when \
+                 draw_text_layout returns false, or the text will silently vanish until the \
+                 next relayout.",
+                layout.layout_key, layout.width,
             );
         }
     }

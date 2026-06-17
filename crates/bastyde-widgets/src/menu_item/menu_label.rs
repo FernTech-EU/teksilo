@@ -173,16 +173,27 @@ impl Widget for MenuLabel {
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);
 
-        // Pull the cached layout — populated by `layout_response`. If
-        // missing (mock backend, or a paint pass that ran before a
-        // layout pass), re-layout via `draw_text` which measures
-        // internally.
+        // Pull the cached layout — populated by `layout_response`. The
+        // fast path draws the pre-measured layout; the fallback re-shapes
+        // through `draw_text` (which runs `layout_single_line` internally).
+        //
+        // The fallback fires when the cached draw produces nothing: either
+        // no cached layout (mock backend, or a paint before the first
+        // layout pass), or — the load-bearing case — the cached layout's
+        // glyphs were evicted from the typesetter's glyph cache. Under
+        // atlas pressure (a text-heavy window) the renderer's
+        // eviction-recovery path clears the bridge cache and *re-paints
+        // without re-laying-out*, so the retained `layout_key` no longer
+        // resolves and `draw_text_layout` returns `false`, drawing nothing.
+        // Without this fallback the label silently vanishes until the next
+        // relayout (e.g. a theme switch). `draw_text` both draws the label
+        // and repopulates the cache for the next frame.
         let layout_opt = self.last_layout.borrow().clone();
-        if let Some(layout) = layout_opt.as_ref() {
-            // Fast path: draw the pre-measured layout.
-            canvas.draw_text_layout(layout, Point::new(bounds.x, bounds.y), color);
-        } else {
-            // Fallback (no cached layout): measure-and-draw in one go.
+        let drew = match layout_opt.as_ref() {
+            Some(layout) => canvas.draw_text_layout(layout, Point::new(bounds.x, bounds.y), color),
+            None => false,
+        };
+        if !drew {
             canvas.draw_text(&parsed.stripped, bounds, &style, color);
         }
 
