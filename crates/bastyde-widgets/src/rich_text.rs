@@ -1896,6 +1896,22 @@ impl Widget for RichTextEditorBody {
             }
         }
 
+        // Sync the caret colour with the theme's `editor_caret` role the
+        // same way. The engine defaults the cursor to opaque black, so
+        // without this the blinking caret stays black under a dark theme.
+        // Cursor decorations are regenerated on every render (the
+        // cursor-only path included), so a colour change only needs a
+        // render this frame — force one so a theme swap doesn't wait for
+        // the next blink toggle to repaint the caret.
+        {
+            let new_caret = ctx.theme.colors.editor_caret.to_array();
+            st.engine.set_cursor_color(new_caret);
+            if st.last_cursor_color != Some(new_caret) {
+                st.last_cursor_color = Some(new_caret);
+                st.pending_full_render = true;
+            }
+        }
+
         // Code block surface colours come from the same theme path
         // (`editor_code_block_bg` / `editor_code_block_fg`). Unlike
         // `text_color`, these are baked into the converted

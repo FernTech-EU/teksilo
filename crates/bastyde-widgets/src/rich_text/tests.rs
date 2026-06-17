@@ -804,6 +804,62 @@ fn read_only_preset_emits_no_cursor_decoration() {
     );
 }
 
+#[test]
+fn caret_color_follows_theme_in_dark_mode() {
+    // Regression: the typesetter defaults the caret to opaque black, so
+    // the editor must push the theme's `editor_caret` role into the
+    // engine each paint. Without it the blinking caret stays black under
+    // a dark theme — invisible against the dark editor background.
+    use bastyde_text::{CursorAffinity, CursorDisplay, TypesetterDecorationKind as DecorationKind};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+
+    let editor = RichTextEditor::editor(doc);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::dark());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    // Paint runs here, syncing the engine's cursor colour from the theme.
+    let _ = tree.render();
+
+    let expected = bastyde_core::presets::intui::dark()
+        .colors
+        .editor_caret
+        .to_array();
+    assert_ne!(
+        expected,
+        [0.0, 0.0, 0.0, 1.0],
+        "dark theme's editor_caret must not be black, or this test proves nothing"
+    );
+
+    // Force a visible caret so the cursor-only render path emits a
+    // DecorationKind::Cursor rect regardless of the current blink phase.
+    let mut st = state.borrow_mut();
+    st.engine.set_cursor(&CursorDisplay {
+        position: 0,
+        anchor: 0,
+        affinity: CursorAffinity::Downstream,
+        visible: true,
+        selected_cells: Vec::new(),
+    });
+    let caret_color = st.engine.with_render_cursor_only(|frame| {
+        frame
+            .decorations
+            .iter()
+            .find(|d| matches!(d.kind, DecorationKind::Cursor))
+            .map(|d| d.color)
+    });
+
+    assert_eq!(
+        caret_color,
+        Some(expected),
+        "caret must paint in the theme's editor_caret colour, not the engine's black default"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Phase B tests — clipboard, double/triple tap, drag-select, Ctrl+A ladder.
 // ---------------------------------------------------------------------------

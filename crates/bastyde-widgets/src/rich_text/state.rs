@@ -127,6 +127,14 @@ pub(crate) struct EditorState {
     /// scroll event triggered a Full or Block render.
     pub last_text_color: Option<[f32; 4]>,
 
+    /// Last caret colour applied to the typesetter. The paint pass syncs
+    /// the engine's cursor colour with the active theme's `editor_caret`
+    /// role each frame so light / dark theme swaps reach the blinking
+    /// caret (the engine defaults it to opaque black). Tracked so a theme
+    /// swap forces a render this frame instead of waiting for the next
+    /// blink toggle to repaint the caret in the new colour.
+    pub last_cursor_color: Option<[f32; 4]>,
+
     /// Last code-block background colour applied to the engine. A
     /// change forces a full `layout_full` (not just a render) because
     /// the converted `BlockLayoutParams.background_color` is baked in
@@ -429,6 +437,7 @@ impl EditorState {
             show_highlights: true,
             text_color_user_set: false,
             last_text_color: None,
+            last_cursor_color: None,
             last_code_block_bg: None,
             last_code_block_fg: None,
             has_focus: false,
