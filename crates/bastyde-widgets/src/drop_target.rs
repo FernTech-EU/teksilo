@@ -442,10 +442,17 @@ impl Widget for DropTarget {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+        // Report the *content's* full response (grow / shrink / floor), not the
+        // chrome wrapper's: a `DropTarget` is a transparent wrapper whose border
+        // / hint are overlays that don't change size. Forwarding the wrapper's
+        // response (a ZStack, which reports rigid) would flatten a flexible
+        // child like `Expand` (flex-basis 0) to a rigid zero and collapse it
+        // inside a flex/fill parent. `place_children` still fills the wrapper,
+        // which then stretches the content to those bounds.
+        self.child_id
+            .or(self.root_child_id)
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
     }
 
     fn place_children(
@@ -549,6 +556,49 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let cb = tree.bounds(inner);
         assert!((cb.width - 300.0).abs() < 0.01 && (cb.height - 200.0).abs() < 0.01);
+    }
+
+    /// Regression: a flexible child (`Expand`, flex-basis 0) wrapped in a
+    /// `DropTarget` must stay flexible so a flex/fill parent stretches it to
+    /// fill. The drop target must forward the content's grow weight, not flatten
+    /// it to a rigid zero (which centered it and collapsed it to nothing).
+    #[test]
+    fn forwards_flexible_child_through_flex_parent() {
+        use crate::primitives::{Expand, Padding, ZStack};
+        let mut tree = themed_tree();
+        let inner = tree.add(RectWidget::new());
+        let expand = tree.add(Expand::new().child_id(inner));
+        let dt = tree.add(DropTarget::new().child_id(expand));
+        let pad = tree.add(Padding::uniform(16.0).child_id(dt));
+        let _z = tree.add(ZStack::new().child(RectWidget::new()).add_child(pad));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let b = tree.bounds(inner);
+        assert!(
+            b.width > 700.0 && b.height > 500.0,
+            "flexible child collapsed inside DropTarget: {b:?}"
+        );
+    }
+
+    /// Regression: the decorative highlight border must be `event_pass_through`
+    /// so a tap reaches the wrapped (interactive) content — otherwise wrapping a
+    /// tree row's expand chevron / a button in a `DropTarget` silently breaks it.
+    #[test]
+    fn border_overlay_does_not_block_taps_to_content() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_core::widget_builder::WidgetBuilder;
+        let tapped = Rc::new(Cell::new(false));
+        let t = tapped.clone();
+        let mut tree = themed_tree();
+        let inner = tree.add(RectWidget::new().on_tap(move |_e, _ctx| t.set(true)));
+        tree.add(DropTarget::new().child_id(inner));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let center = tree.bounds(inner).center();
+        tree.pointer_down_button(center, PointerButton::Primary);
+        tree.pointer_up_button(center, PointerButton::Primary);
+        assert!(
+            tapped.get(),
+            "the DropTarget border overlay must not eat taps meant for the wrapped content"
+        );
     }
 
     /// An accepted external file drop reaches `on_drop`.

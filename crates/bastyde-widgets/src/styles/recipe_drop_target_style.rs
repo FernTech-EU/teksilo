@@ -68,13 +68,18 @@ impl DropTargetStyle for RecipeDropTargetStyle {
         // Reactive highlight border over the child (skipped for `None`). Only a
         // stroke — no fill — so the child is never hidden. The border color
         // tracks the drag state (Idle → transparent, so nothing shows at rest).
+        // It is `event_pass_through` so this decorative overlay never steals
+        // pointer events from the wrapped child — otherwise wrapping interactive
+        // content (a tree row's expand chevron, a button) in a `DropTarget`
+        // would silently break it, since the full-bounds rect sits on top.
         if cfg.variant != DropTargetVariant::None {
             let border = cfg.drag_state.map(|s| s.border_role());
             let rect = ctx.add(
                 RectWidget::new()
                     .border_color(border)
                     .border_width(border_width)
-                    .corner_radius(CornerRadius::uniform(DROP_TARGET_CORNER_RADIUS)),
+                    .corner_radius(CornerRadius::uniform(DROP_TARGET_CORNER_RADIUS))
+                    .event_pass_through(true),
             );
             zstack = zstack.add_child(rect);
         }
