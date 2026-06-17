@@ -359,6 +359,47 @@ external `DataChange::Reset` contract of the proxies is unchanged.
 `ListDataSource` carries a defaulted `first_changed_index()` (returning
 `None`) so generic consumers reach the side-channel without downcasts.
 
+## 14. Incremental reconcile — projecting an external source of truth
+
+§7 and §10 assume the view-model *owns* its model (the `QStandardItemModel`
+shape). When the **domain owns the data** and the bastyde model is a projection
+over it (a Qleany entity store, a DB, an event stream — the
+`QAbstractItemModel` shape), the naive "re-read everything and rebuild" is a
+`Reset`: it reassigns every `NodeId`, so the view's expand set, selection, and
+scroll are all discarded.
+
+`bastyde_data::reconcile` closes that gap. Re-read the domain into a fresh keyed
+list and reconcile it; the model emits only the minimal `insert` / `remove` /
+`move` / `update` changes, **reusing the identity of every key present in both
+states**:
+
+```rust
+use bastyde_data::{reconcile_tree, reconcile_list, ReconcileIndex};
+
+// Tree: pre-order (key, depth, value) rows. `index` (key -> NodeId) persists
+// between calls; returns the NodeIds of newly-inserted nodes.
+let mut index: ReconcileIndex<EntityId, Row> = ReconcileIndex::new();
+let new_nodes = reconcile_tree(&tree_model, &mut index, &rows);
+
+// List: keyed by `key_of`; reads current state from the model each call.
+reconcile_list(&list_model, &rows, |row| row.id);
+```
+
+- **Trees** keep every surviving `NodeId`, so `TreeSlice` expand state,
+  `SelectionModel`, and scroll follow the change — a move stays a `NodeMoved`,
+  not a remove+insert. (Reparenting that *inverts* an ancestor/descendant pair
+  is unsupported — it trips `move_node`'s cycle assertion; domain edits like
+  move / wrap / unwrap never do this.)
+- **Lists** emit `ItemsMoved` / `ItemUpdated` so a `Repeater` reorders subtrees
+  instead of recreating them, and `first_changed_index()` (§13) still narrows
+  row-height caches. Placement is front-to-back (`O(n²)` lookups) — sized for the
+  bounded collections lists are used for.
+
+**Tables.** There is no table-specific reconcile by design: a `TableView`'s rows
+are a `ListModel` (`reconcile_list`), a `TreeTable`'s rows are a `TreeModel`
+(`reconcile_tree`), and a cell edit is an in-place value update either reconciler
+already emits. Columns are configuration, not data.
+
 ---
 
 ## See also
