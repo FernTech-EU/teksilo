@@ -479,7 +479,11 @@ impl WidgetCatalog for TextWidget {
         "Display"
     }
     fn display_name() -> &'static str {
-        "Text"
+        // Match the actual widget type name (`TextWidget`), like every other
+        // catalog entry (`Button`, `VStack`, …). Tools that map source widget
+        // names to catalog entries (e.g. bastyde-designer's interpreter) rely
+        // on this; "Text" was an inconsistent shorthand.
+        "TextWidget"
     }
     fn knobs() -> KnobSpec {
         KnobSpec::new().text("text", "Text", "Label")

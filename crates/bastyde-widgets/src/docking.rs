@@ -181,15 +181,32 @@ impl Widget for DockingLayout {
         // structural change; the Rebuild/Relayout split keeps resize / show-
         // hide / tab-switch from rebuilding.)
 
+        // Centre preservation across rebuilds. `self.center` is a one-shot
+        // `take()`, so a rebuild (a rail / dock / side change re-runs `build()`)
+        // would otherwise find it `None` and fall back to a blank placeholder —
+        // blanking the editor. `preserves_children_on_rebuild()` (below) stops
+        // the framework from auto-destroying our children on a rebuild, so we
+        // manage them here: keep the centre subtree (index 0) and destroy +
+        // rebuild only the model-derived sides.
+        let prior = std::mem::take(&mut self.ordered);
+        let preserved_center = prior.first().copied();
+        for &old_side in prior.iter().skip(1) {
+            ctx.destroy_subtree(old_side);
+        }
+
         // Centre.
-        let center = if let Some(id) = self.center_id {
-            id
-        } else if let Some(w) = self.center.take() {
-            ctx.add_boxed(w)
+        let center = if let Some(c) = preserved_center {
+            c
         } else {
-            ctx.add(RectWidget::new().background(SurfaceRole::Content))
+            let inner = if let Some(id) = self.center_id {
+                id
+            } else if let Some(w) = self.center.take() {
+                ctx.add_boxed(w)
+            } else {
+                ctx.add(RectWidget::new().background(SurfaceRole::Content))
+            };
+            ctx.add(crate::primitives::Expand::new().child_id(inner))
         };
-        let center = ctx.add(crate::primitives::Expand::new().child_id(center));
 
         let mut ordered = vec![center];
         let anim = ctx.animate().collapse().standard();
@@ -410,6 +427,15 @@ impl Widget for DockingLayout {
     }
 
     fn clips_children(&self) -> bool {
+        true
+    }
+
+    /// We manage our own children across rebuilds (see `build`): the centre is
+    /// a one-shot passed-in widget that must survive structural rebuilds, so we
+    /// preserve it and explicitly destroy + rebuild only the model-derived
+    /// sides. Without this the framework auto-destroys every child on rebuild,
+    /// and the centre (already `take()`n) falls back to a blank placeholder.
+    fn preserves_children_on_rebuild(&self) -> bool {
         true
     }
 
