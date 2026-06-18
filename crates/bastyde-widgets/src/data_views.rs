@@ -18,10 +18,14 @@
 //!   `(target, position)` pair `can_accept` / `accept_drop` expect.
 //! - [`default_placeholder`] — the skeleton for a `Loading` row.
 
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use bastyde_core::ObserverHandle;
 use bastyde_core::widget::Widget;
-use bastyde_data::DropPosition;
+use bastyde_data::{
+    DataChange, DropPosition, ItemKey, KeyedSelectionModel, SelectionMode, SelectionModel,
+};
 
 /// The intra-app drag payload a data-view row emits. Non-generic: the receiving
 /// source compares `source_view_id` to decide SameView-vs-Foreign and maps
@@ -77,4 +81,171 @@ pub(crate) fn default_placeholder() -> Box<dyn Widget> {
                 .corner_radius(bastyde_tokens::CornerRadius::uniform(4.0)),
         ),
     )
+}
+
+/// Index-facing row-selection facade backing the four data views.
+///
+/// An app installs *either* the index-based [`SelectionModel`] (positions) or a
+/// [`KeyedSelectionModel<K>`] (stable identities that survive reorder / filter /
+/// window-slide / multi-view). The views' click / keyboard / rebuild / paint
+/// paths all work in **indices**, so this facade erases the difference: the
+/// keyed variant carries the view's index↔key mapping (`key_at` / `len` /
+/// `contains_key`) and translates internally. The method surface deliberately
+/// mirrors `SelectionModel` so call sites read identically (`rs.select(i)`,
+/// `rs.is_selected(i)`, …).
+#[derive(Clone)]
+pub(crate) struct RowSelection {
+    mode: SelectionMode,
+    is_selected: Rc<dyn Fn(usize) -> bool>,
+    select_fn: Rc<dyn Fn(usize)>,
+    toggle_fn: Rc<dyn Fn(usize)>,
+    extend_fn: Rc<dyn Fn(usize)>,
+    selected_indices_fn: Rc<dyn Fn() -> Vec<usize>>,
+    clear_fn: Rc<dyn Fn()>,
+    observe_fn: Rc<dyn Fn(Box<dyn Fn()>) -> ObserverHandle>,
+    on_change_fn: Rc<dyn Fn(&DataChange)>,
+}
+
+impl RowSelection {
+    /// Back the facade with the index-based [`SelectionModel`]. Index ops pass
+    /// straight through; `on_data_change` index-shifts (insert / remove) or
+    /// clears (reset) the selection, matching the legacy inline behaviour.
+    pub(crate) fn from_index(sel: SelectionModel) -> Self {
+        let (s_is, s_sel, s_tog, s_ext, s_idx, s_clr, s_obs, s_chg) = (
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+            sel.clone(),
+        );
+        Self {
+            mode: sel.mode(),
+            is_selected: Rc::new(move |i| s_is.is_selected(i)),
+            select_fn: Rc::new(move |i| s_sel.select(i)),
+            toggle_fn: Rc::new(move |i| s_tog.toggle(i)),
+            extend_fn: Rc::new(move |i| s_ext.extend_to(i)),
+            selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
+            clear_fn: Rc::new(move || s_clr.clear()),
+            observe_fn: Rc::new(move |cb| s_obs.selection_signal().observe(move |_| cb())),
+            on_change_fn: Rc::new(move |change| match change {
+                DataChange::ItemsInserted { range } => {
+                    s_chg.adjust_for_insert(range.start, range.end - range.start);
+                }
+                DataChange::ItemsRemoved { range } => {
+                    s_chg.adjust_for_remove(range.start, range.end - range.start);
+                }
+                DataChange::Reset => s_chg.clear(),
+                _ => {}
+            }),
+        }
+    }
+
+    /// Back the facade with a [`KeyedSelectionModel<K>`] plus the view's
+    /// index↔key mapping. `key_at(i)` is the key at visible index `i`, `len()`
+    /// the visible count (for Shift-range ordering and `selected_indices`), and
+    /// `contains_key(&k)` whether the *source* still holds the key (for
+    /// prune-on-remove — a collapsed-but-present tree node must NOT be pruned,
+    /// so this is supplied by the view, not derived from the visible window).
+    pub(crate) fn from_keyed<K: ItemKey>(
+        keyed: KeyedSelectionModel<K>,
+        key_at: Rc<dyn Fn(usize) -> Option<K>>,
+        len: Rc<dyn Fn() -> usize>,
+        contains_key: Rc<dyn Fn(&K) -> bool>,
+    ) -> Self {
+        let mode = keyed.mode();
+        Self {
+            mode,
+            is_selected: {
+                let (k, ka) = (keyed.clone(), key_at.clone());
+                Rc::new(move |i| ka(i).map(|key| k.is_selected(&key)).unwrap_or(false))
+            },
+            select_fn: {
+                let (k, ka) = (keyed.clone(), key_at.clone());
+                Rc::new(move |i| {
+                    if let Some(key) = ka(i) {
+                        k.select(key);
+                    }
+                })
+            },
+            toggle_fn: {
+                let (k, ka) = (keyed.clone(), key_at.clone());
+                Rc::new(move |i| {
+                    if let Some(key) = ka(i) {
+                        k.toggle(key);
+                    }
+                })
+            },
+            extend_fn: {
+                let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
+                Rc::new(move |i| {
+                    if let Some(target) = ka(i) {
+                        let ordered: Vec<K> = (0..l()).filter_map(|j| ka(j)).collect();
+                        k.extend_to(target, &ordered);
+                    }
+                })
+            },
+            selected_indices_fn: {
+                let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
+                Rc::new(move || {
+                    (0..l())
+                        .filter(|&i| ka(i).map(|key| k.is_selected(&key)).unwrap_or(false))
+                        .collect()
+                })
+            },
+            clear_fn: {
+                let k = keyed.clone();
+                Rc::new(move || k.clear())
+            },
+            observe_fn: {
+                let k = keyed.clone();
+                Rc::new(move |cb| k.selection_signal().observe(move |_| cb()))
+            },
+            on_change_fn: {
+                let (k, c) = (keyed, contains_key);
+                Rc::new(move |change| match change {
+                    // Keys are stable across inserts / moves; only removals and
+                    // resets can orphan a selected key.
+                    DataChange::ItemsRemoved { .. } | DataChange::Reset => {
+                        k.prune_missing(|key| c(key));
+                    }
+                    _ => {}
+                })
+            },
+        }
+    }
+
+    pub(crate) fn mode(&self) -> SelectionMode {
+        self.mode
+    }
+    pub(crate) fn is_selected(&self, index: usize) -> bool {
+        (self.is_selected)(index)
+    }
+    pub(crate) fn select(&self, index: usize) {
+        (self.select_fn)(index)
+    }
+    pub(crate) fn toggle(&self, index: usize) {
+        (self.toggle_fn)(index)
+    }
+    pub(crate) fn extend_to(&self, index: usize) {
+        (self.extend_fn)(index)
+    }
+    pub(crate) fn selected_indices(&self) -> Vec<usize> {
+        (self.selected_indices_fn)()
+    }
+    pub(crate) fn clear(&self) {
+        (self.clear_fn)()
+    }
+    /// Subscribe to selection changes (drives the view's rebuild). Owns the
+    /// returned handle for the subscription's lifetime.
+    pub(crate) fn observe_for_rebuild(&self, cb: impl Fn() + 'static) -> ObserverHandle {
+        (self.observe_fn)(Box::new(cb))
+    }
+    /// React to a source data change (index-shift for the index model, prune
+    /// for the keyed model).
+    pub(crate) fn on_data_change(&self, change: &DataChange) {
+        (self.on_change_fn)(change)
+    }
 }

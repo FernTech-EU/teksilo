@@ -30,6 +30,9 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::selection_model::SelectionModel;
+use bastyde_data::{ItemKey, KeyedSelectionModel};
+
+use crate::data_views::RowSelection;
 use bastyde_data::{DataChange, DragEligibility, DropPosition, DropResponse, ListModel, RowState};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
@@ -75,7 +78,9 @@ pub struct ListView<T: 'static> {
     /// through this. Shared handle: cloned into the scroll observer,
     /// keyboard and DnD closures.
     metrics: SharedRowMetrics,
-    selection: Option<SelectionModel>,
+    /// Row selection — index-based [`SelectionModel`] or keyed
+    /// [`KeyedSelectionModel<K>`], unified behind the index-facing facade.
+    row_selection: Option<RowSelection>,
 
     /// Keyboard-focused item index within the list.
     focused_index: Rc<Cell<Option<usize>>>,
@@ -149,6 +154,43 @@ impl<T: 'static> ListView<T> {
         Self::create(ListSource::from_data_source(source), delegate)
     }
 
+    /// Create a ListView backed by a custom `ListDataSource` with **keyed**
+    /// selection. The `KeyedSelectionModel<S::Key>` tracks selection by source
+    /// identity, so it survives reorders, filters, lazy window-slides, and
+    /// stays consistent across two views of the same source. The view stays
+    /// key-less (`ListView<T>`) — the index↔key mapping is captured from the
+    /// concrete source here. Mutually exclusive with
+    /// [`selection`](Self::selection) (the last one set wins).
+    pub fn from_source_keyed<S: bastyde_data::ListDataSource<Item = T>>(
+        source: S,
+        keyed: KeyedSelectionModel<S::Key>,
+        delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self
+    where
+        S::Key: ItemKey,
+    {
+        let s = Rc::new(source);
+        let key_at = {
+            let s = s.clone();
+            Rc::new(move |i| s.key_at(i)) as Rc<dyn Fn(usize) -> Option<S::Key>>
+        };
+        let len = {
+            let s = s.clone();
+            Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
+        };
+        // Existence for prune: scan the (cheap, key-only) visible index space —
+        // works for lazy sources too, where keys are known before items load.
+        let contains = {
+            let s = s.clone();
+            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
+                as Rc<dyn Fn(&S::Key) -> bool>
+        };
+        let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        let mut view = Self::create(ListSource::from_data_source_rc(s), delegate);
+        view.row_selection = Some(row_selection);
+        view
+    }
+
     /// Create a ListView backed by a pre-built [`ListSource`]. Crate-
     /// internal entry point for consumers that already own an erased
     /// source (e.g. `ComboBox`'s `ItemSource` bridged through
@@ -175,7 +217,7 @@ impl<T: 'static> ListView<T> {
             spacing: 0.0,
             height_source: HeightSource::Uniform,
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
-            selection: None,
+            row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             show_scrollbar: true,
@@ -250,9 +292,11 @@ impl<T: 'static> ListView<T> {
         self
     }
 
-    /// Set the selection model.
+    /// Set the index-based selection model (positions). For identity-based
+    /// selection that survives reorder / filter / window-slide, build the view
+    /// with [`from_source_keyed`](Self::from_source_keyed) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
-        self.selection = Some(sel);
+        self.row_selection = Some(RowSelection::from_index(sel));
         self
     }
 
@@ -409,6 +453,7 @@ impl<T: 'static> Widget for ListView<T> {
             let metrics = self.metrics.clone();
             let len_fn = self.source.len_fn.clone();
             let first_changed = self.source.first_changed_fn.clone();
+            let row_sel = self.row_selection.clone();
             move |change| {
                 // Keep row metrics in step with the data: rows before
                 // the first changed index keep their (seeded or
@@ -428,6 +473,11 @@ impl<T: 'static> Widget for ListView<T> {
                 metrics
                     .borrow_mut()
                     .apply_divergence(divergence, (len_fn)());
+                // Keep selection in step: index-shift (index model) or prune
+                // orphaned keys (keyed model).
+                if let Some(ref rs) = row_sel {
+                    rs.on_data_change(change);
+                }
                 let next = dv.get() + 1;
                 dv.set(next);
                 version_for_data.set(next);
@@ -436,17 +486,15 @@ impl<T: 'static> Widget for ListView<T> {
         ctx.own_handle(data_handle);
 
         // --- Observe selection changes (rebuild to update delegate's `selected` param) ---
-        if let Some(ref sel) = self.selection {
+        if let Some(ref rs) = self.row_selection {
             let version_for_sel = version.clone();
             let sel_ver = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), {
-                let sv = sel_ver.clone();
-                move |_| {
-                    let next = sv.get() + 1;
-                    sv.set(next);
-                    version_for_sel.set(next);
-                }
+            let handle = rs.observe_for_rebuild(move || {
+                let next = sel_ver.get() + 1;
+                sel_ver.set(next);
+                version_for_sel.set(next);
             });
+            ctx.own_handle(handle);
         }
 
         // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
@@ -517,7 +565,7 @@ impl<T: 'static> Widget for ListView<T> {
             let len_for_key = self.source.len_fn.clone();
             let accept_drop_for_key = self.source.dnd.accept_drop_fn.clone();
             let view_id_for_key = self.model_id;
-            let sel_for_key = self.selection.clone();
+            let sel_for_key = self.row_selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
@@ -734,7 +782,7 @@ impl<T: 'static> Widget for ListView<T> {
         if (self.source.dnd.can_fetch_more_fn)() && end + BUFFER_ITEMS >= self.source.len() {
             (self.source.dnd.fetch_more_fn)();
         }
-        let selection = &self.selection;
+        let selection = &self.row_selection;
         let reorderable = self.reorderable;
         let model_id = self.model_id;
         let self_id = ctx.self_id();
@@ -757,7 +805,7 @@ impl<T: 'static> Widget for ListView<T> {
 
                 // Selection click handling: plain click selects,
                 // Ctrl+click toggles, Shift+click extends range.
-                if let Some(ref sel) = self.selection {
+                if let Some(ref sel) = self.row_selection {
                     let sel_click = sel.clone();
                     let click_index = i;
                     ctx.apply_handlers(
@@ -1275,6 +1323,61 @@ mod tests {
             !selection.is_selected(0),
             "previous selection should be cleared"
         );
+    }
+
+    #[test]
+    fn keyed_selection_tracks_identity_not_index() {
+        // from_source_keyed wires a KeyedSelectionModel<S::Key>: a click stores
+        // the row's KEY (not its index), proving the index↔key translation.
+        use bastyde_core::ObserverHandle;
+        use bastyde_data::{KeyedSelectionModel, ListDataSource, SelectionMode};
+        use std::rc::Rc;
+
+        struct KeyedSource {
+            items: Vec<(u64, usize)>, // (stable key, value)
+        }
+        impl ListDataSource for KeyedSource {
+            type Item = usize;
+            type Key = u64;
+            fn len(&self) -> usize {
+                self.items.len()
+            }
+            fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+                self.items.get(i).map(|(_, v)| f(v))
+            }
+            fn key_at(&self, i: usize) -> Option<u64> {
+                self.items.get(i).map(|(k, _)| *k)
+            }
+            fn index_of(&self, key: &u64) -> Option<usize> {
+                self.items.iter().position(|(k, _)| k == key)
+            }
+            fn observe_changes(
+                &self,
+                _f: impl Fn(&bastyde_data::DataChange) + 'static,
+            ) -> ObserverHandle {
+                ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+            }
+        }
+
+        let keyed = KeyedSelectionModel::<u64>::new(SelectionMode::Single);
+        let source = KeyedSource {
+            items: vec![(10, 100), (20, 200), (30, 300)],
+        };
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::from_source_keyed(source, keyed.clone(), |_i, _v, _sel| {
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Click row 1 → the keyed model stores key 20, not index 1.
+        let children = tree.children(lv_id);
+        tree.click(children[1]);
+        assert!(keyed.is_selected(&20), "selection is stored by key");
+        assert_eq!(keyed.selected_keys(), vec![20]);
+        assert!(!keyed.is_selected(&10));
     }
 
     #[test]

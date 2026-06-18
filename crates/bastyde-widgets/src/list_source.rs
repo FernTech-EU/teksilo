@@ -193,7 +193,14 @@ impl<T: 'static> ListSource<T> {
     }
 
     pub(crate) fn from_data_source<S: ListDataSource<Item = T>>(source: S) -> Self {
-        let s = Rc::new(source);
+        Self::from_data_source_rc(Rc::new(source))
+    }
+
+    /// Like [`from_data_source`](Self::from_data_source) but takes a shared
+    /// `Rc<S>`, so a caller that also needs the concrete source (e.g. to build
+    /// a keyed-selection facade over the same `key_at` / `index_of`) can share
+    /// one handle instead of erasing twice.
+    pub(crate) fn from_data_source_rc<S: ListDataSource<Item = T>>(s: Rc<S>) -> Self {
         let s1 = s.clone();
         let s2 = s.clone();
         let s3 = s.clone();
