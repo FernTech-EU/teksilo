@@ -40,7 +40,7 @@ pub(crate) struct BodyRow {
     row_height: Option<f32>,
     widths: SharedColumnWidths,
     /// When `false`, the row is invisible to AccessKit — used by
-    /// TreeTable, which wraps BodyRow in `TreeRowA11y` and wants the
+    /// TreeTableView, which wraps BodyRow in `TreeRowA11y` and wants the
     /// outer wrapper to carry `Role::Row` instead.
     announce_a11y: bool,
 }

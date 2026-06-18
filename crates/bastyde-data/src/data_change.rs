@@ -27,6 +27,12 @@ pub enum DataChange {
     /// A single item was updated in place.
     ItemUpdated { index: usize },
 
+    /// A window of previously-`Loading` rows became `Ready` (lazy / windowed
+    /// sources). Semantically like `ItemsInserted` for a row-height cache
+    /// (divergence = `range.start`), but no rows were added — the count was
+    /// already declared — so a `SelectionModel` must NOT index-shift for it.
+    WindowLoaded { range: Range<usize> },
+
     /// The entire list was replaced. Consumers should discard all state and rebuild.
     Reset,
 }

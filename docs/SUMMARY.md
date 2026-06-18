@@ -130,7 +130,7 @@ directory.
   four collapsible/splittable/draggable side regions, per-corner ownership, an
   activity rail, drag-to-dock five-zone overlay, and a cloneable serializable
   `DockingModel` with `export_state`/`import_state`.
-- [table-view.md](table-view.md) — virtualized `TableView` and `TreeTable`
+- [table-view.md](table-view.md) — virtualized `TableView` and `TreeTableView`
   (multi-column, sort/filter, drag-resize, drag-reorder, full keyboard
   navigation).
 - [tab-widget.md](tab-widget.md) — `TabBar<T>` and `TabWidget` (static +

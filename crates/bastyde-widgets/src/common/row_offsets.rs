@@ -6,7 +6,7 @@
 //! `PrefixSumOffsets` maps row index → content-space top-y in O(log n) (and
 //! the inverse, y → row, by binary search), rebuilding lazily only from the
 //! first dirtied row. Shared by `GridView`'s variable-height strategies and
-//! the 1-D row widgets (`ListView` / `TreeView` / `TableView` / `TreeTable`
+//! the 1-D row widgets (`ListView` / `TreeView` / `TableView` / `TreeTableView`
 //! via `RowMetrics`). Holders keep it behind a `RefCell` so the `&self`
 //! `place_children` pass can feed measured heights back without `&mut`.
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Column descriptor + supporting enums for `TableView` and `TreeTable`.
+//! Column descriptor + supporting enums for `TableView` and `TreeTableView`.
 //!
 //! Columns are declared once per table; the table consumes a `Vec<Column<T>>`
 //! and shares it with its body subtree. The cell delegate is `Rc`-erased so a
@@ -133,10 +133,10 @@ pub struct CellContext {
     pub is_hovered: bool,
     /// Whether `editing_cell_signal` matches this cell.
     pub is_editing: bool,
-    /// `TreeTable` only — depth of the row in the hierarchy. `None` for
+    /// `TreeTableView` only — depth of the row in the hierarchy. `None` for
     /// flat tables.
     pub depth: Option<usize>,
-    /// `TreeTable` only — true on the column hosting the twist arrow.
+    /// `TreeTableView` only — true on the column hosting the twist arrow.
     pub is_tree_column: bool,
 }
 

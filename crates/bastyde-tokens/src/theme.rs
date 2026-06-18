@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn alt_row_is_distinct_from_content_in_both_themes() {
-        // TableView / TreeTable zebra striping needs a perceptible delta
+        // TableView / TreeTableView zebra striping needs a perceptible delta
         // between alternating rows and the body background. If a future
         // refactor accidentally aliases these, regression here.
         let light = ColorTokens::light_default();

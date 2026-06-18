@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Trait abstracting per-row navigation for `TableView` and `TreeTable`.
+//! Trait abstracting per-row navigation for `TableView` and `TreeTableView`.
 //!
 //! Flat tables answer arrow-up/down by stepping a contiguous index;
 //! tree tables need to ask their `TreeSlice` for the next visible
@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 /// Per-row navigator. Implementations live alongside the consumer
 /// widget — `FlatNavigator` here for `TableView`; `TreeNavigator` in
-/// `tree_table.rs` for `TreeTable`.
+/// `tree_table_view.rs` for `TreeTableView`.
 pub(crate) trait RowNavigator {
     fn row_count(&self) -> usize;
 

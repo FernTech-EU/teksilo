@@ -21,7 +21,7 @@
 //!
 //! There is deliberately no table-specific reconcile. A `TableView`'s rows are a
 //! [`ListModel`] (or a `SortFilterListModel` over one) — reconcile that with
-//! [`reconcile_list`]. A `TreeTable`'s rows are a [`TreeModel`] — reconcile that
+//! [`reconcile_list`]. A `TreeTableView`'s rows are a [`TreeModel`] — reconcile that
 //! with [`reconcile_tree`]. A cell edit is just a value change on the row, which
 //! both reconcilers emit as an in-place update (`set` / `update`). Columns are
 //! configuration, not data, so they are never reconciled.

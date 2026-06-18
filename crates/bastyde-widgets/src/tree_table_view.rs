@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `TreeTable<T>` — hierarchical multi-column widget.
+//! `TreeTableView<T>` — hierarchical multi-column widget.
 //!
 //! Sibling of [`TableView`](crate::TableView). Backed by
 //! [`SortFilterTreeModel<T>`](bastyde_data::SortFilterTreeModel) so sort
@@ -118,7 +118,7 @@ impl<T: 'static> RowNavigator for TreeNavigator<T> {
 }
 
 /// Hierarchical multi-column widget. See module documentation.
-pub struct TreeTable<T: 'static> {
+pub struct TreeTableView<T: 'static> {
     proxy: SortFilterTreeModel<T>,
 
     columns: Vec<Column<T>>,
@@ -168,7 +168,7 @@ pub struct TreeTable<T: 'static> {
     body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
     /// Pane-local rebuild trigger + buffered range, owned here so they
-    /// survive `TreeTable` rebuilds (each rebuild constructs a fresh
+    /// survive `TreeTableView` rebuilds (each rebuild constructs a fresh
     /// `TreeBodyPane` struct that inherits these handles).
     pane_version: Signal<u64>,
     pane_built_start: Rc<Cell<usize>>,
@@ -186,7 +186,7 @@ pub struct TreeTable<T: 'static> {
     table_id: usize,
 }
 
-impl<T: 'static> TreeTable<T> {
+impl<T: 'static> TreeTableView<T> {
     /// Wrap a `SortFilterTreeModel<T>`.
     pub fn from_projection(proxy: SortFilterTreeModel<T>) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -576,9 +576,9 @@ impl<T: 'static> TreeTable<T> {
     }
 }
 
-impl<T: 'static> std::fmt::Debug for TreeTable<T> {
+impl<T: 'static> std::fmt::Debug for TreeTableView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TreeTable")
+        f.debug_struct("TreeTableView")
             .field("rows", &self.proxy.visible_count())
             .field("columns", &self.columns.len())
             .field("tree_column", &self.tree_column_id)
@@ -586,7 +586,7 @@ impl<T: 'static> std::fmt::Debug for TreeTable<T> {
     }
 }
 
-impl<T: 'static> Widget for TreeTable<T> {
+impl<T: 'static> Widget for TreeTableView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
@@ -1187,7 +1187,7 @@ mod tests {
 
     #[test]
     fn row_selection_click_repaints_immediately_without_expand_collapse() {
-        // Regression for "row selection in TreeTable only fires on
+        // Regression for "row selection in TreeTableView only fires on
         // expand/collapse": before the selection_signal was observed,
         // calling `sel.select(row)` mutated the model but the rendered
         // `BodyRow.selected` flag (computed at build time from
@@ -1200,7 +1200,7 @@ mod tests {
         let selection = SelectionModel::new(SelectionMode::Single);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .selection_mode(TableSelectionMode::SingleRow)
                 .selection(selection.clone())
@@ -1246,7 +1246,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy)
+            TreeTableView::from_projection(proxy)
                 .add_column(name_col())
                 .add_column(size_col())
                 .row_height(20.0),
@@ -1264,7 +1264,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let _id = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1281,7 +1281,7 @@ mod tests {
         let docs = proxy.tree().root(0);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1291,7 +1291,7 @@ mod tests {
         });
         {
             let any = tree.widget_as_any(id).unwrap();
-            let tt = any.downcast_ref::<TreeTable<&'static str>>().unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
             tt.expand(docs);
         }
         assert_eq!(proxy.visible_count(), 4); // docs, readme, guide, src
@@ -1302,7 +1302,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1313,7 +1313,7 @@ mod tests {
         tree.focus(id);
         {
             let any = tree.widget_as_any(id).unwrap();
-            let tt = any.downcast_ref::<TreeTable<&'static str>>().unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
             tt.set_focused_cell(0, 0);
         }
         // ArrowRight on first row (docs, has children, collapsed) →
@@ -1338,7 +1338,7 @@ mod tests {
         proxy.expand(docs);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy)
+            TreeTableView::from_projection(proxy)
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1376,7 +1376,7 @@ mod tests {
         proxy.set_filter("name", "main");
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let _id = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1393,7 +1393,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1403,13 +1403,13 @@ mod tests {
         });
         {
             let any = tree.widget_as_any(id).unwrap();
-            let tt = any.downcast_ref::<TreeTable<&'static str>>().unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
             tt.expand_all();
         }
         assert_eq!(proxy.visible_count(), 5);
         {
             let any = tree.widget_as_any(id).unwrap();
-            let tt = any.downcast_ref::<TreeTable<&'static str>>().unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
             tt.collapse_all();
         }
         assert_eq!(proxy.visible_count(), 2);
@@ -1420,7 +1420,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            TreeTable::from_projection(proxy)
+            TreeTableView::from_projection(proxy)
                 .add_column(name_col())
                 .add_column(size_col())
                 .row_height(20.0),
@@ -1481,7 +1481,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let table = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1496,7 +1496,7 @@ mod tests {
         tree.focus(table);
         {
             let any = tree.widget_as_any(table).unwrap();
-            any.downcast_ref::<TreeTable<&'static str>>()
+            any.downcast_ref::<TreeTableView<&'static str>>()
                 .unwrap()
                 .set_focused_cell(0, 0);
         }
@@ -1526,7 +1526,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(wide_tree(50));
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let table = tree.add(
-            TreeTable::from_projection(proxy)
+            TreeTableView::from_projection(proxy)
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1556,7 +1556,7 @@ mod tests {
         let mut tree2 = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let proxy2 = SortFilterTreeModel::new(wide_tree(50));
         let table2 = tree2.add(
-            TreeTable::from_projection(proxy2)
+            TreeTableView::from_projection(proxy2)
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1575,7 +1575,7 @@ mod tests {
 
     // ── Boundary scroll chaining ─────────────────────────────────────────
 
-    /// A TreeTable (40 root rows × 20 px in a ~120 px viewport) above a
+    /// A TreeTableView (40 root rows × 20 px in a ~120 px viewport) above a
     /// filler inside an outer ScrollArea, so chaining from the inner
     /// tree-table to the outer area is observable.
     fn nested_tree_table_fixture(
@@ -1589,7 +1589,7 @@ mod tests {
         }
         let proxy = SortFilterTreeModel::new(model);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let tt = TreeTable::from_projection(proxy)
+        let tt = TreeTableView::from_projection(proxy)
             .add_column(name_col())
             .show_header(false)
             .row_height(20.0)
@@ -1726,7 +1726,7 @@ mod tests {
         // The reason the TreeBodyPane split exists: rebuilds targeting
         // an ancestor of the pointer-captured scrollbar are deferred
         // for the whole Down→Up sequence. Pre-split, the scroll-buffer
-        // exit had to rebuild the TreeTable root (an ancestor), so
+        // exit had to rebuild the TreeTableView root (an ancestor), so
         // dragging the thumb past the buffered window left the body
         // stale/empty until release. The pane is a sibling of the
         // scrollbar, so its buffer-exit rebuild goes through mid-drag.
@@ -1739,7 +1739,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(model);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let table = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(name_col())
                 .row_height(20.0),
         );
@@ -1761,7 +1761,7 @@ mod tests {
         // thumb drag drives scroll_y exactly like this).
         let scroll = {
             let any = tree.widget_as_any(table).unwrap();
-            let tt = any.downcast_ref::<TreeTable<&'static str>>().unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
             tt.scroll_y_signal().clone()
         };
         scroll.set(1000.0);
@@ -1803,7 +1803,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let table = tree.add(
-            TreeTable::from_projection(proxy)
+            TreeTableView::from_projection(proxy)
                 .add_column(name_col())
                 .show_header(false)
                 .row_height_fn(move |i| heights.get(i).copied().unwrap_or(28.0)),
@@ -1841,7 +1841,7 @@ mod tests {
         let docs = proxy.tree().root(0);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let table = tree.add(
-            TreeTable::from_projection(proxy.clone())
+            TreeTableView::from_projection(proxy.clone())
                 .add_column(col)
                 .show_header(false)
                 .auto_row_height(50.0),

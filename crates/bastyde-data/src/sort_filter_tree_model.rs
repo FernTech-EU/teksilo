@@ -18,7 +18,7 @@
 //!
 //! The proxy owns its own expand/collapse state (independent of any
 //! `TreeSlice` over the same `TreeModel`) and bumps `version_signal` on
-//! every projection rebuild — `TreeTable` binds to that to know when to
+//! every projection rebuild — `TreeTableView` binds to that to know when to
 //! rebuild its row tree.
 //!
 //! ## Selection semantics
@@ -41,8 +41,8 @@ use bastyde_core::signal::Signal;
 
 use crate::sort_filter_list_model::SortDirection;
 use crate::tree_change::{NodeId, TreeChange};
+use crate::tree_data_source::{FlatEntry, TreeDataSource};
 use crate::tree_model::TreeModel;
-use crate::tree_slice::FlatEntry;
 
 /// Filter strategy used by [`SortFilterTreeModel`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -81,7 +81,7 @@ struct Inner<T: 'static> {
 }
 
 /// Hierarchical projection over a `TreeModel<T>` driven by sort + filter
-/// signals. Exposes a `TreeSlice`-shaped read API consumed by `TreeTable`.
+/// signals. Exposes a `TreeSlice`-shaped read API consumed by `TreeTableView`.
 pub struct SortFilterTreeModel<T: 'static> {
     inner: Rc<RefCell<Inner<T>>>,
 }
@@ -156,7 +156,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         self
     }
 
-    /// Bind a sort signal — typically `TreeTable::sort_signal()`.
+    /// Bind a sort signal — typically `TreeTableView::sort_signal()`.
     pub fn bind_sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>) {
         self.inner.borrow_mut().sort = signal.get();
         rebuild_and_bump(&self.inner);
@@ -172,7 +172,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         g._sort_handle = Some(handle);
     }
 
-    /// Bind a filters signal — typically `TreeTable::filters_signal()`.
+    /// Bind a filters signal — typically `TreeTableView::filters_signal()`.
     pub fn bind_filters_signal(&self, signal: Signal<HashMap<String, String>>) {
         self.inner.borrow_mut().filters = signal.get();
         rebuild_and_bump(&self.inner);
@@ -336,7 +336,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         rebuild_and_bump(&self.inner);
     }
 
-    /// Bumps on every projection rebuild — bind in `TreeTable::build`
+    /// Bumps on every projection rebuild — bind in `TreeTableView::build`
     /// at `BindingLevel::Rebuild`.
     pub fn version_signal(&self) -> Signal<u64> {
         self.inner.borrow().version.clone()
@@ -380,6 +380,63 @@ impl<T: 'static> std::fmt::Debug for SortFilterTreeModel<T> {
             .field("filter_mode", &g.filter_mode)
             .field("filter_count", &g.filters.len())
             .finish()
+    }
+}
+
+/// `SortFilterTreeModel` is a `TreeDataSource` so it drops directly into a
+/// `TreeView` / `TreeTableView`. DnD is left inert (reordering a sort/filter
+/// projection is ill-defined); apps that need a reorderable tree feed a
+/// `TreeSlice` or a bespoke source.
+impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
+    type Item = T;
+    type Key = NodeId;
+
+    fn visible_count(&self) -> usize {
+        SortFilterTreeModel::visible_count(self)
+    }
+
+    fn with_entry<R>(
+        &self,
+        flat_index: usize,
+        f: impl FnOnce(&Self::Item, &FlatEntry<Self::Key>) -> R,
+    ) -> Option<R> {
+        SortFilterTreeModel::with_entry(self, flat_index, f)
+    }
+
+    fn key_at(&self, flat_index: usize) -> Option<NodeId> {
+        self.visible_node_id(flat_index)
+    }
+
+    fn flat_index_of(&self, key: &NodeId) -> Option<usize> {
+        SortFilterTreeModel::flat_index_of(self, *key)
+    }
+
+    fn parent(&self, key: &NodeId) -> Option<NodeId> {
+        self.tree().parent(*key)
+    }
+
+    fn child_keys(&self, key: &NodeId) -> Vec<NodeId> {
+        self.tree().children(*key)
+    }
+
+    fn version_signal(&self) -> Signal<u64> {
+        SortFilterTreeModel::version_signal(self)
+    }
+
+    fn first_changed_index(&self) -> Option<usize> {
+        SortFilterTreeModel::first_changed_index(self)
+    }
+
+    fn is_expanded(&self, key: &NodeId) -> bool {
+        SortFilterTreeModel::is_expanded(self, *key)
+    }
+
+    fn set_expanded(&self, key: &NodeId, expanded: bool) {
+        if expanded {
+            self.expand(*key);
+        } else {
+            self.collapse(*key);
+        }
     }
 }
 

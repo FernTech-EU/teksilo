@@ -117,7 +117,7 @@ The remaining themable widgets are variant-free: `MenuItem`,
 `Dialog`, `Snackbar`, `Banner`, `SegmentedControl`, `ProgressBar`,
 `Link`, `Badge`, `SearchField`, `SpinBox`, `DateEdit`, `ColorPicker`,
 `Calendar`, `RichTextEditor`, `ListView` / `TreeView` (via
-`ListContainerStyle`), `TableView` / `TreeTable` (via `TableStyle`).
+`ListContainerStyle`), `TableView` / `TreeTableView` (via `TableStyle`).
 Their style traits take a `*StyleConfig` with no `variant` field —
 the design language has a single canonical shape, or the variant
 distinction lives elsewhere (e.g. `ProgressBarKind` for determinate
@@ -380,7 +380,7 @@ across six families:
 | `Card` | `CardStyle` | `RecipeCardStyle` | `style_slots.card` |
 | `TabBar` | `TabStyle` ¹ | `RecipeTabStyle` | `style_slots.tab` |
 | `ListView` / `TreeView` (container chrome) | `ListContainerStyle` | `RecipeListContainerStyle` | `style_slots.list_container` |
-| `TableView` / `TreeTable` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
+| `TableView` / `TreeTableView` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
 | `DropZone` | `DropZoneStyle` | `RecipeDropZoneStyle` | `style_slots.drop_zone` |
 | `DropTarget` | `DropTargetStyle` | `RecipeDropTargetStyle` | `style_slots.drop_target` |
 

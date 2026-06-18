@@ -11104,7 +11104,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce607aae8ab0ab3abf3a2723a9ab6f09bb8639ed83fdd888d857b8e556c868d8"
 
 [[package]]
-name = "tree-table"
+name = "tree-table-view"
 version = "0.6.2"
 dependencies = [
  "bastyde",

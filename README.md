@@ -124,7 +124,7 @@ The rules under which Bastyde is built:
 
 **Reactive state.** One `Signal<T>` type, used everywhere. A color change repaints; a size change relayouts; nothing rebuilds that doesn't need to.
 
-**Data models.** `ListModel<T>` and `TreeModel<T>` are generic over your domain type and drive `ListView`, `TreeView`, `TableView`, `TreeTable`, `Repeater`, and `TabBar<T>` directly. Sort/filter projections, per-view tree expand state, shared selection, drag-and-drop reorder, and descendant-to-ancestor tri-state checkbox aggregation come built in.
+**Data models.** `ListModel<T>` and `TreeModel<T>` are generic over your domain type and drive `ListView`, `TreeView`, `TableView`, `TreeTableView`, `Repeater`, and `TabBar<T>` directly. Sort/filter projections, per-view tree expand state, shared selection, drag-and-drop reorder, and descendant-to-ancestor tri-state checkbox aggregation come built in.
 
 **Rendering.** GPU-accelerated via wgpu, with text and graphics sharing one pipeline. When nothing is moving, the app is idle: no wasted frames, near-zero CPU and GPU use.
 

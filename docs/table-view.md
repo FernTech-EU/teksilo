@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# TableView and TreeTable
+# TableView and TreeTableView
 
 Two production-grade tabular widgets for Bastyde: a flat
 [`TableView<T>`](../crates/bastyde-widgets/src/table_view.rs) over any
 `ListDataSource<Item = T>` and a hierarchical
-[`TreeTable<T>`](../crates/bastyde-widgets/src/tree_table.rs) over a
+[`TreeTableView<T>`](../crates/bastyde-widgets/src/tree_table_view.rs) over a
 [`SortFilterTreeModel<T>`](../crates/bastyde-data/src/sort_filter_tree_model.rs).
 They share the same column model, header strip, drag/resize/reorder,
 filter popover, keyboard map, and accessibility wrappers; only the body
@@ -57,7 +57,7 @@ proxy.bind_filters_signal(table.filters_signal().clone());
 table.set_sort(Some("name"), SortDirection::Ascending);
 ```
 
-`TreeTable` is identical in shape but takes a `SortFilterTreeModel<T>`
+`TreeTableView` is identical in shape but takes a `SortFilterTreeModel<T>`
 and adds a `tree_column(id)` plus an optional `filter_mode(...)`:
 
 ```rust
@@ -65,7 +65,7 @@ let proxy = SortFilterTreeModel::new(model)
     .filter_mode(TreeFilterMode::KeepAncestors)
     .with_predicate("name", /* … */);
 
-let tree = TreeTable::from_projection(proxy.clone())
+let tree = TreeTableView::from_projection(proxy.clone())
     .add_column(/* tree column with the twist arrow */ name_col)
     .add_column(size_col)
     .tree_column("name")
@@ -77,7 +77,7 @@ let tree = TreeTable::from_projection(proxy.clone())
 ## Row heights
 
 Three mutually exclusive modes (the last builder call wins), identical on
-`TableView` and `TreeTable`:
+`TableView` and `TreeTableView`:
 
 ```rust
 .row_height(28.0)                 // uniform — the default fast path
@@ -119,7 +119,7 @@ automatically:
 
 - appending rows keeps every measured height (divergence = old length),
   even though `SortFilterListModel` notifies with a blanket `Reset`;
-- expanding/collapsing a `TreeTable` node keeps the heights of all rows
+- expanding/collapsing a `TreeTableView` node keeps the heights of all rows
   above the toggle — no scroll jump;
 - a sort flip invalidates from the first reordered row.
 
@@ -158,7 +158,7 @@ signals — keep them stable across releases.
 | `is_selected`    | `true` when this row (or cell, in cell-mode) is selected    |
 | `is_focused`     | `true` when this cell carries the keyboard focus            |
 | `is_editing`     | `true` when `editing_cell_signal == Some((row, col_index))` |
-| `depth`          | `Some(level)` in `TreeTable`, `None` in `TableView`         |
+| `depth`          | `Some(level)` in `TreeTableView`, `None` in `TableView`         |
 | `is_tree_column` | `true` on the column hosting the twist arrow                |
 
 ---
@@ -237,7 +237,7 @@ plays the same role, plus a `TreeFilterMode` switch:
 | `KeepAncestors`     | a match keeps every ancestor visible (file-tree convention; the **default**)                    |
 | `KeepDescendants`   | a match keeps its full subtree visible (useful for "find a folder, see what's inside")          |
 
-`TreeTable::filter_mode(...)` forwards to the proxy in place — calling
+`TreeTableView::filter_mode(...)` forwards to the proxy in place — calling
 it on the builder mutates the shared `Rc<RefCell<…>>` even though the
 method consumes `Self`.
 
@@ -265,7 +265,7 @@ mutates the map.
 
 The editor inside the popover is a deliberately minimal text field:
 printable characters, Backspace, Delete (clear), and ImeCommit. It is
-self-contained, so the filter UI is available in any TableView/TreeTable
+self-contained, so the filter UI is available in any TableView/TreeTableView
 build.
 
 The header's pointer handler reserves a **filter zone** at the trailing
@@ -292,7 +292,7 @@ Both selection models auto-adjust on `DataChange::ItemsInserted` /
 `ItemsRemoved` / `Reset`, so visual selection survives sorting,
 filtering, and underlying mutation.
 
-`TreeTable` accepts both row and cell modes; selection is keyed by the
+`TreeTableView` accepts both row and cell modes; selection is keyed by the
 **flat visible index** of the `TreeSlice`. Expanding/collapsing
 re-numbers indices, so don't pin a selection across an `expand_all()`
 without a re-mapping step.
@@ -358,13 +358,13 @@ clear behaviour).
 | Ctrl-A                      | select all rows / cells in multi modes                                                |
 | F2 / typing                 | begin edit (gated by `EditTrigger`)                                                   |
 | Escape                      | end edit if any, else clear focus                                                     |
-| ArrowLeft on tree column    | collapse the row when expanded (TreeTable)                                            |
-| ArrowRight on tree column   | expand the row when collapsed and has children (TreeTable)                            |
+| ArrowLeft on tree column    | collapse the row when expanded (TreeTableView)                                            |
+| ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
 
 The same handler powers both widgets via the
 [`RowNavigator`](../crates/bastyde-widgets/src/table_view/row_navigator.rs)
 trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
-`TreeTable`.
+`TreeTableView`.
 
 ---
 
@@ -406,7 +406,7 @@ the source is a `ListModel<T>`. Inter-table or external drops route
 through the user's `on_row_drop(payload, insertion_row, ctx) -> bool`
 handler.
 
-`TreeTable` deliberately does **not** ship row drag-drop in v1: a
+`TreeTableView` deliberately does **not** ship row drag-drop in v1: a
 hierarchical insertion-vs-reparent UX with spring-loaded folders needs
 its own design pass.
 
@@ -416,11 +416,11 @@ its own design pass.
 
 - `TableView` root: `Role::Table` with `row_count` (header inclusive
   when shown) + `column_count`.
-- `TreeTable` root: `Role::TreeGrid`, same counts.
+- `TreeTableView` root: `Role::TreeGrid`, same counts.
 - Each header cell: `Role::ColumnHeader` with `column_index` and, on
   the active sort column, `sort_direction`.
 - Each body row: `Role::Row` with `row_index` (1-based; header is row
-  1, first body row is row 2). On `TreeTable`, the row also carries
+  1, first body row is row 2). On `TreeTableView`, the row also carries
   `level` (1-based depth) and `expanded` for non-leaf rows.
 - Each body cell: `Role::Cell` with `row_index` and `column_index`,
   plus `selected` reflecting the current selection.
@@ -451,7 +451,7 @@ PgDn handler uses.
 | sort indicator (active)       | `TextRole::Accent`                  |
 | filter glyph (inactive)       | `TextRole::Secondary`               |
 | filter glyph (active)         | `TextRole::Accent`                  |
-| TreeTable connector lines     | `BorderRole::Divider`               |
+| TreeTableView connector lines     | `BorderRole::Divider`               |
 
 Static numbers (`ROW_HEIGHT`, `HEADER_HEIGHT`, `RESIZE_HANDLE_WIDTH`,
 `GRID_LINE_THICKNESS`, `TREE_INDENT_PER_LEVEL`, …) are `pub const`s in
@@ -481,7 +481,7 @@ indices and sort direction.
 - multi-row column-group headers,
 - footer / summary rows (compose a `StatusBar` below the table),
 - in-table filter chip bar,
-- TreeTable row drag-drop (insertion-vs-reparent UX needs its own
+- TreeTableView row drag-drop (insertion-vs-reparent UX needs its own
   design).
 
 **Deltas you may notice:** `Column::header_override` is stored on
@@ -501,7 +501,7 @@ not bugs.
   [`TableView`](../examples/data_grid/src/main.rs) with
   `SortFilterListModel`, `MultiRow` selection, alternating rows, and
   filterable name/email/role columns.
-- `cargo run -p tree-table` — mock filesystem
-  [`TreeTable`](../examples/tree_table/src/main.rs) with
+- `cargo run -p tree-table-view` — mock filesystem
+  [`TreeTableView`](../examples/tree_table_view/src/main.rs) with
   `KeepAncestors` filtering, twist-arrow expand/collapse, and the same
   drag-resize / drag-reorder behaviour as the flat table.

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `TreeBodyPane<T>` — the virtualized row pane underneath `TreeTable`'s
+//! `TreeBodyPane<T>` — the virtualized row pane underneath `TreeTableView`'s
 //! header.
 //!
 //! Mirrors `table_view::body_pane::BodyPane` (see its module doc for the
 //! full rationale): the framework's rebuild deferral in
 //! `process_pending_rebuilds` skips rebuilds that target any *ancestor*
 //! of a pointer-captured widget, so row rebuilds rooted on the
-//! `TreeTable` (an ancestor of the scrollbar) stall during a
+//! `TreeTableView` (an ancestor of the scrollbar) stall during a
 //! thumb drag. With the rows owned by this pane — a *sibling* of the
 //! scrollbar — buffer-exit, selection, editing, and expand/collapse
 //! rebuilds keep materializing rows mid-drag.
@@ -21,7 +21,7 @@
 //! the flat pane's clean closure surface.
 //!
 //! `TreeBodyPane` is `pub(crate)` — applications still talk to
-//! `TreeTable`.
+//! `TreeTableView`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -60,7 +60,7 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) tree_display_pos: usize,
     pub(crate) indent_per_level: f32,
 
-    /// Row geometry shared with the `TreeTable` root (the root drives
+    /// Row geometry shared with the `TreeTableView` root (the root drives
     /// scrollbar totals / paint / keyboard, the pane drives
     /// realization, placement, and measurement).
     pub(crate) row_metrics: SharedRowMetrics,
@@ -77,7 +77,7 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// root (so it survives root rebuilds); also bumped by
     /// `place_children`'s post-measure realization re-check.
     pub(crate) version: Signal<u64>,
-    /// Bound at `Relayout` on the `TreeTable` ROOT — bumped when a
+    /// Bound at `Relayout` on the `TreeTableView` ROOT — bumped when a
     /// measure pass changes the content total so the root re-places
     /// with the corrected `max_scroll_y` / thumb ratio next frame (the
     /// root computes them before this pane measures). See
@@ -128,7 +128,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // Buffer-exit detection. Bumps version → rebuild THIS pane,
         // which the deferral logic never skips during a scrollbar thumb
         // drag (the pane is a sibling of the scrollbar, not an
-        // ancestor). The pre-split TreeTable had no buffer-exit
+        // ancestor). The pre-split TreeTableView had no buffer-exit
         // observer at all — scrolling past the buffer left stale rows
         // until the next unrelated rebuild.
         let proxy_for_scroll = self.proxy.clone();

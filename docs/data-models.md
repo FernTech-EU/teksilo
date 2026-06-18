@@ -320,7 +320,7 @@ change, and (for the sort/filter proxies) notify observers with a
 blanket `Reset`. That is the safe *notification* contract, but it
 destroys information a consumer may need: which prefix of the visible
 list is actually unchanged. The canonical consumer is variable-row-height
-virtualization (`ListView` / `TreeView` / `TableView` / `TreeTable`
+virtualization (`ListView` / `TreeView` / `TableView` / `TreeTableView`
 keep per-visible-row measured heights), but anything caching per-row
 derived state can use it.
 
@@ -396,7 +396,7 @@ reconcile_list(&list_model, &rows, |row| row.id);
   bounded collections lists are used for.
 
 **Tables.** There is no table-specific reconcile by design: a `TableView`'s rows
-are a `ListModel` (`reconcile_list`), a `TreeTable`'s rows are a `TreeModel`
+are a `ListModel` (`reconcile_list`), a `TreeTableView`'s rows are a `TreeModel`
 (`reconcile_tree`), and a cell edit is an in-place value update either reconciler
 already emits. Columns are configuration, not data.
 

@@ -51,7 +51,7 @@ use crate::data_change::DataChange;
 use crate::list_data_source::ListDataSource;
 use crate::list_model::ListModel;
 
-/// Sort direction emitted by `TableView` / `TreeTable` headers.
+/// Sort direction emitted by `TableView` / `TreeTableView` headers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
     Ascending,
@@ -151,6 +151,7 @@ impl<T: 'static> Inner<T> {
             Some(DataChange::ItemsInserted { range })
             | Some(DataChange::ItemsRemoved { range }) => range.start,
             Some(DataChange::ItemsMoved { from, to, .. }) => (*from).min(*to),
+            Some(DataChange::WindowLoaded { range }) => range.start,
             Some(DataChange::Reset) => 0,
         };
         let mut d = self
@@ -459,6 +460,9 @@ impl<T: 'static> Clone for SortFilterListModel<T> {
 
 impl<T: 'static> ListDataSource for SortFilterListModel<T> {
     type Item = T;
+    // Selection over a sort/filter projection is positional, not by identity —
+    // `key_at` is left defaulted (None), so use the index-based `SelectionModel`.
+    type Key = usize;
 
     fn len(&self) -> usize {
         self.inner.borrow().visible_to_source.len()
@@ -878,6 +882,7 @@ mod tests {
         );
         impl ListDataSource for VecSource {
             type Item = Row;
+            type Key = usize;
             fn len(&self) -> usize {
                 self.0.borrow().len()
             }

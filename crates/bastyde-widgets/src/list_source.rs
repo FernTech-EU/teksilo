@@ -7,12 +7,136 @@
 //! uniform set of `Rc<dyn Fn(..)>` closures so consumers like `ListView` and
 //! `ComboBox` don't have to carry a generic source parameter or duplicate the
 //! wrapping code.
+//!
+//! The [`DndLazy`] bundle erases the source's DnD + lazy capability protocol the
+//! same way: the view works in **indices** (geometry-derived), and each closure
+//! translates index → the source's `Key` (via `key_at`) before calling the
+//! source's `can_accept` / `accept_drop` / `row_state` / … . The `Key` type
+//! therefore never escapes into the (key-less) `ListView<T>`.
 
 use std::rc::Rc;
 
 use bastyde_core::ObserverHandle;
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::widget::Widget;
-use bastyde_data::{DataChange, ListDataSource, ListModel};
+use bastyde_data::{
+    DataChange, DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse,
+    ListDataSource, ListModel, RowState,
+};
+
+use crate::data_views::RowDrag;
+
+/// The erased DnD + lazy capability closures for a list source. View-facing
+/// arguments are indices + the view's id; the closures resolve keys internally.
+pub(crate) struct DndLazy {
+    /// Whether the row at `index` may begin a drag.
+    pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
+    /// `(payload, target_index, position, this_view_id) -> verdict`.
+    pub(crate) can_accept_fn:
+        Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
+    /// `(payload, target_index, position, this_view_id) -> applied`.
+    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
+    /// Source-side completion: row at `index` was accepted elsewhere.
+    pub(crate) on_drag_out_fn: Rc<dyn Fn(usize)>,
+    /// Whether the row at `index` is loaded.
+    pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
+    /// Nudge the source to load a visible range.
+    pub(crate) request_window_fn: Rc<dyn Fn(std::ops::Range<usize>)>,
+    /// Whether more rows can be appended.
+    pub(crate) can_fetch_more_fn: Rc<dyn Fn() -> bool>,
+    /// Fetch the next page.
+    pub(crate) fetch_more_fn: Rc<dyn Fn()>,
+}
+
+impl DndLazy {
+    /// Erase the DnD + lazy protocol of a concrete `ListDataSource`.
+    fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
+        let (s1, s2, s3, s4, s5, s6, s7, s8) = (
+            s.clone(),
+            s.clone(),
+            s.clone(),
+            s.clone(),
+            s.clone(),
+            s.clone(),
+            s.clone(),
+            s,
+        );
+        Self {
+            drag_fn: Rc::new(move |index| match s1.key_at(index) {
+                Some(k) => s1.drag(&k),
+                None => DragEligibility::NoDrag,
+            }),
+            can_accept_fn: Rc::new(move |payload, target_index, position, view_id| {
+                let Some(target_key) = s2.key_at(target_index) else {
+                    return DropResponse::Reject;
+                };
+                if let Some(rd) = payload.get_typed::<RowDrag>()
+                    && rd.source_view_id == view_id
+                {
+                    let Some(source_key) = s2.key_at(rd.source_index) else {
+                        return DropResponse::Reject;
+                    };
+                    return s2.can_accept(&DropQuery {
+                        source: DragSource::SameView { key: source_key },
+                        target: target_key,
+                        position,
+                    });
+                }
+                s2.can_accept(&DropQuery {
+                    source: DragSource::Foreign { payload },
+                    target: target_key,
+                    position,
+                })
+            }),
+            accept_drop_fn: Rc::new(move |payload, target_index, position, view_id| {
+                let Some(target_key) = s3.key_at(target_index) else {
+                    return false;
+                };
+                if let Some(rd) = payload.get_typed::<RowDrag>()
+                    && rd.source_view_id == view_id
+                {
+                    let Some(source_key) = s3.key_at(rd.source_index) else {
+                        return false;
+                    };
+                    return s3.accept_drop(DropCommit {
+                        source: DragSource::SameView { key: source_key },
+                        target: target_key,
+                        position,
+                    });
+                }
+                s3.accept_drop(DropCommit {
+                    source: DragSource::Foreign { payload },
+                    target: target_key,
+                    position,
+                })
+            }),
+            on_drag_out_fn: Rc::new(move |index| {
+                if let Some(k) = s4.key_at(index) {
+                    s4.on_drag_out(&k);
+                }
+            }),
+            row_state_fn: Rc::new(move |index| s5.row_state(index)),
+            request_window_fn: Rc::new(move |range| s6.request_window(range)),
+            can_fetch_more_fn: Rc::new(move || s7.can_fetch_more()),
+            fetch_more_fn: Rc::new(move || s8.fetch_more()),
+        }
+    }
+
+    /// A fully-inert bundle for sources with no real backing (e.g. `ComboBox`'s
+    /// cloning-accessor source): no drag, every drop rejected, fully resident.
+    fn inert() -> Self {
+        Self {
+            drag_fn: Rc::new(|_| DragEligibility::NoDrag),
+            can_accept_fn: Rc::new(|_, _, _, _| DropResponse::Reject),
+            accept_drop_fn: Rc::new(|_, _, _, _| false),
+            on_drag_out_fn: Rc::new(|_| {}),
+            row_state_fn: Rc::new(|_| RowState::Ready),
+            request_window_fn: Rc::new(|_| {}),
+            can_fetch_more_fn: Rc::new(|| false),
+            fetch_more_fn: Rc::new(|| {}),
+        }
+    }
+}
 
 pub(crate) struct ListSource<T: 'static> {
     pub(crate) len_fn: Rc<dyn Fn() -> usize>,
@@ -33,6 +157,9 @@ pub(crate) struct ListSource<T: 'static> {
     /// `None` for a genuine full change. Raw `ListModel`s report `None` —
     /// their observers already get fine-grained `DataChange` variants.
     pub(crate) first_changed_fn: Rc<dyn Fn() -> Option<usize>>,
+    /// Erased DnD + lazy capability protocol (source-owned validation +
+    /// windowing). Inert for `from_cloning_accessors` sources.
+    pub(crate) dnd: DndLazy,
 }
 
 impl<T: 'static> ListSource<T> {
@@ -53,6 +180,7 @@ impl<T: 'static> ListSource<T> {
                 }
             })),
             first_changed_fn: Rc::new(|| None),
+            dnd: DndLazy::from_source(Rc::new(model)),
         }
     }
 
@@ -69,6 +197,7 @@ impl<T: 'static> ListSource<T> {
             move_item_fn: None,
             remove_item_fn: None,
             first_changed_fn: Rc::new(move || s4.first_changed_index()),
+            dnd: DndLazy::from_source(s),
         }
     }
 
@@ -77,7 +206,8 @@ impl<T: 'static> ListSource<T> {
     /// resulting `with_item_fn` clones the item out, then hands a
     /// reference to the delegate. Used by `ComboBox`'s `ItemSource`,
     /// which fronts both `ListModel<T>` and `ListDataSource<T>` behind
-    /// cloning accessors and doesn't carry a `&T` lifetime.
+    /// cloning accessors and doesn't carry a `&T` lifetime. DnD + lazy are
+    /// inert for this path.
     pub(crate) fn from_cloning_accessors(
         len_fn: Rc<dyn Fn() -> usize>,
         item_at: Rc<dyn Fn(usize) -> Option<T>>,
@@ -93,6 +223,7 @@ impl<T: 'static> ListSource<T> {
             move_item_fn: None,
             remove_item_fn: None,
             first_changed_fn: Rc::new(|| None),
+            dnd: DndLazy::inert(),
         }
     }
 

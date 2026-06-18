@@ -110,7 +110,7 @@ pub enum SurfaceRole {
     Selected,
     /// Inactive selected (when the widget isn't focused).
     SelectedInactive,
-    /// Alternating row background — used by `TableView` / `TreeTable` zebra
+    /// Alternating row background — used by `TableView` / `TreeTableView` zebra
     /// striping when `alternating_rows(true)`. Distinct from `Sunken`
     /// (scroll-container chrome) which is too dark for row striping.
     AltRow,

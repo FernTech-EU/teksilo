@@ -68,7 +68,7 @@ tab-datetime-refs = Calendrier, sélecteurs de date, d'heure et de plage. Voir :
 tab-color-refs = Saisie hexadécimale, édition compacte, sélecteur HSV complet. Voir : cargo run -p color_picker.
 tab-menus-refs = Barre de menu, listes, menus contextuels. Voir : cargo run -p menus_and_dropdowns.
 tab-overlays-refs = Infobulles, popovers, dialogues, snackbars. Voir : cargo run -p tooltips_showcase, cargo run -p dialogs_and_popovers, cargo run -p file_dialogs.
-tab-data-refs = ListView, TreeView, TableView, TreeTable. Voir : cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
+tab-data-refs = ListView, TreeView, TableView, TreeTableView. Voir : cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = Fade, pulse, slide, blur et leurs amis. Voir : cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = Widgets de réaffectation des raccourcis et de paramètres de confidentialité. Voir : cargo run -p shortcuts_demo.
 tab-charts-refs = Graphiques en barres, courbes et anneau (bastyde-charts). Voir : cargo run -p chart_demo.
@@ -280,7 +280,7 @@ dat-tree-child-b = Enfant B
 dat-tree-grandchild = Petit-enfant
 dat-tree-note = TreeView nécessite un TreeModel<T>. Voir `cargo run -p tree-table` pour la démonstration complète.
 dat-table-note = TableView nécessite des définitions de colonnes et un ListModel. Voir `cargo run -p data-grid` pour une grille 1k×6.
-dat-treetable-note = TreeTable combine les colonnes de TableView avec la hiérarchie de TreeView. Voir `cargo run -p tree-table` pour la démo de système de fichiers fictif.
+dat-treetable-note = TreeTableView combine les colonnes de TableView avec la hiérarchie de TreeView. Voir `cargo run -p tree-table` pour la démo de système de fichiers fictif.
 
 # ── Animations tab ──────────────────────────────────────────────────────
 anim-visible = Visible

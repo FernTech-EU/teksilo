@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Selection types for `TableView` and `TreeTable`.
+//! Selection types for `TableView` and `TreeTableView`.
 //!
 //! For row selection (`SingleRow` / `MultiRow`) the table re-uses the
 //! existing `bastyde_data::SelectionModel` keyed by visible row index.
@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use bastyde_core::signal::Signal;
 
-/// Selection mode for a `TableView` or `TreeTable`.
+/// Selection mode for a `TableView` or `TreeTableView`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TableSelectionMode {
     /// No selection allowed.

@@ -283,7 +283,7 @@ Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-w
 
 ## 15. Data Model
 
-Full reference: [`data-models.md`](data-models.md). The `bastyde-data` crate sits between the widget tree and application view-models, providing `ListModel<T>`, `TreeModel<T>` + `TreeSlice<T>`, `SelectionModel`, and the `ListDataSource` trait for paged/external collections. `SortFilterListModel<T>` and `SortFilterTreeModel<T>` are projection wrappers that sort and filter without copying the source. `DataChange` / `TreeChange` notifications drive `Repeater`, `ListView`, `TreeView`, `TableView`, `TreeTable` updates.
+Full reference: [`data-models.md`](data-models.md). The `bastyde-data` crate sits between the widget tree and application view-models, providing `ListModel<T>`, `TreeModel<T>` + `TreeSlice<T>`, `SelectionModel`, and the `ListDataSource` trait for paged/external collections. `SortFilterListModel<T>` and `SortFilterTreeModel<T>` are projection wrappers that sort and filter without copying the source. `DataChange` / `TreeChange` notifications drive `Repeater`, `ListView`, `TreeView`, `TableView`, `TreeTableView` updates.
 
 The crate is separate from `bastyde-core` because collections are a higher layer than the widget tree — view-models live in the application, hold these models as fields, and bind widgets to them. Qleany integration (generated `EntityListModel` / `EntityTreeModel` typed against entity DTOs) is one supported path; nothing in `bastyde-data` requires it.
 

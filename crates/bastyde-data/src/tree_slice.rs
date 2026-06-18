@@ -16,20 +16,11 @@ use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
 use crate::TreeModel;
+use crate::dnd_types::{DragEligibility, DragSource, DropCommit, DropQuery, DropResponse};
 use crate::tree_change::{NodeId, TreeChange};
-
-/// A single entry in the flattened visible-node list.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlatEntry {
-    /// The node's ID in the underlying `TreeModel`.
-    pub node_id: NodeId,
-    /// Depth in the tree (0 for roots).
-    pub depth: usize,
-    /// Whether this node has children in the `TreeModel`.
-    pub has_children: bool,
-    /// Whether this node is currently expanded (children visible).
-    pub is_expanded: bool,
-}
+use crate::tree_data_source::{
+    FlatEntry, TreeDataSource, tree_apply_reorder, tree_is_desc_or_self,
+};
 
 /// Per-view flattened projection of a `TreeModel<T>`.
 ///
@@ -455,9 +446,95 @@ impl<T: 'static> Clone for TreeSliceHandle<T> {
     }
 }
 
+/// `TreeSlice` is the built-in per-view `TreeDataSource` over an in-memory
+/// `TreeModel`. Identity is `NodeId`; a `SameView` drop reorders via
+/// `move_node`/`move_to_root` (with the cycle guard). `Foreign` drops are
+/// rejected — a bare slice knows no foreign payloads.
+impl<T: 'static> TreeDataSource for TreeSlice<T> {
+    type Item = T;
+    type Key = NodeId;
+
+    fn visible_count(&self) -> usize {
+        TreeSlice::visible_count(self)
+    }
+
+    fn with_entry<R>(
+        &self,
+        flat_index: usize,
+        f: impl FnOnce(&Self::Item, &FlatEntry<Self::Key>) -> R,
+    ) -> Option<R> {
+        TreeSlice::with_entry(self, flat_index, f)
+    }
+
+    fn key_at(&self, flat_index: usize) -> Option<NodeId> {
+        self.visible_node_id(flat_index)
+    }
+
+    fn flat_index_of(&self, key: &NodeId) -> Option<usize> {
+        TreeSlice::flat_index_of(self, *key)
+    }
+
+    fn parent(&self, key: &NodeId) -> Option<NodeId> {
+        self.tree().parent(*key)
+    }
+
+    fn child_keys(&self, key: &NodeId) -> Vec<NodeId> {
+        self.tree().children(*key)
+    }
+
+    fn version_signal(&self) -> Signal<u64> {
+        TreeSlice::version_signal(self)
+    }
+
+    fn first_changed_index(&self) -> Option<usize> {
+        TreeSlice::first_changed_index(self)
+    }
+
+    fn is_expanded(&self, key: &NodeId) -> bool {
+        TreeSlice::is_expanded(self, *key)
+    }
+
+    fn set_expanded(&self, key: &NodeId, expanded: bool) {
+        if expanded {
+            self.expand(*key);
+        } else {
+            self.collapse(*key);
+        }
+    }
+
+    fn drag(&self, _key: &NodeId) -> DragEligibility {
+        DragEligibility::CanDrag
+    }
+
+    fn can_accept(&self, query: &DropQuery<'_, NodeId>) -> DropResponse {
+        match &query.source {
+            DragSource::SameView { key: source } => {
+                if *source == query.target
+                    || tree_is_desc_or_self(self.tree(), query.target, *source)
+                {
+                    DropResponse::Reject
+                } else {
+                    DropResponse::Accept
+                }
+            }
+            DragSource::Foreign { .. } => DropResponse::Reject,
+        }
+    }
+
+    fn accept_drop(&self, commit: DropCommit<'_, NodeId>) -> bool {
+        match commit.source {
+            DragSource::SameView { key: source } => {
+                tree_apply_reorder(self.tree(), source, commit.target, commit.position)
+            }
+            DragSource::Foreign { .. } => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dnd_types::DropPosition;
 
     /// Build a sample tree:
     /// A
@@ -784,5 +861,64 @@ mod tests {
         handle.toggle_expand(b);
         assert_eq!(handle.first_changed_index(), Some(1));
         assert_eq!(slice.first_changed_index(), Some(1));
+    }
+
+    // ── TreeDataSource capability protocol ──────────────────────────────
+
+    #[test]
+    fn tree_source_accept_drop_reparents_into() {
+        // Move B (root 1) Into A (root 0). Roots become A, C; B's parent is A.
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree.clone());
+        assert!(slice.accept_drop(DropCommit {
+            source: DragSource::SameView { key: b },
+            target: a,
+            position: DropPosition::Into,
+        }));
+        assert_eq!(tree.root_count(), 2);
+        assert_eq!(tree.parent(b), Some(a));
+    }
+
+    #[test]
+    fn tree_source_can_accept_rejects_cycle_and_refuses_drop() {
+        // Cannot drop A into its own descendant A1.
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let slice = TreeSlice::new(tree.clone());
+        slice.expand(a);
+        let a1 = slice.visible_node_id(1).unwrap();
+        assert_eq!(
+            slice.can_accept(&DropQuery {
+                source: DragSource::SameView { key: a },
+                target: a1,
+                position: DropPosition::Into,
+            }),
+            DropResponse::Reject
+        );
+        // accept_drop refuses rather than panicking in TreeModel::move_node.
+        assert!(!slice.accept_drop(DropCommit {
+            source: DragSource::SameView { key: a },
+            target: a1,
+            position: DropPosition::Into,
+        }));
+    }
+
+    #[test]
+    fn tree_source_reorders_root_siblings() {
+        // Move C (root 2) Before A (root 0) → C, A, B at the root level.
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let c = tree.root(2);
+        let slice = TreeSlice::new(tree.clone());
+        assert!(slice.accept_drop(DropCommit {
+            source: DragSource::SameView { key: c },
+            target: a,
+            position: DropPosition::Before,
+        }));
+        assert_eq!(slice.with_entry(0, |v, _| *v), Some("C"));
+        assert_eq!(slice.with_entry(1, |v, _| *v), Some("A"));
+        assert_eq!(slice.with_entry(2, |v, _| *v), Some("B"));
     }
 }

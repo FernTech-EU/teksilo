@@ -26,8 +26,8 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::selection_model::SelectionModel;
-use bastyde_data::tree_slice::{FlatEntry, TreeSlice, TreeSliceHandle};
-use bastyde_data::{NodeId, TreeModel};
+use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
+use bastyde_data::{FlatEntry, NodeId, TreeModel};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;

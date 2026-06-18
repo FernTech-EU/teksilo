@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! 1-D row-layout abstraction for the virtualizing row widgets
-//! (`ListView`, `TreeView`, `TableView`, `TreeTable`).
+//! (`ListView`, `TreeView`, `TableView`, `TreeTableView`).
 //!
 //! Three height modes behind one call surface, so every consumer of row
 //! geometry (visible range, placement, scrollbar totals, ensure-visible,
@@ -33,7 +33,7 @@ use super::row_offsets::PrefixSumOffsets;
 
 /// Shared handle to a widget's row metrics — cloned into scroll
 /// observers, DnD handlers, keyboard configs, and (for `TableView` /
-/// `TreeTable`) the body pane. Same idiom as `SharedColumnWidths`.
+/// `TreeTableView`) the body pane. Same idiom as `SharedColumnWidths`.
 pub(crate) type SharedRowMetrics = Rc<RefCell<RowMetrics>>;
 
 /// Height source for [`RowMetrics`].

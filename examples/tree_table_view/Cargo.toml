@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 [package]
-name = "tree-table"
+name = "tree-table-view"
 edition = "2024"
 version.workspace = true
 license-file.workspace = true

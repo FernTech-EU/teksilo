@@ -4,7 +4,7 @@
 //! Default `TableStyle` impl + table-family design tokens.
 //!
 //! Design tokens for the table family live as `pub const`s on this
-//! module, shared by `TableView` and `TreeTable` (TreeTable adds
+//! module, shared by `TableView` and `TreeTableView` (TreeTableView adds
 //! tree-only indent / twist sizing on top of the standard table dims).
 //!
 //! ## Wiring status
@@ -12,7 +12,7 @@
 //! The `make_*` trait methods produce reference subtrees for custom
 //! styles that want to install themselves via
 //! `style_slots.table = Some(...)`. The default IntUI shape is the
-//! one `TableView` / `TreeTable` paint today inline; they continue to
+//! one `TableView` / `TreeTableView` paint today inline; they continue to
 //! own their paint passes for performance reasons (grid lines need a
 //! single batched pass over the virtualized viewport — composing one
 //! `RectWidget` per line would defeat virtualization). The full
@@ -29,7 +29,7 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{RectWidget, ZStack};
 
-// ─── IntUI design tokens for TableView / TreeTable ─────────────────
+// ─── IntUI design tokens for TableView / TreeTableView ─────────────────
 
 /// Body row height. Headers use `HEADER_HEIGHT`.
 pub const ROW_HEIGHT: f32 = 28.0;
@@ -55,11 +55,11 @@ pub const HEADER_INTER_CELL_SPACING: f32 = 0.0;
 pub const FOCUS_RING_INSET: f32 = 1.0;
 /// Default minimum column width, used when a column does not set its own.
 pub const MIN_COLUMN_WIDTH_DEFAULT: f32 = 32.0;
-/// `TreeTable` only — pixels per indent level on the tree column.
+/// `TreeTableView` only — pixels per indent level on the tree column.
 pub const TREE_INDENT_PER_LEVEL: f32 = 16.0;
-/// `TreeTable` only — edge length of the twist (expand/collapse) chevron.
+/// `TreeTableView` only — edge length of the twist (expand/collapse) chevron.
 pub const TREE_TWIST_SIZE: f32 = 12.0;
-/// `TreeTable` only — gap between the twist chevron and the cell content.
+/// `TreeTableView` only — gap between the twist chevron and the cell content.
 pub const TREE_TWIST_LABEL_GAP: f32 = 4.0;
 
 /// Default `TableStyle` shipped with Bastyde. The trait methods return

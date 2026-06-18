@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Tier-3 style protocol for `TableView` and `TreeTable`. See
+//! Tier-3 style protocol for `TableView` and `TreeTableView`. See
 //! `docs/styling-system.md`.
 //!
 //! Multi-method trait shared by both data-grid widgets. Chrome is split
@@ -16,7 +16,7 @@
 //!
 //! The trait surface, the `TableGridRecipe`, and the
 //! `style_slots.table` slot are in place. Wiring `TableView` /
-//! `TreeTable` through `make_*` is intentionally deferred. The
+//! `TreeTableView` through `make_*` is intentionally deferred. The
 //! widgets currently still own their cell / row / header / grid-line
 //! chrome directly; every dimension lives on
 //! `bastyde_widgets::styles::recipe_table_style` as `pub const`s.
@@ -52,7 +52,7 @@ pub struct TableRowConfig {
 
 /// Recipe — non-widget data describing the batched paint pass for
 /// grid lines and the frozen-column shadow. Consumed by
-/// `TableView::paint` / `TreeTable::paint` directly. Custom styles
+/// `TableView::paint` / `TreeTableView::paint` directly. Custom styles
 /// override the entire recipe via `TableStyle::grid()`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TableGridRecipe {

@@ -72,7 +72,7 @@ tab-datetime-refs = منتقيات التقويم والتاريخ والوقت 
 tab-color-refs = إدخال الست عشري وتحرير الألوان المضغوط ومنتقي HSV الكامل. انظر: cargo run -p color_picker.
 tab-menus-refs = شريط القوائم وقائمة العناصر والقوائم السياقية. انظر: cargo run -p menus_and_dropdowns.
 tab-overlays-refs = التلميحات والنوافذ المنبثقة والحوارات وأشرطة التنبيه. انظر: cargo run -p tooltips_showcase, cargo run -p dialogs_and_popovers, cargo run -p file_dialogs.
-tab-data-refs = ListView و TreeView و TableView و TreeTable. انظر: cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
+tab-data-refs = ListView و TreeView و TableView و TreeTableView. انظر: cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = التلاشي والنبض والانزلاق والضبابية وما إلى ذلك. انظر: cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = ودجات إعادة ربط الاختصارات وإعدادات الخصوصية. انظر: cargo run -p shortcuts_demo.
 tab-charts-refs = رسوم بيانية شريطية وخطية وحلقية (bastyde-charts). انظر: cargo run -p chart_demo.
@@ -284,7 +284,7 @@ dat-tree-child-b = الفرع ب
 dat-tree-grandchild = الحفيد
 dat-tree-note = يتطلب TreeView نموذج TreeModel<T>. انظر `cargo run -p tree-table` للعرض الكامل.
 dat-table-note = يتطلب TableView تعريفات أعمدة و ListModel. انظر `cargo run -p data-grid` لعرض شبكة ١٠٠٠ × ٦.
-dat-treetable-note = يجمع TreeTable بين أعمدة TableView وتسلسل TreeView. انظر `cargo run -p tree-table` لعرض نظام ملفات وهمي.
+dat-treetable-note = يجمع TreeTableView بين أعمدة TableView وتسلسل TreeView. انظر `cargo run -p tree-table` لعرض نظام ملفات وهمي.
 
 # ── علامة تبويب الحركات ─────────────────────────────────────────────────
 anim-visible = ظاهر

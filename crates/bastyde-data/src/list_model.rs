@@ -10,6 +10,10 @@ use std::rc::Rc;
 use bastyde_core::ObserverHandle;
 
 use crate::data_change::DataChange;
+use crate::dnd_types::{
+    DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse,
+};
+use crate::list_data_source::ListDataSource;
 
 struct ObserverEntry {
     id: u64,
@@ -282,6 +286,71 @@ impl<T: std::fmt::Debug + 'static> std::fmt::Debug for ListModel<T> {
     }
 }
 
+/// `ListModel` is the built-in fully-resident, in-memory `ListDataSource`.
+/// Identity is positional (`Key = usize`); a `SameView` drop reorders via
+/// `move_item`. `Into` and `Foreign` drops are rejected (a flat list does not
+/// nest, and a bare model knows no foreign payloads).
+impl<T: 'static> ListDataSource for ListModel<T> {
+    type Item = T;
+    type Key = usize;
+
+    fn len(&self) -> usize {
+        ListModel::len(self)
+    }
+
+    fn with_item<R>(&self, index: usize, f: impl FnOnce(&T) -> R) -> Option<R> {
+        ListModel::with_item(self, index, f)
+    }
+
+    fn key_at(&self, index: usize) -> Option<usize> {
+        (index < ListModel::len(self)).then_some(index)
+    }
+
+    fn index_of(&self, key: &usize) -> Option<usize> {
+        (*key < ListModel::len(self)).then_some(*key)
+    }
+
+    fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
+        ListModel::observe_changes(self, f)
+    }
+
+    fn drag(&self, _key: &usize) -> DragEligibility {
+        DragEligibility::CanDrag
+    }
+
+    fn can_accept(&self, query: &DropQuery<'_, usize>) -> DropResponse {
+        match &query.source {
+            DragSource::SameView { .. } => match query.position {
+                DropPosition::Into => DropResponse::Reject,
+                DropPosition::Before | DropPosition::After => DropResponse::Accept,
+            },
+            DragSource::Foreign { .. } => DropResponse::Reject,
+        }
+    }
+
+    fn accept_drop(&self, commit: DropCommit<'_, usize>) -> bool {
+        let DragSource::SameView { key: from } = commit.source else {
+            return false;
+        };
+        let len = ListModel::len(self);
+        if from >= len {
+            return false;
+        }
+        let target = commit.target;
+        // move_item removes `from` before inserting, so an insertion point above
+        // the source's old slot shifts down by one.
+        let shift = if from < target { 1 } else { 0 };
+        let to = match commit.position {
+            DropPosition::Before => target.saturating_sub(shift),
+            DropPosition::After => (target + 1).saturating_sub(shift),
+            DropPosition::Into => return false,
+        };
+        let to = to.min(len.saturating_sub(1));
+        self.move_item(from, to);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -502,5 +571,69 @@ mod tests {
     fn remove_out_of_bounds_panics() {
         let model = ListModel::from_vec(vec![1]);
         model.remove(5);
+    }
+
+    // ── ListDataSource capability protocol ──────────────────────────────
+
+    fn order<T: Clone>(model: &ListModel<T>) -> Vec<T> {
+        (0..model.len())
+            .map(|i| model.with_item(i, |v| v.clone()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn list_source_accept_drop_after_reorders() {
+        // [a,b,c,d]; drag index 0 (a) After index 2 (c) → [b,c,a,d]
+        let model = ListModel::from_vec(vec!["a", "b", "c", "d"]);
+        assert!(model.accept_drop(DropCommit {
+            source: DragSource::SameView { key: 0 },
+            target: 2,
+            position: DropPosition::After,
+        }));
+        assert_eq!(order(&model), vec!["b", "c", "a", "d"]);
+    }
+
+    #[test]
+    fn list_source_accept_drop_before_reorders() {
+        // [a,b,c,d]; drag index 3 (d) Before index 1 (b) → [a,d,b,c]
+        let model = ListModel::from_vec(vec!["a", "b", "c", "d"]);
+        assert!(model.accept_drop(DropCommit {
+            source: DragSource::SameView { key: 3 },
+            target: 1,
+            position: DropPosition::Before,
+        }));
+        assert_eq!(order(&model), vec!["a", "d", "b", "c"]);
+    }
+
+    #[test]
+    fn list_source_can_accept_rejects_into_accepts_sibling() {
+        let model = ListModel::from_vec(vec![1, 2, 3]);
+        // A flat list does not nest → Into is forbidden.
+        assert_eq!(
+            model.can_accept(&DropQuery {
+                source: DragSource::SameView { key: 0 },
+                target: 1,
+                position: DropPosition::Into,
+            }),
+            DropResponse::Reject
+        );
+        // Sibling reorder is allowed.
+        assert_eq!(
+            model.can_accept(&DropQuery {
+                source: DragSource::SameView { key: 0 },
+                target: 1,
+                position: DropPosition::After,
+            }),
+            DropResponse::Accept
+        );
+    }
+
+    #[test]
+    fn list_source_key_is_positional_identity() {
+        let model = ListModel::from_vec(vec![10, 20, 30]);
+        assert_eq!(model.key_at(1), Some(1));
+        assert_eq!(model.index_of(&2), Some(2));
+        assert_eq!(model.key_at(5), None);
+        assert_eq!(model.index_of(&9), None);
     }
 }

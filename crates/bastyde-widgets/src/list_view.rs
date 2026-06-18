@@ -29,23 +29,14 @@ use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement}
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
-use bastyde_data::DataChange;
-use bastyde_data::ListModel;
 use bastyde_data::selection_model::SelectionModel;
+use bastyde_data::{DataChange, DragEligibility, DropPosition, DropResponse, ListModel, RowState};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::{RowDrag, default_placeholder, flat_insertion_target};
 use crate::list_source::ListSource;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
-
-/// Internal drag payload for intra-ListView reordering.
-#[derive(Debug, Clone)]
-struct ListViewDragData {
-    /// The model index being dragged.
-    source_index: usize,
-    /// An ID to disambiguate different ListViews (pointer equality of the model).
-    source_model_id: usize,
-}
 
 /// Default number of extra items to create above and below the viewport.
 const BUFFER_ITEMS: usize = 5;
@@ -92,22 +83,12 @@ pub struct ListView<T: 'static> {
     /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
     reorderable: bool,
 
-    /// Controlled-reorder handler `(from, to, ctx)`. When set, drag-drop and
-    /// Alt+Arrow reorders are delivered here INSTEAD of calling the model's
-    /// `move_item` — for lists whose data is owned elsewhere.
-    #[allow(clippy::type_complexity)]
-    on_reorder: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>>,
-
     /// Whether to render an internal vertical scrollbar. When the
     /// caller wants the scrollbar outside the list — e.g. so it
     /// survives ListView rebuilds — this is disabled and the caller
     /// mounts their own, wired through `scroll_y_signal` /
     /// `max_scroll_y_signal` / `viewport_ratio_y_signal`.
     show_scrollbar: bool,
-
-    /// Callback for inter-widget drops from external drag sources.
-    #[allow(clippy::type_complexity)]
-    on_item_drop: Option<Rc<dyn Fn(DragPayload, usize, &mut EventContext) -> bool>>,
 
     // Persistent state (survives rebuild)
     scroll_y: Signal<f32>,
@@ -197,9 +178,7 @@ impl<T: 'static> ListView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
-            on_reorder: None,
             show_scrollbar: true,
-            on_item_drop: None,
             drop_feedback: Signal::new(None),
             placed_content_width: Rc::new(Cell::new(0.0)),
             overscroll_behavior: OverscrollBehavior::default(),
@@ -279,24 +258,14 @@ impl<T: 'static> ListView<T> {
 
     /// Enable intra-widget drag reordering.
     ///
-    /// When enabled, items can be dragged and dropped within this ListView to
-    /// reorder them. By default the model's `move_item()` is called
-    /// automatically; install [`on_reorder`](Self::on_reorder) to route moves
-    /// to a handler instead. Keyboard equivalent: Alt+ArrowUp/Down.
+    /// When enabled, rows can be dragged within this ListView to reorder them.
+    /// The move is routed through the source's `accept_drop` — a `ListModel`
+    /// reorders in place, an external source routes the move to its store. The
+    /// hover indicator reflects the source's `can_accept` verdict, so a
+    /// forbidden drop shows no insertion line. Keyboard equivalent:
+    /// Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
-        self
-    }
-
-    /// Route reorders (drag-drop and Alt+Arrow) to `(from, to, ctx)` instead of
-    /// mutating the model directly — for a list whose data is owned elsewhere
-    /// (a backend reconciled into the model). Requires
-    /// [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(
-        mut self,
-        f: impl Fn(usize, usize, &mut EventContext) + 'static,
-    ) -> Self {
-        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -310,21 +279,6 @@ impl<T: 'static> ListView<T> {
     /// [`viewport_ratio_y_signal`](Self::viewport_ratio_y_signal).
     pub fn show_scrollbar(mut self, show: bool) -> Self {
         self.show_scrollbar = show;
-        self
-    }
-
-    /// Set a callback for inter-widget drops from external drag sources.
-    ///
-    /// The callback receives `(payload, insertion_index, ctx)` and
-    /// returns `true` if the drop was accepted. The firing
-    /// [`EventContext`] lets the handler open a confirmation /
-    /// validation dialog before mutating the underlying model,
-    /// dispatch an intent, or present a snackbar on failure.
-    pub fn on_item_drop(
-        mut self,
-        f: impl Fn(DragPayload, usize, &mut EventContext) -> bool + 'static,
-    ) -> Self {
-        self.on_item_drop = Some(Rc::new(f));
         self
     }
 
@@ -465,6 +419,8 @@ impl<T: 'static> Widget for ListView<T> {
                     }
                     DataChange::ItemUpdated { index } => Some(*index),
                     DataChange::ItemsMoved { from, to, .. } => Some((*from).min(*to)),
+                    // A lazy window load makes rows from range.start onward differ.
+                    DataChange::WindowLoaded { range } => Some(range.start),
                     // Reset-emitting proxies (SortFilterListModel) expose
                     // their real divergence through the side-channel.
                     DataChange::Reset => (first_changed)(),
@@ -559,8 +515,8 @@ impl<T: 'static> Widget for ListView<T> {
         // --- Keyboard navigation + Alt+Arrow reorder ---
         {
             let len_for_key = self.source.len_fn.clone();
-            let move_for_key = self.source.move_item_fn.clone();
-            let on_reorder_for_key = self.on_reorder.clone();
+            let accept_drop_for_key = self.source.dnd.accept_drop_fn.clone();
+            let view_id_for_key = self.model_id;
             let sel_for_key = self.selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
@@ -569,49 +525,48 @@ impl<T: 'static> Widget for ListView<T> {
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
 
-            handlers = handlers.on_key(move |event, ctx| {
+            handlers = handlers.on_key(move |event, _ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     let count = (len_for_key)();
                     if count == 0 {
                         return bastyde_core::event::EventResponse::Ignored;
                     }
 
-                    // Alt+Arrow: reorder (when reorderable)
+                    // Alt+Arrow: reorder via the source's accept_drop (when
+                    // reorderable). The move is expressed as a synthetic
+                    // same-view RowDrag so it travels exactly the same
+                    // source-owned path as a pointer drop.
                     if modifiers.alt() && reorderable {
                         let selected_idx = sel_for_key
                             .as_ref()
                             .and_then(|s| s.selected_indices().first().copied());
                         if let Some(idx) = selected_idx {
-                            match key {
+                            let mv = match key {
                                 bastyde_core::event::Key::ArrowUp if idx > 0 => {
-                                    if let Some(ref cb) = on_reorder_for_key {
-                                        cb(idx, idx - 1, ctx);
-                                    } else {
-                                        if let Some(ref mf) = move_for_key {
-                                            mf(idx, idx - 1);
-                                        }
-                                        if let Some(ref sel) = sel_for_key {
-                                            sel.select(idx - 1);
-                                        }
-                                        fi.set(Some(idx - 1));
-                                    }
-                                    return bastyde_core::event::EventResponse::Handled;
+                                    Some((idx - 1, DropPosition::Before, idx - 1))
                                 }
                                 bastyde_core::event::Key::ArrowDown if idx + 1 < count => {
-                                    if let Some(ref cb) = on_reorder_for_key {
-                                        cb(idx, idx + 1, ctx);
-                                    } else {
-                                        if let Some(ref mf) = move_for_key {
-                                            mf(idx, idx + 1);
-                                        }
-                                        if let Some(ref sel) = sel_for_key {
-                                            sel.select(idx + 1);
-                                        }
-                                        fi.set(Some(idx + 1));
-                                    }
-                                    return bastyde_core::event::EventResponse::Handled;
+                                    Some((idx + 1, DropPosition::After, idx + 1))
                                 }
-                                _ => {}
+                                _ => None,
+                            };
+                            if let Some((target, position, dest)) = mv {
+                                let payload = DragPayload::typed(RowDrag {
+                                    source_index: idx,
+                                    source_view_id: view_id_for_key,
+                                });
+                                if (accept_drop_for_key)(
+                                    &payload,
+                                    target,
+                                    position,
+                                    view_id_for_key,
+                                ) {
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(dest);
+                                    }
+                                    fi.set(Some(dest));
+                                }
+                                return bastyde_core::event::EventResponse::Handled;
                             }
                         }
                     }
@@ -662,28 +617,38 @@ impl<T: 'static> Widget for ListView<T> {
             });
         }
 
-        // --- DnD: register self as drop target when reorderable or on_item_drop ---
-        if self.reorderable || self.on_item_drop.is_some() {
+        // --- DnD: register self as a drop target when reorderable. The
+        // source's `can_accept` decides per-hover whether the drop is allowed
+        // (and a forbidden verdict shows no insertion line). ---
+        if self.reorderable {
             let metrics_for_hover = self.metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
             let len_for_hover = self.source.len_fn.clone();
-            let my_model_id = self.model_id;
+            let can_accept_for_hover = self.source.dnd.can_accept_fn.clone();
+            let my_view_id = self.model_id;
 
             let feedback_for_hover = self.drop_feedback.clone();
             let width_for_hover = self.placed_content_width.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y + scroll;
-                let insertion_top = {
+                let len = (len_for_hover)();
+                let (insertion_y, ins) = {
                     let mut m = metrics_for_hover.borrow_mut();
-                    m.resize((len_for_hover)());
-                    let idx = m.insertion_index(content_y);
-                    m.row_top(idx)
+                    m.resize(len);
+                    let ins = m.insertion_index(content_y);
+                    (m.row_top(ins) - scroll, ins)
                 };
-
-                if payload.has_typed::<ListViewDragData>() {
-                    let line_width = width_for_hover.get();
-                    let insertion_y = insertion_top - scroll;
+                let line_width = width_for_hover.get();
+                // Ask the source whether a drop here is allowed; paint the
+                // insertion line only when it is.
+                let allowed = flat_insertion_target(ins, len).is_some_and(|(target, pos)| {
+                    !matches!(
+                        (can_accept_for_hover)(payload, target, pos, my_view_id),
+                        DropResponse::Reject
+                    )
+                });
+                if allowed {
                     feedback_for_hover.set(Some((insertion_y, line_width)));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
@@ -696,49 +661,29 @@ impl<T: 'static> Widget for ListView<T> {
             });
 
             let len_for_drop = self.source.len_fn.clone();
-            let move_for_drop = self.source.move_item_fn.clone();
-            let on_item_drop = self.on_item_drop.clone();
-            let on_reorder_for_drop = self.on_reorder.clone();
+            let accept_drop_for_drop = self.source.dnd.accept_drop_fn.clone();
+            let drop_view_id = self.model_id;
             let scroll_for_drop = self.scroll_y.clone();
             let metrics_for_drop = self.metrics.clone();
 
-            handlers = handlers.on_drop(move |mut payload, position, ctx| {
+            handlers = handlers.on_drop(move |payload, position, _ctx| {
                 let scroll = scroll_for_drop.get().max(0.0);
                 let content_y = position.y + scroll;
-                let to_index = {
+                let len = (len_for_drop)();
+                let ins = {
                     let mut m = metrics_for_drop.borrow_mut();
-                    m.resize((len_for_drop)());
+                    m.resize(len);
                     m.insertion_index(content_y)
                 };
-
-                // Check if this is an intra-widget reorder
-                if let Some(drag_data) = payload.take_typed::<ListViewDragData>()
-                    && drag_data.source_model_id == my_model_id
-                {
-                    let from = drag_data.source_index;
-                    // Adjust target index: if dragging down, the removal shifts indices
-                    let adjusted_to = if from < to_index {
-                        to_index.saturating_sub(1)
-                    } else {
-                        to_index
-                    };
-                    if from != adjusted_to {
-                        if let Some(ref cb) = on_reorder_for_drop {
-                            // Controlled: hand the move to the app, don't mutate.
-                            cb(from, adjusted_to, ctx);
-                        } else if let Some(ref mf) = move_for_drop {
-                            mf(from, adjusted_to);
-                        }
+                // Route the drop to the source's accept_drop. A same-view
+                // RowDrag reorders; a foreign payload is the source's call
+                // (a bare ListModel rejects it).
+                match flat_insertion_target(ins, len) {
+                    Some((target, position_kind)) => {
+                        (accept_drop_for_drop)(&payload, target, position_kind, drop_view_id)
                     }
-                    return true;
+                    None => false,
                 }
-
-                // Inter-widget drop
-                if let Some(ref handler) = on_item_drop {
-                    return handler(payload, to_index, ctx);
-                }
-
-                false
             });
 
             // Clear the insertion line whenever the drag leaves this
@@ -783,18 +728,28 @@ impl<T: 'static> Widget for ListView<T> {
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
+        // Lazy: nudge the source to load the realized window, and fetch more
+        // as the viewport nears the end (append-only sources).
+        (self.source.dnd.request_window_fn)(start..end);
+        if (self.source.dnd.can_fetch_more_fn)() && end + BUFFER_ITEMS >= self.source.len() {
+            (self.source.dnd.fetch_more_fn)();
+        }
         let selection = &self.selection;
         let reorderable = self.reorderable;
         let model_id = self.model_id;
         let self_id = ctx.self_id();
+        let row_state_fn = self.source.dnd.row_state_fn.clone();
         for i in start..end {
             let selected = selection
                 .as_ref()
                 .map(|s| s.is_selected(i))
                 .unwrap_or(false);
-            if let Some(widget) =
-                (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
-            {
+            // A `Loading` row (data not yet resident) renders a placeholder
+            // skeleton instead of being skipped, so the scrollbar and layout
+            // stay stable while the window loads.
+            let row_widget = (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
+                .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
+            if let Some(widget) = row_widget {
                 let inner_id = ctx.add_boxed(widget);
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
                     inner_id, selected,
@@ -846,13 +801,18 @@ impl<T: 'static> Widget for ListView<T> {
                     let with_item_for_preview = self.source.with_item_fn.clone();
                     let metrics_for_preview = self.metrics.clone();
                     let width_for_preview = self.placed_content_width.clone();
+                    let drag_gate = self.source.dnd.drag_fn.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
                             if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                                let payload = DragPayload::typed(ListViewDragData {
+                                // The source's per-row transferable gate.
+                                if (drag_gate)(drag_index) == DragEligibility::NoDrag {
+                                    return;
+                                }
+                                let payload = DragPayload::typed(RowDrag {
                                     source_index: drag_index,
-                                    source_model_id: drag_model_id,
+                                    source_view_id: drag_model_id,
                                 });
                                 let delegate = delegate_for_preview.clone();
                                 let w = width_for_preview.get().max(120.0);
@@ -1628,32 +1588,98 @@ mod tests {
     }
 
     #[test]
-    fn on_reorder_routes_drag_without_mutating_model() {
+    fn reorderable_drag_routes_to_source_accept_drop() {
+        // The redesign's core: a reorderable ListView routes the drop to the
+        // SOURCE's accept_drop. A source can apply the move to its own store
+        // (`ListModel` does) or, for an externally-owned store, capture it and
+        // reconcile later. This source captures (from, to) WITHOUT mutating,
+        // proving the controlled path with no on_reorder hook.
+        use bastyde_core::ObserverHandle;
+        use bastyde_data::{
+            DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse,
+            ListDataSource,
+        };
         use std::cell::RefCell;
         use std::rc::Rc;
+
+        struct CapturingSource {
+            items: Vec<usize>,
+            captured: Rc<RefCell<Vec<(usize, usize)>>>,
+        }
+        impl ListDataSource for CapturingSource {
+            type Item = usize;
+            type Key = usize;
+            fn len(&self) -> usize {
+                self.items.len()
+            }
+            fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+                self.items.get(i).map(f)
+            }
+            fn key_at(&self, i: usize) -> Option<usize> {
+                (i < self.items.len()).then_some(i)
+            }
+            fn observe_changes(
+                &self,
+                _f: impl Fn(&bastyde_data::DataChange) + 'static,
+            ) -> ObserverHandle {
+                let inner: Rc<dyn std::any::Any> = Rc::new(());
+                ObserverHandle::new(inner, 0, Rc::new(|_| {}))
+            }
+            fn drag(&self, _k: &usize) -> DragEligibility {
+                DragEligibility::CanDrag
+            }
+            fn can_accept(&self, q: &DropQuery<'_, usize>) -> DropResponse {
+                match &q.source {
+                    DragSource::SameView { .. } if q.position != DropPosition::Into => {
+                        DropResponse::Accept
+                    }
+                    _ => DropResponse::Reject,
+                }
+            }
+            fn accept_drop(&self, c: DropCommit<'_, usize>) -> bool {
+                let DragSource::SameView { key: from } = c.source else {
+                    return false;
+                };
+                let target = c.target;
+                let shift = if from < target { 1 } else { 0 };
+                let to = match c.position {
+                    DropPosition::Before => target.saturating_sub(shift),
+                    DropPosition::After => (target + 1).saturating_sub(shift),
+                    DropPosition::Into => return false,
+                };
+                // Controlled: capture the resolved move, do NOT mutate `items`.
+                self.captured.borrow_mut().push((from, to));
+                true
+            }
+        }
+
         let captured: Rc<RefCell<Vec<(usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
-        let cap = captured.clone();
-        let model = ListModel::from_vec(vec![10usize, 20, 30, 40, 50]);
-        let model_clone = model.clone();
+        let source = CapturingSource {
+            items: vec![10, 20, 30, 40, 50],
+            captured: captured.clone(),
+        };
         let mut tree = WidgetTree::new();
         let lv_id = tree.add(
-            ListView::new(model_clone, move |_i, _item, _sel| Box::new(FixedLeaf(100.0, 30.0)))
-                .item_height(30.0)
-                .reorderable(true)
-                .on_reorder(move |from, to, _ctx| cap.borrow_mut().push((from, to))),
+            ListView::from_source(source, move |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0)
+            .reorderable(true),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        // Same gesture as drag_reorders_item_downward: drag item 0 down → (0, 3).
+        // Drag item 0 down to y=120 → insertion index 4 → (target 4, Before),
+        // which the source resolves to the move (from 0, to 3).
         let children = tree.children(lv_id);
         let from = tree.bounds(children[0]).center();
         let to = Point::new(from.x, 120.0);
         drag_item(&mut tree, from, to);
 
-        assert_eq!(*captured.borrow(), vec![(0, 3)], "callback gets the from/to move");
-        // Controlled mode: the model must NOT be mutated by the widget.
-        assert_eq!(model.with_item(0, |v| *v), Some(10), "model untouched");
-        assert_eq!(model.with_item(3, |v| *v), Some(40), "model untouched");
+        assert_eq!(
+            *captured.borrow(),
+            vec![(0, 3)],
+            "the drop is routed to the source's accept_drop with the resolved move"
+        );
     }
 
     #[test]
@@ -1859,81 +1885,71 @@ mod tests {
     }
 
     #[test]
-    fn inter_widget_on_item_drop_receives_payload() {
-        use crate::primitives::VStack;
-        use bastyde_core::drag_payload::DragPayload;
-        use bastyde_core::gesture::DragPhase;
-        use bastyde_core::widget_builder::WidgetBuilder;
-        use std::cell::Cell;
+    fn lazy_loading_rows_render_placeholders_and_request_the_window() {
+        // A windowed source with nothing resident: every visible row is
+        // `Loading`, so the ListView must render placeholder skeletons (not
+        // skip the rows) and nudge the source to load the realized window.
+        use bastyde_core::ObserverHandle;
+        use bastyde_data::{ListDataSource, RowState};
         use std::cell::RefCell;
+        use std::ops::Range;
         use std::rc::Rc;
 
-        // VStack root with:
-        //   - source: FixedLeaf at y=0..30 with on_drag that fires start_drag
-        //     carrying a typed String payload (NOT ListViewDragData).
-        //   - target: ListView below at y=30.., with on_item_drop that stores
-        //     the (payload_string, index) tuple.
-        //
-        // Rationale: the ListView's on_drop consumes any ListViewDragData
-        // payload via take_typed, so the inter-widget path is reachable only
-        // when the source widget is NOT another ListView — which matches the
-        // intended public contract.
-        let received = Rc::new(RefCell::new(None::<(String, usize)>));
-        let r = received.clone();
+        struct Windowed {
+            total: usize,
+            requested: Rc<RefCell<Vec<Range<usize>>>>,
+        }
+        impl ListDataSource for Windowed {
+            type Item = usize;
+            type Key = usize;
+            fn len(&self) -> usize {
+                self.total
+            }
+            fn with_item<R>(&self, _i: usize, _f: impl FnOnce(&usize) -> R) -> Option<R> {
+                None // nothing resident yet
+            }
+            fn key_at(&self, i: usize) -> Option<usize> {
+                (i < self.total).then_some(i)
+            }
+            fn row_state(&self, _i: usize) -> RowState {
+                RowState::Loading
+            }
+            fn request_window(&self, range: Range<usize>) {
+                self.requested.borrow_mut().push(range);
+            }
+            fn observe_changes(
+                &self,
+                _f: impl Fn(&bastyde_data::DataChange) + 'static,
+            ) -> ObserverHandle {
+                let inner: Rc<dyn std::any::Any> = Rc::new(());
+                ObserverHandle::new(inner, 0, Rc::new(|_| {}))
+            }
+        }
 
-        let target_model = ListModel::from_vec(vec![0_usize; 3]);
-        let target_model_clone = target_model.clone();
-
-        let source_id_holder: Rc<Cell<WidgetId>> = Rc::new(Cell::new(WidgetId::default()));
-        let sih = source_id_holder.clone();
-
+        let requested = Rc::new(RefCell::new(Vec::new()));
+        let source = Windowed {
+            total: 1000,
+            requested: requested.clone(),
+        };
         let mut tree = WidgetTree::new();
-        let root = tree.add(
-            VStack::new()
-                .child(FixedLeaf(100.0, 30.0).on_drag(move |phase, ctx| {
-                    if let DragPhase::Started { .. } = phase {
-                        ctx.start_drag(sih.get(), DragPayload::typed("external".to_string()));
-                    }
-                }))
-                .child(
-                    ListView::new(target_model_clone, |_i, _item, _sel| {
-                        Box::new(FixedLeaf(100.0, 30.0))
-                    })
-                    .item_height(30.0)
-                    .on_item_drop(move |mut payload, idx, _ctx| {
-                        if let Some(s) = payload.take_typed::<String>() {
-                            *r.borrow_mut() = Some((s, idx));
-                            true
-                        } else {
-                            false
-                        }
-                    }),
-                ),
+        let lv_id = tree.add(
+            ListView::from_source(source, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 30.0)))
+                .item_height(30.0),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        // Resolve the source widget id — it's the FixedLeaf nested under the
-        // VStack, wrapped by WidgetWithHandlers because we attached on_drag.
-        let vstack_children = tree.children(root);
-        let source_widget = vstack_children[0];
-        source_id_holder.set(source_widget);
-
-        // Drag from the source (centered at tree y=15) into the ListView.
-        // The ListView starts at tree y=30 (after the 30 px source row),
-        // and `on_drop` receives the pointer in TARGET-LOCAL coordinates:
-        //
-        //   local_y = tree_y - 30
-        //   idx     = floor((local_y + item_height/2) / item_height)
-        //
-        // Targeting idx=2 needs local_y ∈ [45, 74]; use local_y=60
-        // (tree_y=90) — the conceptual centre of the third insertion
-        // zone.
-        let source_center = tree.bounds(source_widget).center();
-        drag_item(&mut tree, source_center, Point::new(source_center.x, 90.0));
-
-        let (text, idx) = received.borrow().clone().expect("on_item_drop must fire");
-        assert_eq!(text, "external");
-        assert_eq!(idx, 2);
+        // 300px / 30px = 10 visible + buffer → the loading rows are realized as
+        // placeholder child widgets (children minus the scrollbar), NOT skipped.
+        let placeholder_rows = tree.children(lv_id).len() - 1;
+        assert!(
+            placeholder_rows >= 10,
+            "loading rows must render as placeholders, got {placeholder_rows}"
+        );
+        // And the source was asked to load the realized window.
+        assert!(
+            !requested.borrow().is_empty(),
+            "request_window must be called for the visible range"
+        );
     }
 
     /// Helper: borrow the ListView widget at `id` via the downcast hook

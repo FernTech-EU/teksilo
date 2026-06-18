@@ -33,6 +33,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub mod docking;
+pub(crate) mod data_views;
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;
@@ -95,7 +96,7 @@ pub mod toggle;
 pub mod tool_box;
 pub mod toolbar;
 pub mod tooltip;
-pub mod tree_table;
+pub mod tree_table_view;
 pub mod tree_view;
 
 #[cfg(feature = "preview")]
@@ -227,7 +228,7 @@ pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
 pub use toolbar::{
     Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
 };
-pub use tree_table::TreeTable;
+pub use tree_table_view::TreeTableView;
 pub use tree_view::{ReorderPosition, TreeReorder, TreeRowContext, TreeView};
 
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped

@@ -56,7 +56,7 @@ Off-screen tiles aren't built, so their heights are unknown. Two paths:
   content at/above the viewport top, `VariableRowGrid` adjusts `scroll_y` to keep
   it visually stationary (one-frame latency, no jump). Backed by a prefix-sum
   offset table with O(log n) row↔y lookups (`PrefixSumOffsets`, shared with the
-  1-D row widgets — `ListView` / `TreeView` / `TableView` / `TreeTable` — from
+  1-D row widgets — `ListView` / `TreeView` / `TableView` / `TreeTableView` — from
   `common/row_offsets.rs`). After each measure pass a *realization re-check*
   compares the corrected visible range against the realized tile range and
   requests a rebuild when tiles measured shorter than the estimate would

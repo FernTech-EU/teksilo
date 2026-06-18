@@ -982,6 +982,7 @@ impl<T: 'static> Widget for TableView<T> {
                     }
                     DataChange::ItemUpdated { index } => Some(*index),
                     DataChange::ItemsMoved { from, to, .. } => Some((*from).min(*to)),
+                    DataChange::WindowLoaded { range } => Some(range.start),
                     DataChange::Reset => (first_changed)(),
                 };
                 metrics_for_data
@@ -1096,7 +1097,7 @@ impl<T: 'static> Widget for TableView<T> {
         );
 
         // Build the navigator + key handler. The keyboard module is
-        // generic over RowNavigator so TreeTable can plug in its own
+        // generic over RowNavigator so TreeTableView can plug in its own
         // tree-aware navigator.
         let navigator: Rc<dyn row_navigator::RowNavigator> =
             Rc::new(row_navigator::FlatNavigator::new(self.len_fn.clone()));

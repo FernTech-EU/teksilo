@@ -486,7 +486,7 @@ impl Widget for StandardListItem {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // The row's parent (ListView's `ListItemA11y`, TreeView's
-        // `TreeRowA11y`, TreeTable's `TreeRowA11y`) already sets the
+        // `TreeRowA11y`, TreeTableView's `TreeRowA11y`) already sets the
         // structural role + position-in-set + selected/expanded
         // state. We only contribute the row's name + description
         // here.

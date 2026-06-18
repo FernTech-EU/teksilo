@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Accessibility wrappers for `TableView` / `TreeTable`.
+//! Accessibility wrappers for `TableView` / `TreeTableView`.
 //!
 //! AccessKit's table semantics work by labelling individual nodes with
 //! `Role::Table` / `Role::Row` / `Role::Cell` and stamping each cell with
@@ -10,7 +10,7 @@
 //! semantics by itself, so the body wraps each cell in a thin
 //! `CellA11y` node. `TableView`'s row containers themselves
 //! (`BodyRow`) carry `Role::Row` and
-//! row-index metadata directly. `TreeTable` adds an extra
+//! row-index metadata directly. `TreeTableView` adds an extra
 //! `TreeRowA11y` wrapper around the tree column to declare `set_level`
 //! and `set_expanded` for the row.
 //!
@@ -114,7 +114,7 @@ impl Widget for CellA11y {
     }
 }
 
-/// `TreeTable`-flavoured row wrapper. Announces `Role::Row` and, in
+/// `TreeTableView`-flavoured row wrapper. Announces `Role::Row` and, in
 /// addition to the row index, declares `set_level` (1-based depth) and
 /// `set_expanded` when the row has children.
 #[derive(Debug)]

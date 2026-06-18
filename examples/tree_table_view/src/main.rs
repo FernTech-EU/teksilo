@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `tree_table` — hierarchical `TreeTable` showcase.
+//! `tree_table` — hierarchical `TreeTableView` showcase.
 //!
 //! Run with: `cargo run -p tree-table`
 //!
@@ -26,7 +26,7 @@ use bastyde::data::{
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, CellContext, Column, ColumnWidth, Expand, GridLines, HStack, Spacer,
-    TableAlignment as Alignment, TableSelectionMode, TextWidget, Toolbar, TreeTable, VStack,
+    TableAlignment as Alignment, TableSelectionMode, TextWidget, Toolbar, TreeTableView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -137,10 +137,10 @@ fn main() {
     BastydeAppBuilder::new()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
-        .initial_window(WindowConfig::new().title("TreeTable").size(900, 580).root(
+        .initial_window(WindowConfig::new().title("TreeTableView").size(900, 580).root(
             move |tree, _| {
                 let proxy_for_table = proxy.clone();
-                let table = TreeTable::from_projection(proxy_for_table.clone())
+                let table = TreeTableView::from_projection(proxy_for_table.clone())
                     .add_column(
                         Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
                             // Name plus the optional multi-line

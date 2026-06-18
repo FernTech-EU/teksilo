@@ -776,6 +776,9 @@ impl<T: 'static> Widget for GridView<T> {
                     DataChange::ItemUpdated { index } => {
                         strategy_obs.invalidate_rows(*index..index + 1);
                     }
+                    DataChange::WindowLoaded { range } => {
+                        strategy_obs.invalidate_rows(range.start..range.end);
+                    }
                     DataChange::Reset => {
                         strategy_obs.invalidate_rows(0..usize::MAX);
                         strategy_obs.resize(0);

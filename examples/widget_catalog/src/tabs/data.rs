@@ -3,7 +3,7 @@
 
 //! Data tab — the full data-driven family, all live:
 //! Repeater, ListView, StandardListItem, StandardTreeItem, TreeView,
-//! TableView, TreeTable, GridView. The heavyweights are cannibalized
+//! TableView, TreeTableView, GridView. The heavyweights are cannibalized
 //! from the data_collections / data_grid / tree_table / grid_view
 //! examples and shrunk to fit a scrolling catalog tab.
 
@@ -16,7 +16,7 @@ use bastyde::prelude::*;
 use bastyde::widgets::{
     CellContext, Center, Column, ColumnWidth, Divider, FixedSize, GridLines, GridSizing, GridView,
     ListView, RectWidget, Repeater, StandardListItem, StandardTreeItem, TableAlignment,
-    TableSelectionMode, TableView, TextWidget, TreeTable, TreeView, VStack, ZStack,
+    TableSelectionMode, TableView, TextWidget, TreeTableView, TreeView, VStack, ZStack,
 };
 
 use crate::shared::{Signals, section, tab_header};
@@ -164,7 +164,7 @@ fn table_view_widget() -> impl Widget + 'static {
     table
 }
 
-// ── TreeTable (tree_table) ────────────────────────────────────────────
+// ── TreeTableView (tree_table) ────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 struct FsNode {
@@ -208,7 +208,7 @@ fn tree_table_widget() -> impl Widget + 'static {
         .filter_mode(TreeFilterMode::KeepAncestors)
         .with_comparator("name", |a: &FsNode, b: &FsNode| a.name.cmp(&b.name))
         .with_comparator("size", |a, b| a.size.cmp(&b.size));
-    let table = TreeTable::from_projection(proxy.clone())
+    let table = TreeTableView::from_projection(proxy.clone())
         .add_column(
             Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
                 Box::new(TextWidget::new(lit!(row.name.clone())))
@@ -324,7 +324,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let tree_table = section(
         ctx,
-        lit!("TreeTable"),
+        lit!("TreeTableView"),
         sized(540.0, 200.0, tree_table_widget()),
     );
     let grid_view = section(
@@ -450,7 +450,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new(lit!("TreeTable")) {
+                TextWidget::new(lit!("TreeTableView")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

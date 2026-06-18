@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Shared keyboard handler for `TableView` and `TreeTable`.
+//! Shared keyboard handler for `TableView` and `TreeTableView`.
 //!
 //! The handler is generic over `RowNavigator` so flat and tree
 //! navigation reuse the same key matrix. Tree-specific arrow-left /
