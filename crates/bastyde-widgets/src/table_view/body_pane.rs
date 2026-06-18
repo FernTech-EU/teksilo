@@ -449,12 +449,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                         let preview = Box::new(crate::drag_preview::DragPreview::new(
                             total_w,
                             h,
-                            Box::new(CellRowPreview {
-                                cells,
-                                widths,
-                                height: h,
-                                ids: Vec::new(),
-                            }),
+                            Box::new(CellRowPreview::new(cells, widths, h)),
                         )) as Box<dyn Widget>;
                         ctx.start_drag_with_preview(anchor, payload, preview);
                     }
@@ -591,14 +586,25 @@ fn read_item_local<T, R>(
 /// owns its (already-built) boxed cells and lays them out horizontally at the
 /// dragged row's column widths. Built once at drag-start and mounted by the
 /// framework's drag-overlay build pass, so it can't reuse `BodyRow` (which
-/// addresses cells by arena id).
-struct CellRowPreview {
+/// addresses cells by arena id). Shared with `TreeTableView`'s body pane.
+pub(crate) struct CellRowPreview {
     /// Cells to mount, drained in `build`.
     cells: Vec<Box<dyn Widget>>,
     /// Display-order column widths, parallel to the mounted children.
     widths: Vec<f32>,
     height: f32,
     ids: Vec<WidgetId>,
+}
+
+impl CellRowPreview {
+    pub(crate) fn new(cells: Vec<Box<dyn Widget>>, widths: Vec<f32>, height: f32) -> Self {
+        Self {
+            cells,
+            widths,
+            height,
+            ids: Vec::new(),
+        }
+    }
 }
 
 impl std::fmt::Debug for CellRowPreview {

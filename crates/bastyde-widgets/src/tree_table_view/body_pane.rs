@@ -37,11 +37,13 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{SelectionMode, SelectionModel, SortFilterTreeModel};
 
+use super::TreeTableRowDragData;
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
 use crate::table_view::body::{BodyRow, SharedColumnWidths};
+use crate::table_view::body_pane::CellRowPreview;
 use crate::table_view::column::{CellContext, Column};
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
 
@@ -72,6 +74,16 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) viewport_height: Rc<Cell<f32>>,
     pub(crate) editing_cell: Signal<Option<(usize, usize)>>,
     pub(crate) focused_cell: Signal<Option<(usize, usize)>>,
+
+    /// Enable per-row drag-to-reorder (the root owns the drop validation +
+    /// commit + sort gate; the pane only emits the drag).
+    pub(crate) reorderable: bool,
+    /// Owning `TreeTableView` id — stamped into the drag payload so a drop
+    /// into a sibling table is rejected.
+    pub(crate) table_id: usize,
+    /// Drag-start anchor (the root id), captured so the drag closure stays
+    /// `'static`.
+    pub(crate) drag_anchor: WidgetId,
 
     /// Pane-local rebuild trigger. A persistent handle owned by the
     /// root (so it survives root rebuilds); also bumped by
@@ -315,39 +327,97 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             ));
             self.row_entries.push((flat_idx, tree_row_id));
 
-            // Selection click on the row.
-            if let Some(ref sel) = selection {
-                let sel_for_click = sel.clone();
-                let row_index_for_click = flat_idx;
-                if matches!(
+            // Row handlers: selection click + optional drag-to-reorder
+            // (combined so a row carries both, applied once).
+            let mut row_handlers = HandlerSet::new();
+            if let Some(ref sel) = selection
+                && matches!(
                     selection_mode,
                     TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
-                ) {
-                    ctx.apply_handlers(
-                        tree_row_id,
-                        HandlerSet::new().on_pointer_event(move |event, _ctx| {
-                            if let WidgetEvent::PointerDown {
-                                button: PointerButton::Primary,
-                                modifiers,
-                                ..
-                            } = event
-                            {
-                                if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi
-                                {
-                                    sel_for_click.toggle(row_index_for_click);
-                                } else if modifiers.shift()
-                                    && sel_for_click.mode() == SelectionMode::Multi
-                                {
-                                    sel_for_click.extend_to(row_index_for_click);
-                                } else {
-                                    sel_for_click.select(row_index_for_click);
-                                }
-                            }
-                            EventResponse::Ignored
-                        }),
-                    );
-                }
+                )
+            {
+                let sel_for_click = sel.clone();
+                let row_index_for_click = flat_idx;
+                row_handlers = row_handlers.on_pointer_event(move |event, _ctx| {
+                    if let WidgetEvent::PointerDown {
+                        button: PointerButton::Primary,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
+                            sel_for_click.toggle(row_index_for_click);
+                        } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi {
+                            sel_for_click.extend_to(row_index_for_click);
+                        } else {
+                            sel_for_click.select(row_index_for_click);
+                        }
+                    }
+                    EventResponse::Ignored
+                });
             }
+            if self.reorderable {
+                let source_node = entry.node_id;
+                let table_id = self.table_id;
+                let anchor = self.drag_anchor;
+                let preview_flat = flat_idx;
+                let proxy_for_preview = proxy.clone();
+                let columns_for_preview = columns.clone();
+                let display_for_preview = display_indices.clone();
+                let widths_for_preview = self.column_widths.clone();
+                let metrics_for_preview = self.row_metrics.clone();
+                let tree_pos_for_preview = tree_display_pos;
+                row_handlers = row_handlers.on_drag(move |phase, ctx| {
+                    if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                        let payload = bastyde_core::drag_payload::DragPayload::typed(
+                            TreeTableRowDragData {
+                                source_node,
+                                source_table_id: table_id,
+                            },
+                        );
+                        // Flat multi-cell preview of the dragged row (indent is
+                        // dropped in the floating preview — it reads as the
+                        // row's content picked up).
+                        let widths = widths_for_preview.borrow().clone();
+                        let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
+                        let total_w = widths.iter().sum::<f32>().max(120.0);
+                        let cells: Vec<Box<dyn Widget>> = proxy_for_preview
+                            .with_entry(preview_flat, |item, e| {
+                                display_for_preview
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(display_pos, &col_idx)| {
+                                        let col = &columns_for_preview[col_idx];
+                                        let cell_ctx = CellContext {
+                                            row_index: preview_flat,
+                                            col_id: col.id.clone(),
+                                            col_index: display_pos,
+                                            is_selected: false,
+                                            is_focused: false,
+                                            is_hovered: false,
+                                            is_editing: false,
+                                            depth: Some(e.depth),
+                                            is_tree_column: display_pos == tree_pos_for_preview,
+                                        };
+                                        (col.cell)(item, &cell_ctx)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if cells.is_empty() {
+                            ctx.start_drag(anchor, payload);
+                            return;
+                        }
+                        let preview = Box::new(crate::drag_preview::DragPreview::new(
+                            total_w,
+                            h,
+                            Box::new(CellRowPreview::new(cells, widths, h)),
+                        )) as Box<dyn Widget>;
+                        ctx.start_drag_with_preview(anchor, payload, preview);
+                    }
+                });
+            }
+            ctx.apply_handlers(tree_row_id, row_handlers);
         }
 
         self.row_entries.iter().map(|(_, id)| *id).collect()

@@ -50,7 +50,8 @@ use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, Wi
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{
-    NodeId, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode, TreeModel,
+    DropPosition, NodeId, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode,
+    TreeModel,
 };
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole};
@@ -72,6 +73,15 @@ use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
 
 const BUFFER_ROWS: usize = 5;
 const SCROLLBAR_THICKNESS: f32 = 12.0;
+
+/// Drag payload for an intra-tree row reorder. Carries the dragged node's id
+/// (tree structure, not a visible index — the projection can reorder it) plus
+/// the source table id so a drop into a sibling `TreeTableView` is rejected.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TreeTableRowDragData {
+    pub(crate) source_node: NodeId,
+    pub(crate) source_table_id: usize,
+}
 
 /// Hierarchical projection navigator. Adapts
 /// [`SortFilterTreeModel`]'s
@@ -178,6 +188,15 @@ pub struct TreeTableView<T: 'static> {
     /// thumb ratio are recomputed with the corrected total next frame.
     pane_total_refresh: Signal<u64>,
 
+    /// Enable drag-to-reorder of rows (pointer drag + Alt+Arrow). The move
+    /// reparents/reorders nodes in the underlying `TreeModel`, cycle-guarded.
+    /// Suppressed while a sort is active (the visible order then differs from
+    /// the tree order, so a manual reorder would be meaningless).
+    reorderable: bool,
+    /// Active row-drop insertion indicator `(body_local_y, width)`. Set by
+    /// `on_drag_hover`, cleared on leave / drop, read by `paint`.
+    drop_feedback: Signal<Option<(f32, f32)>>,
+
     // Layout state
     column_widths: SharedColumnWidths,
     display_indices: Rc<RefCell<Vec<usize>>>,
@@ -214,6 +233,8 @@ impl<T: 'static> TreeTableView<T> {
             edit_trigger: EditTrigger::default(),
             on_cell_edit_request: None,
             on_row_activate: None,
+            reorderable: false,
+            drop_feedback: Signal::new(None),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             overscroll_behavior: OverscrollBehavior::default(),
@@ -259,6 +280,20 @@ impl<T: 'static> TreeTableView<T> {
 
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
+        self
+    }
+
+    /// Enable drag-to-reorder of rows (pointer drag + keyboard
+    /// Alt+ArrowUp/Down).
+    ///
+    /// A drop reparents/reorders the dragged node in the underlying
+    /// `TreeModel` (top third of a row = Before, middle = Into / make-child,
+    /// bottom = After). The move is cycle-guarded — dropping a node onto
+    /// itself or into its own subtree is refused (no insertion line). Reorder
+    /// is **suppressed while a sort is active**: with the visible order driven
+    /// by the sort, a manual reorder would have no visible effect.
+    pub fn reorderable(mut self, enabled: bool) -> Self {
+        self.reorderable = enabled;
         self
     }
 
@@ -622,6 +657,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        // Row-drop insertion indicator at RepaintOnly so on_drag_hover /
+        // on_drag_leave `set(...)` calls dirty paint without a rebuild.
+        self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
 
         // Bump version on projection version (data + sort/filter +
         // expand/collapse all in one signal). Proxy observers fire
@@ -730,7 +772,78 @@ impl<T: 'static> Widget for TreeTableView<T> {
             on_row_activate: self.on_row_activate.clone(),
         };
 
-        let handlers = HandlerSet::new()
+        // Alt+Arrow tree sibling reorder wraps the shared key handler: a move
+        // among the node's siblings in the underlying `TreeModel` (cycle-free
+        // by construction). Suppressed while sorted. Every other key falls
+        // through to the navigator (cell/row movement, expand/collapse, edit).
+        let mut shared_key = keyboard::build_key_handler(key_cfg);
+        let reorderable_kbd = self.reorderable;
+        let proxy_kbd = self.proxy.clone();
+        let focused_kbd = self.focused_cell.clone();
+        let sel_kbd = self.selection.clone();
+        let sort_kbd = self.sort_signal.clone();
+        let key_handler = move |event: &bastyde_core::event::WidgetEvent,
+                                ctx: &mut EventContext|
+              -> EventResponse {
+            use bastyde_core::event::{Key, WidgetEvent};
+            if reorderable_kbd
+                && sort_kbd.get().is_none()
+                && let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                && modifiers.alt()
+                && matches!(key, Key::ArrowUp | Key::ArrowDown)
+            {
+                let row = focused_kbd.get().map(|(r, _)| r).or_else(|| {
+                    sel_kbd
+                        .as_ref()
+                        .and_then(|s| s.selected_indices().first().copied())
+                });
+                if let Some(flat_idx) = row
+                    && let Some(node) = proxy_kbd.visible_node_id(flat_idx)
+                {
+                    let tree = proxy_kbd.tree();
+                    let parent = tree.parent(node);
+                    let siblings: Vec<NodeId> = match parent {
+                        Some(p) => tree.children(p),
+                        None => (0..tree.root_count()).map(|i| tree.root(i)).collect(),
+                    };
+                    let pos = siblings.iter().position(|&n| n == node).unwrap_or(0);
+                    let moved = match key {
+                        Key::ArrowUp if pos > 0 => {
+                            match parent {
+                                Some(p) => tree.move_node(node, p, pos - 1),
+                                None => tree.move_to_root(node, pos - 1),
+                            }
+                            true
+                        }
+                        Key::ArrowDown if pos + 1 < siblings.len() => {
+                            match parent {
+                                Some(p) => tree.move_node(node, p, pos + 1),
+                                None => tree.move_to_root(node, pos + 1),
+                            }
+                            true
+                        }
+                        _ => false,
+                    };
+                    if moved {
+                        let count = proxy_kbd.visible_count();
+                        for new_flat in 0..count {
+                            if proxy_kbd.visible_node_id(new_flat) == Some(node) {
+                                let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
+                                focused_kbd.set(Some((new_flat, col)));
+                                if let Some(ref s) = sel_kbd {
+                                    s.select(new_flat);
+                                }
+                                break;
+                            }
+                        }
+                        return EventResponse::Handled;
+                    }
+                }
+            }
+            shared_key(event, ctx)
+        };
+
+        let mut handlers = HandlerSet::new()
             .on_scroll({
                 let overscroll_behavior = self.overscroll_behavior;
                 move |event, _ctx| match event {
@@ -755,9 +868,142 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     _ => EventResponse::Ignored,
                 }
             })
-            .on_key(keyboard::build_key_handler(key_cfg))
+            .on_key(key_handler)
             .clips_children(true)
             .focusable(true);
+
+        // Row reorder DnD: the drop reparents/reorders the dragged node in the
+        // underlying `TreeModel`, cycle-guarded. Suppressed while sorted.
+        if self.reorderable {
+            let my_table_id = self.table_id;
+            let proxy_hover = self.proxy.clone();
+            let metrics_for_hover = self.row_metrics.clone();
+            let scroll_for_hover = self.scroll_y.clone();
+            let header_h_for_hover = header_h;
+            let feedback_for_hover = self.drop_feedback.clone();
+            let sort_for_hover = self.sort_signal.clone();
+            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                let Some(drag) = payload.get_typed::<TreeTableRowDragData>() else {
+                    feedback_for_hover.set(None);
+                    return bastyde_core::DropFeedback::NoFeedback;
+                };
+                if sort_for_hover.get().is_some() || drag.source_table_id != my_table_id {
+                    feedback_for_hover.set(None);
+                    return bastyde_core::DropFeedback::NoFeedback;
+                }
+                let source_node = drag.source_node;
+                let scroll = scroll_for_hover.get().max(0.0);
+                let content_y = position.y - header_h_for_hover + scroll;
+                let count = proxy_hover.visible_count();
+                let (insertion_top, row_idx) = {
+                    let mut m = metrics_for_hover.borrow_mut();
+                    m.resize(count);
+                    let ins = m.insertion_index(content_y);
+                    (m.row_top(ins), m.row_at(content_y))
+                };
+                // A drop is valid unless it targets the node itself or a node
+                // inside its own subtree (a cycle) — invalid shows NO line.
+                let valid = proxy_hover.visible_node_id(row_idx).is_some_and(|t| {
+                    t != source_node
+                        && !bastyde_data::tree_data_source::tree_is_desc_or_self(
+                            &proxy_hover.tree(),
+                            t,
+                            source_node,
+                        )
+                });
+                if valid {
+                    let insertion_y = insertion_top - scroll;
+                    feedback_for_hover.set(Some((insertion_y, 400.0)));
+                    bastyde_core::DropFeedback::InsertionLine {
+                        y: insertion_y,
+                        width: 400.0,
+                    }
+                } else {
+                    feedback_for_hover.set(None);
+                    bastyde_core::DropFeedback::NoFeedback
+                }
+            });
+
+            let drop_table_id = self.table_id;
+            let proxy_drop = self.proxy.clone();
+            let metrics_for_drop = self.row_metrics.clone();
+            let scroll_for_drop = self.scroll_y.clone();
+            let header_h_for_drop = header_h;
+            let feedback_for_drop = self.drop_feedback.clone();
+            let sort_for_drop = self.sort_signal.clone();
+            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+                feedback_for_drop.set(None);
+                let Some(drag) = payload.take_typed::<TreeTableRowDragData>() else {
+                    return false;
+                };
+                if sort_for_drop.get().is_some() || drag.source_table_id != drop_table_id {
+                    return false;
+                }
+                let source_node = drag.source_node;
+                let scroll = scroll_for_drop.get().max(0.0);
+                let content_y = position.y - header_h_for_drop + scroll;
+                let (flat_idx, row_top, row_h) = {
+                    let mut m = metrics_for_drop.borrow_mut();
+                    m.resize(proxy_drop.visible_count());
+                    let idx = m.row_at(content_y);
+                    (idx, m.row_top(idx), m.row_height(idx))
+                };
+                let Some(target_node) = proxy_drop.visible_node_id(flat_idx) else {
+                    return false;
+                };
+                // Drop zone within the row: top third = Before, middle = Into
+                // (make child), bottom = After. tree_apply_reorder refuses a
+                // cycle without panicking.
+                let y_in_row = content_y - row_top;
+                let third = row_h / 3.0;
+                let drop_pos = if y_in_row < third {
+                    DropPosition::Before
+                } else if y_in_row > 2.0 * third {
+                    DropPosition::After
+                } else {
+                    DropPosition::Into
+                };
+                bastyde_data::tree_data_source::tree_apply_reorder(
+                    &proxy_drop.tree(),
+                    source_node,
+                    target_node,
+                    drop_pos,
+                )
+            });
+
+            let feedback_for_leave = self.drop_feedback.clone();
+            handlers = handlers.on_drag_leave(move |_ctx| {
+                feedback_for_leave.set(None);
+            });
+
+            let scroll_for_tick = self.scroll_y.clone();
+            let max_scroll_for_tick = self.max_scroll_y.clone();
+            let viewport_for_tick = self.viewport_height.clone();
+            let header_h_for_tick = header_h;
+            handlers = handlers.on_drag_tick(move |pos, _ctx| {
+                // Auto-scroll near the body band's top/bottom edge during a
+                // drag (body-relative so the header doesn't count as the top).
+                const EDGE: f32 = 32.0;
+                const MAX_VELOCITY: f32 = 12.0;
+                let body_h = (viewport_for_tick.get() - header_h_for_tick).max(0.0);
+                let y = pos.y - header_h_for_tick;
+                let above = (EDGE - y).max(0.0);
+                let below = (y - (body_h - EDGE)).max(0.0);
+                let delta = if above > 0.0 {
+                    -(above / EDGE) * MAX_VELOCITY
+                } else if below > 0.0 {
+                    (below / EDGE) * MAX_VELOCITY
+                } else {
+                    0.0
+                };
+                if delta.abs() > 0.01 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
+                }
+            });
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // ── Build children ────────────────────────────────────────────
@@ -826,6 +1072,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 viewport_height: self.viewport_height.clone(),
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
+                reorderable: self.reorderable,
+                table_id: self.table_id,
+                drag_anchor: ctx.self_id(),
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
                 prev_built_end: self.pane_built_end.clone(),
@@ -1109,6 +1358,18 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
                 canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
             }
+        }
+
+        // Row-drop insertion indicator (source-accepted positions only — a
+        // forbidden hover clears the signal). `y` is stored body-local.
+        if let Some((y, _width)) = self.drop_feedback.get() {
+            let line_color = BorderRole::Focused.resolve(colors);
+            let thickness = 2.0_f32;
+            let line_y = body_origin_y + y - thickness * 0.5;
+            canvas.fill_rect(
+                Rect::new(content_left, line_y, body_width_for_paint, thickness),
+                line_color,
+            );
         }
 
         canvas.clear_clip();
@@ -1882,5 +2143,110 @@ mod tests {
             "measured row 0 must survive the expand, got {}",
             spans[1].0
         );
+    }
+
+    // ── Row reorder (Stage 5) ──────────────────────────────────────────────
+
+    /// Full drag gesture: down on source, move to cross the threshold, move to
+    /// target, up.
+    fn drag(tree: &mut WidgetTree, from: bastyde_canvas::Point, to: bastyde_canvas::Point) {
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: from,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(from.x + 10.0, from.y),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: to,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    #[test]
+    fn drag_reorders_roots_after() {
+        use bastyde_canvas::Point;
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.collapse_all(); // roots only: docs@0, src@1
+        let docs = proxy.tree().root(0);
+        let src = proxy.tree().root(1);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        let h = cp::HEADER_HEIGHT;
+        // Drag docs (flat 0, [h, h+20]) onto the bottom third of src (flat 1,
+        // [h+20, h+40]) → After src.
+        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 38.0));
+        assert_eq!(proxy.tree().root_count(), 2);
+        assert_eq!(proxy.tree().root(0), src, "src becomes the first root");
+        assert_eq!(proxy.tree().root(1), docs, "docs moves after src");
+    }
+
+    #[test]
+    fn drag_into_own_descendant_is_refused() {
+        use bastyde_canvas::Point;
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.expand_all(); // docs@0, readme@1, guide@2, src@3, main.rs@4
+        let docs = proxy.tree().root(0);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        let h = cp::HEADER_HEIGHT;
+        // Drag docs (flat 0) into the middle third of readme (flat 1, a child
+        // of docs) → cycle → refused; tree unchanged, no panic.
+        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 30.0));
+        assert_eq!(proxy.tree().parent(docs), None, "docs stays a root");
+        assert_eq!(proxy.tree().root_count(), 2);
+    }
+
+    #[test]
+    fn reorder_is_suppressed_while_sorted() {
+        use bastyde_canvas::Point;
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.collapse_all();
+        let docs = proxy.tree().root(0);
+        let src = proxy.tree().root(1);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        // Activate a sort: the drop gate must refuse the reorder (a manual
+        // reorder is meaningless once the visible order is sort-driven).
+        tree.widget_as_any(id)
+            .and_then(|a| a.downcast_ref::<TreeTableView<&str>>())
+            .expect("TreeTableView")
+            .set_sort(Some("name"), bastyde_data::SortDirection::Ascending);
+        let h = cp::HEADER_HEIGHT;
+        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 38.0));
+        assert_eq!(proxy.tree().root(0), docs, "docs unchanged while sorted");
+        assert_eq!(proxy.tree().root(1), src, "src unchanged while sorted");
     }
 }
