@@ -25,7 +25,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 

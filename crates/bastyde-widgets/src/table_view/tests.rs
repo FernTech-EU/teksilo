@@ -1167,12 +1167,11 @@ fn enter_invokes_on_row_activate() {
 }
 
 #[test]
-fn reorderable_rows_requires_list_model_source() {
-    // The reorderable_rows builder doesn't validate source type
-    // (allows ListDataSource for forward-compat); the move_item_fn
-    // is None for ListDataSource sources, so the actual reorder is
-    // a no-op. This test documents the contract — the table compiles
-    // and lays out cleanly.
+fn reorderable_rows_on_list_model_lays_out_cleanly() {
+    // `reorderable_rows(true)` over a `ListModel` source: the move is
+    // routed through the source's `accept_drop` (a `ListModel` reorders in
+    // place). This smoke test documents the contract — the table compiles
+    // and lays out cleanly with reorder enabled.
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
@@ -2380,28 +2379,94 @@ fn row_drop_insertion_with_variable_heights() {
 }
 
 #[test]
-fn on_reorder_routes_row_drag_without_mutating_model() {
+fn reorder_drag_routes_to_source_accept_drop_without_mutating() {
     use bastyde_canvas::Point;
+    use bastyde_core::ObserverHandle;
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use bastyde_data::{
+        DataChange, DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse,
+        ListDataSource,
+    };
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    // The redesign's controlled path: a reorderable table routes the drop to
+    // the SOURCE's accept_drop. An externally-owned source CAPTURES the
+    // resolved move and returns true WITHOUT mutating its own store — the
+    // old `on_reorder` hook, now expressed through the source trait.
+    struct CapturingSource {
+        items: Vec<Row>,
+        captured: Rc<RefCell<Vec<(usize, usize)>>>,
+    }
+    impl ListDataSource for CapturingSource {
+        type Item = Row;
+        type Key = usize;
+        fn len(&self) -> usize {
+            self.items.len()
+        }
+        fn with_item<R>(&self, i: usize, f: impl FnOnce(&Row) -> R) -> Option<R> {
+            self.items.get(i).map(f)
+        }
+        fn key_at(&self, i: usize) -> Option<usize> {
+            (i < self.items.len()).then_some(i)
+        }
+        fn observe_changes(&self, _f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
+            ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+        }
+        fn drag(&self, _k: &usize) -> DragEligibility {
+            DragEligibility::CanDrag
+        }
+        fn can_accept(&self, q: &DropQuery<'_, usize>) -> DropResponse {
+            match &q.source {
+                DragSource::SameView { .. } if q.position != DropPosition::Into => {
+                    DropResponse::Accept
+                }
+                _ => DropResponse::Reject,
+            }
+        }
+        fn accept_drop(&self, c: DropCommit<'_, usize>) -> bool {
+            let DragSource::SameView { key: from } = c.source else {
+                return false;
+            };
+            let target = c.target;
+            let shift = if from < target { 1 } else { 0 };
+            let to = match c.position {
+                DropPosition::Before => target.saturating_sub(shift),
+                DropPosition::After => (target + 1).saturating_sub(shift),
+                DropPosition::Into => return false,
+            };
+            // Controlled: capture the resolved move, do NOT mutate `items`.
+            self.captured.borrow_mut().push((from, to));
+            true
+        }
+    }
+
     let captured: Rc<RefCell<Vec<(usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
-    let cap = captured.clone();
+    let items: Vec<Row> = (0..5)
+        .map(|i| Row {
+            id: i,
+            name: format!("row {i}"),
+        })
+        .collect();
     let heights = [40.0_f32, 10.0, 40.0, 40.0, 40.0];
-    let model = rows(5);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let _table = tree.add(
-        TableView::new(model.clone())
-            .add_column(id_col())
-            .add_column(name_col())
-            .show_header(false)
-            .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
-            .reorderable_rows(true)
-            .on_reorder(move |from, to, _ctx| cap.borrow_mut().push((from, to))),
+        TableView::from_source(CapturingSource {
+            items,
+            captured: captured.clone(),
+        })
+        .add_column(id_col())
+        .add_column(name_col())
+        .show_header(false)
+        .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
+        .reorderable_rows(true),
     );
-    tree.layout(SizeProposal { width: Some(400.0), height: Some(300.0) });
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
 
-    // Same gesture as row_drop_insertion_with_variable_heights: drag row 4 → (4, 1).
+    // Drag row 4 (spans 130..170) up to y = 35 → insert before row 1.
     let from = Point::new(150.0, 150.0);
     tree.dispatch_event(WidgetEvent::PointerDown {
         position: from,
@@ -2411,19 +2476,20 @@ fn on_reorder_routes_row_drag_without_mutating_model() {
     tree.dispatch_event(WidgetEvent::PointerMove {
         position: Point::new(from.x + 10.0, from.y),
     });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: Point::new(from.x, 35.0) });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x, 35.0),
+    });
     tree.dispatch_event(WidgetEvent::PointerUp {
         position: Point::new(from.x, 35.0),
         button: PointerButton::Primary,
         modifiers: Modifiers::NONE,
     });
 
-    assert_eq!(*captured.borrow(), vec![(4, 1)], "callback gets the from/to move");
-    // Controlled mode: the row model must NOT be mutated by the widget.
-    let ids: Vec<u32> = (0..model.len())
-        .map(|i| model.with_item(i, |r| r.id).unwrap())
-        .collect();
-    assert_eq!(ids, vec![0, 1, 2, 3, 4], "model must be untouched");
+    assert_eq!(
+        *captured.borrow(),
+        vec![(4, 1)],
+        "the drop is routed to the source's accept_drop with the resolved move"
+    );
 }
 #[test]
 fn auto_row_height_totals_settle_after_measurement() {
@@ -2589,5 +2655,76 @@ fn root_painted_row_decorations_clip_to_widget_bounds() {
     assert!(
         saw_raw_overflow,
         "expected a partial bottom-row decoration spanning past the bounds"
+    );
+}
+
+#[test]
+fn lazy_loading_rows_render_placeholder_cells_and_request_the_window() {
+    // A windowed table source with nothing resident: every visible row is
+    // `Loading`, so the body pane must render placeholder cells (not skip the
+    // rows) and the table must nudge the source to load the realized window.
+    use bastyde_core::ObserverHandle;
+    use bastyde_data::{DataChange, ListDataSource, RowState};
+    use std::cell::RefCell;
+    use std::ops::Range;
+    use std::rc::Rc;
+
+    struct Windowed {
+        total: usize,
+        requested: Rc<RefCell<Vec<Range<usize>>>>,
+    }
+    impl ListDataSource for Windowed {
+        type Item = Row;
+        type Key = usize;
+        fn len(&self) -> usize {
+            self.total
+        }
+        fn with_item<R>(&self, _i: usize, _f: impl FnOnce(&Row) -> R) -> Option<R> {
+            None // nothing resident yet
+        }
+        fn key_at(&self, i: usize) -> Option<usize> {
+            (i < self.total).then_some(i)
+        }
+        fn row_state(&self, _i: usize) -> RowState {
+            RowState::Loading
+        }
+        fn request_window(&self, range: Range<usize>) {
+            self.requested.borrow_mut().push(range);
+        }
+        fn observe_changes(&self, _f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
+            ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+        }
+    }
+
+    let requested = Rc::new(RefCell::new(Vec::new()));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::from_source(Windowed {
+            total: 1000,
+            requested: requested.clone(),
+        })
+        .add_column(id_col())
+        .add_column(name_col())
+        .show_header(false)
+        .row_height(30.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    });
+
+    // The body pane is the table's first child (header suppressed). 300px /
+    // 30px = 10 visible + buffer → the loading rows realize as placeholder
+    // row widgets, NOT skipped.
+    let body_pane = tree.children(table)[0];
+    let placeholder_rows = tree.children(body_pane).len();
+    assert!(
+        placeholder_rows >= 10,
+        "loading rows must render as placeholders, got {placeholder_rows}"
+    );
+    // And the source was asked to load the realized window.
+    assert!(
+        !requested.borrow().is_empty(),
+        "request_window must be called for the visible range"
     );
 }

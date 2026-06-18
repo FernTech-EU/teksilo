@@ -33,20 +33,19 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{SelectionMode, SelectionModel};
+use bastyde_data::{DragEligibility, RowState, SelectionMode, SelectionModel};
 
 use super::a11y::CellA11y;
 use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::table_view::RowReorderDragData;
+use crate::data_views::{RowDrag, default_placeholder};
 
 const BUFFER_ROWS: usize = 5;
 
 pub(crate) type LenFn = Rc<dyn Fn() -> usize>;
 pub(crate) type WithItemFn<T> = Rc<dyn Fn(usize, &dyn Fn(&T))>;
-pub(crate) type MoveItemFn = Rc<dyn Fn(usize, usize)>;
 
 /// The row-virtualization pane. Owns the visible row widgets and
 /// handles their per-row click + drag handlers. Sized to fill the
@@ -55,7 +54,11 @@ pub(crate) type MoveItemFn = Rc<dyn Fn(usize, usize)>;
 pub(crate) struct BodyPane<T: 'static> {
     pub(crate) len_fn: LenFn,
     pub(crate) with_item_fn: WithItemFn<T>,
-    pub(crate) move_item_fn: Option<MoveItemFn>,
+    /// Source per-row drag gate — `NoDrag` suppresses the drag gesture.
+    pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
+    /// Source per-row load state — a `Loading` row renders a placeholder
+    /// skeleton instead of its cells.
+    pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
 
     pub(crate) columns: Vec<Column<T>>,
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
@@ -75,7 +78,10 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) focused_cell: Signal<Option<(usize, usize)>>,
 
     pub(crate) reorderable_rows: bool,
-    pub(crate) table_id: usize,
+    /// Stable id of the owning `TableView` instance — stamped into the
+    /// `RowDrag` payload so the source can tell a same-view reorder from a
+    /// foreign drop.
+    pub(crate) view_id: usize,
     /// Anchor used by row drag-start to identify the source. Captured
     /// at construction so the closure stays `'static`.
     pub(crate) drag_anchor: WidgetId,
@@ -213,6 +219,12 @@ impl<T: 'static> Widget for BodyPane<T> {
                 _ => false,
             };
 
+            // A non-resident row (data not yet loaded) whose source reports
+            // `Loading` renders placeholder cells instead of being skipped,
+            // so the scrollbar and layout stay stable while the window loads.
+            let resident = read_item_local(&with_item_fn, row_idx, |_| ()).is_some();
+            let loading = !resident && (self.row_state_fn)(row_idx) == RowState::Loading;
+
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
                 let col = &columns[col_idx];
@@ -240,8 +252,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                     depth: None,
                     is_tree_column: false,
                 };
-                let cell_widget =
-                    read_item_local(&with_item_fn, row_idx, |item| (col.cell)(item, &cell_ctx));
+                let cell_widget = if loading {
+                    Some(default_placeholder())
+                } else {
+                    read_item_local(&with_item_fn, row_idx, |item| (col.cell)(item, &cell_ctx))
+                };
                 if let Some(widget) = cell_widget {
                     let inner_id = ctx.add_boxed(widget);
                     // When the cell delegate just swapped in an editor
@@ -376,18 +391,72 @@ impl<T: 'static> Widget for BodyPane<T> {
                     });
                 }
             }
-            if self.reorderable_rows && self.move_item_fn.is_some() {
+            if self.reorderable_rows {
                 let drag_row = row_idx;
-                let drag_table_id = self.table_id;
+                let view_id = self.view_id;
                 let anchor = self.drag_anchor;
+                let drag_gate = self.drag_fn.clone();
+                let with_item_for_preview = self.with_item_fn.clone();
+                let columns_for_preview = self.columns.clone();
+                let display_for_preview = self.display_indices.clone();
+                let widths_for_preview = self.column_widths.clone();
+                let metrics_for_preview = self.row_metrics.clone();
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                        let payload =
-                            bastyde_core::drag_payload::DragPayload::typed(RowReorderDragData {
-                                source_row: drag_row,
-                                source_table_id: drag_table_id,
-                            });
-                        ctx.start_drag(anchor, payload);
+                        // The source's per-row transferable gate.
+                        if (drag_gate)(drag_row) == DragEligibility::NoDrag {
+                            return;
+                        }
+                        let payload = bastyde_core::drag_payload::DragPayload::typed(RowDrag {
+                            source_index: drag_row,
+                            source_view_id: view_id,
+                        });
+                        // Build a full-width preview from the dragged row's
+                        // cells so the floating widget reads as the picked-up
+                        // row. Cells are built eagerly here (no arena), then a
+                        // self-contained `CellRowPreview` lays them out.
+                        let display = display_for_preview.borrow().clone();
+                        let cells: Vec<Box<dyn Widget>> =
+                            read_item_local(&with_item_for_preview, drag_row, |item| {
+                                display
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(display_pos, &col_idx)| {
+                                        let col = &columns_for_preview[col_idx];
+                                        let cell_ctx = CellContext {
+                                            row_index: drag_row,
+                                            col_id: col.id.clone(),
+                                            col_index: display_pos,
+                                            is_selected: false,
+                                            is_focused: false,
+                                            is_hovered: false,
+                                            is_editing: false,
+                                            depth: None,
+                                            is_tree_column: false,
+                                        };
+                                        (col.cell)(item, &cell_ctx)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if cells.is_empty() {
+                            ctx.start_drag(anchor, payload);
+                            return;
+                        }
+                        let widths = widths_for_preview.borrow().clone();
+                        let h = metrics_for_preview.borrow_mut().row_height(drag_row);
+                        let total_w = widths.iter().sum::<f32>().max(120.0);
+                        let preview = Box::new(crate::drag_preview::DragPreview::new(
+                            total_w,
+                            h,
+                            Box::new(CellRowPreview {
+                                cells,
+                                widths,
+                                height: h,
+                                ids: Vec::new(),
+                            }),
+                        )) as Box<dyn Widget>;
+                        ctx.start_drag_with_preview(anchor, payload, preview);
                     }
                 });
             }
@@ -516,4 +585,64 @@ fn read_item_local<T, R>(
         }
     });
     slot.into_inner()
+}
+
+/// Self-contained, arena-free row preview for the drag floating widget: it
+/// owns its (already-built) boxed cells and lays them out horizontally at the
+/// dragged row's column widths. Built once at drag-start and mounted by the
+/// framework's drag-overlay build pass, so it can't reuse `BodyRow` (which
+/// addresses cells by arena id).
+struct CellRowPreview {
+    /// Cells to mount, drained in `build`.
+    cells: Vec<Box<dyn Widget>>,
+    /// Display-order column widths, parallel to the mounted children.
+    widths: Vec<f32>,
+    height: f32,
+    ids: Vec<WidgetId>,
+}
+
+impl std::fmt::Debug for CellRowPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CellRowPreview")
+            .field("cells", &self.ids.len())
+            .finish()
+    }
+}
+
+impl Widget for CellRowPreview {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.ids = std::mem::take(&mut self.cells)
+            .into_iter()
+            .map(|w| ctx.add_boxed(w))
+            .collect();
+        self.ids.clone()
+    }
+
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        Size::new(self.widths.iter().sum::<f32>().max(1.0), self.height).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        let mut x = bounds.x;
+        for (i, child) in children.iter_mut().enumerate() {
+            let w = self.widths.get(i).copied().unwrap_or(0.0);
+            child.origin = Point::new(x, bounds.y);
+            child.size = Size::new(w, bounds.height);
+            x += w;
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.ids.clone()
+    }
 }

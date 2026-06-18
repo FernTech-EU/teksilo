@@ -43,7 +43,9 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{DataChange, ListDataSource, ListModel, SelectionModel};
+use bastyde_data::{
+    DataChange, DropPosition, DropResponse, ListDataSource, ListModel, SelectionModel,
+};
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole};
 
@@ -51,6 +53,8 @@ use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::{RowDrag, flat_insertion_target};
+use crate::list_source::DndLazy;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 pub use self::column::{
@@ -93,66 +97,40 @@ pub(crate) struct ColumnReorderDragData {
     pub source_table_id: usize,
 }
 
-/// Drag payload for intra-table row reorder.
-#[derive(Debug, Clone)]
-pub(crate) struct RowReorderDragData {
-    pub source_row: usize,
-    pub source_table_id: usize,
-}
-
 // ── Source erasure ─────────────────────────────────────────────────────────
 
 type LenFn = Rc<dyn Fn() -> usize>;
 type WithItemFn<T> = Rc<dyn Fn(usize, &dyn Fn(&T))>;
 type ObserveFn = Rc<dyn Fn(Box<dyn Fn(&DataChange)>) -> ObserverHandle>;
-/// Optional intra-source reorder hook. Populated only when the source
-/// is a `ListModel<T>` (which exposes `move_item`); `ListDataSource`
-/// implementations are read-only and don't get one.
-type MoveItemFn = Rc<dyn Fn(usize, usize)>;
 /// Divergence side-channel for `DataChange::Reset`-emitting proxies
 /// (`ListDataSource::first_changed_index`). Raw `ListModel`s report
 /// `None` — their observers already get fine-grained variants.
 type FirstChangedFn = Rc<dyn Fn() -> Option<usize>>;
 
+/// The multi-cell read erasure. `TableView` reads each row's item once
+/// per cell (each column's `cell` delegate), so it keeps the side-effect
+/// `with_item_fn` form rather than `ListSource`'s single-widget reader.
+/// The DnD + lazy protocol is shared from `DndLazy` (built separately in
+/// the constructors). Returned alongside the `Rc<S>` source so the caller
+/// can build a `DndLazy` from the same handle without re-wrapping.
 fn erase_list_model<T: 'static>(
     model: ListModel<T>,
-) -> (
-    LenFn,
-    WithItemFn<T>,
-    ObserveFn,
-    Option<MoveItemFn>,
-    FirstChangedFn,
-) {
+) -> (LenFn, WithItemFn<T>, ObserveFn, FirstChangedFn) {
     let m_len = model.clone();
     let m_read = model.clone();
-    let m_obs = model.clone();
-    let m_move = model;
+    let m_obs = model;
     let len_fn: LenFn = Rc::new(move || m_len.len());
     let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
         m_read.with_item(idx, |item| f(item));
     });
     let observe_fn: ObserveFn =
         Rc::new(move |callback| m_obs.observe_changes(move |change| callback(change)));
-    let move_fn: MoveItemFn = Rc::new(move |from, to| m_move.move_item(from, to));
-    (
-        len_fn,
-        with_item_fn,
-        observe_fn,
-        Some(move_fn),
-        Rc::new(|| None),
-    )
+    (len_fn, with_item_fn, observe_fn, Rc::new(|| None))
 }
 
 fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
-    source: S,
-) -> (
-    LenFn,
-    WithItemFn<T>,
-    ObserveFn,
-    Option<MoveItemFn>,
-    FirstChangedFn,
-) {
-    let s = Rc::new(source);
+    s: Rc<S>,
+) -> (LenFn, WithItemFn<T>, ObserveFn, FirstChangedFn) {
     let s_len = s.clone();
     let s_read = s.clone();
     let s_obs = s.clone();
@@ -164,7 +142,7 @@ fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
     let observe_fn: ObserveFn =
         Rc::new(move |callback| s_obs.observe_changes(move |change| callback(change)));
     let first_changed_fn: FirstChangedFn = Rc::new(move || s_changed.first_changed_index());
-    (len_fn, with_item_fn, observe_fn, None, first_changed_fn)
+    (len_fn, with_item_fn, observe_fn, first_changed_fn)
 }
 
 // `read_item` lived here for the inline body-row build; that loop now
@@ -177,12 +155,17 @@ fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
 ///
 /// See module docs for the feature roadmap.
 pub struct TableView<T: 'static> {
-    // Source erasure
+    // Source erasure (multi-cell read path; DnD + lazy live in `dnd`).
     len_fn: LenFn,
     with_item_fn: WithItemFn<T>,
     observe_fn: ObserveFn,
-    move_item_fn: Option<MoveItemFn>,
     first_changed_fn: FirstChangedFn,
+    /// Source-owned DnD validation + lazy windowing, erased from the
+    /// backing `ListDataSource`. A `ListModel` reorders in place via its
+    /// `accept_drop`; an external source routes the move to its store and
+    /// can forbid a drop by returning `DropResponse::Reject` (the view
+    /// then paints no insertion line).
+    dnd: DndLazy,
 
     // Configuration
     columns: Vec<Column<T>>,
@@ -238,23 +221,13 @@ pub struct TableView<T: 'static> {
     /// focused row).
     #[allow(clippy::type_complexity)]
     on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
-    /// External row-drop callback for inter-table or app-defined drops.
-    #[allow(clippy::type_complexity)]
-    on_row_drop: Option<
-        Rc<
-            dyn Fn(
-                bastyde_core::drag_payload::DragPayload,
-                usize,
-                &mut bastyde_core::widget::EventContext,
-            ) -> bool,
-        >,
-    >,
-    /// Controlled row-reorder handler `(from, to, ctx)`. When set, a row
-    /// drag-drop is delivered here INSTEAD of calling the row model's
-    /// `move_item` — for a table whose rows are owned elsewhere.
-    #[allow(clippy::type_complexity)]
-    on_reorder: Option<Rc<dyn Fn(usize, usize, &mut bastyde_core::widget::EventContext)>>,
     reorderable_rows: bool,
+    /// Active row-drop insertion indicator `(body_local_y, width)` —
+    /// `body_local_y` is measured from the body band top (below the
+    /// header). Set by `on_drag_hover` when the source accepts the
+    /// hovered position, cleared on leave / drop, read by `paint`.
+    /// Reactive (`RepaintOnly`) so a `set(...)` dirties the table.
+    drop_feedback: Signal<Option<(f32, f32)>>,
 
     // Build state
     header_row_id: Option<WidgetId>,
@@ -303,24 +276,31 @@ pub struct TableView<T: 'static> {
 impl<T: 'static> TableView<T> {
     /// Wrap a `ListModel<T>`.
     pub fn new(model: ListModel<T>) -> Self {
-        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) = erase_list_model(model);
-        Self::create(len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn)
+        let dnd = DndLazy::from_source(Rc::new(model.clone()));
+        let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_list_model(model);
+        Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
     }
 
     /// Wrap any `ListDataSource<Item = T>` (e.g. a
     /// [`SortFilterListModel<T>`](bastyde_data::SortFilterListModel)).
+    ///
+    /// The source owns DnD validation (`can_accept` / `accept_drop`) and
+    /// lazy windowing (`row_state` / `request_window` / `fetch_more`); a
+    /// read-only source leaves the defaults inert.
     pub fn from_source<S: ListDataSource<Item = T>>(source: S) -> Self {
-        let (len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn) =
-            erase_data_source::<S, T>(source);
-        Self::create(len_fn, with_item_fn, observe_fn, move_fn, first_changed_fn)
+        let s = Rc::new(source);
+        let dnd = DndLazy::from_source(s.clone());
+        let (len_fn, with_item_fn, observe_fn, first_changed_fn) =
+            erase_data_source::<S, T>(s);
+        Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
     }
 
     fn create(
         len_fn: LenFn,
         with_item_fn: WithItemFn<T>,
         observe_fn: ObserveFn,
-        move_item_fn: Option<MoveItemFn>,
         first_changed_fn: FirstChangedFn,
+        dnd: DndLazy,
     ) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
@@ -329,8 +309,8 @@ impl<T: 'static> TableView<T> {
             len_fn,
             with_item_fn,
             observe_fn,
-            move_item_fn,
             first_changed_fn,
+            dnd,
             columns: Vec::new(),
             row_height: None,
             height_source: HeightSource::Uniform,
@@ -361,9 +341,8 @@ impl<T: 'static> TableView<T> {
             on_cell_edit_request: None,
             filters_signal: Signal::new(HashMap::new()),
             on_row_activate: None,
-            on_row_drop: None,
-            on_reorder: None,
             reorderable_rows: false,
+            drop_feedback: Signal::new(None),
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
@@ -490,39 +469,19 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Hook for inter-widget row drops. Receives `(payload, insertion_row, ctx)`
-    /// and returns `true` to accept the drop. Internal reorder drags
-    /// (intra-table) do not invoke this — the table consumes them.
-    pub fn on_row_drop(
-        mut self,
-        f: impl Fn(
-            bastyde_core::drag_payload::DragPayload,
-            usize,
-            &mut bastyde_core::widget::EventContext,
-        ) -> bool
-        + 'static,
-    ) -> Self {
-        self.on_row_drop = Some(Rc::new(f));
-        self
-    }
-
-    /// Enable intra-table drag-to-reorder of rows.
+    /// Enable drag-to-reorder of rows (pointer drag + keyboard
+    /// Alt+ArrowUp/Down).
     ///
-    /// By default the row model's `move_item()` is called automatically;
-    /// install [`on_reorder`](Self::on_reorder) to route the move to a handler
-    /// instead (for rows owned by an external source of truth).
+    /// The move is routed through the backing source's `accept_drop`: a
+    /// `ListModel` reorders in place, an external source routes the move to
+    /// its store. Per-hover the source's `can_accept` decides whether the
+    /// drop is allowed — a forbidden position shows no insertion line and
+    /// the drop is refused. A row may also be forbidden from dragging at
+    /// all (the source's `drag` gate). Cross-table / external drops arrive
+    /// at `accept_drop` as `DragSource::Foreign`; a bare `ListModel`
+    /// rejects them, an external source decides.
     pub fn reorderable_rows(mut self, enabled: bool) -> Self {
         self.reorderable_rows = enabled;
-        self
-    }
-
-    /// Route a row drag-reorder to `(from, to, ctx)` instead of mutating the
-    /// row model directly. Requires [`reorderable_rows(true)`](Self::reorderable_rows).
-    pub fn on_reorder(
-        mut self,
-        f: impl Fn(usize, usize, &mut bastyde_core::widget::EventContext) + 'static,
-    ) -> Self {
-        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -897,6 +856,14 @@ impl<T: 'static> Widget for TableView<T> {
         );
         ctx.register_animated_signal(&self.scroll_y);
 
+        // Row-drop insertion indicator at RepaintOnly so on_drag_hover /
+        // on_drag_leave `set(...)` calls dirty paint without a rebuild.
+        self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
         // Pane → root total refresh (auto-measure mode): re-place this
         // root when the body pane's measurements changed the content
         // total, so `max_scroll_y` / the thumb ratio pick up the
@@ -1140,14 +1107,90 @@ impl<T: 'static> Widget for TableView<T> {
             on_row_activate: self.on_row_activate.clone(),
         };
 
-        let on_row_drop = self.on_row_drop.clone();
-        let move_item_fn = self.move_item_fn.clone();
-        let on_reorder_for_drop = self.on_reorder.clone();
+        // Row DnD is owned by the backing source. The view computes the
+        // geometric (target_row, position) and asks the source: `can_accept`
+        // on hover gates the insertion line (forbidden → no affordance),
+        // `accept_drop` on release commits the move (in-place for a
+        // `ListModel`, routed for an external source). Same-view reorders and
+        // foreign / cross-table drops both flow through `accept_drop` — the
+        // erased closures recover SameView-vs-Foreign from the payload.
+        let view_id = self.table_id;
+        let can_accept_hover = self.dnd.can_accept_fn.clone();
+        let scroll_for_hover = self.scroll_y.clone();
+        let metrics_for_hover = self.row_metrics.clone();
+        let len_for_hover = self.len_fn.clone();
+        let header_h_for_hover = header_h;
+        let band_width_for_hover = self.header_strip_width.clone();
+        let feedback_for_hover = self.drop_feedback.clone();
+
+        let accept_drop_for_drop = self.dnd.accept_drop_fn.clone();
         let scroll_y_for_drop = self.scroll_y.clone();
         let header_h_for_drop = header_h;
         let metrics_for_drop = self.row_metrics.clone();
         let len_fn_for_drop = self.len_fn.clone();
-        let table_id_for_drop = self.table_id;
+        let feedback_for_drop = self.drop_feedback.clone();
+
+        let feedback_for_leave = self.drop_feedback.clone();
+        let scroll_for_tick = self.scroll_y.clone();
+        let max_scroll_for_tick = self.max_scroll_y.clone();
+        let viewport_for_tick = self.viewport_height.clone();
+        let header_h_for_tick = header_h;
+
+        // Alt+Arrow reorder wraps the shared key handler: the move is a
+        // synthetic same-view `RowDrag` through the source's `accept_drop`,
+        // so it travels exactly the pointer-drop path. Every other key falls
+        // through to the shared navigator (cell/row movement, edit, etc.).
+        let mut shared_key = keyboard::build_key_handler(key_cfg);
+        let reorderable_kbd = self.reorderable_rows;
+        let accept_drop_kbd = self.dnd.accept_drop_fn.clone();
+        let focused_kbd = self.focused_cell.clone();
+        let sel_kbd = self.selection.clone();
+        let len_kbd = self.len_fn.clone();
+        let key_handler = move |event: &bastyde_core::event::WidgetEvent,
+                                ctx: &mut bastyde_core::widget::EventContext|
+              -> bastyde_core::event::EventResponse {
+            use bastyde_core::event::{EventResponse, Key, WidgetEvent};
+            if reorderable_kbd
+                && let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                && modifiers.alt()
+            {
+                let count = (len_kbd)();
+                if count > 0 {
+                    let cur = focused_kbd.get().map(|(r, _)| r).or_else(|| {
+                        sel_kbd
+                            .as_ref()
+                            .and_then(|s| s.selected_indices().first().copied())
+                    });
+                    if let Some(idx) = cur {
+                        let mv = match key {
+                            Key::ArrowUp if idx > 0 => {
+                                Some((idx - 1, DropPosition::Before, idx - 1))
+                            }
+                            Key::ArrowDown if idx + 1 < count => {
+                                Some((idx + 1, DropPosition::After, idx + 1))
+                            }
+                            _ => None,
+                        };
+                        if let Some((target, position, dest)) = mv {
+                            let payload =
+                                bastyde_core::drag_payload::DragPayload::typed(RowDrag {
+                                    source_index: idx,
+                                    source_view_id: view_id,
+                                });
+                            if (accept_drop_kbd)(&payload, target, position, view_id) {
+                                if let Some(ref s) = sel_kbd {
+                                    s.select(dest);
+                                }
+                                let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
+                                focused_kbd.set(Some((dest, col)));
+                            }
+                            return EventResponse::Handled;
+                        }
+                    }
+                }
+            }
+            shared_key(event, ctx)
+        };
 
         let handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
@@ -1169,55 +1212,88 @@ impl<T: 'static> Widget for TableView<T> {
                 }
                 _ => bastyde_core::event::EventResponse::Ignored,
             })
-            .on_key(keyboard::build_key_handler(key_cfg))
-            .on_drag_hover(|payload, _pos, _ctx| {
-                if payload.has_typed::<RowReorderDragData>()
-                    || payload.has_typed::<ColumnReorderDragData>()
-                {
-                    bastyde_core::DropFeedback::HighlightRect {
-                        rect: bastyde_canvas::Rect::ZERO,
-                        color: bastyde_tokens::Color::TRANSPARENT,
-                    }
+            .on_key(key_handler)
+            .on_drag_hover(move |payload, position, _ctx| {
+                // Column reorder is handled by the header strip; only
+                // row-level drops (same-view `RowDrag` or a foreign payload
+                // the source accepts) get an insertion line here.
+                if payload.has_typed::<ColumnReorderDragData>() {
+                    feedback_for_hover.set(None);
+                    return bastyde_core::DropFeedback::NoFeedback;
+                }
+                let body_y = position.y - header_h_for_hover;
+                let scroll = scroll_for_hover.get();
+                let content_y = body_y + scroll;
+                let len = (len_for_hover)();
+                let (ins, line_y) = {
+                    let mut m = metrics_for_hover.borrow_mut();
+                    m.resize(len);
+                    let ins = m.insertion_index(content_y);
+                    (ins, m.row_top(ins) - scroll)
+                };
+                let width = band_width_for_hover.get();
+                // Source-owned validation: paint the line only when the
+                // source does not reject the hovered position.
+                let allowed = flat_insertion_target(ins, len).is_some_and(|(target, pos)| {
+                    !matches!(
+                        (can_accept_hover)(payload, target, pos, view_id),
+                        DropResponse::Reject
+                    )
+                });
+                if allowed {
+                    feedback_for_hover.set(Some((line_y, width)));
+                    bastyde_core::DropFeedback::InsertionLine { y: line_y, width }
                 } else {
+                    feedback_for_hover.set(None);
                     bastyde_core::DropFeedback::NoFeedback
                 }
             })
-            .on_drop(move |mut payload, position, ctx| {
-                // Compute insertion row from y position, accounting for
-                // the header band and current scroll.
+            .on_drop(move |payload, position, _ctx| {
+                feedback_for_drop.set(None);
+                if payload.has_typed::<ColumnReorderDragData>() {
+                    return false;
+                }
                 let body_y = position.y - header_h_for_drop;
                 let scroll = scroll_y_for_drop.get();
                 let content_y = body_y + scroll;
-                let insertion_row = {
+                let len = (len_fn_for_drop)();
+                let ins = {
                     let mut m = metrics_for_drop.borrow_mut();
-                    m.resize((len_fn_for_drop)());
+                    m.resize(len);
                     m.insertion_index(content_y)
                 };
-
-                if let Some(drag) = payload.take_typed::<RowReorderDragData>()
-                    && drag.source_table_id == table_id_for_drop
-                    && (on_reorder_for_drop.is_some() || move_item_fn.is_some())
-                {
-                    let from = drag.source_row;
-                    let to = if from < insertion_row {
-                        insertion_row.saturating_sub(1)
-                    } else {
-                        insertion_row
-                    };
-                    if from != to {
-                        if let Some(ref cb) = on_reorder_for_drop {
-                            // Controlled: hand the move to the app, don't mutate.
-                            cb(from, to, ctx);
-                        } else if let Some(ref mover) = move_item_fn {
-                            mover(from, to);
-                        }
+                match flat_insertion_target(ins, len) {
+                    Some((target, position_kind)) => {
+                        (accept_drop_for_drop)(&payload, target, position_kind, view_id)
                     }
-                    return true;
+                    None => false,
                 }
-                if let Some(ref handler) = on_row_drop {
-                    return handler(payload, insertion_row, ctx);
+            })
+            .on_drag_leave(move |_ctx| {
+                feedback_for_leave.set(None);
+            })
+            .on_drag_tick(move |pos, _ctx| {
+                // Auto-scroll when the pointer lingers within 32 px of the
+                // body band's top/bottom edge during a drag (body-relative
+                // so the header doesn't count as the top edge).
+                const EDGE: f32 = 32.0;
+                const MAX_VELOCITY: f32 = 12.0;
+                let body_h = (viewport_for_tick.get() - header_h_for_tick).max(0.0);
+                let y = pos.y - header_h_for_tick;
+                let above = (EDGE - y).max(0.0);
+                let below = (y - (body_h - EDGE)).max(0.0);
+                let delta = if above > 0.0 {
+                    -(above / EDGE) * MAX_VELOCITY
+                } else if below > 0.0 {
+                    (below / EDGE) * MAX_VELOCITY
+                } else {
+                    0.0
+                };
+                if delta.abs() > 0.01 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
                 }
-                false
             })
             .clips_children(true)
             .focusable(true);
@@ -1293,6 +1369,16 @@ impl<T: 'static> Widget for TableView<T> {
         }
 
         let row_count = (self.len_fn)();
+
+        // Lazy: nudge the source to load the realized window, and fetch the
+        // next page as the viewport nears the end (append-only sources). A
+        // fully-resident source leaves these inert.
+        let (vis_start, vis_end) = self.visible_range();
+        (self.dnd.request_window_fn)(vis_start..vis_end);
+        if (self.dnd.can_fetch_more_fn)() && vis_end + BUFFER_ROWS >= row_count {
+            (self.dnd.fetch_more_fn)();
+        }
+
         if row_count == 0 {
             // Empty state.
             if let Some(ref f) = self.empty_view {
@@ -1310,7 +1396,8 @@ impl<T: 'static> Widget for TableView<T> {
             let pane = body_pane::BodyPane::<T> {
                 len_fn: self.len_fn.clone(),
                 with_item_fn: self.with_item_fn.clone(),
-                move_item_fn: self.move_item_fn.clone(),
+                drag_fn: self.dnd.drag_fn.clone(),
+                row_state_fn: self.dnd.row_state_fn.clone(),
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
@@ -1323,7 +1410,7 @@ impl<T: 'static> Widget for TableView<T> {
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
                 reorderable_rows: self.reorderable_rows,
-                table_id: self.table_id,
+                view_id: self.table_id,
                 drag_anchor: ctx.self_id(),
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
@@ -1658,6 +1745,19 @@ impl<T: 'static> Widget for TableView<T> {
                 // Right
                 canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
             }
+        }
+
+        // Row-drop insertion indicator (source-accepted positions only —
+        // a forbidden hover clears the signal, so no line shows). `y` is
+        // stored body-local; the band clip is already active.
+        if let Some((y, _width)) = self.drop_feedback.get() {
+            let line_color = BorderRole::Focused.resolve(colors);
+            let thickness = 2.0_f32;
+            let line_y = body_origin_y + y - thickness * 0.5;
+            canvas.fill_rect(
+                Rect::new(content_left, line_y, body_width_for_paint, thickness),
+                line_color,
+            );
         }
 
         canvas.clear_clip();
