@@ -228,7 +228,7 @@ pub use toolbar::{
     Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
 };
 pub use tree_table::TreeTable;
-pub use tree_view::{TreeRowContext, TreeView};
+pub use tree_view::{ReorderPosition, TreeReorder, TreeRowContext, TreeView};
 
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped
 /// by locale. Registered by applications via

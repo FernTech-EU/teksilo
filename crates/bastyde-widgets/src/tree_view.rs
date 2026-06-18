@@ -46,6 +46,31 @@ struct TreeViewDragData {
     source_tree_id: usize,
 }
 
+/// Where a dragged (or Alt+Arrow-moved) node landed relative to the target,
+/// reported by [`TreeView::on_reorder`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReorderPosition {
+    /// As a sibling immediately before the target.
+    Before,
+    /// As a child of the target (reparent).
+    Into,
+    /// As a sibling immediately after the target.
+    After,
+}
+
+/// A reorder move delivered to [`TreeView::on_reorder`]. The handler decides
+/// how to apply it (e.g. route to a backend that owns the data), so the
+/// `TreeModel` is NOT mutated by the widget when a handler is installed.
+#[derive(Debug, Clone, Copy)]
+pub struct TreeReorder {
+    /// The node being moved.
+    pub source: NodeId,
+    /// The node it was dropped onto / next to.
+    pub target: NodeId,
+    /// Where, relative to `target`.
+    pub position: ReorderPosition,
+}
+
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
 /// reference to the slice handle and the row's `NodeId` so the
 /// delegate can wire chevron toggles and other tree-aware behavior
@@ -115,6 +140,11 @@ pub struct TreeView<T: 'static> {
 
     /// Enable intra-widget drag reordering.
     reorderable: bool,
+
+    /// Controlled-reorder handler. When set, drag-drop and Alt+Arrow reorders
+    /// are delivered here INSTEAD of mutating the `TreeModel` — for views whose
+    /// data is owned elsewhere (a backend reconciled into the model).
+    on_reorder: Option<Rc<dyn Fn(TreeReorder, &mut bastyde_core::widget::EventContext)>>,
 
     /// Whether a row-body PointerUp on a branch row auto-toggles its
     /// expansion. Defaults to `true` (legacy behavior — convenient
@@ -210,6 +240,7 @@ impl<T: 'static> TreeView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
+            on_reorder: None,
             row_click_expands: true,
             drop_feedback: Signal::new(None),
             overscroll_behavior: OverscrollBehavior::default(),
@@ -293,10 +324,26 @@ impl<T: 'static> TreeView<T> {
     /// Enable intra-widget drag reordering.
     ///
     /// When enabled, tree items can be dragged and dropped to reparent or
-    /// reorder them. The underlying `TreeModel::move_node()` is called
-    /// automatically. Keyboard equivalent: Alt+ArrowUp/Down.
+    /// reorder them. By default the underlying `TreeModel::move_node()` is
+    /// called automatically (an "uncontrolled" view that owns its data).
+    /// Install [`on_reorder`](Self::on_reorder) to instead route moves to a
+    /// handler. Keyboard equivalent: Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Route reorders (drag-drop and Alt+Arrow) to a handler instead of
+    /// mutating the `TreeModel` directly. Use this when the tree's data is
+    /// owned elsewhere — e.g. a database or entity store projected into the
+    /// model — so the move goes through that source of truth and the model is
+    /// updated by the resulting reconcile, not by the widget. Requires
+    /// [`reorderable(true)`](Self::reorderable).
+    pub fn on_reorder(
+        mut self,
+        f: impl Fn(TreeReorder, &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -505,7 +552,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
 
-            handlers = handlers.on_key(move |event, _ctx| {
+            let on_reorder_for_key = self.on_reorder.clone();
+            handlers = handlers.on_key(move |event, ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     let visible_count = tsh.visible_count();
                     if visible_count == 0 {
@@ -541,6 +589,40 @@ impl<T: 'static> Widget for TreeView<T> {
 
                             let sibling_idx =
                                 siblings.iter().position(|&n| n == node_id).unwrap_or(0);
+
+                            // Controlled mode: route the sibling move (Before the
+                            // previous / After the next) to the handler; the app
+                            // owns the data and the model is reconciled.
+                            if let Some(cb) = &on_reorder_for_key {
+                                match key {
+                                    bastyde_core::event::Key::ArrowUp if sibling_idx > 0 => {
+                                        cb(
+                                            TreeReorder {
+                                                source: node_id,
+                                                target: siblings[sibling_idx - 1],
+                                                position: ReorderPosition::Before,
+                                            },
+                                            ctx,
+                                        );
+                                        return bastyde_core::event::EventResponse::Handled;
+                                    }
+                                    bastyde_core::event::Key::ArrowDown
+                                        if sibling_idx + 1 < siblings.len() =>
+                                    {
+                                        cb(
+                                            TreeReorder {
+                                                source: node_id,
+                                                target: siblings[sibling_idx + 1],
+                                                position: ReorderPosition::After,
+                                            },
+                                            ctx,
+                                        );
+                                        return bastyde_core::event::EventResponse::Handled;
+                                    }
+                                    _ => {}
+                                }
+                                return bastyde_core::event::EventResponse::Ignored;
+                            }
 
                             match key {
                                 bastyde_core::event::Key::ArrowUp if sibling_idx > 0 => {
@@ -735,7 +817,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let scroll_for_drop = self.scroll_y.clone();
 
             let tsh_for_drop = self.tree_slice.handle();
-            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+            let on_reorder_for_drop = self.on_reorder.clone();
+            handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 if let Some(drag_data) = payload.take_typed::<TreeViewDragData>()
                     && drag_data.source_tree_id == my_tree_id
                 {
@@ -761,6 +844,23 @@ impl<T: 'static> Widget for TreeView<T> {
                         // top third = before, middle = into (if has children), bottom = after
                         let y_in_row = content_y - row_top;
                         let third = row_h / 3.0;
+
+                        // Controlled mode: hand the move to the app and do NOT
+                        // mutate the model — the app routes it to its own data.
+                        if let Some(cb) = &on_reorder_for_drop {
+                            let position = if y_in_row < third {
+                                ReorderPosition::Before
+                            } else if y_in_row > 2.0 * third {
+                                ReorderPosition::After
+                            } else {
+                                ReorderPosition::Into
+                            };
+                            cb(
+                                TreeReorder { source: source_node, target: entry.node_id, position },
+                                ctx,
+                            );
+                            return true;
+                        }
 
                         if y_in_row < third {
                             // Drop BEFORE target: move as sibling above
@@ -1594,6 +1694,39 @@ mod tests {
         assert_eq!(a_children[0], c, "C should be A's first child");
         // C is no longer a root.
         assert_eq!(model.root_count(), 2);
+    }
+
+    #[test]
+    fn on_reorder_routes_drop_without_mutating_model() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let captured: Rc<RefCell<Vec<TreeReorder>>> = Rc::new(RefCell::new(Vec::new()));
+        let cap = captured.clone();
+        let model = sample_tree();
+        let a = model.root(0);
+        let c = model.root(2);
+        let mut wtree = WidgetTree::new();
+        let _tv = wtree.add(
+            TreeView::new(model.clone(), |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .reorderable(true)
+            .on_reorder(move |mv, _ctx| cap.borrow_mut().push(mv)),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Drag C into the middle third of row 0 ("into A").
+        drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 14.0));
+
+        let calls = captured.borrow();
+        assert_eq!(calls.len(), 1, "on_reorder should fire once");
+        assert_eq!(calls[0].source, c);
+        assert_eq!(calls[0].target, a);
+        assert_eq!(calls[0].position, ReorderPosition::Into);
+        // Controlled mode: the model must NOT be mutated by the widget.
+        assert_eq!(model.root_count(), 3, "C must still be a root");
+        assert_eq!(model.children(a).len(), 2, "A's children unchanged");
     }
 
     #[test]

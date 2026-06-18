@@ -92,6 +92,12 @@ pub struct ListView<T: 'static> {
     /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
     reorderable: bool,
 
+    /// Controlled-reorder handler `(from, to, ctx)`. When set, drag-drop and
+    /// Alt+Arrow reorders are delivered here INSTEAD of calling the model's
+    /// `move_item` — for lists whose data is owned elsewhere.
+    #[allow(clippy::type_complexity)]
+    on_reorder: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>>,
+
     /// Whether to render an internal vertical scrollbar. When the
     /// caller wants the scrollbar outside the list — e.g. so it
     /// survives ListView rebuilds — this is disabled and the caller
@@ -191,6 +197,7 @@ impl<T: 'static> ListView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
+            on_reorder: None,
             show_scrollbar: true,
             on_item_drop: None,
             drop_feedback: Signal::new(None),
@@ -272,11 +279,24 @@ impl<T: 'static> ListView<T> {
 
     /// Enable intra-widget drag reordering.
     ///
-    /// When enabled, items can be dragged and dropped within this ListView
-    /// to reorder them. The underlying `ListModel::move_item()` is called
-    /// automatically. Keyboard equivalent: Alt+ArrowUp/Down.
+    /// When enabled, items can be dragged and dropped within this ListView to
+    /// reorder them. By default the model's `move_item()` is called
+    /// automatically; install [`on_reorder`](Self::on_reorder) to route moves
+    /// to a handler instead. Keyboard equivalent: Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Route reorders (drag-drop and Alt+Arrow) to `(from, to, ctx)` instead of
+    /// mutating the model directly — for a list whose data is owned elsewhere
+    /// (a backend reconciled into the model). Requires
+    /// [`reorderable(true)`](Self::reorderable).
+    pub fn on_reorder(
+        mut self,
+        f: impl Fn(usize, usize, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -540,6 +560,7 @@ impl<T: 'static> Widget for ListView<T> {
         {
             let len_for_key = self.source.len_fn.clone();
             let move_for_key = self.source.move_item_fn.clone();
+            let on_reorder_for_key = self.on_reorder.clone();
             let sel_for_key = self.selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
@@ -548,7 +569,7 @@ impl<T: 'static> Widget for ListView<T> {
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
 
-            handlers = handlers.on_key(move |event, _ctx| {
+            handlers = handlers.on_key(move |event, ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     let count = (len_for_key)();
                     if count == 0 {
@@ -563,23 +584,31 @@ impl<T: 'static> Widget for ListView<T> {
                         if let Some(idx) = selected_idx {
                             match key {
                                 bastyde_core::event::Key::ArrowUp if idx > 0 => {
-                                    if let Some(ref mf) = move_for_key {
-                                        mf(idx, idx - 1);
+                                    if let Some(ref cb) = on_reorder_for_key {
+                                        cb(idx, idx - 1, ctx);
+                                    } else {
+                                        if let Some(ref mf) = move_for_key {
+                                            mf(idx, idx - 1);
+                                        }
+                                        if let Some(ref sel) = sel_for_key {
+                                            sel.select(idx - 1);
+                                        }
+                                        fi.set(Some(idx - 1));
                                     }
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(idx - 1);
-                                    }
-                                    fi.set(Some(idx - 1));
                                     return bastyde_core::event::EventResponse::Handled;
                                 }
                                 bastyde_core::event::Key::ArrowDown if idx + 1 < count => {
-                                    if let Some(ref mf) = move_for_key {
-                                        mf(idx, idx + 1);
+                                    if let Some(ref cb) = on_reorder_for_key {
+                                        cb(idx, idx + 1, ctx);
+                                    } else {
+                                        if let Some(ref mf) = move_for_key {
+                                            mf(idx, idx + 1);
+                                        }
+                                        if let Some(ref sel) = sel_for_key {
+                                            sel.select(idx + 1);
+                                        }
+                                        fi.set(Some(idx + 1));
                                     }
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(idx + 1);
-                                    }
-                                    fi.set(Some(idx + 1));
                                     return bastyde_core::event::EventResponse::Handled;
                                 }
                                 _ => {}
@@ -669,6 +698,7 @@ impl<T: 'static> Widget for ListView<T> {
             let len_for_drop = self.source.len_fn.clone();
             let move_for_drop = self.source.move_item_fn.clone();
             let on_item_drop = self.on_item_drop.clone();
+            let on_reorder_for_drop = self.on_reorder.clone();
             let scroll_for_drop = self.scroll_y.clone();
             let metrics_for_drop = self.metrics.clone();
 
@@ -692,10 +722,13 @@ impl<T: 'static> Widget for ListView<T> {
                     } else {
                         to_index
                     };
-                    if from != adjusted_to
-                        && let Some(ref mf) = move_for_drop
-                    {
-                        mf(from, adjusted_to);
+                    if from != adjusted_to {
+                        if let Some(ref cb) = on_reorder_for_drop {
+                            // Controlled: hand the move to the app, don't mutate.
+                            cb(from, adjusted_to, ctx);
+                        } else if let Some(ref mf) = move_for_drop {
+                            mf(from, adjusted_to);
+                        }
                     }
                     return true;
                 }
@@ -1592,6 +1625,35 @@ mod tests {
         assert_eq!(model.with_item(1, |v| *v), Some(40));
         assert_eq!(model.with_item(2, |v| *v), Some(20));
         assert_eq!(model.with_item(3, |v| *v), Some(30));
+    }
+
+    #[test]
+    fn on_reorder_routes_drag_without_mutating_model() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let captured: Rc<RefCell<Vec<(usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+        let cap = captured.clone();
+        let model = ListModel::from_vec(vec![10usize, 20, 30, 40, 50]);
+        let model_clone = model.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model_clone, move |_i, _item, _sel| Box::new(FixedLeaf(100.0, 30.0)))
+                .item_height(30.0)
+                .reorderable(true)
+                .on_reorder(move |from, to, _ctx| cap.borrow_mut().push((from, to))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Same gesture as drag_reorders_item_downward: drag item 0 down → (0, 3).
+        let children = tree.children(lv_id);
+        let from = tree.bounds(children[0]).center();
+        let to = Point::new(from.x, 120.0);
+        drag_item(&mut tree, from, to);
+
+        assert_eq!(*captured.borrow(), vec![(0, 3)], "callback gets the from/to move");
+        // Controlled mode: the model must NOT be mutated by the widget.
+        assert_eq!(model.with_item(0, |v| *v), Some(10), "model untouched");
+        assert_eq!(model.with_item(3, |v| *v), Some(40), "model untouched");
     }
 
     #[test]

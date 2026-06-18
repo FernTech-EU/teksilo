@@ -2378,6 +2378,53 @@ fn row_drop_insertion_with_variable_heights() {
         .collect();
     assert_eq!(ids, vec![0, 4, 1, 2, 3]);
 }
+
+#[test]
+fn on_reorder_routes_row_drag_without_mutating_model() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let captured: Rc<RefCell<Vec<(usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+    let cap = captured.clone();
+    let heights = [40.0_f32, 10.0, 40.0, 40.0, 40.0];
+    let model = rows(5);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let _table = tree.add(
+        TableView::new(model.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .show_header(false)
+            .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
+            .reorderable_rows(true)
+            .on_reorder(move |from, to, _ctx| cap.borrow_mut().push((from, to))),
+    );
+    tree.layout(SizeProposal { width: Some(400.0), height: Some(300.0) });
+
+    // Same gesture as row_drop_insertion_with_variable_heights: drag row 4 → (4, 1).
+    let from = Point::new(150.0, 150.0);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: from,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(from.x + 10.0, from.y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove { position: Point::new(from.x, 35.0) });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(from.x, 35.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert_eq!(*captured.borrow(), vec![(4, 1)], "callback gets the from/to move");
+    // Controlled mode: the row model must NOT be mutated by the widget.
+    let ids: Vec<u32> = (0..model.len())
+        .map(|i| model.with_item(i, |r| r.id).unwrap())
+        .collect();
+    assert_eq!(ids, vec![0, 1, 2, 3, 4], "model must be untouched");
+}
 #[test]
 fn auto_row_height_totals_settle_after_measurement() {
     // Regression: the root computes `max_scroll_y` before the pane's

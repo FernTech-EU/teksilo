@@ -249,6 +249,11 @@ pub struct TableView<T: 'static> {
             ) -> bool,
         >,
     >,
+    /// Controlled row-reorder handler `(from, to, ctx)`. When set, a row
+    /// drag-drop is delivered here INSTEAD of calling the row model's
+    /// `move_item` — for a table whose rows are owned elsewhere.
+    #[allow(clippy::type_complexity)]
+    on_reorder: Option<Rc<dyn Fn(usize, usize, &mut bastyde_core::widget::EventContext)>>,
     reorderable_rows: bool,
 
     // Build state
@@ -357,6 +362,7 @@ impl<T: 'static> TableView<T> {
             filters_signal: Signal::new(HashMap::new()),
             on_row_activate: None,
             on_row_drop: None,
+            on_reorder: None,
             reorderable_rows: false,
             header_row_id: None,
             body_pane_id: None,
@@ -501,8 +507,22 @@ impl<T: 'static> TableView<T> {
     }
 
     /// Enable intra-table drag-to-reorder of rows.
+    ///
+    /// By default the row model's `move_item()` is called automatically;
+    /// install [`on_reorder`](Self::on_reorder) to route the move to a handler
+    /// instead (for rows owned by an external source of truth).
     pub fn reorderable_rows(mut self, enabled: bool) -> Self {
         self.reorderable_rows = enabled;
+        self
+    }
+
+    /// Route a row drag-reorder to `(from, to, ctx)` instead of mutating the
+    /// row model directly. Requires [`reorderable_rows(true)`](Self::reorderable_rows).
+    pub fn on_reorder(
+        mut self,
+        f: impl Fn(usize, usize, &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -1121,6 +1141,7 @@ impl<T: 'static> Widget for TableView<T> {
 
         let on_row_drop = self.on_row_drop.clone();
         let move_item_fn = self.move_item_fn.clone();
+        let on_reorder_for_drop = self.on_reorder.clone();
         let scroll_y_for_drop = self.scroll_y.clone();
         let header_h_for_drop = header_h;
         let metrics_for_drop = self.row_metrics.clone();
@@ -1174,7 +1195,7 @@ impl<T: 'static> Widget for TableView<T> {
 
                 if let Some(drag) = payload.take_typed::<RowReorderDragData>()
                     && drag.source_table_id == table_id_for_drop
-                    && let Some(ref mover) = move_item_fn
+                    && (on_reorder_for_drop.is_some() || move_item_fn.is_some())
                 {
                     let from = drag.source_row;
                     let to = if from < insertion_row {
@@ -1183,7 +1204,12 @@ impl<T: 'static> Widget for TableView<T> {
                         insertion_row
                     };
                     if from != to {
-                        mover(from, to);
+                        if let Some(ref cb) = on_reorder_for_drop {
+                            // Controlled: hand the move to the app, don't mutate.
+                            cb(from, to, ctx);
+                        } else if let Some(ref mover) = move_item_fn {
+                            mover(from, to);
+                        }
                     }
                     return true;
                 }
