@@ -66,6 +66,12 @@ pub enum SyntheticKind {
     /// children list orders mixed `SceneItem` and `SceneGroup`
     /// synthetic NodeIds however the app declared the logical tree.
     SceneGroup = 6,
+    /// A magnetism anchor ("magnet") attached to a scene item. Emitted
+    /// as a synthetic child of the owning item's node by
+    /// `SceneView::accessibility` when magnetism is enabled, so the
+    /// anchor is screen-reader perceivable and can be the target of the
+    /// view's `active_descendant` during the keyboard connect flow.
+    SceneMagnet = 7,
 }
 
 /// Top bit of the u64 NodeId encoding. Set for synthetic (widget-
@@ -680,8 +686,11 @@ impl AccessNodeBuilder {
         customize: impl FnOnce(&mut AccessNodeBuilder),
     ) -> NodeId {
         debug_assert!(
-            matches!(kind, SyntheticKind::SceneItem | SyntheticKind::SceneGroup),
-            "push_scene_child requires SyntheticKind::SceneItem or ::SceneGroup"
+            matches!(
+                kind,
+                SyntheticKind::SceneItem | SyntheticKind::SceneGroup | SyntheticKind::SceneMagnet
+            ),
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, or ::SceneMagnet"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -754,8 +763,11 @@ impl AccessNodeBuilder {
         customize: impl FnOnce(&mut AccessNodeBuilder),
     ) -> NodeId {
         debug_assert!(
-            matches!(kind, SyntheticKind::SceneItem | SyntheticKind::SceneGroup),
-            "push_scene_child_under requires SyntheticKind::SceneItem or ::SceneGroup"
+            matches!(
+                kind,
+                SyntheticKind::SceneItem | SyntheticKind::SceneGroup | SyntheticKind::SceneMagnet
+            ),
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, or ::SceneMagnet"
         );
         let Some(owner) = self.owner else {
             debug_assert!(

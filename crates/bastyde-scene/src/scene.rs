@@ -20,8 +20,9 @@ use crate::flags::ItemFlags;
 use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
+use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::transform::local_to_parent;
-use bastyde_canvas::{Path, Point, Rect, Transform2D};
+use bastyde_canvas::{Path, Point, Rect, Transform2D, Vec2};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
 
@@ -345,6 +346,15 @@ pub struct Scene {
     pub(crate) a11y_live: HashMap<A11yNode, accesskit::Live>,
     pub(crate) a11y_landmarks: HashMap<A11yNode, accesskit::Role>,
     pub(crate) a11y_categories: HashMap<A11yNode, Vec<A11yCategory>>,
+
+    // --- magnetism ---------------------------------------------------
+    /// Magnets attached to each item, in insertion order. Kept in a
+    /// side map (not on `SceneEntry`) so the magnet subsystem is
+    /// modular — the same shape as the logical-AT maps above.
+    magnets: HashMap<ItemId, Vec<(MagnetId, Magnet)>>,
+    /// Reverse lookup `MagnetId -> owning ItemId` for O(1) resolution
+    /// of a magnet's owner (and cleanup on `remove_magnet`).
+    magnet_owner: HashMap<MagnetId, ItemId>,
 }
 
 impl Scene {
@@ -371,6 +381,8 @@ impl Scene {
             a11y_live: HashMap::new(),
             a11y_landmarks: HashMap::new(),
             a11y_categories: HashMap::new(),
+            magnets: HashMap::new(),
+            magnet_owner: HashMap::new(),
         }
     }
 
@@ -1344,6 +1356,14 @@ impl Scene {
             self.a11y_live.remove(&node);
             self.a11y_landmarks.remove(&node);
             self.a11y_categories.remove(&node);
+            // Drop any magnets attached to the removed item, retiring
+            // their ids from the reverse-lookup map. Magnets are local
+            // to the item, so a removed item takes its magnets with it.
+            if let Some(magnets) = self.magnets.remove(removed_id) {
+                for (mid, _) in magnets {
+                    self.magnet_owner.remove(&mid);
+                }
+            }
         }
 
         for removed_id in to_remove {
@@ -1562,6 +1582,349 @@ impl Scene {
     /// Borrow the spatial index (diagnostics / tests).
     pub fn index(&self) -> &dyn SpatialIndex {
         &*self.index
+    }
+
+    // -----------------------------------------------------------------
+    // Magnetism
+    // -----------------------------------------------------------------
+
+    /// Attach a [`Magnet`] to `item` and return its [`MagnetId`].
+    ///
+    /// Magnets are local to their item (their `local_pos` is in the
+    /// item's frame), so they follow the item under any move / rotate /
+    /// scale via the same `scene_transform` the item uses. No-op
+    /// returning a fresh-but-unowned id if `item` is unknown — callers
+    /// add magnets to items they just created.
+    ///
+    /// Bumps the AT-structure change counter (magnets are AT structure)
+    /// so a `SceneView` with magnetism enabled re-walks its synthetic
+    /// magnet nodes.
+    pub fn add_magnet(&mut self, item: ItemId, magnet: Magnet) -> MagnetId {
+        let id = MagnetId::next();
+        if !self.entry_index.contains_key(&item) {
+            return id;
+        }
+        self.magnets.entry(item).or_default().push((id, magnet));
+        self.magnet_owner.insert(id, item);
+        self.bump_a11y_change();
+        id
+    }
+
+    /// Remove a magnet by id. No-op if the id is unknown.
+    pub fn remove_magnet(&mut self, magnet: MagnetId) {
+        let Some(owner) = self.magnet_owner.remove(&magnet) else {
+            return;
+        };
+        if let Some(list) = self.magnets.get_mut(&owner) {
+            list.retain(|(mid, _)| *mid != magnet);
+            if list.is_empty() {
+                self.magnets.remove(&owner);
+            }
+        }
+        self.bump_a11y_change();
+    }
+
+    /// Remove every magnet attached to `item`. No-op if none.
+    pub fn clear_magnets(&mut self, item: ItemId) {
+        if let Some(list) = self.magnets.remove(&item) {
+            for (mid, _) in list {
+                self.magnet_owner.remove(&mid);
+            }
+            self.bump_a11y_change();
+        }
+    }
+
+    /// Move a magnet to a new position in its owning item's local
+    /// frame. No-op if the id is unknown.
+    pub fn set_magnet_local_pos(&mut self, magnet: MagnetId, local_pos: Point) {
+        let Some(&owner) = self.magnet_owner.get(&magnet) else {
+            return;
+        };
+        if let Some(list) = self.magnets.get_mut(&owner)
+            && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet) {
+                m.local_pos = local_pos;
+                self.bump_a11y_change();
+            }
+    }
+
+    /// Enable or disable a magnet. Disabled magnets are skipped by
+    /// broad-phase, feedback, the keyboard cycle, and AT emission.
+    /// No-op if the id is unknown.
+    pub fn set_magnet_enabled(&mut self, magnet: MagnetId, enabled: bool) {
+        let Some(&owner) = self.magnet_owner.get(&magnet) else {
+            return;
+        };
+        if let Some(list) = self.magnets.get_mut(&owner)
+            && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet)
+                && m.enabled != enabled {
+                    m.enabled = enabled;
+                    self.bump_a11y_change();
+                }
+    }
+
+    /// The ids of every magnet attached to `item`, in insertion order
+    /// (enabled and disabled alike). Empty if `item` is unknown or has
+    /// no magnets.
+    pub fn magnet_ids_of(&self, item: ItemId) -> Vec<MagnetId> {
+        self.magnets
+            .get(&item)
+            .map(|list| list.iter().map(|(mid, _)| *mid).collect())
+            .unwrap_or_default()
+    }
+
+    /// The owning item of a magnet, or `None` if the id is unknown.
+    pub fn magnet_owner(&self, magnet: MagnetId) -> Option<ItemId> {
+        self.magnet_owner.get(&magnet).copied()
+    }
+
+    /// The label set on a magnet (for the AT walker). `None` if unset
+    /// or the id is unknown.
+    pub(crate) fn magnet_label(&self, magnet: MagnetId) -> Option<bastyde_i18n::LocalizedString> {
+        let owner = self.magnet_owner.get(&magnet)?;
+        let list = self.magnets.get(owner)?;
+        list.iter()
+            .find(|(mid, _)| *mid == magnet)
+            .and_then(|(_, m)| m.label.clone())
+    }
+
+    /// Whether a magnet is enabled. `false` for an unknown id.
+    pub fn magnet_enabled(&self, magnet: MagnetId) -> bool {
+        let Some(owner) = self.magnet_owner.get(&magnet) else {
+            return false;
+        };
+        self.magnets
+            .get(owner)
+            .and_then(|list| list.iter().find(|(mid, _)| *mid == magnet))
+            .map(|(_, m)| m.enabled)
+            .unwrap_or(false)
+    }
+
+    /// A magnet's position in scene coordinates (its local position
+    /// projected through its owning item's `scene_transform`). `None`
+    /// for an unknown id or a degenerate item transform.
+    pub fn magnet_scene_pos(&self, magnet: MagnetId) -> Option<Point> {
+        let &owner = self.magnet_owner.get(&magnet)?;
+        let list = self.magnets.get(&owner)?;
+        let (_, m) = list.iter().find(|(mid, _)| *mid == magnet)?;
+        self.map_to_scene(owner, m.local_pos)
+    }
+
+    /// Resolve a magnet to a borrow-free [`MagnetRef`] snapshot (id,
+    /// owning item, role, payload clone, current scene position).
+    /// `None` for an unknown id or a degenerate item transform.
+    pub fn magnet(&self, magnet: MagnetId) -> Option<MagnetRef> {
+        let &owner = self.magnet_owner.get(&magnet)?;
+        let list = self.magnets.get(&owner)?;
+        let (_, m) = list.iter().find(|(mid, _)| *mid == magnet)?;
+        let scene_pos = self.map_to_scene(owner, m.local_pos)?;
+        Some(MagnetRef {
+            id: magnet,
+            item: owner,
+            role: m.role,
+            payload: m.payload.clone(),
+            scene_pos,
+        })
+    }
+
+    /// Collect every enabled magnet whose scene position lies inside
+    /// `scene_rect`, as borrow-free [`MagnetRef`] snapshots, excluding
+    /// any magnet on `exclude_item`. Broad-phase over the spatial index
+    /// (`items_in_rect`) so the cost is `O(visible × magnets/item)`.
+    ///
+    /// This is the shared narrow-phase input for both snap helpers: the
+    /// candidates are materialised as owned snapshots, so the predicate
+    /// that runs over them touches no scene state. The predicate may read
+    /// the model (a shared borrow is re-entrant) but must not mutate it;
+    /// mutation belongs in the consumer's `on_connect`, which fires after
+    /// the snap call returns and every borrow is dropped.
+    fn collect_candidate_magnets(
+        &self,
+        scene_rect: Rect,
+        exclude_item: Option<ItemId>,
+    ) -> Vec<MagnetRef> {
+        let mut out = Vec::new();
+        for item in self.items_in_rect(scene_rect) {
+            if Some(item) == exclude_item {
+                continue;
+            }
+            let Some(list) = self.magnets.get(&item) else {
+                continue;
+            };
+            let xform = self.scene_transform(item);
+            for (mid, m) in list {
+                if !m.enabled {
+                    continue;
+                }
+                let scene_pos = xform.apply_point(m.local_pos);
+                if !scene_rect.contains(scene_pos) {
+                    continue;
+                }
+                out.push(MagnetRef {
+                    id: *mid,
+                    item,
+                    role: m.role,
+                    payload: m.payload.clone(),
+                    scene_pos,
+                });
+            }
+        }
+        out
+    }
+
+    /// Square-rect of half-extent `radius` centred on `center`.
+    fn capture_rect(center: Point, radius: f32) -> Rect {
+        Rect::new(
+            center.x - radius,
+            center.y - radius,
+            radius * 2.0,
+            radius * 2.0,
+        )
+    }
+
+    /// Compute the best item-drag snap: the dragged item is visually
+    /// offset by `drag_delta`, and each of its enabled magnets seeks the
+    /// nearest *accepting* magnet on another item within `capture_radius`
+    /// (in scene units). Returns the globally closest accepting pair, or
+    /// `None` if nothing accepts within range.
+    ///
+    /// Pure mechanism: it collects candidates under a brief read, then
+    /// runs the consumer `predicate` with no scene borrow held, so the
+    /// predicate may inspect payloads freely. `snap_vector` added to
+    /// `drag_delta` aligns the dragged magnet onto its target.
+    pub fn compute_item_snap(
+        &self,
+        dragged: ItemId,
+        drag_delta: Vec2,
+        capture_radius: f32,
+        predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict,
+    ) -> Option<MagnetSnap> {
+        if capture_radius <= 0.0 {
+            return None;
+        }
+        let dragged_list = self.magnets.get(&dragged)?;
+        if dragged_list.is_empty() {
+            return None;
+        }
+        // Visual scene positions of the dragged item's enabled magnets:
+        // committed scene pos + the live drag delta.
+        let xform = self.scene_transform(dragged);
+        let dragged_magnets: Vec<MagnetRef> = dragged_list
+            .iter()
+            .filter(|(_, m)| m.enabled)
+            .map(|(mid, m)| {
+                let committed = xform.apply_point(m.local_pos);
+                MagnetRef {
+                    id: *mid,
+                    item: dragged,
+                    role: m.role,
+                    payload: m.payload.clone(),
+                    scene_pos: Point::new(
+                        committed.x + drag_delta.x,
+                        committed.y + drag_delta.y,
+                    ),
+                }
+            })
+            .collect();
+        if dragged_magnets.is_empty() {
+            return None;
+        }
+
+        let mut best: Option<MagnetSnap> = None;
+        for from in &dragged_magnets {
+            let rect = Self::capture_rect(from.scene_pos, capture_radius);
+            let candidates = self.collect_candidate_magnets(rect, Some(dragged));
+            for to in &candidates {
+                let dx = to.scene_pos.x - from.scene_pos.x;
+                let dy = to.scene_pos.y - from.scene_pos.y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > capture_radius {
+                    continue;
+                }
+                let MagnetVerdict::Accept(payload) = predicate(from, to) else {
+                    continue;
+                };
+                let better = best.as_ref().map(|b| dist < b.distance).unwrap_or(true);
+                if better {
+                    best = Some(MagnetSnap {
+                        from: from.id,
+                        to: to.id,
+                        snap_vector: Vec2::new(dx, dy),
+                        payload,
+                        distance: dist,
+                    });
+                }
+            }
+        }
+        best
+    }
+
+    /// Compute the best port-drag snap: a single `source` magnet is
+    /// dragging a transient wire whose free end is at `cursor_scene`.
+    /// Finds the nearest *accepting* target magnet within
+    /// `capture_radius` (scene units), excluding the source's own
+    /// magnet. Returns the target [`MagnetRef`] and the accepting
+    /// verdict's payload, or `None`.
+    pub fn compute_port_snap(
+        &self,
+        source: MagnetId,
+        cursor_scene: Point,
+        capture_radius: f32,
+        predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict,
+    ) -> Option<(MagnetRef, Option<Rc<dyn std::any::Any>>)> {
+        if capture_radius <= 0.0 {
+            return None;
+        }
+        let from = self.magnet(source)?;
+        let rect = Self::capture_rect(cursor_scene, capture_radius);
+        // Don't exclude the source's whole item — a node may legitimately
+        // connect to another of its own ports in some graphs; only the
+        // source magnet itself is excluded (below).
+        let candidates = self.collect_candidate_magnets(rect, None);
+        let mut best: Option<(MagnetRef, Option<Rc<dyn std::any::Any>>, f32)> = None;
+        for to in candidates {
+            if to.id == source {
+                continue;
+            }
+            let dx = to.scene_pos.x - cursor_scene.x;
+            let dy = to.scene_pos.y - cursor_scene.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > capture_radius {
+                continue;
+            }
+            let MagnetVerdict::Accept(payload) = predicate(&from, &to) else {
+                continue;
+            };
+            let better = best.as_ref().map(|b| dist < b.2).unwrap_or(true);
+            if better {
+                best = Some((to, payload, dist));
+            }
+        }
+        best.map(|(to, payload, _)| (to, payload))
+    }
+
+    /// The nearest enabled magnet to `scene_pt` within `radius` (scene
+    /// units), or `None`. Used by the view to start a port-drag from a
+    /// grabbed magnet handle (the handle's grab area is a screen-pixel
+    /// disc, converted to scene units by the caller).
+    pub fn nearest_magnet(&self, scene_pt: Point, radius: f32) -> Option<MagnetId> {
+        if radius <= 0.0 {
+            return None;
+        }
+        let rect = Self::capture_rect(scene_pt, radius);
+        let mut best: Option<(MagnetId, f32)> = None;
+        for c in self.collect_candidate_magnets(rect, None) {
+            let dx = c.scene_pos.x - scene_pt.x;
+            let dy = c.scene_pos.y - scene_pt.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > radius {
+                continue;
+            }
+            let better = best.map(|b| dist < b.1).unwrap_or(true);
+            if better {
+                best = Some((c.id, dist));
+            }
+        }
+        best.map(|(id, _)| id)
     }
 
     // -----------------------------------------------------------------

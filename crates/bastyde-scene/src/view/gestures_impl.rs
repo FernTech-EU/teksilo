@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 use super::*;
+use super::magnetism::{PortDragState, build_connection, handle_connect_key};
 
 impl SceneView {
     pub(super) fn register_pointer_handlers(
@@ -628,11 +629,34 @@ impl SceneView {
             let scene_pan_bounds_sig_keys = self.scene().pan_bounds_signal();
             let view_pan_bounds_sig_keys = self.pan_bounds_override.clone();
             let adopt_scene_size_keys = self.adopt_scene_size;
-            handlers = handlers.on_key(move |event, _ctx| {
+            // Magnetism keyboard-connect captures.
+            let magnetism_for_keys = self.magnetism.clone();
+            let model_for_keys = self.model.clone();
+            let connect_mode_keys = self.magnet_connect_mode.clone();
+            let magnet_focus_keys = self.magnet_focus.clone();
+            let magnet_pending_keys = self.magnet_pending.clone();
+            let self_id_for_keys = self.self_widget_id.get();
+            handlers = handlers.on_key(move |event, ctx| {
                 use crate::scene::PanAxes;
                 let WidgetEvent::KeyDown { key, .. } = event else {
                     return EventResponse::Ignored;
                 };
+                // Magnetism keyboard connect flow takes priority over
+                // pan/zoom: it claims the connect key from any state, and
+                // arrows / Enter / Esc while connect mode is active.
+                if let Some(cfg) = magnetism_for_keys.as_ref().filter(|c| c.enabled.get())
+                    && handle_connect_key(
+                        key,
+                        cfg,
+                        &model_for_keys,
+                        &connect_mode_keys,
+                        &magnet_focus_keys,
+                        &magnet_pending_keys,
+                        self_id_for_keys,
+                        ctx,
+                    ) {
+                        return EventResponse::Handled;
+                    }
                 let pan_axes_keys = pan_axes_sig_keys.get();
                 let zoomable_keys = zoomable_sig_keys.get() && !adopt_scene_size_keys;
                 let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
@@ -749,7 +773,15 @@ impl SceneView {
         let view_pan_bounds_sig_drag = self.pan_bounds_override.clone();
         let zoom_for_drag = self.zoom.clone();
         let last_viewport_for_drag = self.last_viewport.clone();
-        handlers = handlers.on_drag(move |phase, _ctx| {
+        // Magnetism captures. The model handle lets the closure run the
+        // snap helpers; `port_drag` / `item_snap` carry the in-flight
+        // interaction state; `magnetism_for_drag` is the (optional)
+        // config read live so a toolbar toggle takes effect next event.
+        let model_for_drag = self.model.clone();
+        let magnetism_for_drag = self.magnetism.clone();
+        let port_drag = self.port_drag.clone();
+        let item_snap = self.item_snap.clone();
+        handlers = handlers.on_drag(move |phase, ctx| {
             // Read drag mode live so a toolbar can flip
             // between Select / Hand / NoDrag at runtime.
             let drag_mode_inner = drag_mode_sig.get();
@@ -810,6 +842,28 @@ impl SceneView {
                         Some(inv) => inv.apply_point(position),
                         None => Point::ZERO,
                     };
+                    // Magnetism: a press on a magnet handle starts a
+                    // port-drag (a transient wire), taking priority over
+                    // item-drag and marquee. The grab disc is a fixed
+                    // screen-pixel radius, converted to scene units by the
+                    // live zoom so handles stay grabbable at any zoom. Only
+                    // fires for presses the SceneView itself receives
+                    // (lightweight / empty regions); a handle drawn over a
+                    // heavyweight widget is consumed by that widget.
+                    if let Some(cfg) = magnetism_for_drag.as_ref().filter(|c| c.enabled.get()) {
+                        let zoom = xform.geometric_scale().max(1e-3);
+                        let grab = cfg.capture_px / zoom;
+                        if let Some(mid) = model_for_drag.nearest_magnet(scene_press, grab)
+                            && let Some(src) = model_for_drag.magnet_scene_pos(mid) {
+                                port_drag.replace(Some(PortDragState {
+                                    source: mid,
+                                    source_scene: src,
+                                    cursor_scene: scene_press,
+                                    snapped: None,
+                                }));
+                                return;
+                            }
+                    }
                     // Narrow-phase hit-test: target the topmost draggable
                     // item whose actual SHAPE (not just its AABB) contains the
                     // press, so a thin draggable item (e.g. a connector path)
@@ -837,6 +891,33 @@ impl SceneView {
                     }
                 }
                 DragPhase::Moved { position, .. } => {
+                    // Port-drag takes priority: update the wire's free end
+                    // and re-evaluate the snapped target.
+                    if port_drag.borrow().is_some() {
+                        let xform = view_xform_signal.get();
+                        if let Some(inv) = xform.inverse() {
+                            let cursor = inv.apply_point(position);
+                            let mut pd = port_drag.borrow().clone().unwrap();
+                            pd.cursor_scene = cursor;
+                            pd.snapped = None;
+                            if let Some(cfg) =
+                                magnetism_for_drag.as_ref().filter(|c| c.enabled.get())
+                            {
+                                let zoom = xform.geometric_scale().max(1e-3);
+                                let radius = cfg.capture_px / zoom;
+                                if let Some((target, payload)) = model_for_drag.compute_port_snap(
+                                    pd.source,
+                                    cursor,
+                                    radius,
+                                    &*cfg.predicate,
+                                ) {
+                                    pd.snapped = Some((target.id, target.scene_pos, payload));
+                                }
+                            }
+                            port_drag.replace(Some(pd));
+                        }
+                        return;
+                    }
                     if let Some(mut target) = drag_target.get() {
                         // Update current scene-coord position
                         // for live paint feedback (the paint
@@ -844,6 +925,37 @@ impl SceneView {
                         let xform = view_xform_signal.get();
                         if let Some(inv) = xform.inverse() {
                             target.current_scene = inv.apply_point(position);
+                            // Magnetism: snap the dragged item so its
+                            // closest accepting magnet aligns onto a
+                            // target. The snap vector adjusts the visual
+                            // position (and hence the committed delta).
+                            if let Some(cfg) =
+                                magnetism_for_drag.as_ref().filter(|c| c.enabled.get())
+                            {
+                                let delta = Vec2::new(
+                                    target.current_scene.x - target.anchor_scene.x,
+                                    target.current_scene.y - target.anchor_scene.y,
+                                );
+                                let zoom = xform.geometric_scale().max(1e-3);
+                                let radius = cfg.capture_px / zoom;
+                                match model_for_drag.compute_item_snap(
+                                    target.item_id,
+                                    delta,
+                                    radius,
+                                    &*cfg.predicate,
+                                ) {
+                                    Some(snap) => {
+                                        target.current_scene = Point::new(
+                                            target.current_scene.x + snap.snap_vector.x,
+                                            target.current_scene.y + snap.snap_vector.y,
+                                        );
+                                        item_snap.replace(Some(snap));
+                                    }
+                                    None => {
+                                        item_snap.replace(None);
+                                    }
+                                }
+                            }
                             drag_target.set(Some(target));
                         }
                     } else if let Some(mut state) = marquee.get() {
@@ -852,6 +964,35 @@ impl SceneView {
                     }
                 }
                 DragPhase::Ended { position } => {
+                    // Port-drag release: fire the connection if the wire
+                    // snapped onto an accepting target. No item moves.
+                    if port_drag.borrow().is_some() {
+                        let pd = port_drag.replace(None).unwrap();
+                        let xform = view_xform_signal.get();
+                        let cursor = xform
+                            .inverse()
+                            .map(|inv| inv.apply_point(position))
+                            .unwrap_or(pd.cursor_scene);
+                        if let Some(cfg) = magnetism_for_drag.as_ref().filter(|c| c.enabled.get()) {
+                            let zoom = xform.geometric_scale().max(1e-3);
+                            let radius = cfg.capture_px / zoom;
+                            if let Some((target, payload)) = model_for_drag.compute_port_snap(
+                                pd.source,
+                                cursor,
+                                radius,
+                                &*cfg.predicate,
+                            )
+                                && let Some(conn) = build_connection(
+                                    &model_for_drag,
+                                    pd.source,
+                                    target.id,
+                                    payload,
+                                ) {
+                                    (cfg.on_connect)(&conn, ctx);
+                                }
+                        }
+                        return;
+                    }
                     if let Some(mut target) = drag_target.get() {
                         // Drag-to-move commit: compute the
                         // delta (current − anchor) in scene
@@ -862,6 +1003,39 @@ impl SceneView {
                         if let Some(inv) = xform.inverse() {
                             target.current_scene = inv.apply_point(position);
                         }
+                        // Magnetism: re-evaluate the snap at the release
+                        // position (the last Moved's snapped value was
+                        // overwritten by the raw projection above), apply
+                        // it, and fire the connection. The snapped
+                        // current_scene yields a snapped commit delta.
+                        if let Some(cfg) = magnetism_for_drag.as_ref().filter(|c| c.enabled.get()) {
+                            let delta = Vec2::new(
+                                target.current_scene.x - target.anchor_scene.x,
+                                target.current_scene.y - target.anchor_scene.y,
+                            );
+                            let zoom = view_xform_signal.get().geometric_scale().max(1e-3);
+                            let radius = cfg.capture_px / zoom;
+                            if let Some(snap) = model_for_drag.compute_item_snap(
+                                target.item_id,
+                                delta,
+                                radius,
+                                &*cfg.predicate,
+                            ) {
+                                target.current_scene = Point::new(
+                                    target.current_scene.x + snap.snap_vector.x,
+                                    target.current_scene.y + snap.snap_vector.y,
+                                );
+                                if let Some(conn) = build_connection(
+                                    &model_for_drag,
+                                    snap.from,
+                                    snap.to,
+                                    snap.payload,
+                                ) {
+                                    (cfg.on_connect)(&conn, ctx);
+                                }
+                            }
+                        }
+                        item_snap.replace(None);
                         let delta = Vec2::new(
                             target.current_scene.x - target.anchor_scene.x,
                             target.current_scene.y - target.anchor_scene.y,

@@ -223,6 +223,7 @@ impl SceneView {
             || self.foreground_paint.is_some()
             || self.debug_overlay.is_active()
             || self.scene().has_over_layer_items()
+            || self.magnet_wants_post_paint()
     }
 
     pub(super) fn post_paint_impl(
@@ -262,6 +263,11 @@ impl SceneView {
             let region = self.visible_scene_region(bounds);
             fg(canvas, ctx, region);
         }
+
+        // Magnetism feedback (markers + connector / ghost wire), over the
+        // content and the app foreground, under the debug overlay. Same
+        // scene-coord scope.
+        self.paint_magnet_feedback(bounds, canvas, ctx);
 
         // Visual-debug overlays, on top of everything.
         if self.debug_overlay.is_active() {

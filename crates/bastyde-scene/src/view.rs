@@ -65,6 +65,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::Easing;
 
 use crate::item::ItemId;
+use crate::magnet::{MagnetId, MagnetSnap, MagnetismConfig};
 use crate::scene::Scene;
 use crate::scene_model::SceneModel;
 use crate::transform::{anchor_pan_for_pinch, compose_view};
@@ -678,6 +679,28 @@ pub struct SceneView {
     /// the final animated bounds into AT once — the one AT update the
     /// version-delta gate would otherwise miss while suppressing the churn.
     dynamic_churning: bool,
+
+    // --- Magnetism -----------------------------------------------------
+    /// Per-view magnetism config (predicate, on_connect, feedback, …).
+    /// `None` = magnetism off for this view: no snap, no feedback, no
+    /// magnet AT nodes. Shared `Rc` so the drag / key closures hold a clone.
+    magnetism: Option<Rc<MagnetismConfig>>,
+    /// In-flight port-drag (grabbed a magnet handle, dragging a wire).
+    /// `RefCell` (not `Cell`) because `PortDragState` carries a non-`Copy`
+    /// `Rc` payload.
+    port_drag: Rc<RefCell<Option<magnetism::PortDragState>>>,
+    /// Active item-drag snap (the dragged item's magnet aligned onto a
+    /// target). Drives feedback and the connection fired on release.
+    item_snap: Rc<RefCell<Option<MagnetSnap>>>,
+    /// Whether the keyboard connect mode is active (entered via the
+    /// config's connect key while the view is focused).
+    magnet_connect_mode: Rc<Cell<bool>>,
+    /// The keyboard-focused magnet in connect mode (virtual focus: the
+    /// SceneView keeps real arena focus and points `active_descendant`
+    /// at this magnet's synthetic AT node).
+    magnet_focus: Rc<Cell<Option<MagnetId>>>,
+    /// The keyboard-activated source magnet awaiting a target.
+    magnet_pending: Rc<Cell<Option<MagnetId>>>,
 }
 
 impl std::fmt::Debug for SceneView {
@@ -709,6 +732,7 @@ mod builder_impl;
 mod camera_impl;
 mod gestures_impl;
 mod layout_impl;
+mod magnetism;
 mod paint_impl;
 mod widget_trait;
 

@@ -375,10 +375,14 @@ impl SceneView {
             );
         }
 
+        // The on_drag handler drives both marquee / drag-to-move selection
+        // AND magnetism (item-drag snap + port-drag wires), so register it
+        // when either selection is enabled or magnetism is configured.
         if !matches!(
             self.selection.mode(),
             crate::selection::SceneSelectionMode::None
-        ) {
+        ) || self.magnetism.is_some()
+        {
             handlers = self.register_drag_handlers(handlers);
         }
 

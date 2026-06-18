@@ -7,6 +7,7 @@
 // is a follow-up.
 mod a11y;
 mod edge_cases;
+mod magnetism;
 mod multi_view;
 mod nested;
 mod raster_scale_tests;

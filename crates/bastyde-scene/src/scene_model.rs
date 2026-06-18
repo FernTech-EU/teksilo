@@ -50,7 +50,9 @@ use crate::flags::ItemFlags;
 use crate::index::SpatialIndex;
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
+use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::scene::{ItemChange, PanAxes, Scene, SceneLayer};
+use bastyde_canvas::Vec2;
 
 /// A shared, cloneable handle to a [`Scene`].
 pub struct SceneModel(pub(crate) Rc<RefCell<Scene>>);
@@ -240,6 +242,78 @@ impl SceneModel {
         f: impl FnOnce(&mut SceneItemHandlerSet) -> R,
     ) -> Option<R> {
         self.0.borrow_mut().handlers_mut(id).map(f)
+    }
+
+    // -----------------------------------------------------------------
+    // Magnetism
+    // -----------------------------------------------------------------
+
+    /// Attach a [`Magnet`] to `item`; see [`Scene::add_magnet`].
+    pub fn add_magnet(&self, item: ItemId, magnet: Magnet) -> MagnetId {
+        self.0.borrow_mut().add_magnet(item, magnet)
+    }
+    /// Remove a magnet by id; see [`Scene::remove_magnet`].
+    pub fn remove_magnet(&self, magnet: MagnetId) {
+        self.0.borrow_mut().remove_magnet(magnet);
+    }
+    /// Remove every magnet on `item`; see [`Scene::clear_magnets`].
+    pub fn clear_magnets(&self, item: ItemId) {
+        self.0.borrow_mut().clear_magnets(item);
+    }
+    /// Move a magnet in its item's local frame; see [`Scene::set_magnet_local_pos`].
+    pub fn set_magnet_local_pos(&self, magnet: MagnetId, local_pos: Point) {
+        self.0.borrow_mut().set_magnet_local_pos(magnet, local_pos);
+    }
+    /// Enable or disable a magnet; see [`Scene::set_magnet_enabled`].
+    pub fn set_magnet_enabled(&self, magnet: MagnetId, enabled: bool) {
+        self.0.borrow_mut().set_magnet_enabled(magnet, enabled);
+    }
+    /// Ids of every magnet on `item`; see [`Scene::magnet_ids_of`].
+    pub fn magnet_ids_of(&self, item: ItemId) -> Vec<MagnetId> {
+        self.0.borrow().magnet_ids_of(item)
+    }
+    /// The owning item of a magnet; see [`Scene::magnet_owner`].
+    pub fn magnet_owner(&self, magnet: MagnetId) -> Option<ItemId> {
+        self.0.borrow().magnet_owner(magnet)
+    }
+    /// A magnet's scene position; see [`Scene::magnet_scene_pos`].
+    pub fn magnet_scene_pos(&self, magnet: MagnetId) -> Option<Point> {
+        self.0.borrow().magnet_scene_pos(magnet)
+    }
+    /// Resolve a magnet to a [`MagnetRef`] snapshot; see [`Scene::magnet`].
+    pub fn magnet(&self, magnet: MagnetId) -> Option<MagnetRef> {
+        self.0.borrow().magnet(magnet)
+    }
+    /// Best item-drag snap; see [`Scene::compute_item_snap`]. A shared
+    /// (read-only) borrow is held while the `predicate` runs over owned
+    /// candidate snapshots, so the predicate may read but must not mutate
+    /// the model.
+    pub fn compute_item_snap(
+        &self,
+        dragged: ItemId,
+        drag_delta: Vec2,
+        capture_radius: f32,
+        predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict,
+    ) -> Option<MagnetSnap> {
+        self.0
+            .borrow()
+            .compute_item_snap(dragged, drag_delta, capture_radius, predicate)
+    }
+    /// Best port-drag snap; see [`Scene::compute_port_snap`].
+    pub fn compute_port_snap(
+        &self,
+        source: MagnetId,
+        cursor_scene: Point,
+        capture_radius: f32,
+        predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict,
+    ) -> Option<(MagnetRef, Option<std::rc::Rc<dyn std::any::Any>>)> {
+        self.0
+            .borrow()
+            .compute_port_snap(source, cursor_scene, capture_radius, predicate)
+    }
+    /// Nearest enabled magnet within `radius`; see [`Scene::nearest_magnet`].
+    pub fn nearest_magnet(&self, scene_pt: Point, radius: f32) -> Option<MagnetId> {
+        self.0.borrow().nearest_magnet(scene_pt, radius)
     }
 
     // -----------------------------------------------------------------

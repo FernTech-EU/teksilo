@@ -341,6 +341,45 @@ cards sit visually.
 
 ---
 
+## Magnetism
+
+When a view has magnetism enabled (`SceneView::magnetism(...)`), each
+enabled magnet on a **lightweight** item is emitted as a synthetic
+`SyntheticKind::SceneMagnet` AT node, a child of the owning item's node,
+with `Role::Button` and the magnet's `label` as its name (falling back to
+a generic name when unset). This makes anchors screen-reader perceivable
+and gives the keyboard connect flow a focus target. Adding, removing, or
+enabling a magnet bumps the scene's `a11y_change_signal`, so the AT tree
+re-walks with no extra wiring.
+
+The keyboard connect flow uses the roving-`active_descendant` pattern:
+the SceneView keeps real arena focus, and while in connect mode it points
+its `active_descendant` at the focused magnet's synthetic node, so a
+screen reader announces the focused anchor as the user arrows through
+them. (The grid-cell roving pattern, applied to scene anchors.)
+
+Connections themselves are **consumer-owned** in AT, exactly as in the
+scene model: from your `on_connect`, declare the connection's meaning on
+the relation layer, e.g.
+
+```rust
+scene.add_a11y_relation(
+    A11yNode::Item(source_node),
+    A11yRelation::FlowTo,            // or Controls
+    A11yNode::Item(target_node),
+);
+```
+
+Scene provides the relations API; it does not invent connection meaning.
+Magnet AT nodes for **heavyweight**-item magnets are a follow-up; the
+keyboard state machine and `on_connect` still work for them, only the
+`active_descendant` announcement is limited to lightweight-item magnets.
+
+Demo: `cargo run -p scene-magnetism` (a fully keyboard- and
+screen-reader-operable node graph).
+
+---
+
 ## Worked example: graph editor
 
 Nodes contain Ports; connector lines declare data flow via `FlowTo`.

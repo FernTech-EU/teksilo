@@ -63,6 +63,7 @@ pub(crate) mod index;
 pub(crate) mod item;
 pub(crate) mod item_handlers;
 pub(crate) mod items;
+pub(crate) mod magnet;
 pub(crate) mod minimap;
 pub(crate) mod scene;
 pub(crate) mod scene_model;
@@ -83,6 +84,10 @@ pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use item_handlers::{DragMode, SceneItemHandlerSet, SceneTapEvent};
 pub use items::AccessSubtreeMode;
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
+pub use magnet::{
+    Magnet, MagnetConnection, MagnetFeedback, MagnetId, MagnetMarker, MagnetRef, MagnetRole,
+    MagnetSnap, MagnetVerdict, MagnetVisualState, MagnetismConfig, MarkerVisibility,
+};
 pub use minimap::SceneMinimap;
 pub use scene::Scene;
 pub use scene::{ItemChange, PanAxes, SceneConstraints, SceneLayer};

@@ -218,6 +218,28 @@ impl SceneView {
             let Some(id) = resolve(*node) else { continue };
             self.set_collected_role(builder, id, *role);
         }
+
+        // Magnetism: in keyboard connect mode, point the SceneView's
+        // `active_descendant` at the focused magnet's synthetic node (the
+        // roving virtual-focus pattern — the SceneView keeps real arena
+        // focus while the screen reader announces the focused magnet).
+        // Only when that magnet was actually emitted (its item is a
+        // visible lightweight item), so the target node exists this frame.
+        if self.magnet_connect_mode.get()
+            && let (Some(mid), Some(o)) = (self.magnet_focus.get(), owner) {
+                let scene = self.scene();
+                if let Some(owner_item) = scene.magnet_owner(mid)
+                    && scene.item(owner_item).is_some()
+                        && visible_item_ids.contains(&owner_item)
+                        && scene.magnet_enabled(mid)
+                    {
+                        builder.set_active_descendant(synthetic_node_id(
+                            o,
+                            mid.as_u64(),
+                            SyntheticKind::SceneMagnet,
+                        ));
+                    }
+            }
     }
 
     /// Recursive DFS step: emit one node of the logical tree under
@@ -349,6 +371,52 @@ impl SceneView {
                 widget_node_id
             }
         };
+
+        // Magnetism: emit each enabled magnet of a lightweight item as a
+        // synthetic `SceneMagnet` child of the item's node, so the anchor
+        // is screen-reader perceivable and can be the `active_descendant`
+        // target during the keyboard connect flow. Only for lightweight
+        // items (whose synthetic node is in `children_collected` and so
+        // can parent a child); heavyweight-item magnets are a follow-up.
+        if self.magnetism_active().is_some()
+            && let A11yNode::Item(item_id) = node
+                && scene.item(item_id).is_some() {
+                    for mid in scene.magnet_ids_of(item_id) {
+                        if !scene.magnet_enabled(mid) {
+                            continue;
+                        }
+                        let Some(scene_pos) = scene.magnet_scene_pos(mid) else {
+                            continue;
+                        };
+                        let screen = view_transform.apply_point(scene_pos);
+                        let name = scene
+                            .magnet_label(mid)
+                            .map(|l| l.resolve_now())
+                            .unwrap_or_else(|| "Connection point".to_string());
+                        // A small AT box around the anchor so the node has
+                        // non-zero bounds for hit-test / focus-ring chrome.
+                        let (cx, cy) = match self.a11y_bounds_space {
+                            crate::a11y::A11yBoundsSpace::Screen => (screen.x, screen.y),
+                            crate::a11y::A11yBoundsSpace::Scene => (scene_pos.x, scene_pos.y),
+                        };
+                        let half = 8.0_f32;
+                        builder.push_scene_child_under(
+                            Some(synthetic_id),
+                            mid.as_u64(),
+                            SyntheticKind::SceneMagnet,
+                            |child| {
+                                child.set_role(accesskit::Role::Button);
+                                child.set_name(name);
+                                child.inner_mut().set_bounds(accesskit::Rect {
+                                    x0: (cx - half) as f64,
+                                    y0: (cy - half) as f64,
+                                    x1: (cx + half) as f64,
+                                    y1: (cy + half) as f64,
+                                });
+                            },
+                        );
+                    }
+                }
 
         if let Some(children) = logical_children.get(&Some(node)) {
             for child in children {

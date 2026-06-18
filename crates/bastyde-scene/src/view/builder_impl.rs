@@ -77,6 +77,12 @@ impl SceneView {
             _a11y_observer: RefCell::new(None),
             last_at_version: None,
             dynamic_churning: false,
+            magnetism: None,
+            port_drag: Rc::new(RefCell::new(None)),
+            item_snap: Rc::new(RefCell::new(None)),
+            magnet_connect_mode: Rc::new(Cell::new(false)),
+            magnet_focus: Rc::new(Cell::new(None)),
+            magnet_pending: Rc::new(Cell::new(None)),
         }
     }
 
@@ -600,6 +606,27 @@ impl SceneView {
     {
         self.foreground_paint = Some(Rc::new(paint));
         self
+    }
+
+    /// Enable magnetism on this view with the given
+    /// [`MagnetismConfig`](crate::MagnetismConfig).
+    ///
+    /// Once installed, this view's lightweight item drags snap their
+    /// magnets onto compatible magnets on other items, magnet handles
+    /// become grabbable for port-drag wires, the keyboard connect flow
+    /// (the config's connect key) is available while the view is
+    /// focused, magnet markers paint, and each enabled magnet is
+    /// emitted as a synthetic AT node. A view with no magnetism config
+    /// ignores magnets entirely.
+    pub fn magnetism(mut self, config: crate::magnet::MagnetismConfig) -> Self {
+        self.magnetism = Some(Rc::new(config));
+        self
+    }
+
+    /// The reactive enabled signal of the installed magnetism config, if
+    /// any — for a toolbar to read or bind a magnetism on/off toggle.
+    pub fn magnetism_enabled_signal(&self) -> Option<Signal<bool>> {
+        self.magnetism.as_ref().map(|c| c.enabled_signal())
     }
 
     /// Drop the cached paint output for `id`. Apps that mutate

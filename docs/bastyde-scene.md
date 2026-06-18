@@ -294,6 +294,131 @@ is O(visible × chain-depth), independent of total scene size.
 
 ---
 
+## Magnetism
+
+Magnetism is typed snap-and-connect between anchor points ("magnets") on
+scene items. It is general node-graph / diagram machinery: drag an item
+so its magnets snap to compatible magnets on other items, drag a wire
+from a magnet handle, or connect two magnets from the keyboard, and on
+release a connection event carries the magnet payloads to the consumer.
+
+The governing principle is **mechanism in scene, policy in the
+consumer**. Scene owns the geometry, the broad-phase, the snap math, the
+feedback rendering, the predicate hook, and the connection event. Scene
+does **not** own which magnet types are compatible, what a connection
+means, or whether connections persist. Compatibility is decided by the
+predicate the consumer supplies; the meaning of a connection is decided
+by the consumer's `on_connect`.
+
+### The magnet model
+
+A `Magnet` is a local point on an item (in the item's frame, so it
+follows the item under any move / rotate / scale), carrying a directional
+`MagnetRole` and an optional type-erased payload (`'static`,
+downcastable):
+
+```rust
+let out = scene.add_magnet(
+    node,
+    Magnet::new(Point::new(node_w, node_h * 0.5))
+        .role(MagnetRole::Source)          // advisory: Source | Target | Bidirectional
+        .payload(PortId { node, kind: Out }) // any 'static value
+        .label(tr!(node_output())),         // AT name
+);
+```
+
+`MagnetRole` is generic diagram vocabulary (every node-graph has output
+and input ports). It is **advisory** — the scene uses it for default
+feedback (which end is the source) and to order the keyboard cycle, but
+the predicate is always the authority on whether two magnets connect.
+
+Mutators (all `&self` on `SceneModel`, `&mut self` on `Scene`):
+`add_magnet` / `remove_magnet` / `clear_magnets` / `set_magnet_local_pos`
+/ `set_magnet_enabled`. Reads: `magnet_ids_of` / `magnet` (a borrow-free
+`MagnetRef` snapshot) / `magnet_scene_pos` / `magnet_owner` /
+`magnet_enabled`. Removing an item drops its magnets automatically.
+
+### The predicate and the connection event
+
+The predicate is `Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict`, where
+`MagnetVerdict` is `Reject` or `Accept(Option<Rc<dyn Any>>)` — "both
+payloads in, reject or accept-with-payload out". It runs over owned
+magnet snapshots while a shared (read-only) scene borrow is held, so it
+may read the model but must not mutate it.
+
+`on_connect` is `Fn(&MagnetConnection, &mut EventContext)`. It fires on
+mouse release or keyboard confirm, after every borrow is dropped, so it
+may freely mutate the model, declare an AT relation, or fire an intent.
+
+### Three input methods, one mechanism
+
+Install per view via `SceneView::magnetism(MagnetismConfig)`:
+
+```rust
+let cfg = MagnetismConfig::new(|a, b| {
+        // policy: accept Source -> Target on different items
+        if a.item != b.item && /* roles compatible */ true {
+            MagnetVerdict::accept()
+        } else {
+            MagnetVerdict::Reject
+        }
+    })
+    .on_connect(|conn, _ctx| { /* add an edge, fire an intent, … */ })
+    .capture_px(14.0)                 // screen-space capture + grab radius
+    .markers(MarkerVisibility::DuringInteraction)
+    .connect_key(Key::Character('m')); // keyboard connect-mode toggle
+
+let view = SceneView::with_model(model).magnetism(cfg);
+```
+
+- **Item-drag-snap** (mouse): drag a lightweight item; its magnets ride
+  along and snap to the closest accepting magnet within the capture
+  radius; release fires the connection and lands the item snapped.
+- **Port-drag wire** (mouse): press directly on a magnet handle to drag a
+  transient wire that snaps to a compatible target; release connects, the
+  item does not move.
+- **Keyboard connect** (any item kind): focus the view, press the connect
+  key to enter connect mode, arrow-keys / Home / End move a virtual focus
+  through magnets (gated by the predicate once a source is activated),
+  Enter activates the source then forms the connection, Esc cancels.
+
+The capture radius is specified in **screen pixels** and divided by the
+live zoom, so snapping feels constant at any zoom.
+
+### Feedback
+
+A built-in renderer paints magnet markers (coloured by state, constant
+pixel size) plus a connector / ghost wire during an interaction, in the
+post-paint pass over the content. Replace it with
+`MagnetismConfig::feedback(|canvas, ctx, &MagnetFeedback| …)` for custom
+chrome; `MarkerVisibility` (`Always` / `DuringInteraction` / `Never`)
+controls when markers show.
+
+### Persistent vs transient — the consumer chooses
+
+Scene stores **no** connection state. It fires the event; the consumer
+decides. A node-graph keeps connections as persistent edges (an added
+`PathItem` wire, as in the `scene-magnetism` demo); a structural editor
+consumes the event once as a reparent and shows containment by nesting.
+
+### Lightweight vs heavyweight
+
+The built-in mouse integration rides the SceneView's lightweight drag /
+pointer path (the `RectItem::draggable(true)` substrate), because that is
+the only tier the SceneView drags. The keyboard connect flow works for
+magnets on any item (it never touches pointer routing). For heavyweight
+items (which the SceneView does not drag), originate the drag inside the
+item's own widget and call the reusable snap helpers directly:
+`SceneModel::compute_item_snap(dragged, drag_delta, capture_radius, &predicate)`
+and `compute_port_snap(source, cursor, capture_radius, &predicate)` — the
+same mechanism, reachable from any drag origin.
+
+Demo: `cargo run -p scene-magnetism`. Accessibility shaping for magnets
+(synthetic nodes + `active_descendant`) is covered in
+[docs/bastyde-scene-a11y.md](bastyde-scene-a11y.md).
+
+---
+
 ## Background / foreground hooks
 
 Closures injected at the SceneView level for app-supplied chrome.

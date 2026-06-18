@@ -7952,6 +7952,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scene-magnetism"
+version = "0.6.2"
+dependencies = [
+ "bastyde",
+ "bastyde-scene",
+]
+
+[[package]]
 name = "scene-showcase"
 version = "0.6.2"
 dependencies = [

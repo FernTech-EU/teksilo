@@ -139,9 +139,11 @@ directory.
 - [charts.md](charts.md) — `BarChart` / `LineChart` / `PieChart`
   (shared axis / palette / legend / tooltip infrastructure).
 - [bastyde-scene.md](bastyde-scene.md) — the pannable, zoomable scene viewport
-  (canvases, board layouts, diagram editors).
+  (canvases, board layouts, diagram editors), including magnetism (typed
+  snap-and-connect between item anchors).
 - [bastyde-scene-a11y.md](bastyde-scene-a11y.md) — shaping the accessibility
-  tree of a `bastyde-scene` viewport.
+  tree of a `bastyde-scene` viewport, including synthetic magnet nodes and
+  the roving `active_descendant` keyboard connect flow.
 
 ## Visuals & resources
 
