@@ -560,69 +560,124 @@ impl WidgetTree {
         let target =
             self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
 
-        // Walk up from hit target to find a widget with on_drag_hover
-        let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
-
-        // Detect target change BEFORE firing new handlers so we can fire
-        // on_drag_leave on the outgoing target first.
-        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
-        if prev_target != drop_target {
-            if let Some(ref mut drag) = self.active_drag {
-                drag.feedback = crate::drag_state::DropFeedback::NoFeedback;
-                drag.current_target = drop_target;
+        // Drop-target bubbling: walk up from the hit target through successive
+        // drop targets, firing each one's `on_drag_hover`, and stop at the first
+        // that ENGAGES (returns a non-`NoFeedback` response). A target that
+        // returns `NoFeedback` does not accept this payload, so the drag bubbles
+        // to the next drop target above it — letting a reorderable view behind a
+        // per-row `DropTarget` still receive the drag. Pointer position is passed
+        // to each handler in TARGET-LOCAL coordinates.
+        let mut candidate = target.and_then(|t| self.find_drop_target_at_or_above(t));
+        let mut engaged: Option<WidgetId> = None;
+        let mut engaged_feedback = crate::drag_state::DropFeedback::NoFeedback;
+        let mut bubbled_past: Vec<WidgetId> = Vec::new();
+        while let Some(cand) = candidate {
+            let fb = self.fire_on_drag_hover(cand, position, &mut *ops);
+            if fb.is_engaged() {
+                engaged = Some(cand);
+                engaged_feedback = fb;
+                break;
             }
-            if let Some(prev) = prev_target {
-                self.fire_on_drag_leave(prev, &mut *ops);
-            }
+            bubbled_past.push(cand);
+            candidate = self.next_drop_target_above(cand);
         }
 
-        // Call on_drag_hover on the target if it has one. Pointer position
-        // is passed in TARGET-LOCAL coordinates — same coordinate system as
-        // the handler's own `bounds`, so insertion-line / drop-index math
-        // doesn't have to know where it sits in the window.
-        //
-        // on_drag_hover is a "decision" handler (returns DropFeedback).
-        // When both buckets are set, own takes precedence — the widget's
-        // own feedback reflects its internal view of acceptance.
-        if let Some(target_id) = drop_target {
-            let target_bounds = self.arena.bounds(target_id);
-            let local = bastyde_canvas::Point::new(
-                position.x - target_bounds.x,
-                position.y - target_bounds.y,
-            );
-            let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
-                Some(node) => (
-                    node.external_handlers.on_drag_hover.take(),
-                    node.handlers.on_drag_hover.take(),
-                ),
-                None => return,
-            };
-            if ext_handler.is_none() && own_handler.is_none() {
-                return;
+        // Resolve the tracked target and clear stray hover state:
+        // - If an ancestor ENGAGED, every rejecting target we passed is
+        //   transparent (the drag is accepted above) — clear them all so none
+        //   leaves a stuck "forbidden" border.
+        // - If NOTHING engaged, the drag is genuinely rejected: the DEEPEST drop
+        //   target keeps its own reject affordance and becomes the tracked target
+        //   (cleared when the drag moves off); clear only the ancestors above it.
+        let (new_target, new_feedback) = if engaged.is_some() {
+            for cand in &bubbled_past {
+                self.fire_on_drag_leave(*cand, &mut *ops);
             }
+            (engaged, engaged_feedback)
+        } else if let Some((&deepest, rest)) = bubbled_past.split_first() {
+            for cand in rest {
+                self.fire_on_drag_leave(*cand, &mut *ops);
+            }
+            (Some(deepest), crate::drag_state::DropFeedback::NoFeedback)
+        } else {
+            (None, crate::drag_state::DropFeedback::NoFeedback)
+        };
+
+        // Fire `on_drag_leave` on the previously-tracked target when it changes.
+        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        if prev_target != new_target
+            && let Some(prev) = prev_target
+        {
+            self.fire_on_drag_leave(prev, &mut *ops);
+        }
+        if let Some(ref mut drag) = self.active_drag {
+            drag.current_target = new_target;
+            drag.feedback = new_feedback;
+        }
+    }
+
+    /// Fire `on_drag_hover` on a single drop target and return its response.
+    /// A drop target that has an `on_drop` handler but no `on_drag_hover`
+    /// engages optimistically (`Accept`, no visual) so it can still receive the
+    /// drop; `on_drop` makes the final decision on release.
+    fn fire_on_drag_hover(
+        &mut self,
+        target_id: WidgetId,
+        position: bastyde_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> crate::drag_state::DropFeedback {
+        use crate::drag_state::DropFeedback;
+        let target_bounds = self.arena.bounds(target_id);
+        let local = bastyde_canvas::Point::new(
+            position.x - target_bounds.x,
+            position.y - target_bounds.y,
+        );
+        let (mut ext_handler, mut own_handler, has_on_drop) = match self.arena.get_mut(target_id) {
+            Some(node) => {
+                let has_on_drop = node.any_handler(|h| h.on_drop.is_some());
+                let ext = node.external_handlers.on_drag_hover.take();
+                let own = node.handlers.on_drag_hover.take();
+                (ext, own, has_on_drop)
+            }
+            None => return DropFeedback::NoFeedback,
+        };
+        // Drop-only target (no hover handler): engage optimistically.
+        if ext_handler.is_none() && own_handler.is_none() {
+            return if has_on_drop {
+                DropFeedback::Accept
+            } else {
+                DropFeedback::NoFeedback
+            };
+        }
+        let mut feedback = DropFeedback::NoFeedback;
+        if self.active_drag.is_some() {
             let mut ctx = self.make_event_context(&mut *ops);
             if let Some(ref drag) = self.active_drag {
-                let mut feedback = crate::drag_state::DropFeedback::NoFeedback;
                 if let Some(h) = ext_handler.as_mut() {
                     feedback = h(&drag.payload, local, &mut ctx);
                 }
                 if let Some(h) = own_handler.as_mut() {
                     feedback = h(&drag.payload, local, &mut ctx);
                 }
-                if let Some(node) = self.arena.get_mut(target_id) {
-                    node.external_handlers.on_drag_hover = ext_handler;
-                    node.handlers.on_drag_hover = own_handler;
-                }
-                if let Some(ref mut drag) = self.active_drag {
-                    drag.feedback = feedback;
-                }
-                self.collect_from_ctx(ctx, target_id);
-                self.arena.mark_needs_paint(target_id);
-            } else if let Some(node) = self.arena.get_mut(target_id) {
+            }
+            if let Some(node) = self.arena.get_mut(target_id) {
                 node.external_handlers.on_drag_hover = ext_handler;
                 node.handlers.on_drag_hover = own_handler;
             }
+            self.collect_from_ctx(ctx, target_id);
+            self.arena.mark_needs_paint(target_id);
+        } else if let Some(node) = self.arena.get_mut(target_id) {
+            node.external_handlers.on_drag_hover = ext_handler;
+            node.handlers.on_drag_hover = own_handler;
         }
+        feedback
+    }
+
+    /// The next drop target strictly above `id` (its nearest ancestor with a
+    /// drop handler) — used to bubble a drag past a non-accepting target.
+    fn next_drop_target_above(&self, id: WidgetId) -> Option<WidgetId> {
+        let parent = self.arena.parent(id)?;
+        self.find_drop_target_at_or_above(parent)
     }
 
     /// Complete the drag: fire `on_drop` on the target widget and end the session.
@@ -633,6 +688,32 @@ impl WidgetTree {
     ) {
         // Clean up preview overlay
         self.cleanup_drag_preview();
+
+        if self.active_drag.is_none() {
+            return;
+        }
+
+        // Determine the drop target while the session is still live. Normally
+        // it's the target the last hover ENGAGED (drop-target bubbling already
+        // chose it). For a drop with no prior hover (a quick drag, or a
+        // programmatic `start_drag` + release), re-run the bubbling engagement at
+        // the drop position so the drop still lands — and bubbles past a
+        // non-accepting per-row target exactly as a hover would.
+        let mut drop_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        if drop_target.is_none() {
+            let hit = self.hit_test(position);
+            let mut candidate = hit.and_then(|t| self.find_drop_target_at_or_above(t));
+            while let Some(cand) = candidate {
+                if self.fire_on_drag_hover(cand, position, &mut *ops).is_engaged() {
+                    drop_target = Some(cand);
+                    break;
+                }
+                // Clear the bubbled-past target's hover state so it doesn't stay
+                // highlighted after the drag ends.
+                self.fire_on_drag_leave(cand, &mut *ops);
+                candidate = self.next_drop_target_above(cand);
+            }
+        }
 
         // Take the drag session
         let drag = match self.active_drag.take() {
@@ -648,16 +729,12 @@ impl WidgetTree {
         // when a drop handler actually runs.
         let mut outcome = crate::drag_payload::DropOutcome::Cancelled;
 
-        // Fire on_drag_leave on the session's current target before on_drop
-        // runs — widgets own their feedback state and must be given a
-        // chance to clear it regardless of whether the drop is accepted.
-        if let Some(prev) = drag.current_target {
+        // Fire on_drag_leave on the engaged target before on_drop runs — widgets
+        // own their feedback state and must be given a chance to clear it
+        // regardless of whether the drop is accepted.
+        if let Some(prev) = drop_target {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
-
-        // Hit-test to find drop target
-        let target = self.hit_test(position);
-        let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
 
         // on_drop is a "decision" handler (returns bool). Prefer own over
         // external: the widget's own drop semantics trump any external
@@ -1047,6 +1124,60 @@ mod tests {
         assert!(
             parent_fired.get(),
             "Parent's on_drop should fire via ancestor walk"
+        );
+    }
+
+    #[test]
+    fn drop_bubbles_past_a_rejecting_child_to_ancestor() {
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // A child drop target that REJECTS this payload (its `on_drag_hover`
+        // returns `NoFeedback` and `on_drop` returns `false`) must NOT swallow
+        // the drag — it bubbles to the accepting parent. This is the
+        // per-row-`DropTarget`-over-a-reorderable-view case.
+        let child_drop = Rc::new(Cell::new(false));
+        let parent_drop = Rc::new(Cell::new(false));
+        let cd = child_drop.clone();
+        let pd = parent_drop.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let child = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| crate::drag_state::DropFeedback::NoFeedback)
+                .on_drop(move |_p, _pos, _ctx| {
+                    cd.set(true);
+                    false // reject → the framework should bubble past
+                }),
+        );
+        let _parent =
+            tree.add(StackWidget::new().add_child(child).on_drop(move |_p, _pos, _ctx| {
+                pd.set(true);
+                true
+            }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(7_u8));
+        tree.collect_from_ctx(ctx, source);
+
+        // Hover over the child (its on_drag_hover runs → NoFeedback → bubble),
+        // then release there.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(parent_drop.get(), "drop bubbles to the accepting ancestor");
+        assert!(
+            !child_drop.get(),
+            "the rejecting child must not receive the drop"
         );
     }
 

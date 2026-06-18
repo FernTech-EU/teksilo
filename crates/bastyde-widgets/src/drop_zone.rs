@@ -434,8 +434,14 @@ impl Widget for DropZone {
                     hover_state.set(DropZoneVisualState::HoverReject);
                     hover_announce.set(tr_widget!(drop_zone_hover_reject()).resolve_now());
                 }
-                // Visuals are state-driven; no framework-drawn feedback.
-                DropFeedback::NoFeedback
+                // Visuals are state-driven; engage with `Accept` (no framework
+                // feedback) when accepting so the drop lands here, else
+                // `NoFeedback` so the drag bubbles past to the next drop target.
+                if ok {
+                    DropFeedback::Accept
+                } else {
+                    DropFeedback::NoFeedback
+                }
             })
             .on_drag_leave(move |_ctx| {
                 leave_state.set(DropZoneVisualState::Idle);

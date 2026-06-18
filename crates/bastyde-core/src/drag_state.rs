@@ -12,16 +12,38 @@ use bastyde_tokens::Color;
 use crate::drag_payload::DragPayload;
 use crate::widget_id::WidgetId;
 
-/// Visual feedback rendered by a drop target during a drag hover.
+/// A drop target's response to a drag hovering over it.
+///
+/// The variant also decides **drop-target bubbling**: a target that returns
+/// [`NoFeedback`](Self::NoFeedback) does **not** engage the payload, so the
+/// drag passes through to the next drop target up the tree (and a drop on
+/// release likewise bubbles when `on_drop` returns `false`). Any *engaging*
+/// variant ([`Accept`](Self::Accept), [`InsertionLine`](Self::InsertionLine),
+/// [`HighlightRect`](Self::HighlightRect)) stops the bubble at that target.
 #[derive(Debug, Clone)]
 pub enum DropFeedback {
     /// A horizontal line at the given Y coordinate, spanning the given width.
-    /// Used for insertion between list items.
+    /// Used for insertion between list items. Engages the target.
     InsertionLine { y: f32, width: f32 },
-    /// A highlighted rectangle. Used for container/folder drops.
+    /// A highlighted rectangle. Used for container/folder drops. Engages the
+    /// target.
     HighlightRect { rect: Rect, color: Color },
-    /// No feedback (payload not accepted by this target).
+    /// Accepted, but the target draws its own visual (signal-driven, e.g.
+    /// `DropTarget`'s `is_targeted` border) — the framework renders nothing
+    /// extra. Engages the target (stops bubbling), distinct from `NoFeedback`.
+    Accept,
+    /// The payload is not accepted by this target — the drag bubbles to the
+    /// next drop target up the tree (and a drop here would `on_drop`-bubble
+    /// too). The framework renders nothing.
     NoFeedback,
+}
+
+impl DropFeedback {
+    /// Whether this response engages the payload (stops drop-target bubbling).
+    /// Everything except [`NoFeedback`](Self::NoFeedback) engages.
+    pub fn is_engaged(&self) -> bool {
+        !matches!(self, DropFeedback::NoFeedback)
+    }
 }
 
 /// Active drag-and-drop session state, stored on the `WidgetTree`.

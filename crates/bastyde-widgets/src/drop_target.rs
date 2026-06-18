@@ -408,7 +408,15 @@ impl Widget for DropTarget {
                         s.set(new);
                     }
                 }
-                DropFeedback::NoFeedback // visuals are signal-driven
+                // Visuals are signal-driven, so engage with `Accept` (no
+                // framework-drawn feedback) when this target accepts; otherwise
+                // `NoFeedback` so the drag bubbles to the next drop target up
+                // (e.g. a reorderable list behind a per-row DropTarget).
+                if accepts {
+                    DropFeedback::Accept
+                } else {
+                    DropFeedback::NoFeedback
+                }
             })
             .on_drag_leave(move |ctx| {
                 if ds_leave.get() != DropTargetDragState::Idle {

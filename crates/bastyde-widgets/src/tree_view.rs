@@ -2656,4 +2656,85 @@ mod tests {
             "a cyclic drop is refused by the source — no mutation applied"
         );
     }
+
+    #[test]
+    fn from_source_reorder_bubbles_past_a_per_row_drop_target() {
+        // Mirrors the designer outline: each row is a `DropTarget` that accepts
+        // only a palette payload (here `Palette`). A row-reorder `RowDrag` must
+        // bubble PAST that DropTarget to the TreeView and reorder — i.e. the
+        // per-row drop target and the view's drag-to-reorder coexist.
+        use crate::drop_target::DropTarget;
+        use bastyde_core::event::EventResponse;
+        use bastyde_core::widget_builder::WidgetBuilder;
+        #[derive(Clone)]
+        struct Palette;
+        let src = Rc::new(MockI64Source::new());
+        let mut t = WidgetTree::new();
+        let v = t.add(
+            TreeView::from_source(MockI64Wrapper(src.clone()), |_l: &String, _r: &TreeRow, _s| {
+                // Match the designer row exactly: a DropTarget wrapped by an
+                // on_pointer_event (selection) + context_menu handler node.
+                Box::new(
+                    DropTarget::new()
+                        .on_drop_typed::<Palette>(|_p, _pos, _ctx| true)
+                        .child(FixedLeaf(120.0, 24.0))
+                        .on_pointer_event(|_ev, _ctx| EventResponse::Ignored)
+                        .context_menu(|_pos, _ctx| None),
+                ) as Box<dyn Widget>
+            })
+            .item_height(24.0)
+            .reorderable(true),
+        );
+        t.layout(SizeProposal::exact(400.0, 300.0));
+        let rows = t.children(v);
+        // Drag node "b" (id 3, row 2) onto "root2" (id 4, row 3).
+        let from = t.bounds(rows[2]).center();
+        let to = t.bounds(rows[3]).center();
+        drag_item(&mut t, from, to);
+        assert_eq!(
+            src.accept_log.borrow().len(),
+            1,
+            "row reorder must bubble past the per-row DropTarget to the TreeView"
+        );
+    }
+
+    #[test]
+    fn from_source_row_with_pointer_event_selection_stays_draggable() {
+        // A row that selects on press via `on_pointer_event` (raw, returns
+        // `Ignored`) installs NO gesture arena, so it never captures the pointer
+        // and the row stays draggable — the pattern a reorderable view must use
+        // for per-row selection. (A descendant `on_tap`, by contrast, installs a
+        // TapRecognizer that captures the Down and shadows the ancestor drag —
+        // see docs; selectable+reorderable rows select via `on_pointer_event`.)
+        use bastyde_core::event::{EventResponse, WidgetEvent};
+        use bastyde_core::widget_builder::WidgetBuilder;
+        let src = Rc::new(MockI64Source::new());
+        let picked = Rc::new(Cell::new(None::<i64>));
+        let mut t = WidgetTree::new();
+        let picked_for_rows = picked.clone();
+        let v = t.add(
+            TreeView::from_source(MockI64Wrapper(src.clone()), move |_l: &String, _r: &TreeRow, _s| {
+                let picked = picked_for_rows.clone();
+                Box::new(FixedLeaf(120.0, 24.0).on_pointer_event(move |ev, _c| {
+                    if let WidgetEvent::PointerDown { .. } = ev {
+                        picked.set(Some(7));
+                    }
+                    EventResponse::Ignored
+                })) as Box<dyn Widget>
+            })
+            .item_height(24.0)
+            .reorderable(true),
+        );
+        t.layout(SizeProposal::exact(400.0, 300.0));
+        let rows = t.children(v);
+        let from = t.bounds(rows[2]).center();
+        let to = t.bounds(rows[3]).center();
+        drag_item(&mut t, from, to);
+        assert!(picked.get().is_some(), "press still selects via on_pointer_event");
+        assert_eq!(
+            src.accept_log.borrow().len(),
+            1,
+            "on_pointer_event selection must not block the row drag"
+        );
+    }
 }
