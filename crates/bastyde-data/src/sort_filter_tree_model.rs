@@ -427,6 +427,13 @@ impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
         SortFilterTreeModel::first_changed_index(self)
     }
 
+    fn contains_key(&self, key: &NodeId) -> bool {
+        // Existence against the backing tree, not the filtered/visible
+        // projection, so a node hidden by a collapse or filter keeps its
+        // keyed selection (only a genuine delete prunes it).
+        self.tree().with_item(*key, |_| ()).is_some()
+    }
+
     fn is_expanded(&self, key: &NodeId) -> bool {
         SortFilterTreeModel::is_expanded(self, *key)
     }

@@ -27,25 +27,20 @@ use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
-use bastyde_data::{DropPosition, FlatEntry, KeyedSelectionModel, NodeId, TreeModel};
+use bastyde_data::{
+    DragEligibility, DropPosition, DropResponse, FlatEntry, ItemKey, KeyedSelectionModel, NodeId,
+    TreeDataSource, TreeModel,
+};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::RowSelection;
+use crate::data_views::{RowDrag, RowSelection};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::tree_source::{TreeRow, TreeRowMeta, TreeSource};
 
 const BUFFER_ITEMS: usize = 5;
 const DEFAULT_ITEM_HEIGHT: f32 = 28.0;
 const SCROLLBAR_THICKNESS: f32 = 12.0;
-
-/// Internal drag payload for intra-TreeView reordering.
-#[derive(Debug, Clone)]
-struct TreeViewDragData {
-    /// The NodeId of the node being dragged.
-    source_node: NodeId,
-    /// Stable ID to identify this TreeView instance.
-    source_tree_id: usize,
-}
 
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
 /// reference to the slice handle and the row's `NodeId` so the
@@ -79,10 +74,21 @@ impl<'a, T: 'static> TreeRowContext<'a, T> {
     }
 }
 
-/// Internal delegate type: takes the inputs the 3-arg form gets plus
-/// the optional `TreeRowContext`. Both the 3-arg `new` and the 4-arg
-/// `new_with_context` produce a closure of this shape.
+/// Delegate type for the built-in `TreeModel` path: takes the inputs the 3-arg
+/// form gets plus the optional `TreeRowContext`. Both the 3-arg `new` and the
+/// 4-arg `new_with_context` produce a closure of this shape.
 type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget>;
+
+/// Delegate type for the generic [`TreeView::from_source`] path: key-erased, so
+/// it receives a [`TreeRow`] (flat metadata + a chevron toggle) instead of the
+/// `NodeId`-typed `FlatEntry` / `TreeRowContext`.
+type SourceTreeDelegate<T> = dyn Fn(&T, &TreeRow, bool) -> Box<dyn Widget>;
+
+/// Internal, uniform per-row builder both constructors lower to:
+/// `(visible_index, &item, &meta, selected) -> row widget`. The built-in
+/// wrapper rebuilds the `NodeId` `TreeRowContext` from the index; the generic
+/// wrapper builds a key-erased `TreeRow`.
+type RowDelegate<T> = dyn Fn(usize, &T, &TreeRowMeta, bool) -> Box<dyn Widget>;
 
 /// A virtualized hierarchical tree widget backed by a `TreeModel<T>`.
 ///
@@ -102,8 +108,16 @@ type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> B
 /// .item_height(28.0);
 /// ```
 pub struct TreeView<T: 'static> {
-    tree_slice: TreeSlice<T>,
-    delegate: Rc<TreeDelegate<T>>,
+    /// Index-keyed erased backing — the built-in `TreeSlice` or an external
+    /// `TreeDataSource`. All virtualization / DnD / keyboard work goes through
+    /// this in flat indices.
+    source: Rc<TreeSource<T>>,
+    /// Present only for the built-in `TreeModel` path; backs the `NodeId`-typed
+    /// public expand API + [`tree_slice`](Self::tree_slice). `None` for
+    /// [`from_source`](Self::from_source).
+    slice: Option<Rc<TreeSlice<T>>>,
+    /// Uniform per-row builder produced by whichever constructor was used.
+    row_delegate: Rc<RowDelegate<T>>,
     item_height: f32,
     /// Height-mode selection (uniform / exact callback / auto-measure).
     height_source: HeightSource,
@@ -201,12 +215,106 @@ impl<T: 'static> TreeView<T> {
     }
 
     fn new_internal(model: TreeModel<T>, delegate: Rc<TreeDelegate<T>>) -> Self {
+        let slice = Rc::new(TreeSlice::new(model));
+        let source = Rc::new(TreeSource::from_data_source(slice.clone()));
+        // Built-in wrapper: rebuild the `NodeId` `FlatEntry` + `TreeRowContext`
+        // from the visible index so the existing 3-/4-arg delegate keeps its
+        // exact API. `with_row` only invokes this for a present row, so
+        // `visible_node_id(i)` is `Some`; the `None` arm is an unreachable guard.
+        let slice_for_rows = slice.clone();
+        let row_delegate: Rc<RowDelegate<T>> = Rc::new(move |i, item, meta, selected| {
+            let handle = slice_for_rows.handle();
+            match handle.visible_node_id(i) {
+                Some(node_id) => {
+                    let entry = FlatEntry {
+                        node_id,
+                        depth: meta.depth,
+                        has_children: meta.has_children,
+                        is_expanded: meta.is_expanded,
+                    };
+                    let row_ctx = TreeRowContext {
+                        slice: &handle,
+                        node_id,
+                    };
+                    delegate(item, &entry, selected, &row_ctx)
+                }
+                None => crate::data_views::default_placeholder(),
+            }
+        });
+        Self::assemble(source, Some(slice), row_delegate)
+    }
+
+    /// Create a TreeView backed by any [`TreeDataSource`] — an external source of
+    /// truth (e.g. an entity store) carrying its own `Key`, so it needs no
+    /// `TreeModel` mirror. The delegate receives `(&item, &TreeRow, selected)`;
+    /// [`TreeRow`] exposes `depth` / `has_children` / `is_expanded` and a one-call
+    /// chevron `toggle_callback()`. Drop validation + lazy windowing route
+    /// through the source's `can_accept` / `accept_drop` / `row_state`.
+    pub fn from_source<S: TreeDataSource<Item = T>>(
+        source: S,
+        delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::from_source_rc(Rc::new(source), Rc::new(delegate))
+    }
+
+    fn from_source_rc<S: TreeDataSource<Item = T>>(
+        s: Rc<S>,
+        delegate: Rc<SourceTreeDelegate<T>>,
+    ) -> Self {
+        let source = Rc::new(TreeSource::from_data_source(s));
+        let source_for_rows = source.clone();
+        let row_delegate: Rc<RowDelegate<T>> = Rc::new(move |i, item, _meta, selected| {
+            let row = TreeSource::row_context(&source_for_rows, i);
+            delegate(item, &row, selected)
+        });
+        Self::assemble(source, None, row_delegate)
+    }
+
+    /// Like [`from_source`](Self::from_source) but with **keyed** selection: the
+    /// `KeyedSelectionModel<S::Key>` tracks selection by source identity, so it
+    /// survives expand / collapse / filter / reorder and stays consistent across
+    /// two views of the same source. The view stays `TreeView<T>` — the `Key` is
+    /// captured here. Pruning consults the source's
+    /// [`contains_key`](bastyde_data::TreeDataSource::contains_key), so a
+    /// collapsed-but-present node keeps its selection.
+    pub fn from_source_keyed<S: TreeDataSource<Item = T>>(
+        source: S,
+        keyed: KeyedSelectionModel<S::Key>,
+        delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self
+    where
+        S::Key: ItemKey,
+    {
+        let s = Rc::new(source);
+        let key_at = {
+            let s = s.clone();
+            Rc::new(move |i| s.key_at(i)) as Rc<dyn Fn(usize) -> Option<S::Key>>
+        };
+        let len = {
+            let s = s.clone();
+            Rc::new(move || s.visible_count()) as Rc<dyn Fn() -> usize>
+        };
+        let contains = {
+            let s = s.clone();
+            Rc::new(move |k: &S::Key| s.contains_key(k)) as Rc<dyn Fn(&S::Key) -> bool>
+        };
+        let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        let mut view = Self::from_source_rc(s, Rc::new(delegate));
+        view.row_selection = Some(row_selection);
+        view
+    }
+
+    fn assemble(
+        source: Rc<TreeSource<T>>,
+        slice: Option<Rc<TreeSlice<T>>>,
+        row_delegate: Rc<RowDelegate<T>>,
+    ) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-        let tree_slice = TreeSlice::new(model);
         Self {
-            tree_slice,
-            delegate,
+            source,
+            slice,
+            row_delegate,
             item_height: DEFAULT_ITEM_HEIGHT,
             height_source: HeightSource::Uniform,
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
@@ -301,18 +409,23 @@ impl<T: 'static> TreeView<T> {
     /// nodes on each slice change. Mutually exclusive with
     /// [`selection`](Self::selection) (last one set wins).
     pub fn keyed_selection(mut self, keyed: KeyedSelectionModel<NodeId>) -> Self {
+        // Built-in `TreeModel` path only; on `from_source` use
+        // [`from_source_keyed`](Self::from_source_keyed) (the `Key` differs).
+        let Some(slice) = self.slice.clone() else {
+            return self;
+        };
         let key_at = {
-            let tsh = self.tree_slice.handle();
+            let tsh = slice.handle();
             Rc::new(move |i| tsh.visible_node_id(i)) as Rc<dyn Fn(usize) -> Option<NodeId>>
         };
         let len = {
-            let tsh = self.tree_slice.handle();
+            let tsh = slice.handle();
             Rc::new(move || tsh.visible_count()) as Rc<dyn Fn() -> usize>
         };
         // A collapsed-but-present node must NOT be pruned, so existence is
         // checked against the tree, not the visible projection.
         let contains = {
-            let tsh = self.tree_slice.handle();
+            let tsh = slice.handle();
             Rc::new(move |n: &NodeId| tsh.tree().with_item(*n, |_| ()).is_some())
                 as Rc<dyn Fn(&NodeId) -> bool>
         };
@@ -332,47 +445,60 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
-    /// Expand a node programmatically.
+    /// Expand a node programmatically. No-op on the `from_source` path (which
+    /// owns its own expand state — use the source's `set_expanded`).
     pub fn expand(&self, node: bastyde_data::NodeId) {
-        self.tree_slice.expand(node);
+        if let Some(slice) = &self.slice {
+            slice.expand(node);
+        }
     }
 
-    /// Collapse a node programmatically.
+    /// Collapse a node programmatically. No-op on the `from_source` path.
     pub fn collapse(&self, node: bastyde_data::NodeId) {
-        self.tree_slice.collapse(node);
+        if let Some(slice) = &self.slice {
+            slice.collapse(node);
+        }
     }
 
-    /// Toggle a node's expand/collapse state.
+    /// Toggle a node's expand/collapse state. No-op on the `from_source` path.
     pub fn toggle(&self, node: bastyde_data::NodeId) {
-        self.tree_slice.toggle(node);
+        if let Some(slice) = &self.slice {
+            slice.toggle(node);
+        }
     }
 
-    /// Expand all nodes.
+    /// Expand all nodes. No-op on the `from_source` path.
     pub fn expand_all(&self) {
-        self.tree_slice.expand_all();
+        if let Some(slice) = &self.slice {
+            slice.expand_all();
+        }
     }
 
-    /// Collapse all nodes.
+    /// Collapse all nodes. No-op on the `from_source` path.
     pub fn collapse_all(&self) {
-        self.tree_slice.collapse_all();
+        if let Some(slice) = &self.slice {
+            slice.collapse_all();
+        }
     }
 
     /// Access the internal `TreeSlice` (for persistence of expand state).
-    pub fn tree_slice(&self) -> &TreeSlice<T> {
-        &self.tree_slice
+    /// `None` on the [`from_source`](Self::from_source) path, which has no
+    /// `TreeSlice` (the external source owns expand state).
+    pub fn tree_slice(&self) -> Option<&TreeSlice<T>> {
+        self.slice.as_deref()
     }
 
     fn total_content_height(&self) -> f32 {
         self.metrics
             .borrow_mut()
-            .total_height(self.tree_slice.visible_count())
+            .total_height(self.source.visible_count())
     }
 
     fn visible_range(&self) -> (usize, usize) {
         self.metrics.borrow_mut().visible_range(
             self.scroll_y.get(),
             self.viewport_height.get(),
-            self.tree_slice.visible_count(),
+            self.source.visible_count(),
             BUFFER_ITEMS,
         )
     }
@@ -390,7 +516,7 @@ impl<T: 'static> TreeView<T> {
 impl<T: 'static> std::fmt::Debug for TreeView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeView")
-            .field("visible_count", &self.tree_slice.visible_count())
+            .field("visible_count", &self.source.visible_count())
             .field("item_height", &self.item_height)
             .field("scroll_y", &self.scroll_y.get())
             .finish()
@@ -424,24 +550,24 @@ impl<T: 'static> Widget for TreeView<T> {
             BindingLevel::RepaintOnly,
         );
 
-        // --- Observe tree slice version (covers both data mutations and expand/collapse) ---
-        let slice_version = self.tree_slice.version_signal();
+        // --- Observe source version (covers both data mutations and expand/collapse) ---
+        let source_version = self.source.version_signal();
         let version_for_data = version.clone();
         let data_ver = Rc::new(Cell::new(0_u64));
-        ctx.effect(&slice_version, {
+        ctx.effect(&source_version, {
             let dv = data_ver.clone();
             let ver = version_for_data.clone();
             let metrics = self.metrics.clone();
-            let slice = self.tree_slice.handle();
+            let source = self.source.clone();
             let row_sel = self.row_selection.clone();
             move |_| {
-                // Slice observers fire synchronously per reflatten, so
+                // Source version observers fire synchronously per reflatten, so
                 // `first_changed_index()` describes exactly this change:
                 // heights of flat rows before it (e.g. above an
                 // expand/collapse point) stay valid.
                 metrics
                     .borrow_mut()
-                    .apply_divergence(slice.first_changed_index(), slice.visible_count());
+                    .apply_divergence(source.first_changed_index(), source.visible_count());
                 // Drop any keyed selection whose node was deleted (no-op for
                 // the index model). A collapse does not delete, so a collapsed
                 // node's selection survives.
@@ -481,12 +607,12 @@ impl<T: 'static> Widget for TreeView<T> {
             let pbe = self.prev_built_end.clone();
             let sv = scroll_ver.clone();
             let metrics = self.metrics.clone();
-            let slice = self.tree_slice.handle();
+            let source = self.source.clone();
             move |y| {
                 let (visible_start, visible_end) = metrics.borrow_mut().visible_range(
                     *y,
                     viewport_h.get(),
-                    slice.visible_count(),
+                    source.visible_count(),
                     0,
                 );
                 // Only rebuild when visible items fall outside the currently-built range
@@ -533,7 +659,7 @@ impl<T: 'static> Widget for TreeView<T> {
 
         // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
         {
-            let tsh = self.tree_slice.handle();
+            let source = self.source.clone();
             let sel_for_key = self.row_selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
@@ -544,90 +670,33 @@ impl<T: 'static> Widget for TreeView<T> {
 
             handlers = handlers.on_key(move |event, _ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
-                    let visible_count = tsh.visible_count();
+                    let visible_count = source.visible_count();
                     if visible_count == 0 {
                         return bastyde_core::event::EventResponse::Ignored;
                     }
 
                     let current = fi.get().unwrap_or(0).min(visible_count - 1);
 
-                    // Alt+Arrow: sibling reorder (when reorderable)
+                    // Alt+Arrow: sibling reorder (when reorderable). Routed
+                    // through the source's own `accept_drop` (cycle-guarded),
+                    // which returns the moved row's new flat index.
                     if modifiers.alt() && reorderable {
-                        let selected_idx = sel_for_key
+                        let flat_idx = sel_for_key
                             .as_ref()
                             .and_then(|s| s.selected_indices().first().copied())
-                            .or(fi.get());
-
-                        if let Some(flat_idx) = selected_idx
-                            && let Some(entry) = tsh.entry_at(flat_idx)
-                        {
-                            let node_id = entry.node_id;
-                            let tree = tsh.tree();
-                            let parent = tree.parent(node_id);
-
-                            // Determine siblings: either children of parent or root list
-                            let (siblings, is_root_level) = if let Some(parent_id) = parent {
-                                (tree.children(parent_id), false)
-                            } else {
-                                // Node is a root - get all roots
-                                let root_count = tree.root_count();
-                                let siblings: Vec<NodeId> =
-                                    (0..root_count).map(|i| tree.root(i)).collect();
-                                (siblings, true)
-                            };
-
-                            let sibling_idx =
-                                siblings.iter().position(|&n| n == node_id).unwrap_or(0);
-
-                            match key {
-                                bastyde_core::event::Key::ArrowUp if sibling_idx > 0 => {
-                                    if is_root_level {
-                                        tree.move_to_root(node_id, sibling_idx - 1);
-                                    } else {
-                                        tree.move_node(
-                                            node_id,
-                                            parent.expect("non-root branch implies parent is Some"),
-                                            sibling_idx - 1,
-                                        );
-                                    }
-                                    // Find new flat index after node was moved
-                                    for new_flat in 0..visible_count {
-                                        if tsh.visible_node_id(new_flat) == Some(node_id) {
-                                            fi.set(Some(new_flat));
-                                            if let Some(ref sel) = sel_for_key {
-                                                sel.select(new_flat);
-                                            }
-                                            break;
-                                        }
-                                    }
-                                    return bastyde_core::event::EventResponse::Handled;
-                                }
-                                bastyde_core::event::Key::ArrowDown
-                                    if sibling_idx + 1 < siblings.len() =>
-                                {
-                                    if is_root_level {
-                                        tree.move_to_root(node_id, sibling_idx + 1);
-                                    } else {
-                                        tree.move_node(
-                                            node_id,
-                                            parent.expect("non-root branch implies parent is Some"),
-                                            sibling_idx + 1,
-                                        );
-                                    }
-                                    // Find new flat index after node was moved
-                                    for new_flat in 0..visible_count {
-                                        if tsh.visible_node_id(new_flat) == Some(node_id) {
-                                            fi.set(Some(new_flat));
-                                            if let Some(ref sel) = sel_for_key {
-                                                sel.select(new_flat);
-                                            }
-                                            break;
-                                        }
-                                    }
-                                    return bastyde_core::event::EventResponse::Handled;
-                                }
-                                _ => {}
+                            .or(fi.get())
+                            .unwrap_or(current);
+                        let down = match key {
+                            bastyde_core::event::Key::ArrowUp => false,
+                            bastyde_core::event::Key::ArrowDown => true,
+                            _ => return bastyde_core::event::EventResponse::Ignored,
+                        };
+                        if let Some(new_flat) = source.keyboard_reorder(flat_idx, down) {
+                            fi.set(Some(new_flat));
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(new_flat);
                             }
+                            return bastyde_core::event::EventResponse::Handled;
                         }
                         return bastyde_core::event::EventResponse::Ignored;
                     }
@@ -635,33 +704,27 @@ impl<T: 'static> Widget for TreeView<T> {
                     // ArrowRight: expand / ArrowLeft: collapse or move to parent
                     match key {
                         bastyde_core::event::Key::ArrowRight => {
-                            if let Some(entry) = tsh.entry_at(current)
-                                && entry.has_children
-                                && !entry.is_expanded
+                            if let Some(meta) = source.meta(current)
+                                && meta.has_children
+                                && !meta.is_expanded
                             {
-                                tsh.expand(entry.node_id);
+                                source.set_expanded_at(current, true);
                                 return bastyde_core::event::EventResponse::Handled;
                             }
                         }
                         bastyde_core::event::Key::ArrowLeft => {
-                            if let Some(entry) = tsh.entry_at(current) {
-                                if entry.is_expanded {
-                                    tsh.collapse(entry.node_id);
+                            if let Some(meta) = source.meta(current) {
+                                if meta.is_expanded {
+                                    source.set_expanded_at(current, false);
                                     return bastyde_core::event::EventResponse::Handled;
                                 }
-                                // If leaf or collapsed, move to parent
-                                let parent = tsh.tree().parent(entry.node_id);
-                                if let Some(parent_id) = parent {
-                                    // Find parent's flat index
-                                    for i in 0..visible_count {
-                                        if tsh.visible_node_id(i) == Some(parent_id) {
-                                            fi.set(Some(i));
-                                            if let Some(ref sel) = sel_for_key {
-                                                sel.select(i);
-                                            }
-                                            return bastyde_core::event::EventResponse::Handled;
-                                        }
+                                // If leaf or collapsed, move to parent.
+                                if let Some(parent_idx) = source.parent_index(current) {
+                                    fi.set(Some(parent_idx));
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(parent_idx);
                                     }
+                                    return bastyde_core::event::EventResponse::Handled;
                                 }
                             }
                         }
@@ -714,108 +777,49 @@ impl<T: 'static> Widget for TreeView<T> {
 
         // --- DnD: register as drop target when reorderable ---
         if self.reorderable {
-            let my_tree_id = self.tree_id;
+            let my_view_id = self.tree_id;
 
-            // Shared across on_drag_hover / on_drag_tick / on_drag_leave:
-            // the node currently under the pointer (if any) and the instant
-            // at which we first saw it. Used by spring-loaded folders to
-            // expand a branch after the pointer dwells on it for
-            // `SPRING_DELAY_MS`. Reset whenever the hovered node changes
-            // or the drag leaves this widget.
-            let hovered_node: Rc<Cell<Option<(NodeId, std::time::Instant)>>> =
+            // Shared across hover / tick / leave: the visible row index under the
+            // pointer + when first seen, for spring-loaded folder expansion.
+            // Reset whenever the hovered row changes or the drag leaves.
+            let hovered_row: Rc<Cell<Option<(usize, std::time::Instant)>>> =
                 Rc::new(Cell::new(None));
 
+            // ----- hover: geometry → (target, position) → source.can_accept -----
             let metrics_for_hover = self.metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
-            let tsh_for_hover = self.tree_slice.handle();
+            let source_for_hover = self.source.clone();
             let feedback_for_hover = self.drop_feedback.clone();
-            let hn_for_hover = hovered_node.clone();
-
+            let hr_for_hover = hovered_row.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
-                let Some(drag_data) = payload.get_typed::<TreeViewDragData>() else {
+                let vc = source_for_hover.visible_count();
+                if vc == 0 {
                     feedback_for_hover.set(None);
-                    hn_for_hover.set(None);
+                    hr_for_hover.set(None);
                     return DropFeedback::NoFeedback;
-                };
-                let source_node = drag_data.source_node;
+                }
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y + scroll;
-                // Insertion line at the snapped boundary; spring-load tracks the
-                // row the pointer actually sits on.
-                let (insertion_top, row_idx) = {
+                let (insertion_top, row_idx, row_top, row_h) = {
                     let mut m = metrics_for_hover.borrow_mut();
-                    m.resize(tsh_for_hover.visible_count());
-                    let flat_idx = m.insertion_index(content_y);
-                    (m.row_top(flat_idx), m.row_at(content_y))
+                    m.resize(vc);
+                    let ins = m.insertion_index(content_y);
+                    let r = m.row_at(content_y);
+                    let insertion_top = m.row_top(ins);
+                    let row_top = m.row_top(r);
+                    let row_h = m.row_height(r);
+                    (insertion_top, r, row_top, row_h)
                 };
-                let target = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
-
-                // Spring-load tracking (dwell-to-expand a branch).
-                let prev = hn_for_hover.get();
-                match (prev, target) {
-                    (Some((p, t)), Some(n)) if p == n => hn_for_hover.set(Some((n, t))),
-                    (_, Some(n)) => hn_for_hover.set(Some((n, std::time::Instant::now()))),
-                    (_, None) => hn_for_hover.set(None),
+                // Spring-load tracking (dwell-to-expand the hovered branch).
+                match hr_for_hover.get() {
+                    Some((p, t)) if p == row_idx => hr_for_hover.set(Some((row_idx, t))),
+                    _ => hr_for_hover.set(Some((row_idx, std::time::Instant::now()))),
                 }
-
-                // The move is valid unless it would drop the node onto itself or
-                // into its own subtree (a cycle). An invalid drop shows NO line —
-                // the pre-commit forbidden affordance.
-                let valid = target.is_some_and(|t| {
-                    t != source_node
-                        && !bastyde_data::tree_data_source::tree_is_desc_or_self(
-                            tsh_for_hover.tree(),
-                            t,
-                            source_node,
-                        )
-                });
-                if valid {
-                    let insertion_y = insertion_top - scroll;
-                    feedback_for_hover.set(Some((insertion_y, 400.0)));
-                    DropFeedback::InsertionLine {
-                        y: insertion_y,
-                        width: 400.0,
-                    }
-                } else {
-                    feedback_for_hover.set(None);
-                    DropFeedback::NoFeedback
-                }
-            });
-
-            // For the drop handler, we need access to the tree model and the
-            // flattened entries. Access them via the TreeSlice's public methods.
-            let tree_model_for_drop = self.tree_slice.tree().clone();
-            let metrics_for_drop = self.metrics.clone();
-            let scroll_for_drop = self.scroll_y.clone();
-
-            let tsh_for_drop = self.tree_slice.handle();
-            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
-                let Some(drag_data) = payload.take_typed::<TreeViewDragData>() else {
-                    return false;
-                };
-                if drag_data.source_tree_id != my_tree_id {
-                    return false;
-                }
-                let source_node = drag_data.source_node;
-
-                let scroll = scroll_for_drop.get().max(0.0);
-                let content_y = position.y + scroll;
-                let (flat_idx, row_top, row_h) = {
-                    let mut m = metrics_for_drop.borrow_mut();
-                    m.resize(tsh_for_drop.visible_count());
-                    let idx = m.row_at(content_y);
-                    (idx, m.row_top(idx), m.row_height(idx))
-                };
-                let Some(entry) = tsh_for_drop.entry_at(flat_idx) else {
-                    return false;
-                };
-
-                // Drop zone from Y within the row: top third = Before, middle =
-                // Into, bottom = After. Route through the cycle-guarded reorder
-                // helper — a drop onto the node itself or into its own subtree is
-                // refused without mutating or panicking.
+                // Drop position from Y within the row (top third Before / middle
+                // Into / bottom After). The source's `can_accept` is the verdict
+                // — a Reject shows NO line (the pre-commit forbidden affordance).
                 let y_in_row = content_y - row_top;
-                let third = row_h / 3.0;
+                let third = (row_h / 3.0).max(f32::EPSILON);
                 let drop_pos = if y_in_row < third {
                     DropPosition::Before
                 } else if y_in_row > 2.0 * third {
@@ -823,34 +827,70 @@ impl<T: 'static> Widget for TreeView<T> {
                 } else {
                     DropPosition::Into
                 };
-                bastyde_data::tree_data_source::tree_apply_reorder(
-                    &tree_model_for_drop,
-                    source_node,
-                    entry.node_id,
-                    drop_pos,
-                );
-                true
+                match (source_for_hover.dnd.can_accept_fn)(payload, row_idx, drop_pos, my_view_id) {
+                    DropResponse::Reject => {
+                        feedback_for_hover.set(None);
+                        DropFeedback::NoFeedback
+                    }
+                    DropResponse::Accept | DropResponse::Redirect(_) => {
+                        let insertion_y = insertion_top - scroll;
+                        feedback_for_hover.set(Some((insertion_y, 400.0)));
+                        DropFeedback::InsertionLine {
+                            y: insertion_y,
+                            width: 400.0,
+                        }
+                    }
+                }
             });
 
-            // Clear insertion line + spring-load timer whenever the drag
-            // leaves this widget.
+            // ----- drop: re-derive (target, position), route to accept_drop -----
+            let metrics_for_drop = self.metrics.clone();
+            let scroll_for_drop = self.scroll_y.clone();
+            let source_for_drop = self.source.clone();
+            let feedback_for_drop = self.drop_feedback.clone();
+            handlers = handlers.on_drop(move |payload, position, _ctx| {
+                feedback_for_drop.set(None);
+                let vc = source_for_drop.visible_count();
+                if vc == 0 {
+                    return false;
+                }
+                let scroll = scroll_for_drop.get().max(0.0);
+                let content_y = position.y + scroll;
+                let (row_idx, row_top, row_h) = {
+                    let mut m = metrics_for_drop.borrow_mut();
+                    m.resize(vc);
+                    let r = m.row_at(content_y);
+                    (r, m.row_top(r), m.row_height(r))
+                };
+                let y_in_row = content_y - row_top;
+                let third = (row_h / 3.0).max(f32::EPSILON);
+                let drop_pos = if y_in_row < third {
+                    DropPosition::Before
+                } else if y_in_row > 2.0 * third {
+                    DropPosition::After
+                } else {
+                    DropPosition::Into
+                };
+                (source_for_drop.dnd.accept_drop_fn)(&payload, row_idx, drop_pos, my_view_id)
+            });
+
+            // Clear insertion line + spring-load timer whenever the drag leaves.
             let feedback_for_leave = self.drop_feedback.clone();
-            let hn_for_leave = hovered_node.clone();
+            let hr_for_leave = hovered_row.clone();
             handlers = handlers.on_drag_leave(move |_ctx| {
                 feedback_for_leave.set(None);
-                hn_for_leave.set(None);
+                hr_for_leave.set(None);
             });
 
             // Per-frame tick: viewport-edge auto-scroll plus spring-loaded
             // folders. The tick fires regardless of pointer movement, so
-            // edge-scroll and spring-open still progress when the hand
-            // is stationary.
+            // edge-scroll and spring-open still progress when the hand is
+            // stationary.
             let scroll_for_tick = self.scroll_y.clone();
             let max_scroll_for_tick = self.max_scroll_y.clone();
             let viewport_for_tick = self.viewport_height.clone();
-            let hn_for_tick = hovered_node.clone();
-            let tsh_for_tick = self.tree_slice.handle();
-            let tree_model_for_tick = self.tree_slice.tree().clone();
+            let hr_for_tick = hovered_row.clone();
+            let source_for_tick = self.source.clone();
             const SPRING_DELAY_MS: u64 = 700;
             handlers = handlers.on_drag_tick(move |pos, _ctx| {
                 // --- 1. Edge auto-scroll ---
@@ -873,17 +913,19 @@ impl<T: 'static> Widget for TreeView<T> {
                 }
 
                 // --- 2. Spring-loaded folders ---
-                if let Some((node, first_seen)) = hn_for_tick.get() {
+                if let Some((row_idx, first_seen)) = hr_for_tick.get() {
                     let elapsed_ms = first_seen.elapsed().as_millis() as u64;
+                    let has_children = source_for_tick
+                        .meta(row_idx)
+                        .map(|m| m.has_children)
+                        .unwrap_or(false);
                     if elapsed_ms >= SPRING_DELAY_MS
-                        && tree_model_for_tick.has_children(node)
-                        && !tsh_for_tick.is_expanded(node)
+                        && has_children
+                        && !source_for_tick.is_expanded_at(row_idx)
                     {
-                        tsh_for_tick.expand(node);
-                        // Reset so we don't keep re-firing on the same
-                        // node; next time the pointer moves to a
-                        // different row the hover handler re-arms.
-                        hn_for_tick.set(None);
+                        source_for_tick.set_expanded_at(row_idx, true);
+                        // Reset so we don't keep re-firing on the same row.
+                        hr_for_tick.set(None);
                     }
                 }
             });
@@ -903,41 +945,23 @@ impl<T: 'static> Widget for TreeView<T> {
                 .as_ref()
                 .map(|s| s.is_selected(i))
                 .unwrap_or(false);
-            // Get entry metadata for accessibility
-            let entry_meta = self.tree_slice.entry_at(i);
-            let item_has_children = entry_meta.as_ref().is_some_and(|e| e.has_children);
-            // Borrow a fresh handle once per row so we can build a
-            // TreeRowContext for the delegate. The handle is cheap
-            // (Rc-only) and goes out of scope after the closure runs.
-            let slice_handle = self.tree_slice.handle();
-            if let Some(widget) = self.tree_slice.with_entry(i, |item, entry| {
-                let row_ctx = TreeRowContext {
-                    slice: &slice_handle,
-                    node_id: entry.node_id,
-                };
-                (self.delegate)(item, entry, selected, &row_ctx)
-            }) {
+            // Row metadata (a11y level / expand state) from the source.
+            let meta = self.source.meta(i);
+            let item_has_children = meta.as_ref().is_some_and(|m| m.has_children);
+            if let Some(widget) = self
+                .source
+                .with_row(i, &|item, m| (self.row_delegate)(i, item, m, selected))
+            {
                 let inner_id = ctx.add_boxed(widget);
                 let (level, position_1based, total_siblings, expanded_opt) =
-                    if let Some(ref e) = entry_meta {
-                        let exp = if e.has_children {
-                            Some(e.is_expanded)
+                    if let Some(ref m) = meta {
+                        let exp = if m.has_children {
+                            Some(m.is_expanded)
                         } else {
                             None
                         };
-                        let tree_model = self.tree_slice.tree();
-                        let (pos, total) = if let Some(parent_id) = tree_model.parent(e.node_id) {
-                            let siblings = tree_model.children(parent_id);
-                            let idx = siblings.iter().position(|&s| s == e.node_id).unwrap_or(0);
-                            (idx + 1, siblings.len())
-                        } else {
-                            let root_count = tree_model.root_count();
-                            let idx = (0..root_count)
-                                .find(|&k| tree_model.root(k) == e.node_id)
-                                .unwrap_or(0);
-                            (idx + 1, root_count)
-                        };
-                        (e.depth + 1, pos, total, exp)
+                        let (pos, total) = self.source.sibling_pos(i);
+                        (m.depth + 1, pos, total, exp)
                     } else {
                         (1, 1, 1, None)
                     };
@@ -950,13 +974,12 @@ impl<T: 'static> Widget for TreeView<T> {
                     selected,
                 ));
 
-                // Click handling: selection + expand/collapse for items with children
+                // Click handling: selection + expand/collapse for branch rows.
                 {
                     let sel_click = self.row_selection.clone();
                     let click_index = i;
-                    let tsh_click = self.tree_slice.handle();
+                    let source_click = self.source.clone();
                     let has_children = item_has_children && self.row_click_expands;
-                    let node_for_toggle = self.tree_slice.visible_node_id(i);
 
                     ctx.apply_handlers(
                         child_id,
@@ -991,8 +1014,8 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // gesture pre-empts it (once active_drag is
                                 // set, PointerUp is routed to handle_drag_drop
                                 // and never reaches this widget).
-                                if has_children && let Some(node_id) = node_for_toggle {
-                                    tsh_click.toggle_expand(node_id);
+                                if has_children {
+                                    source_click.toggle_at(click_index);
                                 }
                                 bastyde_core::event::EventResponse::Ignored
                             }
@@ -1001,49 +1024,36 @@ impl<T: 'static> Widget for TreeView<T> {
                     );
                 }
 
-                // Attach drag handler for reorderable items. Produces a
-                // visible preview by re-invoking the delegate for this row
-                // and wrapping it in a DragPreview so it reads as
-                // "picked up" at the pointer.
-                if reorderable && let Some(node_id) = self.tree_slice.visible_node_id(i) {
-                    let drag_tree_id = tree_id;
+                // Drag handler for reorderable rows, gated by the source's
+                // transferable verdict (`drag`). Emits the index-based
+                // `RowDrag`; the source recovers the key + validates at
+                // hover/drop. The floating preview re-invokes the row delegate.
+                if reorderable && (self.source.dnd.drag_fn)(i) == DragEligibility::CanDrag {
+                    let drag_view_id = tree_id;
                     let drag_self_id = self_id;
-                    let delegate_for_preview = self.delegate.clone();
-                    let tsh_for_preview = self.tree_slice.handle();
-                    let tree_model_for_preview = self.tree_slice.tree().clone();
+                    let row_delegate = self.row_delegate.clone();
+                    let source_for_preview = self.source.clone();
                     let flat_idx = i;
                     let metrics_for_preview = self.metrics.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
                             if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                                let payload = DragPayload::typed(TreeViewDragData {
-                                    source_node: node_id,
-                                    source_tree_id: drag_tree_id,
+                                let payload = DragPayload::typed(RowDrag {
+                                    source_index: flat_idx,
+                                    source_view_id: drag_view_id,
                                 });
-                                let delegate = delegate_for_preview.clone();
                                 const PREVIEW_WIDTH: f32 = 240.0;
                                 let h = metrics_for_preview.borrow_mut().row_height(flat_idx);
-                                // Build the preview from the source
-                                // node's item + entry metadata. The
-                                // entry captures depth / expansion
-                                // state so the floating preview matches
-                                // the row it was plucked from.
-                                let entry_meta = tsh_for_preview.entry_at(flat_idx);
-                                let preview_opt = entry_meta.and_then(|entry| {
-                                    tree_model_for_preview.with_item(node_id, |item| {
-                                        let preview_ctx = TreeRowContext {
-                                            slice: &tsh_for_preview,
-                                            node_id,
-                                        };
+                                let rd = row_delegate.clone();
+                                let preview_opt =
+                                    source_for_preview.with_row(flat_idx, &move |item, m| {
                                         Box::new(crate::drag_preview::DragPreview::new(
                                             PREVIEW_WIDTH,
                                             h,
-                                            delegate(item, &entry, false, &preview_ctx),
-                                        ))
-                                            as Box<dyn Widget>
-                                    })
-                                });
+                                            rd(flat_idx, item, m, false),
+                                        )) as Box<dyn Widget>
+                                    });
                                 if let Some(preview) = preview_opt {
                                     ctx.start_drag_with_preview(drag_self_id, payload, preview);
                                 } else {
@@ -1096,7 +1106,7 @@ impl<T: 'static> Widget for TreeView<T> {
         }
 
         let viewport_height = bounds.height;
-        let count = self.tree_slice.visible_count();
+        let count = self.source.visible_count();
         let item_count = self.item_entries.len();
         let content_width = (bounds.width - SCROLLBAR_THICKNESS).max(0.0);
 
@@ -2334,5 +2344,316 @@ mod tests {
         model.remove(a1);
         assert!(!keyed.is_selected(&a1), "deleted node is pruned from selection");
         assert!(keyed.is_selected(&b1), "surviving node stays selected");
+    }
+
+    // ── Generic `TreeDataSource` path (Stage 8a) ─────────────────────────────
+    // An external source of truth keyed on `i64` (an entity id), driving a
+    // `TreeView<String>` with NO `TreeModel` mirror — the designer's case.
+
+    struct MockNode {
+        id: i64,
+        parent: Option<i64>,
+        label: String,
+    }
+
+    /// Minimal in-memory `TreeDataSource<Item = String, Key = i64>`. Nodes are
+    /// stored in pre-order; visibility is derived from the expand set.
+    struct MockI64Source {
+        nodes: RefCell<Vec<MockNode>>,
+        expanded: RefCell<std::collections::HashSet<i64>>,
+        version: Signal<u64>,
+        accept_log: RefCell<Vec<(i64, i64, DropPosition)>>,
+    }
+
+    impl MockI64Source {
+        fn new() -> Self {
+            // root1(1) { a(2), b(3) }   root2(4)
+            let nodes = vec![
+                MockNode { id: 1, parent: None, label: "root1".into() },
+                MockNode { id: 2, parent: Some(1), label: "a".into() },
+                MockNode { id: 3, parent: Some(1), label: "b".into() },
+                MockNode { id: 4, parent: None, label: "root2".into() },
+            ];
+            Self {
+                nodes: RefCell::new(nodes),
+                expanded: RefCell::new([1, 4].into_iter().collect()),
+                version: Signal::new(0),
+                accept_log: RefCell::new(Vec::new()),
+            }
+        }
+        fn parent_of(&self, id: i64) -> Option<i64> {
+            self.nodes.borrow().iter().find(|n| n.id == id).and_then(|n| n.parent)
+        }
+        fn exists(&self, id: i64) -> bool {
+            self.nodes.borrow().iter().any(|n| n.id == id)
+        }
+        fn is_descendant(&self, node: i64, ancestor: i64) -> bool {
+            let mut cur = Some(node);
+            while let Some(c) = cur {
+                if c == ancestor {
+                    return true;
+                }
+                cur = self.parent_of(c);
+            }
+            false
+        }
+        fn visible_ids(&self) -> Vec<i64> {
+            let nodes = self.nodes.borrow();
+            let expanded = self.expanded.borrow();
+            nodes
+                .iter()
+                .filter(|n| {
+                    // Visible iff every ancestor is expanded.
+                    let mut cur = n.parent;
+                    while let Some(p) = cur {
+                        if !expanded.contains(&p) {
+                            return false;
+                        }
+                        cur = nodes.iter().find(|m| m.id == p).and_then(|m| m.parent);
+                    }
+                    true
+                })
+                .map(|n| n.id)
+                .collect()
+        }
+        fn depth_of(&self, id: i64) -> usize {
+            let mut d = 0;
+            let mut cur = self.parent_of(id);
+            while let Some(p) = cur {
+                d += 1;
+                cur = self.parent_of(p);
+            }
+            d
+        }
+        fn remove(&self, id: i64) {
+            self.nodes.borrow_mut().retain(|n| n.id != id && n.parent != Some(id));
+            self.bump();
+        }
+        fn bump(&self) {
+            let v = self.version.get() + 1;
+            self.version.set(v);
+        }
+    }
+
+    impl TreeDataSource for MockI64Source {
+        type Item = String;
+        type Key = i64;
+        fn visible_count(&self) -> usize {
+            self.visible_ids().len()
+        }
+        fn with_entry<R>(
+            &self,
+            flat_index: usize,
+            f: impl FnOnce(&String, &FlatEntry<i64>) -> R,
+        ) -> Option<R> {
+            let id = *self.visible_ids().get(flat_index)?;
+            let entry = FlatEntry {
+                node_id: id,
+                depth: self.depth_of(id),
+                has_children: self.nodes.borrow().iter().any(|n| n.parent == Some(id)),
+                is_expanded: self.expanded.borrow().contains(&id),
+            };
+            let nodes = self.nodes.borrow();
+            let label = &nodes.iter().find(|n| n.id == id)?.label;
+            Some(f(label, &entry))
+        }
+        fn key_at(&self, flat_index: usize) -> Option<i64> {
+            self.visible_ids().get(flat_index).copied()
+        }
+        fn flat_index_of(&self, key: &i64) -> Option<usize> {
+            self.visible_ids().iter().position(|k| k == key)
+        }
+        fn parent(&self, key: &i64) -> Option<i64> {
+            self.parent_of(*key)
+        }
+        fn child_keys(&self, key: &i64) -> Vec<i64> {
+            self.nodes.borrow().iter().filter(|n| n.parent == Some(*key)).map(|n| n.id).collect()
+        }
+        fn version_signal(&self) -> Signal<u64> {
+            self.version.clone()
+        }
+        fn is_expanded(&self, key: &i64) -> bool {
+            self.expanded.borrow().contains(key)
+        }
+        fn set_expanded(&self, key: &i64, expanded: bool) {
+            if expanded {
+                self.expanded.borrow_mut().insert(*key);
+            } else {
+                self.expanded.borrow_mut().remove(key);
+            }
+            self.bump();
+        }
+        fn contains_key(&self, key: &i64) -> bool {
+            // Whole-tree existence (survives collapse), not visibility.
+            self.exists(*key)
+        }
+        fn drag(&self, _key: &i64) -> DragEligibility {
+            DragEligibility::CanDrag
+        }
+        fn can_accept(&self, query: &bastyde_data::DropQuery<'_, i64>) -> DropResponse {
+            match &query.source {
+                bastyde_data::DragSource::SameView { key: src } => {
+                    if *src == query.target || self.is_descendant(query.target, *src) {
+                        DropResponse::Reject
+                    } else {
+                        DropResponse::Accept
+                    }
+                }
+                bastyde_data::DragSource::Foreign { .. } => DropResponse::Reject,
+            }
+        }
+        fn accept_drop(&self, commit: bastyde_data::DropCommit<'_, i64>) -> bool {
+            let bastyde_data::DragSource::SameView { key: src } = commit.source else {
+                return false;
+            };
+            if src == commit.target || self.is_descendant(commit.target, src) {
+                return false;
+            }
+            self.accept_log.borrow_mut().push((src, commit.target, commit.position));
+            self.bump();
+            true
+        }
+    }
+
+    #[test]
+    fn from_source_keyed_i64_survives_collapse_and_prunes() {
+        // A `TreeView<String>` driven by a generic `TreeDataSource<Key = i64>`
+        // (no `TreeModel` mirror). Selection is keyed by the entity id: a click
+        // stores the row's i64, a collapse keeps it (whole-tree existence), and
+        // a delete prunes it.
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let source = Rc::new(MockI64Source::new());
+        let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Multi);
+        let mut tree = WidgetTree::new();
+        let tv = tree.add(
+            TreeView::from_source_keyed(
+                MockI64Wrapper(source.clone()),
+                keyed.clone(),
+                |_label: &String, _row: &TreeRow, _sel| Box::new(FixedLeaf(120.0, 24.0)),
+            )
+            .item_height(24.0),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Visible order is [1, 2, 3, 4]; row 1 is node "a" (id 2). Clicking it
+        // must store the KEY 2, proving index→key translation + the render path.
+        let rows = tree.children(tv);
+        tree.click(rows[1]);
+        assert!(keyed.is_selected(&2), "click stores the row's i64 key, not its index");
+        assert!(!keyed.is_selected(&1));
+
+        // Collapse root1 → node 2 leaves the visible projection (version bump
+        // runs the prune). It must survive — still present in the source.
+        source.set_expanded(&1, false);
+        assert!(
+            keyed.is_selected(&2),
+            "a collapsed-but-present i64 node keeps its selection"
+        );
+
+        // Delete node 2 → prune drops the now-missing key.
+        source.remove(2);
+        assert!(!keyed.is_selected(&2), "a deleted i64 node is pruned");
+    }
+
+    /// Newtype so we can hand the same `Rc<MockI64Source>` to the view while
+    /// keeping a handle for assertions (the view erases the source).
+    struct MockI64Wrapper(Rc<MockI64Source>);
+    impl TreeDataSource for MockI64Wrapper {
+        type Item = String;
+        type Key = i64;
+        fn visible_count(&self) -> usize {
+            self.0.visible_count()
+        }
+        fn with_entry<R>(
+            &self,
+            i: usize,
+            f: impl FnOnce(&String, &FlatEntry<i64>) -> R,
+        ) -> Option<R> {
+            self.0.with_entry(i, f)
+        }
+        fn key_at(&self, i: usize) -> Option<i64> {
+            self.0.key_at(i)
+        }
+        fn flat_index_of(&self, k: &i64) -> Option<usize> {
+            self.0.flat_index_of(k)
+        }
+        fn parent(&self, k: &i64) -> Option<i64> {
+            self.0.parent(k)
+        }
+        fn child_keys(&self, k: &i64) -> Vec<i64> {
+            self.0.child_keys(k)
+        }
+        fn version_signal(&self) -> Signal<u64> {
+            self.0.version_signal()
+        }
+        fn is_expanded(&self, k: &i64) -> bool {
+            self.0.is_expanded(k)
+        }
+        fn set_expanded(&self, k: &i64, e: bool) {
+            self.0.set_expanded(k, e)
+        }
+        fn contains_key(&self, k: &i64) -> bool {
+            self.0.contains_key(k)
+        }
+        fn drag(&self, k: &i64) -> DragEligibility {
+            self.0.drag(k)
+        }
+        fn can_accept(&self, q: &bastyde_data::DropQuery<'_, i64>) -> DropResponse {
+            self.0.can_accept(q)
+        }
+        fn accept_drop(&self, c: bastyde_data::DropCommit<'_, i64>) -> bool {
+            self.0.accept_drop(c)
+        }
+    }
+
+    #[test]
+    fn from_source_drop_routes_through_source_and_refuses_cycle() {
+        // Reorderable generic source: a valid drop reaches `accept_drop`; a drop
+        // that would create a cycle (a parent onto its own child) is refused by
+        // the source — proving the view delegates DnD to `can_accept`/
+        // `accept_drop` instead of mutating a model itself.
+
+        // Valid: drag node "b" (id 3, row 2) onto "root2" (id 4, row 3).
+        let valid = Rc::new(MockI64Source::new());
+        let mut t1 = WidgetTree::new();
+        let v1 = t1.add(
+            TreeView::from_source(MockI64Wrapper(valid.clone()), |_l: &String, _r: &TreeRow, _s| {
+                Box::new(FixedLeaf(120.0, 24.0))
+            })
+            .item_height(24.0)
+            .reorderable(true),
+        );
+        t1.layout(SizeProposal::exact(400.0, 300.0));
+        let rows = t1.children(v1);
+        let from = t1.bounds(rows[2]).center();
+        let to = t1.bounds(rows[3]).center();
+        drag_item(&mut t1, from, to);
+        assert_eq!(
+            valid.accept_log.borrow().len(),
+            1,
+            "a valid drop is routed to the source's accept_drop"
+        );
+        assert_eq!(valid.accept_log.borrow()[0].0, 3, "dragged key recovered from RowDrag");
+        assert_eq!(valid.accept_log.borrow()[0].1, 4, "target key resolved from the hovered row");
+
+        // Cycle: drag "root1" (id 1, row 0) onto its child "a" (id 2, row 1).
+        let cyclic = Rc::new(MockI64Source::new());
+        let mut t2 = WidgetTree::new();
+        let v2 = t2.add(
+            TreeView::from_source(MockI64Wrapper(cyclic.clone()), |_l: &String, _r: &TreeRow, _s| {
+                Box::new(FixedLeaf(120.0, 24.0))
+            })
+            .item_height(24.0)
+            .reorderable(true),
+        );
+        t2.layout(SizeProposal::exact(400.0, 300.0));
+        let rows2 = t2.children(v2);
+        let from2 = t2.bounds(rows2[0]).center();
+        let to2 = t2.bounds(rows2[1]).center();
+        drag_item(&mut t2, from2, to2);
+        assert!(
+            cyclic.accept_log.borrow().is_empty(),
+            "a cyclic drop is refused by the source — no mutation applied"
+        );
     }
 }

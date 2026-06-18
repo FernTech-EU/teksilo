@@ -88,6 +88,17 @@ pub trait TreeDataSource: 'static {
         None
     }
 
+    /// Whether `key` still exists in the source, **independent of visibility** —
+    /// a node hidden under a collapsed ancestor (or scrolled out of a lazy
+    /// window) still exists. Drives keyed-selection pruning, so that a
+    /// collapsed-but-present node keeps its selection and only a *deleted* node
+    /// is dropped. Default: visible-only (`flat_index_of(key).is_some()`);
+    /// sources whose nodes persist while collapsed/scrolled out should override
+    /// this to consult their full store.
+    fn contains_key(&self, key: &Self::Key) -> bool {
+        self.flat_index_of(key).is_some()
+    }
+
     // ── DnD (default: inert) ──────────────────────────────────────────────
     /// Whether the node may begin a drag (the transferable gate).
     fn drag(&self, _key: &Self::Key) -> DragEligibility {

@@ -96,6 +96,7 @@ pub mod toggle;
 pub mod tool_box;
 pub mod toolbar;
 pub mod tooltip;
+pub(crate) mod tree_source;
 pub mod tree_table_view;
 pub mod tree_view;
 
@@ -229,6 +230,7 @@ pub use toolbar::{
     Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
 };
 pub use tree_table_view::TreeTableView;
+pub use tree_source::{TreeRow, TreeRowMeta};
 pub use tree_view::{TreeRowContext, TreeView};
 
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped

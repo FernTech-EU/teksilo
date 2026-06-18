@@ -490,6 +490,12 @@ impl<T: 'static> TreeDataSource for TreeSlice<T> {
         TreeSlice::first_changed_index(self)
     }
 
+    fn contains_key(&self, key: &NodeId) -> bool {
+        // Existence against the backing tree, not the visible projection, so a
+        // node hidden under a collapsed ancestor keeps its keyed selection.
+        self.tree().with_item(*key, |_| ()).is_some()
+    }
+
     fn is_expanded(&self, key: &NodeId) -> bool {
         TreeSlice::is_expanded(self, *key)
     }
