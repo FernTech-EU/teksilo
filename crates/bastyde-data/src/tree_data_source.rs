@@ -125,7 +125,7 @@ pub trait TreeDataSource: 'static {
 
 /// Whether `node` is `ancestor` or one of its descendants — the move cycle
 /// guard (you cannot drop a node into its own subtree).
-pub(crate) fn tree_is_desc_or_self<T: 'static>(
+pub fn tree_is_desc_or_self<T: 'static>(
     tree: &TreeModel<T>,
     node: NodeId,
     ancestor: NodeId,
@@ -144,7 +144,7 @@ pub(crate) fn tree_is_desc_or_self<T: 'static>(
 /// remove-then-insert index adjustment `TreeModel::move_node` requires. Shared
 /// by the `TreeSlice` / `SortFilterTreeModel` `accept_drop` impls. Returns
 /// whether the move was applied (false = rejected, e.g. cycle or self-drop).
-pub(crate) fn tree_apply_reorder<T: 'static>(
+pub fn tree_apply_reorder<T: 'static>(
     tree: &TreeModel<T>,
     source: NodeId,
     target: NodeId,

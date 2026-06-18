@@ -27,7 +27,7 @@ use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
-use bastyde_data::{FlatEntry, NodeId, TreeModel};
+use bastyde_data::{DropPosition, FlatEntry, NodeId, TreeModel};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
@@ -44,31 +44,6 @@ struct TreeViewDragData {
     source_node: NodeId,
     /// Stable ID to identify this TreeView instance.
     source_tree_id: usize,
-}
-
-/// Where a dragged (or Alt+Arrow-moved) node landed relative to the target,
-/// reported by [`TreeView::on_reorder`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReorderPosition {
-    /// As a sibling immediately before the target.
-    Before,
-    /// As a child of the target (reparent).
-    Into,
-    /// As a sibling immediately after the target.
-    After,
-}
-
-/// A reorder move delivered to [`TreeView::on_reorder`]. The handler decides
-/// how to apply it (e.g. route to a backend that owns the data), so the
-/// `TreeModel` is NOT mutated by the widget when a handler is installed.
-#[derive(Debug, Clone, Copy)]
-pub struct TreeReorder {
-    /// The node being moved.
-    pub source: NodeId,
-    /// The node it was dropped onto / next to.
-    pub target: NodeId,
-    /// Where, relative to `target`.
-    pub position: ReorderPosition,
 }
 
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
@@ -140,11 +115,6 @@ pub struct TreeView<T: 'static> {
 
     /// Enable intra-widget drag reordering.
     reorderable: bool,
-
-    /// Controlled-reorder handler. When set, drag-drop and Alt+Arrow reorders
-    /// are delivered here INSTEAD of mutating the `TreeModel` — for views whose
-    /// data is owned elsewhere (a backend reconciled into the model).
-    on_reorder: Option<Rc<dyn Fn(TreeReorder, &mut bastyde_core::widget::EventContext)>>,
 
     /// Whether a row-body PointerUp on a branch row auto-toggles its
     /// expansion. Defaults to `true` (legacy behavior — convenient
@@ -240,7 +210,6 @@ impl<T: 'static> TreeView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
-            on_reorder: None,
             row_click_expands: true,
             drop_feedback: Signal::new(None),
             overscroll_behavior: OverscrollBehavior::default(),
@@ -323,27 +292,13 @@ impl<T: 'static> TreeView<T> {
 
     /// Enable intra-widget drag reordering.
     ///
-    /// When enabled, tree items can be dragged and dropped to reparent or
-    /// reorder them. By default the underlying `TreeModel::move_node()` is
-    /// called automatically (an "uncontrolled" view that owns its data).
-    /// Install [`on_reorder`](Self::on_reorder) to instead route moves to a
-    /// handler. Keyboard equivalent: Alt+ArrowUp/Down.
+    /// When enabled, tree rows can be dragged to reparent or reorder them.
+    /// Before/Into/After is chosen by where in the row the pointer drops; the
+    /// move is cycle-guarded — a drop onto the node itself or into its own
+    /// subtree is refused and shows no insertion line. Keyboard equivalent:
+    /// Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
-        self
-    }
-
-    /// Route reorders (drag-drop and Alt+Arrow) to a handler instead of
-    /// mutating the `TreeModel` directly. Use this when the tree's data is
-    /// owned elsewhere — e.g. a database or entity store projected into the
-    /// model — so the move goes through that source of truth and the model is
-    /// updated by the resulting reconcile, not by the widget. Requires
-    /// [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(
-        mut self,
-        f: impl Fn(TreeReorder, &mut bastyde_core::widget::EventContext) + 'static,
-    ) -> Self {
-        self.on_reorder = Some(Rc::new(f));
         self
     }
 
@@ -552,8 +507,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
 
-            let on_reorder_for_key = self.on_reorder.clone();
-            handlers = handlers.on_key(move |event, ctx| {
+            handlers = handlers.on_key(move |event, _ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     let visible_count = tsh.visible_count();
                     if visible_count == 0 {
@@ -589,40 +543,6 @@ impl<T: 'static> Widget for TreeView<T> {
 
                             let sibling_idx =
                                 siblings.iter().position(|&n| n == node_id).unwrap_or(0);
-
-                            // Controlled mode: route the sibling move (Before the
-                            // previous / After the next) to the handler; the app
-                            // owns the data and the model is reconciled.
-                            if let Some(cb) = &on_reorder_for_key {
-                                match key {
-                                    bastyde_core::event::Key::ArrowUp if sibling_idx > 0 => {
-                                        cb(
-                                            TreeReorder {
-                                                source: node_id,
-                                                target: siblings[sibling_idx - 1],
-                                                position: ReorderPosition::Before,
-                                            },
-                                            ctx,
-                                        );
-                                        return bastyde_core::event::EventResponse::Handled;
-                                    }
-                                    bastyde_core::event::Key::ArrowDown
-                                        if sibling_idx + 1 < siblings.len() =>
-                                    {
-                                        cb(
-                                            TreeReorder {
-                                                source: node_id,
-                                                target: siblings[sibling_idx + 1],
-                                                position: ReorderPosition::After,
-                                            },
-                                            ctx,
-                                        );
-                                        return bastyde_core::event::EventResponse::Handled;
-                                    }
-                                    _ => {}
-                                }
-                                return bastyde_core::event::EventResponse::Ignored;
-                            }
 
                             match key {
                                 bastyde_core::event::Key::ArrowUp if sibling_idx > 0 => {
@@ -777,35 +697,52 @@ impl<T: 'static> Widget for TreeView<T> {
             let hn_for_hover = hovered_node.clone();
 
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
-                if payload.has_typed::<TreeViewDragData>() {
-                    let scroll = scroll_for_hover.get().max(0.0);
-                    let content_y = position.y + scroll;
-                    // Insertion line at the snapped boundary; spring-load
-                    // tracks the row the pointer actually sits on.
-                    let (insertion_top, row_idx) = {
-                        let mut m = metrics_for_hover.borrow_mut();
-                        m.resize(tsh_for_hover.visible_count());
-                        let flat_idx = m.insertion_index(content_y);
-                        (m.row_top(flat_idx), m.row_at(content_y))
-                    };
+                let Some(drag_data) = payload.get_typed::<TreeViewDragData>() else {
+                    feedback_for_hover.set(None);
+                    hn_for_hover.set(None);
+                    return DropFeedback::NoFeedback;
+                };
+                let source_node = drag_data.source_node;
+                let scroll = scroll_for_hover.get().max(0.0);
+                let content_y = position.y + scroll;
+                // Insertion line at the snapped boundary; spring-load tracks the
+                // row the pointer actually sits on.
+                let (insertion_top, row_idx) = {
+                    let mut m = metrics_for_hover.borrow_mut();
+                    m.resize(tsh_for_hover.visible_count());
+                    let flat_idx = m.insertion_index(content_y);
+                    (m.row_top(flat_idx), m.row_at(content_y))
+                };
+                let target = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
+
+                // Spring-load tracking (dwell-to-expand a branch).
+                let prev = hn_for_hover.get();
+                match (prev, target) {
+                    (Some((p, t)), Some(n)) if p == n => hn_for_hover.set(Some((n, t))),
+                    (_, Some(n)) => hn_for_hover.set(Some((n, std::time::Instant::now()))),
+                    (_, None) => hn_for_hover.set(None),
+                }
+
+                // The move is valid unless it would drop the node onto itself or
+                // into its own subtree (a cycle). An invalid drop shows NO line —
+                // the pre-commit forbidden affordance.
+                let valid = target.is_some_and(|t| {
+                    t != source_node
+                        && !bastyde_data::tree_data_source::tree_is_desc_or_self(
+                            tsh_for_hover.tree(),
+                            t,
+                            source_node,
+                        )
+                });
+                if valid {
                     let insertion_y = insertion_top - scroll;
                     feedback_for_hover.set(Some((insertion_y, 400.0)));
-
-                    let node = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
-                    let prev = hn_for_hover.get();
-                    match (prev, node) {
-                        (Some((p, t)), Some(n)) if p == n => hn_for_hover.set(Some((n, t))),
-                        (_, Some(n)) => hn_for_hover.set(Some((n, std::time::Instant::now()))),
-                        (_, None) => hn_for_hover.set(None),
-                    }
-
                     DropFeedback::InsertionLine {
                         y: insertion_y,
                         width: 400.0,
                     }
                 } else {
                     feedback_for_hover.set(None);
-                    hn_for_hover.set(None);
                     DropFeedback::NoFeedback
                 }
             });
@@ -817,144 +754,47 @@ impl<T: 'static> Widget for TreeView<T> {
             let scroll_for_drop = self.scroll_y.clone();
 
             let tsh_for_drop = self.tree_slice.handle();
-            let on_reorder_for_drop = self.on_reorder.clone();
-            handlers = handlers.on_drop(move |mut payload, position, ctx| {
-                if let Some(drag_data) = payload.take_typed::<TreeViewDragData>()
-                    && drag_data.source_tree_id == my_tree_id
-                {
-                    let source_node = drag_data.source_node;
-
-                    // Compute target flat index from Y
-                    let scroll = scroll_for_drop.get().max(0.0);
-                    let content_y = position.y + scroll;
-                    let (flat_idx, row_top, row_h) = {
-                        let mut m = metrics_for_drop.borrow_mut();
-                        m.resize(tsh_for_drop.visible_count());
-                        let idx = m.row_at(content_y);
-                        (idx, m.row_top(idx), m.row_height(idx))
-                    };
-
-                    // Get the target entry for drop zone computation
-                    if let Some(entry) = tsh_for_drop.entry_at(flat_idx) {
-                        if entry.node_id == source_node {
-                            return true; // dropped on self, no-op
-                        }
-
-                        // Compute drop zone from Y within the row:
-                        // top third = before, middle = into (if has children), bottom = after
-                        let y_in_row = content_y - row_top;
-                        let third = row_h / 3.0;
-
-                        // Controlled mode: hand the move to the app and do NOT
-                        // mutate the model — the app routes it to its own data.
-                        if let Some(cb) = &on_reorder_for_drop {
-                            let position = if y_in_row < third {
-                                ReorderPosition::Before
-                            } else if y_in_row > 2.0 * third {
-                                ReorderPosition::After
-                            } else {
-                                ReorderPosition::Into
-                            };
-                            cb(
-                                TreeReorder { source: source_node, target: entry.node_id, position },
-                                ctx,
-                            );
-                            return true;
-                        }
-
-                        if y_in_row < third {
-                            // Drop BEFORE target: move as sibling above
-                            let target = entry.node_id;
-                            let source_parent = tree_model_for_drop.parent(source_node);
-                            if let Some(parent) = tree_model_for_drop.parent(target) {
-                                let siblings = tree_model_for_drop.children(parent);
-                                let mut idx =
-                                    siblings.iter().position(|&n| n == target).unwrap_or(0);
-                                // Adjust: if source is an earlier sibling under the same
-                                // parent, move_node removes it first, shifting indices down.
-                                if source_parent == Some(parent) {
-                                    let src_idx = siblings.iter().position(|&n| n == source_node);
-                                    if let Some(si) = src_idx
-                                        && si < idx
-                                    {
-                                        idx -= 1;
-                                    }
-                                }
-                                tree_model_for_drop.move_node(source_node, parent, idx);
-                            } else {
-                                // Target is a root — move to root before it
-                                let root_count = tree_model_for_drop.root_count();
-                                let mut idx = 0;
-                                for i in 0..root_count {
-                                    if tree_model_for_drop.root(i) == target {
-                                        idx = i;
-                                        break;
-                                    }
-                                }
-                                // Adjust if source is also a root before target
-                                if source_parent.is_none() {
-                                    for i in 0..root_count {
-                                        if tree_model_for_drop.root(i) == source_node {
-                                            if i < idx {
-                                                idx -= 1;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                                tree_model_for_drop.move_to_root(source_node, idx);
-                            }
-                        } else if y_in_row > 2.0 * third {
-                            // Drop AFTER target: move as sibling below
-                            let target = entry.node_id;
-                            let source_parent = tree_model_for_drop.parent(source_node);
-                            if let Some(parent) = tree_model_for_drop.parent(target) {
-                                let siblings = tree_model_for_drop.children(parent);
-                                let mut idx = siblings
-                                    .iter()
-                                    .position(|&n| n == target)
-                                    .map(|i| i + 1)
-                                    .unwrap_or(0);
-                                // Adjust for same-parent removal shifting indices
-                                if source_parent == Some(parent) {
-                                    let src_idx = siblings.iter().position(|&n| n == source_node);
-                                    if let Some(si) = src_idx
-                                        && si < idx
-                                    {
-                                        idx -= 1;
-                                    }
-                                }
-                                tree_model_for_drop.move_node(source_node, parent, idx);
-                            } else {
-                                let root_count = tree_model_for_drop.root_count();
-                                let mut idx = root_count;
-                                for i in 0..root_count {
-                                    if tree_model_for_drop.root(i) == target {
-                                        idx = i + 1;
-                                        break;
-                                    }
-                                }
-                                // Adjust if source is also a root before target
-                                if source_parent.is_none() {
-                                    for i in 0..root_count {
-                                        if tree_model_for_drop.root(i) == source_node {
-                                            if i < idx {
-                                                idx -= 1;
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                                tree_model_for_drop.move_to_root(source_node, idx.min(root_count));
-                            }
-                        } else {
-                            // Drop INTO target (middle third): reparent as first child
-                            tree_model_for_drop.move_node(source_node, entry.node_id, 0);
-                        }
-                    }
-                    return true;
+            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+                let Some(drag_data) = payload.take_typed::<TreeViewDragData>() else {
+                    return false;
+                };
+                if drag_data.source_tree_id != my_tree_id {
+                    return false;
                 }
-                false
+                let source_node = drag_data.source_node;
+
+                let scroll = scroll_for_drop.get().max(0.0);
+                let content_y = position.y + scroll;
+                let (flat_idx, row_top, row_h) = {
+                    let mut m = metrics_for_drop.borrow_mut();
+                    m.resize(tsh_for_drop.visible_count());
+                    let idx = m.row_at(content_y);
+                    (idx, m.row_top(idx), m.row_height(idx))
+                };
+                let Some(entry) = tsh_for_drop.entry_at(flat_idx) else {
+                    return false;
+                };
+
+                // Drop zone from Y within the row: top third = Before, middle =
+                // Into, bottom = After. Route through the cycle-guarded reorder
+                // helper — a drop onto the node itself or into its own subtree is
+                // refused without mutating or panicking.
+                let y_in_row = content_y - row_top;
+                let third = row_h / 3.0;
+                let drop_pos = if y_in_row < third {
+                    DropPosition::Before
+                } else if y_in_row > 2.0 * third {
+                    DropPosition::After
+                } else {
+                    DropPosition::Into
+                };
+                bastyde_data::tree_data_source::tree_apply_reorder(
+                    &tree_model_for_drop,
+                    source_node,
+                    entry.node_id,
+                    drop_pos,
+                );
+                true
             });
 
             // Clear insertion line + spring-load timer whenever the drag
@@ -1681,27 +1521,26 @@ mod tests {
 
     #[test]
     fn drag_reparents_into_target() {
-        // Drag C (row 2) into the middle third of row 0 (into A as first child).
+        // Drag C (row 2) into the middle third of row 0 (into A as last child —
+        // drop-into appends, the standard folder convention).
         let (mut wtree, _tv_id, model, a, _b, c) = make_reorderable_tree_view();
         wtree.layout(SizeProposal::exact(400.0, 300.0));
 
         // Middle third of a 28px row is [9.33, 18.67]. Use y=14.
         drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 14.0));
 
-        // C should now be A's first child (A's existing children were A1, A2).
+        // C should now be A's last child (A's existing children were A1, A2).
         let a_children = model.children(a);
         assert_eq!(a_children.len(), 3, "A should have three children");
-        assert_eq!(a_children[0], c, "C should be A's first child");
+        assert_eq!(a_children[2], c, "C should be A's last child");
         // C is no longer a root.
         assert_eq!(model.root_count(), 2);
     }
 
     #[test]
-    fn on_reorder_routes_drop_without_mutating_model() {
-        use std::cell::RefCell;
-        use std::rc::Rc;
-        let captured: Rc<RefCell<Vec<TreeReorder>>> = Rc::new(RefCell::new(Vec::new()));
-        let cap = captured.clone();
+    fn drag_into_reparents_the_node() {
+        // Drag C onto the middle third of A's row → C is reparented under A
+        // (the move is applied via the cycle-guarded reorder helper).
         let model = sample_tree();
         let a = model.root(0);
         let c = model.root(2);
@@ -1711,22 +1550,42 @@ mod tests {
                 Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
             })
             .item_height(28.0)
-            .reorderable(true)
-            .on_reorder(move |mv, _ctx| cap.borrow_mut().push(mv)),
+            .reorderable(true),
         );
         wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-        // Drag C into the middle third of row 0 ("into A").
+        // Drag C (root 2, y≈70) into the middle third of row 0 ("into A").
         drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 14.0));
 
-        let calls = captured.borrow();
-        assert_eq!(calls.len(), 1, "on_reorder should fire once");
-        assert_eq!(calls[0].source, c);
-        assert_eq!(calls[0].target, a);
-        assert_eq!(calls[0].position, ReorderPosition::Into);
-        // Controlled mode: the model must NOT be mutated by the widget.
-        assert_eq!(model.root_count(), 3, "C must still be a root");
-        assert_eq!(model.children(a).len(), 2, "A's children unchanged");
+        assert_eq!(model.root_count(), 2, "C is no longer a root");
+        assert_eq!(model.parent(c), Some(a), "C is now a child of A");
+    }
+
+    #[test]
+    fn drag_into_own_descendant_is_refused_without_panicking() {
+        // The cycle guard: dragging A into its own child A1 must be refused —
+        // no move, and (critically) no panic in TreeModel::move_node.
+        let model = sample_tree();
+        let a = model.root(0);
+        let a1 = model.children(a)[0];
+        let tv = TreeView::new(model.clone(), |_item, entry, _sel| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .reorderable(true);
+        // Expand A so A1 is a visible row before the drag.
+        tv.expand(a);
+        let mut wtree = WidgetTree::new();
+        let _tv = wtree.add(tv);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Rows: A(0), A1(1), A2(2), B(3), C(4). Drag A (row 0, y≈14) into the
+        // middle third of A1 (row 1, y≈42).
+        drag_item(&mut wtree, Point::new(50.0, 14.0), Point::new(50.0, 42.0));
+
+        // Refused: A is still a root, A1 still A's child. No panic occurred.
+        assert_eq!(model.root_count(), 3, "A unchanged (cycle refused)");
+        assert_eq!(model.parent(a1), Some(a), "A1 still under A");
     }
 
     #[test]
