@@ -100,10 +100,14 @@ pub(crate) struct RowSelection {
     select_fn: Rc<dyn Fn(usize)>,
     toggle_fn: Rc<dyn Fn(usize)>,
     extend_fn: Rc<dyn Fn(usize)>,
+    select_all_fn: Rc<dyn Fn(usize)>,
     selected_indices_fn: Rc<dyn Fn() -> Vec<usize>>,
     clear_fn: Rc<dyn Fn()>,
     observe_fn: Rc<dyn Fn(Box<dyn Fn()>) -> ObserverHandle>,
     on_change_fn: Rc<dyn Fn(&DataChange)>,
+    /// Unconditional prune for the version-signal-driven tree views (which
+    /// don't emit a `DataChange`): drop orphaned keys (keyed) or no-op (index).
+    prune_fn: Rc<dyn Fn()>,
 }
 
 impl RowSelection {
@@ -111,7 +115,8 @@ impl RowSelection {
     /// straight through; `on_data_change` index-shifts (insert / remove) or
     /// clears (reset) the selection, matching the legacy inline behaviour.
     pub(crate) fn from_index(sel: SelectionModel) -> Self {
-        let (s_is, s_sel, s_tog, s_ext, s_idx, s_clr, s_obs, s_chg) = (
+        let (s_is, s_sel, s_tog, s_ext, s_all, s_idx, s_clr, s_obs, s_chg) = (
+            sel.clone(),
             sel.clone(),
             sel.clone(),
             sel.clone(),
@@ -127,6 +132,7 @@ impl RowSelection {
             select_fn: Rc::new(move |i| s_sel.select(i)),
             toggle_fn: Rc::new(move |i| s_tog.toggle(i)),
             extend_fn: Rc::new(move |i| s_ext.extend_to(i)),
+            select_all_fn: Rc::new(move |count| s_all.select_all(count)),
             selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
             clear_fn: Rc::new(move || s_clr.clear()),
             observe_fn: Rc::new(move |cb| s_obs.selection_signal().observe(move |_| cb())),
@@ -140,6 +146,10 @@ impl RowSelection {
                 DataChange::Reset => s_chg.clear(),
                 _ => {}
             }),
+            // The index model has no stable identity to prune against on a
+            // bare version bump — tree structural adjustments stay no-ops here
+            // (the legacy behaviour).
+            prune_fn: Rc::new(|| {}),
         }
     }
 
@@ -187,6 +197,13 @@ impl RowSelection {
                     }
                 })
             },
+            select_all_fn: {
+                let (k, ka) = (keyed.clone(), key_at.clone());
+                Rc::new(move |count| {
+                    let keys: Vec<K> = (0..count).filter_map(|i| ka(i)).collect();
+                    k.select_keys(keys, false);
+                })
+            },
             selected_indices_fn: {
                 let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
                 Rc::new(move || {
@@ -204,7 +221,7 @@ impl RowSelection {
                 Rc::new(move |cb| k.selection_signal().observe(move |_| cb()))
             },
             on_change_fn: {
-                let (k, c) = (keyed, contains_key);
+                let (k, c) = (keyed.clone(), contains_key.clone());
                 Rc::new(move |change| match change {
                     // Keys are stable across inserts / moves; only removals and
                     // resets can orphan a selected key.
@@ -213,6 +230,10 @@ impl RowSelection {
                     }
                     _ => {}
                 })
+            },
+            prune_fn: {
+                let (k, c) = (keyed, contains_key);
+                Rc::new(move || k.prune_missing(|key| c(key)))
             },
         }
     }
@@ -232,6 +253,9 @@ impl RowSelection {
     pub(crate) fn extend_to(&self, index: usize) {
         (self.extend_fn)(index)
     }
+    pub(crate) fn select_all(&self, count: usize) {
+        (self.select_all_fn)(count)
+    }
     pub(crate) fn selected_indices(&self) -> Vec<usize> {
         (self.selected_indices_fn)()
     }
@@ -247,5 +271,11 @@ impl RowSelection {
     /// for the keyed model).
     pub(crate) fn on_data_change(&self, change: &DataChange) {
         (self.on_change_fn)(change)
+    }
+    /// Prune orphaned keys (keyed model) — used by the tree views, which drive
+    /// off a version signal rather than a `DataChange`. No-op for the index
+    /// model.
+    pub(crate) fn prune(&self) {
+        (self.prune_fn)()
     }
 }

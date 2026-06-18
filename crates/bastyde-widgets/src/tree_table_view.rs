@@ -50,8 +50,8 @@ use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, Wi
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{
-    DropPosition, NodeId, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode,
-    TreeModel,
+    DropPosition, KeyedSelectionModel, NodeId, SelectionModel, SortDirection, SortFilterTreeModel,
+    TreeFilterMode, TreeModel,
 };
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole};
@@ -60,6 +60,7 @@ use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::RowSelection;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
@@ -145,7 +146,9 @@ pub struct TreeTableView<T: 'static> {
     header_height: Option<f32>,
     show_header: bool,
     selection_mode: TableSelectionMode,
-    selection: Option<SelectionModel>,
+    /// Row selection — index-based `SelectionModel` or keyed
+    /// `KeyedSelectionModel<NodeId>`, unified behind the index-facing facade.
+    row_selection: Option<RowSelection>,
     cell_selection: Option<CellSelectionModel>,
     alternating_rows: bool,
     grid_lines: GridLines,
@@ -222,7 +225,7 @@ impl<T: 'static> TreeTableView<T> {
             header_height: None,
             show_header: true,
             selection_mode: TableSelectionMode::default(),
-            selection: None,
+            row_selection: None,
             cell_selection: None,
             alternating_rows: false,
             grid_lines: GridLines::None,
@@ -373,8 +376,37 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Set the index-based row selection model (visible positions). For
+    /// identity-based selection that survives expand / collapse / sort /
+    /// filter / structural edits, use [`keyed_selection`](Self::keyed_selection)
+    /// instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
-        self.selection = Some(sel);
+        self.row_selection = Some(RowSelection::from_index(sel));
+        self
+    }
+
+    /// Set a keyed row selection model (by `NodeId`). Selection is tracked by
+    /// node identity, so it survives expand / collapse, sort / filter, and node
+    /// moves — and stays consistent if two views share the projection. Pruned
+    /// of deleted nodes on each projection change. Mutually exclusive with
+    /// [`selection`](Self::selection) (last one set wins).
+    pub fn keyed_selection(mut self, keyed: KeyedSelectionModel<NodeId>) -> Self {
+        let key_at = {
+            let p = self.proxy.clone();
+            Rc::new(move |i| p.visible_node_id(i)) as Rc<dyn Fn(usize) -> Option<NodeId>>
+        };
+        let len = {
+            let p = self.proxy.clone();
+            Rc::new(move || p.visible_count()) as Rc<dyn Fn() -> usize>
+        };
+        // A collapsed-but-present node must NOT be pruned, so existence is
+        // checked against the tree, not the (visible) projection window.
+        let contains = {
+            let p = self.proxy.clone();
+            Rc::new(move |n: &NodeId| p.tree().with_item(*n, |_| ()).is_some())
+                as Rc<dyn Fn(&NodeId) -> bool>
+        };
+        self.row_selection = Some(RowSelection::from_keyed(keyed, key_at, len, contains));
         self
     }
 
@@ -675,10 +707,16 @@ impl<T: 'static> Widget for TreeTableView<T> {
         ctx.effect(&self.proxy.version_signal(), {
             let metrics = self.row_metrics.clone();
             let proxy = self.proxy.clone();
+            let row_sel = self.row_selection.clone();
             move |_| {
                 metrics
                     .borrow_mut()
                     .apply_divergence(proxy.first_changed_index(), proxy.visible_count());
+                // Drop any keyed selection whose node was deleted (no-op for
+                // the index model). Cheap; runs on every projection change.
+                if let Some(ref rs) = row_sel {
+                    rs.prune();
+                }
                 let next = proj_ver.get() + 1;
                 proj_ver.set(next);
                 v_for_proj.set(next);
@@ -757,7 +795,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             col_count: display_indices.len().max(1),
             focused_cell: self.focused_cell.clone(),
             selection_mode: self.selection_mode,
-            selection: self.selection.clone(),
+            selection: self.row_selection.clone(),
             cell_selection: self.cell_selection.clone(),
             scroll_y: self.scroll_y.clone(),
             max_scroll_y: self.max_scroll_y.clone(),
@@ -780,7 +818,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let reorderable_kbd = self.reorderable;
         let proxy_kbd = self.proxy.clone();
         let focused_kbd = self.focused_cell.clone();
-        let sel_kbd = self.selection.clone();
+        let sel_kbd = self.row_selection.clone();
         let sort_kbd = self.sort_signal.clone();
         let key_handler = move |event: &bastyde_core::event::WidgetEvent,
                                 ctx: &mut EventContext|
@@ -1066,7 +1104,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 indent_per_level,
                 row_metrics: self.row_metrics.clone(),
                 selection_mode: self.selection_mode,
-                selection: self.selection.clone(),
+                selection: self.row_selection.clone(),
                 cell_selection: self.cell_selection.clone(),
                 scroll_y: self.scroll_y.clone(),
                 viewport_height: self.viewport_height.clone(),
@@ -1274,7 +1312,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             }
         }
 
-        if let Some(ref sel) = self.selection
+        if let Some(ref sel) = self.row_selection
             && matches!(
                 self.selection_mode,
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
@@ -2248,5 +2286,46 @@ mod tests {
         drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 38.0));
         assert_eq!(proxy.tree().root(0), docs, "docs unchanged while sorted");
         assert_eq!(proxy.tree().root(1), src, "src unchanged while sorted");
+    }
+
+    #[test]
+    fn keyed_selection_survives_collapse() {
+        // Keyed (identity) selection: a node selected by NodeId stays selected
+        // when its parent collapses (the row scrolls out of the projection).
+        // The prune on every projection change must NOT drop a collapsed-but-
+        // present node — existence is checked against the tree, not visibility.
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.expand_all();
+        let docs = proxy.tree().root(0);
+        let readme = proxy.tree().children(docs)[0];
+        let keyed = KeyedSelectionModel::<NodeId>::new(SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .selection_mode(TableSelectionMode::MultiRow)
+                .keyed_selection(keyed.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+
+        keyed.select(readme);
+        assert!(keyed.is_selected(&readme));
+
+        // Collapse docs → readme leaves the visible projection, bumping the
+        // version (which runs the prune). It must survive (still in the tree).
+        proxy.collapse(docs);
+        assert!(
+            keyed.is_selected(&readme),
+            "a collapsed-but-present node stays selected by identity"
+        );
+
+        // Re-expand → still selected.
+        proxy.expand(docs);
+        assert!(keyed.is_selected(&readme));
     }
 }

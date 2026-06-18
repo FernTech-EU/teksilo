@@ -33,14 +33,14 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{DragEligibility, RowState, SelectionMode, SelectionModel};
+use bastyde_data::{DragEligibility, RowState, SelectionMode};
 
 use super::a11y::CellA11y;
 use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::data_views::{RowDrag, default_placeholder};
+use crate::data_views::{RowDrag, RowSelection, default_placeholder};
 
 const BUFFER_ROWS: usize = 5;
 
@@ -69,7 +69,7 @@ pub(crate) struct BodyPane<T: 'static> {
     /// the pane drives realization, placement, and measurement).
     pub(crate) row_metrics: SharedRowMetrics,
     pub(crate) selection_mode: TableSelectionMode,
-    pub(crate) selection: Option<SelectionModel>,
+    pub(crate) selection: Option<RowSelection>,
     pub(crate) cell_selection: Option<CellSelectionModel>,
 
     pub(crate) scroll_y: Signal<f32>,
@@ -181,10 +181,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         if let Some(ref sel) = self.selection {
             let v = version.clone();
             let counter = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), move |_| {
+            let handle = sel.observe_for_rebuild(move || {
                 counter.set(counter.get() + 1);
                 v.set(counter.get());
             });
+            ctx.own_handle(handle);
         }
         if let Some(ref cs) = self.cell_selection {
             let v = version.clone();

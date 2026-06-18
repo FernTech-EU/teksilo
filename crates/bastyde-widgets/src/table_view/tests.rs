@@ -895,6 +895,74 @@ fn space_toggles_row_selection_at_focus() {
 }
 
 #[test]
+fn keyed_selection_stores_row_key_not_index() {
+    // from_source_keyed wires a KeyedSelectionModel<S::Key>: Space on the
+    // focused row toggles the row's KEY, not its index (here keys differ from
+    // indices, so a key mix-up would be caught).
+    use bastyde_core::ObserverHandle;
+    use bastyde_data::{KeyedSelectionModel, ListDataSource, SelectionMode};
+    use std::rc::Rc;
+
+    struct KeyedRowSource {
+        rows: Vec<(u64, Row)>, // (stable key, row)
+    }
+    impl ListDataSource for KeyedRowSource {
+        type Item = Row;
+        type Key = u64;
+        fn len(&self) -> usize {
+            self.rows.len()
+        }
+        fn with_item<R>(&self, i: usize, f: impl FnOnce(&Row) -> R) -> Option<R> {
+            self.rows.get(i).map(|(_, r)| f(r))
+        }
+        fn key_at(&self, i: usize) -> Option<u64> {
+            self.rows.get(i).map(|(k, _)| *k)
+        }
+        fn index_of(&self, key: &u64) -> Option<usize> {
+            self.rows.iter().position(|(k, _)| k == key)
+        }
+        fn observe_changes(
+            &self,
+            _f: impl Fn(&bastyde_data::DataChange) + 'static,
+        ) -> ObserverHandle {
+            ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+        }
+    }
+
+    let keyed = KeyedSelectionModel::<u64>::new(SelectionMode::Multi);
+    let source = KeyedRowSource {
+        rows: (0..5)
+            .map(|i| {
+                (
+                    500 + i as u64 * 100,
+                    Row {
+                        id: i,
+                        name: format!("row {i}"),
+                    },
+                )
+            })
+            .collect(),
+    };
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::from_source_keyed(source, keyed.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    // Focus row 2 (key 700) and toggle it.
+    focus_at(&mut tree, table, 2, 0);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert!(keyed.is_selected(&700), "the row KEY is selected, not the index");
+    assert!(!keyed.is_selected(&2), "the index is not used as a key");
+}
+
+#[test]
 fn shift_arrow_extends_multi_row_selection() {
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Multi);

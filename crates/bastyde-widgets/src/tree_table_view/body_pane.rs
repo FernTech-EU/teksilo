@@ -35,10 +35,11 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{SelectionMode, SelectionModel, SortFilterTreeModel};
+use bastyde_data::{SelectionMode, SortFilterTreeModel};
 
 use super::TreeTableRowDragData;
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::data_views::RowSelection;
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
@@ -67,7 +68,7 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// realization, placement, and measurement).
     pub(crate) row_metrics: SharedRowMetrics,
     pub(crate) selection_mode: TableSelectionMode,
-    pub(crate) selection: Option<SelectionModel>,
+    pub(crate) selection: Option<RowSelection>,
     pub(crate) cell_selection: Option<CellSelectionModel>,
 
     pub(crate) scroll_y: Signal<f32>,
@@ -174,10 +175,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         if let Some(ref sel) = self.selection {
             let v = version.clone();
             let counter = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), move |_| {
+            let handle = sel.observe_for_rebuild(move || {
                 counter.set(counter.get() + 1);
                 v.set(counter.get());
             });
+            ctx.own_handle(handle);
         }
         if let Some(ref cs) = self.cell_selection {
             let v = version.clone();

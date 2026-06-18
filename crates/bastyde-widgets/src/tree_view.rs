@@ -27,10 +27,11 @@ use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
-use bastyde_data::{DropPosition, FlatEntry, NodeId, TreeModel};
+use bastyde_data::{DropPosition, FlatEntry, KeyedSelectionModel, NodeId, TreeModel};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::RowSelection;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 const BUFFER_ITEMS: usize = 5;
@@ -108,7 +109,9 @@ pub struct TreeView<T: 'static> {
     height_source: HeightSource,
     /// Row geometry — all virtualization consumers go through this.
     metrics: SharedRowMetrics,
-    selection: Option<SelectionModel>,
+    /// Row selection — index-based `SelectionModel` or keyed
+    /// `KeyedSelectionModel<NodeId>`, unified behind the index-facing facade.
+    row_selection: Option<RowSelection>,
 
     /// Keyboard-focused flat index.
     focused_index: Rc<Cell<Option<usize>>>,
@@ -207,7 +210,7 @@ impl<T: 'static> TreeView<T> {
             item_height: DEFAULT_ITEM_HEIGHT,
             height_source: HeightSource::Uniform,
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
-            selection: None,
+            row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             row_click_expands: true,
@@ -284,9 +287,36 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
-    /// Set the selection model.
+    /// Set the index-based selection model (visible positions). For
+    /// identity-based selection that survives expand / collapse / filter and
+    /// node moves, use [`keyed_selection`](Self::keyed_selection) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
-        self.selection = Some(sel);
+        self.row_selection = Some(RowSelection::from_index(sel));
+        self
+    }
+
+    /// Set a keyed selection model (by `NodeId`). Selection is tracked by node
+    /// identity, so it survives expand / collapse, filtering, and node moves —
+    /// and stays consistent if two views share the model. Pruned of deleted
+    /// nodes on each slice change. Mutually exclusive with
+    /// [`selection`](Self::selection) (last one set wins).
+    pub fn keyed_selection(mut self, keyed: KeyedSelectionModel<NodeId>) -> Self {
+        let key_at = {
+            let tsh = self.tree_slice.handle();
+            Rc::new(move |i| tsh.visible_node_id(i)) as Rc<dyn Fn(usize) -> Option<NodeId>>
+        };
+        let len = {
+            let tsh = self.tree_slice.handle();
+            Rc::new(move || tsh.visible_count()) as Rc<dyn Fn() -> usize>
+        };
+        // A collapsed-but-present node must NOT be pruned, so existence is
+        // checked against the tree, not the visible projection.
+        let contains = {
+            let tsh = self.tree_slice.handle();
+            Rc::new(move |n: &NodeId| tsh.tree().with_item(*n, |_| ()).is_some())
+                as Rc<dyn Fn(&NodeId) -> bool>
+        };
+        self.row_selection = Some(RowSelection::from_keyed(keyed, key_at, len, contains));
         self
     }
 
@@ -403,6 +433,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let ver = version_for_data.clone();
             let metrics = self.metrics.clone();
             let slice = self.tree_slice.handle();
+            let row_sel = self.row_selection.clone();
             move |_| {
                 // Slice observers fire synchronously per reflatten, so
                 // `first_changed_index()` describes exactly this change:
@@ -411,6 +442,12 @@ impl<T: 'static> Widget for TreeView<T> {
                 metrics
                     .borrow_mut()
                     .apply_divergence(slice.first_changed_index(), slice.visible_count());
+                // Drop any keyed selection whose node was deleted (no-op for
+                // the index model). A collapse does not delete, so a collapsed
+                // node's selection survives.
+                if let Some(ref rs) = row_sel {
+                    rs.prune();
+                }
                 let next = dv.get() + 1;
                 dv.set(next);
                 ver.set(next);
@@ -418,17 +455,15 @@ impl<T: 'static> Widget for TreeView<T> {
         });
 
         // --- Observe selection changes (rebuild to update delegate's `selected` param) ---
-        if let Some(ref sel) = self.selection {
+        if let Some(ref rs) = self.row_selection {
             let version_for_sel = version.clone();
             let sel_ver = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), {
-                let sv = sel_ver.clone();
-                move |_| {
-                    let next = sv.get() + 1;
-                    sv.set(next);
-                    version_for_sel.set(next);
-                }
+            let handle = rs.observe_for_rebuild(move || {
+                let next = sel_ver.get() + 1;
+                sel_ver.set(next);
+                version_for_sel.set(next);
             });
+            ctx.own_handle(handle);
         }
 
         // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
@@ -499,7 +534,7 @@ impl<T: 'static> Widget for TreeView<T> {
         // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
         {
             let tsh = self.tree_slice.handle();
-            let sel_for_key = self.selection.clone();
+            let sel_for_key = self.row_selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
@@ -864,7 +899,7 @@ impl<T: 'static> Widget for TreeView<T> {
         let self_id = ctx.self_id();
         for i in start..end {
             let selected = self
-                .selection
+                .row_selection
                 .as_ref()
                 .map(|s| s.is_selected(i))
                 .unwrap_or(false);
@@ -917,7 +952,7 @@ impl<T: 'static> Widget for TreeView<T> {
 
                 // Click handling: selection + expand/collapse for items with children
                 {
-                    let sel_click = self.selection.clone();
+                    let sel_click = self.row_selection.clone();
                     let click_index = i;
                     let tsh_click = self.tree_slice.handle();
                     let has_children = item_has_children && self.row_click_expands;
@@ -2266,5 +2301,38 @@ mod tests {
             .map(|i| tree.with_item(tree.root(i), |v| *v).unwrap())
             .collect();
         assert_eq!(order, vec!["A", "C", "B"]);
+    }
+
+    #[test]
+    fn keyed_selection_tracks_identity_and_prunes_deleted() {
+        // Keyed (identity) selection by NodeId: selecting nodes stores their
+        // ids, and deleting a node prunes only that key on the next slice
+        // change — the other selected node survives.
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let model = sample_tree();
+        let a = model.root(0);
+        let a1 = model.children(a)[0];
+        let b = model.root(1);
+        let b1 = model.children(b)[0];
+        let keyed = KeyedSelectionModel::<NodeId>::new(SelectionMode::Multi);
+        let mut wtree = WidgetTree::new();
+        wtree.add(
+            TreeView::new(model.clone(), |_item, _entry, _sel| {
+                Box::new(FixedLeaf(100.0, 28.0))
+            })
+            .item_height(28.0)
+            .keyed_selection(keyed.clone()),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        keyed.select(a1);
+        keyed.toggle(b1);
+        assert!(keyed.is_selected(&a1) && keyed.is_selected(&b1));
+
+        // Delete A1 → the slice reflattens (version bump) and prune drops the
+        // orphaned key; B1 (still present) survives.
+        model.remove(a1);
+        assert!(!keyed.is_selected(&a1), "deleted node is pruned from selection");
+        assert!(keyed.is_selected(&b1), "surviving node stays selected");
     }
 }

@@ -44,7 +44,8 @@ use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement}
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{
-    DataChange, DropPosition, DropResponse, ListDataSource, ListModel, SelectionModel,
+    DataChange, DropPosition, DropResponse, ItemKey, KeyedSelectionModel, ListDataSource, ListModel,
+    SelectionModel,
 };
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole};
@@ -53,7 +54,7 @@ use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::{RowDrag, flat_insertion_target};
+use crate::data_views::{RowDrag, RowSelection, flat_insertion_target};
 use crate::list_source::DndLazy;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
@@ -177,7 +178,9 @@ pub struct TableView<T: 'static> {
     header_height: Option<f32>,
     show_header: bool,
     selection_mode: TableSelectionMode,
-    selection: Option<SelectionModel>,
+    /// Row selection — index-based `SelectionModel` or keyed
+    /// `KeyedSelectionModel<K>`, unified behind the index-facing facade.
+    row_selection: Option<RowSelection>,
     cell_selection: Option<CellSelectionModel>,
     alternating_rows: bool,
     grid_lines: GridLines,
@@ -295,6 +298,43 @@ impl<T: 'static> TableView<T> {
         Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
     }
 
+    /// Wrap any `ListDataSource<Item = T>` with **keyed** row selection. The
+    /// `KeyedSelectionModel<S::Key>` tracks selection by source identity, so it
+    /// survives reorders / filters / lazy window-slides and stays consistent
+    /// across two views of the same source. The view stays `TableView<T>` — the
+    /// index↔key mapping is captured from the concrete source here. Equivalent
+    /// to `from_source(..)` plus an identity-based replacement for
+    /// [`selection`](Self::selection).
+    pub fn from_source_keyed<S: ListDataSource<Item = T>>(
+        source: S,
+        keyed: KeyedSelectionModel<S::Key>,
+    ) -> Self
+    where
+        S::Key: ItemKey,
+    {
+        let s = Rc::new(source);
+        let dnd = DndLazy::from_source(s.clone());
+        let key_at = {
+            let s = s.clone();
+            Rc::new(move |i| s.key_at(i)) as Rc<dyn Fn(usize) -> Option<S::Key>>
+        };
+        let len = {
+            let s = s.clone();
+            Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
+        };
+        let contains = {
+            let s = s.clone();
+            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
+                as Rc<dyn Fn(&S::Key) -> bool>
+        };
+        let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        let (len_fn, with_item_fn, observe_fn, first_changed_fn) =
+            erase_data_source::<S, T>(s);
+        let mut view = Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd);
+        view.row_selection = Some(row_selection);
+        view
+    }
+
     fn create(
         len_fn: LenFn,
         with_item_fn: WithItemFn<T>,
@@ -318,7 +358,7 @@ impl<T: 'static> TableView<T> {
             header_height: None,
             show_header: true,
             selection_mode: TableSelectionMode::default(),
-            selection: None,
+            row_selection: None,
             cell_selection: None,
             alternating_rows: false,
             grid_lines: GridLines::None,
@@ -490,8 +530,11 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Set the index-based row selection model (positions). For identity-based
+    /// selection that survives reorder / filter / window-slide, build the view
+    /// with [`from_source_keyed`](Self::from_source_keyed) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
-        self.selection = Some(sel);
+        self.row_selection = Some(RowSelection::from_index(sel));
         self
     }
 
@@ -931,7 +974,7 @@ impl<T: 'static> Widget for TableView<T> {
         let data_ver = Rc::new(Cell::new(0_u64));
         let upstream = (self.observe_fn)(Box::new({
             let dv = data_ver.clone();
-            let sel_for_adjust = self.selection.clone();
+            let sel_for_adjust = self.row_selection.clone();
             let cell_sel_for_adjust = self.cell_selection.clone();
             let metrics_for_data = self.row_metrics.clone();
             let len_for_data = self.len_fn.clone();
@@ -955,20 +998,11 @@ impl<T: 'static> Widget for TableView<T> {
                 metrics_for_data
                     .borrow_mut()
                     .apply_divergence(divergence, (len_for_data)());
-                // Auto-adjust both selection models on insert/remove so
-                // the visual selection survives data mutations on the
-                // upstream source.
-                if let Some(ref s) = sel_for_adjust {
-                    match change {
-                        DataChange::ItemsInserted { range } => {
-                            s.adjust_for_insert(range.start, range.end - range.start);
-                        }
-                        DataChange::ItemsRemoved { range } => {
-                            s.adjust_for_remove(range.start, range.end - range.start);
-                        }
-                        DataChange::Reset => s.clear(),
-                        _ => {}
-                    }
+                // Keep row selection in step: index-shift (index model) or
+                // prune orphaned keys (keyed model). Cell selection (always
+                // index-based) is adjusted separately below.
+                if let Some(ref rs) = sel_for_adjust {
+                    rs.on_data_change(change);
                 }
                 if let Some(ref s) = cell_sel_for_adjust {
                     match change {
@@ -991,14 +1025,15 @@ impl<T: 'static> Widget for TableView<T> {
 
         // Observe selection changes -> bump version (rebuild updates the
         // `is_selected` arg passed to cell delegates).
-        if let Some(ref sel) = self.selection {
+        if let Some(ref rs) = self.row_selection {
             let v_for_sel = version.clone();
             let sel_ver = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), move |_| {
+            let handle = rs.observe_for_rebuild(move || {
                 let next = sel_ver.get() + 1;
                 sel_ver.set(next);
                 v_for_sel.set(next);
             });
+            ctx.own_handle(handle);
         }
         if let Some(ref cs) = self.cell_selection {
             let v_for_csel = version.clone();
@@ -1092,7 +1127,7 @@ impl<T: 'static> Widget for TableView<T> {
             col_count: display_indices_now.len().max(1),
             focused_cell: self.focused_cell.clone(),
             selection_mode: self.selection_mode,
-            selection: self.selection.clone(),
+            selection: self.row_selection.clone(),
             cell_selection: self.cell_selection.clone(),
             scroll_y: self.scroll_y.clone(),
             max_scroll_y: self.max_scroll_y.clone(),
@@ -1144,7 +1179,7 @@ impl<T: 'static> Widget for TableView<T> {
         let reorderable_kbd = self.reorderable_rows;
         let accept_drop_kbd = self.dnd.accept_drop_fn.clone();
         let focused_kbd = self.focused_cell.clone();
-        let sel_kbd = self.selection.clone();
+        let sel_kbd = self.row_selection.clone();
         let len_kbd = self.len_fn.clone();
         let key_handler = move |event: &bastyde_core::event::WidgetEvent,
                                 ctx: &mut bastyde_core::widget::EventContext|
@@ -1403,7 +1438,7 @@ impl<T: 'static> Widget for TableView<T> {
                 column_widths: self.column_widths.clone(),
                 row_metrics: self.row_metrics.clone(),
                 selection_mode: self.selection_mode,
-                selection: self.selection.clone(),
+                selection: self.row_selection.clone(),
                 cell_selection: self.cell_selection.clone(),
                 scroll_y: self.scroll_y.clone(),
                 viewport_height: self.viewport_height.clone(),
@@ -1648,7 +1683,7 @@ impl<T: 'static> Widget for TableView<T> {
         }
 
         // Selection highlights — row selection modes only.
-        if let Some(ref sel) = self.selection
+        if let Some(ref sel) = self.row_selection
             && matches!(
                 self.selection_mode,
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow

@@ -14,12 +14,13 @@ use std::rc::Rc;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::EventContext;
-use bastyde_data::{SelectionMode, SelectionModel};
+use bastyde_data::SelectionMode;
 
 use super::column::{EditTrigger, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::data_views::RowSelection;
 
 /// Configuration captured from the table at build time and threaded
 /// into the on_key handler. Cheap to clone (signals + Rcs).
@@ -29,7 +30,7 @@ pub(crate) struct KeyHandlerConfig {
     pub col_count: usize,
     pub focused_cell: Signal<Option<(usize, usize)>>,
     pub selection_mode: TableSelectionMode,
-    pub selection: Option<SelectionModel>,
+    pub selection: Option<RowSelection>,
     pub cell_selection: Option<CellSelectionModel>,
     pub scroll_y: Signal<f32>,
     pub max_scroll_y: Signal<f32>,
