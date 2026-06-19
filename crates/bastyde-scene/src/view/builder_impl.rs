@@ -727,4 +727,23 @@ impl SceneView {
         self.overscroll_behavior = behavior;
         self
     }
+
+    /// Wrap this view in a [`SceneScrollView`](crate::SceneScrollView), adding
+    /// draggable scroll bars with the widget-tier `ScrollArea`'s options (mode,
+    /// per-axis policy, thickness). The bars track the camera and drive panning;
+    /// native wheel / drag panning — and its smoothing — keeps working.
+    ///
+    /// Configure the result with the `SceneScrollView` builder methods:
+    ///
+    /// ```no_run
+    /// # use bastyde_scene::{Scene, SceneView, ScrollBarMode, ScrollBarPolicy};
+    /// let scrollable = SceneView::new(Scene::new())
+    ///     .with_scroll_bars()
+    ///     .scroll_bar_mode(ScrollBarMode::Overlay)
+    ///     .vertical_policy(ScrollBarPolicy::AsNeeded);
+    /// # let _ = scrollable;
+    /// ```
+    pub fn with_scroll_bars(self) -> crate::SceneScrollView {
+        crate::SceneScrollView::new(self)
+    }
 }

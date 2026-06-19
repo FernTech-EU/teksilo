@@ -51,8 +51,8 @@ use bastyde::widgets::{
 };
 use bastyde_scene::{
     A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
-    SceneItem, SceneItemPaintContext, SceneMinimap, SceneSelectionMode, SceneView, TextItem,
-    register_animated_item_signal,
+    SceneItem, SceneItemPaintContext, SceneMinimap, SceneSelectionMode, SceneView, ScrollBarMode,
+    ScrollBarPolicy, TextItem, register_animated_item_signal,
 };
 
 // ---------------------------------------------------------------------------
@@ -830,6 +830,10 @@ fn build_showcase_view() -> SceneView {
     SceneView::new(scene)
         .selection_mode(SceneSelectionMode::Multi)
         .default_size(w, h)
+        // Start slightly zoomed in so the content overflows the viewport and
+        // the scroll bars are active and draggable on launch. Zooming back out
+        // to fit hides them again (the `AsNeeded` policy in `build_root`).
+        .initial_zoom(1.4)
         // R5 background closure: paints a zoom-aware 50-unit grid in
         // scene coords. The closure receives the visible scene region,
         // so off-screen lines are skipped — at zoom 0.1× over a
@@ -969,6 +973,16 @@ fn build_root() -> impl Widget + 'static {
         .content_outline(Some((Color::new(1.0, 1.0, 1.0, 0.18), 1.0)))
         .viewport_color(Color::new(0.40, 0.66, 1.0, 0.95));
 
+    // Wrap the view in a SceneScrollView so the viewport gains overlay scroll
+    // bars. They track pan/zoom and let the user scroll by dragging; native
+    // wheel / hand-drag panning keeps working. `view` is consumed here — every
+    // signal the minimap / status row needed was captured above first.
+    let scrollable = view
+        .with_scroll_bars()
+        .scroll_bar_mode(ScrollBarMode::Overlay)
+        .vertical_policy(ScrollBarPolicy::AsNeeded)
+        .horizontal_policy(ScrollBarPolicy::AsNeeded);
+
     VStack::new()
         .spacing(8.0)
         .child(build_toolbar(drag_mode))
@@ -979,7 +993,7 @@ fn build_root() -> impl Widget + 'static {
             Expand::new().child(
                 ZStack::new()
                     .alignment(Alignment::BOTTOM_TRAILING)
-                    .child(Expand::new().child(view))
+                    .child(Expand::new().child(scrollable))
                     .child(Padding::new(12.0, 12.0, 12.0, 12.0).child(minimap)),
             ),
         )
@@ -1028,5 +1042,49 @@ mod tests {
         let (w, h) = scene_extent();
         assert!(w <= 1500.0, "scene width {} must fit in 1500 window", w);
         assert!(h <= 870.0, "scene height {} must fit below ~80px header", h);
+    }
+
+    #[test]
+    fn showcase_scroll_bars_appear_when_zoomed_content_overflows() {
+        // The showcase starts at initial_zoom(1.4), so the 1490×780 scene
+        // overflows a typical scene-area viewport — both AsNeeded bars should
+        // be placed with real (non-zero) bounds at the viewport edges.
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let scrollable = build_showcase_view()
+            .with_scroll_bars()
+            .scroll_bar_mode(ScrollBarMode::Overlay)
+            .vertical_policy(ScrollBarPolicy::AsNeeded)
+            .horizontal_policy(ScrollBarPolicy::AsNeeded);
+        let id = tree.add(scrollable);
+        // A realistic scene-area size (window minus toolbar/title/status chrome).
+        tree.layout(SizeProposal::exact(1480.0, 800.0));
+
+        let kids = tree.children(id);
+        assert_eq!(kids.len(), 3, "scene_view + v_bar + h_bar");
+        let v = tree.bounds(kids[1]);
+        let h = tree.bounds(kids[2]);
+        assert!(
+            v.width > 0.0 && v.height > 0.0,
+            "vertical scroll bar should be visible, got {:?}",
+            v
+        );
+        assert!(
+            h.width > 0.0 && h.height > 0.0,
+            "horizontal scroll bar should be visible, got {:?}",
+            h
+        );
+        // Vertical bar hugs the trailing (right) edge; horizontal bar the bottom.
+        assert!(
+            (v.x + v.width - 1480.0).abs() < 0.5,
+            "v bar at right edge, got x={} w={}",
+            v.x,
+            v.width
+        );
+        assert!(
+            (h.y + h.height - 800.0).abs() < 0.5,
+            "h bar at bottom edge, got y={} h={}",
+            h.y,
+            h.height
+        );
     }
 }
