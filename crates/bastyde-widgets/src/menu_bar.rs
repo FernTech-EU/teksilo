@@ -43,7 +43,7 @@ use bastyde_core::window::{
 };
 use bastyde_tokens::{SurfaceRole, TextStyleRole};
 
-use crate::icon_button::IconButton;
+use crate::icon_button::{IconButton, IconButtonSize};
 use crate::menu_context::MenuContext;
 use crate::menu_item::MenuLabel;
 use crate::menu_item::ParsedMnemonic;
@@ -116,6 +116,9 @@ pub struct MenuBar {
     bar_id: Option<WidgetId>,
     /// The hamburger `IconButton` id, captured in `build()`.
     hamburger_id: Option<WidgetId>,
+    /// Size variant applied to the collapsed-mode hamburger `IconButton`.
+    /// Defaults to [`IconButtonSize::Default`] (matching a bare `IconButton`).
+    hamburger_size: IconButtonSize,
     /// The declarative source model, when this bar was built via
     /// [`from_model`](Self::from_model). Drives the native menu mirror.
     model: Option<crate::menu::MenuModel>,
@@ -141,6 +144,7 @@ impl MenuBar {
             last_collapsed: Cell::new(false),
             bar_id: None,
             hamburger_id: None,
+            hamburger_size: IconButtonSize::Default,
             model: None,
             native_mode: crate::menu::NativeMenuMode::Off,
             native_binding: RefCell::new(None),
@@ -237,6 +241,16 @@ impl MenuBar {
             self.collapsed.set(true);
             self.last_collapsed.set(true);
         }
+        self
+    }
+
+    /// Set the size variant of the collapsed-mode hamburger
+    /// [`IconButton`]. Mirrors [`IconButton::size`] — pick
+    /// [`IconButtonSize::Toolbar`], [`IconButtonSize::Large`],
+    /// [`IconButtonSize::Hero`], etc. so the hamburger matches the
+    /// surrounding chrome. Defaults to [`IconButtonSize::Default`].
+    pub fn hamburger_size(mut self, size: IconButtonSize) -> Self {
+        self.hamburger_size = size;
         self
     }
 
@@ -984,6 +998,7 @@ impl Widget for MenuBar {
             // completes the ARIA disclosure pattern: the button reports
             // `expanded=true` while the bar is shown, `false` while collapsed.
             let hamburger = IconButton::menu()
+                .size(self.hamburger_size)
                 .expanded_when(revealed.clone())
                 .on_activate_fn({
                     let reveal = reveal.clone();
