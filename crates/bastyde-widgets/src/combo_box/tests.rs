@@ -692,6 +692,9 @@ fn virtualized_combo_reveals_new_rows_on_scroll() {
         },
         modifiers: Default::default(),
     });
+    // Wheel scrolling is animated; advance past the animation so the
+    // offset reaches its target before the visible range is asserted.
+    tree.tick_animations(std::time::Duration::from_millis(200));
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
     assert!(
@@ -862,6 +865,9 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
         delta: bastyde_core::event::ScrollDelta::Pixels { x: 0.0, y: 1_000.0 },
         modifiers: Default::default(),
     });
+    // Wheel scrolling is animated; complete the animation before reading
+    // the materialized range.
+    tree.tick_animations(std::time::Duration::from_millis(200));
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
     // The cursor never moved, but the row under it should now be a
@@ -877,6 +883,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
         delta: bastyde_core::event::ScrollDelta::Pixels { x: 0.0, y: 2_000.0 },
         modifiers: Default::default(),
     });
+    tree.tick_animations(std::time::Duration::from_millis(200));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     let after = materialized_range(&tree, 100..200);
 

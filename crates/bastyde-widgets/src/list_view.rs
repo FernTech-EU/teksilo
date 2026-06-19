@@ -17,8 +17,10 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_tokens::Easing;
 
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -39,7 +41,8 @@ use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{RowDrag, default_placeholder, flat_insertion_target};
 use crate::list_source::ListSource;
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 /// Default number of extra items to create above and below the viewport.
 const BUFFER_ITEMS: usize = 5;
@@ -101,6 +104,16 @@ pub struct ListView<T: 'static> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
+
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+
+    /// How the scroll bar is displayed. Defaults to `Permanent` (reserves
+    /// a layout column); `Overlay` / `Thin` float over the content.
+    scroll_bar_style: ScrollBarMode,
 
     /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
     /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
@@ -224,6 +237,9 @@ impl<T: 'static> ListView<T> {
             drop_feedback: Signal::new(None),
             placed_content_width: Rc::new(Cell::new(0.0)),
             overscroll_behavior: OverscrollBehavior::default(),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -241,6 +257,26 @@ impl<T: 'static> ListView<T> {
     /// disables chaining to an ancestor scrollable).
     pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
         self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
         self
     }
 
@@ -412,6 +448,7 @@ impl<T: 'static> std::fmt::Debug for ListView<T> {
         f.debug_struct("ListView")
             .field("item_count", &self.source.len())
             .field("item_height", &self.item_height)
+            .field("scroll_bar_style", &self.scroll_bar_style)
             .field("scroll_y", &self.scroll_y.get())
             .finish()
     }
@@ -537,6 +574,8 @@ impl<T: 'static> Widget for ListView<T> {
         let max_scroll = self.max_scroll_y.clone();
         let line_height = self.item_height;
         let overscroll_behavior = self.overscroll_behavior;
+        let smooth_scrolling = self.smooth_scrolling;
+        let smooth_scroll_duration = self.smooth_scroll_duration;
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
                 bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
@@ -546,8 +585,17 @@ impl<T: 'static> Widget for ListView<T> {
                     };
                     let current = scroll_y.get();
                     let max = max_scroll.get();
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
-                    scroll_y.set(new_y);
+                    // Base off the animation target so successive notches
+                    // accumulate instead of restarting mid-animation.
+                    let base = scroll_y.animation_target().unwrap_or(current);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                    if moved {
+                        if smooth_scrolling {
+                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                        } else {
+                            scroll_y.set(new_y);
+                        }
+                    }
                     // Chain to an ancestor scrollable when fully clamped
                     // (unless Contain), otherwise consume.
                     crate::common::scroll::scroll_response(
@@ -899,7 +947,12 @@ impl<T: 'static> Widget for ListView<T> {
                 self.scroll_y.clone(),
                 self.max_scroll_y.clone(),
                 self.viewport_ratio_y.clone(),
-            );
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
             let sb_id = ctx.add(scrollbar);
             self.scrollbar_id = Some(sb_id);
         } else {
@@ -949,7 +1002,8 @@ impl<T: 'static> Widget for ListView<T> {
         let provisional_total = self.total_content_height();
         let needs_internal_scrollbar =
             self.show_scrollbar && provisional_total > viewport_height + 0.5;
-        let content_width = if needs_internal_scrollbar {
+        let reserves_bar = self.scroll_bar_style == ScrollBarMode::Permanent;
+        let content_width = if needs_internal_scrollbar && reserves_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -1826,6 +1880,9 @@ mod tests {
             delta: bastyde_core::event::ScrollDelta::Pixels { x: 0.0, y: 60.0 },
             modifiers: Default::default(),
         });
+        // Wheel scrolling animates; complete it so the offset is the full
+        // 60px before the drag math runs.
+        tree.tick_animations(std::time::Duration::from_millis(200));
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // Drag from tree y=15 (center of item 2) down to tree y=120 (middle

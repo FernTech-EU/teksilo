@@ -13,8 +13,10 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_tokens::Easing;
 
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -35,7 +37,8 @@ use bastyde_data::{
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{RowDrag, RowSelection};
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::tree_source::{TreeRow, TreeRowMeta, TreeSource};
 
 const BUFFER_ITEMS: usize = 5;
@@ -152,6 +155,19 @@ pub struct TreeView<T: 'static> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
+
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`. Without it, each wheel
+    /// notch jumps by `item_height` per delivered line (typically 3),
+    /// which reads as a coarse multi-row jump rather than a smooth glide.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+
+    /// How the scroll bar is displayed. Defaults to `Permanent` — a
+    /// layout sibling that reserves its own width. `Overlay` / `Thin`
+    /// float over the content instead, like `ScrollArea`.
+    scroll_bar_style: ScrollBarMode,
 
     /// Rebuild trigger. A persistent field (re-bound each build) so
     /// `place_children`'s post-measure realization re-check can request
@@ -324,6 +340,9 @@ impl<T: 'static> TreeView<T> {
             row_click_expands: true,
             drop_feedback: Signal::new(None),
             overscroll_behavior: OverscrollBehavior::default(),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -359,6 +378,27 @@ impl<T: 'static> TreeView<T> {
         self.item_height = height;
         self.height_source = HeightSource::Uniform;
         self.remake_metrics();
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    /// When disabled, wheel events snap immediately to the new offset.
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
         self
     }
 
@@ -518,6 +558,7 @@ impl<T: 'static> std::fmt::Debug for TreeView<T> {
         f.debug_struct("TreeView")
             .field("visible_count", &self.source.visible_count())
             .field("item_height", &self.item_height)
+            .field("scroll_bar_style", &self.scroll_bar_style)
             .field("scroll_y", &self.scroll_y.get())
             .finish()
     }
@@ -634,6 +675,8 @@ impl<T: 'static> Widget for TreeView<T> {
         let max_scroll = self.max_scroll_y.clone();
         let line_height = self.item_height;
         let overscroll_behavior = self.overscroll_behavior;
+        let smooth_scrolling = self.smooth_scrolling;
+        let smooth_scroll_duration = self.smooth_scroll_duration;
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
                 bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
@@ -643,8 +686,19 @@ impl<T: 'static> Widget for TreeView<T> {
                     };
                     let current = scroll_y.get();
                     let max = max_scroll.get();
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
-                    scroll_y.set(new_y);
+                    // Base off the animation target (not the rendered offset)
+                    // so a mid-fling boundary correctly chains and successive
+                    // notches accumulate instead of restarting from the
+                    // partway-animated position.
+                    let base = scroll_y.animation_target().unwrap_or(current);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                    if moved {
+                        if smooth_scrolling {
+                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                        } else {
+                            scroll_y.set(new_y);
+                        }
+                    }
                     // Chain to an ancestor scrollable when fully clamped
                     // (unless Contain), otherwise consume.
                     crate::common::scroll::scroll_response(
@@ -1091,7 +1145,12 @@ impl<T: 'static> Widget for TreeView<T> {
             self.scroll_y.clone(),
             self.max_scroll_y.clone(),
             self.viewport_ratio_y.clone(),
-        );
+        )
+        .visual(match self.scroll_bar_style {
+            ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+            ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+            ScrollBarMode::Thin => ScrollBarVisual::Thin,
+        });
         let sb_id = ctx.add(scrollbar);
         self.scrollbar_id = Some(sb_id);
 
@@ -1125,7 +1184,14 @@ impl<T: 'static> Widget for TreeView<T> {
         let viewport_height = bounds.height;
         let count = self.source.visible_count();
         let item_count = self.item_entries.len();
-        let content_width = (bounds.width - SCROLLBAR_THICKNESS).max(0.0);
+        // Permanent reserves a column for the bar; Overlay / Thin float
+        // over the content, so rows span the full width.
+        let reserves_bar = self.scroll_bar_style == ScrollBarMode::Permanent;
+        let content_width = if reserves_bar {
+            (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
+        } else {
+            bounds.width
+        };
 
         // Auto-measure pass: measure every realized row at the content
         // width (height-for-width), feed the heights back, and apply the

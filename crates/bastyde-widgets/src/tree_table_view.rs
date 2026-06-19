@@ -38,6 +38,7 @@ mod body_pane;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
@@ -54,14 +55,15 @@ use bastyde_data::{
     TreeFilterMode, TreeModel,
 };
 use bastyde_i18n::LocalizedString;
-use bastyde_tokens::{BorderRole, SurfaceRole};
+use bastyde_tokens::{BorderRole, Easing, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::RowSelection;
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
     Column, ColumnResizePolicy, EditTrigger, GridLines, PinnedSide, TabTraversal,
@@ -162,6 +164,19 @@ pub struct TreeTableView<T: 'static> {
     #[allow(clippy::type_complexity)]
     on_row_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
 
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`. Without it, each wheel
+    /// notch jumps by `row_height` per delivered line, which reads as a
+    /// coarse multi-row jump rather than a smooth glide.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+    scroll_bar_style: ScrollBarMode,
+
     // Public reactive signals
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
@@ -238,6 +253,9 @@ impl<T: 'static> TreeTableView<T> {
             on_row_activate: None,
             reorderable: false,
             drop_feedback: Signal::new(None),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             overscroll_behavior: OverscrollBehavior::default(),
@@ -278,6 +296,27 @@ impl<T: 'static> TreeTableView<T> {
     /// disables chaining to an ancestor scrollable).
     pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
         self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    /// When disabled, wheel events snap immediately to the new offset.
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
         self
     }
 
@@ -649,6 +688,7 @@ impl<T: 'static> std::fmt::Debug for TreeTableView<T> {
             .field("rows", &self.proxy.visible_count())
             .field("columns", &self.columns.len())
             .field("tree_column", &self.tree_column_id)
+            .field("scroll_bar_style", &self.scroll_bar_style)
             .finish()
     }
 }
@@ -772,6 +812,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let scroll_y_for_wheel = self.scroll_y.clone();
         let max_scroll_for_wheel = self.max_scroll_y.clone();
         let line_height = row_h;
+        let smooth_scrolling = self.smooth_scrolling;
+        let smooth_scroll_duration = self.smooth_scroll_duration;
 
         let column_ids_in_display_order: Vec<String> = display_indices
             .iter()
@@ -892,9 +934,24 @@ impl<T: 'static> Widget for TreeTableView<T> {
                         };
                         let current = scroll_y_for_wheel.get();
                         let max = max_scroll_for_wheel.get();
+                        // Base off the animation target (not the rendered offset)
+                        // so a mid-fling boundary correctly chains and successive
+                        // notches accumulate instead of restarting from the
+                        // partway-animated position.
+                        let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
                         let (new_y, moved) =
-                            crate::common::scroll::scroll_clamp_axis(current, dy, max);
-                        scroll_y_for_wheel.set(new_y);
+                            crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                        if moved {
+                            if smooth_scrolling {
+                                scroll_y_for_wheel.animate_to(
+                                    new_y,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                            } else {
+                                scroll_y_for_wheel.set(new_y);
+                            }
+                        }
                         // Chain to an ancestor scrollable when fully
                         // clamped (unless Contain), otherwise consume —
                         // same contract as ListView/TreeView/TableView.
@@ -1129,7 +1186,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 self.scroll_y.clone(),
                 self.max_scroll_y.clone(),
                 self.viewport_ratio_y.clone(),
-            );
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
             self.scrollbar_id = Some(ctx.add(sb));
         }
 
@@ -1193,14 +1255,18 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.clamp_scroll();
 
         let needs_scrollbar = self.show_internal_scrollbars && total_height > body_height + 0.5;
-        let body_width = if needs_scrollbar {
+        // Permanent reserves a layout column for the bar; Overlay / Thin
+        // float over the content, so the body spans the full width.
+        let reserves_bar = needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_width = if reserves_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
         };
         // RTL mirror (see TableView::place_children): scrollbar to the
         // physical left, body/header band shifted right by its thickness.
-        let band_left = if rtl && needs_scrollbar {
+        // Only shift when the bar actually reserves a column (Permanent).
+        let band_left = if rtl && reserves_bar {
             bounds.x + SCROLLBAR_THICKNESS
         } else {
             bounds.x

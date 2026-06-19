@@ -32,6 +32,7 @@ mod tests;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
@@ -48,7 +49,7 @@ use bastyde_data::{
     SelectionModel,
 };
 use bastyde_i18n::LocalizedString;
-use bastyde_tokens::{BorderRole, SurfaceRole};
+use bastyde_tokens::{BorderRole, Easing, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
@@ -56,7 +57,8 @@ use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{RowDrag, RowSelection, flat_insertion_target};
 use crate::list_source::DndLazy;
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 pub use self::column::{
     Alignment, CellContext, Column, ColumnContext, ColumnResizePolicy, ColumnWidth, EditTrigger,
@@ -188,6 +190,19 @@ pub struct TableView<T: 'static> {
     show_internal_scrollbars: bool,
     empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
     column_resize_policy: ColumnResizePolicy,
+
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`. Without it, each wheel
+    /// notch jumps by `row_height` per delivered line (typically 3),
+    /// which reads as a coarse multi-row jump rather than a smooth glide.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+
+    /// How the scroll bar is displayed. Defaults to `Permanent` — a
+    /// layout sibling that reserves its own width. `Overlay` / `Thin`
+    /// float over the content instead, like `ScrollArea`.
+    scroll_bar_style: ScrollBarMode,
 
     // Public reactive signals
     scroll_y: Signal<f32>,
@@ -366,6 +381,9 @@ impl<T: 'static> TableView<T> {
             show_internal_scrollbars: true,
             empty_view: None,
             column_resize_policy: ColumnResizePolicy::default(),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
             overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
@@ -408,6 +426,27 @@ impl<T: 'static> TableView<T> {
     /// disables chaining to an ancestor scrollable).
     pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
         self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    /// When disabled, wheel events snap immediately to the new offset.
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
         self
     }
 
@@ -878,6 +917,7 @@ impl<T: 'static> std::fmt::Debug for TableView<T> {
             .field("columns", &self.columns.len())
             .field("scroll_y", &self.scroll_y.get())
             .field("selection_mode", &self.selection_mode)
+            .field("scroll_bar_style", &self.scroll_bar_style)
             .finish()
     }
 }
@@ -1089,6 +1129,8 @@ impl<T: 'static> Widget for TableView<T> {
         let max_scroll_for_wheel = self.max_scroll_y.clone();
         let line_height = row_h;
         let overscroll_behavior = self.overscroll_behavior;
+        let smooth_scrolling = self.smooth_scrolling;
+        let smooth_scroll_duration = self.smooth_scroll_duration;
 
         // Bind focused_cell at RepaintOnly — its update redraws the
         // focus ring without rebuilding the row tree.
@@ -1236,8 +1278,23 @@ impl<T: 'static> Widget for TableView<T> {
                     };
                     let current = scroll_y_for_wheel.get();
                     let max = max_scroll_for_wheel.get();
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
-                    scroll_y_for_wheel.set(new_y);
+                    // Base off the animation target (not the rendered offset)
+                    // so a mid-fling boundary correctly chains and successive
+                    // notches accumulate instead of restarting from the
+                    // partway-animated position.
+                    let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                    if moved {
+                        if smooth_scrolling {
+                            scroll_y_for_wheel.animate_to(
+                                new_y,
+                                smooth_scroll_duration,
+                                Easing::EaseOut,
+                            );
+                        } else {
+                            scroll_y_for_wheel.set(new_y);
+                        }
+                    }
                     // Chain to an ancestor scrollable when fully clamped
                     // (unless Contain), otherwise consume.
                     crate::common::scroll::scroll_response(
@@ -1463,7 +1520,12 @@ impl<T: 'static> Widget for TableView<T> {
                 self.scroll_y.clone(),
                 self.max_scroll_y.clone(),
                 self.viewport_ratio_y.clone(),
-            );
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
             self.scrollbar_id = Some(ctx.add(sb));
         }
 
@@ -1534,7 +1596,11 @@ impl<T: 'static> Widget for TableView<T> {
         self.clamp_scroll();
 
         let needs_scrollbar = self.show_internal_scrollbars && total_height > body_height + 0.5;
-        let body_width = if needs_scrollbar {
+        // Permanent reserves a column for the bar; Overlay / Thin float
+        // over the content, so rows span the full width.
+        let reserves_bar =
+            needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_width = if reserves_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -1545,7 +1611,7 @@ impl<T: 'static> Widget for TableView<T> {
         // body pane, empty state, and header; `scrollbar_x` is the
         // scrollbar's own physical x. The paint pass derives the same
         // content region from these conventions so the two never drift.
-        let band_left = if rtl && needs_scrollbar {
+        let band_left = if rtl && reserves_bar {
             bounds.x + SCROLLBAR_THICKNESS
         } else {
             bounds.x
