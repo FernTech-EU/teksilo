@@ -53,13 +53,16 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{
     DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
 };
-use bastyde_tokens::SurfaceRole;
+use bastyde_tokens::{Easing, SurfaceRole};
+
+use std::time::Duration;
 
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{RowDrag, flat_insertion_target};
 use crate::list_source::ListSource;
 use crate::primitives::TextWidget;
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_area::ScrollBarMode;
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 use body_pane::{GridBodyPane, TileDelegate};
 use keyboard::{GridKeyConfig, build_grid_key_handler};
@@ -188,6 +191,14 @@ pub struct GridView<T: 'static> {
     // Scroll
     show_scrollbar: bool,
     overscroll_behavior: OverscrollBehavior,
+    /// Animate wheel scrolling instead of snapping to the new offset.
+    /// Enabled by default — mirrors `ScrollArea`.
+    smooth_scrolling: bool,
+    /// Duration of the smooth scroll animation.
+    smooth_scroll_duration: Duration,
+    /// How the scroll bar is displayed. Defaults to `Permanent` (reserves
+    /// a layout column); `Overlay` / `Thin` float over the content.
+    scroll_bar_style: ScrollBarMode,
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
     viewport_ratio_y: Signal<f32>,
@@ -316,6 +327,9 @@ impl<T: 'static> GridView<T> {
             tab_traversal: GridTabTraversal::OutOfGrid,
             show_scrollbar: true,
             overscroll_behavior: OverscrollBehavior::default(),
+            smooth_scrolling: true,
+            smooth_scroll_duration: Duration::from_millis(150),
+            scroll_bar_style: ScrollBarMode::Permanent,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -487,6 +501,26 @@ impl<T: 'static> GridView<T> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
         self.overscroll_behavior = behavior;
+        self
+    }
+
+    /// Enable or disable animated wheel scrolling (enabled by default).
+    pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
+        self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Duration of the smooth scroll animation (default 150 ms).
+    pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self {
+        self.smooth_scroll_duration = duration;
+        self
+    }
+
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column, mirroring `ScrollArea::scroll_bar_style`.
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
+        self.scroll_bar_style = style;
         self
     }
 
@@ -733,6 +767,7 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GridView")
             .field("items", &self.source.len())
+            .field("scroll_bar_style", &self.scroll_bar_style)
             .field("scroll_y", &self.scroll_y.get())
             .finish()
     }
@@ -842,18 +877,26 @@ impl<T: 'static> Widget for GridView<T> {
             let max_scroll = self.max_scroll_y.clone();
             let line_height = strategy.estimated_row_height().max(1.0);
             let overscroll = self.overscroll_behavior;
+            let smooth_scrolling = self.smooth_scrolling;
+            let smooth_scroll_duration = self.smooth_scroll_duration;
             handlers = handlers.on_scroll(move |event, _ctx| match event {
                 WidgetEvent::Scroll { delta, .. } => {
                     let dy = match delta {
                         ScrollDelta::Lines { y, .. } => y * line_height,
                         ScrollDelta::Pixels { y, .. } => *y,
                     };
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(
-                        scroll_y.get(),
-                        dy,
-                        max_scroll.get(),
-                    );
-                    scroll_y.set(new_y);
+                    // Base off the animation target so successive notches
+                    // accumulate instead of restarting mid-animation.
+                    let base = scroll_y.animation_target().unwrap_or(scroll_y.get());
+                    let (new_y, moved) =
+                        crate::common::scroll::scroll_clamp_axis(base, dy, max_scroll.get());
+                    if moved {
+                        if smooth_scrolling {
+                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                        } else {
+                            scroll_y.set(new_y);
+                        }
+                    }
                     crate::common::scroll::scroll_response(
                         moved,
                         overscroll == OverscrollBehavior::Contain,
@@ -1081,7 +1124,12 @@ impl<T: 'static> Widget for GridView<T> {
                 self.scroll_y.clone(),
                 self.max_scroll_y.clone(),
                 self.viewport_ratio_y.clone(),
-            );
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
             self.scrollbar_id = Some(ctx.add(sb));
         }
 
@@ -1148,7 +1196,10 @@ impl<T: 'static> Widget for GridView<T> {
         // would flip a variable strategy's column count back and forth and
         // reset its measurement cache every frame. The scrollbar appearing /
         // disappearing settles in one frame.
-        let body_w = if self.last_needs_scrollbar.get() {
+        // Permanent reserves a column for the bar; Overlay / Thin float
+        // over the content, so tiles span the full width.
+        let reserves_bar = self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_w = if self.last_needs_scrollbar.get() && reserves_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -1206,7 +1257,10 @@ impl<T: 'static> Widget for GridView<T> {
         for child in children.iter_mut() {
             if Some(child.id) == self.scrollbar_id {
                 if needs_sb {
-                    child.origin = Point::new(bounds.x + body_w, bounds.y);
+                    // Right edge in all modes — in Overlay / Thin `body_w`
+                    // spans the full width, so anchor off `bounds.width`.
+                    child.origin =
+                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
                     child.size = Size::new(SCROLLBAR_THICKNESS, vp_h);
                 } else {
                     child.origin = bounds.origin();
