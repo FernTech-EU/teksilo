@@ -10,7 +10,7 @@ use bastyde::widgets::{
 };
 use jiff::civil::{Date, DateTime, Time};
 
-use crate::shared::{FIELD_MAX_WIDTH, Signals, section, tab_header};
+use crate::shared::{Signals, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_datetime_title())
@@ -43,25 +43,28 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .bind_width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
     );
+    // Each edit is capped near its own content width — `MaxSize` makes a
+    // flex field fill the cap, so the free-text 360 dp width would read as
+    // far too wide for "YYYY-MM-DD" / "HH:MM".
     let date_edit = section(
         ctx,
         lit!("DateEdit"),
-        MaxSize::width(FIELD_MAX_WIDTH).child(DateEdit::new(date_signal)),
+        MaxSize::width(180.0).child(DateEdit::new(date_signal)),
     );
     let time_edit = section(
         ctx,
         lit!("TimeEdit"),
-        MaxSize::width(FIELD_MAX_WIDTH).child(TimeEdit::new(time_signal)),
+        MaxSize::width(120.0).child(TimeEdit::new(time_signal)),
     );
     let datetime_edit = section(
         ctx,
         lit!("DateTimeEdit"),
-        MaxSize::width(FIELD_MAX_WIDTH).child(DateTimeEdit::new(dt_signal)),
+        MaxSize::width(290.0).child(DateTimeEdit::new(dt_signal)),
     );
     let date_range_edit = section(
         ctx,
         lit!("DateRangeEdit"),
-        MaxSize::width(FIELD_MAX_WIDTH).child(DateRangeEdit::new(range_signal)),
+        MaxSize::width(340.0).child(DateRangeEdit::new(range_signal)),
     );
 
     ctx.add(
@@ -135,7 +138,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                MaxSize::width(FIELD_MAX_WIDTH) {
+                MaxSize::width(180.0) {
                     DateEdit::new(date_signal)
                 }
             }
@@ -146,7 +149,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                MaxSize::width(FIELD_MAX_WIDTH) {
+                MaxSize::width(120.0) {
                     TimeEdit::new(time_signal)
                 }
             }
@@ -157,7 +160,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                MaxSize::width(FIELD_MAX_WIDTH) {
+                MaxSize::width(290.0) {
                     DateTimeEdit::new(dt_signal)
                 }
             }
@@ -168,7 +171,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                MaxSize::width(FIELD_MAX_WIDTH) {
+                MaxSize::width(340.0) {
                     DateRangeEdit::new(range_signal)
                 }
             }

@@ -167,14 +167,19 @@ pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widge
         )
 }
 
-/// Maximum width for single-line text-entry widgets in the catalog
-/// (TextInput, SearchField, PasswordField, FilePickerField, the
-/// color/date/time edits, …). These widgets are flex-fill by default,
-/// so inside a wide tab they stretch edge-to-edge and stop the
-/// ScrollArea content from shrinking sensibly. Wrap them in
-/// `MaxSize::width(FIELD_MAX_WIDTH)` — the field never grows past the
-/// cap but still shrinks into a narrow viewport — mirroring the
-/// built-in width cap on `SpinBox` (see the `spin_box` example).
+/// Maximum width for free-text entry widgets in the catalog — ones with
+/// no fixed-length content (TextInput, SearchField, PasswordField,
+/// FilePickerField). These are flex-fill by default, so inside a wide
+/// tab they stretch edge-to-edge and stop the ScrollArea content from
+/// shrinking sensibly. Wrap them in `MaxSize::width(FIELD_MAX_WIDTH)` —
+/// the field never grows past the cap but still shrinks into a narrow
+/// viewport — mirroring the built-in width cap on `SpinBox` (see the
+/// `spin_box` example).
+///
+/// Fixed-format fields (hex colors, dates, times) don't use this cap:
+/// `MaxSize` makes the flex field *fill* the cap, so a 7-char hex field
+/// at 360 dp reads as far too wide. Those are capped near their own
+/// content width at each call site instead.
 pub const FIELD_MAX_WIDTH: f32 = 360.0;
 
 /// Per-widget showcase section: bold mono title + the widget itself.

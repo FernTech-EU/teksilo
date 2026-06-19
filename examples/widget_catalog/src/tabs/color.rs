@@ -27,8 +27,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let hex = section(
         ctx,
         lit!("HexColorInput"),
-        MaxSize::width(FIELD_MAX_WIDTH)
-            .child(HexColorInput::new(hex_color).label(tr!(clr_brand_label()))),
+        // Holds "#RRGGBB" (7 chars) — cap near that, not the free-text width.
+        MaxSize::width(120.0).child(HexColorInput::new(hex_color).label(tr!(clr_brand_label()))),
     );
     let edit = section(
         ctx,
@@ -85,7 +85,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                MaxSize::width(FIELD_MAX_WIDTH) {
+                MaxSize::width(120.0) {
                     HexColorInput::new(hex_color) {
                         label: tr!(clr_brand_label())
                     }
