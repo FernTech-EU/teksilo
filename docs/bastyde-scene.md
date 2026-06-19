@@ -257,6 +257,21 @@ SceneView::new(scene).drag_mode(DragMode::NoDrag)
 Middle-click pan is unconditional. Right-click on an item with an
 `on_context_menu` handler fires the handler.
 
+**Drag-start hit-test (narrow-phase).** In `RubberBand` mode, a press
+decides *item drag vs. marquee* by hitting only **draggable** lightweight
+items (`IS_DRAGGABLE` — opt in via `.draggable(true)`), and it hits them with
+the **exact-shape** test, not just their AABB: a per-item snapshot carries the
+item's `scene_rect` (broad-phase) plus its `shape_contains` predicate
+(narrow-phase) and scene transform, sorted topmost-first. A press lands on an
+item only when it falls inside the *shape* (a thin diagonal `PathItem`, a
+ring, a rotated rect) — a press in the AABB but off the shape, or over a
+non-draggable backdrop / heavyweight card, falls through to a **marquee**. This
+is why dragging from on top of a select-only (non-`IS_DRAGGABLE`) card still
+rubber-bands instead of nudging the scene: the card is not in the draggable
+snapshot, and the cross-widget tap/drag disambiguation (see
+[events-and-gestures.md](events-and-gestures.md)) lets the view's `on_drag`
+start even though the card carries an `on_tap`.
+
 ---
 
 ## Reactive observers — `item_change_signal`

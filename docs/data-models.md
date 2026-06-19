@@ -359,46 +359,38 @@ external `DataChange::Reset` contract of the proxies is unchanged.
 `ListDataSource` carries a defaulted `first_changed_index()` (returning
 `None`) so generic consumers reach the side-channel without downcasts.
 
-## 14. Incremental reconcile — projecting an external source of truth
+## 14. Projecting an external source of truth
 
 §7 and §10 assume the view-model *owns* its model (the `QStandardItemModel`
 shape). When the **domain owns the data** and the bastyde model is a projection
 over it (a Qleany entity store, a DB, an event stream — the
-`QAbstractItemModel` shape), the naive "re-read everything and rebuild" is a
-`Reset`: it reassigns every `NodeId`, so the view's expand set, selection, and
-scroll are all discarded.
+`QAbstractItemModel` shape), **implement a data source over the domain instead
+of mirroring it into a built-in model.**
 
-`bastyde_data::reconcile` closes that gap. Re-read the domain into a fresh keyed
-list and reconcile it; the model emits only the minimal `insert` / `remove` /
-`move` / `update` changes, **reusing the identity of every key present in both
-states**:
+Implement [`ListDataSource`] / [`TreeDataSource`] directly over the domain and
+feed the view with `ListView::from_source` / `TreeView::from_source`. The view
+*reads* through `with_item`/`with_entry` and *commands* through the DnD + lazy
+capability methods (`drag` / `can_accept` / `accept_drop` / `request_window` /
+`fetch_more`), so there is **no second in-memory copy to keep in sync** — the
+domain stays the single source of truth, keyed by its own id (`i64`, a UUID,
+…). Because identity is the domain key (not a positional `NodeId`), keyed
+selection, tree expand state, and scroll follow a domain refresh automatically;
+`version_signal()` + `first_changed_index()` (§13) narrow row-height caches
+across the refresh. This is the path the designer's outline uses, and the one
+to reach for whenever the data is a tree, lives behind a query, or doesn't fit
+in memory. Full protocol reference: [data-source.md](data-source.md).
 
-```rust
-use bastyde_data::{reconcile_tree, reconcile_list, ReconcileIndex};
+A bounded, fully-resident, flat list is the one case where a `ListModel`
+projection can still be simpler than a source impl. There is no `reconcile`
+helper for it — keep the projection in sync by emitting the minimal `insert` /
+`remove` / `move_item` / `set` mutations yourself (a `Repeater` then reorders
+subtrees instead of recreating them); accept a `Reset` only when per-item state
+loss is acceptable.
 
-// Tree: pre-order (key, depth, value) rows. `index` (key -> NodeId) persists
-// between calls; returns the NodeIds of newly-inserted nodes.
-let mut index: ReconcileIndex<EntityId, Row> = ReconcileIndex::new();
-let new_nodes = reconcile_tree(&tree_model, &mut index, &rows);
-
-// List: keyed by `key_of`; reads current state from the model each call.
-reconcile_list(&list_model, &rows, |row| row.id);
-```
-
-- **Trees** keep every surviving `NodeId`, so `TreeSlice` expand state,
-  `SelectionModel`, and scroll follow the change — a move stays a `NodeMoved`,
-  not a remove+insert. (Reparenting that *inverts* an ancestor/descendant pair
-  is unsupported — it trips `move_node`'s cycle assertion; domain edits like
-  move / wrap / unwrap never do this.)
-- **Lists** emit `ItemsMoved` / `ItemUpdated` so a `Repeater` reorders subtrees
-  instead of recreating them, and `first_changed_index()` (§13) still narrows
-  row-height caches. Placement is front-to-back (`O(n²)` lookups) — sized for the
-  bounded collections lists are used for.
-
-**Tables.** There is no table-specific reconcile by design: a `TableView`'s rows
-are a `ListModel` (`reconcile_list`), a `TreeTableView`'s rows are a `TreeModel`
-(`reconcile_tree`), and a cell edit is an in-place value update either reconciler
-already emits. Columns are configuration, not data.
+**Tables.** A `TableView`'s rows are a `ListDataSource` (or a `ListModel` for
+the bounded-projection case); a `TreeTableView`'s rows are a `TreeDataSource`. A
+cell edit is an in-place value update the source emits. Columns are
+configuration, not data.
 
 ---
 

@@ -154,6 +154,30 @@ handlers = handlers.on_drop(move |mut payload, pos, _ctx| {
 
 Whether the drop is "accepted" has no framework-observable side effect today — the payload is dropped (Rust `Drop`) regardless, and no user-visible state hangs off the return. The `bool` is an extension point for future listener APIs.
 
+### 4.5 Drop-target bubbling — nested targets
+
+When drop targets nest (a per-row `DropTarget` inside a reorderable
+`ListView`, a cell target inside a table), a hover doesn't stop at the deepest
+one. The framework walks **up** from the hit target through successive drop
+targets, firing each one's `on_drag_hover`, and stops at the first that
+**engages** — returns a non-`NoFeedback` response (`is_engaged()`):
+
+- A target that returns `DropFeedback::NoFeedback` does **not** want this
+  payload, so the drag **bubbles** to the next drop target above it. This is
+  what lets a reorderable view behind a per-row `DropTarget` still receive a
+  drag the row rejected.
+- If an ancestor engages, every rejecting target passed on the way up is
+  cleared (`on_drag_leave`) so none leaves a stuck "forbidden" border — the
+  drag is accepted above them.
+- If **nothing** engages, the drag is genuinely rejected: the *deepest* drop
+  target keeps its own reject affordance and becomes the tracked target;
+  ancestors above it are cleared.
+
+A target with an `on_drop` but no `on_drag_hover` engages **optimistically**
+(`Accept`, no visual), so it can still receive the drop — `on_drop` makes the
+final call on release. The same engage-or-bubble walk runs on `PointerUp`, so
+the drop lands on whichever target the hover settled on.
+
 ## 5. The preview overlay
 
 When a drag starts with `start_drag_with_preview`, the framework:
@@ -230,15 +254,20 @@ scroll wheel during drag:
 
 ## 9. `ListView` / `TreeView` as drop targets — how they wire it up
 
-Both widgets combine every primitive above. Reading [list_view.rs](../crates/bastyde-widgets/src/list_view.rs) and [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) as reference examples:
+Both widgets combine every primitive above, but the **acceptance decision and
+the commit are owned by the backing data source**, not the view (see
+[data-source.md §3](data-source.md)). The view supplies geometry and rendering;
+the source answers `can_accept` / `accept_drop`. Reading
+[list_view.rs](../crates/bastyde-widgets/src/list_view.rs) and
+[tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) as reference examples:
 
-- `drop_feedback: Signal<Option<(f32, f32)>>` (bound at `BindingLevel::RepaintOnly`) — set by `on_drag_hover`, cleared by `on_drag_leave`. Reading it in `paint()` is enough; the binding dirties the widget when the signal changes.
-- `on_drag` (per item wrapper) — fires `start_drag_with_preview` with a `ListViewDragData` / `TreeViewDragData` typed payload and a `DragPreview` built by re-invoking the delegate for the dragged row.
-- `on_drag_hover` (on the list/tree itself) — computes the insertion index from local Y + scroll offset, sets the feedback signal, returns the matching `DropFeedback`. `TreeView` also records the hovered node + timestamp for spring-load.
+- `drop_feedback` signal (bound at `BindingLevel::RepaintOnly`) — set by `on_drag_hover`, cleared by `on_drag_leave`. Reading it in `paint()` is enough; the binding dirties the widget when the signal changes.
+- `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared `RowDrag { source_index, source_view_id }` typed payload (one type for all four data views) and a `DragPreview` built by re-invoking the delegate for the dragged row.
+- `on_drag_hover` (on the list/tree itself) — computes the geometric `(target, position)` from local Y + scroll offset, asks the source `can_accept`, and sets the feedback signal to match the verdict (`Accept` → insertion line, `Reject` → suppress, `Redirect` → snap). `TreeView` also records the hovered node + timestamp for spring-load.
 - `on_drag_tick` — edge auto-scroll (linear ramp inside a 32 px zone, max 12 px/frame). `TreeView` additionally checks the spring-load timer and expands the hovered branch after 700 ms.
 - `on_drag_leave` — clears the feedback signal and the spring-load timer.
-- `on_drop` — decodes the typed payload, computes the target index, calls `ListModel::move_item` / `TreeModel::move_node` (intra-widget) or the user's `on_item_drop` callback (inter-widget).
-- `on_key` — Alt+ArrowUp / Alt+ArrowDown call the same `move_item` / `move_node` so the keyboard contract is satisfied.
+- `on_drop` — re-queries `can_accept`; if not `Reject`, routes the commit to the source's `accept_drop`. A same-view `RowDrag` is a `DragSource::SameView` the source applies (a `ListModel` reorders in place, a `TreeModel`-backed source `move_node`s with the cycle guard); a cross-view or OS payload arrives as `DragSource::Foreign { payload }` at the *same* `accept_drop`, which downcasts it. There is no separate `on_item_drop` on the data views anymore — `GridView` keeps one only as a foreign-payload escape hatch.
+- `on_key` — Alt+ArrowUp / Alt+ArrowDown synthesize the same `RowDrag` and route it through `accept_drop`, so the keyboard contract travels the identical path.
 
 ## 10. Testing
 

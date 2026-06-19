@@ -264,6 +264,40 @@ When a widget attaches multiple gesture handlers (`on_tap` + `on_long_press`), b
 
 Widget authors never touch the arena directly. Attaching handlers via `WidgetBuilder` or `HandlerSet` auto-wires the recognizers and the arena on the node.
 
+### 4.2 Cross-widget tap/drag disambiguation — drag observers
+
+The `GestureArena` is **per-widget**; there is no cross-widget arena. That
+leaves one gap: a descendant's `on_tap` installs a `TapRecognizer` that
+**captures** the pointer on `PointerDown`, which would otherwise route every
+following `PointerMove`/`PointerUp` to the descendant alone — so an *ancestor*
+that wants to start a drag (a `SceneView` behind tappable cards, a draggable
+container wrapping tappable rows) would never see the move and could never
+begin its drag.
+
+The framework closes this without cross-arena arbitration, by leaning on the
+existing **`active_drag` takeover** (an in-flight `start_drag` is consulted
+*before* capture routing). On `PointerDown`, after the normal dispatch, if a
+descendant captured the pointer the framework **arms drag observers**: it walks
+the captured widget's strict ancestors and, for each one that carries an
+`on_drag` / `on_swipe` recognizer, feeds the down event into *that ancestor's
+own* gesture arena (no `on_pointer_event`, no second capture). On each
+subsequent `PointerMove` (while no drag is yet active) it advances those
+observers; the moment one recognizes a drag it calls `start_drag`, and the
+`active_drag` takeover pulls the pointer away from the descendant. If no
+ancestor drag fires, the descendant's tap completes normally on `PointerUp`.
+
+Two consequences worth knowing:
+
+- A widget that has its **own** `on_drag` (a slider, a DnD row) is left
+  untouched — the arming step skips a captured widget that already carries a
+  drag recognizer, so only *pure-tap* descendants inside a draggable ancestor
+  change behavior.
+- A quick press-release on the card is still a **tap** (no move crossed the
+  drag threshold); only a press-and-drag escalates to the ancestor. This is
+  exactly what makes "drag from on top of a select-only scene card starts a
+  marquee, click selects it" work (see
+  [bastyde-scene.md](bastyde-scene.md) "Drag mode").
+
 ## 5. `EventContext` — the deferred-operations pattern
 
 Handlers don't mutate the tree directly. They request mutations on their `EventContext` and the framework applies them after the dispatch finishes:

@@ -27,7 +27,6 @@ pub mod dnd_types;
 pub mod keyed_selection_model;
 pub mod list_data_source;
 pub mod list_model;
-pub mod reconcile;
 pub mod selection_model;
 pub mod sort_filter_list_model;
 pub mod sort_filter_tree_model;
@@ -47,7 +46,6 @@ pub use dnd_types::{
 pub use keyed_selection_model::KeyedSelectionModel;
 pub use list_data_source::ListDataSource;
 pub use list_model::ListModel;
-pub use reconcile::{ReconcileIndex, reconcile_list, reconcile_tree};
 pub use selection_model::{SelectionMode, SelectionModel};
 pub use sort_filter_list_model::{SortDirection, SortFilterListModel};
 pub use sort_filter_tree_model::{SortFilterTreeModel, TreeFilterMode};

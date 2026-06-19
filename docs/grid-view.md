@@ -111,15 +111,33 @@ expose the reactive scroll state (wire an external `ScrollBar` with
 `.show_scrollbar(false)` so it survives rebuilds). `.ensure_index_visible(i,
 ScrollAnchor)` / `.scroll_to_index(i, ScrollAnchor)` where `ScrollAnchor` is
 `Auto | Start | Center | End`. `.overscroll_behavior(Chain | Contain)` controls
-scroll chaining. `.on_near_end(threshold, || ...)` fires when the scroll nears
-the end — the incremental-loading hook.
+scroll chaining.
+
+## Lazy / incremental loading
+
+There is no view-level `on_near_end` hook — incremental loading is a **source
+capability**. When bound to a `ListDataSource`, the body pane calls
+`request_window(start..end)` for the visible+buffer range each realize pass, and
+when the scroll nears the end it consults `can_fetch_more()` → `fetch_more()` to
+grow an append-only source. A tile whose item isn't resident yet (`with_item`
+returns `None`) and whose `row_state(i)` is `Loading` renders a placeholder at
+the estimated tile size instead of being skipped, so selection and focus still
+work while the page loads. (`.is_loading(signal)` + `.loading_view(...)` is the
+separate, whole-grid "first page is loading" overlay.) See
+[data-source.md](data-source.md).
 
 ## Drag-and-drop reorder
 
-`.reorderable(true)` enables intra-grid drag (and keyboard Alt+Arrow), calling
-the model's `move_item`. A vertical insertion bar shows where the item lands.
-`.on_item_drop(|payload, index, ctx| -> bool)` accepts external drops at a flat
-insertion index (reuses the framework DnD pipeline).
+`.reorderable(true)` enables intra-grid drag (and keyboard Alt+Arrow). Drags
+route through the bound source's DnD capabilities: a tile is draggable only when
+the source's `drag(key)` returns `CanDrag`; on hover the geometric
+`(target, position)` is validated by `can_accept(query)` (a vertical insertion
+bar shows an accepted landing; a rejected one suppresses it); the drop commits
+via `accept_drop(commit)`. A `ListModel`-backed source moves the item by
+default. `.on_item_drop(|payload, index, ctx| -> bool)` is the escape hatch for
+**foreign / external** payloads (cross-view or OS drops) the source's
+`can_accept` rejects — it accepts at a flat insertion index, reusing the
+framework DnD pipeline.
 
 ## Sections & sticky headers
 
@@ -167,4 +185,5 @@ Headless (no GPU): [crates/bastyde-widgets/src/grid_view/tests.rs](../crates/bas
 plus unit tests in `layout/offsets.rs` and `layout/strategy.rs`. Coverage:
 virtualization window, column derivation, tile placement (uniform / variable /
 waterfall / sectioned), prefix-sum + anchoring, selection, 2D keyboard,
-reorder, type-ahead, incremental-loading hook, and accessibility roles.
+reorder (source `accept_drop`), type-ahead, source-driven lazy loading
+(`fetch_more` + placeholder rows), and accessibility roles.

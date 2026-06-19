@@ -397,18 +397,31 @@ trailing-pinned pane re-pins to `Trailing`, otherwise the column joins
 the unpinned middle stream. Inter-table drops are rejected by
 `source_table_id` mismatch.
 
-### Row reorder (TableView only)
+### Row reorder
 
-Set `.reorderable_rows(true)` and the table emits
-`RowReorderDragData { source_row, source_table_id }` on row drag.
-Internal reorders call `ListModel::move_item(from, to)` directly when
-the source is a `ListModel<T>`. Inter-table or external drops route
-through the user's `on_row_drop(payload, insertion_row, ctx) -> bool`
-handler.
+Row drag-and-drop is owned by the **backing source**, not the view (see
+[data-source.md §3](data-source.md)). The view computes a geometric
+`(target, position)`, asks the source `can_accept` on every hover (an
+insertion line shows an accepted landing; a `Reject` suppresses it),
+and commits via the source's `accept_drop` on release — there is no
+`on_row_drop` callback.
 
-`TreeTableView` deliberately does **not** ship row drag-drop in v1: a
-hierarchical insertion-vs-reparent UX with spring-loaded folders needs
-its own design pass.
+**TableView.** Set `.reorderable_rows(true)`; a row drag emits the
+shared `RowDrag { source_index, source_view_id }`. An intra-table
+reorder is a `DragSource::SameView` the source's `accept_drop` applies
+(a `ListModel<T>` reorders in place); a cross-table or external drop
+arrives as `DragSource::Foreign { payload }` at the *same*
+`accept_drop`, which downcasts the payload. Keyboard reorder
+(`Alt`+`Arrow`) routes a synthesized `RowDrag` through the same
+`accept_drop`.
+
+**TreeTableView.** Set `.reorderable(true)`; a row drag routes through
+the tree source with the **cycle guard** — `tree_apply_reorder` refuses
+to drop a node into its own subtree, and handles the
+insertion-vs-reparent (`Before`/`After` sibling vs `Into` child) index
+math. Reorder is suppressed while a sort is active (a sorted projection
+has no stable insertion target). `Alt`+`Arrow` keyboard reorder is
+likewise routed through the source.
 
 ---
 

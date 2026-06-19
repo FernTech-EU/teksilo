@@ -104,6 +104,12 @@ directory.
   checkbox state with optional descendant→ancestor tristate
   aggregation), sort/filter projections; the model layer that sits
   above the widget tree.
+- [data-source.md](data-source.md) — the `ListDataSource` /
+  `TreeDataSource` read-and-command interface every data view talks to:
+  the capability protocol (identity, DnD validation via
+  `can_accept`/`accept_drop`, lazy/windowed loading), keyed selection,
+  and how an external source of truth drives a view without a mirror
+  model.
 - [settings.md](settings.md) — reactive end-to-end persistence:
   `SettingsStore`, `SettingsFile<T>`, `MruList<T>`, window-state auto
   save/restore.
