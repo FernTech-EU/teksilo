@@ -164,30 +164,41 @@ mod rich {
 
     impl Widget for FilterPopoverContent {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-            // Forward any text change into the user-supplied callback.
-            // The effect is scoped to this build, so a popover rebuild
-            // refreshes the wiring.
-            if let Some(cb) = self.on_change.clone() {
-                ctx.effect(&self.text, move |s| {
-                    cb(s);
-                });
-            }
-
             let text = self.text.clone();
+            let commit = self.on_change.clone();
+
+            // The clear affordance empties the field *and* applies the
+            // cleared filter immediately (commit "" removes the column's
+            // entry from `filters_signal`).
             let clear = IconButton::clear().embedded().on_activate_fn({
                 let text = text.clone();
+                let commit = commit.clone();
                 move |_| {
-                    if !text.get().is_empty() {
-                        text.set(String::new());
+                    text.set(String::new());
+                    if let Some(cb) = commit.as_ref() {
+                        cb("");
                     }
                 }
             });
 
-            let input_id = ctx.add(
-                TextInput::new(text)
-                    .placeholder(lit!(self.placeholder.clone()))
-                    .trailing_slot(clear),
-            );
+            let mut input = TextInput::new(text.clone())
+                .placeholder(lit!(self.placeholder.clone()))
+                .trailing_slot(clear);
+
+            // Apply the filter on Enter — NOT on every keystroke. Pushing
+            // each character into `filters_signal` re-queries the source
+            // model, which resets the data and rebuilds the owning
+            // TableView; that rebuild tears down this very popover after a
+            // single character. Committing on Enter keeps the popover alive
+            // while the user types the whole term.
+            if let Some(cb) = commit {
+                let text = text.clone();
+                input = input.on_submit_fn(move |_ctx| {
+                    cb(&text.get());
+                });
+            }
+
+            let input_id = ctx.add(input);
             if let Some(slot) = &self.focus_slot {
                 slot.set(Some(input_id));
             }

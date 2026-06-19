@@ -122,6 +122,12 @@ pub(crate) struct HeaderCell {
     /// would compare against a window x that's always huge for any
     /// column past the first one, firing resize from the wrong region.
     cell_window_x: Rc<Cell<f32>>,
+    /// This cell's resolved height, written by `place_children` and read
+    /// by `on_pointer_event` to reject pointer events that bubble up from
+    /// the in-tree filter popover (a descendant overlay anchored below the
+    /// cell). Without it the x-only resize-zone test paints a `ColResize`
+    /// cursor across the whole popover.
+    cell_window_h: Rc<Cell<f32>>,
     /// `true` when the column's `filterable` flag is set. Drives the
     /// filter popover affordance and a "leave-this-region-alone" zone
     /// in the cell's pointer handler so PointerDown over the popover
@@ -187,6 +193,7 @@ impl HeaderCell {
             resize_state,
             table_id,
             cell_window_x: Rc::new(Cell::new(0.0)),
+            cell_window_h: Rc::new(Cell::new(0.0)),
             filterable,
             filter_zone_width: if filterable { filter_zone_width } else { 0.0 },
             filters_signal,
@@ -323,6 +330,7 @@ impl Widget for HeaderCell {
         let press_state: Rc<Cell<Option<PressState>>> = Rc::new(Cell::new(None));
         let self_id = ctx.self_id();
         let cell_window_x = self.cell_window_x.clone();
+        let cell_window_h = self.cell_window_h.clone();
         let filter_zone_w = self.filter_zone_width;
         let is_hovered = self.is_hovered.clone();
         let is_resizing = self.is_resizing.clone();
@@ -345,6 +353,13 @@ impl Widget for HeaderCell {
                 // window-space leading edge written by `place_children`
                 // (== this cell node's bounds origin).
                 let cell_x0 = cell_window_x.get();
+                // This cell's height, used to reject pointer events that
+                // bubble up from the in-tree filter popover (a descendant
+                // overlay anchored *below* the cell). Those arrive with a
+                // local y outside `[0, cell_h]`; the resize/cursor logic is
+                // x-only, so without this gate it paints a `ColResize`
+                // cursor across the entire popover.
+                let cell_h = cell_window_h.get();
                 // The column-resize boundary is shared with the *visual*
                 // neighbour: under LTR that's the column to the right
                 // (handle at the cell's physical-right edge, drag-right =
@@ -398,7 +413,13 @@ impl Widget for HeaderCell {
                         //    the handle (PointerLeave alone can't
                         //    rescue this — the cell has no node-level
                         //    cursor for the framework to revert to).
-                        if resizable {
+                        // Only manage the cursor for moves that are
+                        // genuinely over this cell. Moves bubbling up from
+                        // the filter popover (out-of-cell y) must leave the
+                        // cursor alone, or the x-only resize-zone test below
+                        // paints `ColResize` across the popover.
+                        let in_cell_y = cell_h <= 0.0 || (position.y >= 0.0 && position.y <= cell_h);
+                        if resizable && in_cell_y {
                             let w = widths_handle
                                 .borrow()
                                 .get(width_index)
@@ -422,6 +443,12 @@ impl Widget for HeaderCell {
                         button: PointerButton::Primary,
                         ..
                     } => {
+                        // Ignore presses bubbling up from the filter popover
+                        // (out-of-cell y) — they must not record a header
+                        // press / sort cycle.
+                        if cell_h > 0.0 && (position.y < 0.0 || position.y > cell_h) {
+                            return EventResponse::Ignored;
+                        }
                         let local_x = position.x;
                         let cell_w = widths_handle
                             .borrow()
@@ -541,6 +568,7 @@ impl Widget for HeaderCell {
         // pointer-event handler can convert window x to cell-local x
         // (`local_x ∈ [0, cell_w]` in both directions).
         self.cell_window_x.set(bounds.x);
+        self.cell_window_h.set(bounds.height);
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
