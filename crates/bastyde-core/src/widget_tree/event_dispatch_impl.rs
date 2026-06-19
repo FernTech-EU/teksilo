@@ -273,6 +273,18 @@ impl WidgetTree {
                         },
                         &mut *ops,
                     );
+                    // Let armed ancestor drag recognizers observe the move so
+                    // an ancestor drag can start while a descendant tap holds
+                    // the capture. Once a drag latches, `active_drag` takes
+                    // over and the capture branch above is bypassed.
+                    if self.active_drag.is_none() {
+                        self.advance_drag_observers(
+                            &WidgetEvent::PointerMove {
+                                position: *position,
+                            },
+                            &mut *ops,
+                        );
+                    }
                 } else {
                     self.handle_pointer_move(*position, &mut *ops);
                 }
@@ -295,9 +307,21 @@ impl WidgetTree {
                         );
                     }
                     self.dispatch_to_widget(target, &event, &mut *ops);
+                    // If a descendant captured the pointer for a tap (no drag
+                    // started), arm ancestor drag recognizers so an ancestor
+                    // drag can still begin on move (tap-vs-drag across the
+                    // hit-path).
+                    if self.active_drag.is_none()
+                        && let Some(captured) = self.pointer_captured_by
+                    {
+                        self.arm_drag_observers(captured, &event, &mut *ops);
+                    }
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
+                // The pointer sequence ends here — discard any armed ancestor
+                // drag observers (the gesture resolved as a tap / release).
+                self.drag_observers.clear();
                 if let Some(captured) = self.pointer_captured_by {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
                     self.pointer_captured_by = None;
@@ -512,6 +536,141 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         self.dispatch_to_widget_returning_handled(target, event, ops);
+    }
+
+    /// Whether `id` carries a drag or swipe handler (hence gets a drag/swipe
+    /// recognizer once its arena is built).
+    fn widget_has_drag(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .map(|n| n.any_handler(|h| h.on_drag.is_some() || h.on_swipe.is_some()))
+            .unwrap_or(false)
+    }
+
+    /// On `PointerDown`, when a descendant has captured the pointer for a
+    /// non-drag gesture (a tap / long-press), arm every strict ancestor that
+    /// carries a drag/swipe recognizer so an ancestor drag can still begin
+    /// once the pointer moves past threshold — the tap-vs-drag disambiguation
+    /// across the hit-path. Without this a descendant `on_tap` permanently
+    /// shadows an ancestor `on_drag` (the bubble stops + capture routes every
+    /// move to the descendant alone).
+    ///
+    /// Skipped when the captured widget can itself drag: the innermost drag
+    /// owns the gesture, so no ancestor observation.
+    pub(super) fn arm_drag_observers(
+        &mut self,
+        captured: WidgetId,
+        down_event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.drag_observers.clear();
+        if self.widget_has_drag(captured) {
+            return;
+        }
+        let mut observers = Vec::new();
+        let mut current = self.arena.parent(captured);
+        while let Some(id) = current {
+            if self.widget_has_drag(id) {
+                // Build the arena (the bubble never reached this ancestor) and
+                // feed it the press so its DragRecognizer records the origin.
+                {
+                    let WidgetTree {
+                        arena,
+                        gesture_owners,
+                        ..
+                    } = self;
+                    if let Some(node) = arena.get_mut(id) {
+                        Self::ensure_gesture_arena(node, id, gesture_owners);
+                    }
+                }
+                self.observe_drag_on_ancestor(id, down_event, ops);
+                observers.push(id);
+            }
+            current = self.arena.parent(id);
+        }
+        self.drag_observers = observers;
+    }
+
+    /// On a captured `PointerMove`, feed the move to each armed ancestor drag
+    /// observer (innermost first). If one latches a drag, it has already called
+    /// `start_drag` (so `active_drag` now owns the pointer) — stop observing.
+    pub(super) fn advance_drag_observers(
+        &mut self,
+        move_event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if self.drag_observers.is_empty() {
+            return;
+        }
+        let observers = std::mem::take(&mut self.drag_observers);
+        for id in &observers {
+            let recognized = self.observe_drag_on_ancestor(*id, move_event, ops);
+            if recognized || self.active_drag.is_some() {
+                // A drag latched on this ancestor — it now owns the pointer.
+                return;
+            }
+        }
+        // No drag yet — keep observing on the next move.
+        self.drag_observers = observers;
+    }
+
+    /// Feed one raw pointer event to `id`'s gesture arena WITHOUT firing its
+    /// `on_pointer_event` or taking the implicit capture (the descendant
+    /// already holds it). Returns `true` if the arena recognized a gesture
+    /// (a drag/swipe latched), in which case it is dispatched so the
+    /// `on_drag` handler's `start_drag` runs and `active_drag` takes over.
+    fn observe_drag_on_ancestor(
+        &mut self,
+        id: WidgetId,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        let localized = self.localize_event(id, event);
+        let event = localized.as_ref().unwrap_or(event);
+        let raw = match event {
+            WidgetEvent::PointerDown {
+                position,
+                button,
+                modifiers,
+            } => crate::gesture::RawPointerEvent::Down {
+                position: *position,
+                button: *button,
+                modifiers: *modifiers,
+            },
+            WidgetEvent::PointerMove { position } => {
+                crate::gesture::RawPointerEvent::Move {
+                    position: *position,
+                }
+            }
+            WidgetEvent::PointerUp {
+                position,
+                button,
+                modifiers,
+            } => crate::gesture::RawPointerEvent::Up {
+                position: *position,
+                button: *button,
+                modifiers: *modifiers,
+            },
+            _ => return false,
+        };
+        let mut ctx = self.make_event_context(&mut *ops);
+        let WidgetTree { arena, .. } = self;
+        let recognized = if let Some(node) = arena.get_mut(id) {
+            if let Some(arena_ref) = node.handlers.gesture_arena.as_mut() {
+                if let Some(gesture) = arena_ref.process(&raw) {
+                    Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        self.collect_from_ctx(ctx, id);
+        recognized
     }
 
     /// Rebuild `event` with any pointer position converted into `id`'s

@@ -240,3 +240,42 @@ fn per_view_default_selection_is_independent() {
         "independent selections are distinct signals"
     );
 }
+
+#[test]
+fn drag_on_delegated_heavyweight_tappable_card_starts_marquee() {
+    // Faithful to scene_corkboard: with_model + delegate_typed builds a
+    // heavyweight card carrying on_tap selection. Dragging from on top of it
+    // must start a marquee — the card's tap must NOT shadow the scene on_drag
+    // (the cross-widget tap/drag disambiguation reaches the delegate path).
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use bastyde_core::widget_builder::WidgetBuilder;
+
+    let model = SceneModel::new();
+    model.add_widget_item(1u32, Rect::new(40.0, 40.0, 120.0, 80.0));
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::with_model(model.clone())
+            .selection_mode(SceneSelectionMode::Multi)
+            .delegate_typed::<u32>(|_p, _id| Box::new(FillWidget::new().on_tap(|_p, _c| {}))),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(Point::new(70.0, 70.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(70.0, 70.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(120.0, 120.0),
+    });
+
+    view_ref(&tree, view_id, |v| {
+        assert!(
+            v.marquee.get().is_some(),
+            "dragging a delegated heavyweight tappable card must start a marquee"
+        );
+    });
+}

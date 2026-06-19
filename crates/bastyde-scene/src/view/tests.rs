@@ -2061,6 +2061,46 @@ fn marquee_drag_recognizes_started_phase() {
 }
 
 #[test]
+fn drag_on_heavyweight_tappable_card_starts_marquee() {
+    // Cross-widget tap/drag fix in the scene: a heavyweight widget that
+    // captures the pointer for a tap (selection) must NOT shadow the scene's
+    // own drag — dragging from on top of it falls through to a marquee (no
+    // draggable lightweight item is under the press).
+    use bastyde_canvas::Point;
+    use bastyde_core::widget_builder::WidgetBuilder;
+
+    let mut scene = Scene::new();
+    // A corkboard-style heavyweight card with on_tap selection.
+    scene.add_widget(
+        FillWidget::new().on_tap(|_p, _c| {}),
+        Rect::new(40.0, 40.0, 120.0, 80.0),
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Press ON the card, then drag past the 5px threshold.
+    tree.pointer_move(Point::new(70.0, 70.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(70.0, 70.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(120.0, 120.0),
+    });
+
+    let view = view_handle(&tree, view_id);
+    assert!(
+        view.marquee.get().is_some(),
+        "dragging from a heavyweight tappable card must start the scene marquee \
+         (the card's on_tap must not shadow the scene's on_drag)"
+    );
+}
+
+#[test]
 fn marquee_drag_records_pending_commit() {
     // Drive on_drag through the event path: Started → Moved →
     // Ended. The closure must post a pending commit via
@@ -2202,6 +2242,88 @@ fn drag_to_move_translates_lightweight_item() {
     // Size unchanged.
     assert_eq!(new_rect.width, 30.0);
     assert_eq!(new_rect.height, 30.0);
+}
+
+#[test]
+fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
+    // A thin L-shaped draggable connector: its AABB is the full 100×100 box,
+    // but a press in the AABB *interior* (off the stroke) must NOT grab it —
+    // it falls through to a marquee. A press ON the stroke grabs it.
+    use crate::items::PathItem;
+    use bastyde_canvas::{Path, Point};
+
+    fn thin_l_scene() -> Scene {
+        let mut path = Path::new();
+        path.move_to(Point::new(50.0, 50.0))
+            .line_to(Point::new(150.0, 50.0))
+            .line_to(Point::new(150.0, 150.0));
+        let mut scene = Scene::new();
+        // Heavyweight child so the snapshot-populating layout path runs.
+        scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 10.0, 10.0));
+        scene.add_item(
+            PathItem::new(path, Rect::new(50.0, 50.0, 100.0, 100.0))
+                .stroke_cosmetic(bastyde_tokens::Color::RED, 2.0)
+                .draggable(true),
+            Point::ZERO,
+        );
+        scene
+    }
+
+    // 1) Press deep in the AABB interior (70, 130) — far from both strokes.
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(thin_l_scene())
+            .selection_mode(crate::selection::SceneSelectionMode::Multi),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.pointer_move(Point::new(70.0, 130.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(70.0, 130.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(110.0, 170.0),
+    });
+    {
+        let view = view_handle(&tree, view_id);
+        assert!(
+            view.drag_target.get().is_none(),
+            "a press off the stroke must not grab the thin item (narrow-phase)"
+        );
+        assert!(
+            view.marquee.get().is_some(),
+            "a press off the stroke falls through to a marquee"
+        );
+    }
+
+    // 2) Press ON the top stroke (100, 50) — must grab it (drag-to-move).
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(thin_l_scene())
+            .selection_mode(crate::selection::SceneSelectionMode::Multi),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.pointer_move(Point::new(100.0, 50.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(100.0, 50.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(140.0, 90.0),
+    });
+    {
+        let view = view_handle(&tree, view_id);
+        assert!(
+            view.drag_target.get().is_some(),
+            "a press on the stroke must grab the thin item for drag-to-move"
+        );
+        assert!(
+            view.marquee.get().is_none(),
+            "grabbing the item must not also start a marquee"
+        );
+    }
 }
 
 #[test]

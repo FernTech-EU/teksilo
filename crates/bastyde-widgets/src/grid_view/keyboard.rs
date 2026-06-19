@@ -15,12 +15,14 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::EventContext;
-use bastyde_data::SelectionModel;
+use bastyde_data::{DropPosition, SelectionModel};
 
 use super::layout::{GridLayoutStrategy, ScrollAnchor};
+use crate::data_views::RowDrag;
 
 /// How Tab moves out of (or within) the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,8 +54,15 @@ pub(crate) struct GridKeyConfig {
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     pub(crate) reorderable: bool,
+    /// Source-owned reorder commit (erased from the backing `ListDataSource`).
+    /// Alt+Arrow synthesizes a same-view [`RowDrag`] and routes it through the
+    /// exact same path a pointer drop takes. `(payload, target, position,
+    /// view_id) -> applied`.
     #[allow(clippy::type_complexity)]
-    pub(crate) move_item_fn: Option<Rc<dyn Fn(usize, usize)>>,
+    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
+    /// This grid's id, stamped into the synthetic `RowDrag` so the source
+    /// recognizes the move as same-view.
+    pub(crate) view_id: usize,
     pub(crate) type_ahead_timeout: Duration,
     #[allow(clippy::type_complexity)]
     pub(crate) type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
@@ -104,14 +113,26 @@ pub(crate) fn build_grid_key_handler(
                 None
             };
             if let Some(t) = target {
-                if let Some(ref mf) = cfg.move_item_fn {
-                    mf(current, t);
+                // Express the positional move as a same-view drop the source
+                // can validate + apply: dropping `current` *after* `t` when
+                // moving forward, *before* `t` when moving back, yields
+                // `move_item(current, t)` for an in-memory model.
+                let position = if t > current {
+                    DropPosition::After
+                } else {
+                    DropPosition::Before
+                };
+                let payload = DragPayload::typed(RowDrag {
+                    source_index: current,
+                    source_view_id: cfg.view_id,
+                });
+                if (cfg.accept_drop_fn)(&payload, t, position, cfg.view_id) {
+                    cfg.focused_index.set(Some(t));
+                    if let Some(ref sel) = cfg.selection {
+                        sel.select(t);
+                    }
+                    ensure_visible(&cfg, t);
                 }
-                cfg.focused_index.set(Some(t));
-                if let Some(ref sel) = cfg.selection {
-                    sel.select(t);
-                }
-                ensure_visible(&cfg, t);
                 return EventResponse::Handled;
             }
         }

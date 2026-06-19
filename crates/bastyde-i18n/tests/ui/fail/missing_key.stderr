@@ -1,5 +1,5 @@
 error: bastyde-i18n: translation key `nonexistent` not found in `$DIR/tests/ui/locales/en-US.ftl`
- --> tests/ui/fail/missing_key.rs:6:17
+ --> tests/ui/fail/missing_key.rs:9:17
   |
-6 |     let _ = tr!(nonexistent());
+9 |     let _ = tr!(nonexistent());
   |                 ^^^^^^^^^^^

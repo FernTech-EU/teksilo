@@ -409,6 +409,48 @@ fn alt_arrow_reorders_tile() {
 }
 
 #[test]
+fn pointer_drag_reorders_tile_through_source_accept_drop() {
+    // A pointer drag-reorder now routes through the source's `accept_drop`
+    // (replacing the old `move_item_fn`): drag tile 0 past the last tile and
+    // drop → it lands at the end.
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let model = ListModel::from_vec(vec![10usize, 20, 30, 40]);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .reorderable(true),
+    );
+    // 4×100 + 3×8 gaps = 424 → 4 columns fit in a 440-wide viewport.
+    tree.layout(SizeProposal::exact(440.0, 300.0));
+
+    let from = Point::new(50.0, 25.0); // tile 0 center
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: from,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    // Cross the drag threshold, then move past the last tile (insertion = end).
+    tree.dispatch_event(WidgetEvent::PointerMove { position: Point::new(72.0, 25.0) });
+    let to = Point::new(430.0, 25.0);
+    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: to,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert_eq!(
+        model.with_item(3, |v| *v),
+        Some(10),
+        "tile 0 moved to the end via the source's accept_drop"
+    );
+    assert_eq!(model.with_item(0, |v| *v), Some(20));
+    let _ = id;
+}
+
+#[test]
 fn enter_activates_focused_tile() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     use std::cell::Cell;
@@ -469,23 +511,65 @@ fn type_ahead_jumps_to_match() {
 }
 
 #[test]
-fn on_near_end_fires_when_scrolled_to_bottom() {
+fn fetch_more_fires_when_scrolled_near_the_end() {
+    // Incremental loading now flows through the source's `can_fetch_more` /
+    // `fetch_more` capabilities (the old `on_near_end` hook is gone): as the
+    // realized window nears the end, the body pane asks the source to grow.
     use std::cell::Cell;
     use std::rc::Rc;
-    let model = ListModel::from_vec((0..300).collect());
-    let fired = Rc::new(Cell::new(false));
-    let f = fired.clone();
+    use bastyde_core::ObserverHandle;
+    use bastyde_data::ListDataSource;
+
+    struct Growing {
+        total: usize,
+        fetched: Rc<Cell<bool>>,
+    }
+    impl ListDataSource for Growing {
+        type Item = usize;
+        type Key = usize;
+        fn len(&self) -> usize {
+            self.total
+        }
+        fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+            (i < self.total).then(|| f(&i))
+        }
+        fn key_at(&self, i: usize) -> Option<usize> {
+            (i < self.total).then_some(i)
+        }
+        fn can_fetch_more(&self) -> bool {
+            true
+        }
+        fn fetch_more(&self) {
+            self.fetched.set(true);
+        }
+        fn observe_changes(
+            &self,
+            _f: impl Fn(&bastyde_data::DataChange) + 'static,
+        ) -> ObserverHandle {
+            let inner: Rc<dyn std::any::Any> = Rc::new(());
+            ObserverHandle::new(inner, 0, Rc::new(|_| {}))
+        }
+    }
+
+    let fetched = Rc::new(Cell::new(false));
+    let source = Growing {
+        total: 300,
+        fetched: fetched.clone(),
+    };
     let mut tree = WidgetTree::new();
-    let gv = GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
-        .tile_size(100.0, 50.0)
-        .on_near_end(10, move || f.set(true));
+    let gv =
+        GridView::from_source(source, |_tc| Box::new(FixedLeaf(100.0, 50.0))).tile_size(100.0, 50.0);
     let scroll = gv.scroll_y_signal().clone();
     let max_sig = gv.max_scroll_y_signal().clone();
     let _id = tree.add(gv);
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    // Scroll to the bottom; the scroll observer fires the hook.
+    // At the top the window is far from the end — no fetch yet.
+    assert!(!fetched.get(), "fetch_more must not fire while far from the end");
+    // Scroll to the bottom; the body pane re-realizes and asks the source to
+    // fetch the next page as the window nears the end.
     scroll.set(max_sig.get());
-    assert!(fired.get(), "on_near_end should fire near the bottom");
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(fetched.get(), "fetch_more should fire as the window nears the end");
 }
 
 #[test]

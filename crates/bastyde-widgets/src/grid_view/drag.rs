@@ -3,24 +3,17 @@
 
 //! Drag-to-reorder for `GridView`.
 //!
-//! Each tile can start a typed [`GridViewDragData`] drag; the container is a
-//! drop target that computes a 2D insertion index from the pointer position
-//! and either reorders the backing model (intra-grid) or forwards the drop
-//! to the app (`on_item_drop`). A vertical insertion bar (painted by
-//! `GridOverlay`) shows where the item will land.
+//! Each tile starts a shared [`RowDrag`](crate::data_views::RowDrag) drag (the
+//! same payload `ListView` / `TreeView` / `TableView` emit, so a grid tile can
+//! be dropped on any of them and vice-versa); the container is a drop target
+//! that computes a 2D insertion index from the pointer position and routes the
+//! drop through the **source's** `can_accept` / `accept_drop` (intra-grid
+//! reorder) or forwards a foreign drop to the app (`on_item_drop`). A vertical
+//! insertion bar (painted by `GridOverlay`) shows where the item will land.
 
 use bastyde_canvas::Point;
 
 use super::layout::GridLayoutStrategy;
-
-/// Payload identifying an in-grid tile being dragged for reorder.
-#[derive(Debug, Clone)]
-pub(crate) struct GridViewDragData {
-    pub(crate) source_index: usize,
-    /// Disambiguates different `GridView` instances so a drop only reorders
-    /// when it originated in the same grid.
-    pub(crate) source_model_id: usize,
-}
 
 /// The flat index a drop at `local` (widget-local point) would insert
 /// *before*. Lands on the nearest tile edge; falls through to `len` (append)

@@ -1,5 +1,5 @@
 error: bastyde-i18n: unknown argument `extra` for key `welcome` (expected: name)
- --> tests/ui/fail/unknown_arg.rs:8:38
-  |
-8 |     let _ = tr!(welcome(name = name, extra = extra));
-  |                                      ^^^^^
+  --> tests/ui/fail/unknown_arg.rs:11:38
+   |
+11 |     let _ = tr!(welcome(name = name, extra = extra));
+   |                                      ^^^^^

@@ -29,7 +29,7 @@ use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
 use bastyde_data::{
     DragEligibility, DropPosition, DropResponse, FlatEntry, ItemKey, KeyedSelectionModel, NodeId,
-    TreeDataSource, TreeModel,
+    RowState, TreeDataSource, TreeModel,
 };
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
@@ -936,9 +936,18 @@ impl<T: 'static> Widget for TreeView<T> {
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
+        // Lazy: nudge the source to load the realized window, and fetch more
+        // as the viewport nears the end (append-only sources).
+        (self.source.dnd.request_window_fn)(start..end);
+        if (self.source.dnd.can_fetch_more_fn)()
+            && end + BUFFER_ITEMS >= self.source.visible_count()
+        {
+            (self.source.dnd.fetch_more_fn)();
+        }
         let reorderable = self.reorderable;
         let tree_id = self.tree_id;
         let self_id = ctx.self_id();
+        let row_state_fn = self.source.dnd.row_state_fn.clone();
         for i in start..end {
             let selected = self
                 .row_selection
@@ -948,10 +957,18 @@ impl<T: 'static> Widget for TreeView<T> {
             // Row metadata (a11y level / expand state) from the source.
             let meta = self.source.meta(i);
             let item_has_children = meta.as_ref().is_some_and(|m| m.has_children);
-            if let Some(widget) = self
+            // A `Loading` row (data not yet resident) renders a placeholder
+            // skeleton instead of being skipped, so the scrollbar and layout
+            // stay stable while the window loads. A placeholder reports no
+            // metadata, so the expand/drag wiring below is gated off.
+            let row_widget = self
                 .source
                 .with_row(i, &|item, m| (self.row_delegate)(i, item, m, selected))
-            {
+                .or_else(|| {
+                    ((row_state_fn)(i) == RowState::Loading)
+                        .then(crate::data_views::default_placeholder)
+                });
+            if let Some(widget) = row_widget {
                 let inner_id = ctx.add_boxed(widget);
                 let (level, position_1based, total_siblings, expanded_opt) =
                     if let Some(ref m) = meta {
@@ -2702,10 +2719,14 @@ mod tests {
     fn from_source_row_with_pointer_event_selection_stays_draggable() {
         // A row that selects on press via `on_pointer_event` (raw, returns
         // `Ignored`) installs NO gesture arena, so it never captures the pointer
-        // and the row stays draggable — the pattern a reorderable view must use
-        // for per-row selection. (A descendant `on_tap`, by contrast, installs a
-        // TapRecognizer that captures the Down and shadows the ancestor drag —
-        // see docs; selectable+reorderable rows select via `on_pointer_event`.)
+        // and the row stays draggable — the pattern a reorderable view uses for
+        // per-row selection (selection must land on *press* and carry the
+        // Ctrl/Shift modifiers, which `TapRecognizer` fires-on-release and
+        // strips). The framework also disambiguates a descendant `on_tap`
+        // against an ancestor drag now (the ancestor observes the pointer while
+        // the tap holds capture — see `ancestor_drag_starts_through_descendant_tap_capture`),
+        // but `on_pointer_event` remains the right press-time + modifier-aware
+        // choice here.
         use bastyde_core::event::{EventResponse, WidgetEvent};
         use bastyde_core::widget_builder::WidgetBuilder;
         let src = Rc::new(MockI64Source::new());
@@ -2735,6 +2756,87 @@ mod tests {
             src.accept_log.borrow().len(),
             1,
             "on_pointer_event selection must not block the row drag"
+        );
+    }
+
+    #[test]
+    fn lazy_loading_tree_rows_render_placeholders_and_request_the_window() {
+        // A windowed `TreeDataSource` with nothing resident: every visible row
+        // is `Loading`, so the TreeView must render placeholder skeletons (not
+        // skip the rows) and nudge the source to load the realized window —
+        // the tree analogue of the ListView lazy path.
+        use std::ops::Range;
+
+        struct WindowedTree {
+            total: usize,
+            version: Signal<u64>,
+            requested: Rc<RefCell<Vec<Range<usize>>>>,
+        }
+        impl TreeDataSource for WindowedTree {
+            type Item = String;
+            type Key = usize;
+            fn visible_count(&self) -> usize {
+                self.total
+            }
+            fn with_entry<R>(
+                &self,
+                _flat_index: usize,
+                _f: impl FnOnce(&String, &FlatEntry<usize>) -> R,
+            ) -> Option<R> {
+                None // nothing resident yet
+            }
+            fn key_at(&self, i: usize) -> Option<usize> {
+                (i < self.total).then_some(i)
+            }
+            fn flat_index_of(&self, key: &usize) -> Option<usize> {
+                (*key < self.total).then_some(*key)
+            }
+            fn parent(&self, _key: &usize) -> Option<usize> {
+                None
+            }
+            fn child_keys(&self, _key: &usize) -> Vec<usize> {
+                Vec::new()
+            }
+            fn version_signal(&self) -> Signal<u64> {
+                self.version.clone()
+            }
+            fn is_expanded(&self, _key: &usize) -> bool {
+                false
+            }
+            fn set_expanded(&self, _key: &usize, _expanded: bool) {}
+            fn row_state(&self, _flat_index: usize) -> RowState {
+                RowState::Loading
+            }
+            fn request_window(&self, range: Range<usize>) {
+                self.requested.borrow_mut().push(range);
+            }
+        }
+
+        let requested = Rc::new(RefCell::new(Vec::new()));
+        let source = WindowedTree {
+            total: 1000,
+            version: Signal::new(0),
+            requested: requested.clone(),
+        };
+        let mut t = WidgetTree::new();
+        let v = t.add(
+            TreeView::from_source(source, |_l: &String, _r: &TreeRow, _s| {
+                Box::new(FixedLeaf(120.0, 28.0)) as Box<dyn Widget>
+            })
+            .item_height(28.0),
+        );
+        t.layout(SizeProposal::exact(400.0, 300.0));
+
+        // 300px / 28px ≈ 10 visible + buffer → the loading rows are realized as
+        // placeholder child widgets (children minus the scrollbar), NOT skipped.
+        let placeholder_rows = t.children(v).len() - 1;
+        assert!(
+            placeholder_rows >= 10,
+            "loading tree rows must render as placeholders, got {placeholder_rows}"
+        );
+        assert!(
+            !requested.borrow().is_empty(),
+            "request_window must be called for the visible range"
         );
     }
 }

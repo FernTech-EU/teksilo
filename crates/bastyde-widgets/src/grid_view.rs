@@ -43,16 +43,20 @@ use bastyde_canvas::{EdgeInsets, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::GridViewStyle;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{DataChange, ListModel, SelectionMode, SelectionModel};
+use bastyde_data::{
+    DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
+};
 use bastyde_tokens::SurfaceRole;
 
 use crate::common::scroll::OverscrollBehavior;
+use crate::data_views::{RowDrag, flat_insertion_target};
 use crate::list_source::ListSource;
 use crate::primitives::TextWidget;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
@@ -88,6 +92,38 @@ fn next_grid_id() -> usize {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The erased `can_accept` closure type carried by the grid's source.
+type CanAcceptFn = Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>;
+
+/// Whether a drop at flat insertion `idx` is allowed: the source accepts it
+/// (same-view reorder, or a source that handles the foreign payload), OR it is
+/// a foreign payload and the grid carries an app-level `on_item_drop` handler.
+fn drop_allowed(
+    can_accept: &CanAcceptFn,
+    payload: &DragPayload,
+    idx: usize,
+    len: usize,
+    view_id: usize,
+    has_drop_cb: bool,
+) -> bool {
+    match flat_insertion_target(idx, len) {
+        Some((target, position)) => match (can_accept)(payload, target, position, view_id) {
+            DropResponse::Accept | DropResponse::Redirect(_) => true,
+            DropResponse::Reject => has_drop_cb && is_foreign(payload, view_id),
+        },
+        None => false,
+    }
+}
+
+/// A payload is foreign to this grid when it is not a `RowDrag` originating
+/// here (an external app/OS drop, or a row dragged from another view).
+fn is_foreign(payload: &DragPayload, view_id: usize) -> bool {
+    payload
+        .get_typed::<RowDrag>()
+        .map(|rd| rd.source_view_id != view_id)
+        .unwrap_or(true)
 }
 
 /// Scrollbar thickness, matching `ListView` / `TableView`.
@@ -193,12 +229,6 @@ pub struct GridView<T: 'static> {
     #[allow(clippy::type_complexity)]
     type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
 
-    // Incremental loading. The callback is `Fn()` (no EventContext): it
-    // fires from a reactive scroll observer, which can't carry one, and the
-    // typical action is just to kick off a fetch into the model.
-    #[allow(clippy::type_complexity)]
-    on_near_end: Option<(usize, Rc<dyn Fn()>)>,
-
     // Empty / loading state
     #[allow(clippy::type_complexity)]
     empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
@@ -298,7 +328,6 @@ impl<T: 'static> GridView<T> {
             tile_context_menu: None,
             type_ahead_timeout: std::time::Duration::from_millis(500),
             type_ahead_label: None,
-            on_near_end: None,
             empty_view: None,
             loading_view: None,
             is_loading: None,
@@ -592,8 +621,9 @@ impl<T: 'static> GridView<T> {
 
     // ── Drag-to-reorder ─────────────────────────────────────────────────
 
-    /// Enable intra-grid drag reordering (and keyboard Alt+Arrow). Calls the
-    /// model's `move_item` on drop.
+    /// Enable intra-grid drag reordering (and keyboard Alt+Arrow). The move is
+    /// routed through the source's `accept_drop` (a built-in `ListModel`
+    /// reorders via `move_item`; an external source applies its own command).
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
         self
@@ -647,14 +677,6 @@ impl<T: 'static> GridView<T> {
     /// Type-ahead reset timeout (default 500 ms; `ZERO` disables).
     pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.type_ahead_timeout = timeout;
-        self
-    }
-
-    /// Called when the scroll position reaches within `threshold` items of
-    /// the end — the incremental-loading hook. Fires from a reactive scroll
-    /// observer (no `EventContext`); load more into the model.
-    pub fn on_near_end(mut self, threshold: usize, f: impl Fn() + 'static) -> Self {
-        self.on_near_end = Some((threshold, Rc::new(f)));
         self
     }
 
@@ -854,7 +876,8 @@ impl<T: 'static> Widget for GridView<T> {
             tab_traversal: self.tab_traversal,
             on_tile_activate: self.on_tile_activate.clone(),
             reorderable: self.reorderable,
-            move_item_fn: self.source.move_item_fn.clone(),
+            accept_drop_fn: self.source.dnd.accept_drop_fn.clone(),
+            view_id: self.model_id,
             type_ahead_timeout: self.type_ahead_timeout,
             type_ahead_label: self.type_ahead_label.clone(),
         }));
@@ -891,24 +914,39 @@ impl<T: 'static> Widget for GridView<T> {
         }
 
         // Drop target: intra-grid reorder + external drops, with an insertion
-        // indicator painted by the overlay.
+        // indicator painted by the overlay. Hover/drop are routed through the
+        // SOURCE's `can_accept` / `accept_drop` (the pre-drop validation), so a
+        // same-view `RowDrag` reorders and a foreign payload is the source's
+        // call — falling back to the app-level `on_item_drop` escape hatch.
         if self.reorderable || self.on_item_drop.is_some() {
+            let has_drop_cb = self.on_item_drop.is_some();
+            let my_id = self.model_id;
+
             let strategy_h = strategy.clone();
             let scroll_h = self.scroll_y.clone();
             let vp_w_h = self.viewport_width.clone();
             let len_h = self.source.len_fn.clone();
+            let can_accept_h = self.source.dnd.can_accept_fn.clone();
             let insertion_h = self.insertion.clone();
-            let my_id = self.model_id;
-            handlers = handlers.on_drag_hover(move |_payload, position, _ctx| {
+            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                let len = (len_h)();
                 let idx = drag::insertion_index(
                     strategy_h.as_ref(),
                     position,
                     scroll_h.get(),
                     vp_w_h.get(),
-                    (len_h)(),
+                    len,
                 );
-                insertion_h.set(Some(idx));
-                bastyde_core::DropFeedback::NoFeedback
+                let allowed = drop_allowed(&can_accept_h, payload, idx, len, my_id, has_drop_cb);
+                if allowed {
+                    insertion_h.set(Some(idx));
+                    // Engage (stops drop-target bubbling); the overlay paints
+                    // the insertion bar, so no framework-drawn feedback.
+                    bastyde_core::DropFeedback::Accept
+                } else {
+                    insertion_h.set(None);
+                    bastyde_core::DropFeedback::NoFeedback
+                }
             });
 
             let insertion_leave = self.insertion.clone();
@@ -920,27 +958,24 @@ impl<T: 'static> Widget for GridView<T> {
             let scroll_d = self.scroll_y.clone();
             let vp_w_d = self.viewport_width.clone();
             let len_d = self.source.len_fn.clone();
-            let move_d = self.source.move_item_fn.clone();
+            let accept_drop_d = self.source.dnd.accept_drop_fn.clone();
             let drop_cb = self.on_item_drop.clone();
             let insertion_d = self.insertion.clone();
-            handlers = handlers.on_drop(move |mut payload, position, ctx| {
+            handlers = handlers.on_drop(move |payload, position, ctx| {
                 insertion_d.set(None);
+                let len = (len_d)();
                 let to = drag::insertion_index(
                     strategy_d.as_ref(),
                     position,
                     scroll_d.get(),
                     vp_w_d.get(),
-                    (len_d)(),
+                    len,
                 );
-                if let Some(data) = payload.take_typed::<drag::GridViewDragData>() {
-                    if data.source_model_id == my_id {
-                        let from = data.source_index;
-                        let adjusted = if from < to { to.saturating_sub(1) } else { to };
-                        if from != adjusted {
-                            if let Some(ref mf) = move_d {
-                                mf(from, adjusted);
-                            }
-                        }
+                // Same-view reorder + any source-handled drop go through
+                // accept_drop; a foreign payload a bare model rejects falls to
+                // the app's on_item_drop.
+                if let Some((target, position_kind)) = flat_insertion_target(to, len) {
+                    if (accept_drop_d)(&payload, target, position_kind, my_id) {
                         return true;
                     }
                 }
@@ -952,30 +987,10 @@ impl<T: 'static> Widget for GridView<T> {
         }
         ctx.apply_self_handlers(handlers);
 
-        // Incremental-loading hook: fire when the scroll nears the end.
-        if let Some((threshold, cb)) = &self.on_near_end {
-            let cb = cb.clone();
-            let threshold = *threshold;
-            let strategy_n = strategy.clone();
-            let len_n = self.source.len_fn.clone();
-            let vp_w_n = self.viewport_width.clone();
-            let vp_h_n = self.viewport_height.clone();
-            let fired_for = Rc::new(Cell::new(usize::MAX));
-            let handle = self.scroll_y.observe(move |y| {
-                let len = (len_n)();
-                if len == 0 {
-                    return;
-                }
-                let vr = strategy_n.visible_range(*y, vp_h_n.get(), vp_w_n.get(), len);
-                if vr.end + threshold >= len && fired_for.get() != len {
-                    fired_for.set(len);
-                    cb();
-                }
-            });
-            ctx.own_handle(handle);
-        }
-
         // Children: body pane (or empty view), scrollbar, overlay.
+        // (Incremental loading — `request_window` / `fetch_more` — lives in the
+        // body pane's realize loop now, driven by the source's `can_fetch_more`
+        // / `fetch_more` capabilities; it fires on each scroll-buffer exit.)
         self.body_pane_id = None;
         self.empty_id = None;
         self.scrollbar_id = None;
@@ -1014,6 +1029,11 @@ impl<T: 'static> Widget for GridView<T> {
                 tile_context_menu: self.tile_context_menu.clone(),
                 reorderable: self.reorderable,
                 model_id: self.model_id,
+                drag_fn: self.source.dnd.drag_fn.clone(),
+                row_state_fn: self.source.dnd.row_state_fn.clone(),
+                request_window_fn: self.source.dnd.request_window_fn.clone(),
+                can_fetch_more_fn: self.source.dnd.can_fetch_more_fn.clone(),
+                fetch_more_fn: self.source.dnd.fetch_more_fn.clone(),
                 tile_map: self.tile_map.clone(),
                 header_factory: self.header_factory(),
                 header_title: self.section_data.as_ref().map(|d| d.title_fn.clone()),

@@ -27,16 +27,30 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::SelectionModel;
+use bastyde_data::{DragEligibility, RowState, SelectionModel};
 
 use super::TileContext;
 use super::a11y::TileA11y;
 use super::layout::GridLayoutStrategy;
+use crate::data_views::{RowDrag, default_placeholder};
 
 pub(crate) type LenFn = Rc<dyn Fn() -> usize>;
 pub(crate) type WithItemFn<T> =
     Rc<dyn Fn(usize, &dyn Fn(&T) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>;
 pub(crate) type TileDelegate<T> = Rc<dyn Fn(&TileContext<'_, T>) -> Box<dyn Widget>>;
+/// Per-tile transferable gate (source-owned): may this tile begin a drag?
+pub(crate) type DragFn = Rc<dyn Fn(usize) -> DragEligibility>;
+/// Per-tile residency state (source-owned): is this tile loaded, or a
+/// windowed placeholder?
+pub(crate) type RowStateFn = Rc<dyn Fn(usize) -> RowState>;
+/// Nudge the source to load a visible range / append the next page.
+pub(crate) type RequestWindowFn = Rc<dyn Fn(std::ops::Range<usize>)>;
+pub(crate) type CanFetchMoreFn = Rc<dyn Fn() -> bool>;
+pub(crate) type FetchMoreFn = Rc<dyn Fn()>;
+
+/// How close (in tiles) the realized window's end must come to the total
+/// before an append-only source is asked to `fetch_more`.
+const FETCH_BUFFER_TILES: usize = 24;
 
 pub(crate) struct GridBodyPane<T: 'static> {
     pub(crate) len_fn: LenFn,
@@ -71,6 +85,15 @@ pub(crate) struct GridBodyPane<T: 'static> {
     >,
     pub(crate) reorderable: bool,
     pub(crate) model_id: usize,
+    /// Source-owned DnD + lazy capability closures (erased from the backing
+    /// `ListDataSource`). `drag_fn` gates per-tile drag start; `row_state_fn`
+    /// drives windowed placeholders; the lazy trio nudges the source to load
+    /// the realized window / fetch the next page as the viewport advances.
+    pub(crate) drag_fn: DragFn,
+    pub(crate) row_state_fn: RowStateFn,
+    pub(crate) request_window_fn: RequestWindowFn,
+    pub(crate) can_fetch_more_fn: CanFetchMoreFn,
+    pub(crate) fetch_more_fn: FetchMoreFn,
     /// Shared (flat index → tile wrapper id) map, written at the end of
     /// each build for the container's `active_descendant` roving focus.
     pub(crate) tile_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
@@ -188,6 +211,13 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         let total = (self.len_fn)();
         let cols = self.strategy.column_count(self.viewport_width.get()).max(1);
         let (start, end) = self.visible();
+        // Lazy: nudge the source to load the realized window, and fetch more
+        // as the viewport nears the end (append-only sources). Fires on every
+        // pane build — i.e. on each scroll-buffer exit — matching ListView.
+        (self.request_window_fn)(start..end);
+        if (self.can_fetch_more_fn)() && end + FETCH_BUFFER_TILES >= total {
+            (self.fetch_more_fn)();
+        }
         let focused = self.focused_index.get();
 
         for i in start..end {
@@ -200,6 +230,9 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 .unwrap_or(false);
             let is_focused = focused == Some(i);
             let delegate = self.delegate.clone();
+            // A `Loading` tile (data not yet resident) renders a placeholder
+            // skeleton instead of being skipped, so the scrollbar and layout
+            // stay stable while the window loads.
             let widget = (self.with_item_fn)(i, &|item| {
                 let tc = TileContext {
                     index: i,
@@ -210,7 +243,8 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                     is_focused,
                 };
                 delegate(&tc)
-            });
+            })
+            .or_else(|| ((self.row_state_fn)(i) == RowState::Loading).then(default_placeholder));
             let Some(widget) = widget else { continue };
 
             let inner_id = ctx.add_boxed(widget);
@@ -275,14 +309,17 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let with_item = self.with_item_fn.clone();
                 let strategy = self.strategy.clone();
                 let vp_w = self.viewport_width.clone();
+                let drag_gate = self.drag_fn.clone();
                 extra = extra.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                        let payload = bastyde_core::drag_payload::DragPayload::typed(
-                            super::drag::GridViewDragData {
-                                source_index: idx,
-                                source_model_id: model_id,
-                            },
-                        );
+                        // The source's per-tile transferable gate.
+                        if (drag_gate)(idx) == DragEligibility::NoDrag {
+                            return;
+                        }
+                        let payload = bastyde_core::drag_payload::DragPayload::typed(RowDrag {
+                            source_index: idx,
+                            source_view_id: model_id,
+                        });
                         let r = strategy.tile_rect(idx, vp_w.get());
                         let (w, h) = (r.width.max(40.0), r.height.max(40.0));
                         let delegate = delegate.clone();

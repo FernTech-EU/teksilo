@@ -516,4 +516,116 @@ mod tests {
         tree.drag(Point::new(50.0, 25.0), Point::new(80.0, 25.0));
         assert!(dragged.get());
     }
+
+    #[test]
+    fn ancestor_drag_starts_through_descendant_tap_capture() {
+        // The cross-widget tap-vs-drag disambiguation: a descendant `on_tap`
+        // (which captures the pointer on PointerDown) must NOT permanently
+        // shadow an ancestor `on_drag`. A plain click fires the descendant tap;
+        // a press-then-move starts the ANCESTOR drag instead.
+        use crate::gesture::DragPhase;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tapped = Rc::new(Cell::new(false));
+        let drag_started = Rc::new(Cell::new(false));
+        let t = tapped.clone();
+        let d = drag_started.clone();
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(move |_p, _c| t.set(true)));
+        // Ancestor container carries the drag; child sits on top and taps.
+        let _parent = tree.add(StackWidget::new().add_child(child).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // 1) A plain click on the child fires the child's tap, not the drag.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(tapped.get(), "a click on the child fires the descendant tap");
+        assert!(!drag_started.get(), "a click must not start the ancestor drag");
+
+        tapped.set(false);
+        drag_started.set(false);
+
+        // 2) Press on the child, then move past threshold → the ANCESTOR drag
+        // starts (it observed the pointer while the child tap held capture),
+        // and the descendant tap does NOT fire.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 25.0),
+        });
+        assert!(
+            drag_started.get(),
+            "dragging from the child must start the ancestor drag"
+        );
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(80.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!tapped.get(), "a drag must not fire the descendant tap");
+    }
+
+    #[test]
+    fn ancestor_drag_starts_through_deeply_nested_tap_capture() {
+        // The SceneView shape: an `on_drag` container whose child is an
+        // `on_tap`-wrapped card with a DEEPER inner leaf (the hit target). The
+        // press bubbles up to the card's tap (which captures), and the
+        // container's drag must still start on move — proving the disambiguation
+        // walks multiple levels, not just an immediate parent.
+        use crate::gesture::DragPhase;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let drag_started = Rc::new(Cell::new(false));
+        let d = drag_started.clone();
+
+        let mut tree = WidgetTree::new();
+        // Deepest leaf — the hit target, no handlers of its own.
+        let inner = tree.add(FillWidget::new());
+        // Card: an on_tap wrapper around a container holding the inner leaf.
+        let card = tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .on_tap(move |_p, _c| { /* select */ }),
+        );
+        // Canvas: an on_drag container holding the card.
+        let _canvas = tree.add(StackWidget::new().add_child(card).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 25.0),
+        });
+        assert!(
+            drag_started.get(),
+            "dragging a deeply-nested tappable child must start the ancestor drag"
+        );
+    }
 }

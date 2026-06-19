@@ -1,5 +1,5 @@
 error: bastyde-i18n: missing argument `name` for key `welcome`
- --> tests/ui/fail/missing_arg.rs:6:17
+ --> tests/ui/fail/missing_arg.rs:9:17
   |
-6 |     let _ = tr!(welcome());
+9 |     let _ = tr!(welcome());
   |                 ^^^^^^^

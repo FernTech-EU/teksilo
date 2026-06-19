@@ -54,25 +54,46 @@ impl SceneView {
             // feel unstable to the user.
             let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
             snapshot.clear();
-            // Snapshot draggable lightweight items' scene-AABBs for
-            // the drag-start hit-test. Refreshed each layout pass so
-            // a parent move between drag events doesn't leave the
-            // snapshot stale.
-            let ids: Vec<crate::item::ItemId> = self.scene().ids();
-            for id in ids {
-                if self.scene().item(id).is_none() {
+            // Snapshot draggable lightweight items' narrow-phase hit geometry
+            // (AABB + shape predicate + transform) for the drag-start hit-test
+            // and the grab cursor. Refreshed each layout pass so a parent move
+            // between drag events doesn't leave the snapshot stale.
+            let scene = self.model.0.borrow();
+            for id in scene.ids() {
+                let Some(item) = scene.item(id) else {
                     continue;
-                }
-                let Some(flags) = self.scene().flags(id) else {
+                };
+                let Some(flags) = scene.flags(id) else {
                     continue;
                 };
                 if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                     continue;
                 }
-                if let Some(scene_rect) = self.scene().scene_rect(id) {
-                    snapshot.push((id, scene_rect));
-                }
+                let Some(scene_rect) = scene.scene_rect(id) else {
+                    continue;
+                };
+                let scene_xform = scene.scene_transform(id);
+                let ignores_xform =
+                    flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
+                let scene_anchor = if ignores_xform {
+                    scene_xform.apply_point(Point::ZERO)
+                } else {
+                    Point::ZERO
+                };
+                snapshot.push(super::DraggableSnapshotEntry {
+                    id,
+                    scene_rect,
+                    scene_transform: scene_xform,
+                    shape_contains: item.clone_shape_test().into(),
+                    ignores_xform,
+                    scene_anchor,
+                    local_bounds: scene.local_bounds(id).unwrap_or(Rect::ZERO),
+                    z: scene.z(id).unwrap_or(0.0),
+                });
             }
+            // Topmost-first so the first shape match in `hit_draggable_item`
+            // wins, matching the handler-snapshot hit-test ordering.
+            snapshot.sort_by(|a, b| b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal));
         }
 
         // Refresh the handler-dispatch snapshot used by

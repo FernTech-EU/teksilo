@@ -180,6 +180,12 @@ pub struct WidgetTree {
     /// Widget that has captured the pointer (receives all PointerMove/PointerUp
     /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
     pointer_captured_by: Option<WidgetId>,
+    /// Strict ancestors of the captured widget that carry a drag/swipe
+    /// recognizer, armed on `PointerDown` so an ancestor drag can still start
+    /// while a descendant tap holds the capture (tap-vs-drag disambiguation
+    /// across the hit-path). Innermost-first. Drained when a drag latches or
+    /// the pointer sequence ends. See `arm_drag_observers`.
+    drag_observers: Vec<WidgetId>,
     /// Current cursor selected by hover/interaction routing.
     current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
@@ -406,6 +412,7 @@ impl WidgetTree {
             synthetic_parent_map: std::collections::HashMap::new(),
             cached_frame: None,
             pointer_captured_by: None,
+            drag_observers: Vec::new(),
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
             active_ids_scratch: Vec::new(),

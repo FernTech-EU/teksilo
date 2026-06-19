@@ -254,6 +254,83 @@ struct HandlerSnapshotEntry {
     local_bounds: Rect,
 }
 
+/// Hit-test geometry for one **draggable** lightweight item, snapshotted each
+/// layout pass for the `on_drag` drag-start hit-test and the grab-cursor hover
+/// check. Carries the narrow-phase `shape_contains` predicate + transform (the
+/// same data `HandlerSnapshotEntry` holds for tap/hover) so a press targets the
+/// item only when it lands on the item's **actual shape**, not merely its AABB
+/// — important for thin draggable items (e.g. a connector path) whose bounding
+/// box is much larger than the drawn stroke. z-sorted descending so the first
+/// shape match is the topmost.
+#[derive(Clone)]
+struct DraggableSnapshotEntry {
+    id: ItemId,
+    scene_rect: Rect,
+    scene_transform: bastyde_canvas::Transform2D,
+    shape_contains: Rc<dyn Fn(Point, f32) -> bool>,
+    ignores_xform: bool,
+    scene_anchor: Point,
+    local_bounds: Rect,
+    /// z-order (used to pick topmost on overlap).
+    z: f32,
+}
+
+impl std::fmt::Debug for DraggableSnapshotEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DraggableSnapshotEntry")
+            .field("id", &self.id)
+            .field("scene_rect", &self.scene_rect)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The topmost draggable item whose **shape** contains the pointer (narrow
+/// phase), or `None`. Mirrors the `hit_handler_item` logic used for tap/hover
+/// dispatch: AABB broad-phase, then inverse-project to local and consult
+/// `shape_contains`, with a screen-space branch for `IGNORES_TRANSFORMATIONS`
+/// items. `snap` must be z-sorted descending (topmost first).
+fn hit_draggable_item(
+    snap: &[DraggableSnapshotEntry],
+    screen_pt: Point,
+    scene_pt: Point,
+    view_xform: bastyde_canvas::Transform2D,
+) -> Option<ItemId> {
+    let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+    for entry in snap.iter() {
+        if entry.ignores_xform {
+            let screen_anchor = view_xform.apply_point(entry.scene_anchor);
+            let screen_rect = Rect::new(
+                screen_anchor.x + entry.local_bounds.x,
+                screen_anchor.y + entry.local_bounds.y,
+                entry.local_bounds.width,
+                entry.local_bounds.height,
+            );
+            if !screen_rect.contains(screen_pt) {
+                continue;
+            }
+            let local_pt =
+                Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
+            // Screen-anchored items ignore the view transform → unit scale.
+            if (entry.shape_contains)(local_pt, 1.0) {
+                return Some(entry.id);
+            }
+            continue;
+        }
+        if !entry.scene_rect.contains(scene_pt) {
+            continue;
+        }
+        let local_pt = entry
+            .scene_transform
+            .inverse()
+            .map(|inv| inv.apply_point(scene_pt))
+            .unwrap_or(Point::ZERO);
+        if (entry.shape_contains)(local_pt, view_scale) {
+            return Some(entry.id);
+        }
+    }
+    None
+}
+
 /// Visual debug overlays painted on top of normal scene rendering.
 ///
 /// Every flag defaults to `false`. Use this to verify that culling /
@@ -481,13 +558,13 @@ pub struct SceneView {
     /// — so a labelled rectangle (Rect parent + TextItem child)
     /// moves as one unit, QGraphicsScene-style.
     pending_item_move: Rc<Cell<Option<(ItemId, Vec2)>>>,
-    /// Snapshot of lightweight scene items + their bounds, used
-    /// by the on_drag closure for hit-test. Refreshed in
-    /// `place_children` each layout pass — the snapshot stays
-    /// consistent within a single drag and refreshes between
-    /// drags via the spatial-index mutation triggering relayout.
-    /// Avoids forcing `Scene` into an `Rc<RefCell>`.
-    lightweight_bounds_snapshot: Rc<RefCell<Vec<(ItemId, Rect)>>>,
+    /// Snapshot of **draggable** lightweight scene items + their narrow-phase
+    /// hit geometry, used by the on_drag drag-start hit-test and the grab-cursor
+    /// hover check. Refreshed in `place_children` each layout pass — the
+    /// snapshot stays consistent within a single drag and refreshes between
+    /// drags via the spatial-index mutation triggering relayout. Avoids forcing
+    /// `Scene` into an `Rc<RefCell>`.
+    lightweight_bounds_snapshot: Rc<RefCell<Vec<DraggableSnapshotEntry>>>,
     /// Bumped by the on_drag closure on `Ended` after posting a
     /// `pending_item_move`. SceneView binds to this at
     /// `BindingLevel::Rebuild` in `build`, so the next build

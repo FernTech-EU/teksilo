@@ -1,5 +1,5 @@
 error[E0433]: cannot find type `Buton` in this scope
- --> tests/bati/fail/err_constructor_typo.rs:9:19
-  |
-9 |     let _ = bati!(Buton("oops"));
-  |                   ^^^^^ use of undeclared type `Buton`
+  --> tests/bati/fail/err_constructor_typo.rs:12:19
+   |
+12 |     let _ = bati!(Buton("oops"));
+   |                   ^^^^^ use of undeclared type `Buton`

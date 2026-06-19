@@ -209,8 +209,14 @@ impl SceneView {
                             .as_ref()
                             .and_then(|e| e.handlers.as_deref())
                             .and_then(|h| h.cursor);
-                        let snap = bounds_snapshot.borrow();
-                        let over_draggable = snap.iter().any(|(_, rect)| rect.contains(scene_pt));
+                        // Narrow-phase: the grab cursor only shows when the
+                        // pointer is over the item's actual shape, agreeing
+                        // with the on_drag drag-start hit-test below.
+                        let over_draggable = {
+                            let snap = bounds_snapshot.borrow();
+                            super::hit_draggable_item(&snap, *position, scene_pt, view_xform_signal.get())
+                                .is_some()
+                        };
                         let cursor = if drag_target_for_cursor.get().is_some() {
                             CursorIcon::Grabbing
                         } else if let Some(c) = item_cursor {
@@ -804,16 +810,16 @@ impl SceneView {
                         Some(inv) => inv.apply_point(position),
                         None => Point::ZERO,
                     };
-                    // Hit-test scene items in reverse insertion
-                    // order so items painted on top get
-                    // priority. The snapshot is refreshed each
-                    // layout pass — see `place_children`.
-                    let snap = bounds_snapshot.borrow();
-                    let hit = snap
-                        .iter()
-                        .rev()
-                        .find(|(_, rect)| rect.contains(scene_press));
-                    if let Some(&(item_id, _)) = hit {
+                    // Narrow-phase hit-test: target the topmost draggable
+                    // item whose actual SHAPE (not just its AABB) contains the
+                    // press, so a thin draggable item (e.g. a connector path)
+                    // is grabbed only on its stroke. The snapshot is z-sorted
+                    // and refreshed each layout pass — see `place_children`.
+                    let hit = {
+                        let snap = bounds_snapshot.borrow();
+                        super::hit_draggable_item(&snap, position, scene_press, xform)
+                    };
+                    if let Some(item_id) = hit {
                         // Drag-to-move: enter that mode,
                         // not marquee.
                         drag_target.set(Some(DragTarget {
