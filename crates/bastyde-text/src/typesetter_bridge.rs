@@ -151,7 +151,25 @@ pub struct TypesetterBridge {
     /// cache key — flipping it costs nothing, entries at different
     /// scales coexist and age out via the normal touch/LRU machinery.
     raster_scale: f32,
+    /// Debug-only `layout_key -> source text` side map for diagnostics.
+    ///
+    /// Unlike `layout_cache` / `glyph_cache`, this is **not** cleared on a
+    /// scale-factor change — the scale reset is the dominant trigger of
+    /// the evicted-layout warning (a widget retains a `TextLayout` from
+    /// before the reset, then paints it after both caches were wiped), so
+    /// recovering the text for the warning requires a mapping that
+    /// outlives the wipe. Bounded by [`DEBUG_TEXT_MAP_CAP`]; never read on
+    /// a hot path (only [`debug_layout_text`](TextBackend::debug_layout_text)).
+    #[cfg(debug_assertions)]
+    debug_text_by_key: HashMap<u64, String>,
 }
+
+/// Cap on the debug `layout_key -> text` map. When exceeded the map is
+/// cleared wholesale (oldest text is then simply unavailable to the
+/// warning — it degrades to "no text", never to wrong text). Generous
+/// enough that a normal session never trips it.
+#[cfg(debug_assertions)]
+const DEBUG_TEXT_MAP_CAP: usize = 8192;
 
 impl TypesetterBridge {
     pub fn new() -> Self {
@@ -169,6 +187,23 @@ impl TypesetterBridge {
             last_seen_eviction_epoch,
             atlas_version: 1,
             raster_scale: 1.0,
+            #[cfg(debug_assertions)]
+            debug_text_by_key: HashMap::new(),
+        }
+    }
+
+    /// Record a `layout_key -> text` association for the debug
+    /// evicted-layout warning. No-op in release. Bounded by
+    /// [`DEBUG_TEXT_MAP_CAP`].
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))]
+    #[inline]
+    fn debug_remember_text(&mut self, key: u64, text: &str) {
+        #[cfg(debug_assertions)]
+        {
+            if self.debug_text_by_key.len() >= DEBUG_TEXT_MAP_CAP {
+                self.debug_text_by_key.clear();
+            }
+            self.debug_text_by_key.insert(key, text.to_string());
         }
     }
 
@@ -490,6 +525,7 @@ impl TextBackend for TypesetterBridge {
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
+        self.debug_remember_text(key, text);
 
         let layout = TextLayout {
             width: result.width,
@@ -557,6 +593,7 @@ impl TextBackend for TypesetterBridge {
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
+        self.debug_remember_text(key, text);
 
         let layout = TextLayout {
             width: result.width,
@@ -623,6 +660,7 @@ impl TextBackend for TypesetterBridge {
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
+        self.debug_remember_text(key, source);
 
         let layout = TextLayout {
             width: result.width,
@@ -706,6 +744,7 @@ impl TextBackend for TypesetterBridge {
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
+        self.debug_remember_text(key, source);
 
         let layout = TextLayout {
             width: result.width,
@@ -750,6 +789,18 @@ impl TextBackend for TypesetterBridge {
             ),
         );
         layout
+    }
+
+    fn debug_layout_text(&self, layout_key: u64) -> Option<String> {
+        #[cfg(debug_assertions)]
+        {
+            return self.debug_text_by_key.get(&layout_key).cloned();
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = layout_key;
+            None
+        }
     }
 
     fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad> {

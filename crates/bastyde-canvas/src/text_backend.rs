@@ -271,6 +271,21 @@ pub trait TextBackend {
     fn debug_validate_layout(&self, _layout_key: u64) -> GlyphValidation {
         GlyphValidation::Valid
     }
+
+    /// Debug-build diagnostic: recover the source text behind a
+    /// `layout_key` so warnings can name the impacted string.
+    ///
+    /// Used by the evicted-layout warning in
+    /// [`Canvas::draw_text_layout`](crate::canvas::Canvas::draw_text_layout):
+    /// the glyph cache for a key can be evicted while the metrics cache
+    /// — which is keyed by the text — survives, so a real backend can map
+    /// the key back to its text for the message. Returns `None` when the
+    /// backend can't (the default, including the mock, which shares one
+    /// `layout_key` across all layouts). Never on a hot path; only invoked
+    /// from a `cfg(debug_assertions)` warning.
+    fn debug_layout_text(&self, _layout_key: u64) -> Option<String> {
+        None
+    }
 }
 
 /// Outcome of [`TextBackend::debug_validate_layout`].

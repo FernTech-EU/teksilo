@@ -411,7 +411,7 @@ impl Canvas {
             // loudly instead of dropping text. NOT a panic: the condition
             // is legitimate at runtime and correctly-written callers handle
             // it (see `MenuLabel::paint`).
-            debug_warn_evicted_layout("draw_text_layout", layout);
+            debug_warn_evicted_layout("draw_text_layout", layout, &*backend);
             return false;
         }
         self.frame.layout_keys.push(layout.layout_key);
@@ -904,18 +904,45 @@ fn debug_warn_raster_scale_mismatch(
 /// relayout. A zero-width layout (empty / whitespace-only) legitimately produces
 /// no glyphs and is not flagged.
 #[cfg_attr(not(debug_assertions), allow(unused_variables))]
-fn debug_warn_evicted_layout(caller: &str, layout: &crate::text_backend::TextLayout) {
+fn debug_warn_evicted_layout(
+    caller: &str,
+    layout: &crate::text_backend::TextLayout,
+    backend: &dyn crate::text_backend::TextBackend,
+) {
     #[cfg(debug_assertions)]
     {
         if layout.width > 0.0 {
+            let text = match backend.debug_layout_text(layout.layout_key) {
+                Some(t) => format!(" — text {:?}", DebugElide(&t)),
+                None => String::new(),
+            };
             eprintln!(
                 "[bastyde-canvas] {caller}: retained TextLayout (key {}) resolved to zero \
-                 glyphs despite measuring {:.1}px wide — its glyphs were evicted from the \
+                 glyphs despite measuring {:.1}px wide{text} — its glyphs were evicted from the \
                  backend cache. The caller must re-shape (e.g. fall back to draw_text) when \
                  draw_text_layout returns false, or the text will silently vanish until the \
                  next relayout.",
                 layout.layout_key, layout.width,
             );
+        }
+    }
+}
+
+/// Wrapper that elides long strings in `{:?}` output so the eviction
+/// warning stays a single readable line for paragraph-sized layouts.
+#[cfg(debug_assertions)]
+struct DebugElide<'a>(&'a str);
+
+#[cfg(debug_assertions)]
+impl std::fmt::Debug for DebugElide<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const MAX: usize = 80;
+        if self.0.chars().count() <= MAX {
+            std::fmt::Debug::fmt(self.0, f)
+        } else {
+            let head: String = self.0.chars().take(MAX).collect();
+            std::fmt::Debug::fmt(&head, f)?;
+            f.write_str("…")
         }
     }
 }
