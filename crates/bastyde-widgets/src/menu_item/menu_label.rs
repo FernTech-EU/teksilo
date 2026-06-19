@@ -58,6 +58,14 @@ pub(crate) struct MenuLabel {
     /// Cached layout of the *stripped* text. Recomputed lazily in
     /// `layout_response` and reused by `paint` to avoid double work.
     last_layout: RefCell<Option<TextLayout>>,
+    /// Backend layout-cache generation (`TextBackend::layout_cache_generation`)
+    /// at the time `last_layout` was shaped. `paint` compares it against the
+    /// live generation: a mismatch means the bridge's layout/glyph caches
+    /// were cleared since (scale-factor reset at window creation, or the
+    /// eviction-recovery `invalidate_cache` in bastyde-app), so the cached
+    /// `layout_key` is dangling — the layout is re-shaped *silently* instead
+    /// of being drawn stale and tripping the evicted-layout warning.
+    last_cache_gen: RefCell<u64>,
     /// Cached parsed form (stripped, byte_index, char_index, key_lower).
     /// Recomputed lazily when the source value changes.
     last_parsed: RefCell<Option<(String, ParsedMnemonic)>>,
@@ -82,6 +90,7 @@ impl MenuLabel {
             color: color.into(),
             style: style.into(),
             last_layout: RefCell::new(None),
+            last_cache_gen: RefCell::new(0),
             last_parsed: RefCell::new(None),
         }
     }
@@ -164,6 +173,7 @@ impl Widget for MenuLabel {
         let max_width = proposal.width.map(|w| w + 0.5);
         let layout = backend.layout_single_line(&parsed.stripped, &style, max_width);
         let size = Size::new(layout.width, layout.height);
+        *self.last_cache_gen.borrow_mut() = backend.layout_cache_generation();
         *self.last_layout.borrow_mut() = Some(layout);
         size.into()
     }
@@ -173,28 +183,58 @@ impl Widget for MenuLabel {
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);
 
-        // Pull the cached layout — populated by `layout_response`. The
-        // fast path draws the pre-measured layout; the fallback re-shapes
-        // through `draw_text` (which runs `layout_single_line` internally).
+        // Draw the label. Fast path: the layout cached by
+        // `layout_response` still resolves. It stops resolving when the
+        // glyph atlas changes generation since the layout was shaped —
+        // routinely at window creation (the first layout pass runs at the
+        // default scale factor, then the real HiDPI scale factor is set,
+        // clearing the bridge's caches), and under atlas pressure (LRU
+        // eviction). Both bump the backend's `glyph_epoch`, so comparing it
+        // against the epoch recorded at layout time detects the dangling
+        // `layout_key` *before* we draw it — we re-shape silently rather
+        // than draw a stale layout and trip the (correct, but here noisy)
+        // evicted-layout warning in `draw_text_layout`.
         //
-        // The fallback fires when the cached draw produces nothing: either
-        // no cached layout (mock backend, or a paint before the first
-        // layout pass), or — the load-bearing case — the cached layout's
-        // glyphs were evicted from the typesetter's glyph cache. Under
-        // atlas pressure (a text-heavy window) the renderer's
-        // eviction-recovery path clears the bridge cache and *re-paints
-        // without re-laying-out*, so the retained `layout_key` no longer
-        // resolves and `draw_text_layout` returns `false`, drawing nothing.
-        // Without this fallback the label silently vanishes until the next
-        // relayout (e.g. a theme switch). `draw_text` both draws the label
-        // and repopulates the cache for the next frame.
-        let layout_opt = self.last_layout.borrow().clone();
-        let drew = match layout_opt.as_ref() {
-            Some(layout) => canvas.draw_text_layout(layout, Point::new(bounds.x, bounds.y), color),
+        // The slow path re-shapes, draws the FRESH layout, and writes it
+        // (with its epoch) back into the cache — so the recovery is
+        // self-healing and the next paint takes the fast path instead of
+        // re-shaping every frame.
+        let cur_gen = canvas
+            .text_backend()
+            .map(|b| b.borrow().layout_cache_generation());
+        let gen_ok = cur_gen.map_or(true, |c| c == *self.last_cache_gen.borrow());
+        let mut layout = if gen_ok {
+            self.last_layout.borrow().clone()
+        } else {
+            None
+        };
+        let drew = match layout.as_ref() {
+            Some(l) => canvas.draw_text_layout(l, Point::new(bounds.x, bounds.y), color),
             None => false,
         };
         if !drew {
-            canvas.draw_text(&parsed.stripped, bounds, &style, color);
+            match canvas.text_backend().cloned() {
+                Some(backend_rc) => {
+                    let (fresh, generation) = {
+                        let mut b = backend_rc.borrow_mut();
+                        let f = b.layout_single_line(&parsed.stripped, &style, None);
+                        let g = b.layout_cache_generation();
+                        (f, g)
+                    };
+                    if !canvas.draw_text_layout(&fresh, Point::new(bounds.x, bounds.y), color) {
+                        // Shouldn't happen — we just shaped it — but never
+                        // drop the label: re-shape inline as a last resort.
+                        canvas.draw_text(&parsed.stripped, bounds, &style, color);
+                    }
+                    *self.last_layout.borrow_mut() = Some(fresh.clone());
+                    *self.last_cache_gen.borrow_mut() = generation;
+                    layout = Some(fresh);
+                }
+                None => {
+                    canvas.draw_text(&parsed.stripped, bounds, &style, color);
+                    layout = None;
+                }
+            }
         }
 
         // Underline. Skip if Alt is up, no marker was parsed, OR if
@@ -226,7 +266,7 @@ impl Widget for MenuLabel {
         let Some(backend_rc) = canvas.text_backend() else {
             return;
         };
-        let Some(layout) = layout_opt else {
+        let Some(layout) = layout else {
             return;
         };
 

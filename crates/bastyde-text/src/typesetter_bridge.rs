@@ -151,6 +151,14 @@ pub struct TypesetterBridge {
     /// cache key — flipping it costs nothing, entries at different
     /// scales coexist and age out via the normal touch/LRU machinery.
     raster_scale: f32,
+    /// Monotonic generation bumped whenever `layout_cache` / `glyph_cache`
+    /// are cleared wholesale (scale-factor reset or `invalidate_cache`).
+    /// Surfaced via [`TextBackend::layout_cache_generation`] so widgets
+    /// that retain a `TextLayout` across the layout→paint boundary can
+    /// detect a dangling `layout_key` before drawing it. Independent of
+    /// the eviction epoch (which also tracks LRU, leaving these maps
+    /// intact) so it never perturbs the per-frame atlas-upload decision.
+    layout_cache_generation: u64,
     /// Debug-only `layout_key -> source text` side map for diagnostics.
     ///
     /// Unlike `layout_cache` / `glyph_cache`, this is **not** cleared on a
@@ -187,9 +195,20 @@ impl TypesetterBridge {
             last_seen_eviction_epoch,
             atlas_version: 1,
             raster_scale: 1.0,
+            layout_cache_generation: 0,
             #[cfg(debug_assertions)]
             debug_text_by_key: HashMap::new(),
         }
+    }
+
+    /// Clear the retained layout + glyph maps and bump
+    /// [`layout_cache_generation`](Self::layout_cache_generation). The single
+    /// path through which both maps are dropped, so the generation is the
+    /// authoritative signal that any retained `layout_key` is now dangling.
+    fn clear_layout_caches(&mut self) {
+        self.layout_cache.clear();
+        self.glyph_cache.clear();
+        self.layout_cache_generation = self.layout_cache_generation.wrapping_add(1);
     }
 
     /// Record a `layout_key -> text` association for the debug
@@ -392,8 +411,7 @@ impl TypesetterBridge {
 
     /// Invalidate the layout cache (e.g. on scale factor change).
     pub fn invalidate_cache(&mut self) {
-        self.layout_cache.clear();
-        self.glyph_cache.clear();
+        self.clear_layout_caches();
     }
 
     /// Borrow the underlying [`TextFontService`] immutably.
@@ -475,8 +493,7 @@ impl TextBackend for TypesetterBridge {
             // glyph caches still need to drop because they key
             // on the scale factor.
             self.service.set_scale_factor(scale_factor);
-            self.layout_cache.clear();
-            self.glyph_cache.clear();
+            self.clear_layout_caches();
         }
     }
 
@@ -839,6 +856,10 @@ impl TextBackend for TypesetterBridge {
 
     fn glyph_epoch(&self) -> u64 {
         self.service.eviction_epoch()
+    }
+
+    fn layout_cache_generation(&self) -> u64 {
+        self.layout_cache_generation
     }
 
     fn debug_validate_layout(&self, layout_key: u64) -> GlyphValidation {

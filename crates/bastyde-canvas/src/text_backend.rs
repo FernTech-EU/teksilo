@@ -272,6 +272,26 @@ pub trait TextBackend {
         GlyphValidation::Valid
     }
 
+    /// Monotonic counter bumped every time the backend's retained
+    /// layout→glyph cache (the map behind [`ensure_glyphs`](Self::ensure_glyphs))
+    /// is cleared wholesale: a scale-factor reset, or an explicit
+    /// invalidate on the eviction-recovery path.
+    ///
+    /// Distinct from [`glyph_epoch`](Self::glyph_epoch): that tracks atlas
+    /// *eviction/relocation* (including LRU, which leaves the layout→glyph
+    /// map intact), and drives the per-frame atlas re-upload decision.
+    /// This tracks the *map clear* — the only event after which a retained
+    /// `TextLayout`'s `layout_key` stops resolving and `ensure_glyphs`
+    /// returns empty. A widget that caches a `TextLayout` across the
+    /// layout→paint boundary records this at layout time and compares at
+    /// paint time, so it can re-shape *before* drawing a dangling key
+    /// (rather than discovering it via a `false` return from
+    /// `draw_text_layout`). Backends without such a cache keep the
+    /// default `0`.
+    fn layout_cache_generation(&self) -> u64 {
+        0
+    }
+
     /// Debug-build diagnostic: recover the source text behind a
     /// `layout_key` so warnings can name the impacted string.
     ///
