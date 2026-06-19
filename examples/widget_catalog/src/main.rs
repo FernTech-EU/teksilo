@@ -351,11 +351,18 @@ impl Widget for WidgetCatalog {
         }
 
         // ── Demo shortcuts so the Settings tab's ShortcutSettings has
-        //    something to display. Not wired to Actions — these are
-        //    catalogued for the rebind UI, not for execution.
+        //    something to display. Mostly catalogued for the rebind UI,
+        //    not for execution — except `app.quit`, which is wired to a
+        //    real Action below so Ctrl+Q actually closes the window.
         for shortcut in demo_shortcuts() {
             ctx.register_shortcut_global(shortcut);
         }
+
+        // Wire the one demo shortcut we want live: Ctrl+Q → close window.
+        // The File ▸ Quit menu item shows the same "Ctrl+Q" label, but a
+        // label alone is display-only; the chord needs an Action keyed by
+        // the shortcut's intent name to fire.
+        ctx.register_action(Action::new("app.quit").on_invoke(|_i, ctx| ctx.close_window()));
 
         // ── TabWidget ────────────────────────────────────────────────
         let mut tw = TabWidget::new(self.selected_tab.clone())
