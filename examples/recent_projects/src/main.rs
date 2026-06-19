@@ -394,7 +394,7 @@ impl Widget for Root {
 }
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "RecentProjectsDemo")
+    let paths = AppPaths::new("eu", "FernTech", "RecentProjectsDemo")
         .or_else(|| {
             let cwd = std::env::current_dir().ok()?;
             Some(AppPaths::for_testing(

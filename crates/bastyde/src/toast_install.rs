@@ -16,7 +16,7 @@
 //!
 //! BastydeAppBuilder::new()
 //!     .theme(intui::light())
-//!     .app_paths(AppPaths::new("com", "FernTech", "MyApp").unwrap())
+//!     .app_paths(AppPaths::new("eu", "FernTech", "MyApp").unwrap())
 //!     .install_toast_default()                      // ← the install
 //!     .initial_window(WindowConfig::new()
 //!         .root(|tree, _state| tree.add(MyRoot::new())))

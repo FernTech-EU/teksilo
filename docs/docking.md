@@ -339,7 +339,7 @@ use bastyde::widgets::DockLayoutState;
 use bastyde_settings::Migrator;
 use std::time::Duration;
 
-let paths = AppPaths::new("com", "FernTech", "Bastyde").expect("config dir");
+let paths = AppPaths::new("eu", "FernTech", "Bastyde").expect("config dir");
 let dock_file = SettingsFile::<DockLayoutState>::load(
     paths.config_file("docking.toml"),
     Duration::from_millis(500),   // write debounce

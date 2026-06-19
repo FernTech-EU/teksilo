@@ -22,7 +22,7 @@ use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, ScrollArea,
-    StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
+    Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
     WindowFrame, keystroke_format::format_keystroke,
 };
 use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
@@ -71,7 +71,7 @@ fn main() {
     BastydeAppBuilder::new()
         // Paths + settings must be set BEFORE the persistent-archive
         // toast install and before `.telemetry(...)` (both read them).
-        .application("com", "FernTech", "widget-catalog")
+        .application("eu", "FernTech", "widget-catalog")
         .settings(SettingsBundle::new())
         .install_inspector_in_debug()
         .install_file_dialog()
@@ -97,6 +97,7 @@ fn main() {
             WindowConfig::new()
                 .title("Bastyde — Widget Catalog")
                 .size(1400, 900)
+                .min_size(600, 600)
                 .decorations(DecorationsMode::CustomChrome)
                 .root({
                     let opts = options.clone();
@@ -113,23 +114,25 @@ fn main() {
                         let selected_tab: Signal<Option<TabId>> =
                             Signal::new(Some(tab_ids[opts.initial_tab]));
 
-                        // ── Title bar ─────────────────────────────────
-                        let title_bar: Box<dyn Widget> = match host.clone() {
-                            Some(h) => Box::new(build_title_bar(h, &theme)),
-                            None => Box::new(
-                                TextWidget::new(tr!(app_unsupported_chrome()))
-                                    .style(TextStyleRole::Small)
-                                    .color(TextRole::Error),
-                            ),
-                        };
-                        let title_bar_id = tree.add_boxed(title_bar);
-
                         // ── Minimal MenuBar — File / Help ─────────────
                         // Showcases mnemonics (Alt+F / Alt+H), the
                         // window-level dispatcher (F10, bare-Alt-tap),
                         // and in-menu mnemonic activation (just press
                         // the underlined letter once a menu is open).
                         let menu_bar = tree.add(build_menu_bar());
+
+                        // ── Title bar ─────────────────────────────────
+                        let title_bar: Box<dyn Widget> = match host.clone() {
+                            Some(h) => Box::new(build_title_bar(h, &theme, menu_bar)),
+                            None => Box::new(
+                                VStack::new().spacing(4.0).add_child(menu_bar).child(
+                                    TextWidget::new(tr!(app_unsupported_chrome()))
+                                        .style(TextStyleRole::Small)
+                                        .color(TextRole::Error),
+                                ),
+                            ),
+                        };
+                        let title_bar_id = tree.add_boxed(title_bar);
 
                         // ── Catalog body ─────────────────────────────
                         let catalog = tree.add(WidgetCatalog::new(
@@ -145,7 +148,6 @@ fn main() {
                             VStack::new()
                                 .spacing(0.0)
                                 .add_child(title_bar_id)
-                                .add_child(menu_bar)
                                 .add_child(catalog_filled),
                         );
 
@@ -166,14 +168,32 @@ fn main() {
 
 /// Build the custom title bar. Uses role-driven background/border so
 /// the chrome retints live across `ctx.set_theme(...)` switches.
-fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl Widget + 'static {
+fn build_title_bar(
+    host: Rc<dyn PlatformTitleBarHost>,
+    _theme: &Theme,
+    menu_bar: WidgetId,
+) -> impl Widget + 'static {
     let brand = TextWidget::new(tr!(app_title()))
         .style(TextStyleRole::BodyBold)
         .color(TextRole::Primary);
 
-    let center = TextWidget::new(tr!(app_subtitle()))
-        .style(TextStyleRole::Small)
-        .color(TextRole::Secondary);
+    let leading: HStack = HStack::new().spacing(4.0).add_child(menu_bar).child(brand);
+
+    // Center the subtitle with flexible spacers rather than `Center`:
+    // `Center` (= `Expand::align_child(CENTER)`) places its child at the
+    // child's *unconstrained* intrinsic size, so the ellipsis text never
+    // gets a width to truncate against and overflows its neighbours. With
+    // equal `Spacer`s the text still receives a bounded width — slack
+    // centers it, an over-constraint deficit shrinks/ellipsizes it.
+    let center = HStack::new()
+        .child(Spacer::new())
+        .child(
+            TextWidget::new(tr!(app_subtitle()))
+                .style(TextStyleRole::Small)
+                .color(TextRole::Secondary)
+                .overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing)),
+        )
+        .child(Spacer::new());
 
     // Locale switch — two flat buttons. `EventContext::set_locale`
     // requires an event handler, so the SegmentedControl pattern
@@ -239,7 +259,7 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
         .height(40.0)
         .background(SurfaceRole::Raised)
         .border(BorderRole::Default, 1.0)
-        .leading(brand)
+        .leading(leading)
         .center(center)
         .trailing(trailing)
         .close_action(|ctx| ctx.close_window())
@@ -258,6 +278,7 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
 /// character input on macOS keyboards).
 fn build_menu_bar() -> impl Widget + 'static {
     MenuBar::new()
+        .collapse_policy(bastyde::widgets::CollapsePolicy::Always)
         .menu(tr!(app_menu_file()), || {
             Box::new(
                 MenuList::new().item(

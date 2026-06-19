@@ -36,7 +36,7 @@ use bastyde::settings::AppPaths;
 fn main() {
     BastydeAppBuilder::new()
         .theme(intui::light())
-        .app_paths(AppPaths::new("com", "FernTech", "MyApp").unwrap())
+        .app_paths(AppPaths::new("eu", "FernTech", "MyApp").unwrap())
         .install_toast_default()                    // ← one-line install
         .initial_window(WindowConfig::new()
             .id("main")

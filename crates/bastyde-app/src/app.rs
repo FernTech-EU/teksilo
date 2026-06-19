@@ -2251,7 +2251,7 @@ impl BastydeAppBuilder {
 
     /// Identify the application for OS-correct path resolution. The
     /// `(qualifier, organization, application)` triple follows the
-    /// `directories` convention (e.g. `("com", "FernTech", "Skribisto")`).
+    /// `directories` convention (e.g. `("eu", "FernTech", "Skribisto")`).
     /// Required when [`settings`](Self::settings) is used.
     ///
     /// # Panics

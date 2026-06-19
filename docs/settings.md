@@ -44,7 +44,7 @@ use bastyde::app::BastydeAppBuilder;
 use bastyde::settings::{AppPaths, MruList, SettingsBundle};
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "Bastyde")
+    let paths = AppPaths::new("eu", "FernTech", "Bastyde")
         .expect("could not resolve OS config directory");
 
     // App-typed MRU list — the framework knows nothing about projects.
@@ -54,7 +54,7 @@ fn main() {
     BastydeAppBuilder::new()
         .theme(intui::light())
         .app_paths(paths)                                // explicit
-        // or .application("com", "FernTech", "Bastyde") // shortcut
+        // or .application("eu", "FernTech", "Bastyde") // shortcut
         .settings(
             SettingsBundle::new()
                 .with_window_state(true),                // opt-in
@@ -142,7 +142,7 @@ panics with a clear message in that case; production apps that want
 to fall back to a portable directory use the `Option` directly:
 
 ```rust
-let paths = AppPaths::new("com", "FernTech", "Bastyde")
+let paths = AppPaths::new("eu", "FernTech", "Bastyde")
     .or_else(|| {
         let cwd = std::env::current_dir().ok()?;
         Some(AppPaths::for_testing(&cwd.join(".bastyde-state")))

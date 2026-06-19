@@ -79,7 +79,7 @@ pub use bastyde_inspector as inspector;
 ///
 /// BastydeAppBuilder::new()
 ///     .theme(intui::light())
-///     .app_paths(AppPaths::new("com", "FernTech", "MyApp").unwrap())
+///     .app_paths(AppPaths::new("eu", "FernTech", "MyApp").unwrap())
 ///     .install_toast_default()
 ///     .initial_window(WindowConfig::new()...)
 ///     .run();

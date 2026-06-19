@@ -207,7 +207,7 @@ fn bump(cell: &Rc<Cell<usize>>) -> usize {
 fn main() {
     BastydeAppBuilder::new()
         .theme(bastyde::presets::intui::light())
-        .app_paths(AppPaths::new("com", "FernTech", "ToastDemo").expect("config dir"))
+        .app_paths(AppPaths::new("eu", "FernTech", "ToastDemo").expect("config dir"))
         .install_toast_default()
         .initial_window(
             WindowConfig::new()

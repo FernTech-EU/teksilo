@@ -638,7 +638,7 @@ use bastyde::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt
 const FONT_SIZE: SettingsKey<f32> = SettingsKey::new("editor.font_size", || 14.0);
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "Bastyde").expect("config dir");
+    let paths = AppPaths::new("eu", "FernTech", "Bastyde").expect("config dir");
     let recents: MruList<RecentProject> = MruList::open(&paths, "recent_projects", 10).unwrap();
 
     BastydeAppBuilder::new()
