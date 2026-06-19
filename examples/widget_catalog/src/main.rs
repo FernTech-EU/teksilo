@@ -93,6 +93,7 @@ fn main() {
         )
         .theme(bastyde::presets::intui::light())
         .i18n(i18n)
+        .install_native_menu()
         .initial_window(
             WindowConfig::new()
                 .title("Bastyde — Widget Catalog")
@@ -279,6 +280,8 @@ fn build_title_bar(
 fn build_menu_bar() -> impl Widget + 'static {
     MenuBar::new()
         .collapse_policy(bastyde::widgets::CollapsePolicy::Always)
+        .hamburger_size(bastyde::widgets::IconButtonSize::Large)
+        .native_on_macos(bastyde::widgets::NativeMenuMode::Suppress)
         .menu(tr!(app_menu_file()), || {
             Box::new(
                 MenuList::new().item(
