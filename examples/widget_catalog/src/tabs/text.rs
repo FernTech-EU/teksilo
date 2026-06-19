@@ -5,11 +5,11 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, PasswordField,
-    SearchField, SpinBox, TextInput, TextWidget, VStack,
+    Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, MaxSize,
+    PasswordField, SearchField, SpinBox, TextInput, TextWidget, VStack,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{FIELD_MAX_WIDTH, Signals, section, tab_header};
 
 /// Demo suggestion list — same fruit set as `new_widgets_kit` so the
 /// SearchField shows a working autocomplete dropdown the moment the user
@@ -85,18 +85,20 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let text_input = section(
         ctx,
         lit!("TextInput"),
-        VStack::new()
-            .spacing(6.0)
-            .child(
-                TextInput::new(sigs.username_text.clone())
-                    .label(tr!(txt_username_label()))
-                    .placeholder(tr!(txt_username_placeholder())),
-            )
-            .child(
-                TextInput::new(sigs.readonly_text.clone())
-                    .label(tr!(txt_readonly_label()))
-                    .read_only(true),
-            ),
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            VStack::new()
+                .spacing(6.0)
+                .child(
+                    TextInput::new(sigs.username_text.clone())
+                        .label(tr!(txt_username_label()))
+                        .placeholder(tr!(txt_username_placeholder())),
+                )
+                .child(
+                    TextInput::new(sigs.readonly_text.clone())
+                        .label(tr!(txt_readonly_label()))
+                        .read_only(true),
+                ),
+        ),
     );
     let spin_box = section(
         ctx,
@@ -108,36 +110,40 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let search = section(
         ctx,
         lit!("SearchField"),
-        search_field(sigs.search_text.clone()),
+        MaxSize::width(FIELD_MAX_WIDTH).child(search_field(sigs.search_text.clone())),
     );
     let password_signal = ctx.signal(String::new());
     let password = section(
         ctx,
         lit!("PasswordField"),
-        PasswordField::new(password_signal)
-            .label(tr!(txt_password_label()))
-            .placeholder(tr!(txt_password_placeholder()))
-            .validator({
-                let msg = tr!(txt_password_validation());
-                move |s| {
-                    if s.chars().count() >= 8 {
-                        bastyde::widgets::ValidationOutcome::Valid
-                    } else {
-                        bastyde::widgets::ValidationOutcome::Invalid {
-                            message: msg.clone(),
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            PasswordField::new(password_signal)
+                .label(tr!(txt_password_label()))
+                .placeholder(tr!(txt_password_placeholder()))
+                .validator({
+                    let msg = tr!(txt_password_validation());
+                    move |s| {
+                        if s.chars().count() >= 8 {
+                            bastyde::widgets::ValidationOutcome::Valid
+                        } else {
+                            bastyde::widgets::ValidationOutcome::Invalid {
+                                message: msg.clone(),
+                            }
                         }
                     }
-                }
-            }),
+                }),
+        ),
     );
     let file_path_signal = ctx.signal(String::new());
     let file_picker = section(
         ctx,
         lit!("FilePickerField"),
-        FilePickerField::new(file_path_signal)
-            .kind(FilePickerKind::OpenFile)
-            .label(tr!(txt_file_label()))
-            .placeholder(tr!(txt_file_placeholder())),
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            FilePickerField::new(file_path_signal)
+                .kind(FilePickerKind::OpenFile)
+                .label(tr!(txt_file_label()))
+                .placeholder(tr!(txt_file_placeholder())),
+        ),
     );
     let trigger = Button::new(tr!(txt_input_dialog_trigger()))
         .variant(ButtonVariant::Filled)
@@ -176,9 +182,10 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // Pre-register: `with_suggestions` / `on_select` / `on_submit_fn`
     // each take a non-trivial closure; the bati! property syntax handles
     // single-line closures fine but the suggestion closure is multi-line.
-    let search_id = ctx.add(search_field(sigs.search_text.clone()));
+    let search_id =
+        ctx.add(MaxSize::width(FIELD_MAX_WIDTH).child(search_field(sigs.search_text.clone())));
     let password_signal = ctx.signal(String::new());
-    let password_id = ctx.add(
+    let password_id = ctx.add(MaxSize::width(FIELD_MAX_WIDTH).child(
         PasswordField::new(password_signal)
             .label(tr!(txt_password_label()))
             .placeholder(tr!(txt_password_placeholder()))
@@ -194,7 +201,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     }
                 }
             }),
-    );
+    ));
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -217,15 +224,17 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                VStack {
-                    spacing: 6.0
-                    TextInput::new(username_sig) {
-                        label: tr!(txt_username_label())
-                        placeholder: tr!(txt_username_placeholder())
-                    }
-                    TextInput::new(readonly_sig) {
-                        label: tr!(txt_readonly_label())
-                        read_only: true
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    VStack {
+                        spacing: 6.0
+                        TextInput::new(username_sig) {
+                            label: tr!(txt_username_label())
+                            placeholder: tr!(txt_username_placeholder())
+                        }
+                        TextInput::new(readonly_sig) {
+                            label: tr!(txt_readonly_label())
+                            read_only: true
+                        }
                     }
                 }
             }
@@ -266,10 +275,12 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                FilePickerField::new(file_path_signal) {
-                    kind: FilePickerKind::OpenFile
-                    label: tr!(txt_file_label())
-                    placeholder: tr!(txt_file_placeholder())
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    FilePickerField::new(file_path_signal) {
+                        kind: FilePickerKind::OpenFile
+                        label: tr!(txt_file_label())
+                        placeholder: tr!(txt_file_placeholder())
+                    }
                 }
             }
 

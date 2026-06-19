@@ -4,9 +4,11 @@
 //! Color tab — HexColorInput, ColorEdit, ColorPicker.
 
 use bastyde::prelude::*;
-use bastyde::widgets::{ColorEdit, ColorPicker, Divider, HexColorInput, TextWidget, VStack};
+use bastyde::widgets::{
+    ColorEdit, ColorPicker, Divider, HexColorInput, MaxSize, TextWidget, VStack,
+};
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{FIELD_MAX_WIDTH, Signals, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_color_title())
@@ -25,14 +27,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let hex = section(
         ctx,
         lit!("HexColorInput"),
-        HexColorInput::new(hex_color).label(tr!(clr_brand_label())),
+        MaxSize::width(FIELD_MAX_WIDTH)
+            .child(HexColorInput::new(hex_color).label(tr!(clr_brand_label()))),
     );
     let edit = section(
         ctx,
         lit!("ColorEdit"),
-        ColorEdit::new(edit_color)
-            .alpha_enabled(true)
-            .label(tr!(clr_accent_label())),
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            ColorEdit::new(edit_color)
+                .alpha_enabled(true)
+                .label(tr!(clr_accent_label())),
+        ),
     );
     let picker = section(
         ctx,
@@ -80,8 +85,10 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HexColorInput::new(hex_color) {
-                    label: tr!(clr_brand_label())
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    HexColorInput::new(hex_color) {
+                        label: tr!(clr_brand_label())
+                    }
                 }
             }
 
@@ -91,9 +98,11 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                ColorEdit::new(edit_color) {
-                    alpha_enabled: true
-                    label: tr!(clr_accent_label())
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    ColorEdit::new(edit_color) {
+                        alpha_enabled: true
+                        label: tr!(clr_accent_label())
+                    }
                 }
             }
 

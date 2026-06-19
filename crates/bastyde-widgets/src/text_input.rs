@@ -46,7 +46,7 @@ use bastyde_tokens::{TextRole, TextStyleRole};
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::validation_strip::ValidationStrip;
-use crate::primitives::{Expand, HStack, MinSize, Padding, TextWidget, VStack, ZStack};
+use crate::primitives::{Expand, HStack, MinSize, Padding, Shrinkable, TextWidget, VStack, ZStack};
 use crate::tooltip::{self, RichTooltipSource};
 
 // Re-export the variant enum at module top so callers can write
@@ -54,13 +54,6 @@ use crate::tooltip::{self, RichTooltipSource};
 // deeper import path.
 pub use bastyde_core::styles::TextInputVariant;
 use bastyde_i18n::LocalizedString;
-
-/// Preferred width used when the parent leaves width unconstrained — matches
-/// the inner `TextInputField`'s default natural width. The editor column is a
-/// zero-basis flex `Expand` (so it fills/shrinks to an offered width), which
-/// would otherwise collapse to the `MinSize` floor under an unspecified
-/// proposal; `layout_response` substitutes this instead.
-const PREFERRED_WIDTH: f32 = 200.0;
 
 /// Validation state for the text input field.
 #[derive(Debug, Clone, Default)]
@@ -553,22 +546,26 @@ impl Widget for TextInput {
             let visible = text_signal_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
 
-            // Plain `Expand::horizontal()` (zero-basis flex), NOT
-            // `respect_intrinsic`: a zero-basis flex column claims exactly the
-            // width the row offers, so the field both fills a wide frame and
-            // shrinks into a narrow one. With `respect_intrinsic` the column's
-            // wanted width is the field's natural ≈200 dp, which a flex child
-            // refuses to shrink below — so it overflowed a narrow slot. The
-            // unconstrained natural width is restored in `layout_response`.
+            // `Expand::horizontal().respect_intrinsic()` keeps the field's
+            // natural (mask-aware) width as the column's basis — so the
+            // composite reports a snug width when unconstrained and fills a
+            // wide frame via flex. Wrapping it in `Shrinkable` adds a shrink
+            // weight so a narrow row compresses the column below that basis and
+            // the field scrolls instead of overflowing.
             ctx.add(
-                Expand::horizontal().child(
-                    ZStack::new()
-                        .add_child(ph_id) // below (placeholder)
-                        .child(padded_field), // on top (text field, gets hits)
+                Shrinkable::new().child(
+                    Expand::horizontal().respect_intrinsic().child(
+                        ZStack::new()
+                            .add_child(ph_id) // below (placeholder)
+                            .child(padded_field), // on top (text field, gets hits)
+                    ),
                 ),
             )
         } else {
-            ctx.add(Expand::horizontal().child(padded_field))
+            ctx.add(
+                Shrinkable::new()
+                    .child(Expand::horizontal().respect_intrinsic().child(padded_field)),
+            )
         };
 
         // HStack: [leading] [text_column] [clear] [trailing]
@@ -675,12 +672,12 @@ impl Widget for TextInput {
         let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
 
         // Wrap frame + strip in a VStack with the configured gap. The frame is
-        // wrapped in `Expand::horizontal` so it claims the VStack's full width:
-        // a `VStack` otherwise lays a child out at its own measured width, and
-        // the zero-basis editor column measures to the `MinSize` floor — which
-        // would pin the frame at ~65 dp instead of filling (or shrinking into)
-        // the width the composite was given.
-        let framed_id = ctx.add(Expand::horizontal().child_id(frame_id));
+        // wrapped in `Expand::horizontal().respect_intrinsic()` so it claims
+        // the VStack's full width (a `VStack` lays a child out at its measured
+        // width, not stretched) while keeping the frame's natural width as the
+        // basis when unconstrained. A bounded proposal narrows it and the
+        // `Shrinkable` column compresses to fit.
+        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child_id(frame_id));
         let root_id = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
@@ -765,27 +762,14 @@ impl Widget for TextInput {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        // The editor column is a zero-basis flex `Expand`, so it claims exactly
-        // the width offered to it (filling a wide frame, shrinking into a
-        // narrow one). But that also means an *unconstrained* measurement
-        // collapses the column to nothing and the composite to `MinSize`'s
-        // floor. Mirror `SpinBox`: substitute a preferred width when the parent
-        // leaves width open, and otherwise honour the offered width. The field
-        // re-lays to match during `place_children`.
-        // Composing widgets (`DateEdit`, …) raise `min_width` to their design
-        // width; honour that as the preferred. Plain text inputs fall back to
-        // the field's default natural width.
-        let preferred = self.min_width.unwrap_or(PREFERRED_WIDTH);
-        let effective = SizeProposal {
-            width: Some(proposal.width.unwrap_or(preferred)),
-            height: proposal.height,
-        };
-        let child_size = self
-            .root_child_id
-            .and_then(|id| ctx.child_size(id, effective))
-            .unwrap_or_else(|| effective.resolve(0.0, 0.0));
-        let w = effective.width.unwrap_or(child_size.width);
-        bastyde_canvas::Size::new(w, child_size.height).into()
+        // The `Shrinkable` + `respect_intrinsic` editor column reports the
+        // field's natural (mask-aware) width when unconstrained, fills a wide
+        // frame via flex, and compresses on a deficit — so the composite just
+        // forwards its child's response.
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(

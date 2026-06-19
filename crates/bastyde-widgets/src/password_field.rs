@@ -36,7 +36,7 @@ mod tests;
 use bastyde_i18n::lit;
 use std::rc::Rc;
 
-use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_canvas::{Point, Rect, SizeProposal};
 use bastyde_core::accesskit::{Live, Role};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, WidgetEvent};
@@ -53,7 +53,9 @@ use bastyde_tokens::{TextRole, TextStyleRole};
 use crate::icon_button::{BuiltInIcons, IconButton};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback, ValidationOutcome};
 use crate::primitives::validation_strip::ValidationStrip;
-use crate::primitives::{Center, Expand, HStack, MinSize, Padding, TextWidget, VStack, ZStack};
+use crate::primitives::{
+    Center, Expand, HStack, MinSize, Padding, Shrinkable, TextWidget, VStack, ZStack,
+};
 use crate::tooltip::{self, RichTooltipSource};
 
 // Re-export the masking enums so callers can write
@@ -65,12 +67,6 @@ use bastyde_i18n::LocalizedString;
 /// The caps-lock indicator glyph: U+21EA UPWARDS WHITE ARROW FROM BAR,
 /// the conventional Caps Lock symbol (also used by macOS).
 const CAPS_LOCK_GLYPH: &str = "\u{21EA}";
-
-/// Preferred width when the parent leaves width unconstrained — matches the
-/// inner `TextInputField`'s default natural width. The zero-basis flex editor
-/// column would otherwise collapse to the `MinSize` floor; `layout_response`
-/// substitutes this. (Mirrors `TextInput`.)
-const PREFERRED_WIDTH: f32 = 200.0;
 
 /// How the reveal affordance behaves. Mirrors WinUI's
 /// `PasswordRevealMode`.
@@ -410,13 +406,16 @@ impl Widget for PasswordField {
         );
 
         // Placeholder overlay (never masked) shares the field's column.
-        // Plain `Expand::horizontal()` (zero-basis), NOT `respect_intrinsic`:
-        // a zero-basis flex column claims exactly the offered width, so the
-        // field fills a wide frame and shrinks into a narrow one instead of
-        // pinning at its natural width and overflowing. The unconstrained
-        // natural width is restored in `layout_response`. (Mirrors `TextInput`.)
+        // `Expand::horizontal().respect_intrinsic()` keeps the field's natural
+        // width as the column basis (snug when unconstrained, fills a wide
+        // frame via flex); `Shrinkable` adds a shrink weight so a narrow row
+        // compresses the column and the field scrolls instead of overflowing.
+        // (Mirrors `TextInput`.)
         let text_column_id = if self.placeholder.resolve_now().is_empty() {
-            ctx.add(Expand::horizontal().child_id(padded_field))
+            ctx.add(
+                Shrinkable::new()
+                    .child(Expand::horizontal().respect_intrinsic().child_id(padded_field)),
+            )
         } else {
             let ph = TextWidget::new(self.placeholder.clone())
                 .style(TextStyleRole::Body)
@@ -432,8 +431,11 @@ impl Widget for PasswordField {
             let visible = text_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
             ctx.add(
-                Expand::horizontal()
-                    .child(ZStack::new().add_child(ph_id).add_child(padded_field)),
+                Shrinkable::new().child(
+                    Expand::horizontal()
+                        .respect_intrinsic()
+                        .child(ZStack::new().add_child(ph_id).add_child(padded_field)),
+                ),
             )
         };
 
@@ -533,11 +535,11 @@ impl Widget for PasswordField {
         // ── Inline validation strip ─────────────────────────────────
         let strip_id = ctx.add(ValidationStrip::new(inner_feedback));
 
-        // Wrap the frame in `Expand::horizontal` so it claims the VStack's
-        // full width (a VStack lays a child out at its measured width, which
-        // for the zero-basis editor column is the MinSize floor). Mirrors
-        // `TextInput`.
-        let framed_id = ctx.add(Expand::horizontal().child_id(frame_id));
+        // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it
+        // claims the VStack's full width (a VStack lays a child out at its
+        // measured width, not stretched) while keeping the frame's natural
+        // width as the basis when unconstrained. Mirrors `TextInput`.
+        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child_id(frame_id));
         let root_id = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
@@ -563,21 +565,13 @@ impl Widget for PasswordField {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        // Substitute a preferred width when the parent leaves width open (the
-        // zero-basis editor column would otherwise collapse to the MinSize
-        // floor); otherwise honour the offered width so the field fills/shrinks
-        // to it. Mirrors `TextInput`.
-        let preferred = self.min_width.unwrap_or(PREFERRED_WIDTH);
-        let effective = SizeProposal {
-            width: Some(proposal.width.unwrap_or(preferred)),
-            height: proposal.height,
-        };
-        let child_size = self
-            .root_child_id
-            .and_then(|id| ctx.child_size(id, effective))
-            .unwrap_or_else(|| effective.resolve(0.0, 0.0));
-        let w = effective.width.unwrap_or(child_size.width);
-        Size::new(w, child_size.height).into()
+        // The `Shrinkable` + `respect_intrinsic` editor column reports the
+        // field's natural width when unconstrained, fills a wide frame, and
+        // compresses on a deficit — so just forward the child's response.
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(

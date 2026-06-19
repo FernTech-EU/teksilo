@@ -5,12 +5,12 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Divider, FixedSize, TextWidget,
-    TimeEdit, VStack,
+    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Divider, FixedSize, MaxSize,
+    TextWidget, TimeEdit, VStack,
 };
 use jiff::civil::{Date, DateTime, Time};
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{FIELD_MAX_WIDTH, Signals, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_datetime_title())
@@ -43,10 +43,26 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .bind_width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
     );
-    let date_edit = section(ctx, lit!("DateEdit"), DateEdit::new(date_signal));
-    let time_edit = section(ctx, lit!("TimeEdit"), TimeEdit::new(time_signal));
-    let datetime_edit = section(ctx, lit!("DateTimeEdit"), DateTimeEdit::new(dt_signal));
-    let date_range_edit = section(ctx, lit!("DateRangeEdit"), DateRangeEdit::new(range_signal));
+    let date_edit = section(
+        ctx,
+        lit!("DateEdit"),
+        MaxSize::width(FIELD_MAX_WIDTH).child(DateEdit::new(date_signal)),
+    );
+    let time_edit = section(
+        ctx,
+        lit!("TimeEdit"),
+        MaxSize::width(FIELD_MAX_WIDTH).child(TimeEdit::new(time_signal)),
+    );
+    let datetime_edit = section(
+        ctx,
+        lit!("DateTimeEdit"),
+        MaxSize::width(FIELD_MAX_WIDTH).child(DateTimeEdit::new(dt_signal)),
+    );
+    let date_range_edit = section(
+        ctx,
+        lit!("DateRangeEdit"),
+        MaxSize::width(FIELD_MAX_WIDTH).child(DateRangeEdit::new(range_signal)),
+    );
 
     ctx.add(
         VStack::new()
@@ -119,7 +135,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateEdit::new(date_signal)
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    DateEdit::new(date_signal)
+                }
             }
 
             VStack {
@@ -128,7 +146,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                TimeEdit::new(time_signal)
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    TimeEdit::new(time_signal)
+                }
             }
 
             VStack {
@@ -137,7 +157,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateTimeEdit::new(dt_signal)
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    DateTimeEdit::new(dt_signal)
+                }
             }
 
             VStack {
@@ -146,7 +168,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateRangeEdit::new(range_signal)
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    DateRangeEdit::new(range_signal)
+                }
             }
         }
     )
