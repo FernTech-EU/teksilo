@@ -460,6 +460,8 @@ An `if/else` with two arms of different widget types desugars via `BatiBranch<L,
 
 **Reactive conditionals.** If the condition is a bare identifier whose static type is `Signal<bool>` or `Prop<bool>`, the lowering is `.visible_when(signal)` on the child rather than an arena-level conditional. This is the one place where the macro performs type-directed inference. It is conservative: anything other than a bare identifier of the right type (a boolean expression, a function call, a dereferenced signal, an `if let`) falls into the regular `child_opt` / `BatiBranch` path. To force the build-time conditional when the condition is a Signal identifier, write `if signal.get() { ... }`.
 
+The same binding is also available explicitly as a per-widget property: `Widget { visible_when: signal }` desugars to `.visible_when(signal)` (a `WidgetBuilder` method accepting `bool` / `Signal<bool>` / `Prop<bool>`), equivalent to the imperative `ctx.visible_when(id, signal)`. Use the property form when you want visibility to read as a widget attribute alongside its other properties rather than as a wrapping `if`.
+
 ### 5.2 `for` Forms
 
 Iteration produces a stream of children from a regular Rust iterator.

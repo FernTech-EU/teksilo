@@ -319,6 +319,11 @@ pub struct HandlerSet {
     /// hovered widget is a strict descendant of this node. See
     /// [`HandlerSet::hover_within`].
     pub(crate) hover_within: Option<crate::signal::Signal<bool>>,
+    /// User-bound visibility binding (`bool` / `Signal<bool>` / `Prop<bool>`).
+    /// Applied at insertion via `WidgetTree::visible_when`, exactly like the
+    /// `ctx.visible_when(id, ..)` form, so `bati!` can write `visible_when: sig`
+    /// as a plain widget property. See [`HandlerSet::visible_when`].
+    pub(crate) visible_when: Option<Prop<bool>>,
     /// Builder-level accessibility overrides. Mirrored to
     /// `WidgetNode::access_overrides` at insertion. Action callbacks
     /// (`actions`, `custom_actions`) are dispatched by
@@ -347,6 +352,7 @@ impl HandlerSet {
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
+            visible_when: None,
             access: None,
             access_subtree: None,
         }
@@ -606,6 +612,15 @@ impl HandlerSet {
     /// of this node. Symmetric to [`focus_within`](Self::focus_within).
     pub fn hover_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
         self.hover_within = Some(signal);
+        self
+    }
+
+    /// Bind this node's visibility to a `bool` / `Signal<bool>` / `Prop<bool>`.
+    /// A bound value shows/hides the node reactively (registered at
+    /// `Relayout`). Equivalent to `ctx.visible_when(id, ..)`; exposed as a
+    /// builder method so `bati!` can write `visible_when: sig` as a property.
+    pub fn visible_when(mut self, state: impl Into<Prop<bool>>) -> Self {
+        self.visible_when = Some(state.into());
         self
     }
 
@@ -936,6 +951,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// descendant is hovered. See [`HandlerSet::hover_within`].
     pub fn hover_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
         self.handler_set.hover_within = Some(signal);
+        self
+    }
+
+    /// Bind this node's visibility. See [`HandlerSet::visible_when`].
+    pub fn visible_when(mut self, state: impl Into<Prop<bool>>) -> Self {
+        self.handler_set.visible_when = Some(state.into());
         self
     }
 
@@ -1529,6 +1550,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// descendant is hovered. See [`HandlerSet::hover_within`].
     fn hover_within(self, signal: crate::signal::Signal<bool>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).hover_within(signal)
+    }
+
+    /// Bind this node's visibility (`bool` / `Signal<bool>` / `Prop<bool>`) as
+    /// a builder property, so `bati!` can write `visible_when: sig`. Equivalent
+    /// to `ctx.visible_when(id, ..)`. See [`HandlerSet::visible_when`].
+    fn visible_when(self, state: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).visible_when(state)
     }
 
     fn on_drag_hover(

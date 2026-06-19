@@ -47,6 +47,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "cursor"
             | "clips_children_on"
             | "context_menu"
+            | "visible_when"
     )
 }
 

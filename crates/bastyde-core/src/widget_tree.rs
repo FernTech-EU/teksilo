@@ -1592,10 +1592,16 @@ impl WidgetTree {
     pub(crate) fn apply_self_handler_set(
         &mut self,
         id: WidgetId,
-        handler_set: crate::widget_builder::HandlerSet,
+        mut handler_set: crate::widget_builder::HandlerSet,
     ) {
+        // `visible_when` needs the binding registry (which the arena lacks), so
+        // pull it out here and apply it via `self.visible_when` after.
+        let visible_when = handler_set.visible_when.take();
         self.arena
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::Own);
+        if let Some(prop) = visible_when {
+            self.visible_when(id, prop);
+        }
     }
 
     /// Apply a `HandlerSet` to an existing node as *external* handlers —
@@ -1606,10 +1612,16 @@ impl WidgetTree {
     pub(crate) fn apply_external_handler_set(
         &mut self,
         id: WidgetId,
-        handler_set: crate::widget_builder::HandlerSet,
+        mut handler_set: crate::widget_builder::HandlerSet,
     ) {
+        // See `apply_self_handler_set`: route `visible_when` through the
+        // registry-aware `self.visible_when`.
+        let visible_when = handler_set.visible_when.take();
         self.arena
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::External);
+        if let Some(prop) = visible_when {
+            self.visible_when(id, prop);
+        }
     }
 
     /// Set a per-child alignment override on a widget.
@@ -1976,6 +1988,18 @@ impl WidgetTree {
                         if let Some(sig) = handler_set.hover_within {
                             node.hover_within_signal = Some(sig);
                         }
+                        // Builder-chained `visible_when: prop`. Mirror of
+                        // `WidgetTree::visible_when`: register a bound prop at
+                        // Relayout, then store it on the node. (Disjoint field
+                        // borrow, like `access_hidden` below.)
+                        if let Some(prop) = handler_set.visible_when {
+                            prop.register_if_bound(
+                                id,
+                                &self.binding_registry,
+                                crate::binding::BindingLevel::Relayout,
+                            );
+                            node.visible_state = Some(prop);
+                        }
                         // Builder-level accessibility overrides + subtree
                         // mode. Mirrored here because this insertion path
                         // bypasses `apply_handler_set`.
@@ -2106,6 +2130,16 @@ impl WidgetTree {
                         }
                         if let Some(sig) = handler_set.hover_within {
                             node.hover_within_signal = Some(sig);
+                        }
+                        // Builder-chained `visible_when: prop`. Same as in
+                        // `insert_widget`.
+                        if let Some(prop) = handler_set.visible_when {
+                            prop.register_if_bound(
+                                id,
+                                &self.binding_registry,
+                                crate::binding::BindingLevel::Relayout,
+                            );
+                            node.visible_state = Some(prop);
                         }
                         // Builder-level accessibility overrides + subtree
                         // mode. Same rationale as in `insert_widget`.
@@ -2631,5 +2665,40 @@ mod activation_signal_tests {
         // Redundant relayout while active fires nothing new.
         tree.layout(SizeProposal::exact(100.0, 100.0));
         assert_eq!(log.get(), vec![false, true]);
+    }
+}
+
+#[cfg(test)]
+mod visible_when_builder_tests {
+    use super::*;
+    use crate::signal::{Prop, Signal};
+    use crate::widget_builder::WidgetBuilder;
+
+    /// `.visible_when(signal)` on any widget builder threads a *bound*
+    /// visibility prop onto the inserted node — so `bati!`'s property form
+    /// (`Widget { visible_when: sig }`) reaches the same `node.visible_state`
+    /// slot as the imperative `ctx.visible_when(id, sig)`.
+    #[test]
+    fn visible_when_builder_binds_node_visibility() {
+        let mut tree = WidgetTree::new();
+        let shown = Signal::new(false);
+        let id = tree.add(crate::test_widgets::FillWidget::new().visible_when(shown.clone()));
+
+        let node = tree.arena.get(id).expect("node exists");
+        assert!(
+            matches!(node.visible_state, Some(Prop::Bound(_))),
+            "`.visible_when(Signal)` must store a bound visibility prop"
+        );
+    }
+
+    /// A static `bool` is accepted too (`Prop::Static`), matching
+    /// `ctx.visible_when` / `access_hidden` semantics.
+    #[test]
+    fn visible_when_builder_accepts_static_bool() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(crate::test_widgets::FillWidget::new().visible_when(false));
+
+        let node = tree.arena.get(id).expect("node exists");
+        assert!(matches!(node.visible_state, Some(Prop::Static(false))));
     }
 }
