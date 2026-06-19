@@ -55,6 +55,13 @@ use crate::tooltip::{self, RichTooltipSource};
 pub use bastyde_core::styles::TextInputVariant;
 use bastyde_i18n::LocalizedString;
 
+/// Preferred width used when the parent leaves width unconstrained — matches
+/// the inner `TextInputField`'s default natural width. The editor column is a
+/// zero-basis flex `Expand` (so it fills/shrinks to an offered width), which
+/// would otherwise collapse to the `MinSize` floor under an unspecified
+/// proposal; `layout_response` substitutes this instead.
+const PREFERRED_WIDTH: f32 = 200.0;
+
 /// Validation state for the text input field.
 #[derive(Debug, Clone, Default)]
 pub enum ValidationState {
@@ -546,15 +553,22 @@ impl Widget for TextInput {
             let visible = text_signal_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
 
+            // Plain `Expand::horizontal()` (zero-basis flex), NOT
+            // `respect_intrinsic`: a zero-basis flex column claims exactly the
+            // width the row offers, so the field both fills a wide frame and
+            // shrinks into a narrow one. With `respect_intrinsic` the column's
+            // wanted width is the field's natural ≈200 dp, which a flex child
+            // refuses to shrink below — so it overflowed a narrow slot. The
+            // unconstrained natural width is restored in `layout_response`.
             ctx.add(
-                Expand::horizontal().respect_intrinsic().child(
+                Expand::horizontal().child(
                     ZStack::new()
                         .add_child(ph_id) // below (placeholder)
                         .child(padded_field), // on top (text field, gets hits)
                 ),
             )
         } else {
-            ctx.add(Expand::horizontal().respect_intrinsic().child(padded_field))
+            ctx.add(Expand::horizontal().child(padded_field))
         };
 
         // HStack: [leading] [text_column] [clear] [trailing]
@@ -660,11 +674,17 @@ impl Widget for TextInput {
         });
         let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
 
-        // Wrap frame + strip in a VStack with the configured gap.
+        // Wrap frame + strip in a VStack with the configured gap. The frame is
+        // wrapped in `Expand::horizontal` so it claims the VStack's full width:
+        // a `VStack` otherwise lays a child out at its own measured width, and
+        // the zero-basis editor column measures to the `MinSize` floor — which
+        // would pin the frame at ~65 dp instead of filling (or shrinking into)
+        // the width the composite was given.
+        let framed_id = ctx.add(Expand::horizontal().child_id(frame_id));
         let root_id = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
-                .add_child(frame_id)
+                .add_child(framed_id)
                 .add_child(strip_id),
         );
 
@@ -745,10 +765,27 @@ impl Widget for TextInput {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+        // The editor column is a zero-basis flex `Expand`, so it claims exactly
+        // the width offered to it (filling a wide frame, shrinking into a
+        // narrow one). But that also means an *unconstrained* measurement
+        // collapses the column to nothing and the composite to `MinSize`'s
+        // floor. Mirror `SpinBox`: substitute a preferred width when the parent
+        // leaves width open, and otherwise honour the offered width. The field
+        // re-lays to match during `place_children`.
+        // Composing widgets (`DateEdit`, …) raise `min_width` to their design
+        // width; honour that as the preferred. Plain text inputs fall back to
+        // the field's default natural width.
+        let preferred = self.min_width.unwrap_or(PREFERRED_WIDTH);
+        let effective = SizeProposal {
+            width: Some(proposal.width.unwrap_or(preferred)),
+            height: proposal.height,
+        };
+        let child_size = self
+            .root_child_id
+            .and_then(|id| ctx.child_size(id, effective))
+            .unwrap_or_else(|| effective.resolve(0.0, 0.0));
+        let w = effective.width.unwrap_or(child_size.width);
+        bastyde_canvas::Size::new(w, child_size.height).into()
     }
 
     fn place_children(
@@ -760,6 +797,7 @@ impl Widget for TextInput {
     ) {
         if let Some(p) = children.first_mut() {
             p.origin = Point::new(bounds.x, bounds.y);
+            p.size = bounds.size();
         }
     }
 

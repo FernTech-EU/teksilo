@@ -564,11 +564,19 @@ impl Widget for DateTimeEdit {
         };
 
         // ── Row layout ─────────────────────────────────────────
+        // Each half is wrapped in `Shrinkable` so the row can compress them
+        // when the unified frame is narrower than the combined natural mask
+        // width — the `TextInputField` inside then scrolls its text instead of
+        // overflowing the layout. `Shrinkable` preserves each half's natural
+        // width when there's room, so the wide-case layout (date at natural
+        // width, time fixed/Fill) is unchanged.
+        let date_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child_id(date_field_id));
+        let time_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child_id(time_field_id));
         let mut row = HStack::new()
             .spacing(0.0)
-            .add_child(date_field_id)
+            .add_child(date_shrinkable)
             .add_child(separator_id)
-            .add_child(time_field_id);
+            .add_child(time_shrinkable);
         if let Some(trigger_id) = trigger_id_opt {
             row = row.add_child(trigger_id);
         }
@@ -626,10 +634,18 @@ impl Widget for DateTimeEdit {
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
             self.feedback.clone(),
         ));
+        // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it
+        // claims the VStack's full width (a VStack lays a child out at its own
+        // measured width, not stretched). `respect_intrinsic` keeps the frame's
+        // natural width as the basis when unconstrained, so the widget reports
+        // its natural mask width rather than collapsing; a bounded proposal
+        // narrows it and the `Shrinkable` halves compress to fit.
+        let framed_in_vstack =
+            ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(sized_id));
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
-                .add_child(sized_id)
+                .add_child(framed_in_vstack)
                 .add_child(strip_id),
         );
         let style = crate::styles::recipe_date_edit_style::resolve_date_edit_style(
