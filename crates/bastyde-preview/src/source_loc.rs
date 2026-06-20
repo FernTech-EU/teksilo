@@ -29,9 +29,14 @@ impl SourceLoc {
         fn norm(s: &str) -> String {
             s.replace('\\', "/")
         }
+        // A suffix match, but only on a `/` component boundary — so a short
+        // query like "button.rs" does NOT match ".../radio_button.rs".
+        fn suffix_on_boundary(hay: &str, needle: &str) -> bool {
+            hay == needle || hay.strip_suffix(needle).is_some_and(|p| p.ends_with('/'))
+        }
         let a = norm(self.file);
         let b = norm(target);
-        a == b || a.ends_with(&b) || b.ends_with(&a)
+        suffix_on_boundary(&a, &b) || suffix_on_boundary(&b, &a)
     }
 }
 
@@ -46,6 +51,15 @@ mod tests {
         assert!(loc.matches_path("button.rs"));
         assert!(loc.matches_path("src/button.rs"));
         assert!(!loc.matches_path("crates/bastyde-widgets/src/checkbox.rs"));
+    }
+
+    #[test]
+    fn suffix_match_respects_component_boundaries() {
+        // "button.rs" must not match a sibling whose name merely ends in it.
+        let radio = SourceLoc::new("crates/bastyde-widgets/src/radio_button.rs", 1);
+        assert!(!radio.matches_path("button.rs"));
+        assert!(radio.matches_path("radio_button.rs"));
+        assert!(radio.matches_path("src/radio_button.rs"));
     }
 
     #[test]

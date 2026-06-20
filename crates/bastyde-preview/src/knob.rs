@@ -431,8 +431,12 @@ impl KnobSpec {
     {
         let nested = f(KnobSpec::default());
         for mut decl in nested.decls {
-            decl.group = Some(group);
-            self.decls.push(decl);
+            // Don't clobber a group a nested `group(...)` already set.
+            if decl.group.is_none() {
+                decl.group = Some(group);
+            }
+            // Route through `push` so the duplicate-id guard applies uniformly.
+            self = self.push(decl);
         }
         self
     }
@@ -575,6 +579,28 @@ pub struct KnobValues {
     text_styles: HashMap<&'static str, Signal<TextStyleRole>>,
 }
 
+/// Whether an override `value` is the right `KnobValue` variant for a knob of
+/// `kind` (so `from_spec` can reject a mistyped override instead of dropping it).
+fn override_matches_kind(kind: &KnobKind, value: &KnobValue) -> bool {
+    matches!(
+        (kind, value),
+        (KnobKind::Bool { .. }, KnobValue::Bool(_))
+            | (KnobKind::OptBool { .. }, KnobValue::OptBool(_))
+            | (KnobKind::I32 { .. }, KnobValue::I32(_))
+            | (KnobKind::OptI32 { .. }, KnobValue::OptI32(_))
+            | (KnobKind::F32 { .. }, KnobValue::F32(_))
+            | (KnobKind::OptF32 { .. }, KnobValue::OptF32(_))
+            | (KnobKind::Text { .. }, KnobValue::Text(_))
+            | (KnobKind::OptText { .. }, KnobValue::OptText(_))
+            | (KnobKind::Choice { .. }, KnobValue::Choice(_))
+            | (KnobKind::Enum { .. }, KnobValue::Enum(_))
+            | (KnobKind::TextRole { .. }, KnobValue::TextRole(_))
+            | (KnobKind::SurfaceRole { .. }, KnobValue::SurfaceRole(_))
+            | (KnobKind::BorderRole { .. }, KnobValue::BorderRole(_))
+            | (KnobKind::TextStyle { .. }, KnobValue::TextStyle(_))
+    )
+}
+
 impl KnobValues {
     /// Build a fresh runtime view for a spec, applying optional
     /// variant overrides on top of each knob's declared default.
@@ -596,6 +622,14 @@ impl KnobValues {
         };
         for decl in &spec.decls {
             let ov = overrides.and_then(|o| o.get(decl.id));
+            // Catch an override whose value type doesn't match the knob's
+            // declared kind — it would otherwise fall through to the default
+            // arm and be silently dropped. Dev tooling: panic on misuse.
+            debug_assert!(
+                ov.map_or(true, |v| override_matches_kind(&decl.kind, v)),
+                "knob '{}' override type does not match its declared kind",
+                decl.id
+            );
             match (&decl.kind, ov) {
                 (KnobKind::Bool { default: _ }, Some(KnobValue::Bool(v))) => {
                     values.bools.insert(decl.id, Signal::new(*v));
@@ -946,5 +980,15 @@ mod tests {
         // An override moves it.
         let ov = KnobOverrides::new().enum_("variant", 2);
         assert_eq!(KnobValues::from_spec(&spec, Some(&ov)).enum_("variant").get(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match its declared kind")]
+    fn from_spec_rejects_a_mistyped_override() {
+        let spec = KnobSpec::new().enum_("variant", "Variant", "ButtonVariant", &["A", "B"], 0);
+        // A `choice` override on an Enum knob is the wrong KnobValue variant —
+        // previously dropped silently, now caught (dev tooling: panic on misuse).
+        let ov = KnobOverrides::new().choice("variant", 1);
+        let _ = KnobValues::from_spec(&spec, Some(&ov));
     }
 }

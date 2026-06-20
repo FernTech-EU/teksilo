@@ -67,8 +67,10 @@ fn accessibility() -> KnobSpec {
         .opt_text("access_current", "Current", None)
         .opt_text("access_has_popup", "Has popup", None)
         .opt_text("access_orientation", "Orientation", None)
-        .opt_f32("access_numeric_value", "Numeric value", None, 0.0, 1.0)
-        .opt_f32("access_numeric_step", "Numeric step", None, 0.0, 1.0)
+        // AccessKit numeric values are domain-specific (a slider could be 0–100);
+        // these bounds are only nominal hints — the value is text-edited.
+        .opt_f32("access_numeric_value", "Numeric value", None, -1.0e6, 1.0e6)
+        .opt_f32("access_numeric_step", "Numeric step", None, -1.0e6, 1.0e6)
         .opt_text("access_shortcut_literal", "Shortcut", None)
         .opt_text("access_shortcut_id", "Shortcut id", None)
 }
