@@ -650,16 +650,20 @@ impl<T: 'static> Widget for TreeView<T> {
             let metrics = self.metrics.clone();
             let source = self.source.clone();
             move |y| {
-                let (visible_start, visible_end) = metrics.borrow_mut().visible_range(
-                    *y,
-                    viewport_h.get(),
-                    source.visible_count(),
-                    0,
-                );
+                let count = source.visible_count();
+                let (visible_start, visible_end) =
+                    metrics
+                        .borrow_mut()
+                        .visible_range(*y, viewport_h.get(), count, 0);
                 // Only rebuild when visible items fall outside the currently-built range
                 if visible_start < pbs.get() || visible_end > pbe.get() {
                     let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
-                    let new_end = visible_end + BUFFER_ITEMS;
+                    // Clamp to `count` — build() realizes a `min(end, count)`
+                    // window, so an unclamped `pbe` past the end leaves the
+                    // dirty-check believing rows are built that never were,
+                    // so the bottom rows of a large tree never realize on a
+                    // fast scroll. Mirrors TableView's BodyPane.
+                    let new_end = (visible_end + BUFFER_ITEMS).min(count);
                     pbs.set(new_start);
                     pbe.set(new_end);
                     let next = sv.get() + 1;
@@ -1230,7 +1234,7 @@ impl<T: 'static> Widget for TreeView<T> {
             );
             if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
                 self.prev_built_start.set(vs.saturating_sub(BUFFER_ITEMS));
-                self.prev_built_end.set(ve + BUFFER_ITEMS);
+                self.prev_built_end.set((ve + BUFFER_ITEMS).min(count));
                 self.version.set(self.version.get() + 1);
             }
         }
