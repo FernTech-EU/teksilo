@@ -13,6 +13,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
@@ -839,15 +840,34 @@ impl Scene {
     fn rebucket_subtree(&mut self, root: ItemId) {
         // Re-bucket `root` and every descendant whose scene-AABB
         // depends on the root's frame.
+        //
+        // Build a parent→children adjacency map once (O(N)) so the walk is
+        // O(N) instead of O(N²) (the previous code rescanned every entry per
+        // node).
+        let mut children: HashMap<ItemId, Vec<ItemId>> = HashMap::new();
+        for entry in &self.entries {
+            if let Some(parent) = entry.parent {
+                children.entry(parent).or_default().push(entry.id);
+            }
+        }
+
+        // Cycle guard: the parent-pointer walkers (`scene_transform` etc.)
+        // bound their *upward* walk with a hop cap; this *downward* walk can
+        // loop forever if the parent graph ever contains a cycle (e.g. from a
+        // future de-serialization bug), so we track visited nodes. A
+        // well-formed tree never revisits a node, so this is also a redundant-
+        // work guard.
+        let mut visited: HashSet<ItemId> = HashSet::new();
         let mut stack: Vec<ItemId> = vec![root];
         while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
             if let Some(aabb) = self.compute_scene_aabb(id) {
                 self.index.insert(id, aabb);
             }
-            for entry in &self.entries {
-                if entry.parent == Some(id) {
-                    stack.push(entry.id);
-                }
+            if let Some(kids) = children.get(&id) {
+                stack.extend(kids.iter().copied());
             }
         }
     }
