@@ -432,7 +432,7 @@ impl Renderer {
         );
         self.streams.index.ensure_capacity(
             &self.device,
-            (max_quads * 6 * std::mem::size_of::<u16>()) as u64,
+            (max_quads * 6 * std::mem::size_of::<u32>()) as u64,
         );
         self.streams.reset();
 
@@ -452,9 +452,10 @@ impl Renderer {
             self.queue.write_buffer(&self.anim_uniform_buffer, 0, bytes);
         }
 
-        // Upload the full quad index pattern once — 6 u16s per quad, shared
-        // across every quad-based pipeline this frame.
-        let index_data: Vec<u16> = crate::vertex::generate_quad_indices(max_quads);
+        // Upload the full quad index pattern once — 6 u32s per quad, shared
+        // across every quad-based pipeline this frame. u32 indices avoid the
+        // u16 vertex-index ceiling (16 384 quads) for large batches.
+        let index_data: Vec<u32> = crate::vertex::generate_quad_indices(max_quads);
         let index_binding = self
             .streams
             .index
@@ -551,12 +552,12 @@ impl Renderer {
                         {
                             let quads = ($batch.len() / 4) as u32;
                             let index_count = quads * 6;
-                            let index_bytes = (index_count as u64) * 2;
+                            let index_bytes = (index_count as u64) * 4;
                             $pass.set_pipeline($pipeline);
                             $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
                             $pass.set_index_buffer(
                                 ib.slice(0..index_bytes),
-                                wgpu::IndexFormat::Uint16,
+                                wgpu::IndexFormat::Uint32,
                             );
                             $pass.draw_indexed(0..index_count, 0, 0..1);
                         }
@@ -586,13 +587,13 @@ impl Renderer {
                             if let Some((vb, v_off, v_len)) = $streams.quad.write($queue, bytes) {
                                 let quads = ($qb.len() / 4) as u32;
                                 let index_count = quads * 6;
-                                let index_bytes = (index_count as u64) * 2;
+                                let index_bytes = (index_count as u64) * 4;
                                 $pass.set_pipeline($qp);
                                 $pass.set_bind_group(0, bind_group, &[]);
                                 $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
                                 $pass.set_index_buffer(
                                     ib.slice(0..index_bytes),
-                                    wgpu::IndexFormat::Uint16,
+                                    wgpu::IndexFormat::Uint32,
                                 );
                                 $pass.draw_indexed(0..index_count, 0, 0..1);
                             }
@@ -615,13 +616,13 @@ impl Renderer {
                         if let Some((vb, v_off, v_len)) = $streams.anim_proc.write($queue, bytes) {
                             let quads = (anim_proc_batch.len() / 4) as u32;
                             let index_count = quads * 6;
-                            let index_bytes = (index_count as u64) * 2;
+                            let index_bytes = (index_count as u64) * 4;
                             $pass.set_pipeline(&self.anim_proc_pipeline);
                             $pass.set_bind_group(0, &self.anim_uniform_bind_group, &[]);
                             $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
                             $pass.set_index_buffer(
                                 ib.slice(0..index_bytes),
-                                wgpu::IndexFormat::Uint16,
+                                wgpu::IndexFormat::Uint32,
                             );
                             $pass.draw_indexed(0..index_count, 0, 0..1);
                         }
@@ -1313,7 +1314,7 @@ impl Renderer {
                                             self.streams.anim_proc.write(&self.queue, bytes),
                                             index_binding,
                                         ) {
-                                            let index_bytes: u64 = 6 * 2;
+                                            let index_bytes: u64 = 6 * 4;
                                             pass.set_pipeline(&self.anim_sprite_pipeline);
                                             pass.set_bind_group(
                                                 0,
@@ -1327,7 +1328,7 @@ impl Renderer {
                                             );
                                             pass.set_index_buffer(
                                                 ib.slice(0..index_bytes),
-                                                wgpu::IndexFormat::Uint16,
+                                                wgpu::IndexFormat::Uint32,
                                             );
                                             pass.draw_indexed(0..6, 0, 0..1);
                                         }
@@ -1795,7 +1796,7 @@ impl Renderer {
         pass.set_pipeline(&self.quad_pipeline);
         pass.set_bind_group(0, bind_group, &[]);
         pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
-        pass.set_index_buffer(ib.slice(0..12), wgpu::IndexFormat::Uint16);
+        pass.set_index_buffer(ib.slice(0..24), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..6, 0, 0..1);
     }
 
@@ -1932,12 +1933,14 @@ fn path_quad_verts(
     let u1 = (region.x + region.w) as f32 / aw;
     let v1 = (region.y + region.h) as f32 / ah;
 
-    let color = [
-        entry.color[0],
-        entry.color[1],
-        entry.color[2],
-        entry.color[3] * opacity,
-    ];
+    // The path atlas stores coverage in its alpha channel; the monochrome
+    // quad path (`flags = 0`) tints with the vertex RGB and multiplies by
+    // that coverage. The `Rgba8UnormSrgb` target expects linear RGB from the
+    // shader, so linearize `entry.color` here exactly like every other
+    // pipeline (rect / sdf / shadow / image) — otherwise paths render with a
+    // gamma error against everything else.
+    let lin = crate::vertex::srgb_to_linear_rgba(entry.color);
+    let color = [lin[0], lin[1], lin[2], entry.color[3] * opacity];
 
     let positions = [
         apply_transform_pixel([sx, sy], transform),
@@ -1947,9 +1950,8 @@ fn path_quad_verts(
     ];
     let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
 
-    // Path atlas contents are pre-multiplied RGBA matching `entry.color`,
-    // so the monochrome path (`flags = 0`) renders correctly: the shader
-    // outputs `vertex.rgb * tex.a`, equivalent to `path_color * path_alpha`.
+    // The shader outputs `vertex.rgb * tex.a` for `flags = 0`, equivalent to
+    // `linear_path_color * path_coverage`.
     [
         QuadVertex {
             position: positions[0],
@@ -2264,7 +2266,7 @@ fn composite_blur_quad(
     let Some((ib, _, _)) = index_binding else {
         return;
     };
-    let composite_index_bytes: u64 = 6 * std::mem::size_of::<u16>() as u64;
+    let composite_index_bytes: u64 = 6 * std::mem::size_of::<u32>() as u64;
 
     pass.set_pipeline(quad_pipeline);
     pass.set_bind_group(0, &bind_group, &[]);
@@ -2279,7 +2281,7 @@ fn composite_blur_quad(
     pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
     pass.set_index_buffer(
         ib.slice(0..composite_index_bytes),
-        wgpu::IndexFormat::Uint16,
+        wgpu::IndexFormat::Uint32,
     );
     pass.draw_indexed(0..6, 0, 0..1);
 }

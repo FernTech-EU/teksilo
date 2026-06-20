@@ -445,13 +445,19 @@ fn encode_stops(stops: &[bastyde_canvas::GradientStop]) -> ([[f32; 4]; 4], [f32;
 }
 
 /// Standard quad indices for two triangles from 4 vertices.
-pub const QUAD_INDICES: [u16; 6] = [0, 1, 2, 0, 2, 3];
+///
+/// 32-bit indices: a frame can carry far more than 16 384 quads (the u16
+/// vertex-index ceiling) — large text runs, dense data grids, big scenes —
+/// and a single contiguous batch can approach that count. u16 indices would
+/// silently wrap past vertex 65 535, corrupting draw calls in release and
+/// panicking in debug. The quad index buffer is therefore `Uint32`.
+pub const QUAD_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
 /// Generate indices for N quads.
-pub fn generate_quad_indices(count: usize) -> Vec<u16> {
+pub fn generate_quad_indices(count: usize) -> Vec<u32> {
     let mut indices = Vec::with_capacity(count * 6);
     for i in 0..count {
-        let base = (i * 4) as u16;
+        let base = (i * 4) as u32;
         for &offset in &QUAD_INDICES {
             indices.push(base + offset);
         }
