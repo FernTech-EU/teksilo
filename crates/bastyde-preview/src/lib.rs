@@ -45,6 +45,7 @@
 //! register_widget_catalog!(Button);
 //! ```
 
+mod builder_props;
 mod catalog;
 mod knob;
 mod registry;
@@ -52,8 +53,9 @@ mod source_loc;
 mod variant;
 
 pub use bastyde_core::widget_id::WidgetId;
+pub use builder_props::builder_property_groups;
 pub use catalog::{CatalogEntry, SlottedChild, WidgetCatalog, WidgetCategory};
-pub use knob::{KnobDecl, KnobKind, KnobOverrides, KnobSpec, KnobValue, KnobValues};
+pub use knob::{EnumInfo, KnobDecl, KnobKind, KnobOverrides, KnobSpec, KnobValue, KnobValues};
 pub use registry::{entries_by_group, find_by_file, find_by_id, iter_entries};
 pub use source_loc::SourceLoc;
 pub use variant::{PreviewVariant, ScenarioBuilder};

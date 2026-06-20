@@ -63,6 +63,19 @@ use crate::{
 // Button
 // ---------------------------------------------------------------------------
 
+/// Maps a `variant` enum-knob index to `ButtonVariant` (declaration order).
+fn button_variant(idx: usize) -> ButtonVariant {
+    match idx {
+        0 => ButtonVariant::Filled,
+        1 => ButtonVariant::Tinted,
+        2 => ButtonVariant::Outlined,
+        4 => ButtonVariant::Ghost,
+        5 => ButtonVariant::Link,
+        6 => ButtonVariant::Destructive,
+        _ => ButtonVariant::Plain,
+    }
+}
+
 impl WidgetCatalog for Button {
     fn id() -> &'static str {
         "button"
@@ -76,7 +89,14 @@ impl WidgetCatalog for Button {
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .text("label", "Label", "Click me")
-            .choice("variant", "Variant", &["Default", "Regular", "Flat"], 1)
+            .ctor(0)
+            .enum_(
+                "variant",
+                "Variant",
+                "ButtonVariant",
+                &["Filled", "Tinted", "Outlined", "Plain", "Ghost", "Link", "Destructive"],
+                3,
+            )
             .bool_("enabled", "Enabled", true)
             .opt_text("tooltip", "Tooltip", None)
     }
@@ -85,15 +105,11 @@ impl WidgetCatalog for Button {
             PreviewVariant::defaults("default"),
             PreviewVariant::knobs(
                 "primary",
-                KnobOverrides::new()
-                    .choice("variant", 0)
-                    .text("label", "Save"),
+                KnobOverrides::new().enum_("variant", 0).text("label", "Save"),
             ),
             PreviewVariant::knobs(
                 "flat",
-                KnobOverrides::new()
-                    .choice("variant", 2)
-                    .text("label", "More…"),
+                KnobOverrides::new().enum_("variant", 4).text("label", "More…"),
             ),
             PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
             PreviewVariant::knobs(
@@ -106,15 +122,10 @@ impl WidgetCatalog for Button {
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         let label = knobs.text("label").get();
-        let variant_idx = knobs.choice("variant").get();
+        let variant = button_variant(knobs.enum_("variant").get());
         let enabled = knobs.bool_("enabled").get();
         let tooltip = knobs.opt_text("tooltip").get();
-        let style = match variant_idx {
-            0 => ButtonVariant::Filled,
-            2 => ButtonVariant::Ghost,
-            _ => ButtonVariant::Plain,
-        };
-        let mut b = Button::new(lit!(label)).variant(style).enabled(enabled);
+        let mut b = Button::new(lit!(label)).variant(variant).enabled(enabled);
         if let Some(t) = tooltip {
             b = b.tooltip(lit!(t));
         }
@@ -486,16 +497,24 @@ impl WidgetCatalog for TextWidget {
         "TextWidget"
     }
     fn knobs() -> KnobSpec {
-        KnobSpec::new().text("text", "Text", "Label")
+        KnobSpec::new()
+            .text("text", "Text", "Label")
+            .ctor(0)
+            .text_role("color", "Color", TextRole::Primary)
+            .text_style("style", "Style", TextStyleRole::Body)
     }
     fn variants() -> Vec<PreviewVariant> {
-        vec![PreviewVariant::defaults("default")]
+        vec![
+            PreviewVariant::defaults("default"),
+            PreviewVariant::knobs("secondary", KnobOverrides::new().text_role("color", TextRole::Secondary)),
+            PreviewVariant::knobs("bold", KnobOverrides::new().text_style("style", TextStyleRole::BodyBold)),
+        ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
             TextWidget::new(lit!(knobs.text("text").get()))
-                .style(TextStyleRole::Body)
-                .color(TextRole::Primary),
+                .style(knobs.text_style("style").get())
+                .color(knobs.text_role("color").get()),
         )
     }
     fn icon() -> Option<Box<dyn Widget>> {
@@ -679,7 +698,8 @@ impl WidgetCatalog for Slider {
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .f32_("value", "Value", 0.5, 0.0, 1.0)
-            .choice("orientation", "Orientation", &["Horizontal", "Vertical"], 0)
+            .ctor(0)
+            .enum_("orientation", "Orientation", "Orientation", &["Horizontal", "Vertical"], 0)
             .f32_step("step", "Step (0 = continuous)", 0.0, 0.0, 0.5, 0.05)
             .bool_("enabled", "Enabled", true)
             .opt_text("label", "Label", None)
@@ -693,7 +713,7 @@ impl WidgetCatalog for Slider {
                 "stepped",
                 KnobOverrides::new().f32_("value", 0.5).f32_("step", 0.1),
             ),
-            PreviewVariant::knobs("vertical", KnobOverrides::new().choice("orientation", 1)),
+            PreviewVariant::knobs("vertical", KnobOverrides::new().enum_("orientation", 1)),
             PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
             PreviewVariant::knobs(
                 "with-label",
@@ -703,7 +723,7 @@ impl WidgetCatalog for Slider {
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         use bastyde_tokens::Orientation;
-        let orient = match knobs.choice("orientation").get() {
+        let orient = match knobs.enum_("orientation").get() {
             1 => Orientation::Vertical,
             _ => Orientation::Horizontal,
         };

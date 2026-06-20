@@ -86,6 +86,29 @@ impl TextRole {
             TextRole::EditorGutterFg => colors.editor_gutter_fg,
         }
     }
+
+    /// Every variant's Rust ident, in declaration order — the source of truth
+    /// for the designer's enum-property dropdowns. Keep in sync with the
+    /// variants above (guarded by `role_variant_names_cover_defaults`).
+    pub fn variant_names() -> &'static [&'static str] {
+        &[
+            "Primary",
+            "Secondary",
+            "Disabled",
+            "OnAccent",
+            "Accent",
+            "Error",
+            "Warning",
+            "Success",
+            "Link",
+            "LinkHover",
+            "LinkVisited",
+            "TooltipText",
+            "TooltipShortcut",
+            "EditorFg",
+            "EditorGutterFg",
+        ]
+    }
 }
 
 /// Semantic surface / background role.
@@ -180,6 +203,37 @@ impl SurfaceRole {
             SurfaceRole::Transparent => Color::TRANSPARENT,
         }
     }
+
+    /// Every variant's Rust ident, in declaration order (see [`TextRole::variant_names`]).
+    pub fn variant_names() -> &'static [&'static str] {
+        &[
+            "Main",
+            "Content",
+            "Raised",
+            "Sunken",
+            "Hover",
+            "Pressed",
+            "Selected",
+            "SelectedInactive",
+            "AltRow",
+            "Accent",
+            "AccentHover",
+            "AccentPressed",
+            "AccentDisabled",
+            "AccentSubtle",
+            "StatusInfo",
+            "StatusSuccess",
+            "StatusWarning",
+            "StatusError",
+            "TooltipBg",
+            "EditorBg",
+            "EditorCaret",
+            "EditorCurrentLineBg",
+            "EditorSelectionBg",
+            "Scrim",
+            "Transparent",
+        ]
+    }
 }
 
 /// Semantic border / divider role.
@@ -234,6 +288,23 @@ impl BorderRole {
             BorderRole::Transparent => Color::TRANSPARENT,
         }
     }
+
+    /// Every variant's Rust ident, in declaration order (see [`TextRole::variant_names`]).
+    pub fn variant_names() -> &'static [&'static str] {
+        &[
+            "Default",
+            "Strong",
+            "Focused",
+            "Error",
+            "Warning",
+            "Divider",
+            "DividerStrong",
+            "TooltipBorder",
+            "Accent",
+            "AccentDisabled",
+            "Transparent",
+        ]
+    }
 }
 
 /// Semantic typography role — resolves to a `TextStyle` at paint/layout time.
@@ -269,5 +340,34 @@ impl TextStyleRole {
             TextStyleRole::Tiny => typography.tiny.clone(),
             TextStyleRole::Mono => typography.mono.clone(),
         }
+    }
+
+    /// Every variant's Rust ident, in declaration order (see [`TextRole::variant_names`]).
+    pub fn variant_names() -> &'static [&'static str] {
+        &["Body", "BodyBold", "Small", "SmallBold", "Tiny", "Mono"]
+    }
+}
+
+#[cfg(test)]
+mod role_variant_tests {
+    use super::*;
+
+    /// Guard against drift: each role's declared `variant_names()` must contain
+    /// the `Default` variant's Debug name and have no duplicates. (A new enum
+    /// variant added without updating `variant_names` trips the default check
+    /// for that variant or, at minimum, is caught here when it becomes default.)
+    #[test]
+    fn role_variant_names_cover_defaults() {
+        fn check(names: &[&str], default_dbg: &str) {
+            assert!(names.contains(&default_dbg), "default {default_dbg} missing from {names:?}");
+            let mut sorted = names.to_vec();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), names.len(), "duplicate role variant in {names:?}");
+        }
+        check(TextRole::variant_names(), &format!("{:?}", TextRole::default()));
+        check(SurfaceRole::variant_names(), &format!("{:?}", SurfaceRole::default()));
+        check(BorderRole::variant_names(), &format!("{:?}", BorderRole::default()));
+        check(TextStyleRole::variant_names(), &format!("{:?}", TextStyleRole::default()));
     }
 }

@@ -68,6 +68,14 @@ pub enum KnobKind {
         options: Vec<&'static str>,
         default: usize,
     },
+    /// A Rust enum property: like `Choice`, but carries the enum's path and
+    /// variant idents so a design tool can render a dropdown and emit
+    /// `enum_path::variant`. Stored at runtime as a `usize` index (like Choice).
+    Enum {
+        enum_path: &'static str,
+        variants: Vec<&'static str>,
+        default: usize,
+    },
     TextRole {
         default: TextRole,
     },
@@ -82,11 +90,60 @@ pub enum KnobKind {
     },
 }
 
+/// Resolved dropdown metadata for an enum-typed knob — the Rust enum path, its
+/// variant idents (in declaration order), and the default's index. Lets a
+/// design tool render a dropdown and emit `enum_path::variant`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumInfo {
+    pub enum_path: &'static str,
+    pub variants: Vec<&'static str>,
+    pub default: usize,
+}
+
+impl KnobKind {
+    /// For enum-typed knobs (`Enum` and the four role kinds), the data needed to
+    /// render a dropdown + emit `Path::Variant`; `None` for scalar / text /
+    /// label-only `Choice` kinds. The role variant lists come from
+    /// `bastyde_tokens`, so they never drift from the actual enums.
+    pub fn enum_info(&self) -> Option<EnumInfo> {
+        fn role(path: &'static str, names: &'static [&'static str], default_dbg: String) -> EnumInfo {
+            EnumInfo {
+                enum_path: path,
+                variants: names.to_vec(),
+                default: names.iter().position(|n| **n == default_dbg).unwrap_or(0),
+            }
+        }
+        match self {
+            KnobKind::Enum { enum_path, variants, default } => Some(EnumInfo {
+                enum_path,
+                variants: variants.clone(),
+                default: *default,
+            }),
+            KnobKind::TextRole { default } => {
+                Some(role("TextRole", TextRole::variant_names(), format!("{default:?}")))
+            }
+            KnobKind::SurfaceRole { default } => {
+                Some(role("SurfaceRole", SurfaceRole::variant_names(), format!("{default:?}")))
+            }
+            KnobKind::BorderRole { default } => {
+                Some(role("BorderRole", BorderRole::variant_names(), format!("{default:?}")))
+            }
+            KnobKind::TextStyle { default } => {
+                Some(role("TextStyleRole", TextStyleRole::variant_names(), format!("{default:?}")))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct KnobDecl {
     pub id: &'static str,
     pub label: &'static str,
     pub group: Option<&'static str>,
+    /// `Some(i)` when this knob is constructor argument `i` (`Slider::new(v, …)`)
+    /// rather than a named builder property — a design tool emits it positionally.
+    pub ctor_position: Option<usize>,
     pub kind: KnobKind,
 }
 
@@ -130,6 +187,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::Bool { default },
         })
     }
@@ -139,6 +197,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::OptBool { default },
         })
     }
@@ -155,6 +214,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::I32 {
                 default,
                 min,
@@ -176,6 +236,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::F32 {
                 default,
                 min,
@@ -198,6 +259,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::F32 {
                 default,
                 min,
@@ -207,11 +269,46 @@ impl KnobSpec {
         })
     }
 
+    pub fn opt_i32(
+        self,
+        id: &'static str,
+        label: &'static str,
+        default: Option<i32>,
+        min: i32,
+        max: i32,
+    ) -> Self {
+        self.push(KnobDecl {
+            id,
+            label,
+            group: None,
+            ctor_position: None,
+            kind: KnobKind::OptI32 { default, min, max, step: 1 },
+        })
+    }
+
+    pub fn opt_f32(
+        self,
+        id: &'static str,
+        label: &'static str,
+        default: Option<f32>,
+        min: f32,
+        max: f32,
+    ) -> Self {
+        self.push(KnobDecl {
+            id,
+            label,
+            group: None,
+            ctor_position: None,
+            kind: KnobKind::OptF32 { default, min, max, step: ((max - min) / 100.0).max(0.01) },
+        })
+    }
+
     pub fn text(self, id: &'static str, label: &'static str, default: &str) -> Self {
         self.push(KnobDecl {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::Text {
                 default: default.to_string(),
             },
@@ -223,6 +320,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::OptText {
                 default: default.map(|s| s.to_string()),
             },
@@ -241,6 +339,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::Choice {
                 options: options.to_vec(),
                 default,
@@ -248,11 +347,47 @@ impl KnobSpec {
         })
     }
 
+    /// A Rust enum property (e.g. `ButtonVariant`): `variants` are the Rust
+    /// idents in declaration order, `default` their index. Unlike `choice`, a
+    /// design tool can emit `enum_path::variant` and offer a typed dropdown.
+    pub fn enum_(
+        self,
+        id: &'static str,
+        label: &'static str,
+        enum_path: &'static str,
+        variants: &[&'static str],
+        default: usize,
+    ) -> Self {
+        debug_assert!(default < variants.len(), "default index out of range");
+        self.push(KnobDecl {
+            id,
+            label,
+            group: None,
+            ctor_position: None,
+            kind: KnobKind::Enum {
+                enum_path,
+                variants: variants.to_vec(),
+                default,
+            },
+        })
+    }
+
+    /// Mark the most-recently-added knob as constructor argument `pos`
+    /// (`Slider::new(value, min, max)` → `.f32_("min", …).ctor(1)`), so a design
+    /// tool emits it positionally rather than as a named property.
+    pub fn ctor(mut self, pos: usize) -> Self {
+        if let Some(last) = self.decls.last_mut() {
+            last.ctor_position = Some(pos);
+        }
+        self
+    }
+
     pub fn text_role(self, id: &'static str, label: &'static str, default: TextRole) -> Self {
         self.push(KnobDecl {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::TextRole { default },
         })
     }
@@ -262,6 +397,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::SurfaceRole { default },
         })
     }
@@ -271,6 +407,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::BorderRole { default },
         })
     }
@@ -280,6 +417,7 @@ impl KnobSpec {
             id,
             label,
             group: None,
+            ctor_position: None,
             kind: KnobKind::TextStyle { default },
         })
     }
@@ -317,6 +455,7 @@ pub enum KnobValue {
     Text(String),
     OptText(Option<String>),
     Choice(usize),
+    Enum(usize),
     TextRole(TextRole),
     SurfaceRole(SurfaceRole),
     BorderRole(BorderRole),
@@ -377,6 +516,11 @@ impl KnobOverrides {
 
     pub fn choice(mut self, id: &'static str, value: usize) -> Self {
         self.map.insert(id, KnobValue::Choice(value));
+        self
+    }
+
+    pub fn enum_(mut self, id: &'static str, value: usize) -> Self {
+        self.map.insert(id, KnobValue::Enum(value));
         self
     }
 
@@ -509,6 +653,13 @@ impl KnobValues {
                 (KnobKind::Choice { default, .. }, _) => {
                     values.choices.insert(decl.id, Signal::new(*default));
                 }
+                // Enum knobs share the Choice storage (a usize index).
+                (KnobKind::Enum { default: _, .. }, Some(KnobValue::Enum(v))) => {
+                    values.choices.insert(decl.id, Signal::new(*v));
+                }
+                (KnobKind::Enum { default, .. }, _) => {
+                    values.choices.insert(decl.id, Signal::new(*default));
+                }
                 (KnobKind::TextRole { default: _ }, Some(KnobValue::TextRole(v))) => {
                     values.text_roles.insert(decl.id, Signal::new(*v));
                 }
@@ -599,6 +750,12 @@ impl KnobValues {
             .get(id)
             .cloned()
             .unwrap_or_else(|| panic!("knob '{}' is not declared as Choice", id))
+    }
+
+    /// Enum knobs share the Choice storage (a `usize` index); alias of
+    /// [`choice`](Self::choice) that reads clearer at enum build sites.
+    pub fn enum_(&self, id: &str) -> Signal<usize> {
+        self.choice(id)
     }
 
     pub fn text_role(&self, id: &str) -> Signal<TextRole> {
@@ -743,5 +900,51 @@ mod tests {
         assert_eq!(decls[0].group, None);
         assert_eq!(decls[1].group, Some("search"));
         assert_eq!(decls[2].group, Some("search"));
+    }
+
+    #[test]
+    fn enum_info_carries_path_variants_and_default() {
+        let spec = KnobSpec::new().enum_(
+            "variant",
+            "Variant",
+            "ButtonVariant",
+            &["Filled", "Tinted", "Plain"],
+            2,
+        );
+        let info = spec.get("variant").unwrap().kind.enum_info().unwrap();
+        assert_eq!(info.enum_path, "ButtonVariant");
+        assert_eq!(info.variants, vec!["Filled", "Tinted", "Plain"]);
+        assert_eq!(info.default, 2);
+    }
+
+    #[test]
+    fn enum_info_for_role_kinds_uses_token_variant_names() {
+        let spec = KnobSpec::new().text_role("color", "Color", TextRole::Secondary);
+        let info = spec.get("color").unwrap().kind.enum_info().unwrap();
+        assert_eq!(info.enum_path, "TextRole");
+        assert_eq!(info.variants, TextRole::variant_names().to_vec());
+        assert_eq!(info.variants[info.default], "Secondary");
+        // A scalar kind has no enum_info.
+        assert!(KnobSpec::new().bool_("x", "X", false).get("x").unwrap().kind.enum_info().is_none());
+    }
+
+    #[test]
+    fn ctor_marks_only_the_last_decl() {
+        let spec = KnobSpec::new()
+            .text("label", "Label", "Go")
+            .ctor(0)
+            .bool_("enabled", "Enabled", true);
+        assert_eq!(spec.get("label").unwrap().ctor_position, Some(0));
+        assert_eq!(spec.get("enabled").unwrap().ctor_position, None);
+    }
+
+    #[test]
+    fn enum_knob_resolves_to_its_default_index() {
+        let spec = KnobSpec::new().enum_("variant", "Variant", "ButtonVariant", &["A", "B", "C"], 1);
+        let values = KnobValues::from_spec(&spec, None);
+        assert_eq!(values.enum_("variant").get(), 1);
+        // An override moves it.
+        let ov = KnobOverrides::new().enum_("variant", 2);
+        assert_eq!(KnobValues::from_spec(&spec, Some(&ov)).enum_("variant").get(), 2);
     }
 }
