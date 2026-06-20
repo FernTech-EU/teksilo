@@ -16,6 +16,11 @@ use bastyde_canvas::path::{Path, PathCommand};
 /// (4096) to leave room for shelf packing.
 const MAX_COSMETIC_RASTER_DIM: f32 = 2048.0;
 
+/// Free vertical headroom (device px) below which `begin_frame` treats the
+/// atlas as near-full and compacts. Roughly one tall shelf — enough that a
+/// frame rarely runs out of room mid-walk (where reclaiming is unsafe).
+const COMPACT_SLACK_PX: u32 = 256;
+
 /// A region within the atlas texture.
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasRegion {
@@ -140,8 +145,27 @@ impl PathAtlas {
     }
 
     /// Call at the start of each frame to advance the LRU counter.
+    ///
+    /// This is also the only point at which the atlas may safely **repack**
+    /// itself: no `AtlasRegion` has been handed out for the new frame yet, so
+    /// moving surviving entries to fresh coordinates cannot invalidate any
+    /// region the renderer is still holding from the current frame. When the
+    /// atlas is near-full and there are stale entries (not touched on the last
+    /// completed frame), we compact — dropping the stale entries and repacking
+    /// the rest tightly — so steady-state reclamation never has to happen
+    /// mid-frame (which would corrupt already-placed paths).
     pub fn begin_frame(&mut self) {
         self.current_frame += 1;
+
+        // Only the just-completed frame's working set is worth keeping
+        // (temporal locality); anything older is fragmentation to reclaim.
+        let keep_from = self.current_frame - 1;
+        let near_full = self.shelf_y.saturating_add(self.shelf_height) + COMPACT_SLACK_PX
+            >= self.height;
+        let has_stale = self.cache.values().any(|r| r.last_used_frame < keep_from);
+        if near_full && has_stale {
+            self.compact(keep_from);
+        }
     }
 
     /// Current atlas dimensions.
@@ -232,11 +256,14 @@ impl PathAtlas {
     ///   2. Grow the atlas (doubles up to `max_size`). Growth preserves
     ///      every existing entry's `(x, y)` so any `AtlasRegion` values
     ///      handed out earlier in the same render pass stay valid.
-    ///   3. Last resort, evict LRU entries. Eviction repacks current-frame
-    ///      survivors at fresh coordinates, which silently invalidates
-    ///      `AtlasRegion` values the caller already cached for those
-    ///      entries — so we only do it when growth has hit `max_size` and
-    ///      we'd otherwise drop the path.
+    ///   3. Last resort, evict. Eviction never moves entries already handed
+    ///      out this frame (that would invalidate `AtlasRegion`s the caller
+    ///      cached earlier in the same render walk → wrong-pixel sampling). It
+    ///      can only reclaim space when nothing has been handed out yet this
+    ///      frame; otherwise the allocation fails and the path is skipped for
+    ///      this frame. Steady-state reclamation happens safely in
+    ///      [`PathAtlas::begin_frame`] (compaction) before any region is
+    ///      handed out.
     fn allocate_and_write(
         &mut self,
         key: PathCacheKey,
@@ -261,11 +288,11 @@ impl PathAtlas {
             }
         }
 
-        // Atlas at max size and still no room. Fall through to eviction
-        // as the only remaining option. Note that this may move
-        // current-frame entries, leaving any `AtlasRegion` already
-        // returned to the caller pointing at stale coordinates — but
-        // we're past the size budget at this point.
+        // Atlas at max size and still no room. Try eviction — but it will
+        // refuse to move any entry already handed out this frame, so if the
+        // frame's live working set already fills a max-size atlas this is a
+        // no-op and we return `None` (the path is skipped this frame, which is
+        // correct: it genuinely doesn't fit). It never corrupts placed paths.
         self.evict_lru();
         if let Some(region) = self.try_allocate(w, h) {
             self.blit(region.x, region.y, w, h, pixels);
@@ -313,79 +340,91 @@ impl PathAtlas {
         None
     }
 
-    /// Evict entries from previous frames and repack. Entries used in the
-    /// **current** frame are preserved — otherwise a path inserted earlier
-    /// in the same `render()` walk could be evicted by a later one, leaving
-    /// the earlier path's `AtlasRegion` pointing at coordinates that now
-    /// hold a different path's pixels (visible as flicker on path-heavy
-    /// widgets like LineChart and PieChart when the atlas overflows).
+    /// Mid-frame, last-resort space reclamation.
     ///
-    /// If preserving current-frame entries doesn't free enough room,
-    /// `allocate_and_write` falls through to `try_grow` instead of evicting
-    /// them. As a last resort we clear everything — but that path is now
-    /// only reachable when one frame's paths can't even fit a fully grown
-    /// atlas.
+    /// Eviction must **never** move an entry that has already been handed out
+    /// this frame: the renderer's pre-pass caches each path's `AtlasRegion` in
+    /// `path_regions[..]` and reads it back later in the same frame, so moving
+    /// those pixels makes the cached region sample the wrong location (flicker
+    /// / wrong-pixel rendering on path-heavy widgets like LineChart and
+    /// PieChart). A shelf packer cannot reclaim the fragmented space held by
+    /// older entries without repacking the live ones, so:
+    ///
+    /// * If **no** region has been handed out this frame, clearing the whole
+    ///   atlas is safe — do it (the next lookups re-rasterize from a clean
+    ///   atlas, and `try_grow` already ran).
+    /// * If **any** region is live this frame, we leave the atlas untouched.
+    ///   `allocate_and_write` then returns `None` and the path is skipped for
+    ///   one frame — never corrupted.
+    ///
+    /// Steady-state reclamation that *does* repack happens in
+    /// [`PathAtlas::begin_frame`], where no region is live yet.
     fn evict_lru(&mut self) {
         if self.cache.is_empty() {
             return;
         }
 
         let current = self.current_frame;
-        let any_kept = self.cache.values().any(|r| r.last_used_frame == current);
+        let any_live = self.cache.values().any(|r| r.last_used_frame == current);
+        if any_live {
+            // Can't reclaim without moving a live entry — bail out.
+            return;
+        }
 
-        if any_kept {
-            // Keep the current-frame entries; drop everything else and
-            // repack the survivors at the start of the atlas.
-            let mut survivors: Vec<(PathCacheKey, AtlasRegion, Vec<u8>)> = self
-                .cache
-                .iter()
-                .filter(|(_, r)| r.last_used_frame == current)
-                .map(|(k, r)| {
-                    let pixels = self.read_region(*r);
-                    (*k, *r, pixels)
-                })
-                .collect();
-            self.cache.clear();
-            self.pixels.fill(0);
-            self.shelf_x = 0;
-            self.shelf_y = 0;
-            self.shelf_height = 0;
-            self.dirty = true;
-            // Repack survivors. If any can't be replaced (atlas is too
-            // small even for the current frame's working set) the loop
-            // simply skips it — the next `lookup_or_rasterize` will
-            // re-rasterize and `try_grow` from the outer caller.
-            // Repack tallest-first to limit shelf wastage.
-            survivors.sort_by_key(|(_, r, _)| std::cmp::Reverse(r.h));
-            for (key, old_region, pixels) in survivors {
-                if let Some(new_region) = self.try_allocate(old_region.w, old_region.h) {
-                    self.blit(
-                        new_region.x,
-                        new_region.y,
-                        new_region.w,
-                        new_region.h,
-                        &pixels,
-                    );
-                    self.cache.insert(
-                        key,
-                        AtlasRegion {
-                            x: new_region.x,
-                            y: new_region.y,
-                            w: new_region.w,
-                            h: new_region.h,
-                            last_used_frame: current,
-                        },
-                    );
-                }
+        // No live entries — safe to clear everything.
+        self.cache.clear();
+        self.pixels.fill(0);
+        self.shelf_x = 0;
+        self.shelf_y = 0;
+        self.shelf_height = 0;
+        self.dirty = true;
+    }
+
+    /// Drop every entry not used on or after `keep_from_frame` and repack the
+    /// survivors tightly from the top of the atlas.
+    ///
+    /// This **moves** surviving entries, so it is only sound when no
+    /// `AtlasRegion` has been handed out for the current frame yet — i.e. it
+    /// must be called only from [`PathAtlas::begin_frame`].
+    fn compact(&mut self, keep_from_frame: u64) {
+        // Read survivors out before we wipe the backing pixels. `read_region`
+        // and `cache.iter()` both borrow `&self` immutably, so this is fine.
+        let mut survivors: Vec<(PathCacheKey, AtlasRegion, Vec<u8>)> = self
+            .cache
+            .iter()
+            .filter(|(_, r)| r.last_used_frame >= keep_from_frame)
+            .map(|(k, r)| (*k, *r, self.read_region(*r)))
+            .collect();
+
+        self.cache.clear();
+        self.pixels.fill(0);
+        self.shelf_x = 0;
+        self.shelf_y = 0;
+        self.shelf_height = 0;
+        self.dirty = true;
+
+        // Repack tallest-first to limit shelf wastage.
+        survivors.sort_by_key(|(_, r, _)| std::cmp::Reverse(r.h));
+        for (key, old_region, pixels) in survivors {
+            if let Some(new_region) = self.try_allocate(old_region.w, old_region.h) {
+                self.blit(
+                    new_region.x,
+                    new_region.y,
+                    new_region.w,
+                    new_region.h,
+                    &pixels,
+                );
+                self.cache.insert(
+                    key,
+                    AtlasRegion {
+                        x: new_region.x,
+                        y: new_region.y,
+                        w: new_region.w,
+                        h: new_region.h,
+                        last_used_frame: old_region.last_used_frame,
+                    },
+                );
             }
-        } else {
-            // No current-frame entries — safe to clear everything.
-            self.cache.clear();
-            self.pixels.fill(0);
-            self.shelf_x = 0;
-            self.shelf_y = 0;
-            self.shelf_height = 0;
-            self.dirty = true;
         }
     }
 
@@ -815,6 +854,75 @@ mod tests {
             40,
             40,
         )));
+    }
+
+    #[test]
+    fn evict_never_moves_live_entry_when_full() {
+        // Core invariant for the stale-UV fix: once a region is handed out
+        // this frame it is frozen. If a later path can't fit and the atlas is
+        // already at max size, the new path is skipped (returns None) — the
+        // live entry must NOT be repacked, or `path_regions[..]` would sample
+        // the wrong pixels later in the same frame.
+        let mut atlas = PathAtlas::new(64, 64);
+        atlas.max_size = 64; // forbid growth so eviction is the only path
+        atlas.begin_frame();
+
+        let mut p1 = Path::new();
+        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.commands.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
+        p1.commands
+            .push(PathCommand::LineTo(Point::new(60.0, 60.0)));
+        p1.commands.push(PathCommand::Close);
+
+        let mut p2 = Path::new();
+        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.commands.push(PathCommand::LineTo(Point::new(62.0, 0.0)));
+        p2.commands
+            .push(PathCommand::LineTo(Point::new(62.0, 62.0)));
+        p2.commands.push(PathCommand::Close);
+
+        let style = StrokeStyle::solid(0.0);
+        let r1 = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 60.0, 60.0], 1.0, 1.0)
+            .expect("p1 fits");
+
+        // p2 can't fit, can't grow → must be skipped, not placed by moving p1.
+        let r2 =
+            atlas.lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, [0.0, 0.0, 62.0, 62.0], 1.0, 1.0);
+        assert!(r2.is_none(), "an unfittable path is skipped, never placed by evicting a live entry");
+
+        // p1's region is byte-for-byte unchanged.
+        let r1b = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 60.0, 60.0], 1.0, 1.0)
+            .expect("p1 still cached");
+        assert_eq!(r1.x, r1b.x, "live entry must not move");
+        assert_eq!(r1.y, r1b.y, "live entry must not move");
+    }
+
+    #[test]
+    fn begin_frame_compacts_stale_entries() {
+        // `begin_frame` is the safe point to repack: nothing is handed out
+        // for the new frame yet. A near-full atlas with entries not used on
+        // the last completed frame compacts them away.
+        let mut atlas = PathAtlas::new(64, 64);
+        atlas.begin_frame(); // frame 1
+
+        let mut path = Path::new();
+        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands.push(PathCommand::LineTo(Point::new(8.0, 0.0)));
+        path.commands.push(PathCommand::LineTo(Point::new(8.0, 8.0)));
+        path.commands.push(PathCommand::Close);
+        let style = StrokeStyle::solid(0.0);
+        atlas
+            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 8.0, 8.0], 1.0, 1.0)
+            .expect("entry fits");
+        assert_eq!(atlas.cache.len(), 1);
+
+        atlas.begin_frame(); // frame 2 — keep_from = 1, entry (used f1) kept
+        assert_eq!(atlas.cache.len(), 1, "entry from the last completed frame is kept");
+
+        atlas.begin_frame(); // frame 3 — keep_from = 2, entry (used f1) is stale
+        assert!(atlas.cache.is_empty(), "stale entry compacted away on begin_frame");
     }
 
     #[test]
