@@ -65,6 +65,31 @@ fn always_overflow_actions_start_collapsed_even_with_room() {
 }
 
 #[test]
+fn always_overflow_does_not_distort_spacing_estimate() {
+    // Regression guard: `total_slots` counts the `always_overflow` action,
+    // but `inline_width` subtracts a slot for every collapsed entry — and an
+    // `always_overflow` action starts collapsed — so it nets to zero and the
+    // spacing estimate stays exact. With non-zero spacing and a tight fit the
+    // boundary must land precisely (no over-collapse from a phantom gap).
+    //
+    // Two 40px actions, action #1 is always_overflow, spacing 10.
+    //   inline = action0(40) + gap(10) + chevron(30) = 80
+    let just_fits = compute_overflow(80.0, 0.0, &[40.0, 40.0], &[0, 0], &[false, true], 10.0, 2);
+    assert_eq!(
+        just_fits,
+        vec![false, true],
+        "action0 stays inline when the bar is exactly wide enough (80px)"
+    );
+    // One pixel narrower → action0 must also collapse (chevron-only, 30px).
+    let too_tight = compute_overflow(79.0, 0.0, &[40.0, 40.0], &[0, 0], &[false, true], 10.0, 2);
+    assert_eq!(
+        too_tight,
+        vec![true, true],
+        "action0 collapses once the bar is below the exact-fit width"
+    );
+}
+
+#[test]
 fn pinned_width_reduces_room_for_actions() {
     // 160px of pinned content leaves little room → actions overflow.
     let flags = compute_overflow(200.0, 160.0, &[40.0, 40.0], &[0, 0], &[false; 2], 0.0, 4);
