@@ -475,7 +475,16 @@ impl Widget for SceneScrollView {
         set_if_changed(&self.scroll_pos_y, m.pos_y);
 
         // Place the SceneView filling the (possibly gutter-reduced) area.
-        children[0].origin = bounds.origin();
+        // A reserved vertical gutter sits on the right in LTR but on the left
+        // in RTL (see the vertical bar placement below), so in RTL the content
+        // must start `v_reserved` to the right or it overlaps the bar. The
+        // horizontal gutter is always at the bottom, so `y` never shifts.
+        let content_x = if ctx.is_rtl() {
+            bounds.x + v_reserved
+        } else {
+            bounds.x
+        };
+        children[0].origin = Point::new(content_x, bounds.y);
         children[0].size = Size::new(viewport_w, viewport_h);
 
         // Vertical scroll bar.
