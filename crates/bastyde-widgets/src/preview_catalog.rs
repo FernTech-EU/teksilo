@@ -39,6 +39,7 @@ use bastyde_preview::{
     KnobOverrides, KnobSpec, KnobValues, PreviewVariant, SlottedChild, WidgetCatalog,
     WidgetCategory, register_widget_catalog_at,
 };
+use bastyde_core::styles::{CheckboxVariant, TextInputVariant};
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
@@ -73,6 +74,25 @@ fn button_variant(idx: usize) -> ButtonVariant {
         5 => ButtonVariant::Link,
         6 => ButtonVariant::Destructive,
         _ => ButtonVariant::Plain,
+    }
+}
+
+/// Maps a `variant` enum-knob index to `CheckboxVariant` (declaration order).
+fn checkbox_variant(idx: usize) -> CheckboxVariant {
+    match idx {
+        1 => CheckboxVariant::Rounded,
+        2 => CheckboxVariant::Circle,
+        _ => CheckboxVariant::Square,
+    }
+}
+
+/// Maps a `variant` enum-knob index to `TextInputVariant` (declaration order).
+fn text_input_variant(idx: usize) -> TextInputVariant {
+    match idx {
+        1 => TextInputVariant::Filled,
+        2 => TextInputVariant::Underline,
+        3 => TextInputVariant::Bare,
+        _ => TextInputVariant::Outlined,
     }
 }
 
@@ -536,7 +556,16 @@ impl WidgetCatalog for TextInput {
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .text("value", "Value", "")
+            .ctor(0)
+            .enum_(
+                "variant",
+                "Variant",
+                "TextInputVariant",
+                &["Outlined", "Filled", "Underline", "Bare"],
+                0,
+            )
             .text("placeholder", "Placeholder", "Type here…")
+            .bool_("enabled", "Enabled", true)
     }
     fn variants() -> Vec<PreviewVariant> {
         vec![PreviewVariant::defaults("default")]
@@ -545,7 +574,9 @@ impl WidgetCatalog for TextInput {
         Box::new(
             FixedSize::new().bind_width(220.0_f32).child(
                 TextInput::new(knobs.text("value"))
-                    .placeholder(lit!(knobs.text("placeholder").get())),
+                    .variant(text_input_variant(knobs.enum_("variant").get()))
+                    .placeholder(lit!(knobs.text("placeholder").get()))
+                    .enabled(knobs.bool_("enabled").get()),
             ),
         )
     }
@@ -572,6 +603,8 @@ impl WidgetCatalog for Checkbox {
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .bool_("checked", "Checked", false)
+            .ctor(0)
+            .enum_("variant", "Variant", "CheckboxVariant", &["Square", "Rounded", "Circle"], 0)
             .text("label", "Label", "Enable feature")
             .bool_("enabled", "Enabled", true)
     }
@@ -586,7 +619,12 @@ impl WidgetCatalog for Checkbox {
         let label = knobs.text("label").get();
         let checked = knobs.bool_("checked");
         let enabled = knobs.bool_("enabled").get();
-        Box::new(Checkbox::new(checked).label(lit!(label)).enabled(enabled))
+        Box::new(
+            Checkbox::new(checked)
+                .variant(checkbox_variant(knobs.enum_("variant").get()))
+                .label(lit!(label))
+                .enabled(enabled),
+        )
     }
     fn icon() -> Option<Box<dyn Widget>> {
         Some(icons::checkbox())
