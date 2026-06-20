@@ -296,7 +296,13 @@ impl Widget for ScrollArea {
             // Already built — return existing children
             return self.child_ids.clone();
         } else {
-            panic!("ScrollArea requires .child(...) or ::from_id(...) — no content was set");
+            // No content was set (e.g. `ScrollArea::default()` reaching the
+            // tree). `build()` must never panic — an empty content area is a
+            // valid, if useless, widget: `place_children` early-returns on an
+            // empty child list and `layout_response` falls back to its default
+            // size. Leave `child_ids` empty and render nothing.
+            self.child_ids.clear();
+            return Vec::new();
         };
         ids.push(content_id);
 
