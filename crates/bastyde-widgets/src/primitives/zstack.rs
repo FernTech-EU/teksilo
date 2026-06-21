@@ -76,6 +76,16 @@ impl Widget for ZStack {
         // Ask each child for its intrinsic size (unspecified proposal) and take the max.
         // This ensures background elements (like RectWidget, which returns 0x0 for
         // unspecified) don't inflate the stack's size.
+        //
+        // NOTE: a known limitation is that a height-for-width child (wrapping
+        // text) measured here at `unspecified()` reports its single-line width
+        // rather than wrapping to the offered width. Forwarding the incoming
+        // `proposal` instead would fix wrapping, but it interacts badly with
+        // `MinSize` (which forwards `Some(min)` as the width): a *shrinkable*
+        // single-line label inside `MinSize → ZStack` then truncates to the min
+        // width during intrinsic measurement. A correct fix needs `MinSize`'s
+        // proposal semantics reworked for shrink- vs. wrap-aware children, so
+        // the conservative `unspecified()` is kept here for now.
         let mut max_w: f32 = 0.0;
         let mut max_h: f32 = 0.0;
         let mut min_w: f32 = 0.0;
