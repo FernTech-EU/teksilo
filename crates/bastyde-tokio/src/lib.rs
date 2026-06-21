@@ -92,6 +92,7 @@ impl BastydeAppBuilderTokioExt for BastydeAppBuilder {
         let poll_source = handle.poll_source();
         let completions = handle.completions();
         let tick_handle = handle.clone();
+        let waker_handle = handle.clone();
         let rt = runtime.clone();
         self.app_state(handle)
             .app_state(completions)
@@ -103,5 +104,12 @@ impl BastydeAppBuilderTokioExt for BastydeAppBuilder {
                 let _guard = rt.enter();
                 tick_handle.tick()
             })
+            // Wire the cross-thread waker at startup, exactly like plain
+            // `install_async`. Without it, a `spawn_blocking` (or any background
+            // task) that completes while the event loop is idle never nudges
+            // the loop to tick, so the result appears to hang until some other
+            // event happens to wake it. The AppEventProxy is itself an
+            // AppEventPoster; `set_poster` is idempotent.
+            .on_ready(move |proxy| waker_handle.set_poster(std::sync::Arc::new(proxy)))
     }
 }
