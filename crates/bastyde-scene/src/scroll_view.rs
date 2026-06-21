@@ -415,6 +415,16 @@ impl Widget for SceneScrollView {
             self.model
                 .pan_bounds_signal()
                 .bind_to(self_id, registry, BindingLevel::Relayout);
+            // `place_children`/`metrics` also read the pan axes (gates the
+            // AsNeeded show/hide) and the view-level pan-bounds override (feeds
+            // `effective_extent`). Both are runtime-mutable, so bind them too —
+            // otherwise mutating either leaves max_scroll_*/viewport_ratio_*
+            // stale until an unrelated relayout fires.
+            self.model
+                .pan_axes_signal()
+                .bind_to(self_id, registry, BindingLevel::Relayout);
+            self.pan_bounds_override
+                .bind_to(self_id, registry, BindingLevel::Relayout);
         }
 
         // Always (re)register the bar→pan effects — handles are dropped on
