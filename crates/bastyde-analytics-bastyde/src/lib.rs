@@ -105,6 +105,10 @@ impl UsageReporter for BastydeAdapter {
         self.send(WorkerCommand::Record(event.to_owned()));
     }
 
+    /// **Blocks the calling thread** until the worker drains or the bound
+    /// below elapses (`request_timeout × 4`, ~40 s at the 10 s default). Call
+    /// it off the UI thread — e.g. from `spawn_blocking` or at shutdown — never
+    /// directly inside an event handler, or the window freezes for the wait.
     fn flush(&self) -> Result<(), TelemetryError> {
         let (tx, rx) = oneshot::channel();
         self.send(WorkerCommand::Flush(tx));
@@ -149,6 +153,9 @@ impl UsageReporter for BastydeAdapter {
         "bastyde-collector"
     }
 
+    /// **Blocks the calling thread** for up to `request_timeout` (~10 s) on a
+    /// network round-trip. Invoke off the UI thread (`spawn_blocking`) so the
+    /// "export my data" action doesn't freeze the window.
     fn fetch_remote_data(&self) -> Result<RemoteDataExport, TelemetryError> {
         let Some(install_id) = self.config.install_id.clone() else {
             return Err(TelemetryError::FetchUnsupported);
@@ -186,6 +193,9 @@ impl UsageReporter for BastydeAdapter {
         result
     }
 
+    /// **Blocks the calling thread** for up to `request_timeout` (~10 s) on a
+    /// network round-trip. Invoke off the UI thread (`spawn_blocking`) so the
+    /// "erase my data" action doesn't freeze the window.
     fn erase_remote_data(&self) -> Result<(), TelemetryError> {
         let Some(install_id) = self.config.install_id.clone() else {
             return Err(TelemetryError::ErasureUnsupported);
