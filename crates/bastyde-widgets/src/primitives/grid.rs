@@ -289,14 +289,13 @@ impl Widget for Grid {
         // framework filters dormant children out of `children`, so we
         // look up each child's position in `self.child_ids` (which
         // retains all children) to keep cell assignments stable.
-        let original_indices: Vec<usize> = children
+        // `None` for a child not found in `child_ids` (an orphan from a
+        // transient desync). Such a child is skipped entirely below rather than
+        // mapped to cell 0 — placing it at (0,0) would overlap the real
+        // cell-0 child and pollute that track's measured size.
+        let original_indices: Vec<Option<usize>> = children
             .iter()
-            .map(|c| {
-                self.child_ids
-                    .iter()
-                    .position(|&id| id == c.id)
-                    .unwrap_or(0)
-            })
+            .map(|c| self.child_ids.iter().position(|&id| id == c.id))
             .collect();
 
         // Pass 1: intrinsic sizes — same as size_that_fits.
@@ -306,7 +305,10 @@ impl Widget for Grid {
         let mut col_min = vec![0.0_f32; num_cols];
 
         for (i, child) in children.iter().enumerate() {
-            let (row, col) = self.cell_for(original_indices[i]);
+            let Some(orig) = original_indices[i] else {
+                continue;
+            };
+            let (row, col) = self.cell_for(orig);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
@@ -332,7 +334,10 @@ impl Widget for Grid {
         // Pass 2: re-measure Fractional cells whose column shrank, so
         // their row height reflects wrap-induced growth.
         for (i, child) in children.iter().enumerate() {
-            let (row, col) = self.cell_for(original_indices[i]);
+            let Some(orig) = original_indices[i] else {
+                continue;
+            };
+            let (row, col) = self.cell_for(orig);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
@@ -380,7 +385,11 @@ impl Widget for Grid {
 
         // Place each child in its cell
         for (i, child) in children.iter_mut().enumerate() {
-            let (row, col) = self.cell_for(original_indices[i]);
+            let Some(orig) = original_indices[i] else {
+                child.size = Size::ZERO;
+                continue;
+            };
+            let (row, col) = self.cell_for(orig);
             if row >= num_rows || col >= num_cols {
                 child.size = Size::ZERO;
                 continue;
