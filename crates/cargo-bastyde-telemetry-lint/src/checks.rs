@@ -61,7 +61,7 @@ pub fn run_checks(schema: &Schema, src_roots: &[&Path], _fail_on_warnings: bool)
     if !src_roots.is_empty() {
         let source_hits = scan_source_files(src_roots, &emit_names, schema);
         check_unused_events(schema, &source_hits, &mut issues);
-        check_undeclared_emits(schema, &source_hits, &mut issues);
+        check_undeclared_emits(schema, src_roots, &mut issues);
     }
 
     issues
@@ -237,31 +237,79 @@ fn check_unused_events(schema: &Schema, hits: &HitMap, issues: &mut Vec<Issue>) 
     }
 }
 
-fn check_undeclared_emits(schema: &Schema, hits: &HitMap, _issues: &mut Vec<Issue>) {
-    // Build a set of all declared event fn names.
+fn check_undeclared_emits(schema: &Schema, src_roots: &[&Path], issues: &mut Vec<Issue>) {
+    // Every `emit_*` name the manifest legitimately produces.
     let declared: std::collections::HashSet<String> = schema
         .events
         .iter()
         .map(|e| emit_fn_name(&e.name))
         .collect();
 
-    // Check each source root for emit_* calls not in declared set.
-    // We already have the hits map for declared ones. For undeclared,
-    // we need to scan for any `emit_` prefix that we might have missed.
-    // The hits map only covers declared events; we need a second pass for
-    // undeclared ones. This is done during `scan_source_files` but we
-    // need to capture unrecognised patterns separately.
-    //
-    // For simplicity: the hits map covers only declared events. If source
-    // code calls `emit_foo_bar()` where `foo.bar` is not in the manifest,
-    // that call site won't appear in the hits map. We flag it as undeclared.
-    //
-    // This check is best-effort: we scan source files for `emit_` prefixed
-    // identifiers and cross-check against declared names.
-    let _ = (hits, declared); // covered by scan_source_files above; no extra pass needed here.
-    // A full implementation would pass the undeclared hits from scan_source_files.
-    // Omitted here since scan_source_files already only tracks declared events.
-    // See docs: run `cargo bastyde-telemetry-lint --strict` for full undeclared check.
+    // Scan the source tree for `emit_<ident>(...)` call sites whose name has
+    // no matching declared event — a typo'd or removed event name. Best-effort
+    // text scan (same fidelity as `scan_source_files`): it cross-checks the
+    // identifier text, not a parsed AST.
+    for root in src_roots {
+        walk_dir(root, &mut |file_path, content| {
+            for (line_no, line) in content.lines().enumerate() {
+                for ident in find_emit_call_idents(line) {
+                    if !declared.contains(&ident) {
+                        issues.push(Issue::warning(
+                            &ident,
+                            format!(
+                                "`{ident}` is emitted at {}:{} but no matching event is declared \
+                                 in the manifest (typo, or the event was removed?)",
+                                file_path.to_string_lossy(),
+                                line_no + 1
+                            ),
+                        ));
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Extract `emit_<ident>` names that appear as a *call* (`emit_foo(`) on a
+/// line, skipping function definitions (`fn emit_foo`). Operates on bytes so
+/// arbitrary UTF-8 in the surrounding text never splits a char boundary;
+/// `emit_` and Rust identifiers are ASCII, so the captured slice is valid.
+fn find_emit_call_idents(line: &str) -> Vec<String> {
+    const NEEDLE: &[u8] = b"emit_";
+    let b = line.as_bytes();
+    let n = b.len();
+    let is_ident = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + NEEDLE.len() <= n {
+        if &b[i..i + NEEDLE.len()] == NEEDLE {
+            // Must start an identifier (not the tail of `some_emit_x`).
+            let starts_ident = i == 0 || !is_ident(b[i - 1]);
+            if starts_ident {
+                let mut j = i;
+                while j < n && is_ident(b[j]) {
+                    j += 1;
+                }
+                // Next non-space byte must be `(` for this to be a call.
+                let mut k = j;
+                while k < n && (b[k] == b' ' || b[k] == b'\t') {
+                    k += 1;
+                }
+                let is_call = k < n && b[k] == b'(';
+                // Exclude the definition site `fn emit_foo(...)`.
+                let before = line[..i].trim_end();
+                let is_def = before == "fn" || before.ends_with(" fn") || before.ends_with("\tfn");
+                if is_call && !is_def {
+                    out.push(line[i..j].to_string());
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 // ----- date helpers (no external dep) -----------------------------------
@@ -349,6 +397,70 @@ events:
     #[test]
     fn emit_fn_name_converts_dots() {
         assert_eq!(emit_fn_name("intent.dispatched"), "emit_intent_dispatched");
+    }
+
+    #[test]
+    fn find_emit_call_idents_matches_calls_only() {
+        // Calls are captured…
+        assert_eq!(find_emit_call_idents("emit_foo();"), vec!["emit_foo"]);
+        assert_eq!(
+            find_emit_call_idents("    telemetry::emit_bar_baz (reporter);"),
+            vec!["emit_bar_baz"]
+        );
+        // …definitions are not…
+        assert!(find_emit_call_idents("pub fn emit_foo(reporter: &R) {}").is_empty());
+        assert!(find_emit_call_idents("fn emit_foo() {}").is_empty());
+        // …a name with no following `(` is not a call…
+        assert!(find_emit_call_idents("let f = emit_foo;").is_empty());
+        // …and `emit_` as the tail of another identifier is not matched.
+        assert!(find_emit_call_idents("self.re_emit_foo();").is_empty());
+    }
+
+    #[test]
+    fn undeclared_emit_call_is_flagged() {
+        use std::io::Write;
+
+        let schema = parse_schema(&minimal_yaml("2099-01-01")).unwrap();
+        // `test.event` → `emit_test_event`. The decoy definition must be
+        // ignored; the typo'd call must be flagged.
+        let dir = std::env::temp_dir().join(format!(
+            "bastyde_lint_undeclared_{}_{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("usage.rs");
+        {
+            let mut f = std::fs::File::create(&file).unwrap();
+            writeln!(f, "fn emit_decoy() {{}}").unwrap();
+            writeln!(f, "fn use_them() {{").unwrap();
+            writeln!(f, "    emit_test_event(reporter, None, sid);").unwrap();
+            writeln!(f, "    emit_tset_event(reporter, None, sid);").unwrap();
+            writeln!(f, "}}").unwrap();
+        }
+
+        let issues = run_checks(&schema, &[dir.as_path()], false);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == Severity::Warning
+                    && i.message.contains("emit_tset_event")
+                    && i.message.contains("no matching event is declared")),
+            "the typo'd emit call must be flagged: {issues:?}"
+        );
+        assert!(
+            !issues.iter().any(|i| i.message.contains("emit_decoy")),
+            "the definition site must not be flagged as an undeclared call: {issues:?}"
+        );
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.message.contains("emit_test_event")
+                    && i.message.contains("no matching event")),
+            "a declared event's call must not be flagged: {issues:?}"
+        );
     }
 
     #[test]
