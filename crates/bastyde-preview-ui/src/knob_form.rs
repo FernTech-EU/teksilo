@@ -100,6 +100,10 @@ fn build_editor(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) ->
         }
         KnobKind::OptText { .. } => build_opt_text(ctx, decl, values),
         KnobKind::Choice { options, .. } => build_choice(ctx, decl, values, options),
+        // `Enum` is stored at runtime as a `usize` index just like `Choice`
+        // (see KnobKind docs), so it renders with the same segmented/combo
+        // editor over its variant idents.
+        KnobKind::Enum { variants, .. } => build_choice(ctx, decl, values, variants),
         KnobKind::TextRole { .. } => build_text_role(ctx, decl, values),
         KnobKind::SurfaceRole { .. } => build_surface_role(ctx, decl, values),
         KnobKind::BorderRole { .. } => build_border_role(ctx, decl, values),
@@ -301,6 +305,12 @@ fn build_choice(
     options: &[&'static str],
 ) -> WidgetId {
     let sig = values.choice(decl.id);
+    // Clamp a stale override index (e.g. a persisted choice from when the knob
+    // had more options) into range, so neither the SegmentedControl nor the
+    // ComboBox below renders a blank/unselected control.
+    if !options.is_empty() && sig.get() >= options.len() {
+        sig.set(options.len() - 1);
+    }
     if options.len() <= 4 {
         ctx.add(SegmentedControl::new(sig).segments(options.iter().map(|s| lit!(s.to_string()))))
     } else {

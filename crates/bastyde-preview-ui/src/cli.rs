@@ -132,6 +132,13 @@ impl PreviewerOptions {
     }
 
     fn validate_against_registry(&mut self) {
+        // No catalog registered at all (unit tests parsing args, or a binary
+        // that hasn't linked its widget set): there's nothing to validate
+        // against, and exiting the process here would abort those callers.
+        // Defer to runtime resolution instead.
+        if bastyde_preview::iter_entries().next().is_none() {
+            return;
+        }
         // Skip validation if no widget supplied at all.
         let want_id = match &self.initial_widget {
             Some(id) => id.clone(),
