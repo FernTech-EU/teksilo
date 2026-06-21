@@ -30,6 +30,59 @@ fn fire_event_handler_both(
 }
 
 impl WidgetTree {
+    /// Hops from `focus` up to `scope_id` (0 when equal), or `None` when
+    /// `scope_id` is not an ancestor-or-self of `focus`. Fewer hops means
+    /// the scope sits closer to focus — i.e. a more specific binding.
+    fn scope_distance_from_focus(&self, focus: WidgetId, scope_id: WidgetId) -> Option<usize> {
+        let mut hops = 0usize;
+        let mut current = Some(focus);
+        while let Some(c) = current {
+            if c == scope_id {
+                return Some(hops);
+            }
+            current = self.arena.parent(c);
+            hops += 1;
+        }
+        None
+    }
+
+    /// From every same-chord shortcut candidate, choose the one whose
+    /// scope applies to the current focus, preferring the most specific
+    /// scope: a `Scoped` binding whose subtree contains focus beats a
+    /// `Global` one, and among nested applicable scopes the one closest
+    /// to focus (fewest hops) wins. Equal-specificity ties keep the
+    /// deterministic `(category, id)` order `candidates` arrives in (the
+    /// first such candidate wins). Returns `None` when no candidate
+    /// applies — every match is a scoped binding outside the focused
+    /// subtree — so the caller falls through to normal KeyDown dispatch.
+    fn select_shortcut_for_focus(
+        &self,
+        candidates: &[(&'static str, crate::shortcut::ShortcutScope, bool)],
+    ) -> Option<(&'static str, crate::shortcut::ShortcutScope, bool)> {
+        use crate::shortcut::ShortcutScope;
+        let mut best: Option<(usize, (&'static str, ShortcutScope, bool))> = None;
+        for &(id, scope, propagate) in candidates {
+            // Specificity score, higher = more specific. Global is the
+            // least-specific fallback (0); any applicable scoped binding
+            // outranks it (`usize::MAX - hops`, so fewer hops = deeper
+            // scope = higher score). Tree depth is tiny, so no overflow.
+            let score = match scope {
+                ShortcutScope::Global => Some(0usize),
+                ShortcutScope::Scoped(scope_id) => self
+                    .focused
+                    .and_then(|f| self.scope_distance_from_focus(f, scope_id))
+                    .map(|hops| usize::MAX - hops),
+            };
+            let Some(score) = score else { continue };
+            // Strictly-greater keeps the first candidate on a tie, so the
+            // existing `(category, id)` precedence holds within a scope.
+            if best.as_ref().is_none_or(|(b, _)| score > *b) {
+                best = Some((score, (id, scope, propagate)));
+            }
+        }
+        best.map(|(_, c)| c)
+    }
+
     /// Dispatch an event into the widget tree.
     ///
     /// Routing rules:
@@ -177,16 +230,26 @@ impl WidgetTree {
         // the closure never runs.
         if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
             let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
-            let lookup = self
+            // Gather every same-chord candidate (owned fields) before any
+            // mutable borrow of the registry, then pick the one whose scope
+            // actually applies to the current focus. `find_by_keystroke`
+            // alone yields only the first by `(category, id)` order, which
+            // can be a `Scoped` binding outside focus shadowing an
+            // applicable `Global` one — or a `Global` binding that should
+            // yield to an in-focus `Scoped` one. Selection needs focus +
+            // the tree, so it happens here, not in the registry.
+            let candidates: Vec<(&'static str, crate::shortcut::ShortcutScope, bool)> = self
                 .shortcut_registry
-                .find_by_keystroke(keystroke)
+                .matches_by_keystroke(keystroke)
                 .map(|eff| {
                     (
                         eff.shortcut.id,
                         eff.shortcut.scope,
                         eff.shortcut.propagate_when_disabled,
                     )
-                });
+                })
+                .collect();
+            let lookup = self.select_shortcut_for_focus(&candidates);
             if let Some((id, scope, propagate_when_disabled)) = lookup {
                 let anchor = match scope {
                     // Global shortcuts fire regardless of focus. If no
@@ -216,10 +279,13 @@ impl WidgetTree {
                         return;
                     }
                 }
-                // Scope mismatch — fall through to normal KeyDown
-                // dispatch. `on_activate` was never called, so nothing
-                // to clean up.
+                // Chosen candidate had no anchor after all (e.g. a Global
+                // match while nothing is focused and the tree has no
+                // roots) — fall through to normal KeyDown dispatch.
+                // `on_activate` was never called, so nothing to clean up.
             }
+            // `lookup` is `None` when every same-chord candidate was a
+            // scoped binding outside the focused subtree — fall through.
         }
 
         // --- Active drag session handling ---
@@ -2430,6 +2496,118 @@ mod tests {
             1,
             "scoped shortcut must fire when focus in scope"
         );
+    }
+
+    #[test]
+    fn same_chord_scoped_first_falls_back_to_global_when_focus_outside() {
+        // Defect 1: a Scoped binding that sorts first by id must NOT
+        // shadow the slot when focus is outside its subtree — the
+        // applicable Global binding fires instead. (`editor.saveBlock`
+        // < `zzz.global.save`, so the scoped one wins the id-order race
+        // that `find_by_keystroke` used to settle on.)
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut, ShortcutScope};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let scoped_fired = Rc::new(Cell::new(0));
+        let global_fired = Rc::new(Cell::new(0));
+        let sf = scoped_fired.clone();
+        let gf = global_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        let editor = tree.add_child(root, FillWidget::new().focusable());
+        let _editor_inner = tree.add_child(editor, FillWidget::new().focusable());
+        let sidebar = tree.add_child(root, FillWidget::new().focusable());
+
+        tree.push_action(
+            editor,
+            Action::new("editor.saveBlock").on_invoke(move |_i, _c| sf.set(sf.get() + 1)),
+        );
+        tree.push_action(
+            root,
+            Action::new("zzz.global.save").on_invoke(move |_i, _c| gf.set(gf.get() + 1)),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("editor.saveBlock")
+                .primary(KeyStroke::ctrl(Key::S))
+                .scope(ShortcutScope::Scoped(editor))
+                .build(),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("zzz.global.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(sidebar);
+        tree.press_key(Key::S, Modifiers::CTRL);
+
+        assert_eq!(global_fired.get(), 1, "applicable global must fire");
+        assert_eq!(
+            scoped_fired.get(),
+            0,
+            "inapplicable scoped binding must not eat the chord"
+        );
+    }
+
+    #[test]
+    fn same_chord_global_first_yields_to_scoped_when_focus_inside() {
+        // Defect 2: a Global binding that sorts first by id must yield to
+        // an in-focus Scoped binding (most-specific-scope wins), then
+        // reclaim the chord once focus leaves the scope. (`app.save` <
+        // `editor.saveBlock`, so the global one wins id order.)
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut, ShortcutScope};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let scoped_fired = Rc::new(Cell::new(0));
+        let global_fired = Rc::new(Cell::new(0));
+        let sf = scoped_fired.clone();
+        let gf = global_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        let editor = tree.add_child(root, FillWidget::new().focusable());
+        let editor_inner = tree.add_child(editor, FillWidget::new().focusable());
+        let sidebar = tree.add_child(root, FillWidget::new().focusable());
+
+        tree.push_action(
+            editor,
+            Action::new("editor.saveBlock").on_invoke(move |_i, _c| sf.set(sf.get() + 1)),
+        );
+        tree.push_action(
+            root,
+            Action::new("app.save").on_invoke(move |_i, _c| gf.set(gf.get() + 1)),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("editor.saveBlock")
+                .primary(KeyStroke::ctrl(Key::S))
+                .scope(ShortcutScope::Scoped(editor))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Focus inside the editor: the scoped binding wins over global.
+        tree.focus(editor_inner);
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert_eq!(scoped_fired.get(), 1, "in-focus scoped must win over global");
+        assert_eq!(global_fired.get(), 0, "global must yield to the scoped binding");
+
+        // Focus outside the editor: global reclaims the chord.
+        tree.focus(sidebar);
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert_eq!(scoped_fired.get(), 1, "scoped stays put outside its scope");
+        assert_eq!(global_fired.get(), 1, "global fires when focus leaves the scope");
     }
 
     #[test]

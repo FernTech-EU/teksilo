@@ -827,15 +827,38 @@ impl ShortcutRegistry {
         })
     }
 
+    /// All effective shortcuts whose primary or secondary keystroke
+    /// matches **and** are currently enabled, in the deterministic
+    /// `(category, id)` order of [`iter_effective`](Self::iter_effective).
+    ///
+    /// The dispatcher needs *every* same-chord candidate, not just the
+    /// first: the first by id-order may be a `Scoped` binding whose
+    /// subtree doesn't contain the current focus (and so must yield to
+    /// an applicable `Global` one), or a `Global` binding that should
+    /// itself yield to an in-focus `Scoped` one (most-specific-scope
+    /// wins). Resolving that needs the widget tree (descendant checks),
+    /// which the registry can't see — so it hands back all candidates
+    /// and the dispatcher selects with focus in hand.
+    pub fn matches_by_keystroke(
+        &self,
+        keystroke: KeyStroke,
+    ) -> impl Iterator<Item = EffectiveShortcut<'_>> {
+        self.iter_effective()
+            .filter(move |s| s.enabled && s.matches(keystroke))
+    }
+
     /// First effective shortcut whose primary or secondary keystroke
     /// matches **and** is currently enabled. Disabled shortcuts are
     /// invisible to the dispatcher — the keystroke falls through to
     /// the focused widget's normal `on_key` handling, matching the
     /// "treated as if not registered" semantic advertised by
     /// [`Shortcut::enabled_when`].
+    ///
+    /// Note: this ignores scope applicability — for focus-aware
+    /// resolution the dispatcher uses
+    /// [`matches_by_keystroke`](Self::matches_by_keystroke) instead.
     pub fn find_by_keystroke(&self, keystroke: KeyStroke) -> Option<EffectiveShortcut<'_>> {
-        self.iter_effective()
-            .find(|s| s.enabled && s.matches(keystroke))
+        self.matches_by_keystroke(keystroke).next()
     }
 
     fn resolved_keystrokes(
