@@ -108,10 +108,22 @@ impl SourceKind {
         match self {
             SourceKind::Widget => quote!(::bastyde_i18n),
             SourceKind::App => {
-                // Internal crates (bastyde-i18n's own tests, trybuild
-                // fixtures) don't have bastyde in their dep tree.
-                // Detect by checking CARGO_PKG_NAME — any crate
-                // starting with "bastyde-" is internal to the workspace.
+                // Internal workspace crates can't depend on `bastyde` (cycle),
+                // so they route through `::bastyde_i18n`; external apps route
+                // through `::bastyde::i18n` (the serde pattern — they only need
+                // `bastyde` in deps). A proc-macro can only see the *compiled*
+                // crate's name, and every internal crate starts with
+                // `bastyde-`, so that prefix is the default signal.
+                //
+                // Escape hatch for the one collision — a downstream crate
+                // legitimately named `bastyde-*` that depends on `bastyde`, not
+                // `bastyde-i18n`: set `BASTYDE_I18N_ROUTE=external` (or
+                // `=internal` to force the other way). Honoured first.
+                match std::env::var("BASTYDE_I18N_ROUTE").as_deref() {
+                    Ok("external") => return quote!(::bastyde::i18n),
+                    Ok("internal") => return quote!(::bastyde_i18n),
+                    _ => {}
+                }
                 let pkg = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
                 if pkg.starts_with("bastyde-") {
                     quote!(::bastyde_i18n)
