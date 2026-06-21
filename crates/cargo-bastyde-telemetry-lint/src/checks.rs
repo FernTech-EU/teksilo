@@ -276,6 +276,14 @@ fn check_undeclared_emits(schema: &Schema, src_roots: &[&Path], issues: &mut Vec
 /// `emit_` and Rust identifiers are ASCII, so the captured slice is valid.
 fn find_emit_call_idents(line: &str) -> Vec<String> {
     const NEEDLE: &[u8] = b"emit_";
+    // Scan only the code portion: `//` comments and double-quoted string
+    // contents are stripped first, so prose like `// emit_foo()`, doc
+    // comments, and literals like `"emit_bar(arg)"` don't masquerade as
+    // call sites. (Char literals / lifetimes are left alone — a char
+    // literal can't contain `emit_foo(`, and tracking `'` would mis-handle
+    // `&'a`.)
+    let code = code_portion(line);
+    let line = code.as_str();
     let b = line.as_bytes();
     let n = b.len();
     let is_ident = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
@@ -310,6 +318,72 @@ fn find_emit_call_idents(line: &str) -> Vec<String> {
         i += 1;
     }
     out
+}
+
+/// Return the code portion of a single line: any `//` line comment is dropped,
+/// double-quoted string *contents* are blanked to spaces, and a single-line
+/// `/* ... */` block comment is blanked. This is a best-effort lexer (block
+/// comments are not tracked across lines, raw-string `#` fences are ignored),
+/// enough to keep `emit_*` text inside comments and string literals from being
+/// flagged as undeclared call sites. Only ASCII bytes are substituted and all
+/// other bytes are copied verbatim, so UTF-8 boundaries are preserved.
+fn code_portion(line: &str) -> String {
+    let b = line.as_bytes();
+    let n = b.len();
+    let mut out: Vec<u8> = Vec::with_capacity(n);
+    let mut in_str = false;
+    let mut i = 0;
+    while i < n {
+        let c = b[i];
+        if in_str {
+            if c == b'\\' {
+                // Skip the escape and the escaped byte (blanked).
+                out.push(b' ');
+                if i + 1 < n {
+                    out.push(b' ');
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            if c == b'"' {
+                in_str = false;
+                out.push(c);
+            } else {
+                out.push(b' ');
+            }
+            i += 1;
+            continue;
+        }
+        // In code.
+        if c == b'/' && i + 1 < n && b[i + 1] == b'/' {
+            break; // line comment — rest of the line is not code.
+        }
+        if c == b'/' && i + 1 < n && b[i + 1] == b'*' {
+            out.push(b' ');
+            out.push(b' ');
+            i += 2;
+            while i < n {
+                if b[i] == b'*' && i + 1 < n && b[i + 1] == b'/' {
+                    out.push(b' ');
+                    out.push(b' ');
+                    i += 2;
+                    break;
+                }
+                out.push(b' ');
+                i += 1;
+            }
+            continue;
+        }
+        if c == b'"' {
+            in_str = true;
+        }
+        out.push(c);
+        i += 1;
+    }
+    // SAFETY-equivalent: substitutions are ASCII spaces, other bytes verbatim.
+    String::from_utf8(out).unwrap_or_else(|_| line.to_string())
 }
 
 // ----- date helpers (no external dep) -----------------------------------
@@ -414,6 +488,19 @@ events:
         assert!(find_emit_call_idents("let f = emit_foo;").is_empty());
         // …and `emit_` as the tail of another identifier is not matched.
         assert!(find_emit_call_idents("self.re_emit_foo();").is_empty());
+        // …line comments are not code…
+        assert!(find_emit_call_idents("// emit_foo() was renamed").is_empty());
+        assert!(find_emit_call_idents("/// See [`emit_baz()`] for details").is_empty());
+        assert!(find_emit_call_idents("    let x = 1; // emit_trailing()").is_empty());
+        // …string literals are not code…
+        assert!(find_emit_call_idents(r#"let s = "emit_bar(arg)";"#).is_empty());
+        // …single-line block comments are not code…
+        assert!(find_emit_call_idents("/* emit_block() */").is_empty());
+        // …but a real call alongside a decoy comment is still captured.
+        assert_eq!(
+            find_emit_call_idents("emit_real(); // emit_fake()"),
+            vec!["emit_real"]
+        );
     }
 
     #[test]
