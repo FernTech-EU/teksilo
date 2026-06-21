@@ -366,6 +366,7 @@ impl WidgetTree {
                     text_backend: self.text_backend.as_ref(),
                     arena: Some(&self.arena),
                     extras: Some(extras),
+                    stack_main_axis: None,
                 };
                 let node = self
                     .arena
@@ -498,6 +499,7 @@ fn layout_widget_recursive(
             text_backend,
             arena: Some(arena),
             extras,
+            stack_main_axis: None,
         };
         arena
             .cached_layout_response(id, proposal, &ctx)
@@ -544,6 +546,7 @@ fn layout_widget_recursive(
                 text_backend,
                 arena: Some(arena),
                 extras,
+                stack_main_axis: None,
             };
             let node = arena.get(id).expect("widget id is active in arena");
             node.widget

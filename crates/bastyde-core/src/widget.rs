@@ -13,7 +13,7 @@ mod paint_context;
 
 pub use cursor::CursorIcon;
 pub use event_context::EventContext;
-pub use layout_context::LayoutContext;
+pub use layout_context::{LayoutContext, StackAxis};
 pub use paint_context::{PaintContext, WidgetPlacement, WidgetTreeView};
 
 pub(crate) use event_context::{DismissScope, ShortcutMutation, TreeMutation};

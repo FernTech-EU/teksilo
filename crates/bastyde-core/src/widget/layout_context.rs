@@ -5,8 +5,23 @@ use crate::widget_id::WidgetId;
 
 use super::LayoutResponse;
 
+/// The main (distribution) axis of the linear stack currently negotiating a
+/// child's layout, if any. Set by `HStack`/`VStack` while they query children
+/// so an orientation-agnostic flexible child (notably `Spacer`) can place its
+/// minimum length on the *main* axis only and report `0` on the cross axis —
+/// otherwise it imposes a spurious cross-axis floor on the stack. `None` when
+/// the parent is not a linear stack (or in test contexts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackAxis {
+    Horizontal,
+    Vertical,
+}
+
 /// Context available during layout.
 pub struct LayoutContext<'a> {
+    /// The enclosing linear stack's main axis, when a stack is querying this
+    /// child (see [`StackAxis`]). `None` otherwise.
+    pub stack_main_axis: Option<StackAxis>,
     pub theme: &'a crate::styles::Theme,
     pub layout_direction: crate::environment::LayoutDirection,
     /// Host window HiDPI device scale (physical px per logical px). The layout
@@ -48,6 +63,24 @@ impl<'a> LayoutContext<'a> {
             text_backend: None,
             arena: None,
             extras: None,
+            stack_main_axis: None,
+        }
+    }
+
+    /// The enclosing linear stack's main axis, if a stack is currently
+    /// querying this child. See [`StackAxis`].
+    pub fn stack_main_axis(&self) -> Option<StackAxis> {
+        self.stack_main_axis
+    }
+
+    /// Derive a context that advertises `axis` as the enclosing stack's main
+    /// axis. Used by `HStack`/`VStack` when querying children so a `Spacer`
+    /// (and any other orientation-agnostic flexible leaf) can size correctly
+    /// per axis. All other fields are shared with `self`.
+    pub fn with_stack_main_axis(&self, axis: StackAxis) -> LayoutContext<'a> {
+        LayoutContext {
+            stack_main_axis: Some(axis),
+            ..*self
         }
     }
 

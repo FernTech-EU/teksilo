@@ -33,14 +33,22 @@ impl Widget for Spacer {
     fn layout_response(
         &self,
         _proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        // Spacer wants `min_length` as a floor; the parent stack adds slack
-        // share on top via the flex weight below. Cross axis is 0.
-        bastyde_core::widget::LayoutResponse::flexible(
-            Size::new(self.min_length, self.min_length),
-            1.0,
-        )
+        // Spacer wants `min_length` as a floor on the stack's MAIN axis; the
+        // parent adds its slack share on top via the flex weight. The cross
+        // axis must be 0 — otherwise an invisible spacer with `min_length > 0`
+        // imposes a spurious cross-axis floor on the stack (e.g. an HStack's
+        // intrinsic height grows by `min_length`). The enclosing stack tells us
+        // its main axis via the context; outside a stack we fall back to
+        // `min_length` on both axes (a spacer there is degenerate anyway).
+        use bastyde_core::widget::StackAxis;
+        let size = match ctx.stack_main_axis() {
+            Some(StackAxis::Horizontal) => Size::new(self.min_length, 0.0),
+            Some(StackAxis::Vertical) => Size::new(0.0, self.min_length),
+            None => Size::new(self.min_length, self.min_length),
+        };
+        bastyde_core::widget::LayoutResponse::flexible(size, 1.0)
     }
 
     fn paint(&self, _bounds: Rect, _canvas: &mut bastyde_canvas::Canvas, _ctx: &PaintContext) {
@@ -122,6 +130,47 @@ mod tests {
 
         // Spacer gets 300-60-60 = 180 (well above min_length)
         assert!((tree.bounds(btn2).x - 240.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn min_length_does_not_inflate_cross_axis() {
+        // Regression: a horizontal Spacer with `min_length` must not inflate
+        // its HStack's intrinsic height. The HStack is measured with an open
+        // (intrinsic) height; only the real content (30px) should drive it.
+        let mut tree = WidgetTree::new();
+        let btn = tree.add(FixedLeaf(60.0, 30.0));
+        let spacer = tree.add(Spacer::new().min_length(80.0));
+        let stack = tree.add(HStack::new().add_child(btn).add_child(spacer));
+        // Width fixed, height open → intrinsic height.
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: None,
+        });
+        assert!(
+            (tree.bounds(stack).height - 30.0).abs() < 0.01,
+            "HStack height should follow content (30), not the spacer min_length (80); got {}",
+            tree.bounds(stack).height
+        );
+    }
+
+    #[test]
+    fn min_length_is_honoured_on_the_main_axis() {
+        // The main-axis floor still holds: a cramped HStack keeps the spacer at
+        // least `min_length` wide.
+        let mut tree = WidgetTree::new();
+        let btn1 = tree.add(FixedLeaf(60.0, 30.0));
+        let spacer = tree.add(Spacer::new().min_length(40.0));
+        let btn2 = tree.add(FixedLeaf(60.0, 30.0));
+        let stack = tree.add(
+            HStack::new()
+                .add_child(btn1)
+                .add_child(spacer)
+                .add_child(btn2),
+        );
+        // 60 + 40 + 60 = 160 exactly → spacer at its floor, btn2 at x=100.
+        tree.layout(SizeProposal::exact(160.0, 50.0));
+        assert!((tree.bounds(btn2).x - 100.0).abs() < 0.01);
+        let _ = stack;
     }
 
     #[test]

@@ -66,6 +66,16 @@ impl Axis {
         }
     }
 
+    /// Core-level main-axis tag, so orientation-agnostic children (`Spacer`)
+    /// can size per axis via [`LayoutContext::with_stack_main_axis`].
+    #[inline]
+    fn stack_axis(self) -> bastyde_core::widget::StackAxis {
+        match self {
+            Axis::Horizontal => bastyde_core::widget::StackAxis::Horizontal,
+            Axis::Vertical => bastyde_core::widget::StackAxis::Vertical,
+        }
+    }
+
     /// Build a `SizeProposal` from optional main/cross components for this axis.
     #[inline]
     fn proposal(self, main: Option<f32>, cross: Option<f32>) -> SizeProposal {
@@ -119,6 +129,12 @@ pub(crate) fn negotiate(
     axis: Axis,
 ) -> Negotiated {
     let n = ids.len();
+
+    // Children are queried under a context that advertises this stack's main
+    // axis, so an orientation-agnostic flexible child (`Spacer`) sizes its
+    // minimum length on the main axis and reports `0` on the cross axis.
+    let cctx = ctx.with_stack_main_axis(axis.stack_axis());
+    let ctx = &cctx;
 
     // ── Pass 1: query each child along the main axis (cross offered) ─────────
     let main_proposal = axis.proposal(None, cross_extent);
