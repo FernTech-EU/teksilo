@@ -160,7 +160,19 @@ fn prop_tokens(event: &EventDef, prop: &PropDef) -> (TokenStream, TokenStream) {
                 quote! { ::bastyde_telemetry::PropValue::Enum { variant: #param_name.as_str() } },
             )
         }
-        _ => unreachable!("validated before codegen"),
+        // Should be unreachable — the schema is validated before codegen — but
+        // never `unreachable!`/`panic!` in a proc-macro: that surfaces as a
+        // confusing internal compiler error. If validation ever drifts from
+        // codegen, emit a clean `compile_error!` instead. A `()` placeholder
+        // keeps the type position syntactically valid; the error fires from the
+        // value position.
+        other => {
+            let msg = format!(
+                "telemetry codegen: unknown prop type {other:?} \
+                 (schema validation drifted from codegen)"
+            );
+            (quote! { () }, quote! { ::std::compile_error!(#msg) })
+        }
     }
 }
 
@@ -171,7 +183,15 @@ fn category_tokens(category: &str) -> TokenStream {
         "navigation" => quote! { ::bastyde_telemetry::EventCategory::Navigation },
         "census" => quote! { ::bastyde_telemetry::EventCategory::Census },
         "custom" => quote! { ::bastyde_telemetry::EventCategory::Custom },
-        _ => unreachable!("validated before codegen"),
+        // See `prop_tokens`: surface validation drift as a clean
+        // `compile_error!`, never a proc-macro panic (which reads as an ICE).
+        other => {
+            let msg = format!(
+                "telemetry codegen: unknown event category {other:?} \
+                 (schema validation drifted from codegen)"
+            );
+            quote! { ::std::compile_error!(#msg) }
+        }
     }
 }
 
