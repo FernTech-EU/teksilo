@@ -38,7 +38,7 @@ pub mod tree_slice;
 
 pub use check_state::CheckState;
 pub use checked_model::CheckedModel;
-pub use data_change::DataChange;
+pub use data_change::{DataChange, map_index_after_move};
 pub use dnd_types::{
     DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse, ItemKey,
     RowState,

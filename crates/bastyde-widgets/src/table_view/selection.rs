@@ -259,6 +259,25 @@ impl CellSelectionModel {
         }
     }
 
+    /// Adjust selection after a block of `count` rows moved from `from` to
+    /// `to` (a post-removal index, matching `ListModel::move_item`). Selected
+    /// cells follow their rows; columns are untouched.
+    pub fn adjust_for_row_move(&self, from: usize, to: usize, count: usize) {
+        if from == to || count == 0 {
+            return;
+        }
+        let map = |r: usize| bastyde_data::map_index_after_move(r, from, to, count);
+        let old = self.selection.get();
+        let new: BTreeSet<(usize, usize)> = old.iter().map(|&(r, c)| (map(r), c)).collect();
+        if new != old {
+            self.selection.set(new);
+        }
+        self.remap_base(|(r, c)| Some((map(r), c)));
+        if let Some((r, c)) = self.anchor.get() {
+            self.anchor.set(Some((map(r), c)));
+        }
+    }
+
     /// Adjust selection after `count` columns are inserted at `at_col`.
     pub fn adjust_for_column_insert(&self, at_col: usize, count: usize) {
         let old = self.selection.get();
@@ -442,6 +461,18 @@ mod tests {
         assert!(m.is_selected(3, 0));
         let v: Vec<_> = m.selection_signal().get().into_iter().collect();
         assert_eq!(v, vec![(1, 0), (3, 0)]);
+    }
+
+    #[test]
+    fn adjust_for_row_move_follows_cells() {
+        let m = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        m.select(0, 1); // cell in row 0
+        m.toggle(1, 2); // cell in row 1
+        // Move row 0 to index 2: rows [B,C,A] — A's cell follows to row 2,
+        // B's cell shifts down to row 0.
+        m.adjust_for_row_move(0, 2, 1);
+        let v: Vec<_> = m.selection_signal().get().into_iter().collect();
+        assert_eq!(v, vec![(0, 2), (2, 1)]);
     }
 
     #[test]

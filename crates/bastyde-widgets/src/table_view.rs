@@ -1052,6 +1052,9 @@ impl<T: 'static> Widget for TableView<T> {
                         DataChange::ItemsRemoved { range } => {
                             s.adjust_for_row_remove(range.start, range.end - range.start);
                         }
+                        DataChange::ItemsMoved { from, to, count } => {
+                            s.adjust_for_row_move(*from, *to, *count);
+                        }
                         DataChange::Reset => s.clear(),
                         _ => {}
                     }

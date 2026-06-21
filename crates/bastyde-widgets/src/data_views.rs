@@ -143,6 +143,9 @@ impl RowSelection {
                 DataChange::ItemsRemoved { range } => {
                     s_chg.adjust_for_remove(range.start, range.end - range.start);
                 }
+                DataChange::ItemsMoved { from, to, count } => {
+                    s_chg.adjust_for_move(*from, *to, *count);
+                }
                 DataChange::Reset => s_chg.clear(),
                 _ => {}
             }),

@@ -217,6 +217,27 @@ impl SelectionModel {
             }
         }
     }
+
+    /// Adjust selection indices after a block of `count` items moved from
+    /// `from` to `to` (a post-removal index, matching `ListModel::move_item`).
+    /// Selected indices follow their items, so a dragged row stays selected.
+    pub fn adjust_for_move(&self, from: usize, to: usize, count: usize) {
+        if from == to || count == 0 {
+            return;
+        }
+        let old = self.selection.get();
+        let new_set: BTreeSet<usize> = old
+            .iter()
+            .map(|&idx| crate::map_index_after_move(idx, from, to, count))
+            .collect();
+        if new_set != old {
+            self.selection.set(new_set);
+        }
+        if let Some(a) = self.anchor.get() {
+            self.anchor
+                .set(Some(crate::map_index_after_move(a, from, to, count)));
+        }
+    }
 }
 
 impl Clone for SelectionModel {
@@ -396,6 +417,33 @@ mod tests {
         model.adjust_for_remove(3, 1);
         // 1 stays, 3 removed, 5 shifts to 4
         assert_eq!(model.selected_indices(), vec![1, 4]);
+    }
+
+    #[test]
+    fn adjust_for_move_follows_the_moved_item() {
+        // [A,B,C,D], select A(0). move A from 0 to 2 -> [B,C,A,D].
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.toggle(0);
+        model.adjust_for_move(0, 2, 1);
+        assert_eq!(model.selected_indices(), vec![2], "selection followed A");
+    }
+
+    #[test]
+    fn adjust_for_move_shifts_a_bystander_selection() {
+        // [A,B,C,D], select B(1). move A from 0 to 2 -> [B,C,A,D]; B is now 0.
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.toggle(1);
+        model.adjust_for_move(0, 2, 1);
+        assert_eq!(model.selected_indices(), vec![0], "B shifted down to 0");
+    }
+
+    #[test]
+    fn adjust_for_move_backwards() {
+        // [A,B,C,D], select D(3). move D from 3 to 1 -> [A,D,B,C].
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.toggle(3);
+        model.adjust_for_move(3, 1, 1);
+        assert_eq!(model.selected_indices(), vec![1]);
     }
 
     #[test]

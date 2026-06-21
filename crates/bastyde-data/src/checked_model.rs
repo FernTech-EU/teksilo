@@ -62,7 +62,23 @@ impl CheckedModel {
         }
         // Slow path — create + observe.
         let sig = Signal::new(false);
-        let central = self.checked.clone();
+        let mut inner = self.inner.borrow_mut();
+        Self::install_signal(&mut inner, &self.checked, index, sig.clone());
+        sig
+    }
+
+    /// Register `sig` in `per_index` at `index`, wiring an observer that keeps
+    /// the central `checked` set in sync. The observer captures `index` by
+    /// value, so re-keying after an insert/remove/move must re-install the
+    /// signal at its new index (replacing the stale-index observer) — see the
+    /// `adjust_for_*` methods.
+    fn install_signal(
+        inner: &mut Inner,
+        central: &Signal<BTreeSet<usize>>,
+        index: usize,
+        sig: Signal<bool>,
+    ) {
+        let central = central.clone();
         let handle = sig.observe(move |checked| {
             let mut set = central.get();
             let changed = if *checked {
@@ -74,10 +90,73 @@ impl CheckedModel {
                 central.set(set);
             }
         });
-        let mut inner = self.inner.borrow_mut();
-        inner.per_index.insert(index, sig.clone());
+        inner.per_index.insert(index, sig);
         inner.observers.insert(index, handle);
-        sig
+    }
+
+    /// Re-key every per-index signal through `map`, dropping any whose `map`
+    /// returns `None` (removed rows). Observers are rebuilt so each captures
+    /// its new index. The central set is recomputed to match. Shared spine of
+    /// `adjust_for_insert` / `adjust_for_remove` / `adjust_for_move`.
+    fn rekey(&self, map: impl Fn(usize) -> Option<usize>) {
+        let entries: Vec<(usize, Signal<bool>)> = {
+            let inner = self.inner.borrow();
+            inner.per_index.iter().map(|(&i, s)| (i, s.clone())).collect()
+        };
+        {
+            let mut inner = self.inner.borrow_mut();
+            // Dropping the old observers here detaches their stale-index
+            // callbacks before the rebuilt ones are installed.
+            inner.per_index.clear();
+            inner.observers.clear();
+            for (idx, sig) in entries {
+                if let Some(new_idx) = map(idx) {
+                    Self::install_signal(&mut inner, &self.checked, new_idx, sig);
+                }
+            }
+        }
+        let old = self.checked.get();
+        let new: BTreeSet<usize> = old.iter().filter_map(|&i| map(i)).collect();
+        if new != old {
+            self.checked.set(new);
+        }
+    }
+
+    /// Shift checked-state after `count` rows are inserted at `start`.
+    /// Indices `>= start` move up by `count`.
+    pub fn adjust_for_insert(&self, start: usize, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.rekey(|i| Some(if i >= start { i + count } else { i }));
+    }
+
+    /// Shift checked-state after `count` rows starting at `start` are removed.
+    /// Checked rows in `start..start+count` are dropped; later rows shift down.
+    pub fn adjust_for_remove(&self, start: usize, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let end = start + count;
+        self.rekey(|i| {
+            if i < start {
+                Some(i)
+            } else if i >= end {
+                Some(i - count)
+            } else {
+                None
+            }
+        });
+    }
+
+    /// Shift checked-state after a block of `count` rows moved from `from` to
+    /// `to` (a post-removal index, matching `ListModel::move_item`). Checked
+    /// rows follow their items.
+    pub fn adjust_for_move(&self, from: usize, to: usize, count: usize) {
+        if from == to || count == 0 {
+            return;
+        }
+        self.rekey(|i| Some(crate::map_index_after_move(i, from, to, count)));
     }
 
     pub fn is_checked(&self, index: usize) -> bool {
@@ -219,5 +298,66 @@ mod tests {
         let s = m.signal_for(1);
         m.check(2);
         assert!(!s.get());
+    }
+
+    #[test]
+    fn adjust_for_insert_shifts_checked_rows() {
+        let m = CheckedModel::new();
+        m.check(2);
+        m.check(4);
+        m.adjust_for_insert(3, 2);
+        // 2 stays, 4 -> 6.
+        assert_eq!(m.checked_indices(), vec![2, 6]);
+        assert!(m.is_checked(2));
+        assert!(m.is_checked(6));
+        assert!(!m.is_checked(4));
+    }
+
+    #[test]
+    fn adjust_for_remove_drops_in_range_and_shifts() {
+        let m = CheckedModel::new();
+        m.check(1);
+        m.check(3);
+        m.check(5);
+        m.adjust_for_remove(2, 2); // remove rows 2,3
+        // 1 stays, 3 dropped, 5 -> 3.
+        assert_eq!(m.checked_indices(), vec![1, 3]);
+        assert!(m.is_checked(3), "row that shifted in is checked");
+    }
+
+    #[test]
+    fn adjust_for_move_follows_checked_row() {
+        let m = CheckedModel::new();
+        m.check(0); // row A checked
+        m.adjust_for_move(0, 2, 1); // [B,C,A] — A now at 2
+        assert_eq!(m.checked_indices(), vec![2]);
+        assert!(m.is_checked(2));
+    }
+
+    #[test]
+    fn rekey_rewires_observer_so_later_clicks_target_the_new_index() {
+        // After a shift, the per-index signal handle must drive the *new*
+        // central index when toggled, not the stale captured one.
+        let m = CheckedModel::new();
+        let s = m.signal_for(2);
+        s.set(true);
+        assert_eq!(m.checked_indices(), vec![2]);
+        m.adjust_for_insert(0, 1); // row 2 -> 3, same Signal handle
+        assert_eq!(m.checked_indices(), vec![3]);
+        // The handle the widget kept now flips index 3 in the central set.
+        s.set(false);
+        assert_eq!(m.checked_indices(), Vec::<usize>::new());
+        s.set(true);
+        assert_eq!(m.checked_indices(), vec![3], "observer re-keyed to 3");
+    }
+
+    #[test]
+    fn adjust_is_noop_on_empty_and_zero_count() {
+        let m = CheckedModel::new();
+        m.check(1);
+        m.adjust_for_insert(0, 0);
+        m.adjust_for_remove(5, 0);
+        m.adjust_for_move(2, 2, 1);
+        assert_eq!(m.checked_indices(), vec![1]);
     }
 }

@@ -827,8 +827,11 @@ impl<T: 'static> Widget for GridView<T> {
                             s.adjust_for_remove(range.start, range.end - range.start);
                         }
                     }
-                    DataChange::ItemsMoved { .. } => {
+                    DataChange::ItemsMoved { from, to, count } => {
                         strategy_obs.invalidate_rows(0..usize::MAX);
+                        if let Some(ref s) = selection_obs {
+                            s.adjust_for_move(*from, *to, *count);
+                        }
                     }
                     DataChange::ItemUpdated { index } => {
                         strategy_obs.invalidate_rows(*index..index + 1);
