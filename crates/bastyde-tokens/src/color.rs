@@ -63,18 +63,27 @@ impl Color {
     }
 
     /// Create a color from HSL (Hue 0-360, Saturation 0-1, Lightness 0-1).
+    ///
+    /// Hue wraps (`rem_euclid(360)`) and S/L are clamped, mirroring
+    /// [`Color::from_hsva`]. Without the wrap, `h == 360.0` gave `h_prime == 6`
+    /// which fell through to the catch-all arm and produced black instead of
+    /// red (360° ≡ 0°).
     pub fn from_hsl(h: f32, s: f32, l: f32) -> Self {
+        let h = h.rem_euclid(360.0);
+        let s = s.clamp(0.0, 1.0);
+        let l = l.clamp(0.0, 1.0);
         let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
         let h_prime = h / 60.0;
-        let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
-        let (r1, g1, b1) = match h_prime as u32 {
+        let x = c * (1.0 - (h_prime.rem_euclid(2.0) - 1.0).abs());
+        // Catch-all is the 300°–360° (magenta) sextant, not black — matches
+        // `from_hsva`, and the hue wrap above keeps `h_prime` in `0.0..6.0`.
+        let (r1, g1, b1) = match h_prime as i32 {
             0 => (c, x, 0.0),
             1 => (x, c, 0.0),
             2 => (0.0, c, x),
             3 => (0.0, x, c),
             4 => (x, 0.0, c),
-            5 => (c, 0.0, x),
-            _ => (0.0, 0.0, 0.0),
+            _ => (c, 0.0, x),
         };
         let m = l - c / 2.0;
         Self::from_rgb(r1 + m, g1 + m, b1 + m)
@@ -276,6 +285,19 @@ mod tests {
         let green = Color::from_hsl(120.0, 1.0, 0.5);
         assert!(green.r() < 0.01);
         assert!((green.g() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn color_from_hsl_wraps_hue_360_to_red() {
+        // Regression: h == 360.0 used to fall through to the catch-all arm and
+        // produce black. 360° ≡ 0° must be red, matching from_hsl(0.0, ...).
+        let wrapped = Color::from_hsl(360.0, 1.0, 0.5);
+        assert!((wrapped.r() - 1.0).abs() < 0.01, "r={}", wrapped.r());
+        assert!(wrapped.g() < 0.01, "g={}", wrapped.g());
+        assert!(wrapped.b() < 0.01, "b={}", wrapped.b());
+        // Negative / over-range hues also wrap rather than blacking out.
+        let neg = Color::from_hsl(-360.0, 1.0, 0.5);
+        assert!((neg.r() - 1.0).abs() < 0.01);
     }
 
     #[test]
