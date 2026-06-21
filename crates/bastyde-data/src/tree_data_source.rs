@@ -187,7 +187,13 @@ pub fn tree_apply_reorder<T: 'static>(
                 Some(p) => tree.children(p),
                 None => (0..tree.root_count()).map(|i| tree.root(i)).collect(),
             };
-            let pos = siblings.iter().position(|&s| s == target).unwrap_or(0);
+            // `target` must be among its own parent's children. If it isn't,
+            // the tree is inconsistent — reject the drop rather than silently
+            // falling back to index 0, which would reorder the node to the
+            // start and corrupt the sibling order.
+            let Some(pos) = siblings.iter().position(|&s| s == target) else {
+                return false;
+            };
             let mut idx = if position == DropPosition::After {
                 pos + 1
             } else {
