@@ -74,9 +74,16 @@ pub(crate) fn build_key_handler(
         if row_count == 0 || cfg.col_count == 0 {
             return EventResponse::Ignored;
         }
-        let (row, col) = cfg.focused_cell.get().unwrap_or((0, 0));
+        let raw = cfg.focused_cell.get();
+        let (row, col) = raw.unwrap_or((0, 0));
         let row = row.min(row_count - 1);
         let col = col.min(cfg.col_count - 1);
+        // Persist the clamp: if the stored focus was out of range (e.g. rows or
+        // columns were removed since it was set), write the in-bounds cell back
+        // so the focus ring and any later reader don't keep the stale position.
+        if raw.is_some() && raw != Some((row, col)) {
+            cfg.focused_cell.set(Some((row, col)));
+        }
 
         // Read layout direction live from the dispatch context (a runtime
         // locale switch dirties the tree but does not rebuild, so a
