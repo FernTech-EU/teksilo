@@ -801,13 +801,7 @@ impl DockingModel {
             if tab.panes.is_empty() {
                 removed_tab = true;
                 st.tabs.remove(loc.tab_idx);
-                if st.selected_tab >= st.tabs.len() && !st.tabs.is_empty() {
-                    st.selected_tab = st.tabs.len() - 1;
-                }
-                if st.tabs.is_empty() {
-                    st.selected_tab = 0;
-                    st.visible = false;
-                }
+                Self::fix_selection_after_remove(st, loc.tab_idx);
             }
         }
         // Rebuild every location for the affected side (indices shifted).
@@ -817,6 +811,26 @@ impl DockingModel {
             removed_pane,
             removed_tab,
         })
+    }
+
+    /// Fix up `selected_tab` after the tab at `removed_idx` was removed from
+    /// `st.tabs`. Three cases: the active tab sat *after* the removed one (it
+    /// shifts down by one, so follow it); the active tab ran off the end (clamp
+    /// to the new last); the side is now empty (reset + hide). Removing the
+    /// active tab from the middle deliberately advances selection to the tab
+    /// that shifted into its slot. Keeping this in one place avoids the
+    /// off-by-one that an inlined copy missed (the `removed_idx < selected`
+    /// branch). Caller must `notify()` afterwards.
+    fn fix_selection_after_remove(st: &mut SideState, removed_idx: usize) {
+        if removed_idx < st.selected_tab {
+            st.selected_tab -= 1;
+        } else if st.selected_tab >= st.tabs.len() && !st.tabs.is_empty() {
+            st.selected_tab = st.tabs.len() - 1;
+        }
+        if st.tabs.is_empty() {
+            st.selected_tab = 0;
+            st.visible = false;
+        }
     }
 
     /// Recompute `locations` for every dock on a side after structural edits.
@@ -1077,13 +1091,7 @@ impl DockingModel {
             };
             if let Some(st) = inner.sides.get_mut(&side) {
                 st.tabs.remove(ti);
-                if st.selected_tab >= st.tabs.len() && !st.tabs.is_empty() {
-                    st.selected_tab = st.tabs.len() - 1;
-                }
-                if st.tabs.is_empty() {
-                    st.selected_tab = 0;
-                    st.visible = false;
-                }
+                Self::fix_selection_after_remove(st, ti);
             }
             Self::reindex_side(&mut inner, side);
         }
@@ -1124,13 +1132,7 @@ impl DockingModel {
                 let tab = {
                     let st = inner.sides.get_mut(&src_side).unwrap();
                     let tab = st.tabs.remove(src_ti);
-                    if st.selected_tab >= st.tabs.len() && !st.tabs.is_empty() {
-                        st.selected_tab = st.tabs.len() - 1;
-                    }
-                    if st.tabs.is_empty() {
-                        st.selected_tab = 0;
-                        st.visible = false;
-                    }
+                    Self::fix_selection_after_remove(st, src_ti);
                     tab
                 };
                 // Re-derive orientation for the destination side.
@@ -1641,6 +1643,74 @@ mod tests {
         assert_eq!(m.dock_location(a).unwrap().side, DockSide::Bottom);
         assert!(!m.is_side_visible(DockSide::Leading));
         assert_eq!(splitter.orientation(), Orientation::Horizontal, "re-derived");
+    }
+
+    #[test]
+    fn closing_a_tab_before_the_active_one_keeps_the_active_tab() {
+        // [A, B, C] with B (index 1) selected; close A (index 0). B and C
+        // shift down to fill the gap, so selection must follow B to index 0
+        // — not stay at index 1 (which now holds C).
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        let b = reg(&m, DockSide::Leading);
+        let c = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(c, DockOpenLocation::side(DockSide::Leading).new_tab());
+        let tab_a = m.side_tabs(DockSide::Leading)[0].id;
+        let tab_b = m.side_tabs(DockSide::Leading)[1].id;
+        m.select_tab(DockSide::Leading, 1);
+        assert_eq!(m.side_selected_tab(DockSide::Leading), 1);
+
+        m.close_tab(tab_a);
+
+        assert_eq!(m.tab_count(DockSide::Leading), 2);
+        assert_eq!(m.side_selected_tab(DockSide::Leading), 0, "B followed down");
+        assert_eq!(
+            m.side_tabs(DockSide::Leading)[0].id,
+            tab_b,
+            "the selected tab is still B, not C",
+        );
+    }
+
+    #[test]
+    fn moving_a_tab_before_the_active_one_away_keeps_the_active_tab() {
+        // Same off-by-one, reached through move_tab's cross-side removal: B is
+        // selected, A (before it) is moved to another side, so selection must
+        // follow B down to index 0.
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        let b = reg(&m, DockSide::Leading);
+        let c = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(c, DockOpenLocation::side(DockSide::Leading).new_tab());
+        let tab_a = m.side_tabs(DockSide::Leading)[0].id;
+        let tab_b = m.side_tabs(DockSide::Leading)[1].id;
+        m.select_tab(DockSide::Leading, 1);
+
+        m.move_tab(tab_a, DockSide::Trailing, 0);
+
+        assert_eq!(m.tab_count(DockSide::Leading), 2);
+        assert_eq!(m.side_selected_tab(DockSide::Leading), 0, "B followed down");
+        assert_eq!(m.side_tabs(DockSide::Leading)[0].id, tab_b);
+    }
+
+    #[test]
+    fn closing_the_last_active_tab_clamps_selection() {
+        // [A, B] with B (last) selected; close B. Selection clamps to A.
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        let b = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+        let tab_b = m.side_tabs(DockSide::Leading)[1].id;
+        m.select_tab(DockSide::Leading, 1);
+
+        m.close_tab(tab_b);
+
+        assert_eq!(m.tab_count(DockSide::Leading), 1);
+        assert_eq!(m.side_selected_tab(DockSide::Leading), 0);
     }
 
     #[test]
