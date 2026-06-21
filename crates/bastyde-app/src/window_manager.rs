@@ -961,10 +961,14 @@ impl WindowManager {
             return;
         };
 
-        child
-            .platform_window
-            .window()
-            .set_window_level(WindowLevel::AlwaysOnTop);
+        // Re-surface the modal relative to its owner via focus alone —
+        // `focus_window` raises + focuses on every platform. Do NOT call
+        // `set_window_level(AlwaysOnTop)`: it floats the modal above *all*
+        // windows (every app) for its lifetime, and on a Win32 owned window it
+        // also stalls the message pump (paint events stop until a focus/resize
+        // forces a redraw) — exactly the failure the creation path documents
+        // and avoids. The owner / transient-parent relationship already keeps
+        // the modal above its parent.
         child.platform_window.window().focus_window();
         child
             .platform_window
