@@ -12,6 +12,7 @@
 //! Excel-style Shift-Arrow / Shift-Click semantics.
 
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -56,6 +57,12 @@ pub struct CellSelectionModel {
     mode: TableSelectionMode,
     selection: Signal<BTreeSet<(usize, usize)>>,
     anchor: Rc<Cell<Option<(usize, usize)>>>,
+    /// Cells committed by prior clicks/toggles, kept *separate* from the live
+    /// Shift-drag rectangle. `extend_to` recomputes the selection as
+    /// `base ∪ rectangle(anchor, target)` each time, so a Shift+click to a
+    /// smaller rectangle *shrinks* it (Excel semantics) instead of only ever
+    /// growing it, while Ctrl-committed cells survive.
+    base: Rc<RefCell<BTreeSet<(usize, usize)>>>,
 }
 
 impl CellSelectionModel {
@@ -70,6 +77,7 @@ impl CellSelectionModel {
             mode,
             selection: Signal::new(BTreeSet::new()),
             anchor: Rc::new(Cell::new(None)),
+            base: Rc::new(RefCell::new(BTreeSet::new())),
         }
     }
 
@@ -99,6 +107,9 @@ impl CellSelectionModel {
         s.insert((row, col));
         self.selection.set(s);
         self.anchor.set(Some((row, col)));
+        // A plain click starts a fresh range: nothing committed beneath the
+        // (about-to-be-dragged) rectangle.
+        self.base.borrow_mut().clear();
     }
 
     /// Toggle the cell `(row, col)` (Ctrl-click). In `SingleCell` mode
@@ -112,8 +123,12 @@ impl CellSelectionModel {
                 if !s.insert((row, col)) {
                     s.remove(&(row, col));
                 }
-                self.selection.set(s);
+                self.selection.set(s.clone());
                 self.anchor.set(Some((row, col)));
+                // Ctrl-click commits the whole current selection as the base,
+                // so a subsequent Shift-extend keeps it while the new
+                // rectangle (anchored here) can still grow and shrink.
+                *self.base.borrow_mut() = s;
             }
             TableSelectionMode::SingleRow | TableSelectionMode::MultiRow => {}
         }
@@ -132,7 +147,11 @@ impl CellSelectionModel {
                 let r1 = anchor.0.max(row);
                 let c0 = anchor.1.min(col);
                 let c1 = anchor.1.max(col);
-                let mut s = self.selection.get();
+                // Recompute from the committed base ∪ the current rectangle,
+                // rather than merging into the previous selection — so moving
+                // the Shift target inward SHRINKS the rectangle (Excel
+                // semantics) instead of only ever accreting cells.
+                let mut s = self.base.borrow().clone();
                 for r in r0..=r1 {
                     for c in c0..=c1 {
                         s.insert((r, c));
@@ -156,12 +175,27 @@ impl CellSelectionModel {
                 s.insert((r, c));
             }
         }
-        self.selection.set(s);
+        self.selection.set(s.clone());
+        // Treat select-all as a committed base, so a following Shift-extend
+        // keeps it rather than collapsing to the bare rectangle.
+        *self.base.borrow_mut() = s;
     }
 
     pub fn clear(&self) {
         self.selection.set(BTreeSet::new());
         self.anchor.set(None);
+        self.base.borrow_mut().clear();
+    }
+
+    /// Re-key the committed `base` set with the same transform applied to the
+    /// live selection on a row/column insert or remove, so a later Shift-extend
+    /// unions a correctly-shifted base rather than stale coordinates.
+    fn remap_base(&self, f: impl Fn((usize, usize)) -> Option<(usize, usize)>) {
+        let mut b = self.base.borrow_mut();
+        if b.is_empty() {
+            return;
+        }
+        *b = b.iter().filter_map(|&cell| f(cell)).collect();
     }
 
     /// Adjust selection after `count` rows are inserted starting at
@@ -179,6 +213,9 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
+        self.remap_base(|(r, c)| {
+            Some(if r >= at_row { (r + count, c) } else { (r, c) })
+        });
         if let Some((r, c)) = self.anchor.get()
             && r >= at_row
         {
@@ -204,6 +241,15 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
+        self.remap_base(|(r, c)| {
+            if r < at_row {
+                Some((r, c))
+            } else if r >= end {
+                Some((r - count, c))
+            } else {
+                None
+            }
+        });
         if let Some((r, c)) = self.anchor.get() {
             if r >= end {
                 self.anchor.set(Some((r - count, c)));
@@ -227,6 +273,9 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
+        self.remap_base(|(r, c)| {
+            Some(if c >= at_col { (r, c + count) } else { (r, c) })
+        });
         if let Some((r, c)) = self.anchor.get()
             && c >= at_col
         {
@@ -250,6 +299,15 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
+        self.remap_base(|(r, c)| {
+            if c < at_col {
+                Some((r, c))
+            } else if c >= end {
+                Some((r, c - count))
+            } else {
+                None
+            }
+        });
         if let Some((r, c)) = self.anchor.get() {
             if c >= end {
                 self.anchor.set(Some((r, c - count)));
@@ -266,6 +324,7 @@ impl Clone for CellSelectionModel {
             mode: self.mode,
             selection: self.selection.clone(),
             anchor: self.anchor.clone(),
+            base: self.base.clone(),
         }
     }
 }
@@ -312,6 +371,35 @@ mod tests {
         // 3 rows × 3 cols = 9 cells.
         assert_eq!(m.count(), 9);
         assert!(m.is_selected(3, 2));
+    }
+
+    #[test]
+    fn extend_shrinks_when_target_moves_inward() {
+        // Excel semantics: a second Shift extend to a smaller rectangle must
+        // SHRINK the selection, not keep the larger one.
+        let m = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        m.select(0, 0);
+        m.extend_to(2, 2); // 3×3 = 9
+        assert_eq!(m.count(), 9);
+        m.extend_to(1, 1); // 2×2 = 4
+        assert_eq!(m.count(), 4, "rectangle must shrink, not accrete");
+        assert!(!m.is_selected(2, 2), "the dropped corner must be deselected");
+    }
+
+    #[test]
+    fn ctrl_committed_cells_survive_a_later_shift_extend() {
+        // Ctrl-click commits a base; a subsequent Shift-extend keeps it while
+        // the new rectangle can still shrink.
+        let m = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        m.select(0, 0); // {(0,0)}
+        m.toggle(5, 5); // Ctrl-click → base now {(0,0),(5,5)}, anchor (5,5)
+        m.extend_to(6, 6); // base ∪ rect((5,5),(6,6))
+        assert!(m.is_selected(0, 0), "Ctrl-committed cell must survive");
+        assert!(m.is_selected(6, 6));
+        m.extend_to(5, 5); // shrink the rect back to a single cell
+        assert!(m.is_selected(0, 0), "committed cell still there");
+        assert!(!m.is_selected(6, 6), "shrunk-away cell gone");
+        assert_eq!(m.count(), 2); // (0,0) committed + (5,5) rect
     }
 
     #[test]
