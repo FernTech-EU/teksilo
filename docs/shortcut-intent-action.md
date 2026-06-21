@@ -313,6 +313,39 @@ dotted ids prevent this in practice (`editor.format.bold`, not just
 Framework-internal chords use a `__` prefix by convention
 (`__bastyde_inspector.pick`) so app ids can't collide with them.
 
+### Same-chord precedence
+
+Distinct ids may bind the **same chord** — a normal IDE pattern (a
+global `Ctrl+W` "close window" alongside a panel-scoped `Ctrl+W` "close
+tab"). When a chord matches more than one enabled shortcut, the
+dispatcher resolves them by **focus and scope specificity**, not by id
+order:
+
+1. **Applicability first.** A `Scoped(id)` binding is a candidate only
+   when the focused widget is inside `id`'s subtree. A `Global` binding
+   is always a candidate.
+2. **Most-specific scope wins.** An applicable `Scoped` binding beats a
+   `Global` one. Among nested applicable scopes, the one closest to the
+   focused widget (deepest) wins.
+3. **Id order is only a tiebreak** within equal specificity (the
+   deterministic `(category, id)` order of `iter_effective`).
+
+So with focus in the editor, the editor-scoped `Ctrl+W` fires; move
+focus to the sidebar and the global `Ctrl+W` fires instead. An
+inapplicable scoped binding never "eats" the chord from an applicable
+global one, and a global binding never shadows an in-focus scoped one.
+
+Scope applicability needs the widget tree (descendant checks), which the
+registry can't see — so it hands back every candidate via
+`matches_by_keystroke` and the dispatcher does the focus-aware
+selection. (`find_by_keystroke`, which returns just the first by id
+order, ignores scope and is for non-dispatch queries only.)
+
+This is *cross-id* collision resolution by focus; it is distinct from
+the rebind-time conflict check ([`find_conflict`](#per-slot-overrides),
+used by the settings UI to auto-unbind), and from the *same-id*
+aliasing above.
+
 ### Per-slot overrides
 
 User overrides are per-slot (`SlotOverride::{Default, Bound(ks),
@@ -580,11 +613,15 @@ elsewhere.
 
 A KeyDown event flows through three stages, in this order:
 
-1. **Shortcut resolution.** `ShortcutRegistry::resolve` is consulted
-   *before* any widget dispatch. If the chord matches an enabled
-   shortcut whose scope contains the focused widget, the registry
-   activates the shortcut's intent and returns — the key event is
-   consumed.
+1. **Shortcut resolution.** The registry is consulted *before* any
+   widget dispatch. `ShortcutRegistry::matches_by_keystroke` yields
+   **every** enabled shortcut bound to the chord; the dispatcher then
+   picks the one whose scope applies to the current focus (see
+   [Same-chord precedence](#same-chord-precedence) below). If an
+   applicable shortcut is found, its intent is activated and the key
+   event is consumed. If no candidate applies — every match is a
+   `Scoped` binding outside the focused subtree — the event falls
+   through to stage 2.
 2. **Ancestor key preview.** If no shortcut matched, the framework
    walks the focused widget's strict ancestors root → parent-of-target,
    firing `on_key_preview` on each. Returning `EventResponse::Handled`
