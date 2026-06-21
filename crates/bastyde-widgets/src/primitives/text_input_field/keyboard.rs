@@ -445,14 +445,14 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     if system.is_empty() {
         return;
     }
-    // Strip newlines (single-line enforcement) and anything the
-    // optional filter rejects. Control-character strip is omitted
-    // here to match historical behavior — pastes of tabs etc. have
-    // never been stripped and the filter hook is the right place
-    // for callers that want that.
+    // Strip control characters (single-line enforcement — covers newlines,
+    // tabs, NUL, …) and anything the optional filter rejects. This matches the
+    // typing / IME paths exactly; previously paste let tabs and other control
+    // chars through, an asymmetry a single-line field shouldn't have (and the
+    // `char_filter` hook can't re-admit them — it only rejects).
     let clean: String = system
         .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
+        .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
         .filter(|c| state.char_filter_admits(*c))
         .collect();
     if clean.is_empty() {
