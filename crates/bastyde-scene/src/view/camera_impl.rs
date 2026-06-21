@@ -270,20 +270,15 @@ impl SceneView {
     /// value when the policy excludes it; `PanAxes::None` (and
     /// `adopt_scene_size`) holds both axes at their current pan.
     fn gate_pan_target(&self, target: Vec2) -> Vec2 {
-        use crate::scene::PanAxes;
+        let hold = Vec2::new(self.pan_x.get(), self.pan_y.get());
         if self.adopt_scene_size {
-            return Vec2::new(self.pan_x.get(), self.pan_y.get());
+            return hold;
         }
-        let axes = self.scene().current_pan_axes();
-        let after_axes = match axes {
-            PanAxes::Both => target,
-            PanAxes::None => Vec2::new(self.pan_x.get(), self.pan_y.get()),
-            PanAxes::Horizontal => Vec2::new(target.x, self.pan_y.get()),
-            PanAxes::Vertical => Vec2::new(self.pan_x.get(), target.y),
-        };
-        clamp_pan_to_bounds(
+        let after_axes = apply_pan_axes(target, hold, self.scene().current_pan_axes());
+        clamp_pan(
             after_axes,
-            self.effective_pan_bounds().as_ref(),
+            self.scene().current_pan_bounds(),
+            self.pan_bounds_override.get(),
             self.last_viewport.get(),
             self.zoom.get(),
         )
@@ -303,14 +298,6 @@ impl SceneView {
         intersect_zoom_range(
             self.scene().current_zoom_range().as_ref(),
             self.zoom_range_override.get().as_ref(),
-        )
-    }
-
-    /// Effective pan bounds = intersect(Scene declared, view override).
-    fn effective_pan_bounds(&self) -> Option<Rect> {
-        intersect_pan_bounds(
-            self.scene().current_pan_bounds(),
-            self.pan_bounds_override.get(),
         )
     }
 

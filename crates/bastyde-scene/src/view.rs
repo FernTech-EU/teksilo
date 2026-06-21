@@ -174,6 +174,49 @@ fn clamp_pan_to_bounds(pan: Vec2, bounds: Option<&Rect>, viewport: Size, zoom: f
     )
 }
 
+/// The single chokepoint for the pan-bounds clamp: take the tightening
+/// intersection of the Scene-declared and view-override bounds, then
+/// clamp `candidate` against it for the given `viewport` and `zoom`.
+///
+/// Every pan path (the camera API plus all five gesture handlers) ends
+/// in this exact `intersect → clamp` pair. Funnelling them through one
+/// function keeps a new pan path from silently skipping the intersection
+/// or the clamp. Each site still computes its own `candidate` (the parts
+/// that legitimately differ — `z_new` vs committed zoom for the
+/// zoom-coupled sites, `animation_target` vs live pan for the tween-
+/// chaining sites — stay at the call site).
+fn clamp_pan(
+    candidate: Vec2,
+    scene_bounds: Option<Rect>,
+    view_bounds: Option<Rect>,
+    viewport: Size,
+    zoom: f32,
+) -> Vec2 {
+    let effective = intersect_pan_bounds(scene_bounds, view_bounds);
+    clamp_pan_to_bounds(candidate, effective.as_ref(), viewport, zoom)
+}
+
+/// Apply a [`PanAxes`](crate::scene::PanAxes) policy to a candidate pan:
+/// the permitted axis takes `candidate`, the restricted axis is held at
+/// `hold` (the gesture's reference pan). `Both` passes through; `None`
+/// holds both.
+///
+/// Shared by the pinch and hand-drag sites, which hold the orthogonal
+/// axis at the pan captured when the gesture began, and by the camera's
+/// `gate_pan_target`, which holds it at the current pan. The wheel and
+/// keyboard sites instead zero their input *deltas* (so an excluded axis
+/// passes through to ancestor scrollables / arrow-key guards) and do not
+/// call this.
+fn apply_pan_axes(candidate: Vec2, hold: Vec2, axes: crate::scene::PanAxes) -> Vec2 {
+    use crate::scene::PanAxes;
+    match axes {
+        PanAxes::Both => candidate,
+        PanAxes::None => hold,
+        PanAxes::Horizontal => Vec2::new(candidate.x, hold.y),
+        PanAxes::Vertical => Vec2::new(hold.x, candidate.y),
+    }
+}
+
 /// In-flight marquee box-select state. Tracked in scene
 /// coordinates so pan/zoom mid-drag (e.g. the user holds shift
 /// and scrolls while dragging) doesn't break the rectangle's

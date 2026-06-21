@@ -3390,6 +3390,53 @@ fn adopt_scene_size_returns_scene_extent_from_layout_response() {
 }
 
 #[test]
+fn apply_pan_axes_holds_the_restricted_axis() {
+    use crate::scene::PanAxes;
+    let candidate = Vec2::new(10.0, 20.0);
+    let hold = Vec2::new(1.0, 2.0);
+    assert_eq!(apply_pan_axes(candidate, hold, PanAxes::Both), candidate);
+    assert_eq!(apply_pan_axes(candidate, hold, PanAxes::None), hold);
+    // Horizontal permits x, holds y at `hold`; Vertical is the mirror.
+    assert_eq!(
+        apply_pan_axes(candidate, hold, PanAxes::Horizontal),
+        Vec2::new(10.0, 2.0)
+    );
+    assert_eq!(
+        apply_pan_axes(candidate, hold, PanAxes::Vertical),
+        Vec2::new(1.0, 20.0)
+    );
+}
+
+#[test]
+fn clamp_pan_intersects_bounds_then_clamps() {
+    // Scene bounds [0,200]² intersected with a view override [0,100]²
+    // tightens to [0,100]². With a 100×100 viewport at zoom 1, a pan
+    // can range over pan ∈ [vp - b_hi*z, -b_lo*z] = [0, 0] on each axis
+    // (bounds exactly the viewport), so any candidate clamps to (0,0).
+    let scene_b = Some(Rect::new(0.0, 0.0, 200.0, 200.0));
+    let view_b = Some(Rect::new(0.0, 0.0, 100.0, 100.0));
+    let vp = Size::new(100.0, 100.0);
+    let clamped = clamp_pan(Vec2::new(50.0, -30.0), scene_b, view_b, vp, 1.0);
+    assert_eq!(clamped, Vec2::ZERO);
+
+    // No bounds on either side → identity (candidate passes through).
+    let free = clamp_pan(Vec2::new(7.0, -9.0), None, None, vp, 1.0);
+    assert_eq!(free, Vec2::new(7.0, -9.0));
+
+    // Matches the lower-level pair it funnels: intersect then clamp.
+    let expect = clamp_pan_to_bounds(
+        Vec2::new(500.0, 500.0),
+        intersect_pan_bounds(scene_b, view_b).as_ref(),
+        vp,
+        1.0,
+    );
+    assert_eq!(
+        clamp_pan(Vec2::new(500.0, 500.0), scene_b, view_b, vp, 1.0),
+        expect
+    );
+}
+
+#[test]
 fn pan_axes_none_makes_set_pan_a_noop() {
     let mut scene = Scene::new();
     scene.pan_axes(crate::scene::PanAxes::None);

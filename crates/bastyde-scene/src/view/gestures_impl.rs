@@ -443,12 +443,12 @@ impl SceneView {
                     // Clamp the zoom-induced pan adjustment against
                     // the effective pan_bounds so wheel-zoom over
                     // a doc-style bounded scene doesn't push the
-                    // viewport off the document.
-                    let effective_bounds =
-                        intersect_pan_bounds(scene_pan_bounds_sig.get(), view_pan_bounds_sig.get());
-                    let new_pan = clamp_pan_to_bounds(
+                    // viewport off the document. Clamped against the
+                    // *new* zoom (not yet committed).
+                    let new_pan = clamp_pan(
                         new_pan,
-                        effective_bounds.as_ref(),
+                        scene_pan_bounds_sig.get(),
+                        view_pan_bounds_sig.get(),
                         viewport_size,
                         z_new,
                     );
@@ -477,11 +477,11 @@ impl SceneView {
                 let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                 let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
                 // Clamp the projected pan against effective bounds.
-                let effective_bounds =
-                    intersect_pan_bounds(scene_pan_bounds_sig.get(), view_pan_bounds_sig.get());
-                let clamped = clamp_pan_to_bounds(
+                // Axes already applied by zeroing dx/dy above.
+                let clamped = clamp_pan(
                     Vec2::new(base_x + dx, base_y + dy),
-                    effective_bounds.as_ref(),
+                    scene_pan_bounds_sig.get(),
+                    view_pan_bounds_sig.get(),
                     last_viewport_for_scroll.get(),
                     zoom.get(),
                 );
@@ -532,7 +532,6 @@ impl SceneView {
             let view_pan_bounds_sig_pinch = self.pan_bounds_override.clone();
             let adopt_scene_size_pinch = self.adopt_scene_size;
             handlers = handlers.on_pinch(move |phase, _ctx| {
-                use crate::scene::PanAxes;
                 if !zoomable_sig_pinch.get() || adopt_scene_size_pinch {
                     return;
                 }
@@ -566,22 +565,14 @@ impl SceneView {
                 // requested.
                 zoom.set(z_new);
                 rotation.set(r_new);
-                // Apply pan-axes policy live, then clamp to
-                // effective pan_bounds (intersection of Scene +
-                // view-override).
-                let new_pan = match pan_axes_sig_pinch.get() {
-                    PanAxes::Both => new_pan,
-                    PanAxes::None => pan_old,
-                    PanAxes::Horizontal => Vec2::new(new_pan.x, pan_old.y),
-                    PanAxes::Vertical => Vec2::new(pan_old.x, new_pan.y),
-                };
-                let effective_bounds = intersect_pan_bounds(
+                // Apply pan-axes policy live (orthogonal axis held at
+                // the pre-pinch pan), then clamp to effective pan_bounds
+                // against the new zoom.
+                let new_pan = apply_pan_axes(new_pan, pan_old, pan_axes_sig_pinch.get());
+                let new_pan = clamp_pan(
+                    new_pan,
                     scene_pan_bounds_sig_pinch.get(),
                     view_pan_bounds_sig_pinch.get(),
-                );
-                let new_pan = clamp_pan_to_bounds(
-                    new_pan,
-                    effective_bounds.as_ref(),
                     last_viewport_for_pinch.get(),
                     z_new,
                 );
@@ -668,11 +659,13 @@ impl SceneView {
                     clamp_zoom(z, effective.as_ref())
                 };
                 let clamp_to_pan = |p: Vec2, z: f32| -> Vec2 {
-                    let effective_bounds = intersect_pan_bounds(
+                    clamp_pan(
+                        p,
                         scene_pan_bounds_sig_keys.get(),
                         view_pan_bounds_sig_keys.get(),
-                    );
-                    clamp_pan_to_bounds(p, effective_bounds.as_ref(), viewport_size.get(), z)
+                        viewport_size.get(),
+                        z,
+                    )
                 };
                 // Pan step = quarter of the smaller viewport axis,
                 // capped to a sensible minimum so unusually small
@@ -793,34 +786,31 @@ impl SceneView {
             // delta in scene coords. Marquee and drag-to-move
             // are inactive in this mode.
             if drag_mode_inner == crate::item_handlers::DragMode::ScrollHandDrag {
-                use crate::scene::PanAxes;
                 use bastyde_core::gesture::DragPhase;
                 if let DragPhase::Moved { delta, .. } = phase {
-                    // `delta` is in screen coords. Apply the
-                    // scene's pan-axes policy live: zero out the
-                    // restricted axis so an axis-locked scene
-                    // can't be hand-dragged off-axis. Sign
-                    // convention matches scroll (drag right →
-                    // pan right).
-                    let (dx, dy) = match pan_axes_sig_drag.get() {
-                        PanAxes::Both => (delta.x, delta.y),
-                        PanAxes::None => (0.0, 0.0),
-                        PanAxes::Horizontal => (delta.x, 0.0),
-                        PanAxes::Vertical => (0.0, delta.y),
-                    };
-                    if dx == 0.0 && dy == 0.0 {
+                    // `delta` is in screen coords. Apply the scene's
+                    // pan-axes policy live (orthogonal axis held at the
+                    // current pan) so an axis-locked scene can't be
+                    // hand-dragged off-axis. Sign convention matches
+                    // scroll (drag right → pan right).
+                    let pan_old = Vec2::new(pan_x_for_drag.get(), pan_y_for_drag.get());
+                    let candidate = apply_pan_axes(
+                        Vec2::new(pan_old.x + delta.x, pan_old.y + delta.y),
+                        pan_old,
+                        pan_axes_sig_drag.get(),
+                    );
+                    // Nothing moved on a permitted axis — let the event
+                    // bubble to ancestor scrollables.
+                    if candidate == pan_old {
                         return;
                     }
                     // Clamp to effective pan_bounds (intersection of
                     // Scene + view-override) so the user can't drag
                     // the document off the viewport.
-                    let effective_bounds = intersect_pan_bounds(
+                    let target = clamp_pan(
+                        candidate,
                         scene_pan_bounds_sig_drag.get(),
                         view_pan_bounds_sig_drag.get(),
-                    );
-                    let target = clamp_pan_to_bounds(
-                        Vec2::new(pan_x_for_drag.get() + dx, pan_y_for_drag.get() + dy),
-                        effective_bounds.as_ref(),
                         last_viewport_for_drag.get(),
                         zoom_for_drag.get(),
                     );
