@@ -604,9 +604,14 @@ impl WidgetTree {
         };
 
         // Fire `on_drag_leave` on the previously-tracked target when it changes.
+        // Skip targets already cleared by the per-frame rejecter cleanup above:
+        // a target that rejected this frame while an ancestor engaged is in
+        // `bubbled_past` and has already had its `on_drag_leave` fired, so
+        // re-firing here would deliver two leaves for one pointer move.
         let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         if prev_target != new_target
             && let Some(prev) = prev_target
+            && !bubbled_past.contains(&prev)
         {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
@@ -805,7 +810,7 @@ impl WidgetTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_widgets::FillWidget;
+    use crate::test_widgets::{FillWidget, StackWidget};
     use crate::widget::CursorIcon;
     use crate::widget_builder::WidgetBuilder;
 
@@ -966,6 +971,68 @@ mod tests {
         assert!(
             hover_count.get() > 0,
             "on_drag_hover should have been called"
+        );
+    }
+
+    /// Regression: a rejecting per-row target nested under an engaging ancestor
+    /// must receive exactly ONE `on_drag_leave` for the pointer move that flips
+    /// the ancestor from idle to engaged — not two. The per-frame rejecter
+    /// cleanup (it's in `bubbled_past`) and the tracked-target-change cleanup
+    /// (it was last frame's `current_target`) used to fire independently.
+    #[test]
+    fn rejecter_under_engaging_ancestor_leaves_once() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leaves = Rc::new(Cell::new(0));
+        let lv = leaves.clone();
+        // The ancestor only engages once we flip this between the two moves,
+        // reproducing "frame 1 nothing engages, frame 2 the ancestor does".
+        let engage = Rc::new(Cell::new(false));
+        let eg = engage.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+
+        // Deepest target: always rejects (NoFeedback), counts its leaves.
+        let child = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_payload, _pos, _ctx| crate::drag_state::DropFeedback::NoFeedback)
+                .on_drag_leave(move |_ctx| lv.set(lv.get() + 1)),
+        );
+        // Ancestor container wrapping the child: engages conditionally.
+        let _ancestor = tree.add(
+            StackWidget::new().add_child(child).on_drag_hover(move |_payload, _pos, _ctx| {
+                if eg.get() {
+                    crate::drag_state::DropFeedback::Accept
+                } else {
+                    crate::drag_state::DropFeedback::NoFeedback
+                }
+            }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(7_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Frame 1: nothing engages → child becomes the tracked (rejecting) target.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        assert_eq!(tree.active_drag.as_ref().unwrap().current_target, Some(child));
+        assert_eq!(leaves.get(), 0, "no leave yet — child is freshly tracked");
+
+        // Frame 2: ancestor engages while child still rejects.
+        engage.set(true);
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(101.0, 50.0),
+        });
+
+        assert_eq!(
+            leaves.get(),
+            1,
+            "child must receive exactly one on_drag_leave, not two"
         );
     }
 
