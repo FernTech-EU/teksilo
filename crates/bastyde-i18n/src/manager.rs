@@ -393,6 +393,13 @@ fn format_message(
     };
     let mut errors = Vec::new();
     let cow = bundle.format_pattern(pattern, fluent_args.as_ref(), &mut errors);
+    // `format_pattern` returns best-effort output (e.g. with `{$var}` left in
+    // place for a missing argument) AND reports what went wrong via `errors`.
+    // Silently discarding them ships raw placeholders to the UI with no signal;
+    // surface them like the other i18n diagnostics in this crate.
+    if !errors.is_empty() {
+        eprintln!("bastyde-i18n: errors formatting `{key}`: {errors:?}");
+    }
     Some(cow.into_owned())
 }
 
