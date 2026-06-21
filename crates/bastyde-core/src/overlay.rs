@@ -903,9 +903,21 @@ impl OverlayManager {
 
     /// Check if a point hits any overlay (topmost first).
     /// Returns the overlay ID if hit, None if the point is outside all overlays.
+    ///
+    /// Overlays whose fade-out has begun are skipped — the same predicate
+    /// [`active_ids`](Self::active_ids) uses. A dismissed-but-still-fading
+    /// overlay lingers in the stack until
+    /// [`process_pending_fade_dismissals`](Self::process_pending_fade_dismissals)
+    /// removes it; treating it as hittable would route clicks into the
+    /// vanishing content (and suppress outside-click dismissal of the
+    /// overlays beneath it) for the whole fade duration.
     pub fn hit_test(&self, point: Point) -> Option<OverlayId> {
         for overlay in self.stack.iter().rev() {
-            if overlay.bounds.contains(point) {
+            let fading_out = overlay
+                .fade
+                .as_ref()
+                .is_some_and(|f| f.dismissing_started_real.is_some());
+            if !fading_out && overlay.bounds.contains(point) {
                 return Some(overlay.id);
             }
         }
@@ -1685,6 +1697,46 @@ mod tests {
 
         // Hit test should find topmost (b)
         assert_eq!(mgr.hit_test(Point::new(50.0, 25.0)), Some(b));
+    }
+
+    #[test]
+    fn hit_test_skips_a_fading_out_overlay() {
+        // Regression: dismissing a faded overlay only starts the fade-out and
+        // defers stack removal, so the overlay lingers in the stack (and its
+        // content stays interactive) for the fade duration. `hit_test` must
+        // treat it as gone — matching `active_ids` — so clicks reach the
+        // widget underneath and outside-click dismissal of lower overlays
+        // isn't suppressed by the ghost.
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(Duration::from_millis(150)),
+        });
+        mgr.set_content_bounds(id, Size::new(100.0, 50.0));
+        let point = Point::new(50.0, 25.0);
+
+        // Live overlay: hittable, and reported by active_ids.
+        assert_eq!(mgr.hit_test(point), Some(id));
+        assert!(mgr.active_ids().contains(&id));
+
+        // The fade machinery is populated post-show by the framework.
+        mgr.attach_fade(id, Signal::new(1.0), Duration::from_millis(150));
+
+        // Dismissing only starts the fade-out — the overlay is still in the
+        // stack until `process_pending_fade_dismissals` fires.
+        let dismissed = mgr.dismiss(id);
+        assert!(dismissed.is_empty(), "fade-out defers removal");
+        assert_eq!(mgr.stack.len(), 1, "overlay lingers during the fade");
+
+        // Both predicates now agree it's gone.
+        assert_eq!(mgr.hit_test(point), None, "fading overlay no longer eats clicks");
+        assert!(!mgr.active_ids().contains(&id));
     }
 
     #[test]
