@@ -48,12 +48,16 @@ fn main() -> io::Result<()> {
 
 struct Server {
     documents: HashMap<String, String>,
+    /// Set once a `shutdown` request arrives. Per the LSP spec, `exit` must
+    /// terminate with code 0 only if `shutdown` was received first, else code 1.
+    shutdown_requested: bool,
 }
 
 impl Server {
     fn new() -> Self {
         Self {
             documents: HashMap::new(),
+            shutdown_requested: false,
         }
     }
 
@@ -68,9 +72,14 @@ impl Server {
             if let Some(response) = self.dispatch(&msg) {
                 write_message(&mut writer, &response)?;
             }
-            // After `exit`, terminate the loop.
+            // After `exit`, terminate. Per the LSP spec the process exits with
+            // code 0 only if a `shutdown` request preceded `exit`; otherwise it
+            // must exit with code 1.
             if msg.method.as_deref() == Some("exit") {
-                return Ok(());
+                if self.shutdown_requested {
+                    return Ok(());
+                }
+                std::process::exit(1);
             }
         }
     }
@@ -101,10 +110,13 @@ impl Server {
             ("textDocument/formatting", true) => {
                 Some(self.handle_formatting(id.expect("matched on id.is_some() == true"), &params))
             }
-            ("shutdown", true) => Some(ok(
-                id.expect("matched on id.is_some() == true"),
-                Value::Null,
-            )),
+            ("shutdown", true) => {
+                self.shutdown_requested = true;
+                Some(ok(
+                    id.expect("matched on id.is_some() == true"),
+                    Value::Null,
+                ))
+            }
             ("exit", false) => None,
             (_, true) => Some(err(
                 id.expect("matched on id.is_some() == true"),
