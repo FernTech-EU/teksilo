@@ -540,9 +540,23 @@ mod platform {
     use super::*;
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
-        // macOS color scheme is best read from winit's window.theme() at startup.
-        // Without a window, we cannot query it here.
+        // Windowless color-scheme detection isn't implemented on macOS yet; the
+        // reliable source is winit's `window.theme()` at/after window creation
+        // (the app layer should drive `ThemeMode::Native` from that). Warn once
+        // in debug so this fallback isn't silent.
         // TODO: use NSAppearance.current.name via objc2 for windowless detection.
+        #[cfg(debug_assertions)]
+        {
+            use std::sync::Once;
+            static WARNED: Once = Once::new();
+            WARNED.call_once(|| {
+                eprintln!(
+                    "bastyde-platform: ThemeMode::Native windowless color-scheme \
+                     detection is unimplemented on macOS — falling back to \
+                     NoPreference; drive it from winit's window.theme() instead."
+                );
+            });
+        }
         ColorSchemePreference::NoPreference
     }
 
@@ -560,8 +574,24 @@ mod platform {
     use super::*;
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
+        // Windowless color-scheme detection isn't implemented on Windows yet
+        // (UI_ViewManagement::UISettings or the AppsUseLightTheme registry key
+        // would do it); winit's `window.theme()` is the reliable path. Warn
+        // once in debug so this fallback isn't silent.
         // TODO: read HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
         // 0 = dark, 1 = light
+        #[cfg(debug_assertions)]
+        {
+            use std::sync::Once;
+            static WARNED: Once = Once::new();
+            WARNED.call_once(|| {
+                eprintln!(
+                    "bastyde-platform: ThemeMode::Native windowless color-scheme \
+                     detection is unimplemented on Windows — falling back to \
+                     NoPreference; drive it from winit's window.theme() instead."
+                );
+            });
+        }
         ColorSchemePreference::NoPreference
     }
 
