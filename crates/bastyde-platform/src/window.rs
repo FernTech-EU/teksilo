@@ -87,12 +87,16 @@ impl PlatformWindow {
             .expect("wgpu device request failed");
 
         let surface_caps = surface.get_capabilities(&adapter);
+        // Guard the index accesses: a degenerate adapter/surface (software
+        // fallback, headless) can report empty `formats` / `alpha_modes`, and
+        // `[0]` would panic with an opaque out-of-bounds instead of degrading.
         let surface_format = surface_caps
             .formats
             .iter()
             .find(|f| f.is_srgb())
             .copied()
-            .unwrap_or(surface_caps.formats[0]);
+            .or_else(|| surface_caps.formats.first().copied())
+            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -100,7 +104,11 @@ impl PlatformWindow {
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps.alpha_modes[0],
+            alpha_mode: surface_caps
+                .alpha_modes
+                .first()
+                .copied()
+                .unwrap_or(wgpu::CompositeAlphaMode::Auto),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -164,12 +172,15 @@ impl PlatformWindow {
             .expect("wgpu device request failed");
 
         let surface_caps = surface.get_capabilities(&gpu_adapter);
+        // See the sibling path above: guard against an empty `formats` /
+        // `alpha_modes` rather than panicking on `[0]`.
         let surface_format = surface_caps
             .formats
             .iter()
             .find(|f| f.is_srgb())
             .copied()
-            .unwrap_or(surface_caps.formats[0]);
+            .or_else(|| surface_caps.formats.first().copied())
+            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -177,7 +188,11 @@ impl PlatformWindow {
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps.alpha_modes[0],
+            alpha_mode: surface_caps
+                .alpha_modes
+                .first()
+                .copied()
+                .unwrap_or(wgpu::CompositeAlphaMode::Auto),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
