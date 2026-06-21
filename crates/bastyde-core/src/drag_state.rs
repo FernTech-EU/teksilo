@@ -14,12 +14,17 @@ use crate::widget_id::WidgetId;
 
 /// A drop target's response to a drag hovering over it.
 ///
-/// The variant also decides **drop-target bubbling**: a target that returns
+/// The variant decides **hover bubbling**: a target that returns
 /// [`NoFeedback`](Self::NoFeedback) does **not** engage the payload, so the
-/// drag passes through to the next drop target up the tree (and a drop on
-/// release likewise bubbles when `on_drop` returns `false`). Any *engaging*
+/// drag passes through to the next drop target up the tree. Any *engaging*
 /// variant ([`Accept`](Self::Accept), [`InsertionLine`](Self::InsertionLine),
-/// [`HighlightRect`](Self::HighlightRect)) stops the bubble at that target.
+/// [`HighlightRect`](Self::HighlightRect)) stops the bubble and **settles the
+/// drop target** for the rest of the drag.
+///
+/// On release, `on_drop` runs once on that settled target; its returned `bool`
+/// reports acceptance to the source via `DropOutcome::InApp { accepted }` — it
+/// does **not** re-bubble to another target when it returns `false` (the target
+/// was already chosen during the hover phase).
 #[derive(Debug, Clone)]
 pub enum DropFeedback {
     /// A horizontal line at the given Y coordinate, spanning the given width.
@@ -33,8 +38,8 @@ pub enum DropFeedback {
     /// extra. Engages the target (stops bubbling), distinct from `NoFeedback`.
     Accept,
     /// The payload is not accepted by this target — the drag bubbles to the
-    /// next drop target up the tree (and a drop here would `on_drop`-bubble
-    /// too). The framework renders nothing.
+    /// next drop target up the tree (hover phase). The framework renders
+    /// nothing.
     NoFeedback,
 }
 
