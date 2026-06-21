@@ -127,12 +127,20 @@ impl StoreInner {
 /// I/O thread.
 pub struct SettingsStore {
     inner: Rc<RefCell<StoreInner>>,
+    /// Write-backs that couldn't borrow `inner` (a re-entrant `set` during
+    /// another `set`'s observer chain, while `inner` is already borrowed) are
+    /// queued here instead of being dropped. They are drained into `raw` —
+    /// preserving the in-memory → disk invariant — the next time `inner` is
+    /// successfully borrowed for a write-back, and on `flush_now`. Held in its
+    /// own cell so it can be pushed to even while `inner` is borrowed.
+    pending: Rc<RefCell<Vec<(String, toml::Value)>>>,
 }
 
 impl Clone for SettingsStore {
     fn clone(&self) -> Self {
         Self {
             inner: Rc::clone(&self.inner),
+            pending: Rc::clone(&self.pending),
         }
     }
 }
@@ -168,7 +176,10 @@ impl SettingsStore {
             writer,
         }));
 
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            pending: Rc::new(RefCell::new(Vec::new())),
+        })
     }
 
     /// Path of the underlying file.
@@ -178,6 +189,21 @@ impl SettingsStore {
 
     /// Force any pending payload to disk synchronously.
     pub fn flush_now(&self) -> Result<(), SettingsStoreError> {
+        // Fold any deferred (re-entrant) write-backs into `raw` and reschedule
+        // before forcing the write, so a value queued while `inner` was
+        // borrowed still reaches disk. Acquire the `inner` borrow first, then
+        // drain — otherwise a failed borrow would lose the drained values.
+        // `try_borrow_mut` keeps this safe if `flush_now` runs inside a borrow.
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
+            let deferred: Vec<(String, toml::Value)> =
+                self.pending.borrow_mut().drain(..).collect();
+            if !deferred.is_empty() {
+                for (k, v) in deferred {
+                    write_nested(&mut inner.raw, &k, v);
+                }
+                inner.schedule_flush();
+            }
+        }
         self.inner
             .borrow()
             .writer
@@ -260,30 +286,47 @@ impl SettingsStore {
 
         write_nested(&mut inner.raw, key, initial_value);
 
-        // Wire write-back. The closure captures a Weak so a dropped
-        // store does not stay alive via its own observer.
+        // Wire write-back. The closure captures Weaks so a dropped store does
+        // not stay alive via its own observer.
         let key_owned = key.to_string();
         let weak: Weak<RefCell<StoreInner>> = Rc::downgrade(&self.inner);
+        let weak_pending: Weak<RefCell<Vec<(String, toml::Value)>>> =
+            Rc::downgrade(&self.pending);
         let handle = sig.observe(move |new_val: &T| {
             let Some(inner_rc) = weak.upgrade() else {
                 return;
             };
-            let mut inner = match inner_rc.try_borrow_mut() {
-                Ok(g) => g,
-                Err(_) => {
-                    // The store is borrowed elsewhere — typically a
-                    // re-entrant set during another set's observer
-                    // chain. Skip rather than panic; the top-level
-                    // borrow's flush_schedule will pick this up.
-                    return;
-                }
+            let Some(pending_rc) = weak_pending.upgrade() else {
+                return;
             };
             let value = match serialize_to_value(new_val) {
                 Ok(v) => v,
                 Err(_) => return,
             };
-            write_nested(&mut inner.raw, &key_owned, value);
-            inner.schedule_flush();
+            match inner_rc.try_borrow_mut() {
+                Ok(mut inner) => {
+                    // Apply any deferred re-entrant writes first, then this one,
+                    // so `raw` (and therefore disk) never diverges from the
+                    // in-memory signals. Drain into a local Vec before touching
+                    // `raw` so a re-entrant push during `write_nested` doesn't
+                    // contend on the `pending` borrow.
+                    let deferred: Vec<(String, toml::Value)> =
+                        pending_rc.borrow_mut().drain(..).collect();
+                    for (k, v) in deferred {
+                        write_nested(&mut inner.raw, &k, v);
+                    }
+                    write_nested(&mut inner.raw, &key_owned, value);
+                    inner.schedule_flush();
+                }
+                Err(_) => {
+                    // The store is borrowed elsewhere — a re-entrant set during
+                    // another set's observer chain. Defer rather than drop:
+                    // queue the new value so the next successful write-back (or
+                    // `flush_now`) folds it into `raw`. Dropping it here would
+                    // silently diverge disk from the in-memory signal.
+                    pending_rc.borrow_mut().push((key_owned.clone(), value));
+                }
+            }
         });
 
         let cell = SignalCell {
