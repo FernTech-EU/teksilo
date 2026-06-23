@@ -118,6 +118,12 @@ pub struct EventContext<'ops> {
     /// boundary edge) can still query "where is the cursor right
     /// now". Read by the safe-triangle submenu hover gate.
     pub(crate) tree_pointer_position: Option<bastyde_canvas::Point>,
+    /// True when the in-flight pointer press's hit target is a strict
+    /// descendant of the widget whose handler is currently running and that
+    /// descendant carries its own tap gesture (a chevron, checkbox, inline
+    /// button). Set per-node by the dispatcher for `PointerDown`/`PointerUp`.
+    /// Read via [`press_claimed_by_interactive_child`](Self::press_claimed_by_interactive_child).
+    pub(crate) press_claimed_by_interactive_child: bool,
     /// Per-content-widget overlay bounds snapshotted at handler
     /// invocation. A flat vec is fine — open overlays are typically
     /// 0–3 per tree. Read by the safe-triangle submenu hover gate
@@ -253,6 +259,7 @@ impl<'ops> EventContext<'ops> {
             window_ops: None,
             current_window: None,
             tree_pointer_position: None,
+            press_claimed_by_interactive_child: false,
             overlay_bounds_snapshot: Vec::new(),
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
         }
@@ -504,6 +511,16 @@ impl<'ops> EventContext<'ops> {
     /// submenu hover gate.
     pub fn tree_pointer_position(&self) -> Option<bastyde_canvas::Point> {
         self.tree_pointer_position
+    }
+
+    /// True when the in-flight pointer press's hit target is a strict
+    /// descendant of THIS handler's widget that carries its own tap gesture
+    /// (chevron, checkbox, inline button). A row/container that selects on
+    /// press should early-return `EventResponse::Ignored` when this is set, so
+    /// the press belongs to the inner control, not the row. Only meaningful
+    /// inside `on_pointer_event` handlers for `PointerDown`/`PointerUp`.
+    pub fn press_claimed_by_interactive_child(&self) -> bool {
+        self.press_claimed_by_interactive_child
     }
 
     /// Look up the bounds rect of an open overlay by its root content

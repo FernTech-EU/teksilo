@@ -858,12 +858,18 @@ impl<T: 'static> Widget for ListView<T> {
                     let click_index = i;
                     ctx.apply_handlers(
                         child_id,
-                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                        HandlerSet::new().on_pointer_event(move |event, ctx| match event {
                             bastyde_core::event::WidgetEvent::PointerDown {
                                 modifiers,
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
+                                // The press belongs to an interactive child (an
+                                // embedded checkbox, button, …) — let it handle the
+                                // tap; don't also select the row.
+                                if ctx.press_claimed_by_interactive_child() {
+                                    return bastyde_core::event::EventResponse::Ignored;
+                                }
                                 if modifiers.ctrl() {
                                     sel_click.toggle(click_index);
                                 } else if modifiers.shift() {
@@ -1179,6 +1185,78 @@ mod tests {
             .item_height(item_height),
         );
         (tree, lv_id, model)
+    }
+
+    #[test]
+    fn checkbox_press_does_not_select_row() {
+        // Regression: pressing an embedded checkbox toggles it but must NOT
+        // select the row. The row's select-on-press handler yields to the
+        // checkbox's own tap via `ctx.press_claimed_by_interactive_child()`.
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+        use bastyde_data::{SelectionMode, SelectionModel};
+        use bastyde_i18n::lit;
+        use crate::styles::recipe_standard_item_style as si;
+
+        let model = ListModel::from_vec(vec!["alpha", "beta", "gamma"]);
+        let checks: Vec<Signal<bool>> = (0..3).map(|_| Signal::new(false)).collect();
+        let checks_for_rows = checks.clone();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model, move |i, _item, _selected| {
+                Box::new(
+                    crate::StandardListItem::new(lit!(format!("row {i}")))
+                        .checkbox(checks_for_rows[i].clone()),
+                ) as Box<dyn Widget>
+            })
+            .item_height(40.0)
+            .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let rows = tree.children(lv_id);
+        let row0 = tree.bounds(rows[0]);
+        let press = |t: &mut WidgetTree, x: f32, y: f32| {
+            t.dispatch_event(WidgetEvent::PointerDown {
+                position: Point::new(x, y),
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+            t.dispatch_event(WidgetEvent::PointerUp {
+                position: Point::new(x, y),
+                button: PointerButton::Primary,
+                modifiers: Modifiers::NONE,
+            });
+        };
+
+        // Press the embedded checkbox (leading edge): toggles it, must NOT select.
+        let cb_x = row0.x
+            + si::STANDARD_ITEM_BG_HORIZONTAL_INSET
+            + si::STANDARD_ITEM_PADDING_HORIZONTAL
+            + 4.0;
+        let cb_y = row0.y + row0.height * 0.5;
+        press(&mut tree, cb_x, cb_y);
+        assert!(checks[0].get(), "checkbox press should toggle the checkbox");
+        assert!(
+            selection.selected_indices().is_empty(),
+            "checkbox press must not select the row (got {:?})",
+            selection.selected_indices()
+        );
+
+        // Press the row body (far right of the checkbox): selects, no toggle.
+        let body_x = row0.x + row0.width * 0.7;
+        press(&mut tree, body_x, cb_y);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "body press should select row 0"
+        );
+        assert!(
+            checks[0].get(),
+            "body press must not toggle the checkbox back"
+        );
     }
 
     #[test]

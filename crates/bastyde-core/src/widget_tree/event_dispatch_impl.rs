@@ -851,8 +851,42 @@ impl WidgetTree {
         }
         ancestors.reverse();
 
+        // For a pointer press, find the innermost tap-owning node at-or-above
+        // the hit target (a chevron / checkbox / inline button). A row or
+        // container that selects on press consults
+        // `ctx.press_claimed_by_interactive_child()` to skip selecting when this
+        // owner is a strict descendant of it — the press belongs to the inner
+        // control, not the row. Tap-like handlers only; drag/swipe are excluded
+        // so a draggable row still selects itself on press.
+        let tap_owner: Option<WidgetId> = if matches!(
+            event,
+            WidgetEvent::PointerDown { .. } | WidgetEvent::PointerUp { .. }
+        ) {
+            let mut owner = None;
+            let mut cur = Some(target);
+            while let Some(id) = cur {
+                if self.arena.get(id).is_some_and(|n| {
+                    n.any_handler(|h| {
+                        h.on_tap.is_some()
+                            || h.on_double_tap.is_some()
+                            || h.on_triple_tap.is_some()
+                            || h.on_long_press.is_some()
+                    })
+                }) {
+                    owner = Some(id);
+                    break;
+                }
+                cur = self.arena.parent(id);
+            }
+            owner
+        } else {
+            None
+        };
+
         for &id in &ancestors {
             let mut ctx = self.make_event_context(&mut *ops);
+            ctx.press_claimed_by_interactive_child =
+                tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
             // space before its handlers see it (see `localize_event`).
             let localized = self.localize_event(id, event);
@@ -877,6 +911,8 @@ impl WidgetTree {
         let mut is_target = true;
         while let Some(id) = current {
             let mut ctx = self.make_event_context(&mut *ops);
+            ctx.press_claimed_by_interactive_child =
+                tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
             // space before its handlers (and its gesture arena) see it.
             let localized = self.localize_event(id, event);

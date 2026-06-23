@@ -1058,12 +1058,18 @@ impl<T: 'static> Widget for TreeView<T> {
 
                     ctx.apply_handlers(
                         child_id,
-                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                        HandlerSet::new().on_pointer_event(move |event, ctx| match event {
                             bastyde_core::event::WidgetEvent::PointerDown {
                                 modifiers,
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
+                                // The press belongs to an interactive child (the
+                                // chevron, or an inline control) — toggling/acting
+                                // is its job; don't also select the row.
+                                if ctx.press_claimed_by_interactive_child() {
+                                    return bastyde_core::event::EventResponse::Ignored;
+                                }
                                 // Selection lands on press — snappy, and the
                                 // modifier information is only in the event
                                 // stream (TapRecognizer strips it).
@@ -1085,6 +1091,12 @@ impl<T: 'static> Widget for TreeView<T> {
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
+                                // A release on the chevron (or another interactive
+                                // child) is handled by that child's own tap — don't
+                                // also toggle from the row body.
+                                if ctx.press_claimed_by_interactive_child() {
+                                    return bastyde_core::event::EventResponse::Ignored;
+                                }
                                 // Expand/collapse fires on release so a drag
                                 // gesture pre-empts it (once active_drag is
                                 // set, PointerUp is routed to handle_drag_drop
@@ -1573,6 +1585,97 @@ mod tests {
             selection.selected_indices(),
             vec![2],
             "Second ArrowDown should select index 2 (third root)"
+        );
+    }
+
+    // --- Chevron-vs-selection regression tests ---
+
+    /// A `TreeView` whose rows are real `StandardTreeItem`s (with a live chevron)
+    /// over `sample_tree()`, plus a single-select model. The chevron is the only
+    /// toggle target (`row_click_expands(false)`), mirroring app usage.
+    fn make_standard_tree_view() -> (WidgetTree, WidgetId, bastyde_data::SelectionModel) {
+        use bastyde_data::{SelectionMode, SelectionModel};
+        let tree = sample_tree();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new_with_context(tree, |item: &&'static str, entry, selected, ctx| {
+                Box::new(
+                    crate::StandardTreeItem::new(lit!((*item).to_string()))
+                        .from_entry(entry)
+                        .selected(selected)
+                        .on_toggle_rc(ctx.toggle_callback()),
+                ) as Box<dyn Widget>
+            })
+            .item_height(28.0)
+            .selection(sel_clone)
+            .row_click_expands(false),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        (wtree, tv_id, selection)
+    }
+
+    fn press_at(w: &mut WidgetTree, x: f32, y: f32) {
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+        w.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        w.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(x, y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    #[test]
+    fn chevron_press_toggles_without_selecting_the_row() {
+        // Regression: pressing the expand chevron must toggle the subtree but
+        // NOT select the row. The row's select-on-press handler yields to the
+        // chevron's own tap via `ctx.press_claimed_by_interactive_child()`.
+        let (mut wtree, tv_id, selection) = make_standard_tree_view();
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            3,
+            "precondition: 3 collapsed roots"
+        );
+
+        // Row A is depth 0 (indent 0); the chevron column is x in [0, 16].
+        press_at(&mut wtree, 8.0, 14.0);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            5,
+            "chevron press should expand A, revealing A1 and A2"
+        );
+        assert!(
+            selection.selected_indices().is_empty(),
+            "chevron press must not select the row (got {:?})",
+            selection.selected_indices()
+        );
+    }
+
+    #[test]
+    fn body_press_selects_the_row() {
+        // Companion: pressing the row BODY (past the chevron column) still
+        // selects, and does not expand when row_click_expands=false.
+        let (mut wtree, tv_id, selection) = make_standard_tree_view();
+
+        press_at(&mut wtree, 100.0, 14.0);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "body press should select row 0"
+        );
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            3,
+            "body press must not expand when row_click_expands=false"
         );
     }
 
