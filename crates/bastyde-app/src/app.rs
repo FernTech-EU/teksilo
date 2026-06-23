@@ -162,19 +162,22 @@ fn present_in_tree_modal_request(
     });
 
     tree.activate(content_id);
-    let modal_overlay = tree.show_overlay_from_source(
-        source_widget,
-        OverlayRequest {
-            content_id,
-            anchor: source_widget,
-            placement: OverlayPlacement::Centered,
-            dismiss,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss,
-            fade_duration: None,
-        },
-    );
+    // Present the modal as a WINDOW-LEVEL overlay via `show_overlay` rather than
+    // `show_overlay_from_source`: the latter re-parents the overlay to the source
+    // widget's overlay ancestor, so a modal opened from a menu item would be
+    // trapped in (and positioned relative to) the transient menu overlay instead
+    // of centering on the window. `Centered` already ignores the anchor; keeping
+    // `parent_overlay: None` makes it center on the viewport.
+    let modal_overlay = tree.show_overlay(OverlayRequest {
+        content_id,
+        anchor: source_widget,
+        placement: OverlayPlacement::Centered,
+        dismiss,
+        layer: OverlayLayer::InTree,
+        parent_overlay: None,
+        on_dismiss,
+        fade_duration: None,
+    });
     // Cascade-dismiss the scrim when the modal is dismissed (by any
     // path: Escape, click-outside, manual). The scrim is below the
     // modal in the stack but counts as its "child" in the parent-

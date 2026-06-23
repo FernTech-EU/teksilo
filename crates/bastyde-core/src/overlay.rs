@@ -996,9 +996,26 @@ impl OverlayManager {
         let (vw, vh) = viewport;
         let rtl = matches!(layout_direction, LayoutDirection::RightToLeft);
         for overlay in &mut self.stack {
-            let Some(anchor) = anchor_bounds_fn(overlay.anchor) else {
-                // Anchor destroyed; preserve the previous bounds.
-                continue;
+            let anchor = match anchor_bounds_fn(overlay.anchor) {
+                Some(a) => a,
+                None => {
+                    // Anchor destroyed. Anchor-independent placements must still
+                    // be positioned — e.g. a `Centered` modal opened from a menu
+                    // item that has since closed (the menu item is the anchor,
+                    // but `Centered` doesn't use it). Anchor-relative placements
+                    // keep their previous bounds.
+                    if matches!(
+                        overlay.placement,
+                        OverlayPlacement::Centered
+                            | OverlayPlacement::FullViewport
+                            | OverlayPlacement::BottomCenter
+                            | OverlayPlacement::ViewportCorner { .. }
+                    ) {
+                        Rect::ZERO
+                    } else {
+                        continue;
+                    }
+                }
             };
             let content_size = overlay.bounds.size(); // Will be set from content layout
 
