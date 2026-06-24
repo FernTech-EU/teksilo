@@ -34,9 +34,10 @@ use bastyde_core::widget::{
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, lit};
-use bastyde_tokens::{BorderRole, HAlignment, SurfaceRole, TextRole, TextStyleRole};
+use bastyde_tokens::{BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::icon_button::{IconButton, IconButtonSize};
+use crate::styles::recipe_icon_button_style::ICON_BUTTON_CORNER_RADIUS;
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
@@ -100,6 +101,7 @@ const LABELED_TOP_MARGIN: f32 = 6.0;
 pub struct DockRail {
     pub(crate) side: DockSide,
     pub(crate) size: IconButtonSize,
+    pub(crate) background: Option<ColorProp>,
     pub(crate) top_slot: Option<DockRailSlot>,
     pub(crate) bottom_slot: Option<DockRailSlot>,
     pub(crate) overflow_icon: Option<DockIconFactory>,
@@ -120,6 +122,7 @@ impl DockRail {
         Self {
             side,
             size: IconButtonSize::Large,
+            background: None,
             top_slot: None,
             bottom_slot: None,
             overflow_icon: None,
@@ -130,6 +133,14 @@ impl DockRail {
     /// [`Hero`](IconButtonSize::Hero)). Default [`IconButtonSize::Large`].
     pub fn size(mut self, size: IconButtonSize) -> Self {
         self.size = size;
+        self
+    }
+
+    /// Override the rail strip's background. Accepts `Color`, a
+    /// [`SurfaceRole`](bastyde_tokens::SurfaceRole), or a `Signal<Color>`.
+    /// Default (unset) is `SurfaceRole::Sunken`.
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = Some(color.into());
         self
     }
 
@@ -265,7 +276,12 @@ impl Widget for DockActivityBar {
             BindingLevel::Rebuild,
         );
 
-        let bg = ctx.add(RectWidget::new().background(SurfaceRole::Sunken));
+        let bg_color = self
+            .config
+            .background
+            .clone()
+            .unwrap_or_else(|| SurfaceRole::Sunken.into());
+        let bg = ctx.add(RectWidget::new().background(bg_color));
         let selected = self.model.side_selected_tab_signal(self.side);
         let visible = self.model.side_visible_signal(self.side);
         let tabs = self.model.side_tabs(self.side);
@@ -794,7 +810,13 @@ impl Widget for DockRailItem {
                 SurfaceRole::Transparent
             }
         });
-        let bg_rect = ctx.add(RectWidget::new().bind_background(bg));
+        // Rounded selection highlight matching the IconButton corner style, so
+        // the rail items read as buttons rather than full-square fills.
+        let bg_rect = ctx.add(
+            RectWidget::new()
+                .bind_background(bg)
+                .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
+        );
 
         let glyph = if let Some(icon) = self.icon.take() {
             ctx.add((icon)())
