@@ -25,6 +25,24 @@ pub enum TabBarOrientation {
     Vertical,
 }
 
+/// Which edge of a tab the active-tab highlight indicator hugs.
+///
+/// The position is expressed relative to the content pane, so it stays
+/// meaningful in both orientations and under RTL:
+///
+/// - [`OuterEdge`](TabIndicatorPosition::OuterEdge) (default) — the edge
+///   pointing *away* from the content: **top** for a horizontal bar,
+///   **leading** for a vertical bar. The IntUI / browser-tab look.
+/// - [`InnerEdge`](TabIndicatorPosition::InnerEdge) — the edge pointing
+///   *toward* the content: **bottom** for a horizontal bar (the indicator
+///   sits below the label), **trailing** for a vertical bar.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+pub enum TabIndicatorPosition {
+    #[default]
+    OuterEdge,
+    InnerEdge,
+}
+
 #[derive(Clone, Debug)]
 pub struct TabStyleConfig {
     pub label: WidgetId,
@@ -35,6 +53,9 @@ pub struct TabStyleConfig {
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
     pub orientation: TabBarOrientation,
+    /// Which edge the active-tab highlight indicator hugs. See
+    /// [`TabIndicatorPosition`].
+    pub indicator_position: TabIndicatorPosition,
 }
 
 /// Inputs for the bar-level chrome — the surface the headers row,

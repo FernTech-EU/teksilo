@@ -242,11 +242,24 @@ pub struct TabWidget {
     /// ([`TabDisplayMode::Auto`]) otherwise. Bound at [`BindingLevel::Rebuild`]
     /// like `sizing`, so flipping it swaps what the tabs show live.
     tab_display: Option<Signal<TabDisplayMode>>,
-    /// Surface color/role applied to **every** tab — selected, idle,
-    /// and hovered all use this one value, so the strip reads as
-    /// visually uniform. Set via [`Self::tab_surface_role`].
-    /// `None` (default) means transparent.
-    tab_surface_role: Option<bastyde_core::color_prop::ColorProp>,
+    /// All-states per-tab background shorthand. Set via
+    /// [`Self::tab_background`]. `None` (default) means transparent.
+    tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for the selected tab. Set via [`Self::selected_tab_background`].
+    selected_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for the hovered (non-selected) tab. Set via
+    /// [`Self::hover_tab_background`].
+    hover_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for idle tabs. Set via [`Self::idle_tab_background`].
+    idle_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Bar-strip backdrop fill. Set via [`Self::bar_background`].
+    bar_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Draw a divider between consecutive tabs. Set via [`Self::tab_dividers`].
+    tab_dividers: bool,
+    /// Colour for the inter-tab dividers. Set via [`Self::tab_divider_color`].
+    tab_divider_color: Option<bastyde_core::color_prop::ColorProp>,
+    /// Active-tab highlight edge. Set via [`Self::active_indicator`].
+    active_indicator: Option<bastyde_core::styles::TabIndicatorPosition>,
     /// Text role used for the label (and matching icon tint) on the
     /// selected tab. Set via [`Self::selected_text_role`]. `None`
     /// defaults to [`bastyde_tokens::TextRole::Primary`] (Int UI
@@ -339,7 +352,14 @@ impl TabWidget {
             dyn_pane_ids: HashMap::new(),
             sizing: None,
             tab_display: None,
-            tab_surface_role: None,
+            tab_background: None,
+            selected_tab_background: None,
+            hover_tab_background: None,
+            idle_tab_background: None,
+            bar_background: None,
+            tab_dividers: false,
+            tab_divider_color: None,
+            active_indicator: None,
             selected_text_role: None,
             idle_text_role: None,
             min_tab_width: None,
@@ -594,18 +614,81 @@ impl TabWidget {
         self
     }
 
-    /// Set the surface color/role applied to every tab in the strip.
-    /// Accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (via
-    /// [`ColorProp`](bastyde_core::color_prop::ColorProp)). All tabs —
-    /// selected, idle, and hovered — render the same surface, so
-    /// selection is conveyed only by the accent indicator and the
-    /// label-color shift (Int UI editor-strip convention). Default
-    /// is transparent.
-    pub fn tab_surface_role(
+    /// All-states shorthand for the per-tab background — every tab
+    /// (selected, idle, hovered) paints this unless a per-state override
+    /// is set. Accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (via
+    /// [`ColorProp`](bastyde_core::color_prop::ColorProp)). Default is
+    /// transparent. To tint the bar's backdrop instead, use
+    /// [`bar_background`](Self::bar_background).
+    pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for the **selected** tab. Falls back to
+    /// [`tab_background`](Self::tab_background), then transparent.
+    pub fn selected_tab_background(
         mut self,
         color: impl Into<bastyde_core::color_prop::ColorProp>,
     ) -> Self {
-        self.tab_surface_role = Some(color.into());
+        self.selected_tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for the **hovered** (non-selected) tab. Falls back to
+    /// [`tab_background`](Self::tab_background), then transparent.
+    pub fn hover_tab_background(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.hover_tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for **idle** tabs (not selected, not hovered). Falls back
+    /// to [`tab_background`](Self::tab_background), then transparent.
+    pub fn idle_tab_background(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.idle_tab_background = Some(color.into());
+        self
+    }
+
+    /// Set the bar-strip backdrop fill (behind headers, slots, arrows),
+    /// independent of the per-tab backgrounds. Default transparent.
+    pub fn bar_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.bar_background = Some(color.into());
+        self
+    }
+
+    /// Draw a 1 dp divider between consecutive tabs. Off by default.
+    pub fn tab_dividers(mut self) -> Self {
+        self.tab_dividers = true;
+        self
+    }
+
+    /// Like [`tab_dividers`](Self::tab_dividers) with an explicit colour
+    /// (`Color`, [`BorderRole`](bastyde_tokens::BorderRole), or
+    /// `Signal<Color>`). Implies `tab_dividers()`.
+    pub fn tab_divider_color(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.tab_dividers = true;
+        self.tab_divider_color = Some(color.into());
+        self
+    }
+
+    /// Choose which edge the active-tab highlight indicator hugs. Default
+    /// [`TabIndicatorPosition::OuterEdge`](bastyde_core::styles::TabIndicatorPosition);
+    /// [`InnerEdge`](bastyde_core::styles::TabIndicatorPosition::InnerEdge)
+    /// puts it below the label (horizontal) / trailing edge (vertical).
+    pub fn active_indicator(
+        mut self,
+        position: bastyde_core::styles::TabIndicatorPosition,
+    ) -> Self {
+        self.active_indicator = Some(position);
         self
     }
 
@@ -1214,8 +1297,29 @@ impl Widget for TabWidget {
             if let Some(ref display) = self.tab_display {
                 bar = bar.tab_display(display.get());
             }
-            if let Some(ref bg) = self.tab_surface_role {
-                bar = bar.tab_surface_role(bg.clone());
+            if let Some(ref bg) = self.tab_background {
+                bar = bar.tab_background(bg.clone());
+            }
+            if let Some(ref bg) = self.selected_tab_background {
+                bar = bar.selected_tab_background(bg.clone());
+            }
+            if let Some(ref bg) = self.hover_tab_background {
+                bar = bar.hover_tab_background(bg.clone());
+            }
+            if let Some(ref bg) = self.idle_tab_background {
+                bar = bar.idle_tab_background(bg.clone());
+            }
+            if let Some(ref bg) = self.bar_background {
+                bar = bar.bar_background(bg.clone());
+            }
+            if self.tab_dividers {
+                bar = match self.tab_divider_color {
+                    Some(ref c) => bar.tab_divider_color(c.clone()),
+                    None => bar.tab_dividers(),
+                };
+            }
+            if let Some(pos) = self.active_indicator {
+                bar = bar.active_indicator(pos);
             }
             if let Some(role) = self.selected_text_role {
                 bar = bar.selected_text_role(role);

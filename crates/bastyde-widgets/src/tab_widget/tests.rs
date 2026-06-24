@@ -1568,10 +1568,10 @@ fn tab_widget_vertical_compose_lays_bar_on_leading_edge() {
     );
 }
 
-/// Regression: a vertical bar with a `tab_surface_role` must keep every
+/// Regression: a vertical bar with a per-tab background must keep every
 /// header (and therefore its leading accent indicator) pinned to the bar's
-/// leading edge, regardless of how wide each tab's label is. The surface
-/// role wraps the chrome in an extra `ZStack[bg, chrome]`; a plain ZStack
+/// leading edge, regardless of how wide each tab's label is. The background
+/// wraps the chrome in an extra `ZStack[bg, chrome]`; a plain ZStack
 /// there sized the chrome to its label and centered it, dragging the
 /// indicator inward by a per-label amount (the bug: indicator x drifted as
 /// the selected tab changed because the texts differ). The fix wraps the
@@ -1585,7 +1585,7 @@ fn vertical_surface_role_keeps_headers_flush_leading() {
     let mut tw = TabWidget::new(selected.clone())
         .vertical()
         .max_tab_width(180.0)
-        .tab_surface_role(bastyde_tokens::SurfaceRole::Sunken);
+        .tab_background(bastyde_tokens::SurfaceRole::Sunken);
     for t in titles {
         tw = tw.static_tab(TabInfo::new().title(label(t)), FixedLeaf(120.0, 48.0));
     }
@@ -2199,6 +2199,15 @@ fn subtree_has_role(tree: &WidgetTree, id: WidgetId, role: accesskit::Role) -> b
         .any(|&c| subtree_has_role(tree, c, role))
 }
 
+fn count_role(tree: &WidgetTree, id: WidgetId, role: accesskit::Role) -> usize {
+    let here = usize::from(tree.accessibility_node(id).role() == role);
+    here + tree
+        .children(id)
+        .iter()
+        .map(|&c| count_role(tree, c, role))
+        .sum::<usize>()
+}
+
 #[test]
 fn bar_visibility_always_shows_strip() {
     use crate::tab_widget::TabBarVisibility;
@@ -2294,6 +2303,138 @@ fn bar_visibility_when_multiple_is_reactive_and_preserves_content() {
         "WhenMultiple hides the strip again at a single tab"
     );
     assert_eq!(pane_builds.get(), 2, "no pane rebuild on the 2→1 toggle");
+}
+
+// ─── Appearance API — per-state colours, dividers, indicator ────────
+
+use bastyde_core::styles::TabIndicatorPosition;
+
+/// A horizontal `TabWidget` with `n` static tabs, optionally with
+/// inter-tab dividers, laid out at a generous size.
+fn appearance_widget(n: usize, dividers: bool) -> (WidgetTree, WidgetId) {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tw = TabWidget::new(selected)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false);
+    if dividers {
+        tw = tw.tab_dividers();
+    }
+    for i in 0..n {
+        tw = tw.static_tab(
+            TabInfo::new().title(label(&format!("Tab {i}"))),
+            FixedLeaf(120.0, 48.0),
+        );
+    }
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(tw);
+    tree.layout(SizeProposal::exact(900.0, 320.0));
+    (tree, id)
+}
+
+#[test]
+fn tab_dividers_append_one_overlay_child_to_the_scroll_row() {
+    // Off: the row's children are exactly the headers.
+    let (tree, id) = appearance_widget(3, false);
+    let row = data_source_header_row(&tree, bar_of(&tree, id));
+    assert_eq!(
+        tree.children(row).len(),
+        3,
+        "no overlay child when dividers are off"
+    );
+
+    // On: exactly one extra child (the divider overlay), and it is not a
+    // Tab (so the tab count is unchanged) and is hidden from AT.
+    let (tree, id) = appearance_widget(3, true);
+    let row = data_source_header_row(&tree, bar_of(&tree, id));
+    let kids = tree.children(row);
+    assert_eq!(kids.len(), 4, "dividers add one overlay child to the row");
+    let tabs = kids
+        .iter()
+        .filter(|&&c| tree.accessibility_node(c).role() == accesskit::Role::Tab)
+        .count();
+    assert_eq!(tabs, 3, "the overlay is not a tab");
+    // The last child is the overlay — hidden from assistive tech.
+    let overlay = *kids.last().unwrap();
+    assert!(
+        tree.accessibility_node(overlay).is_hidden(),
+        "the divider overlay is presentational (AT-hidden)"
+    );
+}
+
+#[test]
+fn pinned_tabs_with_dividers_build() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let tw = TabWidget::new(selected)
+        .tab_divider_color(bastyde_tokens::BorderRole::DividerStrong)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false)
+        .static_tab(TabInfo::new().title(label("P1")).pinned(true), FixedLeaf(40.0, 48.0))
+        .static_tab(TabInfo::new().title(label("P2")).pinned(true), FixedLeaf(40.0, 48.0))
+        .static_tab(TabInfo::new().title(label("Doc")), FixedLeaf(120.0, 48.0));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(tw);
+    tree.layout(SizeProposal::exact(800.0, 320.0));
+    // Two pinned tabs + one unpinned all render (smoke: no panic, tabs present).
+    let tab_count = count_role(&tree, id, accesskit::Role::Tab);
+    assert_eq!(tab_count, 3, "all three tabs render with pinned-strip dividers");
+}
+
+#[test]
+fn active_indicator_inner_edge_builds_and_lays_out() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let tw = TabWidget::new(selected)
+        .active_indicator(TabIndicatorPosition::InnerEdge)
+        .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+        .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(tw);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(subtree_has_role(&tree, id, accesskit::Role::Tab));
+}
+
+#[test]
+fn per_state_tab_backgrounds_build_with_and_without() {
+    use bastyde_tokens::SurfaceRole;
+    // All three states set: builds, lays out, all tabs present.
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let tw = TabWidget::new(selected)
+        .selected_tab_background(SurfaceRole::Raised)
+        .hover_tab_background(SurfaceRole::Hover)
+        .idle_tab_background(SurfaceRole::Transparent)
+        .bar_background(SurfaceRole::Sunken)
+        .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+        .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(tw);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert_eq!(count_role(&tree, id, accesskit::Role::Tab), 2);
+
+    // Regression (nested-ZStack collapse): the selected tab's background rect
+    // must FILL its tab, not shrink to 0×0. The first tab is selected by
+    // default; its header → root ZStack → first child is the selected-state
+    // RectWidget, which must cover the full tab bounds.
+    fn first_tab(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+        if tree.accessibility_node(id).role() == accesskit::Role::Tab
+            && tree.bounds(id).height > 0.0
+        {
+            return Some(id);
+        }
+        tree.children(id).iter().find_map(|&c| first_tab(tree, c))
+    }
+    let tab = first_tab(&tree, id).expect("a tab header");
+    let tab_b = tree.bounds(tab);
+    let root_zstack = tree.children(tab)[0];
+    let sel_bg = tree.children(root_zstack)[0];
+    let bg_b = tree.bounds(sel_bg);
+    assert!(
+        (bg_b.width - tab_b.width).abs() < 0.5 && (bg_b.height - tab_b.height).abs() < 0.5,
+        "selected-tab background must fill its tab ({bg_b:?} vs {tab_b:?}) — \
+         a nested ZStack would collapse it to zero"
+    );
+
+    // Default (no backgrounds): also builds with the same tab count.
+    let (tree, id) = appearance_widget(2, false);
+    assert_eq!(count_role(&tree, id, accesskit::Role::Tab), 2);
 }
 
 // ─── Suppress unused-warning when only some tests run ───────────────

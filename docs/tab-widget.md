@@ -693,6 +693,91 @@ horizontal scroll position.
 
 ---
 
+## Appearance — backgrounds, text colour, dividers, indicator
+
+All of these builders exist on both `TabBar` and `TabWidget` (the
+`TabWidget` form forwards to its inner bar). They tune the default
+`RecipeTabStyle`; an app that needs more than colour replaces the whole
+chrome with `.style(impl TabStyle)` or `theme.style_slots.tab` (see
+[styling-system.md](styling-system.md)).
+
+### Per-tab backgrounds (selected / hover / idle)
+
+Each tab state can paint its own background. Precedence is
+**selected > hover > idle**; each state resolves to its own override,
+else the `tab_background` shorthand, else transparent:
+
+```rust
+TabWidget::new(selected)
+    .tab_background(SurfaceRole::Sunken)            // shorthand: all states
+    .selected_tab_background(SurfaceRole::Raised)   // current tab
+    .hover_tab_background(SurfaceRole::Hover)        // hovered (non-selected)
+    .idle_tab_background(SurfaceRole::Transparent)   // the other tabs
+```
+
+Each accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (an
+`impl Into<ColorProp>`). Internally the three states are three flush
+`RectWidget`s gated by `visible_when` — switching state just toggles
+which one paints (a repaint, never a rebuild), so selection state and
+focus survive.
+
+### Tab text colour
+
+Per-state **text colour** is set with the text-role builders (the label
+and its icon tint follow the role):
+
+```rust
+.selected_text_role(TextRole::Primary)     // default
+.idle_text_role(TextRole::Secondary)       // default; also used on hover
+```
+
+Disabled tabs always read as `TextRole::Disabled`. (Full per-state font
+*style* — e.g. bold-when-selected — is not a built-in knob; use a custom
+`TabStyle` if you need it.)
+
+### Bar background
+
+The bar's backdrop fill is **independent** of the per-tab backgrounds:
+
+```rust
+.bar_background(SurfaceRole::Sunken)   // behind headers, slots, arrows
+```
+
+Default is transparent.
+
+### Dividers between tabs
+
+```rust
+.tab_dividers()                             // 1 dp BorderRole::Divider line
+.tab_divider_color(BorderRole::DividerStrong)   // or an explicit colour (implies on)
+```
+
+A line is drawn between consecutive tabs in **both** the scrollable row
+and the pinned strip. In the scrollable row it is an on-top overlay that
+scrolls with the tabs; in the pinned strip it is an interleaved
+`Divider` widget.
+
+### Active-tab indicator position
+
+The highlight that marks the selected tab defaults to the **outer** edge
+(top for a horizontal bar, leading for a vertical bar). Move it to the
+**inner** edge — below the label on a horizontal bar, trailing on a
+vertical bar — with:
+
+```rust
+use bastyde::widgets::TabIndicatorPosition;
+
+.active_indicator(TabIndicatorPosition::InnerEdge)   // below the text (horizontal)
+```
+
+`OuterEdge` (default) and `InnerEdge` together cover all four edges
+across the two orientations, and the vertical leading/trailing edges are
+resolved against the layout direction (RTL-correct). A custom `TabStyle`
+receives the choice on `TabStyleConfig::indicator_position` and may
+interpret it freely.
+
+---
+
 ## Keyboard
 
 | Key                       | Effect                                                   |

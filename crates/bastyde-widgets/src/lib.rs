@@ -115,7 +115,7 @@ pub use badge::Badge;
 pub use banner::{Banner, BannerSeverity};
 pub use bastyde_core::styles::{
     DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
-    SharedDropTargetStyle,
+    SharedDropTargetStyle, TabIndicatorPosition,
 };
 pub use bastyde_data::CheckState;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};

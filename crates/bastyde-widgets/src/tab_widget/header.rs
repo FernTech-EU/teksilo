@@ -157,10 +157,19 @@ pub(crate) struct TabHeader {
     /// browser-tab convention) or the leading edge (vertical bars,
     /// the IDE-perspective / sidebar convention).
     orientation: super::delegate::TabBarOrientation,
-    /// Uniform surface role/color applied regardless of selection /
-    /// hover state, set by the parent [`TabBar`](super::TabBar) via
-    /// `tab_surface_role(...)`. `None` means transparent.
-    tab_surface_role: Option<bastyde_core::color_prop::ColorProp>,
+    /// All-states background shorthand, set by the parent
+    /// [`TabBar`](super::TabBar) via `tab_background(...)`. The per-state
+    /// fields below fall back to this, which falls back to transparent.
+    tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for this tab while it is the selected one. Falls back to
+    /// `tab_background`, then transparent.
+    selected_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background while hovered (and not selected). Falls back to
+    /// `tab_background`, then transparent.
+    hover_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background while idle (not selected, not hovered). Falls back to
+    /// `tab_background`, then transparent.
+    idle_tab_background: Option<bastyde_core::color_prop::ColorProp>,
     /// Text role used for the label (and matching icon tint) when this
     /// tab is the selected one. Default: `TextRole::Primary` (the Int
     /// UI editor-strip convention). Set by the parent `TabBar` via
@@ -171,6 +180,9 @@ pub(crate) struct TabHeader {
     /// `TextRole::Secondary`. Set by the parent `TabBar` via
     /// `idle_text_role(...)`.
     idle_text_role: TextRole,
+    /// Which edge the active-tab highlight indicator hugs, forwarded into
+    /// the [`TabStyleConfig`](bastyde_core::styles::TabStyleConfig).
+    active_indicator: bastyde_core::styles::TabIndicatorPosition,
     /// Per-call style override propagated from the parent `TabBar`'s
     /// `.style(impl TabStyle)` builder. `None` means "use the theme
     /// slot or the bundled `RecipeTabStyle`".
@@ -219,9 +231,13 @@ pub(crate) struct TabHeaderConfig {
     pub max_width: f32,
     pub pinned: bool,
     pub orientation: super::delegate::TabBarOrientation,
-    pub tab_surface_role: Option<bastyde_core::color_prop::ColorProp>,
+    pub tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    pub selected_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    pub hover_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    pub idle_tab_background: Option<bastyde_core::color_prop::ColorProp>,
     pub selected_text_role: TextRole,
     pub idle_text_role: TextRole,
+    pub active_indicator: bastyde_core::styles::TabIndicatorPosition,
     pub style_override: Option<SharedTabStyle>,
 }
 
@@ -263,9 +279,13 @@ impl TabHeader {
             max_width: cfg.max_width,
             pinned: cfg.pinned,
             orientation: cfg.orientation,
-            tab_surface_role: cfg.tab_surface_role,
+            tab_background: cfg.tab_background,
+            selected_tab_background: cfg.selected_tab_background,
+            hover_tab_background: cfg.hover_tab_background,
+            idle_tab_background: cfg.idle_tab_background,
             selected_text_role: cfg.selected_text_role,
             idle_text_role: cfg.idle_text_role,
+            active_indicator: cfg.active_indicator,
             style_override: cfg.style_override,
             inner_root_id: None,
         }
@@ -578,7 +598,7 @@ impl Widget for TabHeader {
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeTabStyle` default. The style wraps `inner_id`
         // with the accent indicator + focus ring chrome; the
-        // tab_surface_role background (which the trait config doesn't
+        // per-state tab background (which the trait config doesn't
         // carry through) stays as a RectWidget sibling underneath.
         let style: SharedTabStyle = self
             .style_override
@@ -595,24 +615,70 @@ impl Widget for TabHeader {
             is_focused,
             is_disabled,
             orientation: orientation_for_cfg,
+            indicator_position: self.active_indicator,
         };
         let chrome_id = style.make_body(&cfg, ctx);
 
-        // tab_surface_role: optional uniform background painted under
-        // the chrome. Adjacent tabs sit flush so we don't round the
-        // corners.
-        let root_id = if let Some(ref role) = self.tab_surface_role {
-            let bg_id = ctx.add(RectWidget::new().background(role.clone()));
+        // Per-state background painted under the chrome. Each state
+        // (selected / hover / idle) resolves to its own override, else the
+        // `tab_background` shorthand, else transparent. When *any* of the
+        // four are set we mount three flush `RectWidget`s in a back ZStack,
+        // each shown only in its state via `ctx.visible_when` (RepaintOnly —
+        // no rebuild, mirroring the hover close-button) so selection /
+        // hover changes just toggle which rect paints. Adjacent tabs sit
+        // flush, so no rounded corners.
+        let any_bg = self.selected_tab_background.is_some()
+            || self.hover_tab_background.is_some()
+            || self.idle_tab_background.is_some()
+            || self.tab_background.is_some();
+        let root_id = if any_bg {
+            let shorthand = &self.tab_background;
+            let effective = |state: &Option<bastyde_core::color_prop::ColorProp>| {
+                state
+                    .clone()
+                    .or_else(|| shorthand.clone())
+                    .unwrap_or_else(|| bastyde_tokens::SurfaceRole::Transparent.into())
+            };
+            let index_for_bg = self.index;
+            // Mutually-exclusive state gates (selected wins over hover).
+            let is_selected = self.selected.map(move |sel| *sel == index_for_bg);
+            let is_hover_only = self.selected.zip(&interaction).map(move |(sel, inter)| {
+                *sel != index_for_bg && matches!(*inter, TabHeaderInteraction::Hovered)
+            });
+            let is_idle = self.selected.zip(&interaction).map(move |(sel, inter)| {
+                *sel != index_for_bg && !matches!(*inter, TabHeaderInteraction::Hovered)
+            });
+
+            let sel_bg = ctx.add(RectWidget::new().background(effective(&self.selected_tab_background)));
+            ctx.visible_when(sel_bg, is_selected);
+            let hov_bg = ctx.add(RectWidget::new().background(effective(&self.hover_tab_background)));
+            ctx.visible_when(hov_bg, is_hover_only);
+            let idle_bg = ctx.add(RectWidget::new().background(effective(&self.idle_tab_background)));
+            ctx.visible_when(idle_bg, is_idle);
+
             // The chrome (a `ZStack[indicator-painter, label-row]`) reports
             // its *content* width via `layout_response` — a plain `ZStack`
             // wrapper would size it to the label and CENTER it, dragging the
             // leading accent indicator inward by `(tab_width - label_width)/2`
             // and making the indicator's x drift per tab as labels differ.
             // Wrap the chrome in `Expand` so it fills the full tab bounds
-            // (the indicator stays pinned to the leading edge); the bg rect
-            // already fills.
+            // (the indicator stays pinned to its edge).
+            //
+            // The three background rects are **direct** children of this
+            // outer `ZStack`, NOT nested in an inner one: `ZStack` sizes to
+            // its children's *intrinsic* size, and a `RectWidget` reports
+            // `0×0` intrinsic, so an inner stack would collapse to zero and
+            // the selected / hover fills would never paint. As direct
+            // children each rect is queried with the exact bounds proposal
+            // and fills; `visible_when` (RepaintOnly) shows exactly one.
             let filled_chrome = ctx.add(Expand::new().child_id(chrome_id));
-            ctx.add(ZStack::new().add_child(bg_id).add_child(filled_chrome))
+            ctx.add(
+                ZStack::new()
+                    .add_child(sel_bg)
+                    .add_child(hov_bg)
+                    .add_child(idle_bg)
+                    .add_child(filled_chrome),
+            )
         } else {
             chrome_id
         };

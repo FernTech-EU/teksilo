@@ -9,8 +9,8 @@ use bastyde::tokens::Orientation;
 use bastyde::widgets::scroll_bar::ScrollBarOrientation;
 use bastyde::widgets::{
     Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Padding, Panel,
-    ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabInfo, TabWidget, TextWidget, ToolBox,
-    ToolBoxItem, VStack,
+    ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabIndicatorPosition, TabInfo, TabWidget,
+    TextWidget, ToolBox, ToolBoxItem, VStack,
 };
 
 use crate::shared::{Signals, color_cell, section, tab_header};
@@ -36,6 +36,35 @@ fn embedded_tab_widget(selected: Signal<Option<TabId>>) -> TabWidget {
         .static_tab(
             TabInfo::new().title(lit!("Settings")),
             body("Settings — tab content."),
+        )
+}
+
+/// A horizontal TabWidget exercising the per-state colour API: distinct
+/// selected / hover / idle tab backgrounds, a decoupled bar backdrop,
+/// inter-tab dividers, and the active-tab indicator moved *below* the
+/// label (`TabIndicatorPosition::InnerEdge`) instead of the default top.
+fn styled_tab_widget(selected: Signal<Option<TabId>>) -> TabWidget {
+    let body = |s: &'static str| {
+        Padding::uniform(12.0).child(TextWidget::new(lit!(s)).style(TextStyleRole::Body))
+    };
+    TabWidget::new(selected)
+        .bar_background(SurfaceRole::Sunken)
+        .selected_tab_background(SurfaceRole::Raised)
+        .hover_tab_background(SurfaceRole::Hover)
+        .idle_tab_background(SurfaceRole::Transparent)
+        .tab_dividers()
+        .active_indicator(TabIndicatorPosition::InnerEdge)
+        .static_tab(
+            TabInfo::new().title(lit!("Edit")),
+            body("Per-state backgrounds: selected = Raised, hover = Hover, idle = transparent."),
+        )
+        .static_tab(
+            TabInfo::new().title(lit!("Preview")),
+            body("The indicator sits below the label (InnerEdge), with dividers between tabs."),
+        )
+        .static_tab(
+            TabInfo::new().title(lit!("History")),
+            body("The bar backdrop (Sunken) is independent of the per-tab backgrounds."),
         )
 }
 
@@ -82,6 +111,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .bind_width(420.0_f32)
             .bind_height(160.0_f32)
             .child(embedded_tab_widget(sigs.inner_tabs_selected.clone())),
+    );
+    let styled_tabs = section(
+        ctx,
+        lit!("TabWidget — per-state colours, dividers, indicator below label"),
+        FixedSize::new()
+            .bind_width(420.0_f32)
+            .bind_height(160.0_f32)
+            .child(styled_tab_widget(sigs.styled_tabs_selected.clone())),
     );
     let group_box = section(
         ctx,
@@ -199,6 +236,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .add_child(panel)
             .add_child(card)
             .add_child(tab_widget)
+            .add_child(styled_tabs)
             .add_child(group_box)
             .add_child(group_header)
             .add_child(accordion)

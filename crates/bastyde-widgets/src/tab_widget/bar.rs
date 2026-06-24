@@ -31,7 +31,7 @@ use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
@@ -41,7 +41,8 @@ use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::overlay::OverlayPlacement;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
+    EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
+    WidgetPlacement,
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -160,17 +161,37 @@ pub struct TabBar<T: 'static> {
     /// Optional tab-strip cross-axis extent override (compact bars).
     tab_height: Option<f32>,
 
-    /// Uniform surface color/role applied to every tab header in the
-    /// strip — selected, idle, and hovered all paint the same fill,
-    /// so selection is conveyed by the accent indicator and the
-    /// label-color shift only. Default `None` = transparent.
-    tab_surface_role: Option<bastyde_core::color_prop::ColorProp>,
+    /// All-states surface color/role shorthand applied to every tab
+    /// header — the per-state overrides below fall back to this, which
+    /// itself falls back to transparent. Default `None`.
+    tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for the **selected** tab (falls back to
+    /// `tab_background`, then transparent).
+    selected_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for the **hovered** (non-selected) tab (falls back to
+    /// `tab_background`, then transparent).
+    hover_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Background for **idle** tabs (falls back to `tab_background`, then
+    /// transparent).
+    idle_tab_background: Option<bastyde_core::color_prop::ColorProp>,
+    /// Backdrop fill spanning the whole bar strip, painted behind the
+    /// headers / slots / arrows. Independent of the per-tab backgrounds.
+    /// Default `None` = transparent.
+    bar_background: Option<bastyde_core::color_prop::ColorProp>,
     /// Text role used for the label (and matching icon tint) on the
     /// selected tab. Default: `TextRole::Primary`.
     selected_text_role: TextRole,
     /// Text role used for the label (and matching icon tint) on idle
     /// tabs (not selected, not disabled). Default: `TextRole::Secondary`.
     idle_text_role: TextRole,
+    /// When `true`, draw a 1 dp divider between consecutive tabs (in both
+    /// the scrollable and the pinned strip).
+    tab_dividers: bool,
+    /// Color of the inter-tab dividers. `None` ⇒ `BorderRole::Divider`.
+    tab_divider_color: Option<bastyde_core::color_prop::ColorProp>,
+    /// Which edge the active-tab highlight indicator hugs. Default
+    /// [`TabIndicatorPosition::OuterEdge`](bastyde_core::styles::TabIndicatorPosition).
+    active_indicator: bastyde_core::styles::TabIndicatorPosition,
     /// Per-call style override propagated to every header in the bar.
     /// `None` means "use the theme slot or the bundled `RecipeTabStyle`".
     style_override: Option<bastyde_core::styles::SharedTabStyle>,
@@ -403,9 +424,16 @@ impl<T: 'static> TabBar<T> {
             pinned_tab_width: DEFAULT_PINNED_TAB_WIDTH,
             spacing: DEFAULT_TAB_SPACING,
             tab_height: None,
-            tab_surface_role: None,
+            tab_background: None,
+            selected_tab_background: None,
+            hover_tab_background: None,
+            idle_tab_background: None,
+            bar_background: None,
             selected_text_role: TextRole::Primary,
             idle_text_role: TextRole::Secondary,
+            tab_dividers: false,
+            tab_divider_color: None,
+            active_indicator: bastyde_core::styles::TabIndicatorPosition::OuterEdge,
             style_override: None,
             bar_leading_slot: None,
             bar_trailing_slot: None,
@@ -500,15 +528,87 @@ impl<T: 'static> TabBar<T> {
         self
     }
 
-    /// Set the surface color/role applied to **every** tab — selected,
-    /// idle, and hovered all paint the same fill. Accepts any `Color`,
-    /// `SurfaceRole`, or `Signal<Color>` (via [`ColorProp`](bastyde_core::color_prop::ColorProp)).
-    /// Default `None` = transparent.
-    pub fn tab_surface_role(
+    /// All-states shorthand for the per-tab background — every tab
+    /// (selected, idle, hovered) paints this unless a per-state override
+    /// below is set. Accepts any `Color`, `SurfaceRole`, or `Signal<Color>`
+    /// (via [`ColorProp`](bastyde_core::color_prop::ColorProp)).
+    /// Default `None` = transparent. To tint the bar's backdrop instead,
+    /// use [`bar_background`](Self::bar_background).
+    pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for the **selected** tab. Falls back to
+    /// [`tab_background`](Self::tab_background), then transparent.
+    pub fn selected_tab_background(
         mut self,
         color: impl Into<bastyde_core::color_prop::ColorProp>,
     ) -> Self {
-        self.tab_surface_role = Some(color.into());
+        self.selected_tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for the **hovered** (non-selected) tab. Falls back to
+    /// [`tab_background`](Self::tab_background), then transparent.
+    pub fn hover_tab_background(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.hover_tab_background = Some(color.into());
+        self
+    }
+
+    /// Background for **idle** tabs (not selected, not hovered). Falls back
+    /// to [`tab_background`](Self::tab_background), then transparent.
+    pub fn idle_tab_background(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.idle_tab_background = Some(color.into());
+        self
+    }
+
+    /// Set the backdrop fill spanning the whole bar strip (behind the
+    /// headers, slots, and scroll arrows). Independent of the per-tab
+    /// backgrounds. Accepts any `Color`, `SurfaceRole`, or `Signal<Color>`.
+    /// Default `None` = transparent.
+    pub fn bar_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.bar_background = Some(color.into());
+        self
+    }
+
+    /// Draw a 1 dp divider between consecutive tabs (scrollable and pinned
+    /// strips). Off by default. See [`tab_divider_color`](Self::tab_divider_color).
+    pub fn tab_dividers(mut self) -> Self {
+        self.tab_dividers = true;
+        self
+    }
+
+    /// Like [`tab_dividers`](Self::tab_dividers), but with an explicit
+    /// colour. Accepts any `Color`, [`BorderRole`](bastyde_tokens::BorderRole),
+    /// or `Signal<Color>`. Implies `tab_dividers()`.
+    pub fn tab_divider_color(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.tab_dividers = true;
+        self.tab_divider_color = Some(color.into());
+        self
+    }
+
+    /// Choose which edge the active-tab highlight indicator hugs. Default
+    /// [`TabIndicatorPosition::OuterEdge`](bastyde_core::styles::TabIndicatorPosition)
+    /// (top for horizontal / leading for vertical);
+    /// [`InnerEdge`](bastyde_core::styles::TabIndicatorPosition::InnerEdge)
+    /// puts it below the label (horizontal) / on the trailing edge (vertical).
+    /// Honoured by the default `RecipeTabStyle`; a custom
+    /// [`TabStyle`](bastyde_core::styles::TabStyle) may interpret it freely.
+    pub fn active_indicator(
+        mut self,
+        position: bastyde_core::styles::TabIndicatorPosition,
+    ) -> Self {
+        self.active_indicator = position;
         self
     }
 
@@ -533,7 +633,7 @@ impl<T: 'static> TabBar<T> {
     /// Override the active [`TabStyle`](bastyde_core::styles::TabStyle)
     /// for every header in this bar. The widget keeps responsibility
     /// for the label / icon / close button composition, the
-    /// optional `tab_surface_role` background, and all input handling;
+    /// optional per-state tab backgrounds, and all input handling;
     /// the style only paints the accent indicator and focus ring
     /// chrome via `make_body`. Per-call override > theme slot >
     /// built-in `RecipeTabStyle` default.
@@ -1155,9 +1255,13 @@ impl<T: 'static> Widget for TabBar<T> {
                     max_width: max_w,
                     pinned: is_pinned,
                     orientation: self.orientation,
-                    tab_surface_role: self.tab_surface_role.clone(),
+                    tab_background: self.tab_background.clone(),
+                    selected_tab_background: self.selected_tab_background.clone(),
+                    hover_tab_background: self.hover_tab_background.clone(),
+                    idle_tab_background: self.idle_tab_background.clone(),
                     selected_text_role: self.selected_text_role,
                     idle_text_role: self.idle_text_role,
+                    active_indicator: self.active_indicator,
                     style_override: self.style_override.clone(),
                 }))
             });
@@ -1213,6 +1317,14 @@ impl<T: 'static> Widget for TabBar<T> {
             Rc::new(RefCell::new(Vec::with_capacity(unpinned_header_ids.len())));
         let row_bounds_buf: Rc<std::cell::Cell<Rect>> =
             Rc::new(std::cell::Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0)));
+        // Resolved inter-tab divider colour (used by both the scrollable
+        // row's overlay and the pinned strip), or `None` when off.
+        let divider_prop: Option<bastyde_core::color_prop::ColorProp> =
+            self.tab_dividers.then(|| {
+                self.tab_divider_color
+                    .clone()
+                    .unwrap_or_else(|| BorderRole::Divider.into())
+            });
         let row = TabHeaderRow {
             header_ids: unpinned_header_ids.clone(),
             axis: self.orientation,
@@ -1223,6 +1335,8 @@ impl<T: 'static> Widget for TabBar<T> {
             tab_height: self.tab_height,
             header_bounds_buf: header_bounds_buf.clone(),
             row_bounds_buf: row_bounds_buf.clone(),
+            divider: divider_prop.clone().map(|c| (c, self.spacing)),
+            overlay_id: None,
         };
         let row_id = ctx.add(row);
         self.header_row_id = Some(row_id);
@@ -1283,17 +1397,41 @@ impl<T: 'static> Widget for TabBar<T> {
         // regardless of how far the unpinned tabs scroll. Strip
         // orientation matches the bar.
         if !pinned_header_ids.is_empty() {
+            // A 1 dp divider widget between consecutive pinned headers when
+            // dividers are enabled. The pinned strip is a plain stack (it
+            // does not use `header_bounds_buf`), so we interleave real
+            // `Divider` widgets rather than an overlay — they're inert and
+            // don't affect pinned drag/reorder.
+            let make_divider = |ctx: &mut BuildContext| -> Option<WidgetId> {
+                divider_prop.clone().map(|c| {
+                    let d = match self.orientation {
+                        TabBarOrientation::Horizontal => crate::primitives::Divider::vertical(),
+                        TabBarOrientation::Vertical => crate::primitives::Divider::horizontal(),
+                    };
+                    ctx.add(d.color(c))
+                })
+            };
             let pinned_id = match self.orientation {
                 TabBarOrientation::Horizontal => {
                     let mut pinned = HStack::new().spacing(self.spacing);
-                    for id in &pinned_header_ids {
+                    for (i, id) in pinned_header_ids.iter().enumerate() {
+                        if i > 0
+                            && let Some(div) = make_divider(ctx)
+                        {
+                            pinned = pinned.add_child(div);
+                        }
                         pinned = pinned.add_child(*id);
                     }
                     ctx.add(pinned)
                 }
                 TabBarOrientation::Vertical => {
                     let mut pinned = crate::VStack::new().spacing(self.spacing);
-                    for id in &pinned_header_ids {
+                    for (i, id) in pinned_header_ids.iter().enumerate() {
+                        if i > 0
+                            && let Some(div) = make_divider(ctx)
+                        {
+                            pinned = pinned.add_child(div);
+                        }
                         pinned = pinned.add_child(*id);
                     }
                     ctx.add(pinned)
@@ -1414,7 +1552,7 @@ impl<T: 'static> Widget for TabBar<T> {
             content: root_id,
             orientation: self.orientation.into(),
             show_separator: self.show_separator,
-            surface_role: self.tab_surface_role.clone(),
+            surface_role: self.bar_background.clone(),
             drop_indicator: self.paint_state.drop_indicator_x.clone(),
         };
         let bar_root = style.make_bar(&chrome_cfg, ctx);
@@ -1815,6 +1953,14 @@ struct TabHeaderRow {
     /// Cached row-level world bounds — used to map bar-local
     /// coordinates onto header bounds.
     row_bounds_buf: Rc<std::cell::Cell<Rect>>,
+    /// `(color, spacing)` for an inter-tab divider overlay, or `None`
+    /// when dividers are off. When `Some`, `build` appends a single
+    /// `TabRowDividers` leaf as the last child (painted on top of the
+    /// headers, reading `header_bounds_buf`).
+    divider: Option<(bastyde_core::color_prop::ColorProp, f32)>,
+    /// The appended divider-overlay child id, set in `build` when
+    /// `divider` is `Some`. Kept so `children()` reports it too.
+    overlay_id: Option<WidgetId>,
 }
 
 impl TabHeaderRow {
@@ -1886,11 +2032,32 @@ impl TabHeaderRow {
     }
 }
 
+impl TabHeaderRow {
+    /// The full child list: the pre-registered headers plus the optional
+    /// divider overlay appended last.
+    fn child_ids(&self) -> Vec<WidgetId> {
+        let mut ids = self.header_ids.clone();
+        ids.extend(self.overlay_id);
+        ids
+    }
+}
+
 impl Widget for TabHeaderRow {
-    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Children are pre-registered with the bar's BuildContext; the
-        // row just exposes them.
-        self.header_ids.clone()
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Headers are pre-registered with the bar's BuildContext; the row
+        // just exposes them. When dividers are on, append a single overlay
+        // leaf (last child → painted on top of the headers) that reads the
+        // shared `header_bounds_buf` to draw a line at each boundary.
+        if let Some((color, spacing)) = self.divider.clone() {
+            let overlay = ctx.add_boxed(Box::new(TabRowDividers {
+                header_bounds_buf: self.header_bounds_buf.clone(),
+                axis: self.axis,
+                color,
+                spacing,
+            }));
+            self.overlay_id = Some(overlay);
+        }
+        self.child_ids()
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -1986,11 +2153,86 @@ impl Widget for TabHeaderRow {
                 }
             }
         }
+        drop(buf);
+        // The divider overlay (appended last) is not a header — the loop
+        // above broke before it (i >= extents.len()) so it never reached
+        // `header_bounds_buf`. Place it spanning the whole row so it can
+        // paint the inter-tab lines on top.
+        if self.overlay_id.is_some()
+            && let Some(last) = children.last_mut()
+        {
+            last.origin = bounds.origin();
+            last.size = bounds.size();
+        }
         self.row_bounds_buf.set(bounds);
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.header_ids.clone()
+        self.child_ids()
+    }
+}
+
+/// Pure-decoration overlay (the last child of [`TabHeaderRow`]) that paints
+/// a 1 dp line at each boundary between consecutive tab headers, reading the
+/// row's shared `header_bounds_buf` (world coords). Painted on top of the
+/// headers so it shows over any per-tab background; pointer events pass
+/// straight through.
+struct TabRowDividers {
+    header_bounds_buf: Rc<RefCell<Vec<Rect>>>,
+    axis: TabBarOrientation,
+    color: bastyde_core::color_prop::ColorProp,
+    spacing: f32,
+}
+
+impl std::fmt::Debug for TabRowDividers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TabRowDividers")
+            .field("axis", &self.axis)
+            .finish()
+    }
+}
+
+impl Widget for TabRowDividers {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Repaint when the (possibly bound) divider colour changes.
+        self.color
+            .register_if_bound(ctx.self_id(), ctx.binding_registry(), BindingLevel::RepaintOnly);
+        ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        // Leaf overlay — fill whatever bounds the row places it at.
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn paint(&self, _bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let headers = self.header_bounds_buf.borrow();
+        if headers.len() < 2 {
+            return;
+        }
+        let color = self.color.resolve(ctx.theme, true);
+        let t = ctx.theme.shape.border_width.max(1.0);
+        // Draw between consecutive headers. When `spacing > 0` the line is
+        // centred in the gap; with flush tabs it sits on the shared edge.
+        for pair in headers.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let line = match self.axis {
+                TabBarOrientation::Horizontal => {
+                    let mid = (a.right() + b.x) * 0.5;
+                    Rect::new(mid - t * 0.5, a.y, t, a.height)
+                }
+                TabBarOrientation::Vertical => {
+                    let mid = (a.bottom() + b.y) * 0.5;
+                    Rect::new(a.x, mid - t * 0.5, a.width, t)
+                }
+            };
+            canvas.fill_rect(line, color);
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
     }
 }
 

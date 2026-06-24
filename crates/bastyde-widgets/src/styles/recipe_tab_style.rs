@@ -8,12 +8,12 @@
 //! bars, leading for vertical bars), plus a keyboard focus ring
 //! inset from the tab's bounds.
 //!
-//! The tab's own background (uniform across states, controlled by
-//! `TabBar::tab_surface_role`) is painted by the surrounding
-//! `TabHeader` as a separate RectWidget sibling — the trait config
-//! doesn't carry the tab-surface role through the cfg, and pulling it
-//! through every consumer would be more disruptive than letting the
-//! widget keep that single rect.
+//! The tab's own per-state background (selected / hover / idle,
+//! controlled by `TabBar::tab_background` and the per-state overrides)
+//! is painted by the surrounding `TabHeader` as separate RectWidget
+//! siblings — the trait config doesn't carry the tab-surface roles
+//! through the cfg, and pulling them through every consumer would be
+//! more disruptive than letting the widget keep those rects.
 //!
 //! `TabStyle` carries two methods. `make_body` wraps a single tab
 //! header: a leaf `TabBodyPainter` (accent indicator + focus ring)
@@ -31,7 +31,9 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
-use bastyde_core::styles::{TabBarChromeConfig, TabBarOrientation, TabStyle, TabStyleConfig};
+use bastyde_core::styles::{
+    TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle, TabStyleConfig,
+};
 use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::CornerRadius;
@@ -43,7 +45,7 @@ use crate::primitives::{HStack, RectWidget, ZStack};
 pub const TAB_EDITOR_HEIGHT: f32 = 50.0;
 pub const TAB_TOOL_WINDOW_HEIGHT: f32 = 28.0;
 pub const TAB_PADDING_HORIZONTAL: f32 = 12.0;
-pub const TAB_UNDERLINE_ACTIVE: f32 = 3.0;
+pub const TAB_UNDERLINE_ACTIVE: f32 = 2.0;
 pub const TAB_UNDERLINE_HOVER: f32 = 2.0;
 pub const TAB_CLOSE_BUTTON_SIZE: f32 = 16.0;
 /// Thickness of the drag-reorder drop-indicator line.
@@ -62,6 +64,7 @@ impl TabStyle for RecipeTabStyle {
             is_focused: cfg.is_focused.clone(),
             is_disabled: cfg.is_disabled.clone(),
             orientation: cfg.orientation,
+            indicator_position: cfg.indicator_position,
         });
 
         // Compose the slots. The widget today bundles everything into
@@ -280,13 +283,54 @@ struct TabBodyPainter {
     is_focused: Signal<bool>,
     is_disabled: Signal<bool>,
     orientation: TabBarOrientation,
+    indicator_position: TabIndicatorPosition,
 }
 
 impl std::fmt::Debug for TabBodyPainter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabBodyPainter")
             .field("orientation", &self.orientation)
+            .field("indicator_position", &self.indicator_position)
             .finish()
+    }
+}
+
+impl TabBodyPainter {
+    /// The active-tab highlight rect for a tab at `bounds`, given the bar
+    /// orientation, the configured indicator edge, and the layout
+    /// direction (for the RTL-dependent vertical edges).
+    ///
+    /// Horizontal: `OuterEdge` → top, `InnerEdge` → bottom (RTL-invariant).
+    /// Vertical: `OuterEdge` → leading, `InnerEdge` → trailing — leading is
+    /// the left edge in LTR and the right edge in RTL.
+    fn indicator_rect(&self, bounds: Rect, thickness: f32, rtl: bool) -> Rect {
+        match self.orientation {
+            TabBarOrientation::Horizontal => match self.indicator_position {
+                TabIndicatorPosition::OuterEdge => {
+                    Rect::new(bounds.x, bounds.y, bounds.width, thickness)
+                }
+                TabIndicatorPosition::InnerEdge => Rect::new(
+                    bounds.x,
+                    bounds.bottom() - thickness,
+                    bounds.width,
+                    thickness,
+                ),
+            },
+            TabBarOrientation::Vertical => {
+                // Leading edge = left in LTR / right in RTL; trailing is the
+                // opposite. OuterEdge hugs leading, InnerEdge hugs trailing.
+                let on_left = match self.indicator_position {
+                    TabIndicatorPosition::OuterEdge => !rtl,
+                    TabIndicatorPosition::InnerEdge => rtl,
+                };
+                let x = if on_left {
+                    bounds.x
+                } else {
+                    bounds.right() - thickness
+                };
+                Rect::new(x, bounds.y, thickness, bounds.height)
+            }
+        }
     }
 }
 
@@ -329,23 +373,21 @@ impl Widget for TabBodyPainter {
         let focused = self.is_focused.get();
         let disabled = self.is_disabled.get();
 
-        // Accent indicator on the layout-axis "outside" edge of the
-        // selected, enabled tab. IntUI convention:
-        //   - Horizontal bar → indicator on TOP (browser-tab look,
-        //     selected tab "merges" into the content panel below).
-        //   - Vertical bar → indicator on the LEADING edge (sidebar
-        //     / IDE perspective look — the tab "points into" the
-        //     content panel on the trailing side).
+        // Accent indicator on the selected, enabled tab. The edge is
+        // chosen by `indicator_position` (default `OuterEdge`):
+        //   - Horizontal bar → TOP for OuterEdge (browser-tab look, the
+        //     selected tab "merges" into the content panel below) or
+        //     BOTTOM for InnerEdge (the indicator sits below the label).
+        //   - Vertical bar → LEADING edge for OuterEdge (IDE perspective
+        //     look) or TRAILING for InnerEdge. Leading/trailing follow the
+        //     layout direction.
         let indicator_thickness = TAB_UNDERLINE_ACTIVE;
         if active && !disabled {
-            let indicator = match self.orientation {
-                TabBarOrientation::Horizontal => {
-                    Rect::new(bounds.x, bounds.y, bounds.width, indicator_thickness)
-                }
-                TabBarOrientation::Vertical => {
-                    Rect::new(bounds.x, bounds.y, indicator_thickness, bounds.height)
-                }
-            };
+            let rtl = matches!(
+                ctx.layout_direction,
+                bastyde_core::environment::LayoutDirection::RightToLeft
+            );
+            let indicator = self.indicator_rect(bounds, indicator_thickness, rtl);
             canvas.fill_rect(indicator, colors.accent);
         }
 
@@ -374,5 +416,70 @@ impl Widget for TabBodyPainter {
         // The parent TabHeader carries the Role::Tab. This painter is
         // presentational only.
         builder.set_hidden();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn painter(
+        orientation: TabBarOrientation,
+        indicator_position: TabIndicatorPosition,
+    ) -> TabBodyPainter {
+        TabBodyPainter {
+            is_active: Signal::new(true),
+            is_focused: Signal::new(false),
+            is_disabled: Signal::new(false),
+            orientation,
+            indicator_position,
+        }
+    }
+
+    // 100×40 tab, 3 dp indicator.
+    const B: Rect = Rect {
+        x: 10.0,
+        y: 20.0,
+        width: 100.0,
+        height: 40.0,
+    };
+    const T: f32 = TAB_UNDERLINE_ACTIVE;
+
+    #[test]
+    fn horizontal_outer_edge_is_top_and_rtl_invariant() {
+        let p = painter(TabBarOrientation::Horizontal, TabIndicatorPosition::OuterEdge);
+        let expected = Rect::new(B.x, B.y, B.width, T);
+        assert_eq!(p.indicator_rect(B, T, false), expected);
+        assert_eq!(p.indicator_rect(B, T, true), expected, "top edge is RTL-invariant");
+    }
+
+    #[test]
+    fn horizontal_inner_edge_is_bottom() {
+        let p = painter(TabBarOrientation::Horizontal, TabIndicatorPosition::InnerEdge);
+        let expected = Rect::new(B.x, B.bottom() - T, B.width, T);
+        assert_eq!(p.indicator_rect(B, T, false), expected);
+        assert_eq!(p.indicator_rect(B, T, true), expected);
+    }
+
+    #[test]
+    fn vertical_outer_edge_is_leading() {
+        let p = painter(TabBarOrientation::Vertical, TabIndicatorPosition::OuterEdge);
+        // LTR leading = left, RTL leading = right.
+        assert_eq!(p.indicator_rect(B, T, false), Rect::new(B.x, B.y, T, B.height));
+        assert_eq!(
+            p.indicator_rect(B, T, true),
+            Rect::new(B.right() - T, B.y, T, B.height)
+        );
+    }
+
+    #[test]
+    fn vertical_inner_edge_is_trailing() {
+        let p = painter(TabBarOrientation::Vertical, TabIndicatorPosition::InnerEdge);
+        // LTR trailing = right, RTL trailing = left.
+        assert_eq!(
+            p.indicator_rect(B, T, false),
+            Rect::new(B.right() - T, B.y, T, B.height)
+        );
+        assert_eq!(p.indicator_rect(B, T, true), Rect::new(B.x, B.y, T, B.height));
     }
 }

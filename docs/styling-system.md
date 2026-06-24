@@ -435,7 +435,14 @@ re-implementing the others:
 - **`TabStyle`** — `make_body` themes a single tab header (accent
   indicator + focus ring + label slot composition); `make_bar` themes
   the whole strip (optional backdrop fill, content-pane separator,
-  drag-reorder drop indicator).
+  drag-reorder drop indicator). `TabStyleConfig` carries
+  `indicator_position` (`TabIndicatorPosition::{OuterEdge, InnerEdge}`)
+  so the active-tab highlight can hug either edge; the default
+  `RecipeTabStyle` honours all four edges (outer/inner × horizontal/
+  vertical, RTL-correct). Per-tab backgrounds, the bar backdrop, inter-tab
+  dividers, and text-colour roles are widget-level `TabBar`/`TabWidget`
+  builders rather than part of the trait — see
+  [tab-widget.md](tab-widget.md) "Appearance".
 - **`DialogStyle`** — `make_panel` themes the modal surface (shadow +
   corner radius + padding + container chrome); `make_scrim` themes
   the full-viewport overlay backdrop (the click-outside-to-dismiss

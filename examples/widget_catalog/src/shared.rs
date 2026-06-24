@@ -75,6 +75,7 @@ pub struct Signals {
 
     // ── Tabs / overlays ───────────────────────────────────────────
     pub inner_tabs_selected: Signal<Option<TabId>>,
+    pub styled_tabs_selected: Signal<Option<TabId>>,
     pub visibility_signal: Signal<bool>,
     pub pinned_signal: Signal<bool>,
 
@@ -110,6 +111,7 @@ impl Signals {
             slider_disabled_state: ctx.signal(30.0_f32),
 
             inner_tabs_selected: ctx.signal(None),
+            styled_tabs_selected: ctx.signal(None),
             visibility_signal: ctx.signal(false),
             pinned_signal: ctx.signal(false),
 

@@ -172,7 +172,8 @@ pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
 pub use tab_style::{
-    SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabStyle, TabStyleConfig,
+    SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle,
+    TabStyleConfig,
 };
 pub use table_style::{
     SharedTableStyle, SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig,
