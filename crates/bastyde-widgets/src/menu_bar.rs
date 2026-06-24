@@ -43,6 +43,7 @@ use bastyde_core::window::{
 };
 use bastyde_tokens::{SurfaceRole, TextStyleRole};
 
+use crate::animations::Unroll;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::menu_context::MenuContext;
 use crate::menu_item::MenuLabel;
@@ -126,6 +127,12 @@ pub struct MenuBar {
     collapsed: Signal<bool>,
     /// `true` while the collapsed bar is shown as a floating overlay.
     revealed: Signal<bool>,
+    /// Animated 0..1 reveal progress for the floating bar (0 = rolled up
+    /// into the hamburger, 1 = fully unrolled). The overlay's deferred
+    /// reveal/dismiss drives it; an [`Unroll`] wrapper binds the bar's
+    /// width to it so the bar unrolls out of the hamburger on open and
+    /// rolls back into it on close. Stays at `1.0` for the inline bar.
+    reveal_progress: Signal<f32>,
     /// Idempotence guard for the responsive write (Toolbar pattern).
     last_collapsed: Cell<bool>,
     /// The bar root (ZStack) id, captured in `build()`. Used both as the
@@ -160,6 +167,7 @@ impl MenuBar {
             collapse_policy: None,
             collapsed: Signal::new(false),
             revealed: Signal::new(false),
+            reveal_progress: Signal::new_animated(1.0),
             last_collapsed: Cell::new(false),
             bar_id: None,
             hamburger_id: None,
@@ -978,16 +986,25 @@ impl Widget for MenuBar {
         // content is wrapped in a `RevealHeightBox` so the *floating* bar's
         // height matches the hamburger button — the triggers center
         // vertically (the inner `HStack`'s default `VAlignment::Center`);
-        // the inline bar keeps its natural height.
+        // the inline bar keeps its natural height. That, in turn, is
+        // wrapped in an `Unroll` so the floating bar unrolls out of the
+        // hamburger on open and rolls back into it on close (driven by
+        // `reveal_progress`; the overlay owns the tween + dismissal
+        // deferral — see the reveal closure below). `reveal_progress`
+        // stays at `1.0` for the inline bar, so `Unroll` is a no-op there.
         let root_id = if self.collapse_policy.is_some() {
+            let height_box = ctx.add(RevealHeightBox {
+                child_id: None,
+                pending_child: Some(PendingChild::Id(zstack_id)),
+                revealed: self.revealed.clone(),
+                hamburger_id: ham_cell.clone(),
+            });
+            // Unrolls trailing-ward from the hamburger's edge (RTL flip is
+            // a follow-up, matching the docking handle-direction caveat).
             ctx.add(
-                RevealHeightBox {
-                    child_id: None,
-                    pending_child: Some(PendingChild::Id(zstack_id)),
-                    revealed: self.revealed.clone(),
-                    hamburger_id: ham_cell.clone(),
-                }
-                .access_role(bastyde_core::accesskit::Role::MenuBar),
+                Unroll::from_progress(self.reveal_progress.clone())
+                    .child_id(height_box)
+                    .access_role(bastyde_core::accesskit::Role::MenuBar),
             )
         } else {
             zstack_id
@@ -1003,6 +1020,12 @@ impl Widget for MenuBar {
             let bar_id = root_id;
             let revealed = self.revealed.clone();
             let collapsed = self.collapsed.clone();
+            // Captured at build (EventContext can't reach motion / pref):
+            // the unroll tween duration and whether to snap. A theme /
+            // reduced-motion change rebuilds the bar, refreshing both.
+            let reveal_progress = self.reveal_progress.clone();
+            let reveal_duration = ctx.theme().motion.duration_collapse;
+            let reduced_motion = ctx.prefers_reduced_motion();
 
             // The bar overlay trails the hamburger (the developer is
             // responsible for placing the hamburger). The anchor cell is
@@ -1016,6 +1039,7 @@ impl Widget for MenuBar {
             let reveal: MenubarReveal = {
                 let revealed = revealed.clone();
                 let anchor_cell = anchor_cell.clone();
+                let reveal_progress = reveal_progress.clone();
                 Rc::new(move |ctx: &mut EventContext| {
                     if revealed.get() {
                         return; // idempotent — already revealed
@@ -1027,7 +1051,7 @@ impl Widget for MenuBar {
                         let revealed = revealed.clone();
                         Rc::new(move || revealed.set(false))
                     };
-                    ctx.show_overlay(OverlayRequest {
+                    let request = OverlayRequest {
                         content_id: bar_id,
                         anchor,
                         placement: OverlayPlacement::TrailingEdge,
@@ -1036,7 +1060,22 @@ impl Widget for MenuBar {
                         parent_overlay: None,
                         on_dismiss: Some(on_dismiss),
                         fade_duration: None,
-                    });
+                    };
+                    if reduced_motion {
+                        // No tween: show fully unrolled; dismissal is immediate.
+                        reveal_progress.set(1.0);
+                        ctx.show_overlay(request);
+                    } else {
+                        // Start rolled up, then the overlay tweens 0 → 1 on
+                        // show and 1 → 0 on close (deferring teardown until
+                        // the roll-back completes).
+                        reveal_progress.set(0.0);
+                        ctx.show_overlay_with_reveal(
+                            request,
+                            reveal_progress.clone(),
+                            reveal_duration,
+                        );
+                    }
                     if let Some(trigger) = first_trigger {
                         ctx.request_focus(trigger);
                     }
@@ -2305,8 +2344,10 @@ mod tests {
         assert!(first_descendant_with_role(&t, mb, Role::MenuBar).is_some());
 
         // Dismiss with Escape: expanded back to false, focus restored to
-        // the hamburger (not lost in the now-hidden bar).
+        // the hamburger (not lost in the now-hidden bar). The dismissal is
+        // deferred for the roll-back tween, so advance past it first.
         t.press_key(Key::Escape, Modifiers::NONE);
+        t.advance_time(std::time::Duration::from_secs(1));
         t.layout(SizeProposal::exact(800.0, 100.0));
         assert!(
             !t.accessibility_node(hamburger).is_expanded(),
@@ -2341,6 +2382,10 @@ mod tests {
         t.click(hamburger);
         t.layout(SizeProposal::exact(800.0, 100.0));
         assert!(t.is_active(bar), "bar revealed");
+        // Let the unroll tween finish so the bar reaches full width and
+        // its triggers settle at their on-screen positions.
+        t.tick_animations(std::time::Duration::from_millis(500));
+        t.layout(SizeProposal::exact(800.0, 100.0));
 
         // Arrow-navigate to the next menu.
         t.press_key(Key::ArrowRight, Modifiers::NONE);
@@ -2388,6 +2433,45 @@ mod tests {
     }
 
     #[test]
+    fn revealed_bar_unrolls_open_and_defers_close() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .menu(lit!("&View"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let (bar, hamburger) = (t.children(mb)[0], t.children(mb)[1]);
+
+        // Open: starts rolled up (~0 width), then unrolls to full width.
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let just_opened = t.bounds(bar).width;
+        t.tick_animations(std::time::Duration::from_millis(500));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let unrolled = t.bounds(bar).width;
+        assert!(
+            unrolled > just_opened + 1.0,
+            "bar unrolls wider after the tween: {just_opened} -> {unrolled}"
+        );
+
+        // Close: the bar stays alive (rolling back) immediately after the
+        // dismiss; it only goes dormant once the deferred tween completes.
+        t.press_key(Key::Escape, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(
+            t.is_active(bar),
+            "bar stays active while rolling back on close"
+        );
+        t.advance_time(std::time::Duration::from_secs(1));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!t.is_active(bar), "bar dormant after the roll-back finishes");
+    }
+
+    #[test]
     fn collapsible_escape_hides_revealed_bar() {
         let mut t = collapsible_tree();
         let mb = t.add(
@@ -2406,6 +2490,9 @@ mod tests {
         assert!(t.is_active(bar));
 
         t.press_key(Key::Escape, Modifiers::NONE);
+        // The close rolls the bar back into the hamburger before tearing
+        // down; advance past the tween so the deferred dismissal fires.
+        t.advance_time(std::time::Duration::from_secs(1));
         t.layout(SizeProposal::exact(800.0, 100.0));
         assert!(!t.is_active(bar), "Escape hides the revealed bar");
     }
@@ -2433,6 +2520,8 @@ mod tests {
             bastyde_canvas::Point::new(400.0, 400.0),
             bastyde_core::event::PointerButton::Primary,
         );
+        // Advance past the roll-back tween so the deferred dismissal fires.
+        t.advance_time(std::time::Duration::from_secs(1));
         t.layout(SizeProposal::exact(800.0, 100.0));
         assert!(!t.is_active(bar), "click outside hides the revealed bar");
     }
