@@ -715,6 +715,73 @@ mod tests {
     }
 
     #[test]
+    fn window_control_glyphs_retint_on_theme_switch() {
+        // Regression: `WindowControls` froze `text_primary` / `surface_hover`
+        // / `status_error_bg` into `Color` snapshots at build time and relied
+        // on `mark_all_dirty` to "follow the theme" — but a static `Color` is
+        // a `ColorProp::Static` that always re-resolves to the same value, so
+        // the min/max/close glyphs kept the build-time theme's color after a
+        // `set_theme`. The fix hands the buttons `TextRole::Primary` /
+        // `SurfaceRole::*`, which resolve against the live theme at paint
+        // time. This test renders the control glyphs under light then dark
+        // and asserts they actually change color.
+        use crate::primitives::{Expand, VStack};
+        use bastyde_canvas::MockTextBackend;
+        use std::cell::RefCell;
+
+        let host = Rc::new(TestHost::default());
+        let bar_widget = TitleBar::new(host as Rc<dyn PlatformTitleBarHost>).height(40.0);
+
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let bar_id = tree.add(bar_widget);
+        let body_id = tree.add(Expand::new());
+        tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .add_child(bar_id)
+                .add_child(body_id),
+        );
+
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        let light_glyphs: Vec<[f32; 4]> =
+            tree.render().glyphs.iter().map(|g| g.color).collect();
+        assert!(
+            !light_glyphs.is_empty(),
+            "control glyphs (—, □, ×) should have rendered"
+        );
+
+        // Every control glyph uses TextRole::Primary; under light it must
+        // resolve to the light theme's primary text color.
+        let light_primary = bastyde_core::presets::intui::light()
+            .colors
+            .text_primary
+            .to_array();
+        assert!(
+            light_glyphs.iter().all(|c| *c == light_primary),
+            "control glyphs should paint with the light theme's text_primary, got {light_glyphs:?}"
+        );
+
+        tree.set_theme(bastyde_core::presets::intui::dark());
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        let dark_glyphs: Vec<[f32; 4]> = tree.render().glyphs.iter().map(|g| g.color).collect();
+
+        let dark_primary = bastyde_core::presets::intui::dark()
+            .colors
+            .text_primary
+            .to_array();
+        assert!(
+            dark_glyphs.iter().all(|c| *c == dark_primary),
+            "control glyphs should retint to the dark theme's text_primary, got {dark_glyphs:?}"
+        );
+        assert_ne!(
+            light_glyphs, dark_glyphs,
+            "control glyph colors must change across a theme switch"
+        );
+    }
+
+    #[test]
     fn window_controls_have_semantic_names_not_glyphs() {
         let host = Rc::new(TestHost::default());
         let (tree, bar) = build_realistic_tree(host, |b| b);

@@ -25,13 +25,14 @@ use std::rc::Rc;
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::PlatformTitleBarHost;
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{Color, TextStyleRole};
+use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{Center, FixedSize, HStack, RectWidget, Switcher, TextWidget, ZStack};
 use crate::title_bar::CloseAction;
@@ -61,18 +62,21 @@ pub type ControlAction = Rc<dyn Fn(&mut EventContext)>;
 ///
 /// Composes existing primitives — a `FixedSize` cell wrapping a `ZStack`
 /// of (hover background, centred glyph). Hover state is tracked in a
-/// `Signal<Color>` that drives the background's `bind_background` so a
-/// hover change repaints with no relayout.
+/// `Signal<bool>` that drives a derived `Signal<SurfaceRole>` background,
+/// so a hover change repaints with no relayout. Both the glyph color
+/// (`fg`) and the hover surface are stored as *roles* (`ColorProp` /
+/// `SurfaceRole`) that resolve against the current theme at paint time —
+/// so the cluster retints live across `ctx.set_theme(...)` without a
+/// rebuild.
 pub struct ControlButton {
     glyph: &'static str,
     width: f32,
     height: f32,
-    fg: Color,
-    /// Background colour drawn over the title bar when the cursor is
-    /// inside the cell. `Color::TRANSPARENT` keeps the cell flat.
-    hover_bg: Color,
+    fg: ColorProp,
+    /// Surface role painted over the title bar when the cursor is
+    /// inside the cell. `SurfaceRole::Transparent` keeps the cell flat.
+    hover_role: SurfaceRole,
     action: Option<ControlAction>,
-    bg_signal: Signal<Color>,
     /// Accessible name exposed to AT. Reactive so `WindowControls` can
     /// flip it between "Maximize" and "Restore" without rebuilding.
     a11y_name: Signal<String>,
@@ -98,15 +102,14 @@ impl std::fmt::Debug for ControlButton {
 }
 
 impl ControlButton {
-    pub fn new(glyph: &'static str, width: f32, height: f32, fg: Color) -> Self {
+    pub fn new(glyph: &'static str, width: f32, height: f32, fg: impl Into<ColorProp>) -> Self {
         Self {
             glyph,
             width,
             height,
-            fg,
-            hover_bg: Color::TRANSPARENT,
+            fg: fg.into(),
+            hover_role: SurfaceRole::Transparent,
             action: None,
-            bg_signal: Signal::new(Color::TRANSPARENT),
             a11y_name: Signal::new(String::new()),
             external_hover: None,
             root_child_id: None,
@@ -124,8 +127,8 @@ impl ControlButton {
         self
     }
 
-    pub fn hover_background(mut self, color: Color) -> Self {
-        self.hover_bg = color;
+    pub fn hover_background(mut self, role: SurfaceRole) -> Self {
+        self.hover_role = role;
         self
     }
 
@@ -150,17 +153,28 @@ impl ControlButton {
 
 impl Widget for ControlButton {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
-        // Reactive hover background: starts transparent, flips to
-        // `hover_bg` while the pointer is inside, back to transparent on
-        // leave. RectWidget with `bind_background` repaints on change.
-        let bg_signal = ctx.signal(Color::TRANSPARENT);
-        self.bg_signal = bg_signal.clone();
+        // Reactive hover background: a `Signal<bool>` tracks whether the
+        // pointer is inside the cell, and a derived `Signal<SurfaceRole>`
+        // maps it to the hover role (while inside) or
+        // `SurfaceRole::Transparent` (flat). Driving the RectWidget with a
+        // *role* signal — rather than a resolved `Color` — means the hover
+        // fill resolves against the live theme at paint time, so it
+        // retints across `set_theme` as well as repainting on hover.
+        let hovered = ctx.signal(false);
+        let hover_role = self.hover_role;
+        let bg_role = hovered.map(move |inside| {
+            if *inside {
+                hover_role
+            } else {
+                SurfaceRole::Transparent
+            }
+        });
 
-        let bg_rect = ctx.add(RectWidget::new().bind_background(bg_signal.clone()));
+        let bg_rect = ctx.add(RectWidget::new().background(bg_role));
 
         let glyph_text = TextWidget::new(lit!(self.glyph))
             .style(TextStyleRole::Body)
-            .color(self.fg)
+            .color(self.fg.clone())
             .single_line()
             .a11y_hidden();
         let centred_glyph = ctx.add(Center::new().child(glyph_text));
@@ -173,19 +187,14 @@ impl Widget for ControlButton {
                 .child_id(stack),
         );
 
-        // Self handlers: tap fires the action, hover drives bg_signal.
-        let bg_enter = bg_signal.clone();
-        let bg_leave = bg_signal.clone();
-        let hover_color = self.hover_bg;
+        // Self handlers: tap fires the action, hover drives the `hovered`
+        // bool (which the derived role signal above reacts to).
+        let hovered_handler = hovered.clone();
         let mut handlers =
             HandlerSet::new()
                 .cursor(CursorIcon::Pointer)
                 .on_hover(move |entered, _ctx| {
-                    if entered {
-                        bg_enter.set(hover_color);
-                    } else {
-                        bg_leave.set(Color::TRANSPARENT);
-                    }
+                    hovered_handler.set(entered);
                 });
 
         if let Some(action) = self.action.take() {
@@ -194,21 +203,15 @@ impl Widget for ControlButton {
 
         ctx.apply_self_handlers(handlers);
 
-        // External hover feed (Windows non-client hover): map the
-        // boolean signal to the same `bg_signal` colour that the
-        // internal hover handler writes, so OS-driven hover renders
-        // identically to widget-tree-driven hover. The effect handle
-        // is owned by the BuildContext so it lives as long as the
+        // External hover feed (Windows non-client hover): write the same
+        // `hovered` bool the internal handler writes, so OS-driven hover
+        // renders identically to widget-tree-driven hover. The effect
+        // handle is owned by the BuildContext so it lives as long as the
         // widget node.
         if let Some(ext) = self.external_hover.take() {
-            let bg_target = self.bg_signal.clone();
-            let hover_color = self.hover_bg;
+            let hovered_ext = hovered.clone();
             ctx.effect(&ext, move |entered| {
-                bg_target.set(if *entered {
-                    hover_color
-                } else {
-                    Color::TRANSPARENT
-                });
+                hovered_ext.set(*entered);
             });
         }
 
@@ -311,15 +314,16 @@ impl WindowControls {
 
 impl Widget for WindowControls {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
-        // Window controls are painted once during build — swapping the
-        // `Color` fields on a new build would be wasted allocation when
-        // the glyph/hover colors follow the theme. We read a snapshot and
-        // leave fine-grained reactive repaint to `mark_all_dirty` on the
-        // static `.color(...)` values inside each `ControlButton`.
-        let theme = ctx.theme_signal().get();
-        let fg = theme.colors.text_primary;
-        let hover_bg = theme.colors.surface_hover;
-        let close_hover = theme.colors.status_error_bg;
+        // Hand the buttons *roles*, not a frozen `theme.colors.*` snapshot.
+        // A resolved `Color` is a `ColorProp::Static` that `mark_all_dirty`
+        // re-resolves to the same value, so a build-time snapshot would
+        // freeze the glyph/hover colors at whatever theme was active when
+        // the tree was built — they would not retint on `set_theme`. Roles
+        // resolve against the current theme at paint time, so the cluster
+        // follows light ↔ dark live without a rebuild.
+        let fg = TextRole::Primary;
+        let hover_bg = SurfaceRole::Hover;
+        let close_hover = SurfaceRole::StatusError;
 
         // Win11-style cell: 46 dp wide × 32 dp tall fits comfortably into a
         // 40 dp title bar. Height here is the cell's natural size; the

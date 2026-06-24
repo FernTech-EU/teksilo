@@ -58,24 +58,26 @@ fn main() {
                         Some(host) => Box::new(
                             TitleBar::new(host)
                                 .height(40.0)
-                                // surface_pressed (#43454A) is clearly lighter
-                                // than surface_main (#2B2D30) in the dark default
-                                // theme. Plus a 2 px border in text_secondary so
-                                // the separation is unambiguous regardless of
-                                // theme.
-                                .background(theme.colors.surface_pressed)
-                                .border(theme.colors.text_secondary, 2.0)
+                                // Use *roles*, not frozen `theme.colors.*`
+                                // snapshots: roles resolve at paint time, so the
+                                // bar retints live when `ctx.set_theme(...)`
+                                // swaps light ↔ dark. `SurfaceRole::Pressed` is
+                                // clearly lighter than `SurfaceRole::Main`, plus
+                                // a 2 px `TextRole::Secondary` border for an
+                                // unambiguous separation in either theme.
+                                .background(SurfaceRole::Pressed)
+                                .border(TextRole::Secondary, 2.0)
                                 .leading(
                                     TextWidget::new(lit!("  Bastyde — Title Bar Demo"))
                                         .style(theme.typography.body_bold.clone())
-                                        .color(theme.colors.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .center(
                                     TextWidget::new(lit!(
                                         "drag · double-click maximize · right-click for menu  "
                                     ))
                                     .style(theme.typography.small.clone())
-                                    .color(theme.colors.text_secondary),
+                                    .color(TextRole::Secondary),
                                 )
                                 .close_action(|ctx| ctx.close_window()),
                         ),
@@ -84,17 +86,17 @@ fn main() {
                                 "(custom chrome unsupported on this platform — \
             falling back to native decorations)"
                             ))
-                            .color(theme.colors.text_error),
+                            .color(TextRole::Error),
                         ),
                     };
 
                     let body = ZStack::new()
-                        .child(RectWidget::new().background(theme.colors.surface_main))
+                        .child(RectWidget::new().background(SurfaceRole::Main))
                         .child(
                             Expand::new().child(
                                 TextWidget::new(lit!("body content goes here"))
                                     .style(theme.typography.body.clone())
-                                    .color(theme.colors.text_primary),
+                                    .color(TextRole::Primary),
                             ),
                         );
 
