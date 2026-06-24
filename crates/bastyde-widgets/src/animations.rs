@@ -12,6 +12,7 @@
 //!
 //! - [`Fade`] — opacity 0 ↔ 1, layout-transparent.
 //! - [`Collapse`] — height 0 ↔ natural, layout-driving.
+//! - [`Unroll`] — width 0 ↔ natural, layout-driving (horizontal `Collapse`).
 //!
 //! Spinner is a separate concern: it is a *leaf* widget (shader-driven
 //! `AnimatedQuadKind::SpinnerArc`), not a subtree wrapper, and lives at
@@ -28,6 +29,7 @@ pub mod scale;
 pub mod shake;
 pub mod slide;
 pub mod smooth_size;
+pub mod unroll;
 
 pub use blur::Blur;
 pub use collapse::Collapse;
@@ -40,3 +42,4 @@ pub use scale::{Scale, ScaleOrigin};
 pub use shake::Shake;
 pub use slide::{Slide, SlideEdge};
 pub use smooth_size::{SmoothSize, SmoothSizeAxes};
+pub use unroll::{Unroll, UnrollFrom};

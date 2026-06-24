@@ -1557,6 +1557,44 @@ impl WidgetTree {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
         }
+        for (mut req, progress, duration) in ctx.reveal_overlay_requests {
+            if req.parent_overlay.is_none() {
+                req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
+            }
+            if self
+                .overlay_manager
+                .find_by_content(req.content_id)
+                .is_some()
+            {
+                continue;
+            }
+            let content_id = req.content_id;
+            let current_focus = self.focused;
+            let overlay_id = self.overlay_manager.show(req);
+            self.overlay_manager
+                .set_shown_at_sim(overlay_id, self.sim_clock);
+            self.a11y_dirty = true;
+            if let Some(focus_id) = current_focus {
+                self.overlay_manager.set_top_focus_restore(focus_id);
+            }
+            // Drive the caller's progress signal 0 → 1, and register it
+            // as the overlay's fade-state signal so every dismiss path
+            // tweens it 1 → 0 and defers removal until it completes — the
+            // same deferral machinery as `with_fade`, minus `set_opacity`
+            // (the caller owns how `progress` paints).
+            self.register_animated_signal(&progress, content_id);
+            let _ = progress.try_animate_with_options(crate::animation::AnimationRequest {
+                target: 1.0,
+                duration,
+                easing: bastyde_tokens::Easing::EaseOut,
+                frame_interval: None,
+                looping: false,
+                epsilon: 0.0,
+                max_duration: None,
+            });
+            self.overlay_manager
+                .attach_fade(overlay_id, progress, duration);
+        }
         if let Some(capture) = ctx.pointer_capture {
             if capture {
                 self.pointer_captured_by = Some(source_widget);

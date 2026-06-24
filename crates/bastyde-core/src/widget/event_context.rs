@@ -63,6 +63,18 @@ pub struct EventContext<'ops> {
     )>,
     /// Timed overlay requests (request, auto-dismiss delay).
     pub(crate) timed_overlay_requests: Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
+    /// Reveal overlay requests (request, caller-owned animated progress
+    /// signal, tween duration). The framework shows the overlay, then
+    /// drives `progress` 0 → 1 on show and 1 → 0 on dismiss, deferring
+    /// the actual stack removal until the roll-back tween completes —
+    /// the same deferral the fade path uses, minus the opacity scope.
+    /// The caller applies `progress` however it wants (e.g. an `Unroll`
+    /// width). See [`show_overlay_with_reveal`](EventContext::show_overlay_with_reveal).
+    pub(crate) reveal_overlay_requests: Vec<(
+        crate::overlay::OverlayRequest,
+        crate::signal::Signal<f32>,
+        std::time::Duration,
+    )>,
     /// Dismiss descendant overlays of the source widget's containing overlay.
     /// Optionally preserve the subtree rooted at a specific content widget ID.
     pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,
@@ -237,6 +249,7 @@ impl<'ops> EventContext<'ops> {
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
+            reveal_overlay_requests: Vec::new(),
             dismiss_descendant_overlays: Vec::new(),
             cancel_delayed_overlays: Vec::new(),
             repaint_requests: Vec::new(),
@@ -699,6 +712,35 @@ impl<'ops> EventContext<'ops> {
     /// Show an overlay (tooltip, menu, popover).
     pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) {
         self.overlay_requests.push(request);
+    }
+
+    /// Show an overlay whose reveal/dismiss is animated by a
+    /// caller-owned progress signal.
+    ///
+    /// `progress` must be an animated `Signal<f32>` (created with
+    /// [`Signal::new_animated`](crate::signal::Signal::new_animated) or
+    /// [`BuildContext::animated_signal`](crate::build_context::BuildContext::animated_signal)).
+    /// The framework shows the overlay, tweens `progress` 0 → 1 over
+    /// `duration`, and on any dismiss path tweens it 1 → 0 while
+    /// **deferring** the overlay's removal (and its content's dormancy)
+    /// until the roll-back completes — the same window the fade path
+    /// uses, but with no opacity applied. The caller binds `progress`
+    /// to whatever paints the reveal (e.g. an
+    /// [`Unroll`](https://docs.rs/bastyde) width), and is responsible for
+    /// resetting it to `0.0` before the show if a prior reveal left it
+    /// at `1.0`.
+    ///
+    /// Under `prefers-reduced-motion`, skip this and use
+    /// [`show_overlay`](Self::show_overlay) with the progress pinned at
+    /// `1.0` so there is no tween and dismissal is immediate.
+    pub fn show_overlay_with_reveal(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        progress: crate::signal::Signal<f32>,
+        duration: std::time::Duration,
+    ) {
+        self.reveal_overlay_requests
+            .push((request, progress, duration));
     }
 
     /// Show an overlay that dismisses automatically after `duration`.
