@@ -1597,10 +1597,23 @@ impl WidgetCatalog for GroupHeader {
         KnobSpec::new().text("label", "Label", "Section title")
     }
     fn variants() -> Vec<PreviewVariant> {
-        vec![PreviewVariant::defaults("default")]
+        vec![
+            PreviewVariant::defaults("default"),
+            // Demonstrates the role-based styling API: a bold, accent-colored
+            // header that tracks runtime theme changes.
+            PreviewVariant::defaults("accent"),
+        ]
     }
-    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
-        Box::new(GroupHeader::new(lit!(knobs.text("label").get(),)))
+    fn build(variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        let header = GroupHeader::new(lit!(knobs.text("label").get(),));
+        match variant {
+            "accent" => Box::new(
+                header
+                    .style(bastyde_tokens::TextStyleRole::BodyBold)
+                    .color(bastyde_tokens::TextRole::Accent),
+            ),
+            _ => Box::new(header),
+        }
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/group_header.rs", GroupHeader);

@@ -21,10 +21,10 @@
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::color_prop::ColorProp;
+use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{Color, TextRole, TextStyle};
+use bastyde_tokens::{TextRole, TextStyleRole};
 
 use crate::primitives::{Divider, Expand, HStack, TextWidget};
 use bastyde_i18n::LocalizedString;
@@ -33,12 +33,17 @@ use bastyde_i18n::LocalizedString;
 pub struct GroupHeader {
     label: LocalizedString,
     /// Optional text-style override for the label. Defaults to
-    /// `theme.typography.body` — IntelliJ/Jewel group headers render at
-    /// normal body size, not as a smaller caption.
-    style: Option<TextStyle>,
-    /// Optional label-color override. Defaults to
-    /// `theme.colors.text_primary` (no dimming).
-    color: Option<Color>,
+    /// [`TextStyleRole::Body`] — IntelliJ/Jewel group headers render at
+    /// normal body size, not as a smaller caption. Accepts a static
+    /// [`TextStyle`](bastyde_tokens::TextStyle) or a
+    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole), so the default
+    /// (and any role override) tracks runtime theme changes.
+    style: Option<TextStyleProp>,
+    /// Optional label-color override. Defaults to [`TextRole::Primary`]
+    /// (no dimming). Accepts any `impl Into<ColorProp>` — a literal
+    /// `Color`, a text/surface role, or a `Signal<Color>` — so accent
+    /// headers track runtime theme changes.
+    color: Option<ColorProp>,
     /// Horizontal gap between the label and the rule line.
     gap: f32,
     // Build state
@@ -57,16 +62,19 @@ impl GroupHeader {
         }
     }
 
-    /// Override the label's text style (font, size, weight, …).
-    pub fn style(mut self, style: TextStyle) -> Self {
-        self.style = Some(style);
+    /// Override the label's text style (font, size, weight, …). Accepts a
+    /// static [`TextStyle`](bastyde_tokens::TextStyle) or a
+    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    pub fn style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.style = Some(style.into());
         self
     }
 
     /// Override the label's color. Useful when a consumer wants to
-    /// emphasise a header with an accent.
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Some(color);
+    /// emphasise a header with an accent. Accepts a literal `Color`, a
+    /// `TextRole`/`SurfaceRole`, or a `Signal<Color>`.
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = Some(color.into());
         self
     }
 
@@ -88,20 +96,21 @@ impl std::fmt::Debug for GroupHeader {
 
 impl Widget for GroupHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Default to the Body text role and the Primary text color role so
+        // both the default and any caller override resolve at paint/layout
+        // time and track runtime theme changes.
         let style = self
             .style
             .clone()
-            .unwrap_or_else(|| ctx.theme().typography.body.clone());
-        // Caller override (literal Color) wins, otherwise the Primary
-        // text role so the label tracks runtime theme changes.
-        let color: ColorProp = match self.color {
-            Some(c) => c.into(),
-            None => TextRole::Primary.into(),
-        };
+            .unwrap_or_else(|| TextStyleRole::Body.into());
+        let color = self
+            .color
+            .clone()
+            .unwrap_or_else(|| TextRole::Primary.into());
 
         let label = TextWidget::new(self.label.clone())
             .style(style)
-            .bind_color(color)
+            .color(color)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
