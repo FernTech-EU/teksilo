@@ -511,6 +511,33 @@ impl AccessNodeBuilder {
             };
             self.inner.set_text_selection(selection);
         }
+
+        // accesskit contract: a `Role::Label` node carries its text in the
+        // `value` property, NOT `label`. Every platform adapter reads it that
+        // way — Windows UIA derives the node's Name from `value` (its
+        // `label_comes_from_value()` returns true for `Role::Label`), macOS
+        // maps `Role::Label` to `NSAccessibilityStaticTextRole` whose content
+        // is exposed as AXValue, and `accesskit_consumer` reads `value` when
+        // another control is `labelled_by` this node. A name left in the
+        // `label` property is therefore silently dropped on Windows and stray
+        // on macOS. Widgets set the accessible name uniformly via `set_name`
+        // (-> the `label` property); re-serialize it to `value` here, the one
+        // place every emitted node is finalized — widget nodes (via the tree
+        // walker) and scene synthetic children (via `push_scene_child`, which
+        // also funnels through `build`). The builder's logical `name()` view
+        // is intentionally left untouched, so introspection / `find_by_label`
+        // continue to report the accessible name regardless of role. Reading
+        // the inner node directly keeps this robust against any label set
+        // outside `set_name`, and idempotent (a second pass finds no label).
+        if self.inner.role() == Role::Label
+            && let Some(label) = self.inner.label().map(|s| s.to_string())
+        {
+            if self.inner.value().is_none() {
+                self.inner.set_value(label);
+            }
+            self.inner.clear_label();
+        }
+
         (node_id, self.inner, self.children_collected)
     }
 

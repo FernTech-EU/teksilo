@@ -857,6 +857,42 @@ mod tests {
     }
 
     #[test]
+    fn label_role_emits_text_as_value_not_label() {
+        // accesskit contract: a `Role::Label` node carries its text in the
+        // `value` property, not `label`. Widgets set the accessible name via
+        // `set_name` (-> `label`); the builder re-serializes it to `value`
+        // when the role is `Role::Label`, otherwise the Name is empty under
+        // Windows UIA and stray under macOS AXStaticText. The logical
+        // introspection name (used by `find_by_label` etc.) is unchanged.
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().label("Section")); // Role::Label
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+
+        // Logical view still reports the accessible name.
+        assert_eq!(tree.accessibility_node(widget).name(), Some("Section"));
+
+        // The *emitted* node carries the text in `value`, with `label` cleared.
+        let update = tree.sync_accessibility();
+        let node = &update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == crate::accessibility::widget_id_to_node_id(widget))
+            .expect("label node must be present in the tree update")
+            .1;
+        assert_eq!(node.role(), accesskit::Role::Label);
+        assert_eq!(
+            node.value(),
+            Some("Section"),
+            "Role::Label text must be exposed via `value`"
+        );
+        assert_eq!(
+            node.label(),
+            None,
+            "Role::Label must not leave text in the `label` property"
+        );
+    }
+
+    #[test]
     fn find_by_role_works() {
         let mut tree = WidgetTree::new();
         tree.add(FillWidget::new().label("Text"));
