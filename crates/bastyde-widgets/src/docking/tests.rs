@@ -703,6 +703,29 @@ fn rail_strip_width_follows_the_size_mode() {
 }
 
 #[test]
+fn rail_with_divider_builds_and_lays_out() {
+    use super::DockRail;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(DockRail::new(DockSide::Leading).divider()),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // The rail still renders normally with the divider overlay attached.
+    let rail = find_first_role(&t, root, Role::TabList).expect("a rail renders");
+    let b = t.bounds(rail);
+    assert!(b.width > 0.0 && b.height > 0.0);
+}
+
+#[test]
 fn rail_slot_resizes_with_the_activity_bar_size() {
     use super::{DockRail, DockRailItemSize};
     use crate::icon_button::{IconButton, IconButtonSize};

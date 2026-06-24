@@ -102,6 +102,7 @@ pub struct DockRail {
     pub(crate) side: DockSide,
     pub(crate) size: IconButtonSize,
     pub(crate) background: Option<ColorProp>,
+    pub(crate) divider: Option<ColorProp>,
     pub(crate) top_slot: Option<DockRailSlot>,
     pub(crate) bottom_slot: Option<DockRailSlot>,
     pub(crate) overflow_icon: Option<DockIconFactory>,
@@ -123,6 +124,7 @@ impl DockRail {
             side,
             size: IconButtonSize::Large,
             background: None,
+            divider: None,
             top_slot: None,
             bottom_slot: None,
             overflow_icon: None,
@@ -141,6 +143,23 @@ impl DockRail {
     /// Default (unset) is `SurfaceRole::Sunken`.
     pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
         self.background = Some(color.into());
+        self
+    }
+
+    /// Draw a 1 dp divider line between the rail and the side's content, on
+    /// the rail's content-facing edge (RTL-aware). Uses `BorderRole::Divider`.
+    /// Off by default. See [`divider_color`](Self::divider_color) for a custom
+    /// colour.
+    pub fn divider(mut self) -> Self {
+        self.divider = Some(BorderRole::Divider.into());
+        self
+    }
+
+    /// Like [`divider`](Self::divider), but with an explicit colour. Accepts
+    /// `Color`, a [`BorderRole`](bastyde_tokens::BorderRole), or a
+    /// `Signal<Color>`.
+    pub fn divider_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.divider = Some(color.into());
         self
     }
 
@@ -373,12 +392,19 @@ impl Widget for DockActivityBar {
         // Insertion-line overlay (topmost) — painted while a dock tab / dock
         // widget is dragged over the rail.
         let indicator = ctx.add(RailDropIndicator::new(self.drop_indicator.clone()));
-        let root = ctx.add(
-            ZStack::new()
-                .add_child(bg)
-                .add_child(padded)
-                .add_child(indicator),
-        );
+        let mut stack = ZStack::new()
+            .add_child(bg)
+            .add_child(padded)
+            .add_child(indicator);
+        // Optional divider between the rail and the side's content, on the
+        // content-facing edge (drawn above the background so it isn't covered).
+        if let Some(color) = self.config.divider.clone() {
+            stack = stack.add_child(ctx.add(RailEdgeDivider {
+                side: self.side,
+                color,
+            }));
+        }
+        let root = ctx.add(stack);
         self.root = Some(root);
 
         // Right-click on empty rail space → the activities checklist + Activity
@@ -635,6 +661,65 @@ impl Widget for RailDropIndicator {
         let x = bounds.x + RAIL_PADDING;
         let w = (bounds.width - RAIL_PADDING * 2.0).max(0.0);
         canvas.fill_rect(Rect::new(x, yy, w, t), color);
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// RailEdgeDivider — a 1 dp line between the rail and the side's content.
+// ───────────────────────────────────────────────────────────────────────
+
+/// A pure-decoration overlay (topmost child of the rail's ZStack) that paints a
+/// 1 dp vertical line on the rail's content-facing edge — the boundary between
+/// the activity rail and the side's resizable content. The edge is derived from
+/// the side (the rail always hugs the outer / leading-cross edge, so content
+/// sits on the opposite vertical edge) and the active layout direction, so it
+/// stays correct under RTL. Pointer events pass straight through.
+struct RailEdgeDivider {
+    side: DockSide,
+    color: ColorProp,
+}
+
+impl std::fmt::Debug for RailEdgeDivider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RailEdgeDivider").finish()
+    }
+}
+
+impl Widget for RailEdgeDivider {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let rtl = matches!(
+            ctx.layout_direction,
+            bastyde_core::environment::LayoutDirection::RightToLeft
+        );
+        // The rail hugs the outer thickness edge (leading / trailing) or the
+        // leading cross-edge (top / bottom), so the content is on the trailing
+        // geometric edge for every side except Trailing, where it's the leading
+        // edge. Resolve that to a concrete left / right under RTL.
+        let content_on_right = match self.side {
+            DockSide::Trailing => rtl,
+            _ => !rtl,
+        };
+        let t = 1.0;
+        let x = if content_on_right {
+            bounds.x + bounds.width - t
+        } else {
+            bounds.x
+        };
+        let color = self.color.resolve(ctx.theme, true);
+        canvas.fill_rect(Rect::new(x, bounds.y, t, bounds.height), color);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
