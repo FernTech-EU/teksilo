@@ -647,6 +647,47 @@ fn dynamic_pane_dropped_when_tab_removed() {
 }
 
 #[test]
+fn dynamic_tab_removal_reaps_pane_no_active_leak() {
+    // The reconcile fix at the framework level: TabWidget is
+    // `preserves_children_on_rebuild`, so before the fix a removed tab's pane
+    // stayed in the arena AND active (a ghost), growing the active-widget set
+    // on every add/remove cycle. Cycling add→remove must leave the active
+    // count flat.
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let model: ListModel<TabHandle> = ListModel::new();
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected.clone())
+            .dynamic_tab::<()>("doc", |_h, _s| {
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
+            .dynamic_model(model.clone())
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let baseline = tree.active_widget_count();
+
+    for _ in 0..5 {
+        model.push(TabHandle::dynamic(
+            TabId::fresh(),
+            "doc",
+            TabInfo::new().title(label("Tmp")),
+            (),
+        ));
+        tree.layout(SizeProposal::exact(640.0, 320.0));
+        let _ = model.remove(model.len() - 1);
+        tree.layout(SizeProposal::exact(640.0, 320.0));
+    }
+
+    assert_eq!(
+        tree.active_widget_count(),
+        baseline,
+        "each removed tab's pane must be reaped — no stranded active ghosts"
+    );
+}
+
+#[test]
 fn locale_change_retitles_live_tabs() {
     // Regression for the eager-resolution bug: with delegate-based
     // label resolution, live tabs must retitle when the locale

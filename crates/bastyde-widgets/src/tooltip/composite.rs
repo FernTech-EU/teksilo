@@ -305,15 +305,15 @@ impl Widget for CompositeTooltipWidget {
         self.root_child_id.map(|id| vec![id]).unwrap_or_default()
     }
 
-    /// Keep the existing child subtree across rebuilds rather than
-    /// destroying it. The body widget is owned once (`self.body` is
-    /// taken on first build) and cannot be reconstructed on a later
-    /// `build()`, so it must survive — otherwise the reused `body_id`
-    /// would dangle. Mirrors `Switcher`'s preserve-on-rebuild contract.
-    /// (In practice the composite tooltip has no `Rebuild`-level binding,
-    /// so this path is rarely exercised; when it is, the freshly-built
-    /// chrome supersedes the old, which is left orphaned — an accepted
-    /// cost on a tooltip that effectively never rebuilds.)
+    /// Reconcile children across rebuilds rather than tearing them down.
+    /// The body widget is owned once (`self.body` is taken on first build)
+    /// and cannot be reconstructed on a later `build()`, so it must survive —
+    /// otherwise the reused `body_id` would dangle. The body is re-parented
+    /// under the freshly-built chrome each rebuild; the reconciling rebuild
+    /// path follows authoritative parent pointers, so it keeps the re-parented
+    /// body and destroys only the superseded old chrome. (In practice the
+    /// composite tooltip has no `Rebuild`-level binding, so this path is rarely
+    /// exercised.) Mirrors `Switcher`'s preserve-on-rebuild contract.
     fn preserves_children_on_rebuild(&self) -> bool {
         true
     }

@@ -237,6 +237,15 @@ Three construction strategies control the memory/responsiveness tradeoff for mul
 
 **Transient** — subtrees built on activation, destroyed on deactivation. Lowest memory, highest switch cost. Suitable for browser-like scenarios where each tab is independent.
 
+### Rebuild and child reconciliation
+
+When a widget's `build()` re-runs (a `BindingLevel::Rebuild` signal fired, or an explicit rebuild request), the framework reconciles the widget's children against what the new `build()` returned. `Widget::preserves_children_on_rebuild()` selects the policy:
+
+- **`false` (default) — re-derive.** Every old child subtree is destroyed up front, then `build()` produces a fresh set. Correct for data-driven widgets (`Repeater`, `ListView`) that reconstruct children from current model state with fresh `WidgetId`s. A `false` widget must not re-attach an old child id — it is already gone.
+- **`true` — reconcile.** `build()` re-attaches (by id) the children it keeps and drops the rest. The framework keeps every re-attached child's subtree intact — focus, scroll offset, text contents, signal subscriptions all survive — and destroys only the children the new build dropped *and* did not re-parent elsewhere. This is the mode for widgets that memoize stateful children across rebuilds: `Switcher` pages, `TabWidget` / `DockingLayout` panes, the `CompositeTooltip` body, `SceneView`'s heavyweight scene widgets.
+
+The reconcile is **scoped** (it only considers the rebuilt widget's own direct children, so floating retained nodes held outside the child tree — e.g. dormant menu/popover content registered via `ctx.add` — are never touched) and **parent-authoritative**: a kept subtree that the rebuild re-parents *out* of a dropped sibling and into the new tree survives, because the destroy walk follows live `parent` pointers rather than the dropped sibling's now-stale `children` list. The per-node teardown frees the arena slot via a single-node removal (`Arena::remove_node`), so the recursion the destroy walk already performed is not duplicated by the arena. Net effect: a `preserve = true` widget that removes a child (a closed tab, a superseded tooltip chrome) genuinely reaps it — it does not leave a stranded, still-`Active` orphan in the arena.
+
 ---
 
 ## 9. Event System

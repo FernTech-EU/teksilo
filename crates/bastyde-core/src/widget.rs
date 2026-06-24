@@ -441,33 +441,37 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         true
     }
 
-    /// Whether `rebuild_single_widget` should **preserve** existing
-    /// children (skip the destroy-subtree-then-rebuild dance) when
-    /// re-running this widget's `build()`.
+    /// How `rebuild_single_widget` treats this widget's existing children
+    /// when re-running its `build()`.
     ///
-    /// Default `false` — rebuild is a "tear down and reconstruct"
-    /// operation, the right semantic for data-driven widgets like
-    /// `Repeater` / `ListView` where every rebuild constructs fresh
-    /// children from current model state.
+    /// **`false` (default) — re-derive.** Rebuild is "tear down and
+    /// reconstruct": every old child subtree is destroyed up front, then
+    /// `build()` produces a fresh set. The right semantic for data-driven
+    /// widgets like `Repeater` / `ListView` that rebuild their children from
+    /// current model state with fresh `WidgetId`s. A `false` widget must NOT
+    /// re-attach an old child id — it has already been destroyed.
     ///
-    /// Override to `true` for widgets whose children are stable
-    /// across rebuilds — they were created once at first build via
-    /// `ctx.add` / `ctx.add_boxed`, and subsequent rebuilds just
-    /// re-push the same `WidgetId`s. `SceneView` is the canonical
-    /// example: heavyweight scene widgets are materialised on first
-    /// build from `Scene::add_widget` pending entries; subsequent
-    /// rebuilds (triggered to drain pending drag-to-move / marquee
-    /// commits) MUST keep those widgets attached or the user sees
-    /// the cards / nested SceneView "disappear" on every drag end.
+    /// **`true` — reconcile.** `build()` re-attaches (by id) the children it
+    /// keeps and drops the rest. The framework keeps every re-attached child's
+    /// subtree intact — focus, scroll offset, text contents, signal
+    /// subscriptions all survive — and destroys only the old children the new
+    /// build dropped *and* did not re-parent elsewhere. This is the mode for
+    /// widgets that memoize stateful children across rebuilds:
     ///
-    /// When `true`, `build()` is responsible for returning a
-    /// children vec that contains every `WidgetId` it wants to
-    /// keep attached — the framework still updates the parent's
-    /// `children` field from that return value, so any IDs not in
-    /// the returned vec are orphaned (still in the arena, no
-    /// parent), exactly as if `false`. The opt-in only skips the
-    /// active `destroy_subtree` step that would tear them down
-    /// and unmount their state.
+    /// * `Switcher` keeps every mounted page alive so switching tabs doesn't
+    ///   wipe the inactive pages' state.
+    /// * `SceneView` re-pushes the same heavyweight scene-widget ids each
+    ///   rebuild (draining drag-to-move / marquee commits) — they must stay
+    ///   attached or the cards "disappear" on every drag end.
+    /// * `TabWidget` / `DockingLayout` / `CompositeTooltip` re-attach memoized
+    ///   panes / a one-shot body widget that cannot be reconstructed.
+    ///
+    /// The reconcile follows **authoritative parent pointers**, so a kept
+    /// subtree that `build()` re-parents *out* of a dropped sibling and into
+    /// the new tree survives — it is not swept via the dropped sibling's now
+    /// stale `children` list. Dropped children are genuinely destroyed (state
+    /// unmounted, arena slots freed), not left as stranded, still-active
+    /// orphans.
     fn preserves_children_on_rebuild(&self) -> bool {
         false
     }

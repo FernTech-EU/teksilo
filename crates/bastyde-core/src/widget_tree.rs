@@ -1405,22 +1405,28 @@ impl WidgetTree {
                 .remove(&sub_id);
         }
 
-        // Tear down existing children unless the widget opts into
-        // preserving them (`Widget::preserves_children_on_rebuild`).
-        // Stable-child widgets like `SceneView` re-push the same
-        // `WidgetId`s on every rebuild — destroying them here would
-        // unmount cards / nested SceneViews on every drag-to-move
-        // or marquee commit (the rebuild signal that drains pending
-        // mutations).
+        // Decide how to treat the existing children. Two modes:
+        //
+        // * Default (`preserves_children_on_rebuild() == false`): the widget
+        //   re-derives its whole subtree, so tear down every old child up
+        //   front and let `build()` produce a fresh set.
+        //
+        // * Reconcile (`preserves_children_on_rebuild() == true`): the widget
+        //   re-attaches the children it keeps (by id) and drops the rest. We
+        //   snapshot the old children, run `build()`, then destroy only the
+        //   old children the new build did NOT re-attach and did NOT re-parent
+        //   elsewhere. Re-attached children keep their state (focus, scroll,
+        //   text, subscriptions); dropped children are reaped rather than left
+        //   as stranded, still-active orphans.
         let preserve_children = self
             .arena
             .get(widget_id)
             .map(|n| n.widget.preserves_children_on_rebuild())
             .unwrap_or(false);
+        let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         if !preserve_children {
-            let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
-            for child_id in old_children {
-                self.destroy_subtree(child_id);
+            for child_id in &old_children {
+                self.destroy_subtree(*child_id);
             }
         }
 
@@ -1446,6 +1452,25 @@ impl WidgetTree {
                 child_node.parent = Some(widget_id);
             }
         }
+
+        // Reconcile the preserve path: reap any old child the new build
+        // dropped (not in `new_children`) and did not re-parent elsewhere
+        // (its `parent` still points here). Authoritative parent pointers mean
+        // a kept subtree re-parented out of a dropped sibling survives. Runs
+        // before `node.children` is overwritten so the destroy walk can't see
+        // the new list. Re-parented survivors already have their new parent by
+        // now (`ctx.add` builds nested widgets synchronously and re-homes their
+        // children), so the `parent == widget_id` test correctly excludes them.
+        if preserve_children {
+            let new_set: std::collections::HashSet<WidgetId> =
+                new_children.iter().copied().collect();
+            for &old_c in &old_children {
+                if !new_set.contains(&old_c) && self.arena.parent(old_c) == Some(widget_id) {
+                    self.destroy_subtree_inner(old_c, true);
+                }
+            }
+        }
+
         if let Some(node) = self.arena.get_mut(widget_id) {
             node.children = new_children;
             node.effect_handles = effect_handles;
@@ -1458,6 +1483,26 @@ impl WidgetTree {
     /// `arena.destroy()` whenever a widget that may have subscribed to
     /// events is being torn down.
     pub(crate) fn destroy_subtree(&mut self, widget_id: WidgetId) {
+        self.destroy_subtree_inner(widget_id, false);
+    }
+
+    /// Shared teardown for [`destroy_subtree`](Self::destroy_subtree) and the
+    /// reconciling rebuild path. When `reparent_aware` is `true`, recursion
+    /// descends into a child only if that child's `parent` still points at
+    /// `widget_id`.
+    ///
+    /// A reconciling rebuild (a [`preserves_children_on_rebuild`] widget) may
+    /// re-parent a kept subtree *out* of a dropped sibling and *into* the new
+    /// tree. The dropped sibling's `children` list still lists that subtree
+    /// (stale), so following it would tear down a node that is actually alive
+    /// elsewhere. Following the authoritative `parent` pointer instead stops
+    /// at the boundary of what genuinely still belongs to the node being
+    /// destroyed. The per-node teardown ends with `arena.remove_node` (a
+    /// single-node removal), NOT `arena.destroy` (which would re-recurse the
+    /// stale `children` list and undo the skip).
+    ///
+    /// [`preserves_children_on_rebuild`]: crate::widget::Widget::preserves_children_on_rebuild
+    fn destroy_subtree_inner(&mut self, widget_id: WidgetId, reparent_aware: bool) {
         // See the matching cancel in `rebuild_single_widget` — the
         // scheduler holds strong Signal<f32> clones, so the animation
         // would outlive its widget without this explicit cancellation.
@@ -1467,7 +1512,11 @@ impl WidgetTree {
 
         let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child in children {
-            self.destroy_subtree(child);
+            if reparent_aware && self.arena.parent(child) != Some(widget_id) {
+                // Re-parented into the surviving tree by this rebuild — leave it.
+                continue;
+            }
+            self.destroy_subtree_inner(child, reparent_aware);
         }
         let drained_subs = self
             .arena
@@ -1515,7 +1564,11 @@ impl WidgetTree {
         if self.pointer_captured_by == Some(widget_id) {
             self.pointer_captured_by = None;
         }
-        self.arena.destroy(widget_id);
+        // Single-node removal: this function already recursed into the
+        // children above (honouring re-parenting when `reparent_aware`).
+        // `arena.destroy` would re-recurse the now-stale `children` list and
+        // tear down a survivor re-homed out of this subtree.
+        self.arena.remove_node(widget_id);
     }
 
     /// Set the layout direction (LTR/RTL). Marks all widgets as needing layout.

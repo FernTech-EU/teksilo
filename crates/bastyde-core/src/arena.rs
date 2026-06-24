@@ -933,7 +933,21 @@ impl WidgetArena {
         for child in children {
             self.destroy(child);
         }
-        // Remove from parent's children list
+        self.remove_node(id);
+    }
+
+    /// Remove a *single* node: unlink it from its parent's child list and drop
+    /// it from the arena. Does **not** recurse into its children.
+    ///
+    /// The caller owns the recursion. This exists for
+    /// [`WidgetTree::destroy_subtree`](crate::widget_tree::WidgetTree) /
+    /// the reconciling rebuild path, which walks the subtree itself so it can
+    /// honour re-parenting — a child re-homed into the surviving tree must NOT
+    /// be torn down via this node's now-stale `children` list. Using
+    /// [`destroy`](Self::destroy) there would re-recurse that stale list and
+    /// destroy the re-homed survivor.
+    pub fn remove_node(&mut self, id: WidgetId) {
+        self.roots_dirty = true;
         if let Some(parent_id) = self.parent(id)
             && let Some(parent) = self.nodes.get_mut(parent_id)
         {

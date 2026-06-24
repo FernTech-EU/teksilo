@@ -3720,4 +3720,200 @@ mod tests {
             "a factory returning None must not mount any overlay"
         );
     }
+
+    // ---- Reconcile-on-rebuild (`preserves_children_on_rebuild`) ----------
+    //
+    // These pin the contract that the preserve path RECONCILES: it keeps the
+    // children a rebuild re-attaches (and any subtree re-parented into the new
+    // tree) while reaping the ones it drops — so memoizing widgets are both
+    // stateful and leak-free. Regression guard for the orphan-leak the old
+    // "preserve = destroy nothing" behaviour caused.
+
+    /// `build()` mints a fresh child every time and returns only it, abandoning
+    /// the previous one. Used to prove dropped children are reaped, not leaked.
+    #[derive(Debug)]
+    struct FreshChildHost {
+        preserve: bool,
+    }
+    impl Widget for FreshChildHost {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            vec![ctx.add(FillWidget::new())]
+        }
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _c: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            p.resolve(10.0, 10.0).into()
+        }
+        fn preserves_children_on_rebuild(&self) -> bool {
+            self.preserve
+        }
+    }
+
+    #[test]
+    fn reconcile_reaps_dropped_children_no_leak() {
+        // preserve=false (destroy-all) and preserve=true (reconcile) must BOTH
+        // keep the arena bounded when a rebuild drops its old child. Before the
+        // reconcile fix, preserve=true grew the arena (and the active set) by
+        // one stranded orphan per rebuild.
+        for preserve in [false, true] {
+            let mut tree = WidgetTree::new();
+            let host = tree.add(FreshChildHost { preserve });
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            let total0 = tree.arena.len();
+            let active0 = tree.active_widget_count();
+            for _ in 0..5 {
+                tree.arena_mark_needs_rebuild_for_testing(host);
+                tree.layout(SizeProposal::exact(100.0, 100.0));
+            }
+            assert_eq!(
+                tree.arena.len(),
+                total0,
+                "preserve={preserve}: dropped children must be reaped, not leaked"
+            );
+            assert_eq!(
+                tree.active_widget_count(),
+                active0,
+                "preserve={preserve}: no stranded still-active orphans"
+            );
+        }
+    }
+
+    /// Memoizes one child and re-attaches the same id every build.
+    #[derive(Debug)]
+    struct StableChildHost {
+        child: Option<WidgetId>,
+        probe: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
+    }
+    impl Widget for StableChildHost {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let id = match self.child {
+                Some(id) => id,
+                None => {
+                    let id = ctx.add(FillWidget::new());
+                    self.child = Some(id);
+                    self.probe.set(Some(id));
+                    id
+                }
+            };
+            vec![id]
+        }
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _c: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            p.resolve(10.0, 10.0).into()
+        }
+        fn preserves_children_on_rebuild(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn reconcile_preserves_reattached_child() {
+        let probe = std::rc::Rc::new(std::cell::Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let host = tree.add(StableChildHost {
+            child: None,
+            probe: probe.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let child = probe.get().expect("child mounted");
+        let total0 = tree.arena.len();
+        for _ in 0..5 {
+            tree.arena_mark_needs_rebuild_for_testing(host);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+        }
+        assert!(
+            tree.arena.is_active(child),
+            "the re-attached child must survive every rebuild"
+        );
+        assert_eq!(tree.arena.len(), total0, "no growth — same child reused");
+    }
+
+    /// Re-homes a node returned from its `build()` under itself.
+    #[derive(Debug)]
+    struct Wrapper {
+        child: WidgetId,
+    }
+    impl Widget for Wrapper {
+        fn build(&mut self, _ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            vec![self.child]
+        }
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _c: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            p.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// Memoizes a body, then wraps it in a FRESH `Wrapper` each build —
+    /// re-parenting the body out of the previous (now dropped) wrapper. This is
+    /// the TabWidget / CompositeTooltip pattern in miniature.
+    #[derive(Debug)]
+    struct ReparentHost {
+        body: Option<WidgetId>,
+        probe: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
+    }
+    impl Widget for ReparentHost {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let body = match self.body {
+                Some(id) => id,
+                None => {
+                    let id = ctx.add(FillWidget::new());
+                    self.body = Some(id);
+                    self.probe.set(Some(id));
+                    id
+                }
+            };
+            vec![ctx.add(Wrapper { child: body })]
+        }
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _c: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            p.resolve(10.0, 10.0).into()
+        }
+        fn preserves_children_on_rebuild(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn reconcile_spares_reparented_survivor() {
+        // The memoized body is re-parented into a fresh wrapper each rebuild;
+        // the old wrapper is dropped. The body must survive (it is re-homed),
+        // and the old wrappers must be reaped (no leak). This is the exact
+        // failure that destroyed TabWidget's static panel before the fix: the
+        // parent-authoritative recursion + single-node arena removal spare the
+        // re-homed body while still reaping the dropped wrapper subtree.
+        let probe = std::rc::Rc::new(std::cell::Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let host = tree.add(ReparentHost {
+            body: None,
+            probe: probe.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let body = probe.get().expect("body mounted");
+        let total0 = tree.arena.len();
+        for _ in 0..5 {
+            tree.arena_mark_needs_rebuild_for_testing(host);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+        }
+        assert!(
+            tree.arena.is_active(body),
+            "the re-parented body must survive — it was moved into the new tree, \
+             not swept with the dropped wrapper"
+        );
+        assert_eq!(
+            tree.arena.len(),
+            total0,
+            "dropped wrappers reaped — no per-rebuild leak"
+        );
+    }
 }

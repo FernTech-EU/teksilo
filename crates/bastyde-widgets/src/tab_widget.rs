@@ -1041,9 +1041,11 @@ impl TabWidget {
             };
             pane_ids.push(pane_id);
         }
-        // Prune dynamic-pane memo entries for tabs the model no
-        // longer carries — their widgets become unreachable from any
-        // root and the arena will reap them.
+        // Prune dynamic-pane memo entries for tabs the model no longer
+        // carries. Their pane widgets are absent from the children this
+        // rebuild returns, so the reconciling rebuild path (TabWidget is
+        // `preserves_children_on_rebuild`) destroys them — they are not left
+        // as stranded, still-active orphans.
         self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
 
         pane_ids
