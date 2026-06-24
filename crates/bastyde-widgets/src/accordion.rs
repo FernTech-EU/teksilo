@@ -12,14 +12,15 @@
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::color_prop::ColorProp;
+use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
+use bastyde_tokens::{BorderRole, TextRole, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
 use crate::primitives::{HStack, IconWidget, MinSize, Spacer, TextWidget, VStack};
@@ -132,14 +133,17 @@ pub struct Accordion {
     /// Region wrapper ID — used for `aria-controls` on the header button.
     region_id: Option<WidgetId>,
     /// Optional override for the header foreground color (title text +
-    /// chevron icon). When `None`, the accordion uses
-    /// `theme.colors.text_primary`. Set this when the accordion is
-    /// embedded inside a surface that uses a non-standard text color
-    /// (rich tooltip, dark snackbar, etc.).
-    title_color: Option<Color>,
-    /// Optional override for the header title's text style. Defaults
-    /// to `theme.typography.body` when `None`.
-    title_style: Option<TextStyle>,
+    /// chevron icon). When `None`, the accordion uses [`TextRole::Primary`].
+    /// Set this when the accordion is embedded inside a surface that uses a
+    /// non-standard text color (rich tooltip, dark snackbar, etc.). Accepts
+    /// any `impl Into<ColorProp>` — a literal `Color`, a role, or a
+    /// `Signal<Color>` — so the override stays theme-reactive.
+    title_color: Option<ColorProp>,
+    /// Optional override for the header title's text style. Defaults to
+    /// [`TextStyleRole::Body`] when `None`. Accepts a static
+    /// [`TextStyle`](bastyde_tokens::TextStyle) or a
+    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    title_style: Option<TextStyleProp>,
     /// Header orientation (default [`AccordionOrientation::Vertical`]).
     orientation: AccordionOrientation,
     /// When set, the expanded content **fills** the accordion's allotted space
@@ -209,17 +213,20 @@ impl Accordion {
     }
 
     /// Override the header foreground color used for the title text and
-    /// chevron icon. Defaults to `theme.colors.text_primary`.
-    pub fn title_color(mut self, color: Color) -> Self {
-        self.title_color = Some(color);
+    /// chevron icon. Defaults to [`TextRole::Primary`]. Accepts a literal
+    /// `Color`, a `TextRole`/`SurfaceRole`, or a `Signal<Color>`.
+    pub fn title_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.title_color = Some(color.into());
         self
     }
 
-    /// Override the header title's `TextStyle`. Use this to make the
-    /// disclosure label smaller (e.g. inside a tooltip) or to match
-    /// a non-body typography role.
-    pub fn title_style(mut self, style: TextStyle) -> Self {
-        self.title_style = Some(style);
+    /// Override the header title's text style. Use this to make the
+    /// disclosure label smaller (e.g. inside a tooltip) or to match a
+    /// non-body typography role. Accepts a static
+    /// [`TextStyle`](bastyde_tokens::TextStyle) or a
+    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.title_style = Some(style.into());
         self
     }
 
@@ -256,15 +263,36 @@ impl Widget for Accordion {
         let focus_ring_width = theme.shape.focus_ring_width;
         let expanded = self.expanded.clone();
 
-        // Keyboard focus state for focus ring
+        // Keyboard focus state for the focus ring (Int UI shows the accent
+        // border only on *keyboard* focus, not on a pointer click).
         let kb_focused = ctx.signal(false);
+        // Pointer-over-header state, used solely to infer the focus origin:
+        // if the pointer is over the header when focus arrives, it's a click.
+        let hovered = ctx.signal(false);
 
-        // Header foreground: caller override (literal Color) wins, otherwise
-        // the Primary text role so the title tracks theme changes.
-        let header_fg: ColorProp = match self.title_color {
-            Some(c) => c.into(),
-            None => TextRole::Primary.into(),
-        };
+        // Refresh this node's announced `aria-expanded` whenever the state
+        // flips — from a tap, the keyboard, or an external `expanded.set(...)`.
+        // Without binding the signal to the accordion's own node the
+        // `accessibility()` output isn't re-queried, so the announced state
+        // would go stale (same mechanism Button uses for its disclosure
+        // pattern).
+        self.expanded.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+
+        // Header foreground: caller override wins, otherwise the Primary text
+        // role so the title tracks theme changes. The title style defaults to
+        // the Body role for the same reason.
+        let header_fg: ColorProp = self
+            .title_color
+            .clone()
+            .unwrap_or_else(|| TextRole::Primary.into());
+        let title_style: TextStyleProp = self
+            .title_style
+            .clone()
+            .unwrap_or_else(|| TextStyleRole::Body.into());
 
         let horizontal = self.orientation == AccordionOrientation::Horizontal;
 
@@ -281,10 +309,10 @@ impl Widget for Accordion {
                 ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
             ctx.visible_when(chevron_left_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
-            let title_id = ctx.add(RotatedLabel::new(
-                self.title.clone(),
-                Signal::new(TextRole::Primary),
-            ));
+            let title_id = ctx.add(
+                RotatedLabel::new(self.title.clone(), header_fg.clone())
+                    .style(title_style.clone()),
+            );
             let spacer_id = ctx.add(Spacer::new());
             ctx.add(
                 VStack::new()
@@ -302,15 +330,11 @@ impl Widget for Accordion {
             ctx.visible_when(chevron_down_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
-            // Custom override wins; otherwise use the Body role so the title
-            // tracks typography changes across themes.
-            let title_widget = TextWidget::new(self.title.clone()).bind_color(header_fg);
-            let title_widget = if let Some(style) = self.title_style.clone() {
-                title_widget.style(style)
-            } else {
-                title_widget.style(TextStyleRole::Body)
-            };
-            let title_widget = title_widget.single_line().a11y_hidden();
+            let title_widget = TextWidget::new(self.title.clone())
+                .color(header_fg)
+                .style(title_style.clone())
+                .single_line()
+                .a11y_hidden();
             let title_id = ctx.add(title_widget);
             let spacer_id = ctx.add(Spacer::new());
 
@@ -405,12 +429,31 @@ impl Widget for Accordion {
         // observes the signal and drives the height/width tween.
         let expanded_tap = self.expanded.clone();
         let expanded_key = self.expanded.clone();
+        let expanded_access = self.expanded.clone();
         let kb_focused_focus = kb_focused.clone();
+        let hovered_focus = hovered.clone();
+        let hovered_hover = hovered.clone();
 
         let mut handler_set = HandlerSet::new()
             .on_tap({
                 move |_pos, _ctx: &mut EventContext| {
                     expanded_tap.set(!expanded_tap.get());
+                }
+            })
+            .on_access_action({
+                // An AT "press" / default-action toggles the disclosure, the
+                // same as a pointer tap or Space/Enter. Without this an
+                // assistive technology can navigate to the header (it
+                // advertises `Action::Click`) but cannot operate it.
+                move |action: bastyde_core::accesskit::Action,
+                      _ctx: &mut EventContext|
+                      -> EventResponse {
+                    if action == bastyde_core::accesskit::Action::Click {
+                        expanded_access.set(!expanded_access.get());
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
                 }
             })
             .on_key({
@@ -431,11 +474,18 @@ impl Widget for Accordion {
                     }
                 }
             })
+            .on_hover({
+                move |entered: bool, _ctx: &mut EventContext| {
+                    hovered_hover.set(entered);
+                }
+            })
             .on_focus({
                 move |gained: bool, _ctx: &mut EventContext| {
-                    // Only show focus ring for keyboard focus (approximation:
-                    // always show on gain, clear on loss — the V1 code checked origin)
-                    kb_focused_focus.set(gained);
+                    // Show the focus ring only for *keyboard* focus. If the
+                    // pointer is over the header when focus arrives, the focus
+                    // came from a click — keep the ring hidden (same heuristic
+                    // as the sibling ToolBox header).
+                    kb_focused_focus.set(gained && !hovered_focus.get());
                 }
             })
             .focusable(true)
@@ -743,6 +793,54 @@ mod tests {
         let info = tree.accessibility_node(acc);
         assert_eq!(info.name(), Some("Details"));
         assert!(info.is_expanded());
+    }
+
+    #[test]
+    fn access_action_click_toggles_expanded() {
+        // A screen-reader "press" / default action must operate the
+        // disclosure, not just a pointer tap. The accordion advertises
+        // `Action::Click`; dispatching it has to flip `expanded`.
+        let expanded = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(acc),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert!(expanded.get(), "AT click expands the accordion");
+
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(acc),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert!(!expanded.get(), "a second AT click collapses it");
+    }
+
+    #[test]
+    fn announced_expanded_state_refreshes_on_external_toggle() {
+        // Binding `expanded` to the accordion's own node keeps the announced
+        // `aria-expanded` fresh when the state changes from outside the
+        // widget — without re-querying accessibility() the AT state goes stale.
+        let expanded = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        // Realize the AT tree once so the binding is in place.
+        let _ = tree.sync_accessibility();
+        assert!(!tree.accessibility_node(acc).is_expanded());
+
+        expanded.set(true);
+        let _ = tree.sync_accessibility();
+        assert!(
+            tree.accessibility_node(acc).is_expanded(),
+            "announced expanded state must follow an external set"
+        );
     }
 
     #[test]

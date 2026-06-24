@@ -36,6 +36,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Point, Rect, Size, SizeProposal, Transform2D};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
+use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
@@ -1095,21 +1096,30 @@ fn pivoted_rotation(pivot: Point, theta: f32) -> Transform2D {
 #[derive(Debug)]
 pub(crate) struct RotatedLabel {
     label: LocalizedString,
-    color: Signal<TextRole>,
+    color: ColorProp,
+    style: TextStyleProp,
     child_id: Option<WidgetId>,
     natural: Cell<Size>,
     transform_signal: Option<Signal<Transform2D>>,
 }
 
 impl RotatedLabel {
-    pub(crate) fn new(label: LocalizedString, color: Signal<TextRole>) -> Self {
+    pub(crate) fn new(label: LocalizedString, color: impl Into<ColorProp>) -> Self {
         Self {
             label,
-            color,
+            color: color.into(),
+            style: TextStyleRole::Body.into(),
             child_id: None,
             natural: Cell::new(Size::ZERO),
             transform_signal: None,
         }
+    }
+
+    /// Override the rotated label's text style (defaults to
+    /// [`TextStyleRole::Body`]).
+    pub(crate) fn style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.style = style.into();
+        self
     }
 }
 
@@ -1117,8 +1127,8 @@ impl Widget for RotatedLabel {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let child = ctx.add(
             TextWidget::new(self.label.clone())
-                .bind_color(self.color.clone())
-                .style(TextStyleRole::Body)
+                .color(self.color.clone())
+                .style(self.style.clone())
                 .single_line()
                 .a11y_hidden(),
         );
