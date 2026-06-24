@@ -142,7 +142,10 @@ impl BastydeAppBuilderToastExt for BastydeAppBuilder {
         if let Some(a) = archive {
             builder = builder.app_state(a);
         }
-        builder.app_state(post_root)
+        // Compose (don't clobber) the app-wide post-root chain, so the
+        // toast host coexists with the inspector shell or any other
+        // post-root chrome regardless of install order.
+        builder.register_post_root(post_root)
     }
 
     fn install_toast_default(self) -> Self {

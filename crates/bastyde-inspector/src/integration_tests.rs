@@ -418,6 +418,105 @@ fn tree_tab_renders_rows_for_user_root() {
 }
 
 #[test]
+fn overflow_stripes_collected_for_overflowing_user_root() {
+    use bastyde_core::signal::Signal;
+    use bastyde_widgets::primitives::{FixedSize, HStack};
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    // A horizontal stack of rigid 200px children inside a 400px window:
+    // the children's union (600px) spills past the parent's right edge,
+    // so `collect_overflow` must record an overhang strip.
+    let row = tree.add(
+        FixedSize::new()
+            .bind_width(Signal::new(300.0))
+            .bind_height(Signal::new(60.0))
+            .child(
+                HStack::new()
+                    .child(
+                        FixedSize::new()
+                            .bind_width(Signal::new(200.0))
+                            .bind_height(Signal::new(40.0)),
+                    )
+                    .child(
+                        FixedSize::new()
+                            .bind_width(Signal::new(200.0))
+                            .bind_height(Signal::new(40.0)),
+                    )
+                    .child(
+                        FixedSize::new()
+                            .bind_width(Signal::new(200.0))
+                            .bind_height(Signal::new(40.0)),
+                    ),
+            ),
+    );
+
+    let state = InspectorState::new(false);
+    let shell_id = tree.add(InspectorShell::new(row, state.clone()));
+    let mut ids = state.user_root_ids.get();
+    ids.push(row);
+    state.user_root_ids.set(ids);
+    let _ = shell_id;
+
+    // First pass: `BoundsTracker.layout_response` reads bounds during the
+    // measure phase, before the sibling user-subtree is placed this pass —
+    // so it sees the previous pass's geometry (zero on the very first pass).
+    // The snapshot only catches up once a later pass runs against placed
+    // bounds, which a live app always provides. Force a second real pass
+    // (a changed proposal) to assert the catch-up.
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.layout(SizeProposal::exact(401.0, 300.0));
+
+    assert!(
+        !state.overflow_snapshot.get_ref().is_empty(),
+        "overflow stripes must be collected for an overflowing HStack; snapshot = {:?}",
+        state.overflow_snapshot.get_ref()
+    );
+}
+
+#[test]
+fn f12_global_shortcut_toggles_panel_open() {
+    use bastyde_core::event::{Key, Modifiers};
+    use bastyde_core::intent::Intent;
+    use bastyde_core::shortcut::{KeyStroke, Shortcut};
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let button = tree.add(Button::new(lit!("Click Me")));
+    let state = InspectorState::new(false);
+    let shell_id = tree.add(InspectorShell::new(button, state.clone()));
+    let mut ids = state.user_root_ids.get();
+    ids.push(button);
+    state.user_root_ids.set(ids);
+
+    // Mirror the runtime registration in `state::install`: a global F12
+    // shortcut owned by the (wrapped) root that flips `state.open`.
+    let toggle = state.open.clone();
+    let shortcut = Shortcut::new("__bastyde_inspector.toggle")
+        .name("Toggle Inspector")
+        .primary(KeyStroke::new(Key::F12, Modifiers::empty()))
+        .on_activate(move |_ks, _ctx| {
+            let next = !toggle.get();
+            toggle.set(next);
+            Intent::new("__bastyde_inspector.toggle")
+        })
+        .build();
+    tree.shortcut_registry_mut()
+        .register_owned(shortcut, shell_id);
+
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(!state.open.get(), "panel starts closed");
+    // No widget focused — the global F12 must still fire.
+    assert_eq!(tree.focused(), None, "precondition: nothing focused");
+    tree.press_key(Key::F12, Modifiers::empty());
+    assert!(
+        state.open.get(),
+        "F12 (global shortcut) must toggle the inspector panel open with no focus"
+    );
+}
+
+#[test]
 fn click_at_window_center_reaches_button_bounds() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
 

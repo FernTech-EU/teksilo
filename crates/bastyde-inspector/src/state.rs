@@ -451,7 +451,13 @@ pub(crate) fn install(builder: BastydeAppBuilder) -> BastydeAppBuilder {
         shell_id
     });
 
-    builder.app_state(state).app_state(post_root)
+    // Compose (don't clobber) the app-wide post-root chain. Using
+    // `register_post_root` instead of `app_state(post_root)` lets the
+    // inspector shell coexist with the toast host (or any other
+    // post-root chrome) no matter which was installed first — a plain
+    // `app_state` insert is type-keyed and would silently overwrite the
+    // other installer's `DefaultPostRoot`.
+    builder.app_state(state).register_post_root(post_root)
 }
 
 #[cfg(test)]

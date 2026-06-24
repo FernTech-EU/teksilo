@@ -2387,6 +2387,42 @@ impl BastydeAppBuilder {
         self
     }
 
+    /// Register an app-wide [`DefaultPostRoot`] hook that wraps every
+    /// window's root after its `root_builder` runs.
+    ///
+    /// Unlike `app_state(DefaultPostRoot::new(..))` — which stores a single
+    /// type-keyed value and so silently replaces any previously-registered
+    /// hook — this **composes**: each registered hook runs in call order,
+    /// each wrapping the previous one's result. So an app that installs the
+    /// debug inspector AND the toast host (or any other post-root chrome)
+    /// gets both wrappers, not just whichever was installed last. The
+    /// earlier-registered hook is the innermost wrapper (it sees the raw
+    /// user root); the latest is outermost.
+    ///
+    /// All framework installers that splice window-level chrome
+    /// (`install_inspector_in_debug`, `install_toast*`) route through this,
+    /// so their order of installation no longer matters for correctness.
+    pub fn register_post_root(mut self, hook: crate::DefaultPostRoot) -> Self {
+        use crate::DefaultPostRoot;
+        let key = TypeId::of::<DefaultPostRoot>();
+        let composed = match self.app_state_registry.remove(&key) {
+            Some(existing) => {
+                let existing = *existing
+                    .downcast::<DefaultPostRoot>()
+                    .expect("DefaultPostRoot slot held a non-DefaultPostRoot value");
+                let prev = existing.0;
+                let next = hook.0;
+                DefaultPostRoot(std::rc::Rc::new(move |tree, root_id| {
+                    let inner = prev(tree, root_id);
+                    next(tree, inner)
+                }))
+            }
+            None => hook,
+        };
+        self.app_state_registry.insert(key, Box::new(composed));
+        self
+    }
+
     /// Install the rfd-backed native file-dialog service. Registers a
     /// [`FileDialogHandle`](bastyde_platform::file_dialog::FileDialogHandle)
     /// wrapping an
@@ -2980,6 +3016,49 @@ mod tests {
             .theme(bastyde_core::presets::intui::light())
             .build_headless();
         assert_ne!(app.theme().colors.accent, Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn register_post_root_composes_instead_of_clobbering() {
+        // Regression: installing two post-root chrome wrappers (e.g. the
+        // debug inspector AND the toast host) must run BOTH, not just the
+        // last-installed one — `app_state(DefaultPostRoot)` is type-keyed
+        // and silently overwrote the earlier hook, killing F12 / overflow
+        // stripes in any app that also installed toast.
+        use crate::DefaultPostRoot;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let order: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+        let (o1, o2) = (order.clone(), order.clone());
+
+        let builder = BastydeAppBuilder::new()
+            .register_post_root(DefaultPostRoot::new(move |_t, id| {
+                o1.borrow_mut().push("inspector");
+                id
+            }))
+            .register_post_root(DefaultPostRoot::new(move |_t, id| {
+                o2.borrow_mut().push("toast");
+                id
+            }));
+
+        let composed = builder
+            .app_state_registry
+            .get(&TypeId::of::<DefaultPostRoot>())
+            .and_then(|b| b.downcast_ref::<DefaultPostRoot>())
+            .expect("composed DefaultPostRoot must be present")
+            .clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(Button::new(lit!("root")));
+        let out = (composed.0)(&mut tree, root);
+
+        assert_eq!(
+            *order.borrow(),
+            vec!["inspector", "toast"],
+            "both hooks run, earliest-registered innermost (first)"
+        );
+        assert_eq!(out, root, "passthrough hooks return the same root id");
     }
 
     #[test]
