@@ -20,7 +20,7 @@
 //!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
 //!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
 //!     ))
-//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
+//!     .trailing_slot(|| Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
 //! ```
 
 use std::cell::{Cell, RefCell};
@@ -34,7 +34,7 @@ use bastyde_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement,
 };
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
@@ -74,6 +74,10 @@ struct MenuBarEntry {
     factory: Box<dyn Fn() -> Box<dyn Widget>>,
 }
 
+/// A leading/trailing slot's content factory — re-run on every `build()`
+/// so the slot survives a rebuild (see [`MenuBar::leading_slot`]).
+type SlotFactory = Box<dyn Fn() -> Box<dyn Widget>>;
+
 // ---------------------------------------------------------------------------
 // MenuBar — public widget
 // ---------------------------------------------------------------------------
@@ -85,8 +89,15 @@ struct MenuBarEntry {
 /// - `trailing_slot`: content after the menu buttons (e.g., search, user avatar)
 pub struct MenuBar {
     entries: Vec<MenuBarEntry>,
-    leading_slot: Vec<PendingChild>,
-    trailing_slot: Vec<PendingChild>,
+    /// Leading/trailing content slots, stored as **factories** so they
+    /// can be re-derived on every `build()` — like the menu entries, and
+    /// unlike a one-shot `Box<dyn Widget>` which `build()` would consume,
+    /// leaving the slot empty on the next theme / locale / model-version
+    /// rebuild. (The arena destroys a rebuilt widget's children unless it
+    /// `preserves_children_on_rebuild`, which MenuBar can't, since it
+    /// re-derives its menus afresh — so retained child ids would dangle.)
+    leading_slot: Vec<SlotFactory>,
+    trailing_slot: Vec<SlotFactory>,
     root_child_id: Option<WidgetId>,
     /// Window-state guard for the per-window menubar key dispatcher
     /// (F10, Alt+letter, bare-Alt-tap). Owned by the MenuBar so the
@@ -191,6 +202,17 @@ impl MenuBar {
             .collect()
     }
 
+    /// Add an `HStack`'s worth of slot content to `row` by re-running
+    /// each slot factory. Re-run on every `build()`, so the slots are
+    /// re-derived (not consumed) and survive a rebuild.
+    fn add_slot(ctx: &mut BuildContext, mut row: HStack, slot: &[SlotFactory]) -> HStack {
+        for factory in slot {
+            let id = ctx.add_boxed(factory());
+            row = row.add_child(id);
+        }
+        row
+    }
+
     /// Choose how this bar behaves on macOS, where the convention is a global
     /// menu bar at the top of the screen. Requires the bar to have been built
     /// with [`from_model`](Self::from_model) and the app to have called
@@ -285,15 +307,25 @@ impl MenuBar {
         self
     }
 
-    pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
+    /// Add content before the menu buttons (e.g. an app icon).
+    ///
+    /// Takes a **factory** rather than a widget so the slot can be
+    /// rebuilt on every `build()` — a theme / locale switch (or a
+    /// `MenuModel` mutation, for model-based bars) re-runs it. A by-value
+    /// widget would be consumed on the first build and the slot would
+    /// vanish on the next rebuild. Call more than once to stack several.
+    pub fn leading_slot<W: Widget + 'static>(mut self, factory: impl Fn() -> W + 'static) -> Self {
         self.leading_slot
-            .push(PendingChild::Deferred(Box::new(widget)));
+            .push(Box::new(move || Box::new(factory())));
         self
     }
 
-    pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
+    /// Add content after the menu buttons (e.g. a search box or avatar).
+    /// Like [`leading_slot`](Self::leading_slot), takes a re-runnable
+    /// factory so the slot survives a rebuild.
+    pub fn trailing_slot<W: Widget + 'static>(mut self, factory: impl Fn() -> W + 'static) -> Self {
         self.trailing_slot
-            .push(PendingChild::Deferred(Box::new(widget)));
+            .push(Box::new(move || Box::new(factory())));
         self
     }
 
@@ -302,25 +334,9 @@ impl MenuBar {
     /// no F10/Alt dispatcher.
     fn build_suppressed(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let mut row = HStack::new().spacing(2.0);
-        for pending in self.leading_slot.drain(..) {
-            match pending {
-                PendingChild::Id(id) => row = row.add_child(id),
-                PendingChild::Deferred(w) => {
-                    let id = ctx.add_boxed(w);
-                    row = row.add_child(id);
-                }
-            }
-        }
+        row = Self::add_slot(ctx, row, &self.leading_slot);
         row = row.child(Spacer::new());
-        for pending in self.trailing_slot.drain(..) {
-            match pending {
-                PendingChild::Id(id) => row = row.add_child(id),
-                PendingChild::Deferred(w) => {
-                    let id = ctx.add_boxed(w);
-                    row = row.add_child(id);
-                }
-            }
-        }
+        row = Self::add_slot(ctx, row, &self.trailing_slot);
         let row_id = ctx.add(row);
         self.root_child_id = Some(row_id);
         self.bar_id = Some(row_id);
@@ -837,16 +853,8 @@ impl Widget for MenuBar {
         // Build the full row: [leading_slot | triggers... | Spacer | trailing_slot]
         let mut row = HStack::new().spacing(2.0);
 
-        // Leading slot
-        for pending in self.leading_slot.drain(..) {
-            match pending {
-                PendingChild::Id(id) => row = row.add_child(id),
-                PendingChild::Deferred(w) => {
-                    let id = ctx.add_boxed(w);
-                    row = row.add_child(id);
-                }
-            }
-        }
+        // Leading slot (re-derived each build so it survives rebuild)
+        row = Self::add_slot(ctx, row, &self.leading_slot);
 
         // Menu triggers + content
         let mut trigger_ids = Vec::new();
@@ -856,13 +864,18 @@ impl Widget for MenuBar {
         // for Alt+letter activation.
         let mut mnemonic_table: HashMap<char, usize> = HashMap::new();
 
-        // Model-built bars re-derive entries from the (possibly mutated) model
-        // every build; classic `.menu()` bars consume their stored entries.
-        let entries = match &self.model {
-            Some(model) => Self::model_entries(model),
-            None => std::mem::take(&mut self.entries),
+        // Both bar flavours re-derive their entries every build and re-run
+        // the (Fn) factories, so neither consumes the state it needs to
+        // rebuild: model-built bars re-derive from the (possibly mutated)
+        // model, classic `.menu()` bars iterate their retained entries by
+        // reference. Consuming `self.entries` here (the old `mem::take`)
+        // left the bar empty on the next theme / locale rebuild.
+        let model_entries = self.model.as_ref().map(Self::model_entries);
+        let entries: &[MenuBarEntry] = match &model_entries {
+            Some(derived) => derived,
+            None => &self.entries,
         };
-        for (i, entry) in entries.into_iter().enumerate() {
+        for (i, entry) in entries.iter().enumerate() {
             let parsed: ParsedMnemonic = parse_mnemonic(&entry.label.resolve_now());
 
             // Wrap factory output in MenuOverlayHost for focus/key handling
@@ -876,7 +889,7 @@ impl Widget for MenuBar {
             ctx.set_dormant(content_id);
 
             let trigger = MenuBarTrigger {
-                label: entry.label,
+                label: entry.label.clone(),
                 stripped_name: parsed.stripped.clone(),
                 mnemonic_key: parsed.key_lower,
                 index: i,
@@ -910,16 +923,8 @@ impl Widget for MenuBar {
         // Spacer pushes triggers left, trailing slot right
         row = row.child(Spacer::new());
 
-        // Trailing slot
-        for pending in self.trailing_slot.drain(..) {
-            match pending {
-                PendingChild::Id(id) => row = row.add_child(id),
-                PendingChild::Deferred(w) => {
-                    let id = ctx.add_boxed(w);
-                    row = row.add_child(id);
-                }
-            }
-        }
+        // Trailing slot (re-derived each build so it survives rebuild)
+        row = Self::add_slot(ctx, row, &self.trailing_slot);
 
         let row_id = ctx.add(row);
 
@@ -1202,6 +1207,30 @@ mod tests {
             always_on_top: false,
         }));
         t
+    }
+
+    /// Total active widgets whose concrete type name contains `needle`.
+    fn count_by_type(t: &WidgetTree, needle: &str) -> u32 {
+        t.widget_type_histogram()
+            .iter()
+            .filter(|(name, _)| name.contains(needle))
+            .map(|(_, n)| *n)
+            .sum()
+    }
+
+    /// Distinctly-typed leaf used to prove a leading/trailing slot's
+    /// content survives a rebuild (its type can't collide with the bar's
+    /// own internal widgets).
+    #[derive(Debug)]
+    struct SlotMarker;
+    impl Widget for SlotMarker {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            proposal.resolve(12.0, 12.0).into()
+        }
     }
 
     fn first_descendant_with_role(t: &WidgetTree, from: WidgetId, role: Role) -> Option<WidgetId> {
@@ -1518,6 +1547,14 @@ mod tests {
         );
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
         assert!(t.window_state().unwrap().menubar_dispatcher().is_some());
+        // An empty bar still has a (now-empty) dispatcher, so assert the
+        // menus themselves are present — the dispatcher check alone would
+        // pass straight through a bar that self-emptied on rebuild.
+        assert_eq!(
+            count_by_type(&t, "MenuBarTrigger"),
+            2,
+            "two menus before rebuild"
+        );
         // Force a rebuild and confirm the dispatcher install path
         // doesn't crash (debug builds) or silently overwrite a live
         // guard (release builds).
@@ -1527,6 +1564,76 @@ mod tests {
             t.window_state().unwrap().menubar_dispatcher().is_some(),
             "after rebuild the dispatcher slot must still point at \
              the most-recently-installed dispatcher"
+        );
+        assert_eq!(
+            count_by_type(&t, "MenuBarTrigger"),
+            2,
+            "classic .menu() bar must keep its menus across a rebuild \
+             (regression: build() used to mem::take the entries, leaving \
+             an empty bar on the next theme/locale rebuild)"
+        );
+    }
+
+    #[test]
+    fn menubar_slots_survive_rebuild() {
+        // Regression: leading_slot / trailing_slot were drain(..)-ed on
+        // every build, so a bar with an app icon (leading) or a search /
+        // avatar (trailing) lost those slots on a theme / locale / model
+        // rebuild — even for reactive model-based bars, which otherwise
+        // re-derive their menus correctly.
+        let mut t = tree_with_window();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .leading_slot(|| SlotMarker)
+                .trailing_slot(|| SlotMarker),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(count_by_type(&t, "SlotMarker"), 2, "both slots before rebuild");
+        assert_eq!(count_by_type(&t, "MenuBarTrigger"), 1);
+
+        t.arena_mark_needs_rebuild_for_testing(mb);
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(
+            count_by_type(&t, "SlotMarker"),
+            2,
+            "leading + trailing slots must survive a rebuild"
+        );
+        assert_eq!(count_by_type(&t, "MenuBarTrigger"), 1, "menu survives too");
+    }
+
+    #[test]
+    fn model_menubar_slots_survive_first_layout_self_rebuild() {
+        // A `from_model` bar binds `model.version()` at `BindingLevel::Rebuild`,
+        // so it re-runs build() once during the very first layout pass. With the
+        // old drain(..) slots, that self-rebuild emptied them before the first
+        // frame ever painted — a model bar's leading/trailing slots rendered for
+        // zero frames. A single layout must leave both slots present.
+        let file = bastyde_core::MenuItemId::next();
+        let model = crate::menu::MenuModel::new()
+            .menu_with_id(file, lit!("File"), |m| {
+                m.item(crate::menu::MenuEntry::new(lit!("New")))
+            });
+        let mut t = tree_with_window();
+        let _mb = t.add(
+            MenuBar::from_model(model.clone())
+                .leading_slot(|| SlotMarker)
+                .trailing_slot(|| SlotMarker),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(
+            count_by_type(&t, "SlotMarker"),
+            2,
+            "model bar's slots must survive the self-rebuild on first layout"
+        );
+
+        // And they survive a subsequent model mutation (another rebuild).
+        model.push_item(file, crate::menu::MenuEntry::new(lit!("Open")));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(
+            count_by_type(&t, "SlotMarker"),
+            2,
+            "slots survive a model-mutation rebuild too"
         );
     }
 
