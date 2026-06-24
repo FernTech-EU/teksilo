@@ -966,15 +966,31 @@ impl Widget for MenuBar {
         let padding = Padding::symmetric(0.0, 2.0).child_id(row_id);
         let padding_id = ctx.add(padding);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
+        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
+        // Shared cell holding the hamburger id once it's built below — the
+        // `RevealHeightBox` measures it to size the floating bar (filled at
+        // `anchor_cell.set(...)`, the same pattern as the overlay anchor).
+        let ham_cell: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
         // In collapsible mode the `Role::MenuBar` landmark lives on the
         // bar content node (not the composing widget) so it travels into
         // the floating overlay AND so `overlay_is_host_surface` treats
-        // the revealed bar as a host (menu-open dismissal spares it).
+        // the revealed bar as a host (menu-open dismissal spares it). The
+        // content is wrapped in a `RevealHeightBox` so the *floating* bar's
+        // height matches the hamburger button — the triggers center
+        // vertically (the inner `HStack`'s default `VAlignment::Center`);
+        // the inline bar keeps its natural height.
         let root_id = if self.collapse_policy.is_some() {
-            ctx.add(zstack.access_role(bastyde_core::accesskit::Role::MenuBar))
+            ctx.add(
+                RevealHeightBox {
+                    child_id: None,
+                    pending_child: Some(PendingChild::Id(zstack_id)),
+                    revealed: self.revealed.clone(),
+                    hamburger_id: ham_cell.clone(),
+                }
+                .access_role(bastyde_core::accesskit::Role::MenuBar),
+            )
         } else {
-            ctx.add(zstack)
+            zstack_id
         };
         self.root_child_id = Some(root_id);
         self.bar_id = Some(root_id);
@@ -1040,6 +1056,9 @@ impl Widget for MenuBar {
                 });
             let hamburger_id = ctx.add(hamburger);
             anchor_cell.set(Some(hamburger_id));
+            // Let the bar's `RevealHeightBox` measure the hamburger so the
+            // floating overlay's height matches the button.
+            ham_cell.set(Some(hamburger_id));
             self.hamburger_id = Some(hamburger_id);
 
             // Hamburger visible only while collapsed.
@@ -1215,6 +1234,99 @@ impl Widget for MenuBar {
     /// scratch.
     fn preserves_children_on_rebuild(&self) -> bool {
         true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RevealHeightBox — match the floating bar's height to the hamburger
+// ---------------------------------------------------------------------------
+
+/// Wraps the collapsible bar's content. While the bar is shown as a
+/// floating overlay (`revealed == true`) it reports a height equal to the
+/// hamburger button's measured height, so the floating bar reads as a
+/// horizontal extension of the hamburger and the menu-trigger text centers
+/// vertically (the inner `HStack`'s default `VAlignment::Center`). When the
+/// bar is inline (`revealed == false`) it reports the child's natural size,
+/// leaving the normal in-window bar unchanged.
+#[derive(Debug)]
+struct RevealHeightBox {
+    child_id: Option<WidgetId>,
+    pending_child: Option<PendingChild>,
+    revealed: Signal<bool>,
+    /// The hamburger `IconButton` id, filled after it is built (the
+    /// `anchor_cell` pattern). Measuring it — rather than mapping the size
+    /// table — honours a custom `IconButtonSize` / style for free.
+    hamburger_id: Rc<Cell<Option<WidgetId>>>,
+}
+
+impl Widget for RevealHeightBox {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        // Re-layout when the bar reveals / hides so the height switches
+        // between hamburger-matched (floating) and natural (inline).
+        self.revealed.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            bastyde_core::binding::BindingLevel::Relayout,
+        );
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        let child = self.child_id;
+        if self.revealed.get() {
+            if let Some(ham) = self.hamburger_id.get() {
+                if let Some(h) = ctx
+                    .measure_intrinsic(ham, SizeProposal::unspecified())
+                    .map(|s| s.height)
+                {
+                    let child_w = child
+                        .and_then(|id| {
+                            ctx.child_size(
+                                id,
+                                SizeProposal {
+                                    width: proposal.width,
+                                    height: Some(h),
+                                },
+                            )
+                        })
+                        .map(|s| s.width)
+                        .unwrap_or(0.0);
+                    let w = proposal.width.unwrap_or(child_w);
+                    return Size::new(w, h).into();
+                }
+            }
+        }
+        child
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or(Size::ZERO)
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
     }
 }
 
@@ -2245,6 +2357,33 @@ mod tests {
         assert!(
             b.width > 0.0 && (b.x > 0.0 || b.y > 0.0),
             "trigger stays laid out in the floating bar, not collapsed to the origin: {b:?}"
+        );
+    }
+
+    #[test]
+    fn revealed_bar_height_matches_hamburger() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always)
+                .hamburger_size(IconButtonSize::Toolbar),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let (bar, hamburger) = (t.children(mb)[0], t.children(mb)[1]);
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(t.is_active(bar), "bar revealed");
+
+        let ham_h = t.bounds(hamburger).height;
+        let bar_h = t.bounds(bar).height;
+        assert!(ham_h > 0.0, "hamburger laid out: {ham_h}");
+        assert!(
+            (bar_h - ham_h).abs() < 0.5,
+            "floating bar height ({bar_h}) matches the hamburger ({ham_h})"
         );
     }
 
