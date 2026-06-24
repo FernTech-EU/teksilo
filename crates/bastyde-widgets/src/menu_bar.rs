@@ -20,7 +20,7 @@
 //!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
 //!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
 //!     ))
-//!     .trailing_slot(|| Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
+//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
 //! ```
 
 use std::cell::{Cell, RefCell};
@@ -34,7 +34,7 @@ use bastyde_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
-    CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
 };
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
@@ -74,10 +74,6 @@ struct MenuBarEntry {
     factory: Box<dyn Fn() -> Box<dyn Widget>>,
 }
 
-/// A leading/trailing slot's content factory — re-run on every `build()`
-/// so the slot survives a rebuild (see [`MenuBar::leading_slot`]).
-type SlotFactory = Box<dyn Fn() -> Box<dyn Widget>>;
-
 // ---------------------------------------------------------------------------
 // MenuBar — public widget
 // ---------------------------------------------------------------------------
@@ -89,15 +85,25 @@ type SlotFactory = Box<dyn Fn() -> Box<dyn Widget>>;
 /// - `trailing_slot`: content after the menu buttons (e.g., search, user avatar)
 pub struct MenuBar {
     entries: Vec<MenuBarEntry>,
-    /// Leading/trailing content slots, stored as **factories** so they
-    /// can be re-derived on every `build()` — like the menu entries, and
-    /// unlike a one-shot `Box<dyn Widget>` which `build()` would consume,
-    /// leaving the slot empty on the next theme / locale / model-version
-    /// rebuild. (The arena destroys a rebuilt widget's children unless it
-    /// `preserves_children_on_rebuild`, which MenuBar can't, since it
-    /// re-derives its menus afresh — so retained child ids would dangle.)
-    leading_slot: Vec<SlotFactory>,
-    trailing_slot: Vec<SlotFactory>,
+    /// Pending leading/trailing slot content (the standard by-value slot
+    /// pattern, same as `Card` / `TextInput` / `StandardListItem`). Consumed
+    /// on the first build into `leading_slot_ids` / `trailing_slot_ids`, which
+    /// are re-attached on every later build. MenuBar is
+    /// [`preserves_children_on_rebuild`], so the reconciling rebuild keeps the
+    /// re-attached slot widgets alive — a stateful slot control (a search
+    /// field, a focused button) survives a theme / locale / model-version
+    /// rebuild with its state intact. The menu triggers, by contrast, are
+    /// re-derived fresh each build (the model may have changed) and the
+    /// reconcile reaps the superseded ones.
+    ///
+    /// [`preserves_children_on_rebuild`]: bastyde_core::widget::Widget::preserves_children_on_rebuild
+    leading_slot: Vec<PendingChild>,
+    trailing_slot: Vec<PendingChild>,
+    /// Memoized slot widget ids — populated from the pending content on the
+    /// first build, reused (re-attached) on every later build so the slot
+    /// widgets keep their identity and state across rebuilds.
+    leading_slot_ids: Vec<WidgetId>,
+    trailing_slot_ids: Vec<WidgetId>,
     root_child_id: Option<WidgetId>,
     /// Window-state guard for the per-window menubar key dispatcher
     /// (F10, Alt+letter, bare-Alt-tap). Owned by the MenuBar so the
@@ -146,6 +152,8 @@ impl MenuBar {
             entries: Vec::new(),
             leading_slot: Vec::new(),
             trailing_slot: Vec::new(),
+            leading_slot_ids: Vec::new(),
+            trailing_slot_ids: Vec::new(),
             root_child_id: None,
             menubar_guard: RefCell::new(None),
             install_dispatcher: true,
@@ -202,12 +210,32 @@ impl MenuBar {
             .collect()
     }
 
-    /// Add an `HStack`'s worth of slot content to `row` by re-running
-    /// each slot factory. Re-run on every `build()`, so the slots are
-    /// re-derived (not consumed) and survive a rebuild.
-    fn add_slot(ctx: &mut BuildContext, mut row: HStack, slot: &[SlotFactory]) -> HStack {
-        for factory in slot {
-            let id = ctx.add_boxed(factory());
+    /// Add an `HStack`'s worth of slot content to `row`, memoized.
+    ///
+    /// On the first build `pending` holds the by-value slot widgets: each is
+    /// inserted once and its id captured in `cache`. On every later build the
+    /// cached ids are re-attached unchanged — re-parenting the same slot
+    /// widgets into the fresh row. Because MenuBar is
+    /// `preserves_children_on_rebuild`, the reconciling rebuild keeps those
+    /// re-homed widgets (and their state) alive while reaping the superseded
+    /// menu triggers. Building each slot widget exactly once is what preserves
+    /// a stateful slot control across rebuilds.
+    fn add_slot(
+        ctx: &mut BuildContext,
+        mut row: HStack,
+        pending: &mut Vec<PendingChild>,
+        cache: &mut Vec<WidgetId>,
+    ) -> HStack {
+        if cache.is_empty() && !pending.is_empty() {
+            *cache = pending
+                .drain(..)
+                .map(|p| match p {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
+        }
+        for &id in cache.iter() {
             row = row.add_child(id);
         }
         row
@@ -307,25 +335,26 @@ impl MenuBar {
         self
     }
 
-    /// Add content before the menu buttons (e.g. an app icon).
+    /// Add content before the menu buttons (e.g. an app icon). Call more than
+    /// once to stack several.
     ///
-    /// Takes a **factory** rather than a widget so the slot can be
-    /// rebuilt on every `build()` — a theme / locale switch (or a
-    /// `MenuModel` mutation, for model-based bars) re-runs it. A by-value
-    /// widget would be consumed on the first build and the slot would
-    /// vanish on the next rebuild. Call more than once to stack several.
-    pub fn leading_slot<W: Widget + 'static>(mut self, factory: impl Fn() -> W + 'static) -> Self {
+    /// Takes the widget by value, like every other widget's slot. MenuBar
+    /// builds it once and reuses it across rebuilds (it
+    /// [`preserves_children_on_rebuild`](bastyde_core::widget::Widget::preserves_children_on_rebuild)),
+    /// so the slot — and any state it holds — survives a theme / locale /
+    /// model-version rebuild.
+    pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.leading_slot
-            .push(Box::new(move || Box::new(factory())));
+            .push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
     /// Add content after the menu buttons (e.g. a search box or avatar).
-    /// Like [`leading_slot`](Self::leading_slot), takes a re-runnable
-    /// factory so the slot survives a rebuild.
-    pub fn trailing_slot<W: Widget + 'static>(mut self, factory: impl Fn() -> W + 'static) -> Self {
+    /// Like [`leading_slot`](Self::leading_slot), taken by value and preserved
+    /// across rebuilds.
+    pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.trailing_slot
-            .push(Box::new(move || Box::new(factory())));
+            .push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
@@ -334,9 +363,9 @@ impl MenuBar {
     /// no F10/Alt dispatcher.
     fn build_suppressed(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let mut row = HStack::new().spacing(2.0);
-        row = Self::add_slot(ctx, row, &self.leading_slot);
+        row = Self::add_slot(ctx, row, &mut self.leading_slot, &mut self.leading_slot_ids);
         row = row.child(Spacer::new());
-        row = Self::add_slot(ctx, row, &self.trailing_slot);
+        row = Self::add_slot(ctx, row, &mut self.trailing_slot, &mut self.trailing_slot_ids);
         let row_id = ctx.add(row);
         self.root_child_id = Some(row_id);
         self.bar_id = Some(row_id);
@@ -853,8 +882,8 @@ impl Widget for MenuBar {
         // Build the full row: [leading_slot | triggers... | Spacer | trailing_slot]
         let mut row = HStack::new().spacing(2.0);
 
-        // Leading slot (re-derived each build so it survives rebuild)
-        row = Self::add_slot(ctx, row, &self.leading_slot);
+        // Leading slot (memoized — the same widgets survive each rebuild)
+        row = Self::add_slot(ctx, row, &mut self.leading_slot, &mut self.leading_slot_ids);
 
         // Menu triggers + content
         let mut trigger_ids = Vec::new();
@@ -923,8 +952,8 @@ impl Widget for MenuBar {
         // Spacer pushes triggers left, trailing slot right
         row = row.child(Spacer::new());
 
-        // Trailing slot (re-derived each build so it survives rebuild)
-        row = Self::add_slot(ctx, row, &self.trailing_slot);
+        // Trailing slot (memoized — the same widgets survive each rebuild)
+        row = Self::add_slot(ctx, row, &mut self.trailing_slot, &mut self.trailing_slot_ids);
 
         let row_id = ctx.add(row);
 
@@ -1176,6 +1205,17 @@ impl Widget for MenuBar {
         }
         v
     }
+
+    /// Reconcile on rebuild. The menu triggers are re-derived fresh each build
+    /// (the model may have changed) and the reconcile reaps the superseded
+    /// ones; the memoized leading/trailing slot widgets (see `add_slot`) are
+    /// re-attached by id and kept alive, so a stateful slot control — a search
+    /// field, a focused button, an avatar with hover state — survives a
+    /// model-version / theme / locale rebuild instead of being rebuilt from
+    /// scratch.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,6 +1264,29 @@ mod tests {
     #[derive(Debug)]
     struct SlotMarker;
     impl Widget for SlotMarker {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            proposal.resolve(12.0, 12.0).into()
+        }
+    }
+
+    /// Slot leaf that records how many times it was built and its widget id —
+    /// to prove a stateful slot is *preserved* (built once, same instance),
+    /// not rebuilt, across a MenuBar rebuild.
+    #[derive(Debug)]
+    struct CountingSlot {
+        builds: std::rc::Rc<std::cell::Cell<u32>>,
+        id_out: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
+    }
+    impl Widget for CountingSlot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            self.builds.set(self.builds.get() + 1);
+            self.id_out.set(Some(ctx.self_id()));
+            vec![]
+        }
         fn layout_response(
             &self,
             proposal: SizeProposal,
@@ -1585,8 +1648,8 @@ mod tests {
         let mb = t.add(
             MenuBar::new()
                 .menu(lit!("&File"), || Box::new(MenuList::new()))
-                .leading_slot(|| SlotMarker)
-                .trailing_slot(|| SlotMarker),
+                .leading_slot(SlotMarker)
+                .trailing_slot(SlotMarker),
         );
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
         assert_eq!(count_by_type(&t, "SlotMarker"), 2, "both slots before rebuild");
@@ -1617,8 +1680,8 @@ mod tests {
         let mut t = tree_with_window();
         let _mb = t.add(
             MenuBar::from_model(model.clone())
-                .leading_slot(|| SlotMarker)
-                .trailing_slot(|| SlotMarker),
+                .leading_slot(SlotMarker)
+                .trailing_slot(SlotMarker),
         );
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
         assert_eq!(
@@ -1634,6 +1697,53 @@ mod tests {
             count_by_type(&t, "SlotMarker"),
             2,
             "slots survive a model-mutation rebuild too"
+        );
+    }
+
+    #[test]
+    fn model_menubar_preserves_stateful_slot_across_rebuild() {
+        // The follow-on capability: a stateful slot control keeps its identity
+        // (built once, same WidgetId) across a model-driven rebuild — the
+        // memoized slot is re-attached, not reconstructed, so its internal
+        // state (focus, caret, scroll) is preserved. Adding a second top-level
+        // menu proves the bar genuinely rebuilt (trigger count 1 → 2) while the
+        // slot's build count stays 1.
+        let builds = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let id_out = std::rc::Rc::new(std::cell::Cell::new(None));
+        let file = bastyde_core::MenuItemId::next();
+        let model = crate::menu::MenuModel::new().menu_with_id(file, lit!("File"), |m| {
+            m.item(crate::menu::MenuEntry::new(lit!("New")))
+        });
+        let mut t = tree_with_window();
+        t.add(MenuBar::from_model(model.clone()).leading_slot(CountingSlot {
+            builds: builds.clone(),
+            id_out: id_out.clone(),
+        }));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        let first_id = id_out.get().expect("slot built");
+        assert_eq!(builds.get(), 1, "slot built exactly once initially");
+        assert_eq!(count_by_type(&t, "MenuBarTrigger"), 1);
+
+        // Structural model change → MenuBar rebuild.
+        model.push_menu(lit!("Edit"), |m| {
+            m.item(crate::menu::MenuEntry::new(lit!("Undo")))
+        });
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+
+        assert_eq!(
+            count_by_type(&t, "MenuBarTrigger"),
+            2,
+            "the bar rebuilt (a second menu trigger appeared)"
+        );
+        assert_eq!(
+            builds.get(),
+            1,
+            "the stateful slot was preserved, not rebuilt, across the rebuild"
+        );
+        assert_eq!(
+            id_out.get(),
+            Some(first_id),
+            "the slot kept its identity (same widget instance)"
         );
     }
 

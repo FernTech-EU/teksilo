@@ -712,7 +712,7 @@ impl Widget for Root {
 
         let menu_bar = ctx.add(
             MenuBar::new()
-                .leading_slot(|| IconWidget::chevron_right(16.0).color(TextRole::Accent))
+                .leading_slot(IconWidget::chevron_right(16.0).color(TextRole::Accent))
                 // `&File` parses to "File" with 'F' marked as the
                 // mnemonic. Hold Alt to see the underline; Alt+F opens
                 // this menu. Inside the menu, bare 'N' / 'O' / 'S' / 'Q'
@@ -879,11 +879,11 @@ impl Widget for Root {
                             ),
                     )
                 })
-                .trailing_slot(|| {
+                .trailing_slot(
                     Button::new(lit!("Settings"))
                         .variant(ButtonVariant::Ghost)
-                        .on_activate_fn(|_| println!("Settings"))
-                }),
+                        .on_activate_fn(|_| println!("Settings")),
+                ),
         );
 
         let root = ctx.add(

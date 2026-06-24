@@ -133,11 +133,11 @@ impl Widget for Root {
                 .menu(lit!("&File"), Root::file_menu)
                 .menu(lit!("&Edit"), Root::edit_menu)
                 .menu(lit!("&View"), Root::view_menu)
-                .trailing_slot(|| {
+                .trailing_slot(
                     Button::new(lit!("Settings"))
                         .variant(ButtonVariant::Ghost)
-                        .on_activate_fn(|_| println!("Settings"))
-                }),
+                        .on_activate_fn(|_| println!("Settings")),
+                ),
         );
 
         // ── Bar 2: responsive showcase driven by a width slider ─────────
@@ -150,11 +150,11 @@ impl Widget for Root {
                 .menu(lit!("&File"), Root::file_menu)
                 .menu(lit!("&Edit"), Root::edit_menu)
                 .menu(lit!("&View"), Root::view_menu)
-                .trailing_slot(|| {
+                .trailing_slot(
                     Button::new(lit!("Help"))
                         .variant(ButtonVariant::Ghost)
-                        .on_activate_fn(|_| println!("Help"))
-                }),
+                        .on_activate_fn(|_| println!("Help")),
+                ),
         );
         let demo_bar_slot = ctx.add(
             FixedSize::new()

@@ -465,6 +465,10 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     ///   attached or the cards "disappear" on every drag end.
     /// * `TabWidget` / `DockingLayout` / `CompositeTooltip` re-attach memoized
     ///   panes / a one-shot body widget that cannot be reconstructed.
+    /// * `MenuBar` re-derives its menu triggers fresh each build (the model may
+    ///   have changed — the reconcile reaps the superseded ones) while keeping
+    ///   its memoized leading/trailing slot widgets, so a stateful slot control
+    ///   survives a model-version rebuild.
     ///
     /// The reconcile follows **authoritative parent pointers**, so a kept
     /// subtree that `build()` re-parents *out* of a dropped sibling and into
