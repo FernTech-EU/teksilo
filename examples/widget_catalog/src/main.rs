@@ -181,9 +181,9 @@ fn build_title_bar(
     let leading: HStack = HStack::new().spacing(4.0).add_child(menu_bar).child(brand);
 
     // Center the subtitle with flexible spacers rather than `Center`:
-    // `Center` (= `Expand::align_child(CENTER)`) places its child at the
-    // child's *unconstrained* intrinsic size, so the ellipsis text never
-    // gets a width to truncate against and overflows its neighbours. With
+    // `Center` reports `flex = 0`, so in an HStack it shrink-wraps to the
+    // text's intrinsic width — the ellipsis text never gets a bounded width
+    // to truncate against and overflows its neighbours on a deficit. With
     // equal `Spacer`s the text still receives a bounded width — slack
     // centers it, an over-constraint deficit shrinks/ellipsizes it.
     let center = HStack::new()

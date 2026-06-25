@@ -180,17 +180,25 @@ The named axis is the one the wrapper *competes for slack on*. Cross-axis behavi
 
 Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/bastyde-widgets/src/primitives/expand.rs#L25-L41).
 
-### 3.3 `Center` — sugar for centered fill
+### 3.3 `Center` — center a child within given space
 
 [crates/bastyde-widgets/src/primitives/center.rs](../crates/bastyde-widgets/src/primitives/center.rs)
 
-`Center::new().child(w)` is exactly `Expand::new().align_child(Alignment::CENTER).child(w)`. Reach for it when that's all you mean — the name is clearer.
+Centers a single child within the space `Center` is **given**. Per axis: it
+**fills an axis the parent bounded** and **shrink-wraps to the child on an axis
+the parent left open**. It reports `flex = 0` — a pure alignment wrapper, not a
+space-claiming one.
 
 ```rust
 Center::new().child(spinner)
 ```
 
-Claims all offered space; the child sits at its natural size, centered.
+Consequence: a *bare* `Center` inside an `HStack` / `VStack` does **not** grab
+the stack's slack — a stack leaves its main axis open, so `Center` sizes to its
+child there (like Flutter's `Center` / `Align`, or Compose's `Box`), rather than
+collapsing to zero. To center a child *within the leftover space* of a stack,
+give it flex with `Expand`: `Expand::horizontal { Center { w } }` (the analogue
+of Flutter's `Expanded(child: Center(...))`).
 
 ### 3.4 `Shrinkable` — opt a child into compression
 
@@ -505,7 +513,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 
-When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Center::new()` instead of `Expand::new().align_child(CENTER)`. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::bind_width(48.0).bind_height(48.0)` when you mean "at least," not "exactly."
+When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::bind_width(48.0).bind_height(48.0)` when you mean "at least," not "exactly." (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
 
 ---
 

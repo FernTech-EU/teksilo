@@ -70,7 +70,7 @@ slack distribution math, and worked examples.
 - [Wrap](../crates/bastyde-widgets/src/primitives/wrap.rs) — flow layout that wraps to new rows when out of width.
 - [MasonryLayout](../crates/bastyde-widgets/src/primitives/masonry.rs) — variable-height grid packing into the shortest column (Pinterest-style).
 - [FormLayout](../crates/bastyde-widgets/src/primitives/form_layout.rs) — labelled rows with column alignment for settings panels.
-- [Center](../crates/bastyde-widgets/src/primitives/center.rs) — claims available space and centers a single child.
+- [Center](../crates/bastyde-widgets/src/primitives/center.rs) — centers a single child within the space it is given (fills a bounded axis, shrink-wraps an open one; `flex = 0`, so it does not claim stack slack — wrap in `Expand` for that).
 - [Expand](../crates/bastyde-widgets/src/primitives/expand.rs) — flex-basis-zero workhorse for ratio splits and full-bleed children.
 - [Shrinkable](../crates/bastyde-widgets/src/primitives/shrinkable.rs) — shrink counterpart to `Expand`: opts a child into compression (down to a `min` floor) when a stack is over-constrained. Native shrink covers single-line / ellipsis text; controls (`Button` etc.) stay rigid and overflow via [`Toolbar`](#toolbar).
 - [Padding](../crates/bastyde-widgets/src/primitives/padding.rs) — uniform or per-edge inset around a single child (propagates flex/shrink/min).
