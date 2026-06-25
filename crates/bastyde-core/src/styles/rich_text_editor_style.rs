@@ -33,6 +33,11 @@ pub struct RichTextEditorStyleConfig {
     /// own default (TextInput-style insets for editable, no padding for
     /// read-only). Set via `RichTextEditor::content_padding`.
     pub content_padding: Option<(f32, f32, f32, f32)>,
+    /// App-supplied background fill (`RichTextEditor::background`). When `Some`,
+    /// the style should paint this instead of its default surface — so the
+    /// common "give the editor a surface" case needs no custom style. `None`
+    /// keeps the style's own default.
+    pub background: Option<crate::color_prop::ColorProp>,
 }
 
 pub trait RichTextEditorStyle: 'static {

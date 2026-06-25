@@ -112,13 +112,6 @@ pub(crate) struct EditorState {
     pub show_highlights: bool,
 
     /// `true` once the app explicitly set a text color via
-    /// [`RichTextEditor::text_color`](super::RichTextEditor::text_color).
-    /// While `false` the paint pass syncs the engine's default text
-    /// color with the active theme's `editor_fg` role each frame so
-    /// light / dark theme swaps reach the rendered glyphs without
-    /// caller-side wiring.
-    pub text_color_user_set: bool,
-
     /// Last text color applied to the typesetter. Tracked so a theme
     /// swap (light ↔ dark) can force a full re-render — without it
     /// paint() would happily call `engine.with_render_cursor_only`,
@@ -134,6 +127,21 @@ pub(crate) struct EditorState {
     /// swap forces a render this frame instead of waiting for the next
     /// blink toggle to repaint the caret in the new colour.
     pub last_cursor_color: Option<[f32; 4]>,
+
+    /// Last selection-highlight colour applied to the engine. Tracked (like
+    /// the caret) so an app-set `selection_color` change forces a render this
+    /// frame. `None` until the app sets a colour.
+    pub last_selection_color: Option<[f32; 4]>,
+
+    /// App-set colour overrides (`impl Into<ColorProp>` — Color / theme role /
+    /// Signal), resolved against the active theme on each paint. `None` tracks
+    /// the theme's editor roles. Set by the `RichTextEditor` builders, read by
+    /// `RichTextEditorBody::paint`; `background_prop` is consumed by
+    /// `RichTextEditor::build` (threaded into the style's `make_body`).
+    pub text_color_prop: Option<bastyde_core::color_prop::ColorProp>,
+    pub caret_color_prop: Option<bastyde_core::color_prop::ColorProp>,
+    pub selection_color_prop: Option<bastyde_core::color_prop::ColorProp>,
+    pub background_prop: Option<bastyde_core::color_prop::ColorProp>,
 
     /// Last code-block background colour applied to the engine. A
     /// change forces a full `layout_full` (not just a render) because
@@ -435,9 +443,13 @@ impl EditorState {
             pending_recolor: false,
             wrap_mode,
             show_highlights: true,
-            text_color_user_set: false,
             last_text_color: None,
             last_cursor_color: None,
+            last_selection_color: None,
+            text_color_prop: None,
+            caret_color_prop: None,
+            selection_color_prop: None,
+            background_prop: None,
             last_code_block_bg: None,
             last_code_block_fg: None,
             has_focus: false,

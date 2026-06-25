@@ -35,9 +35,16 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
         // gets the requested gutter against whatever surface the viewer
         // is mounted in.
         if cfg.is_read_only {
-            return match cfg.content_padding {
+            let content = match cfg.content_padding {
                 Some((t, r, b, l)) => ctx.add(Padding::new(t, r, b, l).child_id(cfg.viewport)),
                 None => cfg.viewport,
+            };
+            return match cfg.background.clone() {
+                Some(bg) => {
+                    let bg_id = ctx.add(RectWidget::new().background(bg));
+                    ctx.add(ZStack::new().add_child(bg_id).add_child(content))
+                }
+                None => content,
             };
         }
 
@@ -61,7 +68,11 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
             }
         });
         let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
+            .background(
+                cfg.background
+                    .clone()
+                    .unwrap_or_else(|| SurfaceRole::Content.into()),
+            )
             .border_color(ColorProp::DynamicBorderRole(border_role))
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));

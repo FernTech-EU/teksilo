@@ -3559,6 +3559,31 @@ fn editor_style_override_installs_custom_chrome() {
 }
 
 #[test]
+fn color_overrides_store_reactive_props() {
+    // The color builders accept `impl Into<ColorProp>` (Color / theme role /
+    // Signal) and stash a reactive prop on the shared state; paint resolves it
+    // against the active theme each frame. (Resolution is exercised by the
+    // theme-default paint tests; here we lock the builder -> state wiring.)
+    use bastyde_tokens::{SurfaceRole, TextRole};
+
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc)
+        .text_color(TextRole::Primary)
+        .caret_color(TextRole::Accent)
+        .selection_color(TextRole::Accent)
+        .background(SurfaceRole::Content);
+    let state = editor.state_handle();
+    let st = state.borrow();
+    assert!(st.text_color_prop.is_some(), "text_color stored as a prop");
+    assert!(st.caret_color_prop.is_some(), "caret_color stored as a prop");
+    assert!(
+        st.selection_color_prop.is_some(),
+        "selection_color stored as a prop"
+    );
+    assert!(st.background_prop.is_some(), "background stored as a prop");
+}
+
+#[test]
 fn editor_wrapper_is_generic_container_in_a11y_tree() {
     // Regression guard: the composing outer `RichTextEditor` must
     // emit `Role::GenericContainer` in the AT tree so screen readers

@@ -59,6 +59,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{
     RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,
@@ -70,7 +71,6 @@ use bastyde_text::text_document::{
     Alignment, BlockFormat, ListStyle, MoveMode, SelectionType, TextDocument, TextFormat,
 };
 use bastyde_text::{FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode};
-use bastyde_tokens::Color;
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
@@ -332,33 +332,39 @@ impl RichTextEditor {
         self
     }
 
-    /// Override the selection-highlight color. Defaults to the theme's
-    /// selection color when not set.
-    pub fn selection_color(self, color: Color) -> Self {
-        self.state
-            .borrow_mut()
-            .engine
-            .set_selection_color(color.to_array());
+    /// Override the editor background fill. Accepts a `Color`, a theme role
+    /// (`SurfaceRole::Content`, …), or a `Signal`. Threaded into the active
+    /// [`RichTextEditorStyle`]'s `make_body`, so the common case ("give the
+    /// editor a surface") needs no custom style. `None` uses the style's
+    /// default surface.
+    pub fn background(self, color: impl Into<ColorProp>) -> Self {
+        self.state.borrow_mut().background_prop = Some(color.into());
         self
     }
 
-    /// Override the caret / insertion-point color.
-    pub fn caret_color(self, color: Color) -> Self {
-        self.state
-            .borrow_mut()
-            .engine
-            .set_cursor_color(color.to_array());
+    /// Override the selection-highlight color. Accepts a `Color`, theme role,
+    /// or `Signal`. Resolved against the active theme on every paint; `None`
+    /// uses the engine/theme default.
+    pub fn selection_color(self, color: impl Into<ColorProp>) -> Self {
+        self.state.borrow_mut().selection_color_prop = Some(color.into());
         self
     }
 
-    /// Pin the default text color, bypassing theme-driven updates. Once set,
-    /// dark / light mode changes no longer affect glyph color for this
-    /// editor. Omit to track the active theme automatically.
-    pub fn text_color(self, color: Color) -> Self {
-        let mut st = self.state.borrow_mut();
-        st.engine.set_text_color(color.to_array());
-        st.text_color_user_set = true;
-        drop(st);
+    /// Override the caret / insertion-point color. Accepts a `Color`, theme
+    /// role, or `Signal`. Resolved against the active theme on every paint;
+    /// `None` tracks the theme's `editor_caret` role.
+    pub fn caret_color(self, color: impl Into<ColorProp>) -> Self {
+        self.state.borrow_mut().caret_color_prop = Some(color.into());
+        self
+    }
+
+    /// Override the default text color. Accepts a `Color`, theme role, or
+    /// `Signal`. Resolved against the active theme on every paint; `None`
+    /// tracks the theme's `editor_fg` role (so dark / light swaps follow
+    /// automatically). A role or `Signal` stays reactive; a bare `Color` pins
+    /// it.
+    pub fn text_color(self, color: impl Into<ColorProp>) -> Self {
+        self.state.borrow_mut().text_color_prop = Some(color.into());
         self
     }
 
@@ -1887,8 +1893,13 @@ impl Widget for RichTextEditorBody {
         // visible glyphs keep painting in the old colour until the
         // next typing / scroll event happens to bump up to a Full
         // path on its own.
-        if !st.text_color_user_set {
-            let new_color = ctx.theme.colors.editor_fg.to_array();
+        // An app-set `text_color` (Color / role / Signal) is resolved against
+        // the active theme each paint; otherwise track the theme's `editor_fg`.
+        {
+            let new_color = match &st.text_color_prop {
+                Some(prop) => prop.resolve(ctx.theme, true).to_array(),
+                None => ctx.theme.colors.editor_fg.to_array(),
+            };
             st.engine.set_text_color(new_color);
             if st.last_text_color != Some(new_color) {
                 st.last_text_color = Some(new_color);
@@ -1896,18 +1907,35 @@ impl Widget for RichTextEditorBody {
             }
         }
 
-        // Sync the caret colour with the theme's `editor_caret` role the
-        // same way. The engine defaults the cursor to opaque black, so
-        // without this the blinking caret stays black under a dark theme.
-        // Cursor decorations are regenerated on every render (the
-        // cursor-only path included), so a colour change only needs a
-        // render this frame — force one so a theme swap doesn't wait for
-        // the next blink toggle to repaint the caret.
+        // Caret colour: app override resolved each paint, else the theme's
+        // `editor_caret` role. The engine defaults the cursor to opaque black,
+        // so without this the blinking caret stays black under a dark theme.
+        // Cursor decorations are regenerated on every render (the cursor-only
+        // path included), so a colour change only needs a render this frame —
+        // force one so a swap doesn't wait for the next blink toggle.
         {
-            let new_caret = ctx.theme.colors.editor_caret.to_array();
+            let new_caret = match &st.caret_color_prop {
+                Some(prop) => prop.resolve(ctx.theme, true).to_array(),
+                None => ctx.theme.colors.editor_caret.to_array(),
+            };
             st.engine.set_cursor_color(new_caret);
             if st.last_cursor_color != Some(new_caret) {
                 st.last_cursor_color = Some(new_caret);
+                st.pending_full_render = true;
+            }
+        }
+
+        // Selection highlight: only applied when the app set a colour (else the
+        // engine/theme default stands). Resolved each paint; regenerated like
+        // the caret, so a change just needs a render this frame.
+        if let Some(new_sel) = st
+            .selection_color_prop
+            .as_ref()
+            .map(|p| p.resolve(ctx.theme, true).to_array())
+        {
+            st.engine.set_selection_color(new_sel);
+            if st.last_selection_color != Some(new_sel) {
+                st.last_selection_color = Some(new_sel);
                 st.pending_full_render = true;
             }
         }
@@ -2444,6 +2472,32 @@ impl Widget for RichTextEditor {
         };
         let viewport_id = ctx.add(body);
 
+        // Reactive colour overrides: a signal/role-bound `ColorProp` must
+        // repaint the body (the leaf that resolves + applies them in `paint`)
+        // when it changes. Bind to `viewport_id`, not the wrapper — the painter
+        // owns its prop bindings (the `RectWidget` pattern). Theme-role changes
+        // already dirty every node via the reactive theme; this covers
+        // `Signal`-bound props. The background prop is reactive through the
+        // `RectWidget` the style builds, so it isn't registered here.
+        {
+            let props = {
+                let st = self.state.borrow();
+                [
+                    st.text_color_prop.clone(),
+                    st.caret_color_prop.clone(),
+                    st.selection_color_prop.clone(),
+                ]
+            };
+            let registry = ctx.binding_registry();
+            for prop in props.iter().flatten() {
+                prop.register_if_bound(
+                    viewport_id,
+                    registry,
+                    bastyde_core::binding::BindingLevel::RepaintOnly,
+                );
+            }
+        }
+
         // Snapshot focus + read-only state for the chrome. `is_focused`
         // is the reactive mirror updated by `on_focus`; `is_read_only`
         // is sampled from the policy bundle.
@@ -2462,6 +2516,7 @@ impl Widget for RichTextEditor {
             is_focused,
             is_read_only,
             content_padding: self.content_padding,
+            background: self.state.borrow().background_prop.clone(),
         };
         let root = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root);
