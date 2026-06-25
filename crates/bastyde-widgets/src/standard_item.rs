@@ -111,8 +111,13 @@ pub struct StandardListItem {
     checkbox: Option<CheckboxKind>,
     selected: Signal<bool>,
     enabled: Signal<bool>,
-    label_style: TextStyleRole,
-    subtitle_style: TextStyleRole,
+    label_style: bastyde_core::color_prop::TextStyleProp,
+    subtitle_style: bastyde_core::color_prop::TextStyleProp,
+    /// Per-call label text-color override. `None` ⇒ enabled-derived
+    /// (`Primary` / `Disabled`).
+    label_color: Option<bastyde_core::color_prop::ColorProp>,
+    /// Per-call subtitle text-color override. `None` ⇒ `TextRole::Secondary`.
+    subtitle_color: Option<bastyde_core::color_prop::ColorProp>,
     interaction: Signal<InteractionState>,
     style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
@@ -132,8 +137,10 @@ impl StandardListItem {
             checkbox: None,
             selected: Signal::new(false),
             enabled: Signal::new(true),
-            label_style: TextStyleRole::Body,
-            subtitle_style: TextStyleRole::Small,
+            label_style: TextStyleRole::Body.into(),
+            subtitle_style: TextStyleRole::Small.into(),
+            label_color: None,
+            subtitle_color: None,
             interaction: Signal::new(InteractionState::Idle),
             style_override: None,
             root_child_id: None,
@@ -248,13 +255,35 @@ impl StandardListItem {
         self
     }
 
-    pub fn label_style(mut self, role: TextStyleRole) -> Self {
-        self.label_style = role;
+    /// Override the label's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
+    /// `TextStyleRole::Body`.
+    pub fn label_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = style.into();
         self
     }
 
-    pub fn subtitle_style(mut self, role: TextStyleRole) -> Self {
-        self.subtitle_style = role;
+    /// Override the subtitle's text style. Default is `TextStyleRole::Small`.
+    pub fn subtitle_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.subtitle_style = style.into();
+        self
+    }
+
+    /// Override the label's text color. Accepts `Color`, a role, or a
+    /// `Signal` of either. Default (unset) is enabled-derived
+    /// (`Primary` / `Disabled`); setting this replaces that cascade.
+    pub fn label_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.label_color = Some(color.into());
+        self
+    }
+
+    /// Override the subtitle's text color. Default (unset) is
+    /// `TextRole::Secondary`.
+    pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.subtitle_color = Some(color.into());
         self
     }
 }
@@ -288,18 +317,24 @@ impl StandardListItem {
 
         // Label column: either a single TextWidget or a VStack with
         // label on top and subtitle (with its own slots) below.
-        let label_widget = TextWidget::new(self.label.clone())
-            .style(self.label_style)
-            .bind_color(label_role.clone())
+        let mut label_widget = TextWidget::new(self.label.clone())
+            .style(self.label_style.clone())
             .a11y_hidden();
+        label_widget = match &self.label_color {
+            Some(c) => label_widget.bind_color(c.clone()),
+            None => label_widget.bind_color(label_role.clone()),
+        };
         let label_id = ctx.add(label_widget);
 
         let label_column_id = if let Some(subtitle) = &self.subtitle {
             // Two-line: VStack { label, subtitle line }.
-            let subtitle_widget = TextWidget::new(subtitle.clone())
-                .style(self.subtitle_style)
-                .color(TextRole::Secondary)
+            let mut subtitle_widget = TextWidget::new(subtitle.clone())
+                .style(self.subtitle_style.clone())
                 .a11y_hidden();
+            subtitle_widget = match &self.subtitle_color {
+                Some(c) => subtitle_widget.bind_color(c.clone()),
+                None => subtitle_widget.color(TextRole::Secondary),
+            };
             let subtitle_text_id = ctx.add(subtitle_widget);
 
             // Subtitle HStack: [leading?] subtitle [Spacer] [trailing?].
@@ -624,13 +659,30 @@ impl StandardTreeItem {
         self
     }
 
-    pub fn label_style(mut self, role: TextStyleRole) -> Self {
-        self.inner = self.inner.label_style(role);
+    pub fn label_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.inner = self.inner.label_style(style);
         self
     }
 
-    pub fn subtitle_style(mut self, role: TextStyleRole) -> Self {
-        self.inner = self.inner.subtitle_style(role);
+    pub fn subtitle_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.inner = self.inner.subtitle_style(style);
+        self
+    }
+
+    /// Override the label's text color. Forwarded to the inner
+    /// [`StandardListItem`] — see its `label_color(...)`.
+    pub fn label_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.inner = self.inner.label_color(color);
+        self
+    }
+
+    /// Override the subtitle's text color. Forwarded to the inner
+    /// [`StandardListItem`] — see its `subtitle_color(...)`.
+    pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.inner = self.inner.subtitle_color(color);
         self
     }
 

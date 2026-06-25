@@ -74,7 +74,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .spacing(8.0)
             .child(Badge::new(lit!("New")))
             .child(Badge::new(lit!("Beta")))
-            .child(Badge::new(lit!("Stable")).color(SurfaceRole::AccentSubtle))
+            .child(Badge::new(lit!("Stable")).background(SurfaceRole::AccentSubtle))
             .child(Badge::new(lit!("3")))
             .child(Badge::new(lit!("99+"))),
     );
@@ -223,7 +223,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     Badge::new(lit!("New"))
                     Badge::new(lit!("Beta"))
                     Badge::new(lit!("Stable")) {
-                        color: SurfaceRole::Raised
+                        background: SurfaceRole::Raised
                     }
                     Badge::new(lit!("3"))
                     Badge::new(lit!("99+"))

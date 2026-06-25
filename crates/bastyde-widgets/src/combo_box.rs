@@ -121,6 +121,12 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     variant: ComboBoxVariant,
     /// Per-call style override.
     style_override: Option<SharedComboBoxStyle>,
+    /// Per-call override for the selected-value text style (font, size,
+    /// weight). `None` ⇒ the default `TextStyleRole::Body`.
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    /// Per-call override for the selected-value text color. `None` ⇒
+    /// enabled-derived (`Primary` / `Disabled`); setting this replaces it.
+    text_role_override: Option<bastyde_core::color_prop::ColorProp>,
     // Build state — four mutable signals replace the legacy
     // `ComboBoxState` enum. `is_open` survives until the dropdown
     // dismisses (overlay callback resets it); `is_focused` /
@@ -176,6 +182,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             search_query: None,
             variant: ComboBoxVariant::default(),
             style_override: None,
+            label_style: None,
+            text_role_override: None,
             is_open: Signal::new(false),
             is_hovered: Signal::new(false),
             is_focused: Signal::new(false),
@@ -324,6 +332,22 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         self.style_override = Some(Rc::new(style));
         self
     }
+
+    /// Override the selected-value text style (font, size, weight).
+    /// Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
+    /// Default (unset) is `TextStyleRole::Body`.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
+        self
+    }
+
+    /// Override the selected-value text color. Accepts `Color`, a role, or
+    /// a `Signal` of either. Default (unset) is enabled-derived
+    /// (`Primary` / `Disabled`); setting this replaces that cascade.
+    pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.text_role_override = Some(color.into());
+        self
+    }
 }
 
 /// Searchable-mode builders. The search field is a `TextInput`, which
@@ -466,25 +490,34 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         // Label colour follows the disabled signal — the chrome style
         // owns bg / border / focus ring; the widget owns its label.
-        let text_role = self.is_disabled.map(|d| {
-            if *d {
-                TextRole::Disabled
-            } else {
-                TextRole::Primary
-            }
-        });
+        let text_role: bastyde_core::color_prop::ColorProp = match &self.text_role_override {
+            Some(c) => c.clone(),
+            None => self
+                .is_disabled
+                .map(|d| {
+                    if *d {
+                        TextRole::Disabled
+                    } else {
+                        TextRole::Primary
+                    }
+                })
+                .into(),
+        };
 
         // Build the selected-label subtree the style will host. Wrapped
         // in `.a11y_hidden()` because the combo box's own
         // `accessibility(builder)` already announces the selected value
         // via `set_value`, so a screen reader exposed to the inner text
         // node would double-announce.
-        let label = TextWidget::new(lit!(""))
-            .style(TextStyleRole::Body)
+        let mut label = TextWidget::new(lit!(""))
             .bind_text(label_text)
             .bind_color(text_role)
             .single_line()
             .a11y_hidden();
+        label = match &self.label_style {
+            Some(style) => label.style(style.clone()),
+            None => label.style(TextStyleRole::Body),
+        };
         let label_id = ctx.add(label);
 
         // Resolve the active style: per-call override > theme slot >

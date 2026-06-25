@@ -49,6 +49,14 @@ pub struct CommandLinkButton {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     action: Option<Box<dyn Fn(&mut EventContext)>>,
+    /// Per-call title text-style override. `None` ⇒ `TextStyleRole::BodyBold`.
+    title_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    /// Per-call description text-style override. `None` ⇒ `TextStyleRole::Body`.
+    description_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    /// Per-call title text-color override. `None` ⇒ `TextRole::Primary`.
+    title_color: Option<bastyde_core::color_prop::ColorProp>,
+    /// Per-call description text-color override. `None` ⇒ `TextRole::Secondary`.
+    description_color: Option<bastyde_core::color_prop::ColorProp>,
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
 }
@@ -62,6 +70,10 @@ impl CommandLinkButton {
             icon: None,
             initial_enabled: true,
             action: None,
+            title_style: None,
+            description_style: None,
+            title_color: None,
+            description_color: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -92,6 +104,39 @@ impl CommandLinkButton {
     /// route through the Action / Intent system.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
+        self
+    }
+
+    /// Override the title's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
+    /// (unset) is `TextStyleRole::BodyBold`.
+    pub fn title_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.title_style = Some(style.into());
+        self
+    }
+
+    /// Override the description's text style. Default is `TextStyleRole::Body`.
+    pub fn description_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.description_style = Some(style.into());
+        self
+    }
+
+    /// Override the title's text color. Accepts `Color`, a role, or a
+    /// `Signal` of either. Default (unset) is `TextRole::Primary`.
+    pub fn title_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.title_color = Some(color.into());
+        self
+    }
+
+    /// Override the description's text color. Default is `TextRole::Secondary`.
+    pub fn description_color(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.description_color = Some(color.into());
         self
     }
 }
@@ -151,9 +196,15 @@ impl Widget for CommandLinkButton {
         let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
+        let title_color: bastyde_core::color_prop::ColorProp =
+            self.title_color.clone().unwrap_or_else(|| title_role.into());
+        let title_style: bastyde_core::color_prop::TextStyleProp = self
+            .title_style
+            .clone()
+            .unwrap_or_else(|| TextStyleRole::BodyBold.into());
         let title_widget = TextWidget::new(self.title.clone())
-            .style(TextStyleRole::BodyBold)
-            .bind_color(title_role)
+            .style(title_style)
+            .bind_color(title_color)
             .single_line()
             .a11y_hidden();
         let title_id = ctx.add(title_widget);
@@ -163,10 +214,18 @@ impl Widget for CommandLinkButton {
             .alignment(HAlignment::Leading)
             .add_child(title_id);
         if let Some(description) = &self.description {
+            let desc_color: bastyde_core::color_prop::ColorProp = self
+                .description_color
+                .clone()
+                .unwrap_or_else(|| desc_role.into());
+            let desc_style: bastyde_core::color_prop::TextStyleProp = self
+                .description_style
+                .clone()
+                .unwrap_or_else(|| TextStyleRole::Body.into());
             let desc = ctx.add(
                 TextWidget::new(description.clone())
-                    .style(TextStyleRole::Body)
-                    .bind_color(desc_role)
+                    .style(desc_style)
+                    .bind_color(desc_color)
                     .a11y_hidden(),
             );
             text_column = text_column.add_child(desc);

@@ -127,6 +127,7 @@ struct SegmentCell {
     label: LocalizedString,
     icon: Option<IconFactory>,
     tooltip: Option<LocalizedString>,
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
     seg_disabled: bool,
     index: usize,
     selected: Signal<usize>,
@@ -181,12 +182,11 @@ impl Widget for SegmentCell {
         if let Some(icon_factory) = &self.icon {
             row = row.child(icon_factory().color(color.clone()));
         }
-        row = row.child(
-            TextWidget::new(self.label.clone())
-                .style(TextStyleRole::Small)
-                .bind_color(color)
-                .single_line(),
-        );
+        let label_widget = match &self.label_style {
+            Some(style) => TextWidget::new(self.label.clone()).style(style.clone()),
+            None => TextWidget::new(self.label.clone()).style(TextStyleRole::Small),
+        };
+        row = row.child(label_widget.bind_color(color).single_line());
 
         // The cell node owns the AT RadioButton + name; exclude the inner
         // content subtree so a screen reader doesn't double-announce the
@@ -274,6 +274,11 @@ pub struct SegmentedControl {
     focus_origin: Signal<Option<FocusOrigin>>,
     /// Per-call override for the chrome.
     style_override: Option<SharedSegmentedControlStyle>,
+    /// Per-call override for every segment's label text style (font, size,
+    /// weight). `None` ⇒ the default `TextStyleRole::Small`. Text *color*
+    /// stays state-driven (selected → `OnAccent`, disabled → `Disabled`)
+    /// and is intentionally not overridable.
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
     /// Build-time children — chrome first (back), then one
     /// `SegmentCell` per segment.
     children: Vec<WidgetId>,
@@ -290,6 +295,7 @@ impl SegmentedControl {
             hovered_segment: Signal::new(None),
             focus_origin: Signal::new(None),
             style_override: None,
+            label_style: None,
             children: Vec::new(),
         }
     }
@@ -320,6 +326,15 @@ impl SegmentedControl {
     /// Per-call override for the segmented-control chrome.
     pub fn style(mut self, style: impl bastyde_core::styles::SegmentedControlStyle) -> Self {
         self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Override every segment's label text style (font, size, weight).
+    /// Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
+    /// Default (unset) is `TextStyleRole::Small`. Text color stays
+    /// state-driven and is intentionally not overridable here.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
         self
     }
 
@@ -447,6 +462,7 @@ impl Widget for SegmentedControl {
                 label: self.segments[index].label.clone(),
                 icon: self.segments[index].icon.clone(),
                 tooltip: self.segments[index].tooltip.clone(),
+                label_style: self.label_style.clone(),
                 seg_disabled: self.segments[index].disabled,
                 index,
                 selected: selected.clone(),

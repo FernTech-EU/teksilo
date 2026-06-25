@@ -152,6 +152,14 @@ pub struct MenuItem {
     /// `set_keyboard_shortcut`, so screen readers announce the chord
     /// that the visual trailing label shows.
     resolved_shortcut: Option<String>,
+    /// Per-call override for the label's text style (font, size, weight).
+    /// `None` ⇒ the default `TextStyleRole::Body`.
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    /// Per-call override for the label text color. `None` ⇒ the
+    /// interaction/enabled-derived cascade (hover / disabled). Setting
+    /// this replaces the cascade (loses the hover/disabled tint), so use
+    /// it only when a host enforces a fixed text role.
+    text_role_override: Option<bastyde_core::color_prop::ColorProp>,
     /// Per-call style override. When `None`, falls back to the
     /// theme-wide slot (`theme.style_slots.menu_item`) and finally to
     /// the IntUI default `RecipeMenuItemStyle`.
@@ -193,6 +201,8 @@ impl MenuItem {
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
             resolved_shortcut: None,
+            label_style: None,
+            text_role_override: None,
             style_override: None,
             root_child_id: None,
             submenu_content_id: None,
@@ -277,6 +287,24 @@ impl MenuItem {
         self
     }
 
+    /// Override the label's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
+    /// (unset) is `TextStyleRole::Body`.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
+        self
+    }
+
+    /// Override the label text color. Accepts `Color`, a role, or a
+    /// `Signal` of either. Default (unset) is the interaction/enabled
+    /// cascade; setting this replaces that cascade (the hover / disabled
+    /// tint no longer applies), so reserve it for chrome that enforces a
+    /// fixed text role.
+    pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.text_role_override = Some(color.into());
+        self
+    }
+
     /// Attach a tooltip that appears after a hover delay, same mechanism
     /// as [`Button::tooltip`](crate::button::Button::tooltip).
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
@@ -339,6 +367,8 @@ impl MenuItem {
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
             resolved_shortcut: None,
+            label_style: None,
+            text_role_override: None,
             style_override: None,
             root_child_id: None,
             submenu_content_id: None,
@@ -630,11 +660,19 @@ impl Widget for MenuItem {
             .map(|w| w.alt_down().clone())
             .unwrap_or_else(|| Signal::new(false));
         let label_source: bastyde_core::signal::Prop<String> = self.label.clone().into();
+        let label_color: bastyde_core::color_prop::ColorProp = self
+            .text_role_override
+            .clone()
+            .unwrap_or_else(|| text_role.clone().into());
+        let label_style: bastyde_core::color_prop::TextStyleProp = self
+            .label_style
+            .clone()
+            .unwrap_or_else(|| TextStyleRole::Body.into());
         let label = ctx.add(MenuLabel::new(
             label_source,
             alt_down,
-            text_role.clone(),
-            TextStyleRole::Body,
+            label_color,
+            label_style,
         ));
 
         // Resolve the trailing shortcut text — manual label wins;

@@ -79,6 +79,12 @@ pub struct SplitButton {
     /// Per-call Tier-3 chrome override. `None` ⇒ theme slot ⇒ the built-in
     /// `RecipeSplitButtonStyle`.
     style_override: Option<SharedSplitButtonStyle>,
+    /// Per-call override for the main-region label text style (font, size,
+    /// weight). `None` ⇒ the inner `TextWidget` default.
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    /// Per-call override for the main-region label text color. `None` ⇒ the
+    /// variant/interaction-derived cascade; setting this replaces it.
+    text_role_override: Option<bastyde_core::color_prop::ColorProp>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     initial_selected: usize,
@@ -129,6 +135,8 @@ impl SplitButton {
             rows: Vec::new(),
             variant: ButtonVariant::Plain,
             style_override: None,
+            label_style: None,
+            text_role_override: None,
             initial_enabled: true,
             initial_selected: 0,
             promote_on_select: true,
@@ -188,6 +196,23 @@ impl SplitButton {
     /// `RecipeSplitButtonStyle`.
     pub fn style(mut self, style: impl SplitButtonStyle) -> Self {
         self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Override the main-region label text style (font, size, weight).
+    /// Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
+    /// Default (unset) is the inner `TextWidget` default — e.g. pass
+    /// `TextStyleRole::BodyBold` for a bold default action.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
+        self
+    }
+
+    /// Override the main-region label text color. Accepts `Color`, a role,
+    /// or a `Signal` of either. Default (unset) is the variant/interaction
+    /// cascade; setting this replaces it (loses hover/disabled tint).
+    pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+        self.text_role_override = Some(color.into());
         self
     }
 
@@ -504,11 +529,18 @@ impl Widget for SplitButton {
         let self_id = ctx.self_id();
 
         // ---- Main region subtree ----
-        let label_widget = TextWidget::new(lit!(""))
+        let label_color: bastyde_core::color_prop::ColorProp = self
+            .text_role_override
+            .clone()
+            .unwrap_or_else(|| text_role.clone().into());
+        let mut label_widget = TextWidget::new(lit!(""))
             .bind_text(main_label_text)
-            .bind_color(text_role.clone())
+            .bind_color(label_color)
             .single_line()
             .a11y_hidden();
+        if let Some(style) = &self.label_style {
+            label_widget = label_widget.style(style.clone());
+        }
         let label_id = ctx.add(label_widget);
 
         let main_padding_id = ctx.add(

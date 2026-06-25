@@ -277,6 +277,12 @@ pub struct Button {
     /// enforced text role (e.g. tab-bar overflow dropdown trigger
     /// inheriting `idle_text_role`). See [`Button::text_role`].
     text_role_override: Option<bastyde_core::color_prop::ColorProp>,
+    /// Optional per-call override for the label's text style (font, size,
+    /// weight). When `Some`, applied to the inner label `TextWidget` via
+    /// its `.style(...)`; when `None`, the `TextWidget` default is used.
+    /// Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either
+    /// (anything `Into<TextStyleProp>`). See [`Button::text_style`].
+    label_style: Option<bastyde_core::color_prop::TextStyleProp>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
     /// Root child ID — set during build().
@@ -316,6 +322,7 @@ impl Button {
             expanded_signal: None,
             shared_interaction: None,
             text_role_override: None,
+            label_style: None,
             leading: None,
             trailing: None,
             interaction: Signal::new(InteractionState::Idle),
@@ -476,6 +483,16 @@ impl Button {
         self
     }
 
+    /// Override the label's text style (font, size, weight). By default the
+    /// label uses the inner `TextWidget`'s default style; pass a
+    /// `TextStyleRole` (e.g. `TextStyleRole::BodyBold`), a `TextStyle`, or a
+    /// `Signal` of either to change it — e.g. to make the label bold.
+    /// Orthogonal to [`Button::text_role`], which only sets the color.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.label_style = Some(style.into());
+        self
+    }
+
     /// Add an icon to the button at the specified location.
     pub fn icon(mut self, icon: IconWidget, location: IconLocation) -> Self {
         self.icon = Some(icon);
@@ -537,11 +554,15 @@ impl Button {
     /// initial text; `bind_text` immediately overwrites it with the
     /// prop's current value (and tracks updates for `Prop::Bound`).
     fn make_label_text(&self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> TextWidget {
-        TextWidget::new(lit!(""))
+        let mut text = TextWidget::new(lit!(""))
             .bind_text(self.label.clone())
             .bind_color(color)
             .single_line()
-            .a11y_hidden()
+            .a11y_hidden();
+        if let Some(style) = &self.label_style {
+            text = text.style(style.clone());
+        }
+        text
     }
 
     /// Take the configured icon, size it, and bind its tint to `color`.

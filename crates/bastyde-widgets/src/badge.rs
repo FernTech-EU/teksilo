@@ -20,8 +20,11 @@ use bastyde_i18n::LocalizedString;
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
     label: LocalizedString,
-    color: Option<ColorProp>,
-    text_color: Option<ColorProp>,
+    background: Option<ColorProp>,
+    text_role: Option<ColorProp>,
+    /// Per-call override for the label's text style (font, size, weight).
+    /// `None` ⇒ the default `TextStyleRole::Tiny`.
+    text_style: Option<bastyde_core::color_prop::TextStyleProp>,
     /// Per-call override for the pill chrome.
     style_override: Option<SharedBadgeStyle>,
     root_child_id: Option<WidgetId>,
@@ -31,8 +34,9 @@ impl Badge {
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
-            color: None,
-            text_color: None,
+            background: None,
+            text_role: None,
+            text_style: None,
             style_override: None,
             root_child_id: None,
         }
@@ -48,15 +52,23 @@ impl Badge {
     /// Override the badge background. Accepts `Color`, a
     /// [`SurfaceRole`](bastyde_tokens::SurfaceRole) / [`TextRole`](bastyde_tokens::TextRole),
     /// or a `Signal<Color>`. Default (unset) is `SurfaceRole::AccentSubtle`.
-    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
-        self.color = Some(color.into());
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = Some(color.into());
         self
     }
 
     /// Override the badge text color. Accepts `Color`, a role, or a signal.
     /// Default (unset) is the theme's `status_info_fg`.
-    pub fn text_color(mut self, color: impl Into<ColorProp>) -> Self {
-        self.text_color = Some(color.into());
+    pub fn text_role(mut self, color: impl Into<ColorProp>) -> Self {
+        self.text_role = Some(color.into());
+        self
+    }
+
+    /// Override the label's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
+    /// (unset) is `TextStyleRole::Tiny`.
+    pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+        self.text_style = Some(style.into());
         self
     }
 }
@@ -73,19 +85,22 @@ impl Widget for Badge {
 
         // Default text color: `status_info_fg` via a derived signal so
         // theme changes still propagate. Callers override with
-        // `.text_color(...)`. The pill background default
-        // (`AccentSubtle`) lives in the recipe; `.color(...)` reaches
+        // `.text_role(...)`. The pill background default
+        // (`AccentSubtle`) lives in the recipe; `.background(...)` reaches
         // the style as `background_override`.
         let text: ColorProp = self
-            .text_color
+            .text_role
             .take()
             .unwrap_or_else(|| ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg)));
 
-        let text_widget = TextWidget::new(self.label.clone())
-            .style(TextStyleRole::Tiny)
+        let mut text_widget = TextWidget::new(self.label.clone())
             .color(text)
             .single_line()
             .a11y_hidden();
+        text_widget = match &self.text_style {
+            Some(style) => text_widget.style(style.clone()),
+            None => text_widget.style(TextStyleRole::Tiny),
+        };
         let content = ctx.add(text_widget);
 
         // The pill chrome (rounded background + padding inset) is owned
@@ -98,7 +113,7 @@ impl Widget for Badge {
         let root = style.make_body(
             &BadgeStyleConfig {
                 content,
-                background_override: self.color.take(),
+                background_override: self.background.take(),
             },
             ctx,
         );

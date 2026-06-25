@@ -875,7 +875,7 @@ impl WidgetCatalog for Badge {
         KnobSpec::new()
             .text("label", "Label", "NEW")
             .surface_role("background", "Background", SurfaceRole::Accent)
-            .text_role("text_color", "Text colour", TextRole::OnAccent)
+            .text_role("text_role", "Text colour", TextRole::OnAccent)
     }
     fn variants() -> Vec<PreviewVariant> {
         vec![
@@ -887,31 +887,31 @@ impl WidgetCatalog for Badge {
                 KnobOverrides::new()
                     .text("label", "OK")
                     .surface_role("background", SurfaceRole::StatusSuccess)
-                    .text_role("text_color", TextRole::Success),
+                    .text_role("text_role", TextRole::Success),
             ),
             PreviewVariant::knobs(
                 "warning",
                 KnobOverrides::new()
                     .text("label", "BETA")
                     .surface_role("background", SurfaceRole::StatusWarning)
-                    .text_role("text_color", TextRole::Warning),
+                    .text_role("text_role", TextRole::Warning),
             ),
             PreviewVariant::knobs(
                 "error",
                 KnobOverrides::new()
                     .text("label", "ERR")
                     .surface_role("background", SurfaceRole::StatusError)
-                    .text_role("text_color", TextRole::Error),
+                    .text_role("text_role", TextRole::Error),
             ),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         let bg = knobs.surface_role("background");
-        let fg = knobs.text_role("text_color");
+        let fg = knobs.text_role("text_role");
         Box::new(
             Badge::new(lit!(knobs.text("label").get()))
-                .color(bg)
-                .text_color(fg),
+                .background(bg)
+                .text_role(fg),
         )
     }
 }
