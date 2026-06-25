@@ -96,6 +96,15 @@ pub struct WidgetTree {
     /// intent itself, and the firing shortcut's
     /// `propagate_when_disabled` policy.
     pending_intents: Vec<(WidgetId, crate::intent::Intent, bool)>,
+    /// Window-global actions registered via
+    /// [`BuildContext::register_action_global`](crate::BuildContext::register_action_global).
+    /// Consulted as a fallback at the end of every intent dispatch — *after* the
+    /// source→root walk finds no consuming node action — so an app-global command
+    /// is reachable no matter where the intent originated (a menu-bar dropdown
+    /// overlay, deep content, a global shortcut anchored at the root). Each entry
+    /// is owned by the registering widget and torn down on its rebuild/destroy,
+    /// mirroring `register_shortcut_global`.
+    global_actions: Vec<(WidgetId, crate::action::Action)>,
     /// Currently-armed key-capture slot. `Some` when
     /// [`WidgetTree::begin_key_capture`] has been called and the
     /// returned [`CaptureHandle`](crate::shortcut::CaptureHandle)
@@ -392,6 +401,7 @@ impl WidgetTree {
             pending_modal_dismissal: false,
             shortcut_registry: crate::shortcut::ShortcutRegistry::new(),
             pending_intents: Vec::new(),
+            global_actions: Vec::new(),
             key_capture: None,
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
@@ -1387,6 +1397,7 @@ impl WidgetTree {
         // rebindings survive this round-trip (see ShortcutRegistry
         // graveyard semantics).
         self.shortcut_registry.unregister_all_for_owner(widget_id);
+        self.global_actions.retain(|(owner, _)| *owner != widget_id);
         // Re-apply `Widget::declare_shortcuts` so the static metadata
         // survives the rebuild (the unregister above wiped both
         // declared and build-registered entries; build() will refill
@@ -1534,6 +1545,7 @@ impl WidgetTree {
         // `rebuild_single_widget`, destruction is permanent; if the
         // user had overrides, they stay in the graveyard.
         self.shortcut_registry.unregister_all_for_owner(widget_id);
+        self.global_actions.retain(|(owner, _)| *owner != widget_id);
         // Bindings from this widget stop being relevant; clean them
         // up so the registry doesn't leak dead entries for the
         // lifetime of the app.
@@ -1938,6 +1950,44 @@ impl WidgetTree {
                 crate::intent::IntentResponse::Propagated => continue,
             }
         }
+
+        // Fallback: window-global actions (registered via
+        // `register_action_global`). The source→root walk found no consuming
+        // node action, so consult app-global commands — reachable regardless of
+        // where the intent originated (menu-bar overlay, content, shortcut).
+        let mut i = 0;
+        while i < self.global_actions.len() {
+            let matches = {
+                let (_, action) = &self.global_actions[i];
+                action.intent == intent.name && action.is_enabled()
+            };
+            if !matches {
+                i += 1;
+                continue;
+            }
+            // Take the action out so the FnMut handler can run without holding a
+            // borrow on `self`; reinsert at its slot afterwards.
+            let (owner, mut action) = self.global_actions.remove(i);
+            let mut ctx = self.make_event_context(&mut *ops);
+            let response = (action.handler)(&intent, &mut ctx);
+            self.global_actions.insert(i, (owner, action));
+            self.collect_from_ctx(ctx, owner);
+            match response {
+                crate::intent::IntentResponse::Handled => return,
+                crate::intent::IntentResponse::Propagated => {
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Register a window-global [`Action`](crate::action::Action) owned by
+    /// `owner`. Consulted as a dispatch fallback (see [`Self::dispatch_intent`]);
+    /// torn down when `owner` rebuilds or is destroyed. Backs
+    /// [`BuildContext::register_action_global`](crate::BuildContext::register_action_global).
+    pub(crate) fn push_global_action(&mut self, owner: WidgetId, action: crate::action::Action) {
+        self.global_actions.push((owner, action));
     }
 
     // --- Window-close request (drained by the app loop) ---

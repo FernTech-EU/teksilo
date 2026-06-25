@@ -104,6 +104,13 @@ enum MenuItemMode {
 enum CheckKind {
     TwoState(Signal<bool>),
     TriState(Signal<CheckState>),
+    /// Reflect-only: the checkmark mirrors `state`, but activation does **not**
+    /// write it — the bound value's truth lives elsewhere (a model / method) and
+    /// the item's `on_activate`/intent is solely responsible for changing it.
+    /// The classic "View ▸ Sidebar / Full Screen" pattern, where the check
+    /// follows layout state the menu doesn't own. Renders identically to
+    /// `TwoState`; differs only in that clicking has no built-in toggle.
+    Reflect(Signal<bool>),
 }
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
@@ -400,6 +407,20 @@ impl MenuItem {
         self
     }
 
+    /// Render `Role::MenuItemCheckBox` whose checkmark **reflects** `state`
+    /// read-only: activation does NOT write the signal — the truth lives
+    /// elsewhere (a model / method), and this item's `on_activate`/intent is
+    /// responsible for the change, after which `state` updates the checkmark
+    /// reactively. Use for "View ▸ Sidebar / Full Screen"-style commands that
+    /// mirror externally-owned state (e.g. `DockingModel::dock_open_signal`),
+    /// where two-way [`bind_checked`](Self::bind_checked) would fight the model.
+    ///
+    /// Mutually exclusive with the other check / radio binders — last call wins.
+    pub fn reflect_checked(mut self, state: Signal<bool>) -> Self {
+        self.mode = MenuItemMode::Check(CheckKind::Reflect(state));
+        self
+    }
+
     /// Bind this item to a tri-state `Signal<CheckState>`. The item
     /// renders `Role::MenuItemCheckBox`; activation cycles
     /// `Unchecked` ↔ `Checked` (per Windows / [`Checkbox`](crate::checkbox::Checkbox)
@@ -500,6 +521,7 @@ impl std::fmt::Debug for MenuItem {
             MenuItemMode::Plain => "Plain",
             MenuItemMode::Check(CheckKind::TwoState(_)) => "Check(TwoState)",
             MenuItemMode::Check(CheckKind::TriState(_)) => "Check(TriState)",
+            MenuItemMode::Check(CheckKind::Reflect(_)) => "Check(Reflect)",
             MenuItemMode::Radio { .. } => "Radio",
         };
         f.debug_struct("MenuItem")
@@ -579,10 +601,11 @@ impl Widget for MenuItem {
                         ctx.add(Spacer::new())
                     }
                 }
-                MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                MenuItemMode::Check(CheckKind::TwoState(s))
+                | MenuItemMode::Check(CheckKind::Reflect(s)) => {
                     debug_assert!(
                         self.icon.is_none(),
-                        "MenuItem: .icon() is mutually exclusive with .bind_checked()"
+                        "MenuItem: .icon() is mutually exclusive with a checkmark (bind_checked / reflect_checked)"
                     );
                     self.icon = None;
                     // 0 = checkmark, 1 = spacer.
@@ -833,6 +856,9 @@ impl Widget for MenuItem {
                 let s = s.clone();
                 Some(std::rc::Rc::new(move || s.set(!s.get())))
             }
+            // Reflect-only: no built-in write — the on_activate / intent owns
+            // the state change; the checkmark follows `state` reactively.
+            MenuItemMode::Check(CheckKind::Reflect(_)) => None,
             MenuItemMode::Check(CheckKind::TriState(s)) => {
                 let s = s.clone();
                 // Click toggles Unchecked <-> Checked. Indeterminate
@@ -1245,7 +1271,8 @@ impl Widget for MenuItem {
         // for tri-state Indeterminate.
         match &self.mode {
             MenuItemMode::Plain => {}
-            MenuItemMode::Check(CheckKind::TwoState(s)) => {
+            MenuItemMode::Check(CheckKind::TwoState(s))
+            | MenuItemMode::Check(CheckKind::Reflect(s)) => {
                 builder.set_toggled(s.get());
             }
             MenuItemMode::Check(CheckKind::TriState(s)) => match s.get() {
@@ -1419,6 +1446,37 @@ mod tests {
         let item_id2 = first_descendant_with_role(&t2, list_id2, Role::MenuItemCheckBox);
         t2.click(item_id2);
         assert!(!checked2.get());
+    }
+
+    #[test]
+    fn reflect_checked_emits_role_and_reflects_signal() {
+        let visible = Signal::new(true);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Show Outline")).reflect_checked(visible)),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.role(), Role::MenuItemCheckBox);
+        assert!(info.is_toggled(), "checkmark reflects the bound signal (true)");
+    }
+
+    #[test]
+    fn reflect_checked_click_does_not_write_signal() {
+        // The defining property: activation is reflect-only — the bound signal's
+        // truth lives elsewhere, so clicking must NOT flip it (the on_activate /
+        // intent owns the change).
+        let visible = Signal::new(false);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Show Outline")).reflect_checked(visible.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        t.click(item_id);
+        assert!(!visible.get(), "reflect_checked must not write the bound signal on click");
     }
 
     #[test]

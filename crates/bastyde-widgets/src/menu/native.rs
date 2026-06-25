@@ -126,7 +126,9 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
         }
         match item.state {
             MenuItemState::Plain => {}
-            MenuItemState::Check(sig) => {
+            // Two-way and reflect-only both mirror the signal into the native
+            // checkmark; they differ only in the in-window click behavior.
+            MenuItemState::Check(sig) | MenuItemState::ReflectCheck(sig) => {
                 let h = handle.clone();
                 let id = item.id;
                 observers.push(sig.observe(move |v| {
@@ -202,7 +204,7 @@ fn resolve_node(
         MenuNode::Item(entry) => {
             let check = match &entry.state {
                 MenuItemState::Plain => NativeCheck::None,
-                MenuItemState::Check(s) => {
+                MenuItemState::Check(s) | MenuItemState::ReflectCheck(s) => {
                     if s.get() {
                         NativeCheck::On
                     } else {

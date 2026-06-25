@@ -545,6 +545,43 @@ Key bits:
 - **`on_invoke_with_response(|intent, ctx| …) -> IntentResponse`** — when
   the handler needs to decide `Handled` vs `Propagated` at runtime.
 
+### Scoped vs global actions
+
+`ctx.register_action(action)` attaches the action to the **registering widget's
+node** — it only fires when that widget is on the intent's source→root walk.
+That's right for actions co-located with their UI (a panel handling a command
+fired from within itself).
+
+`ctx.register_action_global(action)` registers an **app-global** action consulted
+as a dispatch **fallback** — *after* the source→root walk finds no consuming node
+action — so it fires no matter where the intent originated. Use it for app-wide
+commands whose handler lives at the app root but whose triggers are scattered
+across the tree **and the window chrome**:
+
+- A **menu-bar dropdown** renders in an *overlay*, not under the widget that
+  built the menu — so a `MenuEntry::intent("app.x")` dispatched from it will
+  **not** reach an action registered with `register_action` on a sibling widget
+  (e.g. the app body). This is the most common footgun: the menu item looks
+  wired but nothing happens.
+- A **global shortcut** with no widget focused anchors at the arena root; a
+  scoped action deep in the tree won't be on that walk.
+
+`register_action_global` is the action-side counterpart to
+`register_shortcut_global`. Ownership applies: the action is torn down when the
+registering widget rebuilds or is destroyed. Multiple globals for the same intent
+name fire in registration order, honouring `IntentResponse` (`Handled` stops,
+`Propagated` continues to the next global).
+
+```rust
+// App root: command reachable from the menu bar, a shortcut, and content alike.
+ctx.register_shortcut_global(
+    Shortcut::new("view.toggle_sidebar").primary(KeyStroke::ctrl(Key::B)).build(),
+);
+ctx.register_action_global(
+    Action::new("view.toggle_sidebar").on_invoke(|_i, _c| sidebar.toggle()),
+);
+```
+
 ### Handler patterns: extract only when needed
 
 The framework already name-matches before invoking a handler — an
@@ -583,6 +620,12 @@ From
      `propagate_when_disabled`) or `return` (otherwise).
    - Invoke the handler. On `Handled` → return. On `Propagated` →
      continue.
+3. **Global fallback.** If the chain walk consumed nothing, consult the
+   window-global actions (registered via `register_action_global`) in
+   registration order. First enabled match handles it (`Handled` → stop,
+   `Propagated` → next global). This is position-independent, so it catches
+   intents from menu-bar overlays and root-anchored shortcuts that the
+   source→root walk would otherwise miss.
 
 Handlers may call `ctx.send_intent(...)` from inside; those intents
 queue and drain after the current one, until the queue empties. FIFO
@@ -598,6 +641,10 @@ ordering.
 - **`ctx.send_intent(...)`**: anchor is the widget whose handler ran.
   Default `propagate_when_disabled = true` — programmatic sends have
   no shortcut to consult and take the least-surprising path.
+  ⚠️ When the handler runs in an **overlay** (menu dropdown, popover), the
+  anchor is the overlay's content, whose source→root walk does **not** pass
+  through the widget that opened it — register an app-global action
+  (`register_action_global`) for commands fired from menus/chrome.
 - **`tree.dispatch_intent(source, intent, propagate)`**: caller chooses.
 
 ### Focus invalidation on destroy
@@ -736,6 +783,7 @@ impl Widget for Root {
 | Declare a handler                          | `Action::new("id").on_invoke(\|intent, ctx\| …)`                     |
 | Propagate after observing                  | `.on_invoke_with_response(\|i, c\| IntentResponse::Propagated)`      |
 | Register handler on widget                 | `ctx.register_action(action)`                                        |
+| Register app-global handler (menu/chrome)  | `ctx.register_action_global(action)`                                 |
 | Fire programmatically                      | `ctx.send_intent(AppIntent::X)`                                      |
 | Typed enum bridge                          | `#[derive(IntentKind)]` + `#[name = "…"]` on each variant            |
 | Recover typed variant                      | `AppIntent::from_intent(intent)`                                     |

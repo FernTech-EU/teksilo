@@ -519,6 +519,25 @@ impl<'a> BuildContext<'a> {
         self.tree.push_action(id, action);
     }
 
+    /// Register a **window-global** [`Action`](crate::action::Action), owned by
+    /// the widget being built. Unlike [`register_action`](Self::register_action)
+    /// — which only fires when this widget is on the intent's source→root walk —
+    /// a global action is consulted as a dispatch *fallback*, so it is reachable
+    /// no matter where the intent originated: a menu-bar dropdown (which renders
+    /// in an overlay, not under the registering widget), deep content, or a
+    /// global shortcut anchored at the root when nothing is focused.
+    ///
+    /// This is the action-side counterpart to
+    /// [`register_shortcut_global`](Self::register_shortcut_global): use it for
+    /// app-wide commands (`app.save`, `view.toggle_sidebar`) whose handler lives
+    /// at the app root but whose triggers (menu, toolbar, shortcut) are scattered
+    /// across the tree and chrome. Ownership applies: the action is torn down
+    /// when this widget rebuilds or is destroyed.
+    pub fn register_action_global(&mut self, action: crate::action::Action) {
+        let id = self.self_id();
+        self.tree.push_global_action(id, action);
+    }
+
     /// Register a [`Shortcut`](crate::shortcut::Shortcut) in the
     /// tree's registry, owned by the widget being built.
     ///

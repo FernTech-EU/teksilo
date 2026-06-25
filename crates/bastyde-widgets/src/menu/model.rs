@@ -21,8 +21,12 @@ use crate::menu_list::MenuList;
 pub enum MenuItemState {
     /// A plain command, no check column.
     Plain,
-    /// Two-state checkbox bound to a `Signal<bool>`.
+    /// Two-state checkbox bound to a `Signal<bool>`; activation flips it.
     Check(Signal<bool>),
+    /// Reflect-only checkmark mirroring a `Signal<bool>`; activation does NOT
+    /// write it (the `intent`/`on_activate` owns the change). For commands that
+    /// mirror externally-owned state — "View ▸ Sidebar / Full Screen".
+    ReflectCheck(Signal<bool>),
     /// Tri-state checkbox bound to a `Signal<CheckState>`.
     TriCheck(Signal<CheckState>),
     /// Radio item: selected iff `selected == value`.
@@ -100,9 +104,20 @@ impl MenuEntry {
         self
     }
 
-    /// Make this a two-state checkbox item bound to `state`.
+    /// Make this a two-state checkbox item bound to `state`. Activation flips
+    /// `state` — use when the signal *is* the source of truth.
     pub fn checkable(mut self, state: Signal<bool>) -> Self {
         self.state = MenuItemState::Check(state);
+        self
+    }
+
+    /// Show a checkmark that **reflects** `state` read-only. Activation does not
+    /// write it — pair with [`intent`](Self::intent) / [`on_activate`](Self::on_activate)
+    /// that drive the change; the checkmark then follows `state` reactively. Use
+    /// when the truth is owned elsewhere (e.g. `DockingModel::dock_open_signal`),
+    /// where two-way [`checkable`](Self::checkable) would fight the model.
+    pub fn checked(mut self, state: Signal<bool>) -> Self {
+        self.state = MenuItemState::ReflectCheck(state);
         self
     }
 
@@ -144,6 +159,7 @@ impl MenuEntry {
         match &self.state {
             MenuItemState::Plain => {}
             MenuItemState::Check(s) => mi = mi.bind_checked(s.clone()),
+            MenuItemState::ReflectCheck(s) => mi = mi.reflect_checked(s.clone()),
             MenuItemState::TriCheck(s) => mi = mi.bind_check_state(s.clone()),
             MenuItemState::Radio { value, selected } => mi = mi.radio(*value, selected.clone()),
         }

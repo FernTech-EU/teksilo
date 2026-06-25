@@ -3511,6 +3511,51 @@ mod tests {
         );
     }
 
+    /// A global action fires for an intent dispatched from a widget in a
+    /// completely unrelated subtree — proving it is a position-independent
+    /// fallback (the menu-bar-vs-content case).
+    #[test]
+    fn global_action_reached_from_unrelated_source() {
+        use crate::action::Action;
+        use crate::intent::Intent;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Debug)]
+        struct Registrar(Rc<Cell<bool>>);
+        impl crate::widget::Widget for Registrar {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let flag = self.0.clone();
+                ctx.register_action_global(
+                    Action::new("test.global").on_invoke(move |_i, _c| flag.set(true)),
+                );
+                vec![]
+            }
+            fn layout_response(
+                &self,
+                _p: bastyde_canvas::SizeProposal,
+                _c: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                bastyde_canvas::Size::new(0.0, 0.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let fired = Rc::new(Cell::new(false));
+        let registrar = tree.add(Registrar(fired.clone()));
+        let source = tree.add(FillWidget::new()); // unrelated sibling root
+        let mut ops = crate::window::NoopWindowOps;
+
+        tree.dispatch_intent(source, Intent::new("test.global"), true, &mut ops);
+        assert!(fired.get(), "global action must fire from an unrelated source");
+
+        // And it is torn down with its owner.
+        fired.set(false);
+        tree.destroy_subtree(registrar);
+        tree.dispatch_intent(source, Intent::new("test.global"), true, &mut ops);
+        assert!(!fired.get(), "destroying the owner must remove its global action");
+    }
+
     // --- Transform-aware hit-testing -------------------------------------
     //
     // `set_transform` scopes are paint-only: the renderer pushes the
