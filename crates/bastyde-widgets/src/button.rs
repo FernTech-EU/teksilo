@@ -965,6 +965,134 @@ mod tests {
         );
     }
 
+    // Helper: lay out a Target button (left) and an Open trigger (right)
+    // side by side, then open a click-opened overlay anchored to the
+    // trigger and parked below the bar. Returns the tree plus the pieces
+    // the dismiss-passthrough tests assert on.
+    fn open_overlay_beside_button() -> (
+        WidgetTree,
+        bastyde_core::widget_id::WidgetId, // target
+        bastyde_core::widget_id::WidgetId, // trigger
+        bastyde_core::widget_id::WidgetId, // overlay content
+        Rc<Cell<u32>>,                     // target activations
+        Rc<Cell<u32>>,                     // trigger activations
+    ) {
+        use bastyde_core::overlay::{
+            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+        };
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let target_fired = Rc::new(Cell::new(0_u32));
+        let tf = target_fired.clone();
+        let trigger_fired = Rc::new(Cell::new(0_u32));
+        let gf = trigger_fired.clone();
+
+        let target =
+            tree.add(Button::new(lit!("Target")).on_activate_fn(move |_| tf.set(tf.get() + 1)));
+        let trigger =
+            tree.add(Button::new(lit!("Open")).on_activate_fn(move |_| gf.set(gf.get() + 1)));
+        let content = tree.add(Button::new(lit!("Item")));
+        let _root = tree.add(
+            crate::primitives::HStack::new()
+                .spacing(40.0)
+                .add_child(target)
+                .add_child(trigger),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.show_overlay(OverlayRequest {
+            content_id: content,
+            anchor: trigger,
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        // Second layout positions the overlay content below the trigger.
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        (tree, target, trigger, content, target_fired, trigger_fired)
+    }
+
+    #[test]
+    fn dismiss_click_activates_button_beneath() {
+        // The reported quirk: with a dropdown/menu open, clicking another
+        // widget should dismiss the overlay AND activate that widget in a
+        // single click — not require a throwaway first click.
+        use bastyde_core::event::PointerButton;
+
+        let (mut tree, target, _trigger, _content, target_fired, trigger_fired) =
+            open_overlay_beside_button();
+
+        let tb = tree.bounds(target);
+        let target_center =
+            bastyde_canvas::Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
+        // The overlay is parked below the button bar; the dismiss assertion
+        // after dispatch confirms this click lands outside it.
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: target_center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: target_center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the press should dismiss the open overlay",
+        );
+        assert_eq!(
+            target_fired.get(),
+            1,
+            "the same press should activate the button beneath the dismissed overlay",
+        );
+        assert_eq!(trigger_fired.get(), 0);
+    }
+
+    #[test]
+    fn dismiss_click_on_trigger_is_consumed_not_reactivated() {
+        // The anchor guard: clicking the trigger that owns an open overlay
+        // must merely close it. The press is consumed, so it can't reach
+        // the trigger's own tap handler and reopen what it just closed.
+        use bastyde_core::event::PointerButton;
+
+        let (mut tree, _target, trigger, _content, _target_fired, trigger_fired) =
+            open_overlay_beside_button();
+
+        let gb = tree.bounds(trigger);
+        let trigger_center =
+            bastyde_canvas::Point::new(gb.x + gb.width / 2.0, gb.y + gb.height / 2.0);
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: trigger_center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: trigger_center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "clicking the trigger should close its overlay",
+        );
+        assert_eq!(
+            trigger_fired.get(),
+            0,
+            "the dismiss press on the anchor must be consumed, not delivered to the trigger",
+        );
+    }
+
     #[test]
     fn bind_label_updates_at_name_when_signal_changes() {
         // Regression for the calendar header use case: a Button bound

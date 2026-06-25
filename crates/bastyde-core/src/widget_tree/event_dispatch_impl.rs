@@ -174,7 +174,8 @@ impl WidgetTree {
             position, button, ..
         } = &event
         {
-            let (dismissed, focus_restore) = self.overlay_manager.handle_click_outside(*position);
+            let (dismissed, focus_restore, toggle_anchors) =
+                self.overlay_manager.handle_click_outside(*position);
             if !dismissed.is_empty() {
                 self.dormant_dismissed_content(&dismissed, &mut *ops);
                 if let Some(restore_id) = focus_restore
@@ -182,7 +183,21 @@ impl WidgetTree {
                 {
                     self.focus_ops(restore_id, &mut *ops);
                 }
-                if *button != PointerButton::Secondary {
+                // The press dismissed one or more overlays. By default it
+                // now ALSO falls through to the widget under the cursor,
+                // so a single click both closes the menu/popover and
+                // activates the control beneath — the behaviour a
+                // secondary press already had. The one case still
+                // swallowed: a primary press on the anchor of a
+                // click-opened overlay, because the anchor's own tap
+                // handler would otherwise reopen the overlay this very
+                // press just dismissed (click-the-trigger-to-close).
+                let on_toggle_anchor = *button == PointerButton::Primary
+                    && toggle_anchors.iter().any(|&anchor| {
+                        self.arena.is_active(anchor)
+                            && self.arena.bounds(anchor).contains(*position)
+                    });
+                if on_toggle_anchor {
                     return;
                 }
             }

@@ -935,33 +935,52 @@ impl OverlayManager {
     /// any of the dismissed overlays opened. Aligns the click-outside
     /// path with the Esc / ArrowLeft-cascade paths, both of which
     /// already restore focus from the dismissed overlay.
-    pub fn handle_click_outside(&mut self, point: Point) -> (Vec<WidgetId>, Option<WidgetId>) {
+    ///
+    /// The third return value lists the anchor widgets of the dismissed
+    /// *click-opened* overlays (`ClickOutside` / `EscapeOrClickOutside`).
+    /// The dispatcher consumes a primary press that lands on one of these
+    /// anchors so the trigger merely closes its overlay rather than
+    /// reopening it; every other dismiss-press falls through to the widget
+    /// under the cursor (so one click both dismisses the overlay and
+    /// activates the control beneath). Hover-opened (`PointerLeave`)
+    /// overlays contribute no anchor — a press on their anchor passes
+    /// through, e.g. clicking a button that still has its tooltip up.
+    pub fn handle_click_outside(
+        &mut self,
+        point: Point,
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
         if self.stack.is_empty() {
-            return (Vec::new(), None);
+            return (Vec::new(), None, Vec::new());
         }
 
         // Check if the point is inside any overlay
         if self.hit_test(point).is_some() {
-            return (Vec::new(), None);
+            return (Vec::new(), None, Vec::new());
         }
 
-        // Dismiss all overlays that should close on an outside click.
-        let to_dismiss: Vec<OverlayId> = self
-            .stack
-            .iter()
-            .filter(|o| {
-                matches!(
-                    o.dismiss,
-                    DismissBehavior::ClickOutside
-                        | DismissBehavior::EscapeOrClickOutside
-                        | DismissBehavior::PointerLeave { .. }
-                )
-            })
-            .map(|o| o.id)
-            .collect();
+        // Collect the overlays this outside-click should close, and — for
+        // the *click-opened* ones — their anchor widgets. The anchors let
+        // the dispatcher decide whether the same press may fall through to
+        // the widget beneath: a press on a click-opened overlay's own
+        // anchor is consumed, since the anchor's tap handler would
+        // otherwise reopen what this press just dismissed. Hover-opened
+        // overlays (`PointerLeave`) are not click toggles, so their
+        // anchors are omitted and a press there falls through.
+        let mut to_dismiss: Vec<OverlayId> = Vec::new();
+        let mut toggle_anchors: Vec<WidgetId> = Vec::new();
+        for o in &self.stack {
+            match o.dismiss {
+                DismissBehavior::ClickOutside | DismissBehavior::EscapeOrClickOutside => {
+                    to_dismiss.push(o.id);
+                    toggle_anchors.push(o.anchor);
+                }
+                DismissBehavior::PointerLeave { .. } => to_dismiss.push(o.id),
+                DismissBehavior::EscapeKey | DismissBehavior::Manual => {}
+            }
+        }
 
         if to_dismiss.is_empty() {
-            return (Vec::new(), None);
+            return (Vec::new(), None, Vec::new());
         }
 
         let focus_restore = self
@@ -974,7 +993,7 @@ impl OverlayManager {
         for id in to_dismiss {
             all_dismissed.extend(self.dismiss(id));
         }
-        (all_dismissed, focus_restore)
+        (all_dismissed, focus_restore, toggle_anchors)
     }
 
     /// Compute overlay positions based on anchor bounds.
@@ -1447,12 +1466,12 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
 
         // Click inside — no dismiss
-        let (dismissed, _) = mgr.handle_click_outside(Point::new(50.0, 25.0));
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(50.0, 25.0));
         assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
 
         // Click outside — dismissed
-        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(!dismissed.is_empty());
         assert!(mgr.is_empty());
     }
@@ -1475,7 +1494,7 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(trigger);
 
-        let (dismissed, focus_restore) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, focus_restore, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert_eq!(dismissed.len(), 1);
         assert_eq!(focus_restore, Some(trigger));
     }
@@ -1515,7 +1534,7 @@ mod tests {
         mgr.set_content_bounds(b, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(inside_a);
 
-        let (_, focus_restore) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (_, focus_restore, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert_eq!(focus_restore, Some(pre_overlay_focus));
     }
 
@@ -1533,7 +1552,7 @@ mod tests {
             fade_duration: None,
         });
 
-        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
     }
@@ -1630,9 +1649,55 @@ mod tests {
         let id = mgr.active_ids()[0];
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
 
-        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(!dismissed.is_empty());
         assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn click_outside_reports_click_opened_anchors_only() {
+        // An outside click dismisses both a click-opened dropdown and a
+        // hover-opened tooltip, but only the click-opened overlay's anchor
+        // is reported as a re-toggle guard: clicking a tooltip's anchor
+        // should still fall through to the widget beneath.
+        let mut mgr = OverlayManager::new();
+        let click_anchor = fake_id(1);
+        let hover_anchor = fake_id(2);
+
+        let click_overlay = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: click_anchor,
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        mgr.set_content_bounds(click_overlay, Size::new(100.0, 50.0));
+
+        let hover_overlay = mgr.show(OverlayRequest {
+            content_id: fake_id(11),
+            anchor: hover_anchor,
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::PointerLeave {
+                delay: std::time::Duration::from_millis(150),
+            },
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        mgr.set_content_bounds(hover_overlay, Size::new(100.0, 50.0));
+
+        let (dismissed, _focus, toggle_anchors) =
+            mgr.handle_click_outside(Point::new(500.0, 500.0));
+
+        // Both overlays close on the outside click...
+        assert_eq!(dismissed.len(), 2);
+        assert!(mgr.is_empty());
+        // ...but only the click-opened dropdown contributes a guard anchor.
+        assert_eq!(toggle_anchors, vec![click_anchor]);
     }
 
     #[test]
@@ -1649,7 +1714,7 @@ mod tests {
             fade_duration: None,
         });
 
-        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
     }
