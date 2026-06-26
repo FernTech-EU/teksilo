@@ -3,12 +3,12 @@
 
 //! Hand-rolled CLI parser for the widget catalog.
 //!
-//! Three flags, ~20 lines of logic — clap is overkill.
+//! A handful of flags, ~30 lines of logic — clap is overkill.
 //!
 //! Usage:
 //!
 //! ```text
-//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS]] [--mode classic|bati]
+//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS] | --cycle-ms MS] [--mode classic|bati]
 //! ```
 
 use std::time::Duration;
@@ -64,6 +64,21 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                     .unwrap_or(100);
                 opts.cycle = Some(Duration::from_millis(ms));
             }
+            "--cycle-ms" => {
+                // Explicit form of `--cycle <MS>`: the interval is *mandatory*,
+                // not a peeked positional. Preferred by scripts that drive the
+                // cycle for timed captures (tools/screenshot_examples.py), where
+                // a silent fall-back to the 100 ms default would desync the
+                // screenshots from the tab they're meant to show.
+                let Some(value) = iter.next() else {
+                    eprintln!("--cycle-ms expects a millisecond INTEGER argument");
+                    continue;
+                };
+                match value.parse::<u64>() {
+                    Ok(ms) => opts.cycle = Some(Duration::from_millis(ms)),
+                    Err(_) => eprintln!("--cycle-ms: expected an integer, got `{value}`"),
+                }
+            }
             "--mode" => {
                 let Some(value) = iter.next() else {
                     eprintln!("--mode expects `classic` or `bati`");
@@ -106,6 +121,8 @@ fn print_help(tab_names: &[&str]) {
            --tab <NAME|INDEX>   Open the catalog directly on this tab.\n  \
            --cycle [MS]         Auto-advance the selected tab every MS milliseconds\n  \
                                 (default 100). Stops on user interaction.\n  \
+           --cycle-ms <MS>      Like --cycle, but MS is mandatory. Script-friendly\n  \
+                                (no silent fall-back to the default interval).\n  \
            --mode <classic|bati>  Initial view mode (default `classic`).\n  \
            --help, -h           Show this help and exit.\n\
          \n\

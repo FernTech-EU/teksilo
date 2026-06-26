@@ -10,6 +10,9 @@
 //! Auto-cycle through tabs every 100 ms (for screen recordings):
 //!   `cargo run -p widget-catalog -- --cycle`
 //!
+//! Auto-cycle on an explicit interval (e.g. for timed screenshots):
+//!   `cargo run -p widget-catalog -- --cycle-ms 6000`
+//!
 
 use std::cell::Cell;
 use std::rc::Rc;
