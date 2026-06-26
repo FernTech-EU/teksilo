@@ -271,7 +271,11 @@ pub struct SegmentedControl {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     hovered_segment: Signal<Option<usize>>,
-    focus_origin: Signal<Option<FocusOrigin>>,
+    /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
+    /// ring and the focus-driven selected-segment accent fill are derived
+    /// live from this × the input-modality signal in `build()`
+    /// (`:focus-visible`).
+    focused: Signal<bool>,
     /// Per-call override for the chrome.
     style_override: Option<SharedSegmentedControlStyle>,
     /// Per-call override for every segment's label text style (font, size,
@@ -293,7 +297,7 @@ impl SegmentedControl {
             selected,
             initial_enabled: true,
             hovered_segment: Signal::new(None),
-            focus_origin: Signal::new(None),
+            focused: Signal::new(false),
             style_override: None,
             label_style: None,
             children: Vec::new(),
@@ -427,7 +431,22 @@ impl Widget for SegmentedControl {
 
         let selected = self.selected.clone();
         let hovered_segment = self.hovered_segment.clone();
-        let focus_origin = self.focus_origin.clone();
+        // `:focus-visible`: derive the keyboard/pointer origin live from the
+        // input-modality signal (true after a key event, false after
+        // pointer-down) rather than snapshotting hover at focus time. The
+        // chrome reads `Some(_)` for the selected-segment accent fill (any
+        // focus) and `Some(Keyboard)` for the focus ring, so this keeps the
+        // fill on a click while making the ring keyboard-only.
+        let focused = self.focused.clone();
+        let focus_origin = self.focused.zip(&ctx.focus_visible()).map(|(f, v)| {
+            if !*f {
+                None
+            } else if *v {
+                Some(FocusOrigin::Keyboard)
+            } else {
+                Some(FocusOrigin::Pointer)
+            }
+        });
 
         let n = self.segments.len();
         let disabled_flags: Rc<Vec<bool>> =
@@ -519,23 +538,15 @@ impl Widget for SegmentedControl {
             });
         }
 
-        // Focus handler — track origin so the chrome can decide
-        // accent-vs-inactive selected appearance and keyboard-vs-no
-        // focus ring.
+        // Focus handler. Track raw focus only; the keyboard/pointer
+        // distinction (for the ring and the selected-segment accent fill) is
+        // derived live from the input-modality signal in `build()`
+        // (`:focus-visible`), so clicking to focus then pressing a key
+        // reveals the ring.
         {
-            let focus_origin = focus_origin.clone();
-            let hovered_segment = hovered_segment.clone();
+            let focused = focused.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
-                if gained {
-                    let origin = if hovered_segment.get().is_some() {
-                        FocusOrigin::Pointer
-                    } else {
-                        FocusOrigin::Keyboard
-                    };
-                    focus_origin.set(Some(origin));
-                } else {
-                    focus_origin.set(None);
-                }
+                focused.set(gained);
             });
         }
 

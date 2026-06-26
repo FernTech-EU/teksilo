@@ -63,18 +63,19 @@ impl ToggleStyle for RecipeToggleStyle {
             });
         }
 
-        // Focus-origin signal, derived from is_focused × is_hovered.
-        // Pointer-induced focus skips the focus ring; keyboard focus
-        // shows it.
+        // Focus-origin signal, derived from is_focused × is_focus_visible
+        // (`:focus-visible`). Pointer-induced focus skips the focus ring;
+        // keyboard focus shows it. Driven by the live input-modality signal,
+        // so clicking to focus then pressing a key reveals the ring.
         let focus_origin = cfg
             .is_focused
-            .zip(&cfg.is_hovered)
-            .map(|(focused, hovered)| {
+            .zip(&cfg.is_focus_visible)
+            .map(|(focused, visible)| {
                 if *focused {
-                    Some(if *hovered {
-                        FocusOrigin::Pointer
-                    } else {
+                    Some(if *visible {
                         FocusOrigin::Keyboard
+                    } else {
+                        FocusOrigin::Pointer
                     })
                 } else {
                     None

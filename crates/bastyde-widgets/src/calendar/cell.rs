@@ -156,10 +156,14 @@ impl Widget for DayCell {
         // date. The recipe binds visibility on the focus-ring node.
         let date_owned = date;
         let calendar_focused = self.calendar_focused.clone();
+        // `:focus-visible`: the roving ring shows only during keyboard
+        // navigation — gate on the live input-modality signal so clicking a
+        // day selects it without painting the roving focus indicator.
         let is_focused_cell = self
             .focused_date
             .zip(&calendar_focused)
-            .map(move |(focused_d, has_focus)| *has_focus && *focused_d == date_owned);
+            .map(move |(focused_d, has_focus)| *has_focus && *focused_d == date_owned)
+            .and(&ctx.focus_visible());
 
         // ── Delegate visual chrome to the active CalendarStyle ─
         let style = resolve_calendar_style(ctx);

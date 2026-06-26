@@ -5226,6 +5226,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jotdown"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "206bf4773a58f2a051a24fb77cb6c5eeaa84403c0dc5d072ec460ed1648db594"
+
+[[package]]
 name = "js-sys"
 version = "0.3.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10476,6 +10482,7 @@ dependencies = [
  "ego-tree",
  "flume",
  "im",
+ "jotdown",
  "log",
  "parking_lot",
  "pulldown-cmark",

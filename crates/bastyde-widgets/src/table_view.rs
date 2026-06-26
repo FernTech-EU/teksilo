@@ -1171,13 +1171,20 @@ impl<T: 'static> Widget for TableView<T> {
             BindingLevel::RepaintOnly,
         );
 
-        // Focus-aware selection + modality-gated focus ring. `focus_scope_active`
-        // resolves (stack empty here) to this root's inclusive focus signal —
-        // `true` whenever the table or any descendant holds focus — so the
-        // selection band dims to `SelectedInactive` on focus-out. `focus_visible`
-        // gates the cell ring to keyboard navigation. Both bound `RepaintOnly`:
-        // a focus/modality change redraws the decorations without a rebuild.
-        self.view_focused = ctx.focus_scope_active();
+        // Focus-aware selection + modality-gated focus ring. `begin_focus_scope`
+        // keys the scope signal on this root id directly — the same id the body
+        // pane uses for its row scope (`drag_anchor = ctx.self_id()`), and
+        // independent of the arena focusable flag (not yet wired here). A plain
+        // `focus_scope_active()` here would find no focusable ancestor and fall
+        // back to the constant-`true` "outside any scope" signal — `true`
+        // whenever ANY widget holds focus, lighting every table's ring at once.
+        // The signal is `true` whenever the table or any descendant holds focus,
+        // so the selection band dims to `SelectedInactive` on focus-out. Pop
+        // straight back; the body pane re-pushes the same cached signal.
+        // `focus_visible` gates the cell ring to keyboard navigation. Both bound
+        // `RepaintOnly`: a focus/modality change redraws without a rebuild.
+        self.view_focused = ctx.begin_focus_scope();
+        ctx.end_focus_scope();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),

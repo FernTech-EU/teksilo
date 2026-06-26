@@ -37,6 +37,10 @@ pub struct ToggleStyleConfig {
     pub is_on: Signal<bool>,
     pub is_hovered: Signal<bool>,
     pub is_focused: Signal<bool>,
+    /// Input-modality "focus-visible": `true` after keyboard input. The focus
+    /// ring shows only when this and `is_focused` are both true, so a pointer
+    /// click focuses without a ring while keyboard navigation reveals one.
+    pub is_focus_visible: Signal<bool>,
     pub is_disabled: Signal<bool>,
     pub variant: ToggleVariant,
 }

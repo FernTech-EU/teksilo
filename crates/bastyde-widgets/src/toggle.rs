@@ -125,6 +125,9 @@ impl Widget for Toggle {
             is_on: self.on.clone(),
             is_hovered: self.hovered.clone(),
             is_focused: self.focused.clone(),
+            // `:focus-visible` — input modality, so the recipe shows the
+            // focus ring only during keyboard navigation, not on a click.
+            is_focus_visible: ctx.focus_visible(),
             // is_disabled tracks the arena's effective enabled-state
             // reactively (see `BuildContext::effective_enabled_signal`).
             is_disabled: effective_enabled.map(|on| !*on),
@@ -300,6 +303,41 @@ mod tests {
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
+
+    #[test]
+    fn focus_ring_only_under_focus_visible() {
+        // `:focus-visible`: the keyboard-only focus ring. Programmatic focus
+        // leaves `focus_visible` false → no ring; a key press reveals it.
+        let theme = bastyde_core::presets::intui::light();
+        let ring = theme.colors.focus_ring.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let t = tree.add(Toggle::new(Signal::new(false)));
+        tree.layout(SizeProposal::exact(120.0, 60.0));
+
+        tree.focus(t);
+        assert!(
+            !frame_has_ring(&tree.render(), ring),
+            "no focus ring while focus-visible is false (pointer modality)",
+        );
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            frame_has_ring(&tree.render(), ring),
+            "focus ring shows under keyboard modality",
+        );
+    }
+
+    /// Whether the focus-ring *stroke* (ring color + non-zero stroke width) is
+    /// present. A plain color match is ambiguous: in IntUI `focus_ring` shares
+    /// the `accent` RGBA, and the toggle paints accent *fills* — the ring is
+    /// the only *stroked* shape in that color.
+    fn frame_has_ring(frame: &bastyde_canvas::RenderFrame, color: [f32; 4]) -> bool {
+        frame
+            .shapes
+            .iter()
+            .any(|s| s.color == color && s.stroke_width > 0.0)
+            || frame.cosmetic_lines.iter().any(|l| l.color == color)
+    }
 
     #[test]
     fn click_toggles_state() {

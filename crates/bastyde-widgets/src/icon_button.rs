@@ -669,7 +669,12 @@ impl bastyde_core::widget::Widget for IconButton {
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
-        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        // `:focus-visible`: reveal the focus ring during keyboard navigation
+        // only, not on a mouse click. Gate raw focus on the input-modality
+        // signal (true after a key event, false after pointer-down).
+        let is_focused = interaction
+            .map(|s| matches!(s, InteractionState::Focused))
+            .and(&ctx.focus_visible());
         // `is_disabled` derives from the arena's effective enabled
         // state — NOT from the interaction signal (which never
         // carries Disabled anymore). Style chrome uses this to pick

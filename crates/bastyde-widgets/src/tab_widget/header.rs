@@ -33,7 +33,6 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
-use bastyde_core::focus::FocusOrigin;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{SharedTabStyle, TabStyleConfig};
 use bastyde_core::widget::{
@@ -143,7 +142,10 @@ pub(crate) struct TabHeader {
     shared: Rc<HeaderShared>,
 
     interaction: Signal<TabHeaderInteraction>,
-    focus_origin: Signal<Option<FocusOrigin>>,
+    /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
+    /// ring is derived live from this × the input-modality signal in
+    /// `build()` (`:focus-visible`).
+    focused: Signal<bool>,
 
     /// Width clamps applied to the natural content width when the bar
     /// is in Independent sizing mode.
@@ -274,7 +276,7 @@ impl TabHeader {
             selected: cfg.selected,
             shared: cfg.shared,
             interaction: Signal::new(TabHeaderInteraction::Idle),
-            focus_origin: Signal::new(None),
+            focused: Signal::new(false),
             min_width: cfg.min_width,
             max_width: cfg.max_width,
             pinned: cfg.pinned,
@@ -397,16 +399,16 @@ impl Widget for TabHeader {
             ctx.enabled_when(self_id, false);
         }
         let interaction = ctx.signal(TabHeaderInteraction::Idle);
-        let focus_origin: Signal<Option<FocusOrigin>> = ctx.signal(None);
+        let focused: Signal<bool> = ctx.signal(false);
         let registry = ctx.binding_registry();
 
         // Repaint on selection / hover / focus changes.
         self.selected
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        focus_origin.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        focused.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         self.interaction = interaction.clone();
-        self.focus_origin = focus_origin.clone();
+        self.focused = focused.clone();
 
         // Locale-reactive label signal — used by `accessibility()`
         // to keep the AT name in sync with locale changes (and by
@@ -570,17 +572,18 @@ impl Widget for TabHeader {
             ctx.add(padded)
         };
 
-        // Derive the cfg signals the active TabStyle needs. The
-        // widget's own interaction state is finer-grained (Idle /
-        // Hovered for pointer presence; Some(Pointer) / Some(Keyboard)
-        // for focus), but the trait surface is the four canonical
-        // booleans. `is_focused` flips true only on keyboard focus
-        // because the IntUI focus ring is suppressed for pointer
-        // focus (matches IntelliJ / VS Code convention).
+        // Derive the cfg signals the active TabStyle needs. The widget's own
+        // interaction state is finer-grained (Idle / Hovered for pointer
+        // presence; plus a raw focus bool), but the trait surface is the four
+        // canonical booleans. `:focus-visible`: `is_focused` flips true only
+        // when focus arrived (or continues) via keyboard — raw focus gated on
+        // the live input-modality signal — so the focus ring shows during
+        // keyboard navigation but is suppressed on a mouse click (matches
+        // IntelliJ / VS Code convention; a click-then-keypress reveals it).
         let index_for_cfg = self.index;
         let is_active = self.selected.map(move |sel| *sel == index_for_cfg);
         let is_hovered = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
-        let is_focused = focus_origin.map(|o| matches!(o, Some(FocusOrigin::Keyboard)));
+        let is_focused = focused.and(&ctx.focus_visible());
         // Reactive disabled view from the arena (ancestor-AND). The
         // style chrome picks the disabled-surface role from this; the
         // signal flips automatically when a parent's `enabled_when`
@@ -693,8 +696,7 @@ impl Widget for TabHeader {
         let header_ids = self.shared.header_ids.clone();
         let enabled_tabs = self.shared.enabled_tabs.clone();
         let interaction_for_hover = interaction.clone();
-        let interaction_for_focus = interaction.clone();
-        let focus_origin_for_handler = focus_origin.clone();
+        let focused_for_handler = focused.clone();
 
         let mut handler_set = HandlerSet::new()
             .on_tap(move |_event, _ctx: &mut EventContext| {
@@ -708,19 +710,12 @@ impl Widget for TabHeader {
                 });
             })
             .on_focus({
-                let focus_origin = focus_origin_for_handler.clone();
-                let interaction = interaction_for_focus.clone();
+                // Track raw focus only; the keyboard/pointer distinction is
+                // derived live from the input-modality signal in `build()`
+                // (`:focus-visible`).
+                let focused = focused_for_handler.clone();
                 move |gained: bool, _ctx: &mut EventContext| {
-                    if !gained {
-                        focus_origin.set(None);
-                        return;
-                    }
-                    let origin = if interaction.get() == TabHeaderInteraction::Hovered {
-                        FocusOrigin::Pointer
-                    } else {
-                        FocusOrigin::Keyboard
-                    };
-                    focus_origin.set(Some(origin));
+                    focused.set(gained);
                 }
             })
             .on_key({

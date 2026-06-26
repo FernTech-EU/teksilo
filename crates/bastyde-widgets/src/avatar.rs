@@ -735,7 +735,9 @@ impl Widget for Avatar {
                 content: content_id,
                 presence: self.current_presence(),
                 presence_corner: self.presence_corner,
-                is_focused: focused,
+                // `:focus-visible`: keyboard-only focus ring (gate raw focus
+                // on the input-modality signal).
+                is_focused: focused.and(&ctx.focus_visible()),
                 background_override: self.background.clone(),
                 border_color_override: self.border_color.clone(),
                 border_width_override: self.border_width,
@@ -1483,9 +1485,11 @@ mod tests {
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let unfocused_shapes = tree.render().shapes.len();
 
-        // Programmatically set the avatar as focused. The framework's
-        // public way to do this in tests:
+        // Focus the avatar AND flip the input modality to keyboard. The focus
+        // ring is `:focus-visible` (keyboard-only), so it paints only after a
+        // key event — not on programmatic or pointer focus.
         tree.focus(id);
+        tree.press_key(bastyde_core::event::Key::ArrowDown, bastyde_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let focused_shapes = tree.render().shapes.len();
 
@@ -1509,7 +1513,9 @@ mod tests {
                 .on_activate_fn(|_ctx| {}),
         );
         tree.layout(SizeProposal::exact(64.0, 64.0));
+        // Keyboard modality reveals the `:focus-visible` ring.
         tree.focus(id);
+        tree.press_key(bastyde_core::event::Key::ArrowDown, bastyde_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let frame = tree.render();
         let target = bastyde_core::presets::intui::light().colors.focus_ring;

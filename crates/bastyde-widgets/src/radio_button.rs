@@ -183,7 +183,12 @@ impl Widget for RadioButton {
         let is_selected = selected.map(move |s| *s == value);
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
-        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        // `:focus-visible`: reveal the focus ring during keyboard navigation
+        // only, not on a mouse click. Gate raw focus on the input-modality
+        // signal (true after a key event, false after pointer-down).
+        let is_focused = interaction
+            .map(|s| matches!(s, InteractionState::Focused))
+            .and(&ctx.focus_visible());
         // is_disabled derives from the arena.
         let is_disabled = effective_enabled.map(|on| !*on);
 

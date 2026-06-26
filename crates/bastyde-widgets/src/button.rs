@@ -808,7 +808,12 @@ impl bastyde_core::widget::Widget for Button {
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeButtonStyle::default()));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
-        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        // `:focus-visible`: reveal the focus ring during keyboard navigation
+        // only, not on a mouse click. Gate raw focus on the input-modality
+        // signal (true after a key event, false after pointer-down).
+        let is_focused = interaction
+            .map(|s| matches!(s, InteractionState::Focused))
+            .and(&ctx.focus_visible());
         // `is_disabled` derives from the arena's effective enabled
         // state — NOT from the interaction signal. The interaction
         // signal never carries Disabled anymore (the snapshot-based
@@ -923,6 +928,43 @@ mod tests {
     use bastyde_core::widget_tree::WidgetTree;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    #[test]
+    fn focus_ring_only_under_focus_visible() {
+        // `:focus-visible`: the focus ring shows during keyboard navigation
+        // but not when focus arrived via a pointer click. Programmatic focus
+        // leaves `focus_visible` false, so a focused-but-not-keyboard button
+        // shows no ring; a key press flips the modality and reveals it.
+        let theme = bastyde_core::presets::intui::light();
+        let ring = theme.colors.border_focused.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let btn = tree.add(Button::new(lit!("T")).on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // Focused, but `focus_visible` is still false → ring gated OFF even
+        // though the widget holds focus.
+        tree.focus(btn);
+        assert!(
+            !frame_has_color(&tree.render(), ring),
+            "no focus ring while focus-visible is false (pointer modality)",
+        );
+
+        // A key event flips `focus_visible` true → ring appears (focus held).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            frame_has_color(&tree.render(), ring),
+            "focus ring shows under keyboard modality",
+        );
+    }
+
+    /// Whether `color` appears in any color-bearing layer of the frame —
+    /// borders land in `shapes` (stroked SDF quads), `decorations`
+    /// (`DecorationRect`), or `cosmetic_lines` depending on the widget.
+    fn frame_has_color(frame: &bastyde_canvas::RenderFrame, color: [f32; 4]) -> bool {
+        frame.shapes.iter().any(|s| s.color == color)
+            || frame.decorations.iter().any(|d| d.color == color)
+            || frame.cosmetic_lines.iter().any(|l| l.color == color)
+    }
 
     #[test]
     fn keyup_without_keydown_does_not_fire() {

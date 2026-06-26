@@ -534,7 +534,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             selected_label: label_id,
             is_open: self.is_open.clone(),
             is_hovered: self.is_hovered.clone(),
-            is_focused: self.is_focused.clone(),
+            // `:focus-visible`: keyboard-only focus ring (gate raw focus on
+            // the input-modality signal).
+            is_focused: self.is_focused.and(&ctx.focus_visible()),
             is_disabled: self.is_disabled.clone(),
             variant: self.variant,
         };

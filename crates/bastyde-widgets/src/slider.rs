@@ -51,7 +51,10 @@ pub struct Slider {
     style_override: Option<SharedSliderStyle>,
     hovered: Signal<bool>,
     dragging: Signal<bool>,
-    focus_origin: Signal<Option<FocusOrigin>>,
+    /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
+    /// ring is derived live from this × the input-modality signal in
+    /// `build()` (`:focus-visible`).
+    focused: Signal<bool>,
     cached_bounds: Rc<Cell<Rect>>,
     body_id: Option<WidgetId>,
 }
@@ -71,7 +74,7 @@ impl Slider {
             style_override: None,
             hovered: Signal::new(false),
             dragging: Signal::new(false),
-            focus_origin: Signal::new(None),
+            focused: Signal::new(false),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
             body_id: None,
         }
@@ -184,7 +187,19 @@ impl Widget for Slider {
             is_hovered: self.hovered.clone(),
             is_dragging: self.dragging.clone(),
             is_disabled: effective_enabled.map(|on| !*on),
-            focus_origin: self.focus_origin.clone(),
+            // `:focus-visible`: derive the keyboard/pointer origin live from
+            // the input-modality signal (true after a key event, false after
+            // pointer-down) rather than snapshotting hover at focus time, so
+            // the focus ring follows the *current* modality.
+            focus_origin: self.focused.zip(&ctx.focus_visible()).map(|(f, v)| {
+                if !*f {
+                    None
+                } else if *v {
+                    Some(FocusOrigin::Keyboard)
+                } else {
+                    Some(FocusOrigin::Pointer)
+                }
+            }),
             orientation,
             tick_count: self.tick_count,
             variant: self.variant,
@@ -205,7 +220,7 @@ impl Widget for Slider {
         let orientation = self.orientation;
         let hovered = self.hovered.clone();
         let dragging = self.dragging.clone();
-        let focus_origin = self.focus_origin.clone();
+        let focused = self.focused.clone();
         let cached_bounds = self.cached_bounds.clone();
 
         let adjust_by_step = {
@@ -320,21 +335,14 @@ impl Widget for Slider {
             });
         }
 
-        // Focus handler
+        // Focus handler. Track raw focus only; the keyboard/pointer
+        // distinction is derived live from the input-modality signal in
+        // `build()` (`:focus-visible`), so clicking to focus then pressing a
+        // key reveals the ring.
         {
-            let focus_origin = focus_origin.clone();
-            let hovered_for_focus = hovered.clone();
+            let focused = focused.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
-                if gained {
-                    let origin = if hovered_for_focus.get() {
-                        FocusOrigin::Pointer
-                    } else {
-                        FocusOrigin::Keyboard
-                    };
-                    focus_origin.set(Some(origin));
-                } else {
-                    focus_origin.set(None);
-                }
+                focused.set(gained);
             });
         }
 
@@ -417,6 +425,43 @@ mod tests {
     use bastyde_canvas::Point;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
+
+    #[test]
+    fn focus_ring_only_under_focus_visible() {
+        // `:focus-visible`: the keyboard-only focus ring (now derived live
+        // from the input-modality signal, not a hover-at-focus snapshot).
+        // Programmatic focus leaves `focus_visible` false → no ring; a key
+        // press reveals it.
+        let theme = bastyde_core::presets::intui::light();
+        let ring = theme.colors.focus_ring.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        tree.focus(s);
+        assert!(
+            !frame_has_ring(&tree.render(), ring),
+            "no focus ring while focus-visible is false (pointer modality)",
+        );
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            frame_has_ring(&tree.render(), ring),
+            "focus ring shows under keyboard modality",
+        );
+    }
+
+    /// Whether the focus-ring *stroke* (ring color + non-zero stroke width) is
+    /// present. A plain color match is ambiguous: in IntUI `focus_ring` shares
+    /// the `accent` RGBA, and the slider paints accent *fills* (track + thumb)
+    /// — the ring is the only *stroked* shape in that color.
+    fn frame_has_ring(frame: &bastyde_canvas::RenderFrame, color: [f32; 4]) -> bool {
+        frame
+            .shapes
+            .iter()
+            .any(|s| s.color == color && s.stroke_width > 0.0)
+            || frame.cosmetic_lines.iter().any(|l| l.color == color)
+    }
 
     #[test]
     fn keyboard_adjusts_value() {

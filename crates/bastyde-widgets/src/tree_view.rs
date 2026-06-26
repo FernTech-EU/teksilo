@@ -645,12 +645,18 @@ impl<T: 'static> Widget for TreeView<T> {
             BindingLevel::RepaintOnly,
         );
 
-        // Focus signals for the container ring. `focus_scope_active` (stack empty
-        // at the root) resolves to this view's inclusive focus; `focus_visible`
-        // is the keyboard/pointer modality. Bound `RepaintOnly` so focus-in/out
+        // Focus signals for the container ring. `begin_focus_scope` keys the
+        // scope signal on this root id directly (independent of the arena
+        // focusable flag, not yet wired here): a plain `focus_scope_active()`
+        // would find no focusable ancestor and fall back to the constant-`true`
+        // "outside any scope" signal — lighting the ring whenever ANY other
+        // widget takes keyboard focus. Pop straight back; the real row scope
+        // below resolves the same cached signal. `focus_visible` is the
+        // keyboard/pointer modality. Bound `RepaintOnly` so focus-in/out
         // redraws the ring. (Selection-emptiness changes already rebuild via
         // `version`, so paint re-reads the selection without extra binding.)
-        self.view_focused = ctx.focus_scope_active();
+        self.view_focused = ctx.begin_focus_scope();
+        ctx.end_focus_scope();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -2978,6 +2984,73 @@ mod tests {
         // row ring's `:focus-visible` rule; clicking never leaves a ring).
         tree.click(tv);
         assert!(!focus_visible.get(), "pointer input clears focus-visible → ring hides");
+    }
+
+    #[test]
+    fn container_focus_ring_hidden_when_a_sibling_holds_focus() {
+        // Regression: the container ring must track THIS view's own keyboard
+        // focus, not a global signal. The view captured its focus signal at
+        // build time; a plain `focus_scope_active()` there found no focusable
+        // ancestor (the root's `.focusable(true)` isn't wired into the arena
+        // yet) and fell back to the constant-`true` "outside any scope" signal —
+        // so every data view lit its container ring whenever ANY other widget
+        // took keyboard focus. `begin_focus_scope` keys the signal on the root
+        // id and fixes it. This observes the painted ring (not just the signal,
+        // which `focus_scope_active_for` resolves correctly post-build).
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_core::widget_builder::WidgetBuilder;
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let source = Rc::new(MockI64Source::new());
+        let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let root = tree.add(
+            crate::primitives::VStack::new()
+                .child(
+                    TreeView::from_source_keyed(
+                        MockI64Wrapper(source.clone()),
+                        keyed.clone(),
+                        |_label: &String, _row: &TreeRow, _sel| Box::new(FixedLeaf(120.0, 24.0)),
+                    )
+                    .item_height(24.0),
+                )
+                // A focusable sibling that paints no chrome of its own.
+                .child(FixedLeaf(40.0, 24.0).focusable(true)),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let children = tree.children(root);
+        let (tv, sibling) = (children[0], children[1]);
+
+        let ring = bastyde_tokens::BorderRole::Focused
+            .resolve(&bastyde_core::presets::intui::light().colors)
+            .to_array();
+
+        // The sibling holds focus under keyboard modality. It is NOT inside the
+        // tree view, so the tree view's container ring must stay hidden even
+        // though focus-visible is true and nothing is selected.
+        tree.focus(sibling);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE); // sibling ignores it; flips focus-visible
+        assert_eq!(tree.focused(), Some(sibling), "sibling holds focus");
+        assert_eq!(keyed.count(), 0, "nothing selected");
+        let frame = tree.render();
+        assert!(
+            !frame.decorations.iter().any(|d| d.color == ring)
+                && !frame.shapes.iter().any(|s| s.color == ring)
+                && !frame.cosmetic_lines.iter().any(|l| l.color == ring),
+            "container ring must NOT paint while a sibling holds focus",
+        );
+
+        // Move focus to the tree view (programmatic — focus-visible stays true).
+        // Now the view holds keyboard focus with no selection → the ring shows.
+        tree.focus(tv);
+        assert_eq!(tree.focused(), Some(tv), "tree view holds focus");
+        assert_eq!(keyed.count(), 0, "still nothing selected");
+        let frame = tree.render();
+        assert!(
+            frame.decorations.iter().any(|d| d.color == ring)
+                || frame.shapes.iter().any(|s| s.color == ring)
+                || frame.cosmetic_lines.iter().any(|l| l.color == ring),
+            "container ring paints when the view holds keyboard focus",
+        );
     }
 
     #[test]

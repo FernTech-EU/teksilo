@@ -522,7 +522,15 @@ impl<T: 'static> Widget for ListView<T> {
 
         // Focus signals for the container ring (see TreeView). `RepaintOnly` so
         // focus-in/out redraws; selection-emptiness changes already rebuild.
-        self.view_focused = ctx.focus_scope_active();
+        // `begin_focus_scope` keys the scope signal on this root id directly,
+        // independent of the arena focusable flag (not yet wired at this point):
+        // a plain `focus_scope_active()` would `find_focusable_at_or_above`
+        // nothing and fall back to the constant-`true` "outside any scope"
+        // signal — lighting the ring whenever ANY other widget takes keyboard
+        // focus. Pop straight back; the real row scope below resolves the same
+        // cached signal.
+        self.view_focused = ctx.begin_focus_scope();
+        ctx.end_focus_scope();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),

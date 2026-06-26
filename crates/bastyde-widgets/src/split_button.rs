@@ -681,7 +681,11 @@ impl Widget for SplitButton {
             content: content_id,
             is_pressed: interaction.map(|s| *s == InteractionState::Pressed),
             is_hovered: interaction.map(|s| *s == InteractionState::Hovered),
-            is_focused: interaction.map(|s| *s == InteractionState::Focused),
+            // `:focus-visible`: keyboard-only focus ring (gate raw focus on
+            // the input-modality signal).
+            is_focused: interaction
+                .map(|s| *s == InteractionState::Focused)
+                .and(&ctx.focus_visible()),
             is_disabled: effective_enabled.map(|on| !*on),
             variant,
         };

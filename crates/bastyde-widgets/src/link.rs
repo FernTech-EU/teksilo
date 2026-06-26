@@ -162,7 +162,12 @@ impl Widget for Link {
         // from the arena (reactive) instead of a build-time snapshot.
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
-        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        // `:focus-visible`: reveal the focus ring during keyboard navigation
+        // only, not on a mouse click. Gate raw focus on the input-modality
+        // signal (true after a key event, false after pointer-down).
+        let is_focused = interaction
+            .map(|s| matches!(s, InteractionState::Focused))
+            .and(&ctx.focus_visible());
         let is_visited = self.visited.clone().unwrap_or_else(|| Signal::new(false));
         let is_disabled = effective_enabled.map(|on| !*on);
 

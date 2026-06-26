@@ -319,7 +319,12 @@ impl Widget for Checkbox {
 
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
-        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        // `:focus-visible`: reveal the focus ring during keyboard navigation
+        // only, not on a mouse click. Gate raw focus on the input-modality
+        // signal (true after a key event, false after pointer-down).
+        let is_focused = interaction
+            .map(|s| matches!(s, InteractionState::Focused))
+            .and(&ctx.focus_visible());
         // is_disabled derives from the arena (not from interaction).
         let is_disabled = effective_enabled.map(|on| !*on);
 
@@ -559,6 +564,37 @@ mod tests {
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
+
+    #[test]
+    fn focus_ring_only_under_focus_visible() {
+        // `:focus-visible`: the focus border shows during keyboard navigation
+        // but not on a pointer click. Programmatic focus leaves `focus_visible`
+        // false → no border; a key press flips the modality and reveals it.
+        let theme = bastyde_core::presets::intui::light();
+        let ring = theme.colors.border_focused.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let cb = tree.add(Checkbox::new(Signal::new(false)).label(lit!("A")));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.focus(cb);
+        assert!(
+            !frame_has_color(&tree.render(), ring),
+            "no focus border while focus-visible is false (pointer modality)",
+        );
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            frame_has_color(&tree.render(), ring),
+            "focus border shows under keyboard modality",
+        );
+    }
+
+    /// Whether `color` appears in any color-bearing layer of the frame.
+    fn frame_has_color(frame: &bastyde_canvas::RenderFrame, color: [f32; 4]) -> bool {
+        frame.shapes.iter().any(|s| s.color == color)
+            || frame.decorations.iter().any(|d| d.color == color)
+            || frame.cosmetic_lines.iter().any(|l| l.color == color)
+    }
 
     // --- Two-state tests ---
 
