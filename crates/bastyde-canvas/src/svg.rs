@@ -9,19 +9,38 @@
 //! icon tinting.
 //!
 //! Both *filled* and *stroked* (line-style) icons are supported. The
-//! parser tracks each element's `fill` / `stroke` / `stroke-width` /
-//! `stroke-linecap` / `stroke-linejoin` presentation attributes (and
-//! their inline-`style` equivalents), inheriting them through `<g>`
-//! groups and the `<svg>` root the way SVG does. Filled geometry merges
-//! into one [`Path`] ([`SvgIcon::raw_path`]); stroked geometry is kept
-//! separately as [`SvgStroke`]s carrying their viewBox-space width and
-//! cap/join, so the line-style convention (`fill="none"
-//! stroke="currentColor"`) renders as outlines instead of solid blobs.
+//! parser tracks each element's paint state — `fill` / `stroke` /
+//! `stroke-width` / `stroke-linecap` / `stroke-linejoin` /
+//! `stroke-miterlimit` / `fill-rule` / `opacity` / `fill-opacity` /
+//! `stroke-opacity` / `stroke-dasharray` / `display` / `visibility` — from
+//! presentation attributes, `<style>` CSS rules (tag / `.class` / `#id`
+//! selectors), and the inline `style` attribute, inheriting through `<g>`
+//! groups and the `<svg>` root the way SVG does. So the line-style
+//! convention (`fill="none" stroke="currentColor"`, however it's applied)
+//! renders as outlines instead of solid blobs.
+//!
+//! Geometry is split for rendering: the default (winding, opaque) fill
+//! merges into one [`Path`] ([`SvgIcon::raw_path`]); even-odd / translucent
+//! fills become [`SvgFill`]s; strokes become [`SvgStroke`]s. `<use>`
+//! references resolve against an id index (including `<symbol>`); the
+//! non-rendering containers (`<defs>` / `<symbol>` / `<clipPath>` / `<mask>`
+//! / `<pattern>` / `<marker>`) don't paint directly; `preserveAspectRatio`
+//! controls the fit.
+//!
+//! **Out of scope (known limitations):** `<text>` / `<tspan>` / `<image>`
+//! and `<switch>` are skipped; group `opacity` is approximated as
+//! per-element alpha (overlaps double-tint); paint order is global
+//! (all fills, then strokes) rather than strict document order;
+//! `vector-effect="non-scaling-stroke"` is ignored; CSS is limited to
+//! simple selectors (no combinators / pseudo-classes / `@media`); and the
+//! pipeline is monochrome (one theme tint, not full-color SVG).
 
 pub(crate) mod path_parser;
 
+use std::collections::HashMap;
+
 use crate::geometry::{Point, Rect, Transform2D};
-use crate::paint::{LineCap, LineJoin, StrokeStyle};
+use crate::paint::{FillRule, LineCap, LineJoin, StrokeStyle};
 use crate::path::Path;
 use crate::xml::{XmlElement, parse_dom};
 
@@ -66,6 +85,26 @@ pub struct SvgStroke {
     pub line_cap: LineCap,
     /// Line join at contour vertices.
     pub line_join: LineJoin,
+    /// Miter limit (`stroke-miterlimit`); 4.0 by default.
+    pub miter_limit: f32,
+    /// Opacity (`stroke-opacity` × ancestor `opacity`), in `[0, 1]`.
+    pub opacity: f32,
+    /// `stroke-dasharray` (viewBox-space lengths) + `stroke-dashoffset`,
+    /// if dashed.
+    pub dash: Option<(Vec<f32>, f32)>,
+}
+
+/// One non-default *filled* sub-path of an SVG icon — either even-odd or
+/// partially transparent (a plain winding, fully-opaque fill merges into
+/// [`SvgIcon::raw_path`] instead). Colors are stripped; the widget tints.
+#[derive(Debug, Clone)]
+pub struct SvgFill {
+    /// Fill geometry in viewBox coordinates.
+    pub path: Path,
+    /// Even-odd vs non-zero winding.
+    pub fill_rule: FillRule,
+    /// Opacity (`fill-opacity` × ancestor `opacity`), in `[0, 1]`.
+    pub opacity: f32,
 }
 
 /// A parsed SVG icon: geometry + viewBox, ready to be scaled and
@@ -73,13 +112,50 @@ pub struct SvgStroke {
 /// are kept separately so line-style icons render as outlines.
 #[derive(Debug, Clone)]
 pub struct SvgIcon {
-    /// Merged *filled* path in viewBox coordinates.
+    /// Merged *default* fill (non-zero winding, fully opaque) in viewBox
+    /// coordinates — the hot path, returned by [`raw_path`](Self::raw_path).
     path: Path,
+    /// Non-default fills (even-odd or `opacity < 1`), each carrying its
+    /// own rule + opacity. Empty for the common icon.
+    extra_fills: Vec<SvgFill>,
     /// *Stroked* sub-paths in viewBox coordinates, grouped by stroke
     /// style. Empty for the common all-filled icon.
     strokes: Vec<SvgStroke>,
     /// The SVG viewBox (defines the coordinate space).
     view_box: Rect,
+    /// How the viewBox maps into a target rect (`preserveAspectRatio`).
+    aspect: AspectRatio,
+}
+
+/// Alignment of the scaled viewBox within the target rect along one axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Align {
+    Min,
+    Mid,
+    Max,
+}
+
+/// SVG `preserveAspectRatio` — how the viewBox is scaled and aligned into
+/// a target rect. Default is `xMidYMid meet` (uniform fit, centered).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AspectRatio {
+    x: Align,
+    y: Align,
+    /// `meet` (fit, default) vs `slice` (cover).
+    slice: bool,
+    /// `none` — non-uniform stretch to fill (ignores `x`/`y`/`slice`).
+    stretch: bool,
+}
+
+impl Default for AspectRatio {
+    fn default() -> Self {
+        Self {
+            x: Align::Mid,
+            y: Align::Mid,
+            slice: false,
+            stretch: false,
+        }
+    }
 }
 
 impl SvgIcon {
@@ -100,18 +176,37 @@ impl SvgIcon {
 
         let view_box = parse_view_box(svg_el)?;
 
+        // Index every element carrying an `id` so `<use href="#id">` can
+        // resolve references (including forward references).
+        let mut id_map = HashMap::new();
+        build_id_map(svg_el, &mut id_map);
+        let css = collect_style_rules(svg_el);
+        let ctx = WalkCtx {
+            id_map: &id_map,
+            css: &css,
+        };
+
         let mut builder = SvgBuilder::default();
         walk_element(
             svg_el,
             &Transform2D::IDENTITY,
             SvgPaintState::default(),
             &mut builder,
+            &ctx,
+            0,
         )?;
+
+        let aspect = svg_el
+            .attribute("preserveAspectRatio")
+            .map(parse_preserve_aspect_ratio)
+            .unwrap_or_default();
 
         Ok(SvgIcon {
             path: builder.fill,
+            extra_fills: builder.extra_fills,
             strokes: builder.strokes,
             view_box,
+            aspect,
         })
     }
 
@@ -145,14 +240,16 @@ impl SvgIcon {
         }
     }
 
-    /// Produce the *stroked* sub-paths scaled to fit within `rect`,
-    /// each paired with a ready-to-render [`StrokeStyle`] whose width is
-    /// scaled into display space. Empty for the common filled-only icon.
+    /// Produce the *stroked* sub-paths scaled to fit within `rect`, each
+    /// as `(path, style, opacity)` — a ready-to-render [`StrokeStyle`]
+    /// whose width / dash are scaled into display space, plus the stroke
+    /// opacity in `[0, 1]` (multiply it into the tint's alpha). Empty for
+    /// the common filled-only icon.
     ///
     /// Pair with [`to_path_in_rect`](Self::to_path_in_rect): fill the
     /// returned path, then stroke each of these — an icon may carry both
     /// (a filled shape with a stroked border).
-    pub fn stroked_paths_in_rect(&self, rect: Rect) -> Vec<(Path, StrokeStyle)> {
+    pub fn stroked_paths_in_rect(&self, rect: Rect) -> Vec<(Path, StrokeStyle, f32)> {
         if self.strokes.is_empty() {
             return Vec::new();
         }
@@ -165,28 +262,71 @@ impl SvgIcon {
                 let mut style = StrokeStyle::solid(s.width * scale);
                 style.line_cap = s.line_cap;
                 style.line_join = s.line_join;
-                (s.path.transformed(&transform), style)
+                style.miter_limit = s.miter_limit;
+                if let Some((arr, off)) = &s.dash {
+                    style.dash_pattern = Some(arr.iter().map(|d| d * scale).collect());
+                    style.dash_offset = off * scale;
+                }
+                (s.path.transformed(&transform), style, s.opacity)
             })
             .collect()
     }
 
-    /// The aspect-ratio-preserving fit transform mapping viewBox
-    /// coordinates into `rect` (scale, then center), together with the
-    /// uniform scale factor applied. `None` if the viewBox is degenerate.
+    /// Produce the *non-default* fills (even-odd or partially transparent)
+    /// scaled to fit within `rect`, each paired with its [`FillRule`] and
+    /// opacity. Empty for the common icon (whose fills all merge into
+    /// [`to_path_in_rect`](Self::to_path_in_rect)).
+    pub fn extra_fills_in_rect(&self, rect: Rect) -> Vec<(Path, FillRule, f32)> {
+        if self.extra_fills.is_empty() {
+            return Vec::new();
+        }
+        let Some((transform, _)) = self.fit_transform(rect) else {
+            return Vec::new();
+        };
+        self.extra_fills
+            .iter()
+            .map(|f| (f.path.transformed(&transform), f.fill_rule, f.opacity))
+            .collect()
+    }
+
+    /// The `preserveAspectRatio` fit transform mapping viewBox coordinates
+    /// into `rect`, together with a representative scale factor (used to
+    /// scale stroke widths). `None` if the viewBox is degenerate.
     fn fit_transform(&self, rect: Rect) -> Option<(Transform2D, f32)> {
-        if self.view_box.width <= 0.0 || self.view_box.height <= 0.0 {
+        let vb = self.view_box;
+        if vb.width <= 0.0 || vb.height <= 0.0 {
             return None;
         }
-        let scale = (rect.width / self.view_box.width).min(rect.height / self.view_box.height);
-        let scaled_w = self.view_box.width * scale;
-        let scaled_h = self.view_box.height * scale;
-        let offset_x = rect.x + (rect.width - scaled_w) / 2.0;
-        let offset_y = rect.y + (rect.height - scaled_h) / 2.0;
+        let sx = rect.width / vb.width;
+        let sy = rect.height / vb.height;
 
-        // Scale viewBox coordinates first, then translate to target position.
+        // `none` — non-uniform stretch to fill. The representative scale for
+        // stroke widths is the geometric mean of the two axis scales.
+        if self.aspect.stretch {
+            let transform = Transform2D::scale(sx, sy).then(&Transform2D::translate(
+                rect.x - vb.x * sx,
+                rect.y - vb.y * sy,
+            ));
+            return Some((transform, (sx * sy).sqrt()));
+        }
+
+        // Uniform `meet` (fit) or `slice` (cover), then align the leftover.
+        let scale = if self.aspect.slice {
+            sx.max(sy)
+        } else {
+            sx.min(sy)
+        };
+        let align = |leftover: f32, a: Align| match a {
+            Align::Min => 0.0,
+            Align::Mid => leftover / 2.0,
+            Align::Max => leftover,
+        };
+        let offset_x = rect.x + align(rect.width - vb.width * scale, self.aspect.x);
+        let offset_y = rect.y + align(rect.height - vb.height * scale, self.aspect.y);
+
         let transform = Transform2D::scale(scale, scale).then(&Transform2D::translate(
-            offset_x - self.view_box.x * scale,
-            offset_y - self.view_box.y * scale,
+            offset_x - vb.x * scale,
+            offset_y - vb.y * scale,
         ));
         Some((transform, scale))
     }
@@ -201,9 +341,15 @@ impl SvgIcon {
         &self.strokes
     }
 
+    /// Access the *non-default* fills (even-odd / transparent) in viewBox
+    /// coordinates.
+    pub fn extra_fills(&self) -> &[SvgFill] {
+        &self.extra_fills
+    }
+
     /// Whether this icon carries any geometry at all (filled or stroked).
     pub fn is_empty(&self) -> bool {
-        self.path.is_empty() && self.strokes.is_empty()
+        self.path.is_empty() && self.extra_fills.is_empty() && self.strokes.is_empty()
     }
 
     /// Access the viewBox.
@@ -244,31 +390,89 @@ fn parse_view_box(svg_el: &XmlElement) -> Result<Rect, SvgParseError> {
     Ok(Rect::new(0.0, 0.0, w, h))
 }
 
-/// Parse a length value, stripping unit suffixes like "px".
+/// Parse a length value. Absolute unit suffixes (`px`/`pt`/`mm`/`cm`/`in`)
+/// are stripped and the number kept (SVG's user unit is px-equivalent).
+/// Percentages and font-relative units (`%`/`em`/`ex`/`rem`) can't be
+/// resolved without a viewport / font, so they return `None` (the caller
+/// falls back) rather than mis-parsing — e.g. `width="100%"` with no
+/// viewBox degrades to the viewBox error instead of a confusing one.
 fn parse_length(s: &str) -> Option<f32> {
-    let s = s.trim().trim_end_matches("px").trim_end_matches("pt");
-    s.parse::<f32>().ok()
+    let s = s.trim();
+    if s.ends_with('%') || s.ends_with("em") || s.ends_with("ex") {
+        return None;
+    }
+    let num = s
+        .trim_end_matches("px")
+        .trim_end_matches("pt")
+        .trim_end_matches("mm")
+        .trim_end_matches("cm")
+        .trim_end_matches("in")
+        .trim();
+    num.parse::<f32>().ok()
 }
 
-/// Accumulates parsed geometry: one merged fill path plus stroked
-/// sub-paths grouped by stroke style.
+/// Approximate equality for grouping float paint parameters.
+const GROUP_EPS: f32 = 1e-4;
+
+/// Accumulates parsed geometry: the default merged fill path, non-default
+/// fills, and stroked sub-paths grouped by stroke style.
 #[derive(Default)]
 struct SvgBuilder {
     fill: Path,
+    extra_fills: Vec<SvgFill>,
     strokes: Vec<SvgStroke>,
 }
 
 impl SvgBuilder {
+    /// Add a filled sub-path. A non-zero winding, fully-opaque fill (the
+    /// overwhelmingly common case) merges into the single `fill` path;
+    /// even-odd or partially-transparent fills go to `extra_fills`,
+    /// grouped by `(rule, opacity)` so an icon authored uniformly stays
+    /// one entry.
+    fn push_fill(&mut self, path: Path, fill_rule: FillRule, opacity: f32) {
+        if fill_rule == FillRule::Winding && (opacity - 1.0).abs() < GROUP_EPS {
+            self.fill.append(&path);
+            return;
+        }
+        if let Some(group) = self
+            .extra_fills
+            .iter_mut()
+            .find(|f| f.fill_rule == fill_rule && (f.opacity - opacity).abs() < GROUP_EPS)
+        {
+            group.path.append(&path);
+        } else {
+            self.extra_fills.push(SvgFill {
+                path,
+                fill_rule,
+                opacity,
+            });
+        }
+    }
+
     /// Add a stroked sub-path, merging it into an existing group that
-    /// shares the same width / cap / join so the common "one stroke
-    /// style for the whole icon" case stays a single entry (and one
-    /// rasterized atlas tile). Strokes are per-contour, so appending
-    /// extra `MoveTo`-started contours is equivalent to stroking each
-    /// separately.
-    fn push_stroke(&mut self, path: Path, width: f32, line_cap: LineCap, line_join: LineJoin) {
-        const EPS: f32 = 1e-4;
+    /// shares the same width / cap / join / opacity / dash so the common
+    /// "one stroke style for the whole icon" case stays a single entry
+    /// (and one rasterized atlas tile). Strokes are per-contour, so
+    /// appending extra `MoveTo`-started contours is equivalent to
+    /// stroking each separately.
+    #[allow(clippy::too_many_arguments)] // stroke paint params; bundling adds no clarity
+    fn push_stroke(
+        &mut self,
+        path: Path,
+        width: f32,
+        line_cap: LineCap,
+        line_join: LineJoin,
+        miter_limit: f32,
+        opacity: f32,
+        dash: Option<(Vec<f32>, f32)>,
+    ) {
         if let Some(group) = self.strokes.iter_mut().find(|s| {
-            (s.width - width).abs() < EPS && s.line_cap == line_cap && s.line_join == line_join
+            (s.width - width).abs() < GROUP_EPS
+                && s.line_cap == line_cap
+                && s.line_join == line_join
+                && (s.miter_limit - miter_limit).abs() < GROUP_EPS
+                && (s.opacity - opacity).abs() < GROUP_EPS
+                && s.dash == dash
         }) {
             group.path.append(&path);
         } else {
@@ -277,6 +481,9 @@ impl SvgBuilder {
                 width,
                 line_cap,
                 line_join,
+                miter_limit,
+                opacity,
+                dash,
             });
         }
     }
@@ -285,8 +492,9 @@ impl SvgBuilder {
 /// The resolved paint state for an element — what SVG's `fill` /
 /// `stroke` presentation attributes would compute to, with colors
 /// reduced to "is this paint active?" booleans (colors are stripped for
-/// theme tinting). Inherited down the element tree like real SVG.
-#[derive(Debug, Clone, Copy)]
+/// theme tinting). Inherited down the element tree like real SVG. Not
+/// `Copy` (it carries a dash `Vec`); cloned per child in the walk.
+#[derive(Debug, Clone)]
 struct SvgPaintState {
     /// Whether the shape's interior is filled (`fill` != `none`).
     fill: bool,
@@ -296,20 +504,99 @@ struct SvgPaintState {
     stroke_width: f32,
     line_cap: LineCap,
     line_join: LineJoin,
+    /// `stroke-miterlimit`; 4.0 by default.
+    miter_limit: f32,
+    /// `fill-rule` — non-zero winding (default) vs even-odd.
+    fill_rule: FillRule,
+    /// `opacity` — inherited, accumulated product of ancestor group
+    /// opacities (approximates group compositing as per-element alpha).
+    opacity: f32,
+    /// `fill-opacity` — this element's fill alpha multiplier.
+    fill_opacity: f32,
+    /// `stroke-opacity` — this element's stroke alpha multiplier.
+    stroke_opacity: f32,
+    /// `stroke-dasharray` (local-space lengths), if dashed.
+    dash_array: Option<Vec<f32>>,
+    /// `stroke-dashoffset` (local space).
+    dash_offset: f32,
+    /// `display:none` — prunes this element and its subtree. Not
+    /// inherited (only ever set true by the element's own declaration;
+    /// a pruned element's children are never visited).
+    display_none: bool,
+    /// `visibility` — inherited. `false` suppresses this element's own
+    /// shape but children still process and may set `visibility:visible`.
+    visible: bool,
 }
 
 impl Default for SvgPaintState {
     fn default() -> Self {
         // SVG initial values: fill = black (painted), stroke = none,
-        // stroke-width = 1, butt caps, miter joins.
+        // stroke-width = 1, butt caps, miter joins, non-zero fill rule,
+        // fully opaque, no dash, displayed + visible.
         Self {
             fill: true,
             stroke: false,
             stroke_width: 1.0,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            miter_limit: 4.0,
+            fill_rule: FillRule::Winding,
+            opacity: 1.0,
+            fill_opacity: 1.0,
+            stroke_opacity: 1.0,
+            dash_array: None,
+            dash_offset: 0.0,
+            display_none: false,
+            visible: true,
         }
     }
+}
+
+/// Shared, read-only context threaded through the element walk.
+struct WalkCtx<'a> {
+    /// Every `id`-bearing element in the document, for `<use>` resolution.
+    id_map: &'a HashMap<&'a str, &'a XmlElement>,
+    /// Parsed `<style>` CSS rules applied during paint-state resolution.
+    css: &'a CssRules,
+}
+
+/// Recursion bound — guards against `<use>` reference cycles and
+/// pathologically deep documents (icons nest only a handful of levels).
+const MAX_WALK_DEPTH: usize = 256;
+
+/// Build the `id -> element` index over the whole tree (first definition
+/// wins, matching SVG's duplicate-id resolution).
+fn build_id_map<'a>(node: &'a XmlElement, map: &mut HashMap<&'a str, &'a XmlElement>) {
+    if let Some(id) = node.attribute("id") {
+        map.entry(id).or_insert(node);
+    }
+    for child in node.children() {
+        build_id_map(child, map);
+    }
+}
+
+/// Elements whose content is a definition / metadata, not direct geometry.
+/// They (and their subtrees) must not paint when walked in document order.
+/// `<symbol>`/`<defs>` content reaches the canvas only via `<use>`.
+/// `<style>` text is consumed separately by the CSS pre-pass.
+fn is_non_rendering(tag: &str) -> bool {
+    matches!(
+        tag,
+        "defs"
+            | "symbol"
+            | "clipPath"
+            | "mask"
+            | "pattern"
+            | "marker"
+            | "style"
+            | "metadata"
+            | "title"
+            | "desc"
+            | "text"
+            | "tspan"
+            | "image"
+            | "switch"
+    )
 }
 
 fn walk_element(
@@ -317,15 +604,48 @@ fn walk_element(
     parent_transform: &Transform2D,
     parent_paint: SvgPaintState,
     builder: &mut SvgBuilder,
+    ctx: &WalkCtx,
+    depth: usize,
 ) -> Result<(), SvgParseError> {
+    if depth > MAX_WALK_DEPTH {
+        return Ok(());
+    }
+
+    // Non-rendering containers: skip the whole subtree.
+    if is_non_rendering(node.tag_name()) {
+        #[cfg(debug_assertions)]
+        if matches!(node.tag_name(), "text" | "tspan") {
+            eprintln!(
+                "bastyde: SVG <{}> is not supported by the icon parser; element ignored",
+                node.tag_name()
+            );
+        }
+        return Ok(());
+    }
+
+    // The element's own `transform` maps its local space into the parent's,
+    // so it composes *inside* the parent chain: apply local first, then the
+    // ancestors (`local.then(parent)`).
     let transform = if let Some(t_attr) = node.attribute("transform") {
         let local = parse_transform(t_attr)?;
-        parent_transform.then(&local)
+        local.then(parent_transform)
     } else {
         *parent_transform
     };
 
-    let paint = resolve_paint_state(node, parent_paint);
+    let paint = resolve_paint_state(node, parent_paint, ctx.css);
+
+    // `display:none` prunes this element and its whole subtree.
+    if paint.display_none {
+        return Ok(());
+    }
+
+    // `<use>` instantiates a referenced element; it has no geometry of its
+    // own and no rendered children.
+    if node.tag_name() == "use" {
+        instantiate_use(node, &transform, paint, builder, ctx, depth)?;
+        return Ok(());
+    }
 
     // Compute this element's shape in its local coordinate space (if it
     // is a drawable shape at all), then emit fill and/or stroke.
@@ -347,75 +667,279 @@ fn walk_element(
         _ => None,
     };
 
-    if let Some(local) = shape {
+    // `visibility:hidden` suppresses this element's own shape (but not its
+    // children — they recurse below and may set `visibility:visible`).
+    if paint.visible && let Some(local) = shape {
         let world = if transform != Transform2D::IDENTITY {
             local.transformed(&transform)
         } else {
             local
         };
+        // Local-space stroke widths / dash lengths bake into viewBox space
+        // by the cumulative transform's scale so they track group scaling.
+        let scale = transform.geometric_scale();
         if paint.fill {
-            builder.fill.append(&world);
+            let fill_alpha = paint.opacity * paint.fill_opacity;
+            builder.push_fill(world.clone(), paint.fill_rule, fill_alpha);
         }
         if paint.stroke && paint.stroke_width > 0.0 {
-            // The width is in local space; bake it into viewBox space by
-            // the cumulative transform's scale so it tracks group scaling.
-            let width = paint.stroke_width * transform.geometric_scale();
-            builder.push_stroke(world, width, paint.line_cap, paint.line_join);
+            let width = paint.stroke_width * scale;
+            let stroke_alpha = paint.opacity * paint.stroke_opacity;
+            let dash = paint.dash_array.as_ref().map(|arr| {
+                (
+                    arr.iter().map(|d| d * scale).collect::<Vec<f32>>(),
+                    paint.dash_offset * scale,
+                )
+            });
+            builder.push_stroke(
+                world,
+                width,
+                paint.line_cap,
+                paint.line_join,
+                paint.miter_limit,
+                stroke_alpha,
+                dash,
+            );
         }
     }
 
-    // Recurse into children (for <g>, <svg>, <defs>, etc.), passing the
+    // Recurse into children (for <g>, <svg>, <a>, etc.), passing the
     // resolved transform and paint state down so they inherit.
     for child in node.children() {
-        walk_element(child, &transform, paint, builder)?;
+        walk_element(child, &transform, paint.clone(), builder, ctx, depth + 1)?;
     }
 
     Ok(())
 }
 
-/// Apply an element's paint-related presentation attributes (and inline
-/// `style`) onto the inherited parent state. Inline `style` wins over
-/// presentation attributes, both win over inheritance — matching SVG's
-/// cascade for these properties.
-fn resolve_paint_state(node: &XmlElement, parent: SvgPaintState) -> SvgPaintState {
+/// Resolve and render a `<use>` reference. The `use_transform` already
+/// folds in ancestors + the `<use>` element's own `transform`; the
+/// element's `x`/`y` add an inner translation, and a referenced
+/// `<symbol>`/`<svg>` viewport maps its `viewBox` into the `<use>` size box.
+fn instantiate_use(
+    node: &XmlElement,
+    use_transform: &Transform2D,
+    paint: SvgPaintState,
+    builder: &mut SvgBuilder,
+    ctx: &WalkCtx,
+    depth: usize,
+) -> Result<(), SvgParseError> {
+    let Some(href) = node
+        .attribute("href")
+        .or_else(|| node.attribute("xlink:href"))
+    else {
+        return Ok(());
+    };
+    let id = href.strip_prefix('#').unwrap_or(href);
+    let Some(&target) = ctx.id_map.get(id) else {
+        return Ok(()); // dangling reference — ignore, don't error
+    };
+
+    // `<use>` x/y is an inner translation, applied before the placement.
+    let x = attr_f32(node, "x").unwrap_or(0.0);
+    let y = attr_f32(node, "y").unwrap_or(0.0);
+    let placed = Transform2D::translate(x, y).then(use_transform);
+
+    match target.tag_name() {
+        // A symbol/svg target renders its *children* through the symbol
+        // viewport; the element itself never paints directly.
+        "symbol" | "svg" => {
+            let inner = symbol_viewport_transform(target, node, &placed);
+            let tpaint = resolve_paint_state(target, paint, ctx.css);
+            for child in target.children() {
+                walk_element(child, &inner, tpaint.clone(), builder, ctx, depth + 1)?;
+            }
+        }
+        // Any other element (shape, <g>, …) renders directly at the placement.
+        _ => {
+            walk_element(target, &placed, paint, builder, ctx, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+/// Transform mapping a referenced `<symbol>`/`<svg>`'s `viewBox` content
+/// into the `<use>` size box. Only scales when the symbol declares a
+/// `viewBox` *and* the `<use>` declares `width`+`height`; otherwise the
+/// symbol is treated as a plain group (the common icon-sprite case where
+/// the symbol's coordinate system already matches the outer viewBox).
+fn symbol_viewport_transform(
+    symbol: &XmlElement,
+    use_node: &XmlElement,
+    placed: &Transform2D,
+) -> Transform2D {
+    let vb = symbol.attribute("viewBox").and_then(parse_view_box_values);
+    match (vb, attr_f32(use_node, "width"), attr_f32(use_node, "height")) {
+        (Some((vx, vy, vw, vh)), Some(uw), Some(uh)) if vw > 0.0 && vh > 0.0 => {
+            let vb_local = Transform2D::translate(-vx, -vy).then(&Transform2D::scale(uw / vw, uh / vh));
+            vb_local.then(placed)
+        }
+        _ => *placed,
+    }
+}
+
+/// Parse a `preserveAspectRatio` value (e.g. `xMidYMid meet`, `none`,
+/// `xMinYMax slice`). Unknown tokens fall back to the `xMidYMid meet`
+/// default.
+fn parse_preserve_aspect_ratio(s: &str) -> AspectRatio {
+    let mut it = s.split_whitespace();
+    let align = it.next().unwrap_or("xMidYMid");
+    if align.eq_ignore_ascii_case("none") {
+        return AspectRatio {
+            stretch: true,
+            ..AspectRatio::default()
+        };
+    }
+    let slice = it.next().is_some_and(|m| m.eq_ignore_ascii_case("slice"));
+    let x = if align.contains("xMin") {
+        Align::Min
+    } else if align.contains("xMax") {
+        Align::Max
+    } else {
+        Align::Mid
+    };
+    let y = if align.contains("YMin") {
+        Align::Min
+    } else if align.contains("YMax") {
+        Align::Max
+    } else {
+        Align::Mid
+    };
+    AspectRatio {
+        x,
+        y,
+        slice,
+        stretch: false,
+    }
+}
+
+/// Parse a `viewBox` attribute value into `(x, y, w, h)`; `None` if it
+/// isn't exactly four numbers.
+fn parse_view_box_values(vb: &str) -> Option<(f32, f32, f32, f32)> {
+    let nums: Vec<f32> = vb
+        .split(|c: char| c.is_ascii_whitespace() || c == ',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<f32>().ok())
+        .collect();
+    if nums.len() == 4 {
+        Some((nums[0], nums[1], nums[2], nums[3]))
+    } else {
+        None
+    }
+}
+
+/// The presentation attributes the icon parser reads from an element.
+const PAINT_PROPERTIES: &[&str] = &[
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "fill-rule",
+    "opacity",
+    "fill-opacity",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "display",
+    "visibility",
+];
+
+/// Resolve an element's paint state from the inherited parent state plus,
+/// in ascending precedence: presentation attributes < `<style>` CSS rules
+/// < the inline `style` attribute — matching SVG's cascade for these
+/// properties.
+fn resolve_paint_state(node: &XmlElement, parent: SvgPaintState, css: &CssRules) -> SvgPaintState {
     let mut st = parent;
+    // `display`/`visibility` are per-element decisions, not inherited as
+    // a pruning/suppression flag — reset before applying this element's
+    // own declarations. (`visible` *content* still inherited via `parent`.)
+    st.display_none = false;
 
-    // Presentation attributes.
-    if let Some(v) = node.attribute("fill") {
-        st.fill = !is_none_paint(v);
-    }
-    if let Some(v) = node.attribute("stroke") {
-        st.stroke = !is_none_paint(v);
-    }
-    if let Some(w) = node.attribute("stroke-width").and_then(parse_length) {
-        st.stroke_width = w;
-    }
-    if let Some(v) = node.attribute("stroke-linecap") {
-        st.line_cap = parse_line_cap(v);
-    }
-    if let Some(v) = node.attribute("stroke-linejoin") {
-        st.line_join = parse_line_join(v);
+    // 1. Presentation attributes (CSS specificity 0).
+    for &prop in PAINT_PROPERTIES {
+        if let Some(v) = node.attribute(prop) {
+            apply_declaration(&mut st, prop, v);
+        }
     }
 
-    // Inline style declarations override presentation attributes.
+    // 2. `<style>` rule declarations, by ascending selector specificity.
+    css.apply_to(&mut st, node);
+
+    // 3. Inline `style` attribute (highest precedence).
     if let Some(style) = node.attribute("style") {
         for (key, value) in parse_inline_style(style) {
-            match key {
-                "fill" => st.fill = !is_none_paint(value),
-                "stroke" => st.stroke = !is_none_paint(value),
-                "stroke-width" => {
-                    if let Some(w) = parse_length(value) {
-                        st.stroke_width = w;
-                    }
-                }
-                "stroke-linecap" => st.line_cap = parse_line_cap(value),
-                "stroke-linejoin" => st.line_join = parse_line_join(value),
-                _ => {}
-            }
+            apply_declaration(&mut st, key, value);
         }
     }
 
     st
+}
+
+/// Apply one `property: value` declaration onto the paint state. Shared by
+/// presentation attributes, `<style>` rules, and the inline `style` attr.
+fn apply_declaration(st: &mut SvgPaintState, key: &str, value: &str) {
+    match key {
+        "fill" => st.fill = !is_none_paint(value),
+        "stroke" => st.stroke = !is_none_paint(value),
+        "stroke-width" => {
+            if let Some(w) = parse_length(value) {
+                st.stroke_width = w;
+            }
+        }
+        "stroke-linecap" => st.line_cap = parse_line_cap(value),
+        "stroke-linejoin" => st.line_join = parse_line_join(value),
+        "stroke-miterlimit" => {
+            if let Some(m) = value.trim().parse::<f32>().ok().filter(|m| *m >= 1.0) {
+                st.miter_limit = m;
+            }
+        }
+        // `vector-effect="non-scaling-stroke"` is intentionally NOT mapped:
+        // for a fixed-size icon render it would freeze the stroke width
+        // against the icon's own fit scale (hairline at large sizes), which
+        // is rarely what an icon author wants. Documented as a limitation.
+        "fill-rule" => {
+            st.fill_rule = if value.trim().eq_ignore_ascii_case("evenodd") {
+                FillRule::EvenOdd
+            } else {
+                FillRule::Winding
+            };
+        }
+        // `opacity` is a group multiplier: it compounds with the inherited
+        // value (and with fill/stroke-opacity) rather than replacing it.
+        "opacity" => {
+            if let Some(o) = parse_opacity(value) {
+                st.opacity *= o;
+            }
+        }
+        "fill-opacity" => {
+            if let Some(o) = parse_opacity(value) {
+                st.fill_opacity = o;
+            }
+        }
+        "stroke-opacity" => {
+            if let Some(o) = parse_opacity(value) {
+                st.stroke_opacity = o;
+            }
+        }
+        "stroke-dasharray" => st.dash_array = parse_dash_array(value),
+        "stroke-dashoffset" => {
+            if let Some(off) = parse_length(value) {
+                st.dash_offset = off;
+            }
+        }
+        "display" => st.display_none = value.trim().eq_ignore_ascii_case("none"),
+        "visibility" => {
+            let v = value.trim();
+            if v.eq_ignore_ascii_case("hidden") || v.eq_ignore_ascii_case("collapse") {
+                st.visible = false;
+            } else if v.eq_ignore_ascii_case("visible") {
+                st.visible = true;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Whether a `fill` / `stroke` value means "no paint". Colors are
@@ -441,13 +965,276 @@ fn parse_line_join(value: &str) -> LineJoin {
     }
 }
 
-/// Split an inline `style="a:b;c:d"` attribute into `(property, value)`
-/// pairs, trimmed. Declarations without a `:` are skipped.
+/// Parse an opacity value — a number or a percentage — clamped to `[0, 1]`.
+fn parse_opacity(value: &str) -> Option<f32> {
+    let v = value.trim();
+    let n = if let Some(pct) = v.strip_suffix('%') {
+        pct.trim().parse::<f32>().ok()? / 100.0
+    } else {
+        v.parse::<f32>().ok()?
+    };
+    Some(n.clamp(0.0, 1.0))
+}
+
+/// Parse a `stroke-dasharray` value into local-space lengths. `none` /
+/// empty / all-zero → `None` (solid). An odd-length list is doubled per
+/// the SVG spec.
+fn parse_dash_array(value: &str) -> Option<Vec<f32>> {
+    let v = value.trim();
+    if v.is_empty() || v.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut nums: Vec<f32> = v
+        .split(|c: char| c.is_ascii_whitespace() || c == ',')
+        .filter(|s| !s.is_empty())
+        .filter_map(parse_length)
+        .filter(|n| *n >= 0.0)
+        .collect();
+    if nums.is_empty() || nums.iter().all(|n| *n == 0.0) {
+        return None;
+    }
+    if nums.len() % 2 == 1 {
+        let dup = nums.clone();
+        nums.extend(dup);
+    }
+    Some(nums)
+}
+
+/// Split an inline `style="a:b;c:d"` attribute (or a CSS declaration
+/// block body) into `(property, value)` pairs, trimmed. Declarations
+/// without a `:` are skipped.
 fn parse_inline_style(style: &str) -> impl Iterator<Item = (&str, &str)> {
     style.split(';').filter_map(|decl| {
         let (key, value) = decl.split_once(':')?;
         Some((key.trim(), value.trim()))
     })
+}
+
+// --- Minimal CSS (`<style>` blocks + `class`) -------------------------
+//
+// Illustrator / Inkscape / Font-Awesome exports style geometry via CSS
+// classes rather than presentation attributes. Without this, those
+// elements fall back to defaults (fill on, stroke off) and line icons
+// render as filled blobs. Scope is deliberately narrow: single tag /
+// `.class` / `#id` / `*` selectors only — anything with a combinator,
+// pseudo-class, attribute selector, or compound form is skipped.
+
+/// A supported simple CSS selector.
+enum CssSelector {
+    Universal,
+    Tag(String),
+    Class(String),
+    Id(String),
+}
+
+/// One CSS rule: a selector plus its ordered declarations.
+struct CssRule {
+    selector: CssSelector,
+    decls: Vec<(String, String)>,
+}
+
+impl CssRule {
+    fn matches(&self, tag: &str, classes: &[&str], id: Option<&str>) -> bool {
+        match &self.selector {
+            CssSelector::Universal => true,
+            CssSelector::Tag(t) => t == tag,
+            CssSelector::Class(c) => classes.contains(&c.as_str()),
+            CssSelector::Id(i) => id == Some(i.as_str()),
+        }
+    }
+}
+
+/// The parsed `<style>` rule set for a document.
+#[derive(Default)]
+struct CssRules {
+    rules: Vec<CssRule>,
+}
+
+impl CssRules {
+    /// Apply every matching rule's declarations to `st`, in ascending
+    /// specificity (universal/tag, then class, then id) and document
+    /// order within a tier — so id rules win over class rules win over
+    /// tag rules, the practical subset of CSS specificity.
+    fn apply_to(&self, st: &mut SvgPaintState, node: &XmlElement) {
+        let tag = node.tag_name();
+        let id = node.attribute("id");
+        let class_attr = node.attribute("class").unwrap_or("");
+        let classes: Vec<&str> = class_attr.split_whitespace().collect();
+
+        let tiers = [
+            |s: &CssSelector| matches!(s, CssSelector::Universal | CssSelector::Tag(_)),
+            |s: &CssSelector| matches!(s, CssSelector::Class(_)),
+            |s: &CssSelector| matches!(s, CssSelector::Id(_)),
+        ];
+        for in_tier in tiers {
+            for rule in &self.rules {
+                if in_tier(&rule.selector) && rule.matches(tag, &classes, id) {
+                    for (k, v) in &rule.decls {
+                        apply_declaration(st, k, v);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Collect and parse every `<style>` element's CSS in the document
+/// (top-level or nested, e.g. inside `<defs>`).
+fn collect_style_rules(svg_el: &XmlElement) -> CssRules {
+    let mut rules = Vec::new();
+    collect_style_text(svg_el, &mut rules);
+    CssRules { rules }
+}
+
+fn collect_style_text(node: &XmlElement, rules: &mut Vec<CssRule>) {
+    if node.tag_name() == "style" {
+        // Treat as CSS only when the type is CSS or unspecified.
+        let is_css = node
+            .attribute("type")
+            .map(|t| t.trim().eq_ignore_ascii_case("text/css"))
+            .unwrap_or(true);
+        if is_css {
+            let stripped = strip_css_comments(node.text_content());
+            parse_css_block(&stripped, rules);
+        }
+    }
+    for child in node.children() {
+        collect_style_text(child, rules);
+    }
+}
+
+/// Strip `/* … */` comments from a CSS string.
+fn strip_css_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        match rest[start + 2..].find("*/") {
+            Some(end) => rest = &rest[start + 2 + end + 2..],
+            None => {
+                rest = ""; // unterminated comment — drop the remainder
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Parse `selector { decls } …` rules, appending to `rules`. `@`-rules
+/// (`@charset`/`@import`/`@media`/`@keyframes`/…) are skipped — bodyless
+/// ones to their `;`, block ones past their matching `}` — so a stray
+/// at-rule (common in Illustrator / Inkscape exports) doesn't poison the
+/// following selector or silently drop the rest of the sheet.
+fn parse_css_block(text: &str, rules: &mut Vec<CssRule>) {
+    let mut rest = text;
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        if rest.starts_with('@') {
+            rest = skip_at_rule(rest);
+            continue;
+        }
+        let Some(open) = rest.find('{') else {
+            break;
+        };
+        let selector_part = rest[..open].trim();
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            break; // unbalanced — stop
+        };
+        let decl_block = &after[..close];
+        rest = &after[close + 1..];
+
+        if selector_part.is_empty() {
+            continue;
+        }
+        let decls: Vec<(String, String)> = parse_inline_style(decl_block)
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        if decls.is_empty() {
+            continue;
+        }
+        for sel in selector_part.split(',') {
+            if let Some(selector) = parse_simple_selector(sel.trim()) {
+                rules.push(CssRule {
+                    selector,
+                    decls: decls.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Skip a CSS at-rule starting at `s[0] == '@'`. Bodyless rules
+/// (`@charset`/`@import`) end at `;`; block rules (`@media`/`@keyframes`)
+/// end past their balanced `{ }`. Returns the remainder after the rule.
+fn skip_at_rule(s: &str) -> &str {
+    let brace = s.find('{');
+    let semi = s.find(';');
+    match (brace, semi) {
+        // Bodyless at-rule: no block, or `;` before any block.
+        (None, Some(sc)) => &s[sc + 1..],
+        (Some(b), Some(sc)) if sc < b => &s[sc + 1..],
+        // Block at-rule: skip past its matching close brace.
+        (Some(b), _) => skip_balanced_braces(&s[b..]),
+        (None, None) => "", // malformed — consume the remainder
+    }
+}
+
+/// Given a slice starting at an opening `{`, return the slice after the
+/// matching `}` (or `""` if unbalanced).
+fn skip_balanced_braces(s: &str) -> &str {
+    let mut depth: u32 = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &s[i + 1..];
+                }
+            }
+            _ => {}
+        }
+    }
+    "" // unbalanced — consume the remainder
+}
+
+/// Parse a single simple selector (`*`, `tag`, `.class`, `#id`). Returns
+/// `None` for compound / combinator / pseudo / attribute selectors.
+fn parse_simple_selector(sel: &str) -> Option<CssSelector> {
+    let sel = sel.trim();
+    if sel.is_empty() {
+        return None;
+    }
+    if sel == "*" {
+        return Some(CssSelector::Universal);
+    }
+    // Reject anything carrying a combinator, pseudo, or attribute selector.
+    if sel.contains([' ', '\t', '\n', '>', '+', '~', '[', ']', ':', '(']) {
+        return None;
+    }
+    if let Some(class) = sel.strip_prefix('.') {
+        // A bare `.class` — reject compound forms like `.a.b`.
+        if class.is_empty() || class.contains(['.', '#']) {
+            return None;
+        }
+        return Some(CssSelector::Class(class.to_string()));
+    }
+    if let Some(id) = sel.strip_prefix('#') {
+        if id.is_empty() || id.contains(['.', '#']) {
+            return None;
+        }
+        return Some(CssSelector::Id(id.to_string()));
+    }
+    // Bare tag name — reject compound forms like `rect.cls`.
+    if sel.contains(['.', '#']) {
+        return None;
+    }
+    Some(CssSelector::Tag(sel.to_string()))
 }
 
 // --- Shape element parsers ---
@@ -457,17 +1244,41 @@ fn parse_rect_element(node: &XmlElement) -> Option<Path> {
     let y = attr_f32(node, "y").unwrap_or(0.0);
     let w = attr_f32(node, "width")?;
     let h = attr_f32(node, "height")?;
-    let rx = attr_f32(node, "rx").unwrap_or(0.0);
-    let ry = attr_f32(node, "ry").unwrap_or(rx);
-    if rx > 0.0 || ry > 0.0 {
-        let r = rx.max(ry);
-        Some(Path::rounded_rect(
-            Rect::new(x, y, w, h),
-            bastyde_tokens::CornerRadius::uniform(r),
-        ))
+    // Per SVG: a missing rx/ry takes the other's value.
+    let (mut rx, mut ry) = match (attr_f32(node, "rx"), attr_f32(node, "ry")) {
+        (Some(rx), Some(ry)) => (rx, ry),
+        (Some(rx), None) => (rx, rx),
+        (None, Some(ry)) => (ry, ry),
+        (None, None) => (0.0, 0.0),
+    };
+    // Clamp each radius to half the corresponding side.
+    rx = rx.clamp(0.0, w / 2.0);
+    ry = ry.clamp(0.0, h / 2.0);
+    if rx > 0.0 && ry > 0.0 {
+        Some(rounded_rect_xy(Rect::new(x, y, w, h), rx, ry))
     } else {
         Some(Path::rect(Rect::new(x, y, w, h)))
     }
+}
+
+/// Build a rounded-rectangle path with independent corner radii `rx`/`ry`
+/// (true elliptical corners) — SVG `<rect rx=.. ry=..>`. Mirrors
+/// `Path::rounded_rect`'s arc layout but with `2rx × 2ry` corner ellipses.
+fn rounded_rect_xy(r: Rect, rx: f32, ry: f32) -> Path {
+    let (x, y, right, bottom) = (r.x, r.y, r.right(), r.bottom());
+    let (dx, dy) = (2.0 * rx, 2.0 * ry);
+    let mut p = Path::new();
+    p.move_to(Point::new(x + rx, y));
+    p.line_to(Point::new(right - rx, y));
+    p.arc_to(Rect::new(right - dx, y, dx, dy), -90.0, 90.0); // top-right
+    p.line_to(Point::new(right, bottom - ry));
+    p.arc_to(Rect::new(right - dx, bottom - dy, dx, dy), 0.0, 90.0); // bottom-right
+    p.line_to(Point::new(x + rx, bottom));
+    p.arc_to(Rect::new(x, bottom - dy, dx, dy), 90.0, 90.0); // bottom-left
+    p.line_to(Point::new(x, y + ry));
+    p.arc_to(Rect::new(x, y, dx, dy), 180.0, 90.0); // top-left
+    p.close();
+    p
 }
 
 fn parse_circle_element(node: &XmlElement) -> Option<Path> {
@@ -918,5 +1729,381 @@ mod tests {
             icon.strokes().is_empty(),
             "stroke='none' child must not stroke"
         );
+    }
+
+    // ── Non-rendering containers, <use>/<symbol>, transform order, guards ──
+
+    #[test]
+    fn nested_transforms_compose_in_svg_order() {
+        // A child transform applies BEFORE the parent's (local.then(parent)):
+        // inner scale(2) then outer translate(10,0): (5,5) → (10,10) → (20,10).
+        let svg = r#"<svg viewBox="0 0 100 100">
+            <g transform="translate(10,0)">
+                <g transform="scale(2)">
+                    <rect x="5" y="5" width="1" height="1"/>
+                </g>
+            </g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        match icon.raw_path().commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!((p.x - 20.0).abs() < 0.01, "x should be 20, got {}", p.x);
+                assert!((p.y - 10.0).abs() < 0.01, "y should be 10, got {}", p.y);
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn defs_not_rendered() {
+        let svg = r#"<svg viewBox="0 0 24 24"><defs><path d="M0 0L24 24"/></defs></svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.is_empty(), "content inside <defs> must not render");
+    }
+
+    #[test]
+    fn symbol_use_renders_with_offset() {
+        // A <symbol> renders only via <use>; the use x/y offsets it.
+        let svg = r##"<svg viewBox="0 0 48 48">
+            <symbol id="sq"><rect x="0" y="0" width="10" height="10"/></symbol>
+            <use href="#sq" x="20" y="5"/>
+        </svg>"##;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(!icon.raw_path().is_empty(), "<use> of a <symbol> must render");
+        match icon.raw_path().commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!(
+                    (p.x - 20.0).abs() < 0.01 && (p.y - 5.0).abs() < 0.01,
+                    "rect should be offset to (20,5), got ({},{})",
+                    p.x,
+                    p.y
+                );
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_id_use_is_empty() {
+        let svg = r##"<svg viewBox="0 0 24 24"><use href="#missing"/></svg>"##;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.is_empty(), "dangling <use> renders nothing, no error");
+    }
+
+    #[test]
+    fn use_cycle_terminates() {
+        // A symbol that <use>s itself must terminate (depth guard), not overflow.
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <symbol id="a"><use href="#a"/></symbol>
+            <use href="#a"/>
+        </svg>"##;
+        assert!(
+            SvgIcon::parse(svg).is_ok(),
+            "self-referential <use> must terminate cleanly"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_groups_ok() {
+        let mut svg = String::from(r#"<svg viewBox="0 0 24 24">"#);
+        for _ in 0..100 {
+            svg.push_str("<g>");
+        }
+        svg.push_str(r#"<rect x="0" y="0" width="1" height="1"/>"#);
+        for _ in 0..100 {
+            svg.push_str("</g>");
+        }
+        svg.push_str("</svg>");
+        let icon = SvgIcon::parse(&svg).unwrap();
+        assert!(!icon.is_empty(), "100 nested groups (< depth bound) render");
+    }
+
+    // ── CSS <style> / class, display / visibility ─────────────────────
+
+    #[test]
+    fn style_block_drives_stroke() {
+        // A CSS class turns a path into a line icon (fill:none + stroke).
+        // Without CSS support it would fall back to filled-black (a blob).
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>.icon{fill:none;stroke:#000;stroke-width:2}</style>
+            <path class="icon" d="M2 12L22 12"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.raw_path().is_empty(), "CSS fill:none must suppress fill");
+        assert_eq!(icon.strokes().len(), 1, "CSS stroke must apply");
+        assert!((icon.strokes()[0].width - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn css_at_rules_dont_drop_real_rules() {
+        // A stray @charset / @media (common in Illustrator/Inkscape exports)
+        // must not poison the following selector or drop the rest of the
+        // sheet — the real `.icon` rule must still apply.
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>@charset "UTF-8"; @media print { .x{fill:red} } .icon{fill:none;stroke:#000;stroke-width:2}</style>
+            <path class="icon" d="M2 12L22 12"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            ".icon fill:none must apply despite the @-rules"
+        );
+        assert_eq!(icon.strokes().len(), 1);
+        assert!((icon.strokes()[0].width - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn tag_selector_fill() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>path{fill:none;stroke:#000;stroke-width:1}</style>
+            <path d="M0 0L24 24"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.raw_path().is_empty(), "tag selector fill:none applies");
+        assert_eq!(icon.strokes().len(), 1);
+    }
+
+    #[test]
+    fn class_multiple_values() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>.a{fill:none} .b{stroke:#000;stroke-width:3}</style>
+            <path class="a b" d="M0 0L24 0"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.raw_path().is_empty(), ".a fill:none applies");
+        assert_eq!(icon.strokes().len(), 1, ".b stroke applies");
+        assert!((icon.strokes()[0].width - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn css_class_beats_presentation_attr() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>.x{fill:none}</style>
+            <rect x="0" y="0" width="10" height="10" fill="black" class="x"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            "class fill:none must beat presentation fill=black"
+        );
+    }
+
+    #[test]
+    fn inline_style_beats_css_class() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <style>.x{fill:none}</style>
+            <rect x="0" y="0" width="10" height="10" class="x" style="fill:black"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            !icon.raw_path().is_empty(),
+            "inline fill:black must beat class fill:none"
+        );
+    }
+
+    #[test]
+    fn display_none_prunes() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <rect x="0" y="0" width="10" height="10" display="none"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.is_empty(), "display=none element must not render");
+    }
+
+    #[test]
+    fn display_none_in_style_prunes_subtree() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <g style="display:none"><rect x="0" y="0" width="10" height="10"/></g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.is_empty(), "display:none group prunes its subtree");
+    }
+
+    #[test]
+    fn visibility_hidden_suppresses_shape() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <rect x="0" y="0" width="10" height="10" visibility="hidden"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(icon.is_empty(), "visibility=hidden suppresses the shape");
+    }
+
+    #[test]
+    fn visibility_visible_child_overrides_hidden_parent() {
+        // visibility is inherited, but a child can override back to visible
+        // (and the walk keeps recursing through a hidden group).
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <g visibility="hidden">
+                <rect x="0" y="0" width="10" height="10" visibility="visible"/>
+            </g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            !icon.is_empty(),
+            "a visible child of a hidden group must render"
+        );
+    }
+
+    // ── fill-rule, opacity, dasharray ─────────────────────────────────
+
+    #[test]
+    fn fill_rule_winding_stays_in_path() {
+        let svg = r#"<svg viewBox="0 0 24 24"><path d="M0 0L24 0L24 24Z"/></svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(!icon.raw_path().is_empty());
+        assert!(
+            icon.extra_fills().is_empty(),
+            "default winding fill stays in the main path"
+        );
+    }
+
+    #[test]
+    fn fill_rule_evenodd_in_extra_fills() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <path fill-rule="evenodd" d="M0 0L24 0L24 24Z"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            "evenodd fill must go to extra_fills, not the main winding path"
+        );
+        assert_eq!(icon.extra_fills().len(), 1);
+        assert_eq!(icon.extra_fills()[0].fill_rule, FillRule::EvenOdd);
+    }
+
+    #[test]
+    fn opacity_below_1_goes_to_extra_fills() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <rect x="0" y="0" width="10" height="10" opacity="0.5"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            "a translucent fill must go to extra_fills"
+        );
+        assert_eq!(icon.extra_fills().len(), 1);
+        assert!((icon.extra_fills()[0].opacity - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn stroke_dasharray_sets_dash_pattern() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-dasharray="5 3">
+            <line x1="0" y1="0" x2="24" y2="0"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert_eq!(icon.strokes().len(), 1);
+        let dash = icon.strokes()[0].dash.as_ref().expect("dash present");
+        assert_eq!(dash.0, vec![5.0, 3.0]);
+    }
+
+    #[test]
+    fn stroke_dasharray_odd_length_doubles() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-dasharray="4">
+            <line x1="0" y1="0" x2="24" y2="0"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        let dash = icon.strokes()[0].dash.as_ref().expect("dash present");
+        assert_eq!(
+            dash.0,
+            vec![4.0, 4.0],
+            "an odd-length dash array is doubled per spec"
+        );
+    }
+
+    // ── Fidelity: miterlimit, preserveAspectRatio, rect rx≠ry, units ──
+
+    #[test]
+    fn miter_limit_parses() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-miterlimit="10">
+            <path d="M0 0L10 10L20 0"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert_eq!(icon.strokes().len(), 1);
+        assert!((icon.strokes()[0].miter_limit - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn rect_rx_ry_distinct_uses_elliptical_corners() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <rect x="0" y="0" width="20" height="10" rx="4" ry="2"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        let cmds = &icon.raw_path().commands;
+        let arcs = cmds
+            .iter()
+            .filter(|c| matches!(c, PathCommand::ArcTo { .. }))
+            .count();
+        assert_eq!(arcs, 4, "four elliptical corner arcs");
+        // First corner arc (top-right) must be a 2rx × 2ry = 8 × 4 ellipse.
+        let arc = cmds
+            .iter()
+            .find_map(|c| match c {
+                PathCommand::ArcTo { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            (arc.width - 8.0).abs() < 0.01 && (arc.height - 4.0).abs() < 0.01,
+            "corner ellipse should be 8×4, got {}×{}",
+            arc.width,
+            arc.height
+        );
+    }
+
+    #[test]
+    fn aspect_ratio_none_stretches() {
+        // 20×10 viewBox + none → stretch to fill: sx=2, sy=4, (10,5)→(20,20).
+        let svg = r#"<svg viewBox="0 0 20 10" preserveAspectRatio="none">
+            <rect x="10" y="5" width="1" height="1"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        let path = icon.to_path_in_rect(Rect::new(0.0, 0.0, 40.0, 40.0));
+        match path.commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!(
+                    (p.x - 20.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01,
+                    "stretched to ({},{})",
+                    p.x,
+                    p.y
+                );
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aspect_ratio_xminymin_aligns_to_corner() {
+        // 20×10 meet into 40×40 → scale 2 (40×20), aligned top-left.
+        let svg = r#"<svg viewBox="0 0 20 10" preserveAspectRatio="xMinYMin meet">
+            <rect x="0" y="0" width="1" height="1"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        let path = icon.to_path_in_rect(Rect::new(0.0, 0.0, 40.0, 40.0));
+        match path.commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!(
+                    p.x.abs() < 0.01 && p.y.abs() < 0.01,
+                    "top-left aligned, got ({},{})",
+                    p.x,
+                    p.y
+                );
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn length_with_pt_unit_parses() {
+        let svg = r#"<svg width="24pt" height="24pt"><rect width="10" height="10"/></svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!((icon.width() - 24.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn percent_width_no_viewbox_is_clean_error() {
+        // No viewBox + percentage dimensions can't establish a coordinate
+        // space → clean Err, no panic.
+        let svg = r#"<svg width="100%" height="100%"><rect width="10" height="10"/></svg>"#;
+        assert!(SvgIcon::parse(svg).is_err());
     }
 }

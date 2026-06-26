@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use crate::geometry::{Rect, Transform2D};
-use crate::paint::{StrokeSpace, StrokeStyle};
+use crate::paint::{FillRule, StrokeSpace, StrokeStyle};
 
 /// The complete render output for one frame. This is the boundary between
 /// platform-independent widget code and GPU-specific rendering code.
@@ -354,8 +354,11 @@ pub struct PathEntry {
     pub path: crate::path::Path,
     /// Fill color: [r, g, b, a].
     pub color: [f32; 4],
-    /// Stroke style (width, dash pattern, line cap).
+    /// Stroke style (width, dash pattern, line cap). A zero width signals
+    /// a fill (the rasterizer branches on it).
     pub stroke_style: StrokeStyle,
+    /// Fill rule for the fill branch (ignored when stroking).
+    pub fill_rule: FillRule,
     /// Bounding rect in logical pixels (computed from path bounds).
     pub bounds: [f32; 4],
 }

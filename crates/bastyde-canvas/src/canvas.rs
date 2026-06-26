@@ -7,7 +7,7 @@ use std::rc::Rc;
 use bastyde_tokens::{Color, CornerRadius, Shadow, TextStyle};
 
 use crate::geometry::{Point, Rect, Transform2D};
-use crate::paint::{Paint, StrokeSpace, StrokeStyle};
+use crate::paint::{FillRule, Paint, StrokeSpace, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
     AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind, DecorationRect,
@@ -314,15 +314,25 @@ impl Canvas {
 
     // --- Tier 3: Arbitrary paths (CPU rasterized) ---
 
-    /// Fill an arbitrary path with a solid color.
-    /// The path will be CPU-rasterized (Tier 3) and cached in the shape atlas.
+    /// Fill an arbitrary path with a solid color, using the non-zero
+    /// winding rule. The path will be CPU-rasterized (Tier 3) and cached
+    /// in the shape atlas.
     pub fn fill_path(&mut self, path: &Path, color: Color) {
+        self.fill_path_with_rule(path, color, FillRule::Winding);
+    }
+
+    /// Fill an arbitrary path with an explicit [`FillRule`] — use
+    /// [`FillRule::EvenOdd`] for SVG `fill-rule="evenodd"` geometry
+    /// (rings / donuts / counters). The path will be CPU-rasterized
+    /// (Tier 3) and cached in the shape atlas.
+    pub fn fill_path_with_rule(&mut self, path: &Path, color: Color, fill_rule: FillRule) {
         let bounds = path.bounds();
         let idx = self.frame.paths.len();
         self.frame.paths.push(PathEntry {
             path: path.clone(),
             color: color.to_array(),
             stroke_style: StrokeStyle::solid(0.0),
+            fill_rule,
             bounds: bounds.to_array(),
         });
         self.frame.draw_order.push(DrawCommand::Path(idx));
@@ -343,6 +353,7 @@ impl Canvas {
             path: path.clone(),
             color: color.to_array(),
             stroke_style: style,
+            fill_rule: FillRule::Winding,
             bounds: bounds.to_array(),
         });
         self.frame.draw_order.push(DrawCommand::Path(idx));

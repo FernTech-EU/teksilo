@@ -667,15 +667,22 @@ impl Widget for IconWidget {
             IconSource::Svg(icon) => {
                 if color.a() > 0.0 {
                     // Filled geometry (the default for most icons) +
-                    // stroked geometry (line-style icons). An icon may
-                    // carry both — a filled shape with a stroked border.
+                    // even-odd / transparent fills + stroked geometry
+                    // (line-style icons). An icon may carry any mix.
                     let fill = icon.to_path_in_rect(bounds);
                     if !fill.is_empty() {
                         canvas.fill_path(&fill, color);
                     }
-                    for (path, style) in icon.stroked_paths_in_rect(bounds) {
-                        if !path.is_empty() {
-                            canvas.stroke_path(&path, color, style);
+                    for (path, rule, opacity) in icon.extra_fills_in_rect(bounds) {
+                        let c = color.with_alpha(color.a() * opacity);
+                        if !path.is_empty() && c.a() > 0.0 {
+                            canvas.fill_path_with_rule(&path, c, rule);
+                        }
+                    }
+                    for (path, style, opacity) in icon.stroked_paths_in_rect(bounds) {
+                        let c = color.with_alpha(color.a() * opacity);
+                        if !path.is_empty() && c.a() > 0.0 {
+                            canvas.stroke_path(&path, c, style);
                         }
                     }
                 }
@@ -893,6 +900,25 @@ mod tests {
         assert!(
             frame.paths[0].stroke_style.width > 0.0,
             "the rendered path must be stroked, not filled"
+        );
+    }
+
+    #[test]
+    fn icon_from_svg_evenodd_emits_evenodd_path_entry() {
+        // A fill-rule="evenodd" icon must reach the renderer as a PathEntry
+        // carrying FillRule::EvenOdd (so holes punch instead of filling in).
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <path fill-rule="evenodd" d="M2 2L22 2L22 22Z"/>
+        </svg>"#;
+        let mut tree = WidgetTree::new();
+        tree.add(IconWidget::from_svg(svg).color(Color::BLACK));
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        assert_eq!(frame.paths.len(), 1, "evenodd icon renders one path");
+        assert_eq!(
+            frame.paths[0].fill_rule,
+            bastyde_canvas::FillRule::EvenOdd,
+            "the fill rule must reach the PathEntry"
         );
     }
 

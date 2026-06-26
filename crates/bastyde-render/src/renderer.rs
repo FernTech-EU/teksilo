@@ -381,6 +381,7 @@ impl Renderer {
                                 &entry.path,
                                 entry.color,
                                 &entry.stroke_style,
+                                entry.fill_rule,
                                 entry.bounds,
                                 scale_factor,
                                 zoom,

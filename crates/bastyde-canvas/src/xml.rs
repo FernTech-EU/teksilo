@@ -23,6 +23,10 @@ pub(crate) struct XmlElement {
     pub(crate) name: String,
     pub(crate) attrs: HashMap<String, String>,
     pub(crate) children: Vec<XmlElement>,
+    /// Concatenated character data directly inside this element. Retained
+    /// for `<style>` CSS blocks; empty for the elements the icon parser
+    /// otherwise cares about.
+    pub(crate) text_content: String,
 }
 
 impl XmlElement {
@@ -36,9 +40,14 @@ impl XmlElement {
         self.attrs.get(name).map(String::as_str)
     }
 
-    /// Iterate over child elements (text/comment nodes are not retained).
+    /// Iterate over child elements (comment/PI nodes are not retained).
     pub(crate) fn children(&self) -> impl Iterator<Item = &XmlElement> {
         self.children.iter()
+    }
+
+    /// Character data directly inside this element (used for `<style>`).
+    pub(crate) fn text_content(&self) -> &str {
+        &self.text_content
     }
 }
 
@@ -71,9 +80,27 @@ pub(crate) fn parse_dom(text: &str) -> Result<Option<XmlElement>, String> {
                 let elem = stack.pop().ok_or_else(|| "unmatched end tag".to_string())?;
                 attach_or_root(&mut stack, &mut root, elem);
             }
+            Ok(Event::Text(e)) => {
+                // Retain character data on the enclosing element (for <style>).
+                // `xml_content` decodes + resolves entity references, matching
+                // the XML 1.0 normalization used for attribute values above.
+                if let Some(parent) = stack.last_mut()
+                    && let Ok(text) = e.xml_content(quick_xml::XmlVersion::Implicit1_0)
+                {
+                    parent.text_content.push_str(&text);
+                }
+            }
+            Ok(Event::CData(e)) => {
+                // CData is literal — decode bytes, no entity resolution.
+                if let Some(parent) = stack.last_mut()
+                    && let Ok(text) = e.decode()
+                {
+                    parent.text_content.push_str(&text);
+                }
+            }
             Ok(Event::Eof) => break,
             Ok(_) => {
-                // Text, CData, Comment, PI, Decl, DocType — not retained.
+                // Comment, PI, Decl, DocType — not retained.
             }
             Err(e) => return Err(e.to_string()),
         }
@@ -129,5 +156,6 @@ fn element_from_start(e: &quick_xml::events::BytesStart<'_>) -> Result<XmlElemen
         name,
         attrs,
         children: Vec::new(),
+        text_content: String::new(),
     })
 }

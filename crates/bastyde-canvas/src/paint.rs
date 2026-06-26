@@ -74,6 +74,17 @@ pub enum LineJoin {
     Bevel,
 }
 
+/// Fill rule for a filled path — how self-intersections and nested
+/// sub-paths decide inside vs outside. [`Winding`](FillRule::Winding)
+/// (non-zero) is the default; [`EvenOdd`](FillRule::EvenOdd) is SVG's
+/// `fill-rule="evenodd"` (rings / donuts / counters authored with holes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FillRule {
+    #[default]
+    Winding,
+    EvenOdd,
+}
+
 /// Whether a stroke's width is interpreted in logical pixels (and so scales
 /// with the canvas transform) or held transform-invariant ("cosmetic").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -92,7 +103,7 @@ pub enum StrokeSpace {
 }
 
 /// Stroke style configuration, supporting dashed/dotted strokes.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StrokeStyle {
     pub width: f32,
     /// Alternating dash/gap lengths. `None` means solid stroke.
@@ -103,6 +114,9 @@ pub struct StrokeStyle {
     /// How connected segments meet at a vertex. Defaults to
     /// [`LineJoin::Miter`] (SVG's default and every pre-existing stroke).
     pub line_join: LineJoin,
+    /// Miter length / stroke width ratio beyond which a miter join falls
+    /// back to bevel. Defaults to `4.0` (SVG's and tiny-skia's default).
+    pub miter_limit: f32,
     /// Whether `width` scales with the canvas transform
     /// ([`StrokeSpace::Logical`], default) or is held transform-invariant
     /// ([`StrokeSpace::Device`], a cosmetic / hairline stroke). See
@@ -118,6 +132,7 @@ impl StrokeStyle {
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            miter_limit: 4.0,
             space: StrokeSpace::Logical,
         }
     }
@@ -129,6 +144,7 @@ impl StrokeStyle {
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            miter_limit: 4.0,
             space: StrokeSpace::Logical,
         }
     }
@@ -140,6 +156,7 @@ impl StrokeStyle {
             dash_offset: 0.0,
             line_cap: LineCap::Round,
             line_join: LineJoin::Miter,
+            miter_limit: 4.0,
             space: StrokeSpace::Logical,
         }
     }
@@ -162,8 +179,17 @@ impl StrokeStyle {
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            miter_limit: 4.0,
             space: StrokeSpace::Device,
         }
+    }
+}
+
+impl Default for StrokeStyle {
+    // Delegates to `solid(0.0)` so `miter_limit` defaults to 4.0 (a derived
+    // Default would zero it, making every miter join bevel).
+    fn default() -> Self {
+        Self::solid(0.0)
     }
 }
 
