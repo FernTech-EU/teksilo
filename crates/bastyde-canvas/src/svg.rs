@@ -1356,32 +1356,35 @@ fn parse_transform(attr: &str) -> Result<Transform2D, SvgParseError> {
             break;
         }
 
-        if let Some(rest) = remaining.strip_prefix("translate") {
+        // Reduce each token to a single matrix `op`. SVG applies the
+        // leftmost token *outermost* (`transform="A B"` ⇒ matrix `A·B`,
+        // a point transformed as `A·B·p` ⇒ B first), so each new token
+        // appends on the RIGHT of the running product: `result = op · result`,
+        // which with `a.then(&b) == b·a` is `op.then(&result)`.
+        let (op, rest) = if let Some(rest) = remaining.strip_prefix("translate") {
             let (args, rest) = parse_transform_args(rest)?;
             let tx = args.first().copied().unwrap_or(0.0);
             let ty = args.get(1).copied().unwrap_or(0.0);
-            result = result.then(&Transform2D::translate(tx, ty));
-            remaining = rest;
+            (Transform2D::translate(tx, ty), rest)
         } else if let Some(rest) = remaining.strip_prefix("scale") {
             let (args, rest) = parse_transform_args(rest)?;
             let sx = args.first().copied().unwrap_or(1.0);
             let sy = args.get(1).copied().unwrap_or(sx);
-            result = result.then(&Transform2D::scale(sx, sy));
-            remaining = rest;
+            (Transform2D::scale(sx, sy), rest)
         } else if let Some(rest) = remaining.strip_prefix("rotate") {
             let (args, rest) = parse_transform_args(rest)?;
-            let angle_deg = args.first().copied().unwrap_or(0.0);
-            if args.len() >= 3 {
-                let cx = args[1];
-                let cy = args[2];
-                result = result
+            let angle = args.first().copied().unwrap_or(0.0).to_radians();
+            let op = if args.len() >= 3 {
+                // rotate(a cx cy) = translate(cx,cy)·rotate(a)·translate(-cx,-cy):
+                // move the pivot to the origin, rotate, move it back.
+                let (cx, cy) = (args[1], args[2]);
+                Transform2D::translate(-cx, -cy)
+                    .then(&Transform2D::rotate(angle))
                     .then(&Transform2D::translate(cx, cy))
-                    .then(&Transform2D::rotate(angle_deg.to_radians()))
-                    .then(&Transform2D::translate(-cx, -cy));
             } else {
-                result = result.then(&Transform2D::rotate(angle_deg.to_radians()));
-            }
-            remaining = rest;
+                Transform2D::rotate(angle)
+            };
+            (op, rest)
         } else if let Some(rest) = remaining.strip_prefix("matrix") {
             let (args, rest) = parse_transform_args(rest)?;
             if args.len() != 6 {
@@ -1389,35 +1392,40 @@ fn parse_transform(attr: &str) -> Result<Transform2D, SvgParseError> {
                     "matrix requires 6 values".into(),
                 ));
             }
-            let t = Transform2D {
-                m: [args[0], args[1], args[2], args[3], args[4], args[5]],
-            };
-            result = result.then(&t);
-            remaining = rest;
+            (
+                Transform2D {
+                    m: [args[0], args[1], args[2], args[3], args[4], args[5]],
+                },
+                rest,
+            )
         } else if let Some(rest) = remaining.strip_prefix("skewX") {
             let (args, rest) = parse_transform_args(rest)?;
             let angle = args.first().copied().unwrap_or(0.0).to_radians();
-            let t = Transform2D {
-                m: [1.0, 0.0, angle.tan(), 1.0, 0.0, 0.0],
-            };
-            result = result.then(&t);
-            remaining = rest;
+            (
+                Transform2D {
+                    m: [1.0, 0.0, angle.tan(), 1.0, 0.0, 0.0],
+                },
+                rest,
+            )
         } else if let Some(rest) = remaining.strip_prefix("skewY") {
             let (args, rest) = parse_transform_args(rest)?;
             let angle = args.first().copied().unwrap_or(0.0).to_radians();
-            let t = Transform2D {
-                m: [1.0, angle.tan(), 0.0, 1.0, 0.0, 0.0],
-            };
-            result = result.then(&t);
-            remaining = rest;
+            (
+                Transform2D {
+                    m: [1.0, angle.tan(), 0.0, 1.0, 0.0, 0.0],
+                },
+                rest,
+            )
         } else {
             return Err(SvgParseError::InvalidTransform(format!(
                 "unrecognized transform: {remaining}"
             )));
-        }
+        };
 
-        // Skip optional comma/whitespace between transforms
-        remaining = remaining.trim_start();
+        result = op.then(&result);
+
+        // Skip optional comma/whitespace between transforms.
+        remaining = rest.trim_start();
         remaining = remaining.strip_prefix(',').unwrap_or(remaining);
     }
 
@@ -1749,6 +1757,53 @@ mod tests {
             Some(PathCommand::MoveTo(p)) => {
                 assert!((p.x - 20.0).abs() < 0.01, "x should be 20, got {}", p.x);
                 assert!((p.y - 10.0).abs() < 0.01, "y should be 10, got {}", p.y);
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multi_op_transform_applies_left_to_right() {
+        // "translate(10,0) scale(2)" = translate·scale, so a point scales
+        // first then translates: (5,5) → (10,10) → (20,10). (The reversed
+        // order would give (30,10).)
+        let svg = r#"<svg viewBox="0 0 100 100">
+            <g transform="translate(10,0) scale(2)">
+                <rect x="5" y="5" width="1" height="1"/>
+            </g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        match icon.raw_path().commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!(
+                    (p.x - 20.0).abs() < 0.01 && (p.y - 10.0).abs() < 0.01,
+                    "expected (20,10), got ({},{})",
+                    p.x,
+                    p.y
+                );
+            }
+            other => panic!("expected MoveTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rotate_around_center_uses_correct_pivot() {
+        // rotate(90 10 10) of (20,10): relative to the pivot (10,0), a 90°
+        // (clockwise, y-down) rotation gives (0,10), + pivot → (10,20).
+        let svg = r#"<svg viewBox="0 0 100 100">
+            <g transform="rotate(90 10 10)">
+                <rect x="20" y="10" width="1" height="1"/>
+            </g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        match icon.raw_path().commands.first() {
+            Some(PathCommand::MoveTo(p)) => {
+                assert!(
+                    (p.x - 10.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01,
+                    "expected (10,20), got ({},{})",
+                    p.x,
+                    p.y
+                );
             }
             other => panic!("expected MoveTo, got {other:?}"),
         }
