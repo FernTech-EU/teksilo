@@ -226,6 +226,9 @@ pub struct GridView<T: 'static> {
     // Activation / context menu / type-ahead
     #[allow(clippy::type_complexity)]
     on_tile_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
+    /// Whether tile activation is a single or double click (default
+    /// `DoubleClick`). Enter always activates.
+    activate_on: crate::data_views::ActivateOn,
     #[allow(clippy::type_complexity)]
     tile_context_menu: Option<
         Rc<
@@ -339,6 +342,7 @@ impl<T: 'static> GridView<T> {
             insertion: Signal::new(None),
             model_id: next_grid_id(),
             on_tile_activate: None,
+            activate_on: crate::data_views::ActivateOn::default(),
             tile_context_menu: None,
             type_ahead_timeout: std::time::Duration::from_millis(500),
             type_ahead_label: None,
@@ -680,13 +684,22 @@ impl<T: 'static> GridView<T> {
 
     // ── Activation / context menu / type-ahead / loading ────────────────
 
-    /// Called when a tile is activated (double-click or Enter on the focused
-    /// tile) — the "open / default action", distinct from selection.
+    /// Called when a tile is activated (a click per [`activate_on`](Self::activate_on),
+    /// or Enter on the focused tile) — the "open / default action", distinct
+    /// from selection.
     pub fn on_tile_activate(
         mut self,
         f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
         self.on_tile_activate = Some(Rc::new(f));
+        self
+    }
+
+    /// Choose single- vs double-click tile activation (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter activates in either
+    /// mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
         self
     }
 
@@ -1072,9 +1085,11 @@ impl<T: 'static> Widget for GridView<T> {
                 selection: self.selection.clone(),
                 focused_index: self.focused_index.clone(),
                 on_tile_activate: self.on_tile_activate.clone(),
+                activate_on: self.activate_on,
                 tile_context_menu: self.tile_context_menu.clone(),
                 reorderable: self.reorderable,
                 model_id: self.model_id,
+                scope_owner: ctx.self_id(),
                 drag_fn: self.source.dnd.drag_fn.clone(),
                 row_state_fn: self.source.dnd.row_state_fn.clone(),
                 request_window_fn: self.source.dnd.request_window_fn.clone(),
@@ -1096,6 +1111,12 @@ impl<T: 'static> Widget for GridView<T> {
 
             let overlay = GridOverlay {
                 focused_index: self.focused_index.clone(),
+                // Grid root's inclusive focus signal (stack empty here → resolves
+                // to this root) + input modality, so the ring is keyboard-only
+                // and hides when the grid loses focus.
+                view_focused: ctx.focus_scope_active(),
+                focus_visible: ctx.focus_visible(),
+                selection: self.selection.clone(),
                 scroll_y: self.scroll_y.clone(),
                 strategy: strategy.clone(),
                 viewport_width: self.viewport_width.clone(),
@@ -1362,6 +1383,17 @@ impl<T: 'static> Widget for GridView<T> {
 /// ambiguity — a last sibling always paints over the tiles.
 struct GridOverlay {
     focused_index: Signal<Option<usize>>,
+    /// `true` while the grid (its root or a descendant) holds keyboard focus —
+    /// the grid root's inclusive [`BuildContext::focus_scope_active`] signal.
+    /// Gates the focus ring so an unfocused grid shows none.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible`. Gates the focus ring to keyboard
+    /// navigation, never a mouse click.
+    focus_visible: Signal<bool>,
+    /// The grid's selection, for the **container focus ring**: when the grid is
+    /// keyboard-focused but has no current tile *and* nothing is selected, no
+    /// tile chrome marks the focus, so the whole grid outlines itself instead.
+    selection: Option<SelectionModel>,
     scroll_y: Signal<f32>,
     strategy: Rc<dyn GridLayoutStrategy>,
     viewport_width: Rc<Cell<f32>>,
@@ -1417,6 +1449,23 @@ impl Widget for GridOverlay {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        if let Some(ref sel) = self.selection {
+            sel.selection_signal().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::RepaintOnly,
+            );
+        }
         self.marquee.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -1476,8 +1525,27 @@ impl Widget for GridOverlay {
             }
         }
 
-        // Focus ring.
+        // Focus ring — keyboard-only (`:focus-visible`) and only while the grid
+        // holds focus, so a mouse click never leaves a ring.
+        if !self.view_focused.get() || !self.focus_visible.get() {
+            return;
+        }
         let Some(idx) = self.focused_index.get() else {
+            // No current tile. If nothing is selected either, no tile chrome
+            // marks the focus — outline the whole grid so a Tab-focused empty
+            // grid still shows where focus landed (mirrors TreeView / ListView).
+            let empty = self.selection.as_ref().map_or(true, |s| s.count() == 0);
+            if empty {
+                let inset = 1.0_f32;
+                let rect = Rect::new(
+                    bounds.x + inset,
+                    bounds.y + inset,
+                    (bounds.width - inset * 2.0).max(0.0),
+                    (bounds.height - inset * 2.0).max(0.0),
+                );
+                let color = bastyde_tokens::BorderRole::Focused.resolve(&ctx.theme.colors);
+                canvas.stroke_rect(rect, color, 1.5);
+            }
             return;
         };
         let vp_w = bounds.width;

@@ -20,7 +20,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
-use bastyde_tokens::Easing;
+use bastyde_tokens::{BorderRole, Easing};
 
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -121,6 +121,22 @@ pub struct ListView<T: 'static> {
     drop_feedback: Signal<Option<(f32, f32)>>, // (y, width) for insertion line
     /// Content width (updated during place_children, used by drag feedback).
     placed_content_width: Rc<Cell<f32>>,
+
+    /// Optional row-activation callback (a click per `activate_on`, or
+    /// Enter/Space on the focused row) — distinct from *selection*, which also
+    /// moves on arrow navigation.
+    on_activate: Option<Rc<dyn Fn(usize)>>,
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    activate_on: crate::data_views::ActivateOn,
+
+    /// `true` while the view holds keyboard focus (root's inclusive
+    /// [`BuildContext::focus_scope_active`] signal). With `focus_visible`, drives
+    /// the **container focus ring** shown when the view is Tab-focused but
+    /// nothing is selected. Bound `RepaintOnly`.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible` — gates the container ring to keyboard
+    /// navigation. Bound `RepaintOnly`.
+    focus_visible: Signal<bool>,
 
     /// Rebuild trigger. A persistent field (re-bound each build) so
     /// `place_children`'s post-measure realization re-check can request
@@ -235,7 +251,12 @@ impl<T: 'static> ListView<T> {
             reorderable: false,
             show_scrollbar: true,
             drop_feedback: Signal::new(None),
+            // Replaced at build with the live tree signals.
+            view_focused: Signal::new(false),
+            focus_visible: Signal::new(false),
             placed_content_width: Rc::new(Cell::new(0.0)),
+            on_activate: None,
+            activate_on: crate::data_views::ActivateOn::default(),
             overscroll_behavior: OverscrollBehavior::default(),
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
@@ -346,6 +367,23 @@ impl<T: 'static> ListView<T> {
     /// Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Set the row-**activation** handler — invoked with the flat row index on a
+    /// click (per [`activate_on`](Self::activate_on)) or Enter/Space on the
+    /// focused row. Distinct from *selection*: arrow-key navigation moves the
+    /// selection but does **not** activate.
+    pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
+        self.on_activate = Some(Rc::new(f));
+        self
+    }
+
+    /// Choose single- vs double-click activation (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter/Space activates in
+    /// either mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
         self
     }
 
@@ -477,6 +515,21 @@ impl<T: 'static> Widget for ListView<T> {
         // on_drag_hover / on_drag_leave dirty the ListView's paint cache
         // without triggering a rebuild.
         self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
+        // Focus signals for the container ring (see TreeView). `RepaintOnly` so
+        // focus-in/out redraws; selection-emptiness changes already rebuild.
+        self.view_focused = ctx.focus_scope_active();
+        self.focus_visible = ctx.focus_visible();
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
@@ -614,6 +667,7 @@ impl<T: 'static> Widget for ListView<T> {
             let accept_drop_for_key = self.source.dnd.accept_drop_fn.clone();
             let view_id_for_key = self.model_id;
             let sel_for_key = self.row_selection.clone();
+            let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
@@ -679,6 +733,10 @@ impl<T: 'static> Widget for ListView<T> {
                         bastyde_core::event::Key::Enter | bastyde_core::event::Key::Space => {
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(current);
+                            }
+                            // Enter/Space activates the focused row (open/commit).
+                            if let Some(ref cb) = activate_key {
+                                cb(current);
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
@@ -835,6 +893,7 @@ impl<T: 'static> Widget for ListView<T> {
         let model_id = self.model_id;
         let self_id = ctx.self_id();
         let row_state_fn = self.source.dnd.row_state_fn.clone();
+        ctx.begin_focus_scope();
         for i in start..end {
             let selected = selection
                 .as_ref()
@@ -888,6 +947,24 @@ impl<T: 'static> Widget for ListView<T> {
                     );
                 }
 
+                // Row activation (open/commit) — a gesture, so it arbitrates
+                // against the reorder drag via the gesture arena (a click
+                // activates, a drag does not). `SingleClick` → `on_tap`,
+                // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
+                if let Some(ref cb) = self.on_activate {
+                    let cb = cb.clone();
+                    let activate_index = i;
+                    let handlers = match self.activate_on {
+                        crate::data_views::ActivateOn::SingleClick => {
+                            HandlerSet::new().on_tap(move |_tap, _ctx| cb(activate_index))
+                        }
+                        crate::data_views::ActivateOn::DoubleClick => {
+                            HandlerSet::new().on_double_tap(move |_tap, _ctx| cb(activate_index))
+                        }
+                    };
+                    ctx.apply_handlers(child_id, handlers);
+                }
+
                 // When reorderable, attach an on_drag handler to start drag.
                 // The preview is a fresh copy of the delegate's widget for the
                 // dragged item, wrapped in a sized+raised `DragPreview` so the
@@ -939,6 +1016,7 @@ impl<T: 'static> Widget for ListView<T> {
                 self.item_entries.push((i, child_id));
             }
         }
+        ctx.end_focus_scope();
 
         // --- Create scrollbar ---
         // Skipped when the caller opted out via `show_scrollbar(false)`
@@ -1134,6 +1212,24 @@ impl<T: 'static> Widget for ListView<T> {
                 color,
             );
             canvas.clear_clip();
+        }
+
+        // Container focus ring — keyboard focus landed but nothing is selected,
+        // so no row ring shows; outline the whole view (see TreeView).
+        let has_selection = self
+            .row_selection
+            .as_ref()
+            .is_some_and(|s| !s.selected_indices().is_empty());
+        if self.view_focused.get() && self.focus_visible.get() && !has_selection {
+            let color = BorderRole::Focused.resolve(&ctx.theme.colors);
+            let inset = 1.0_f32;
+            let rect = Rect::new(
+                bounds.x + inset,
+                bounds.y + inset,
+                (bounds.width - inset * 2.0).max(0.0),
+                (bounds.height - inset * 2.0).max(0.0),
+            );
+            canvas.stroke_rect(rect, color, 1.5);
         }
     }
 

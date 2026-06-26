@@ -27,6 +27,20 @@ use bastyde_data::{
     DataChange, DropPosition, ItemKey, KeyedSelectionModel, SelectionMode, SelectionModel,
 };
 
+/// How a data-view row/tile is *activated* (opened/committed) by pointer —
+/// distinct from *selection*, which also moves on arrow-key navigation. Mirrors
+/// the platform split other toolkits expose (Qt
+/// `SH_ItemView_ActivateItemOnSingleClick`, GTK `activate-on-single-click`).
+/// Enter/Space always activates regardless of this mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivateOn {
+    /// Activate on a single primary click (KDE / web / Scrivener convention).
+    SingleClick,
+    /// Activate on a double primary click (Finder / Explorer / Qt & GTK default).
+    #[default]
+    DoubleClick,
+}
+
 /// The intra-app drag payload a data-view row emits. Non-generic: the receiving
 /// source compares `source_view_id` to decide SameView-vs-Foreign and maps
 /// `source_index` → its own key.

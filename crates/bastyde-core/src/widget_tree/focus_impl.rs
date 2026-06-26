@@ -44,6 +44,7 @@ impl WidgetTree {
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
         self.update_focus_within_signals(previously_focused, Some(id));
+        self.update_scope_focus_signals(previously_focused, Some(id));
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin }, &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
@@ -182,6 +183,13 @@ impl WidgetTree {
     /// How the currently focused widget gained focus.
     pub fn focus_origin(&self) -> Option<crate::focus::FocusOrigin> {
         self.focus_origin
+    }
+
+    /// Input-modality "focus-visible" signal: `true` after keyboard input,
+    /// `false` after pointer input. Focus rings observe this so they show only
+    /// during keyboard navigation. See [`BuildContext::focus_visible`].
+    pub fn focus_visible_signal(&self) -> crate::signal::Signal<bool> {
+        self.focus_visible.clone()
     }
 
     /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab).
@@ -361,6 +369,94 @@ impl WidgetTree {
                 sig.set(true);
             }
         }
+    }
+
+    /// Inclusive ancestor chain of `id`: `id` itself, then its strict
+    /// ancestors. Empty when `id` is `None`.
+    pub(super) fn inclusive_ancestors_of(&self, id: Option<WidgetId>) -> Vec<WidgetId> {
+        let mut chain = Vec::new();
+        if let Some(start) = id {
+            chain.push(start);
+            chain.extend(self.strict_ancestors_of(Some(start)));
+        }
+        chain
+    }
+
+    /// Mirror of [`update_focus_within_signals`](Self::update_focus_within_signals)
+    /// for `scope_focus_signal`, using *inclusive* ancestor chains — so a node
+    /// that is itself the focused widget (e.g. a data view holding focus
+    /// directly) sees its own scope signal flip `true`.
+    pub(crate) fn update_scope_focus_signals(
+        &mut self,
+        old: Option<WidgetId>,
+        new: Option<WidgetId>,
+    ) {
+        let old_chain = self.inclusive_ancestors_of(old);
+        let new_chain = self.inclusive_ancestors_of(new);
+        for &id in &old_chain {
+            if !new_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.scope_focus_signal.clone()
+            {
+                sig.set(false);
+            }
+        }
+        for &id in &new_chain {
+            if !old_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.scope_focus_signal.clone()
+            {
+                sig.set(true);
+            }
+        }
+    }
+
+    /// Get-or-create the `scope_focus_signal` on `node_id`, initialised to the
+    /// node's current focus-containment (`focused` is `node_id` or a descendant).
+    pub(crate) fn scope_focus_signal_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+        if let Some(node) = self.arena.get(node_id)
+            && let Some(sig) = node.scope_focus_signal.clone()
+        {
+            return sig;
+        }
+        let active = self.inclusive_ancestors_of(self.focused).contains(&node_id);
+        let sig = crate::signal::Signal::new(active);
+        if let Some(node) = self.arena.get_mut(node_id) {
+            node.scope_focus_signal = Some(sig.clone());
+        }
+        sig
+    }
+
+    /// Reactive signal that is `true` when the nearest focusable ancestor of
+    /// `node_id` (its "focus scope" — e.g. the enclosing data view) holds
+    /// keyboard focus. With no focusable ancestor, returns a constant-`true`
+    /// signal so selection renders active (the legacy behaviour for items
+    /// outside any focus scope). Drives focus-aware selection in `StandardItem`.
+    pub fn focus_scope_active_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+        match self.find_focusable_at_or_above(node_id) {
+            Some(scope) => self.scope_focus_signal_for(scope),
+            None => crate::signal::Signal::new(true),
+        }
+    }
+
+    /// Push `node_id`'s focus scope onto the build-time scope stack (creating its
+    /// `scope_focus_signal` if absent) so descendants built before arena
+    /// parenting is wired (docked / virtualized rows) still read the correct
+    /// view focus. Pair with [`end_focus_scope`](Self::end_focus_scope).
+    pub fn begin_focus_scope(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+        let sig = self.scope_focus_signal_for(node_id);
+        self.focus_scope_stack.push(sig.clone());
+        sig
+    }
+
+    /// Pop the innermost focus scope pushed by [`begin_focus_scope`].
+    pub fn end_focus_scope(&mut self) {
+        self.focus_scope_stack.pop();
+    }
+
+    /// The innermost active build-time focus scope, if any.
+    pub fn current_focus_scope(&self) -> Option<crate::signal::Signal<bool>> {
+        self.focus_scope_stack.last().cloned()
     }
 
     /// Single point of mutation for `self.hovered`. Updates both the
@@ -702,6 +798,100 @@ mod tests {
             !halo.get(),
             "focusing the widget itself must not set its own focus_within"
         );
+    }
+
+    #[test]
+    fn focus_scope_active_is_inclusive_for_the_view_itself() {
+        // A non-focusable item inside a focusable "view" reads the view's scope
+        // focus: true when the view OR a descendant holds focus (inclusive),
+        // unlike `focus_within` (strict descendants only). This is what powers
+        // focus-aware selection — the data view holds focus directly, yet its
+        // selected rows must still render "active".
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let item = tree.add(FillWidget::new()); // a row item — NOT focusable
+        let view = tree.add(StackWidget::new().add_child(item).focusable(true));
+        let outside = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let active = tree.focus_scope_active_for(item);
+        assert!(!active.get(), "no focus yet → scope inactive");
+
+        tree.focus(view);
+        assert!(
+            active.get(),
+            "view focused directly → scope active (focus_within would be false here)"
+        );
+
+        tree.focus(outside);
+        assert!(!active.get(), "focus moved outside the view → scope inactive");
+    }
+
+    #[test]
+    fn begin_focus_scope_for_keys_on_the_view_root_not_the_building_pane() {
+        // TableView / TreeTableView / GridView build their rows inside a
+        // separate, non-focusable body *pane*; keyboard focus lands on the
+        // focusable view *root* (the pane's ancestor). A row's focus scope must
+        // therefore be keyed on the root via `begin_focus_scope_for(root)`, so
+        // its selection reads "active" when the view is focused. Keying on the
+        // pane — which never holds focus and is not an ancestor of the focused
+        // root — would read constant-false (the latent bug this fixes).
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new()); // row item — NOT focusable
+        let pane = tree.add(StackWidget::new().add_child(row)); // body pane — NOT focusable
+        let root = tree.add(StackWidget::new().add_child(pane).focusable(true));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // What the pane opens for its rows: a scope keyed on the root.
+        let keyed_on_root = tree.begin_focus_scope(root);
+        tree.end_focus_scope();
+        // What keying on the pane itself would have produced (the bug).
+        let keyed_on_pane = tree.scope_focus_signal_for(pane);
+
+        assert!(!keyed_on_root.get(), "no focus yet → inactive");
+        tree.focus(root);
+        assert!(keyed_on_root.get(), "view root focused → row scope active");
+        assert!(
+            !keyed_on_pane.get(),
+            "pane-keyed scope stays false: the focused root is the pane's ancestor, not its descendant",
+        );
+    }
+
+    #[test]
+    fn focus_visible_tracks_input_modality() {
+        // `:focus-visible` — keyboard input reveals focus rings, pointer input
+        // hides them. The recipe gates the row focus ring on this signal.
+        use crate::event::{Key, Modifiers};
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new();
+        let w = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let vis = tree.focus_visible_signal();
+        assert!(!vis.get(), "starts not focus-visible");
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert!(vis.get(), "keyboard input turns focus-visible ON");
+
+        tree.click(w);
+        assert!(!vis.get(), "pointer input turns focus-visible OFF");
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(vis.get(), "keyboard input turns it back ON");
+    }
+
+    #[test]
+    fn focus_scope_active_without_focusable_ancestor_is_constant_true() {
+        // An item with no focusable ancestor (e.g. a static list) always reads
+        // active, so its selection chrome is never muted.
+        let mut tree = WidgetTree::new();
+        let item = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(tree.focus_scope_active_for(item).get());
     }
 
     #[test]

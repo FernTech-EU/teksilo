@@ -247,6 +247,21 @@ pub struct TableView<T: 'static> {
     /// Reactive (`RepaintOnly`) so a `set(...)` dirties the table.
     drop_feedback: Signal<Option<(f32, f32)>>,
 
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    activate_on: crate::data_views::ActivateOn,
+
+    /// `true` while this view — its root or any descendant (e.g. a cell
+    /// editor) — holds keyboard focus. Captured at build from
+    /// [`BuildContext::focus_scope_active`] and bound `RepaintOnly`. Drives
+    /// **focus-aware selection**: the selection band paints with the active
+    /// `Selected` chrome while focused and the muted `SelectedInactive` chrome
+    /// once focus leaves the table — the standard desktop affordance.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible` — `true` after keyboard input, `false`
+    /// after a pointer press. Gates the cell focus ring so it shows only
+    /// during keyboard navigation, never on a mouse click. Bound `RepaintOnly`.
+    focus_visible: Signal<bool>,
+
     // Build state
     header_row_id: Option<WidgetId>,
     body_pane_id: Option<WidgetId>,
@@ -393,6 +408,10 @@ impl<T: 'static> TableView<T> {
             column_order_signal: Signal::new(Vec::new()),
             column_pinning_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
+            // Replaced at build with the live tree signals; the defaults are
+            // only the pre-build values (treat as focused, pointer modality).
+            view_focused: Signal::new(true),
+            focus_visible: Signal::new(false),
             tab_traversal: TabTraversal::default(),
             editing_cell: Signal::new(None),
             edit_trigger: EditTrigger::default(),
@@ -401,6 +420,7 @@ impl<T: 'static> TableView<T> {
             on_row_activate: None,
             reorderable_rows: false,
             drop_feedback: Signal::new(None),
+            activate_on: crate::data_views::ActivateOn::default(),
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
@@ -561,6 +581,14 @@ impl<T: 'static> TableView<T> {
     /// rejects them, an external source decides.
     pub fn reorderable_rows(mut self, enabled: bool) -> Self {
         self.reorderable_rows = enabled;
+        self
+    }
+
+    /// Choose single- vs double-click activation for `on_row_activate` (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter/Space activates in
+    /// either mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
         self
     }
 
@@ -1143,6 +1171,25 @@ impl<T: 'static> Widget for TableView<T> {
             BindingLevel::RepaintOnly,
         );
 
+        // Focus-aware selection + modality-gated focus ring. `focus_scope_active`
+        // resolves (stack empty here) to this root's inclusive focus signal —
+        // `true` whenever the table or any descendant holds focus — so the
+        // selection band dims to `SelectedInactive` on focus-out. `focus_visible`
+        // gates the cell ring to keyboard navigation. Both bound `RepaintOnly`:
+        // a focus/modality change redraws the decorations without a rebuild.
+        self.view_focused = ctx.focus_scope_active();
+        self.focus_visible = ctx.focus_visible();
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
         // Build the navigator + key handler. The keyboard module is
         // generic over RowNavigator so TreeTableView can plug in its own
         // tree-aware navigator.
@@ -1507,6 +1554,8 @@ impl<T: 'static> Widget for TableView<T> {
                 reorderable_rows: self.reorderable_rows,
                 view_id: self.table_id,
                 drag_anchor: ctx.self_id(),
+                on_row_activate: self.on_row_activate.clone(),
+                activate_on: self.activate_on,
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
                 prev_built_end: self.pane_built_end.clone(),
@@ -1758,7 +1807,13 @@ impl<T: 'static> Widget for TableView<T> {
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
             )
         {
-            let bg = SurfaceRole::Selected.resolve(colors);
+            // Focus-aware: active `Selected` while the table holds keyboard
+            // focus, muted `SelectedInactive` once focus moves elsewhere.
+            let bg = if self.view_focused.get() {
+                SurfaceRole::Selected.resolve(colors)
+            } else {
+                SurfaceRole::SelectedInactive.resolve(colors)
+            };
             let mut m = self.row_metrics.borrow_mut();
             for row_idx in sel.selected_indices() {
                 let y = body_origin_y + m.row_top(row_idx) - scroll_y;
@@ -1811,8 +1866,12 @@ impl<T: 'static> Widget for TableView<T> {
             }
         }
 
-        // Focus ring on the currently-focused cell.
-        if let Some((focus_row, focus_col)) = self.focused_cell.get()
+        // Focus ring on the currently-focused cell — keyboard-only
+        // (`:focus-visible`) and only while the table itself holds focus, so a
+        // mouse click never leaves a ring and an unfocused table shows none.
+        if self.view_focused.get()
+            && self.focus_visible.get()
+            && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
         {
             let mut x_off = 0.0_f32;
@@ -1865,6 +1924,27 @@ impl<T: 'static> Widget for TableView<T> {
         }
 
         canvas.clear_clip();
+
+        // Container focus ring — the table holds keyboard focus but nothing
+        // indicates where: no current cell (no cell ring) and no selection (no
+        // band). Outline the whole view so Tab has a visible landing point
+        // before the user navigates (mirrors TreeView / ListView).
+        let nothing_indicated = self.focused_cell.get().is_none()
+            && self
+                .row_selection
+                .as_ref()
+                .map_or(true, |s| s.selected_indices().is_empty())
+            && self.cell_selection.as_ref().map_or(true, |s| s.count() == 0);
+        if self.view_focused.get() && self.focus_visible.get() && nothing_indicated {
+            let inset = 1.0_f32;
+            let rect = Rect::new(
+                bounds.x + inset,
+                bounds.y + inset,
+                (bounds.width - inset * 2.0).max(0.0),
+                (bounds.height - inset * 2.0).max(0.0),
+            );
+            canvas.stroke_rect(rect, BorderRole::Focused.resolve(colors), 1.5);
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

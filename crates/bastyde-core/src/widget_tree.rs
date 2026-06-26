@@ -124,6 +124,18 @@ pub struct WidgetTree {
     tooltips: Vec<TooltipEntry>,
     /// How the currently focused widget gained focus.
     focus_origin: Option<crate::focus::FocusOrigin>,
+    /// Input-modality "focus-visible" state: `true` after keyboard input,
+    /// `false` after pointer input. Focus rings (e.g. `StandardItem`'s current
+    /// row) show only while this is `true`, the standard `:focus-visible`
+    /// behaviour — so a mouse click selects without a ring, and keyboard
+    /// navigation reveals it.
+    focus_visible: crate::signal::Signal<bool>,
+    /// Active focus-scope stack during build. A data view pushes its scope
+    /// (`begin_focus_scope`) around its row loop so each row reads *its view's*
+    /// focus deterministically — independent of arena parenting, which may not
+    /// be wired yet while rows build (docked / virtualized content). Drives
+    /// focus-aware selection + focus rings in `StandardItem`.
+    focus_scope_stack: Vec<crate::signal::Signal<bool>>,
     /// Layout direction for RTL/LTR support.
     layout_direction: crate::environment::LayoutDirection,
     /// Animation scheduler for smooth animated state and signal transitions.
@@ -395,6 +407,8 @@ impl WidgetTree {
             focused_signal: crate::signal::Signal::new(None),
             hovered: None,
             hovered_signal: crate::signal::Signal::new(None),
+            focus_visible: crate::signal::Signal::new(false),
+            focus_scope_stack: Vec::new(),
             last_pointer_position: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
@@ -1284,6 +1298,7 @@ impl WidgetTree {
             self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
+            self.update_scope_focus_signals(old, None);
         }
         if self.focused.is_none() {
             self.focus_origin = None;
@@ -1562,6 +1577,7 @@ impl WidgetTree {
             self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
+            self.update_scope_focus_signals(old, None);
         }
         if self.hovered == Some(widget_id) {
             let old = self.hovered;

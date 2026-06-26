@@ -82,6 +82,13 @@ pub(crate) struct BodyPane<T: 'static> {
     /// `RowDrag` payload so the source can tell a same-view reorder from a
     /// foreign drop.
     pub(crate) view_id: usize,
+
+    /// Optional row-activation callback (a click per `activate_on`, or
+    /// Enter/Space on the focused row) — distinct from *selection*, which also
+    /// moves on arrow navigation.
+    pub(crate) on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    pub(crate) activate_on: crate::data_views::ActivateOn,
     /// Anchor used by row drag-start to identify the source. Captured
     /// at construction so the closure stays `'static`.
     pub(crate) drag_anchor: WidgetId,
@@ -212,6 +219,10 @@ impl<T: 'static> Widget for BodyPane<T> {
         let row_widths_handle = self.column_widths.clone();
         let selection_mode = self.selection_mode;
 
+        // Key the row focus scope on the table's focusable root (`drag_anchor`),
+        // not this pane — keyboard focus lands on the root, so a `StandardItem`
+        // cell's focus-aware selection must track the root's focus.
+        ctx.begin_focus_scope_for(self.drag_anchor);
         for row_idx in start..end {
             let row_selected_for_a11y = match (selection_mode, &self.selection) {
                 (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
@@ -456,10 +467,28 @@ impl<T: 'static> Widget for BodyPane<T> {
                     }
                 });
             }
+            // Row activation (open/commit) — a gesture, so it arbitrates
+            // against the reorder drag via the gesture arena (a click
+            // activates, a drag does not). `SingleClick` → `on_tap`,
+            // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
+            if let Some(ref cb) = self.on_row_activate {
+                let cb = cb.clone();
+                let activate_index = row_idx;
+                let handlers = match self.activate_on {
+                    crate::data_views::ActivateOn::SingleClick => {
+                        HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
+                    }
+                    crate::data_views::ActivateOn::DoubleClick => {
+                        HandlerSet::new().on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
+                    }
+                };
+                ctx.apply_handlers(row_id, handlers);
+            }
             ctx.apply_handlers(row_id, row_handlers);
 
             self.row_entries.push((row_idx, row_id));
         }
+        ctx.end_focus_scope();
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

@@ -303,6 +303,62 @@ impl<'a> BuildContext<'a> {
         self.tree.activation_signal(id)
     }
 
+    /// Reactive `Signal<bool>` that is `true` while the *focus scope* containing
+    /// the widget being built — its nearest focusable ancestor, e.g. the
+    /// enclosing `ListView` / `TreeView` — holds keyboard focus. Items outside
+    /// any focusable scope read a constant `true`.
+    ///
+    /// Drives **focus-aware selection**: a selected row renders with the active
+    /// `Selected` chrome while its view has focus and the muted
+    /// `SelectedInactive` chrome when focus moves elsewhere — the standard
+    /// desktop affordance (Qt `SH_ItemView_...`, macOS inactive selection) that
+    /// shows where the keyboard is. The scope is resolved at build time but the
+    /// signal stays live across focus changes.
+    pub fn focus_scope_active(&mut self) -> Signal<bool> {
+        // Prefer the scope a containing data view explicitly established for its
+        // rows (deterministic, parenting-independent); else resolve by walking
+        // to the nearest focusable ancestor.
+        if let Some(scope) = self.tree.current_focus_scope() {
+            return scope;
+        }
+        let id = self.self_id();
+        self.tree.focus_scope_active_for(id)
+    }
+
+    /// Mark the widget being built as a **focus scope** for the rows/items it
+    /// builds next: any descendant's [`focus_scope_active`](Self::focus_scope_active)
+    /// (and `StandardItem`'s focus-aware selection / focus ring) reads *this*
+    /// widget's keyboard focus. A data view calls this around its row loop, then
+    /// [`end_focus_scope`](Self::end_focus_scope). Deterministic — unaffected by
+    /// arena parenting, which may not be wired while docked/virtualized rows build.
+    pub fn begin_focus_scope(&mut self) -> Signal<bool> {
+        let id = self.self_id();
+        self.tree.begin_focus_scope(id)
+    }
+
+    /// Like [`begin_focus_scope`](Self::begin_focus_scope) but keys the scope on
+    /// an explicit `node_id` rather than the widget being built. A view whose
+    /// rows are built by a **separate body-pane widget** (TableView /
+    /// TreeTableView / GridView) passes its own focusable root id so descendant
+    /// items resolve the *root's* keyboard focus — not the pane's, which is a
+    /// child of the root and so never holds focus itself.
+    pub fn begin_focus_scope_for(&mut self, node_id: WidgetId) -> Signal<bool> {
+        self.tree.begin_focus_scope(node_id)
+    }
+
+    /// End the focus scope opened by [`begin_focus_scope`](Self::begin_focus_scope).
+    pub fn end_focus_scope(&mut self) {
+        self.tree.end_focus_scope();
+    }
+
+    /// Input-modality "focus-visible" signal — `true` after keyboard input,
+    /// `false` after pointer input (the standard `:focus-visible` rule). Pair
+    /// with [`focus_scope_active`](Self::focus_scope_active) to draw a focus
+    /// ring only during keyboard navigation, not on mouse clicks.
+    pub fn focus_visible(&self) -> Signal<bool> {
+        self.tree.focus_visible_signal()
+    }
+
     /// Bind an opacity multiplier (0..1) to a widget. The render walker
     /// emits `SetOpacity(value)` before painting the widget's subtree
     /// and `RestoreOpacity` afterwards, so the multiplier composes

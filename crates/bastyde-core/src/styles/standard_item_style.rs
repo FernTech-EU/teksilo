@@ -27,6 +27,10 @@ pub struct StandardItemStyleConfig {
     pub is_hovered: Signal<bool>,
     pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
+    /// Input-modality "focus-visible": `true` after keyboard input. A focus ring
+    /// should render only when this and `is_focused` are both true, so a mouse
+    /// click selects without a ring while keyboard navigation reveals one.
+    pub is_focus_visible: Signal<bool>,
     pub is_disabled: Signal<bool>,
 }
 

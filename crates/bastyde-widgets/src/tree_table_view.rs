@@ -215,6 +215,18 @@ pub struct TreeTableView<T: 'static> {
     /// `on_drag_hover`, cleared on leave / drop, read by `paint`.
     drop_feedback: Signal<Option<(f32, f32)>>,
 
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    activate_on: crate::data_views::ActivateOn,
+
+    /// `true` while this view — its root or any descendant — holds keyboard
+    /// focus. Captured at build from [`BuildContext::focus_scope_active`], bound
+    /// `RepaintOnly`. Drives focus-aware selection: the band paints `Selected`
+    /// while focused, muted `SelectedInactive` once focus leaves the view.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible`. Gates the cell focus ring to keyboard
+    /// navigation (never a mouse click). Bound `RepaintOnly`.
+    focus_visible: Signal<bool>,
+
     // Layout state
     column_widths: SharedColumnWidths,
     display_indices: Rc<RefCell<Vec<usize>>>,
@@ -253,6 +265,7 @@ impl<T: 'static> TreeTableView<T> {
             on_row_activate: None,
             reorderable: false,
             drop_feedback: Signal::new(None),
+            activate_on: crate::data_views::ActivateOn::default(),
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             scroll_bar_style: ScrollBarMode::Permanent,
@@ -266,6 +279,9 @@ impl<T: 'static> TreeTableView<T> {
             column_pinning_signal: Signal::new(HashMap::new()),
             filters_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
+            // Replaced at build with the live tree signals.
+            view_focused: Signal::new(true),
+            focus_visible: Signal::new(false),
             editing_cell: Signal::new(None),
             header_row_id: None,
             body_pane_id: None,
@@ -336,6 +352,14 @@ impl<T: 'static> TreeTableView<T> {
     /// by the sort, a manual reorder would have no visible effect.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Choose single- vs double-click activation for `on_row_activate` (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter/Space activates in
+    /// either mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
         self
     }
 
@@ -725,6 +749,22 @@ impl<T: 'static> Widget for TreeTableView<T> {
             BindingLevel::Relayout,
         );
         self.focused_cell.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
+        // Focus-aware selection + modality-gated focus ring (mirrors TableView).
+        // `focus_scope_active` resolves to this root's inclusive focus signal;
+        // `focus_visible` is the keyboard/pointer modality. Both `RepaintOnly`.
+        self.view_focused = ctx.focus_scope_active();
+        self.focus_visible = ctx.focus_visible();
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
@@ -1170,6 +1210,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 reorderable: self.reorderable,
                 table_id: self.table_id,
                 drag_anchor: ctx.self_id(),
+                on_row_activate: self.on_row_activate.clone(),
+                activate_on: self.activate_on,
                 version: self.pane_version.clone(),
                 prev_built_start: self.pane_built_start.clone(),
                 prev_built_end: self.pane_built_end.clone(),
@@ -1384,7 +1426,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
             )
         {
-            let bg = SurfaceRole::Selected.resolve(colors);
+            // Focus-aware: active while the view holds focus, muted otherwise.
+            let bg = if self.view_focused.get() {
+                SurfaceRole::Selected.resolve(colors)
+            } else {
+                SurfaceRole::SelectedInactive.resolve(colors)
+            };
             let mut m = self.row_metrics.borrow_mut();
             for row_idx in sel.selected_indices() {
                 let y = body_origin_y + m.row_top(row_idx) - scroll_y;
@@ -1431,8 +1478,11 @@ impl<T: 'static> Widget for TreeTableView<T> {
             }
         }
 
-        // Focus ring.
-        if let Some((focus_row, focus_col)) = self.focused_cell.get()
+        // Focus ring — keyboard-only (`:focus-visible`) and only while the
+        // view holds focus, so a mouse click never leaves a ring.
+        if self.view_focused.get()
+            && self.focus_visible.get()
+            && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
         {
             let mut x_off = 0.0_f32;
@@ -1477,6 +1527,26 @@ impl<T: 'static> Widget for TreeTableView<T> {
         }
 
         canvas.clear_clip();
+
+        // Container focus ring — keyboard focus on the view but no current cell
+        // and no selection, so nothing else marks the focus. Outline the whole
+        // view (see TableView / TreeView).
+        let nothing_indicated = self.focused_cell.get().is_none()
+            && self
+                .row_selection
+                .as_ref()
+                .map_or(true, |s| s.selected_indices().is_empty())
+            && self.cell_selection.as_ref().map_or(true, |s| s.count() == 0);
+        if self.view_focused.get() && self.focus_visible.get() && nothing_indicated {
+            let inset = 1.0_f32;
+            let rect = Rect::new(
+                bounds.x + inset,
+                bounds.y + inset,
+                (bounds.width - inset * 2.0).max(0.0),
+                (bounds.height - inset * 2.0).max(0.0),
+            );
+            canvas.stroke_rect(rect, BorderRole::Focused.resolve(colors), 1.5);
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

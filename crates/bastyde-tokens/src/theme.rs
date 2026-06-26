@@ -141,7 +141,10 @@ impl ColorTokens {
             surface_hover: Color::from_hex("#EBECF0"),
             surface_pressed: Color::from_hex("#DFE1E5"),
             surface_selected: Color::from_hex("#D4F0F5"),
-            surface_selected_inactive: Color::from_hex("#EBECF0"),
+            // A muted teal (the selection hue, dimmed) — distinct from both the
+            // active `surface_selected` and the neutral-gray `surface_hover`
+            // (which it previously duplicated).
+            surface_selected_inactive: Color::from_hex("#DCE9EC"),
             surface_alt_row: Color::from_hex("#F7F8FA"),
 
             // Text — cross-checked against Jewel IntUiLightTheme.kt:
@@ -246,7 +249,11 @@ impl ColorTokens {
             surface_hover: Color::from_hex("#393B40"),
             surface_pressed: Color::from_hex("#43454A"),
             surface_selected: Color::from_hex("#1A3D47"),
-            surface_selected_inactive: Color::from_hex("#393B40"),
+            // A muted teal (the selection hue, dimmed) — distinct from both the
+            // active `surface_selected` and the neutral-gray `surface_hover`
+            // (which it previously duplicated, making inactive selection
+            // indistinguishable from hover).
+            surface_selected_inactive: Color::from_hex("#2C4A54"),
             surface_alt_row: Color::from_hex("#26282E"),
 
             // Text — values cross-checked against the Jewel standalone

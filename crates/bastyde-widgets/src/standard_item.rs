@@ -427,11 +427,17 @@ impl StandardListItem {
         let is_pressed = self
             .interaction
             .map(|s| matches!(s, InteractionState::Pressed));
-        // StandardItem doesn't track focus separately today — the
-        // parent ListView / TreeView owns row focus via its own a11y
-        // wiring. Wire a constant-false signal so the recipe sees a
-        // consistent shape.
-        let is_focused = ctx.signal(false);
+        // Focus-aware selection: `is_focused` tracks whether this item's focus
+        // scope (its nearest focusable ancestor — the enclosing ListView /
+        // TreeView / … or any focusable container) holds keyboard focus. The
+        // recipe paints the active `Selected` chrome while it does and the muted
+        // `SelectedInactive` chrome when focus is elsewhere. Items outside any
+        // focusable scope read a constant `true`, so their selection always
+        // looks active.
+        let is_focused = ctx.focus_scope_active();
+        // Keyboard-vs-pointer modality so the recipe shows the focus ring only
+        // during keyboard navigation (`:focus-visible`).
+        let is_focus_visible = ctx.focus_visible();
 
         let style: SharedStandardItemStyle = self
             .style_override
@@ -444,6 +450,7 @@ impl StandardListItem {
             is_hovered,
             is_pressed,
             is_focused,
+            is_focus_visible,
             is_disabled,
         };
         let root_id = style.make_body(&cfg, ctx);

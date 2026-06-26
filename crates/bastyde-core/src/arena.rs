@@ -83,6 +83,13 @@ pub struct WidgetNode {
     /// widgets that want a unified focus halo without per-child
     /// `on_focus` plumbing. See `WidgetBuilder::focus_within`.
     pub(crate) focus_within_signal: Option<Signal<bool>>,
+    /// Framework-managed signal, lazily attached to a focusable node, set to
+    /// `true` whenever the focus is this node **or** a descendant (i.e. the node
+    /// is an *inclusive* ancestor of the focused widget). Unlike
+    /// `focus_within_signal` (strict descendants), this includes the node being
+    /// focused itself — so a data view that holds focus directly reads `true`.
+    /// Powers focus-aware selection (`BuildContext::focus_scope_active`).
+    pub(crate) scope_focus_signal: Option<Signal<bool>>,
     /// User-bound signal that the framework sets to `true` whenever
     /// the hovered widget is a strict descendant of this node.
     /// Symmetric to `focus_within_signal`. See
@@ -292,6 +299,7 @@ impl WidgetNode {
             enabled_state: None,
             tab_stop: None,
             focus_within_signal: None,
+            scope_focus_signal: None,
             hover_within_signal: None,
             activation_signal: None,
             alignment_override: None,

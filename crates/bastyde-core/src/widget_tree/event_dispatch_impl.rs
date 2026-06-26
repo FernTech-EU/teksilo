@@ -115,6 +115,23 @@ impl WidgetTree {
     }
 
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
+        // Track input modality for `:focus-visible`: keyboard input reveals
+        // focus rings, pointer input hides them. Updated at the dispatch root so
+        // every handler (and the next paint) observes the current modality.
+        match &event {
+            WidgetEvent::KeyDown { .. } => {
+                if !self.focus_visible.get() {
+                    self.focus_visible.set(true);
+                }
+            }
+            WidgetEvent::PointerDown { .. } => {
+                if self.focus_visible.get() {
+                    self.focus_visible.set(false);
+                }
+            }
+            _ => {}
+        }
+
         // The "back toward the parent overlay" key closes the top nested
         // overlay (e.g. an open submenu over its parent menu). It is the
         // inline-start arrow: ArrowLeft under LTR, ArrowRight under RTL.

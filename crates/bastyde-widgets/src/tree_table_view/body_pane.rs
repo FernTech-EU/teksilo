@@ -82,6 +82,13 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// Owning `TreeTableView` id — stamped into the drag payload so a drop
     /// into a sibling table is rejected.
     pub(crate) table_id: usize,
+
+    /// Optional row-activation callback (a click per `activate_on`, or
+    /// Enter/Space on the focused row) — distinct from *selection*, which also
+    /// moves on arrow navigation.
+    pub(crate) on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    pub(crate) activate_on: crate::data_views::ActivateOn,
     /// Drag-start anchor (the root id), captured so the drag closure stays
     /// `'static`.
     pub(crate) drag_anchor: WidgetId,
@@ -215,6 +222,9 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         let indent_per_level = self.indent_per_level;
         let tree_display_pos = self.tree_display_pos;
 
+        // Key the row focus scope on the view's focusable root (`drag_anchor`),
+        // not this pane — see TableView's body pane for the rationale.
+        ctx.begin_focus_scope_for(self.drag_anchor);
         for flat_idx in start..end {
             let entry = match proxy.entry_at(flat_idx) {
                 Some(e) => e,
@@ -419,8 +429,26 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     }
                 });
             }
+            // Row activation (open/commit) — a gesture, so it arbitrates
+            // against the reorder drag via the gesture arena (a click
+            // activates, a drag does not). `SingleClick` → `on_tap`,
+            // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
+            if let Some(ref cb) = self.on_row_activate {
+                let cb = cb.clone();
+                let activate_index = flat_idx;
+                let handlers = match self.activate_on {
+                    crate::data_views::ActivateOn::SingleClick => {
+                        HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
+                    }
+                    crate::data_views::ActivateOn::DoubleClick => {
+                        HandlerSet::new().on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
+                    }
+                };
+                ctx.apply_handlers(tree_row_id, handlers);
+            }
             ctx.apply_handlers(tree_row_id, row_handlers);
         }
+        ctx.end_focus_scope();
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

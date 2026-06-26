@@ -73,6 +73,7 @@ pub(crate) struct GridBodyPane<T: 'static> {
     // Per-tile interaction callbacks (Phase 3).
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
+    pub(crate) activate_on: crate::data_views::ActivateOn,
     #[allow(clippy::type_complexity)]
     pub(crate) tile_context_menu: Option<
         Rc<
@@ -85,6 +86,11 @@ pub(crate) struct GridBodyPane<T: 'static> {
     >,
     pub(crate) reorderable: bool,
     pub(crate) model_id: usize,
+    /// The GridView root's focusable `WidgetId`. The focus scope this pane
+    /// opens for its tiles is keyed on the root (where keyboard focus lands),
+    /// not on the pane itself (a non-focusable child), so a `StandardItem`
+    /// tile's focus-aware selection tracks the grid's real focus.
+    pub(crate) scope_owner: WidgetId,
     /// Source-owned DnD + lazy capability closures (erased from the backing
     /// `ListDataSource`). `drag_fn` gates per-tile drag start; `row_state_fn`
     /// drives windowed placeholders; the lazy trio nudges the source to load
@@ -220,6 +226,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         }
         let focused = self.focused_index.get();
 
+        ctx.begin_focus_scope_for(self.scope_owner);
         for i in start..end {
             let row = i / cols;
             let col = i % cols;
@@ -292,7 +299,14 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             if let Some(cb) = &self.on_tile_activate {
                 let cb = cb.clone();
                 let idx = i;
-                extra = extra.on_double_tap(move |_tap, ctx| cb(idx, ctx));
+                extra = match self.activate_on {
+                    crate::data_views::ActivateOn::SingleClick => {
+                        extra.on_tap(move |_tap, ctx| cb(idx, ctx))
+                    }
+                    crate::data_views::ActivateOn::DoubleClick => {
+                        extra.on_double_tap(move |_tap, ctx| cb(idx, ctx))
+                    }
+                };
                 has_extra = true;
             }
             if let Some(factory) = &self.tile_context_menu {
@@ -351,6 +365,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
 
             self.tile_entries.push((i, tile_id));
         }
+        ctx.end_focus_scope();
 
         // Realize the visible section headers.
         self.header_entries.clear();

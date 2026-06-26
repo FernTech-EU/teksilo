@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
-use bastyde_tokens::Easing;
+use bastyde_tokens::{BorderRole, Easing};
 
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -159,6 +159,25 @@ pub struct TreeView<T: 'static> {
     /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
     /// `set(...)` call dirties the TreeView for repaint automatically.
     drop_feedback: Signal<Option<DropViz>>, // insertion line OR folder highlight
+
+    /// Optional row-activation callback (a click on the row body per
+    /// `activate_on`, or Enter/Space on the focused row) — distinct from
+    /// *selection*, which also moves on arrow navigation. Lets a view
+    /// open/commit a row without firing on every navigation step.
+    on_activate: Option<Rc<dyn Fn(usize)>>,
+    /// Whether activation is a single or double click (default `DoubleClick`).
+    activate_on: crate::data_views::ActivateOn,
+
+    /// `true` while this view (root or descendant) holds keyboard focus — the
+    /// root's inclusive [`BuildContext::focus_scope_active`] signal, bound
+    /// `RepaintOnly`. With [`focus_visible`](Self::focus_visible) it drives the
+    /// **container focus ring**: when the view is Tab-focused but nothing is
+    /// selected, no row ring shows, so the whole view outlines itself instead —
+    /// the user can see where keyboard focus landed before they arrow.
+    view_focused: Signal<bool>,
+    /// Input-modality `:focus-visible`. Gates the container ring (and row rings)
+    /// to keyboard navigation, never a mouse click. Bound `RepaintOnly`.
+    focus_visible: Signal<bool>,
 
     // Persistent scroll state
     scroll_y: Signal<f32>,
@@ -350,6 +369,11 @@ impl<T: 'static> TreeView<T> {
             reorderable: false,
             row_click_expands: true,
             drop_feedback: Signal::new(None),
+            // Replaced at build with the live tree signals.
+            view_focused: Signal::new(false),
+            focus_visible: Signal::new(false),
+            on_activate: None,
+            activate_on: crate::data_views::ActivateOn::default(),
             overscroll_behavior: OverscrollBehavior::default(),
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
@@ -496,6 +520,25 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
+    /// Set the row-**activation** handler — invoked with the flat row index on a
+    /// primary click on the row body, or Enter/Space on the focused row.
+    /// Activation is distinct from *selection*: arrow-key navigation moves the
+    /// selection but does **not** activate, so a view can open/commit a row on a
+    /// deliberate click/Enter without firing on every navigation step.
+    pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
+        self.on_activate = Some(Rc::new(f));
+        self
+    }
+
+    /// Choose single- vs double-click activation (default
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn) — the cross-platform
+    /// convention; pass [`SingleClick`](crate::ActivateOn::SingleClick) for the
+    /// KDE/web/Scrivener feel). Enter/Space activates in either mode.
+    pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
+        self.activate_on = mode;
+        self
+    }
+
     /// Expand a node programmatically. No-op on the `from_source` path (which
     /// owns its own expand state — use the source's `set_expanded`).
     pub fn expand(&self, node: bastyde_data::NodeId) {
@@ -597,6 +640,24 @@ impl<T: 'static> Widget for TreeView<T> {
         // on_drag_hover / on_drag_leave dirty the TreeView's paint cache
         // without triggering a rebuild.
         self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
+        // Focus signals for the container ring. `focus_scope_active` (stack empty
+        // at the root) resolves to this view's inclusive focus; `focus_visible`
+        // is the keyboard/pointer modality. Bound `RepaintOnly` so focus-in/out
+        // redraws the ring. (Selection-emptiness changes already rebuild via
+        // `version`, so paint re-reads the selection without extra binding.)
+        self.view_focused = ctx.focus_scope_active();
+        self.focus_visible = ctx.focus_visible();
+        self.view_focused.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.focus_visible.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
@@ -730,6 +791,7 @@ impl<T: 'static> Widget for TreeView<T> {
         {
             let source = self.source.clone();
             let sel_for_key = self.row_selection.clone();
+            let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
@@ -811,6 +873,11 @@ impl<T: 'static> Widget for TreeView<T> {
                         bastyde_core::event::Key::Enter | bastyde_core::event::Key::Space => {
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(current);
+                            }
+                            // Enter/Space activates the focused row (open/commit),
+                            // unlike the arrow keys which only move the selection.
+                            if let Some(ref cb) = activate_key {
+                                cb(current);
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
@@ -1038,6 +1105,10 @@ impl<T: 'static> Widget for TreeView<T> {
         let tree_id = self.tree_id;
         let self_id = ctx.self_id();
         let row_state_fn = self.source.dnd.row_state_fn.clone();
+        // Establish this TreeView as the focus scope for the rows it builds, so
+        // their `StandardItem`s read *its* keyboard focus deterministically
+        // (rows may build before arena parenting is wired).
+        ctx.begin_focus_scope();
         for i in start..end {
             let selected = self
                 .row_selection
@@ -1141,6 +1212,26 @@ impl<T: 'static> Widget for TreeView<T> {
                             _ => bastyde_core::event::EventResponse::Ignored,
                         }),
                     );
+
+                    // Row activation (open/commit) — a gesture, so it arbitrates
+                    // against the reorder drag via the gesture arena (a click
+                    // activates, a drag does not). `SingleClick` → `on_tap`,
+                    // `DoubleClick` → `on_double_tap`; Enter/Space activates too
+                    // (keyboard handler). Distinct from selection, which also
+                    // moves on arrow navigation.
+                    if let Some(ref cb) = self.on_activate {
+                        let cb = cb.clone();
+                        let activate_index = i;
+                        let handlers = match self.activate_on {
+                            crate::data_views::ActivateOn::SingleClick => {
+                                HandlerSet::new().on_tap(move |_tap, _ctx| cb(activate_index))
+                            }
+                            crate::data_views::ActivateOn::DoubleClick => {
+                                HandlerSet::new().on_double_tap(move |_tap, _ctx| cb(activate_index))
+                            }
+                        };
+                        ctx.apply_handlers(child_id, handlers);
+                    }
                 }
 
                 // Drag handler for reorderable rows, gated by the source's
@@ -1186,6 +1277,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 self.item_entries.push((i, child_id));
             }
         }
+        ctx.end_focus_scope();
 
         // --- Scrollbar ---
         let scrollbar = ScrollBar::new(
@@ -1363,6 +1455,26 @@ impl<T: 'static> Widget for TreeView<T> {
                 }
             }
             canvas.clear_clip();
+        }
+
+        // Container focus ring. When the view is Tab-focused (keyboard modality)
+        // but nothing is selected, no row paints a ring — so outline the whole
+        // view, giving the user a visible focus landing point before they arrow.
+        // Once a row is selected its own ring takes over and this clears.
+        let has_selection = self
+            .row_selection
+            .as_ref()
+            .is_some_and(|s| !s.selected_indices().is_empty());
+        if self.view_focused.get() && self.focus_visible.get() && !has_selection {
+            let color = BorderRole::Focused.resolve(&ctx.theme.colors);
+            let inset = 1.0_f32;
+            let rect = Rect::new(
+                bounds.x + inset,
+                bounds.y + inset,
+                (bounds.width - inset * 2.0).max(0.0),
+                (bounds.height - inset * 2.0).max(0.0),
+            );
+            canvas.stroke_rect(rect, color, 1.5);
         }
     }
 
@@ -2744,6 +2856,128 @@ mod tests {
             self.bump();
             true
         }
+    }
+
+    #[test]
+    fn from_source_row_scope_is_the_treeview_not_a_higher_ancestor() {
+        // Reproduces the Skribisto shell: an outer focusable container holds the
+        // binder TreeView and a sibling focusable ("the editor"). A row's focus
+        // scope MUST be the TreeView — so when focus moves to the editor, the
+        // row's scope goes inactive (selection mutes, focus ring clears). If the
+        // scope resolved to the outer shell instead, it would stay active and the
+        // ring would never clear.
+        use crate::primitives::ZStack;
+        use bastyde_core::widget_builder::WidgetBuilder;
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let source = Rc::new(MockI64Source::new());
+        let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new();
+        let tv = tree.add(
+            TreeView::from_source_keyed(
+                MockI64Wrapper(source.clone()),
+                keyed.clone(),
+                |_l: &String, _r: &TreeRow, _s| Box::new(FixedLeaf(120.0, 24.0)),
+            )
+            .item_height(24.0),
+        );
+        let editor = tree.add(FixedLeaf(100.0, 24.0).focusable(true));
+        // Outer shell holds both, and is itself focusable (like `App`).
+        let _shell = tree.add(ZStack::new().add_child(tv).add_child(editor).focusable(true));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let rows = tree.children(tv);
+        let scope = tree.focus_scope_active_for(rows[0]);
+
+        tree.focus(tv);
+        assert!(scope.get(), "row scope active when the TreeView is focused");
+        tree.focus(editor);
+        assert!(
+            !scope.get(),
+            "focus moved to the sibling editor → the row's TreeView scope must go \
+             inactive (so selection mutes and the focus ring clears)"
+        );
+    }
+
+    #[test]
+    fn focus_scope_active_tracks_view_focus_for_rows() {
+        // Diagnostic for focus-aware selection: a row's focus scope (its nearest
+        // focusable ancestor = the TreeView) must read inactive before focus and
+        // active once a click focuses the view.
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        let source = Rc::new(MockI64Source::new());
+        let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new();
+        let tv = tree.add(
+            TreeView::from_source_keyed(
+                MockI64Wrapper(source.clone()),
+                keyed.clone(),
+                |_label: &String, _row: &TreeRow, _sel| Box::new(FixedLeaf(120.0, 24.0)),
+            )
+            .item_height(24.0)
+            // Mirror Skribisto's binder: reorderable rows (drag recognizer) +
+            // single-click activation (tap recognizer). These install gesture
+            // arenas on each row — verify they don't preempt focusing the view.
+            .reorderable(true)
+            .activate_on(crate::data_views::ActivateOn::SingleClick)
+            .on_activate(|_| {}),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let rows = tree.children(tv);
+        assert_eq!(tree.focused(), None, "no focus yet");
+        tree.click(rows[1]);
+        // Clicking a row must move keyboard focus to the TreeView (or a focusable
+        // descendant of it) — that is what makes focus-aware selection render
+        // active. If this regresses, selected rows render with the muted
+        // `SelectedInactive` chrome and look unselected.
+        let focused = tree.focused();
+        assert!(focused.is_some(), "clicking a row focuses something");
+        assert!(
+            focused == Some(tv) || tree.is_descendant_of(focused.unwrap(), tv),
+            "focus landed inside the TreeView (got {focused:?}, tv = {tv:?})"
+        );
+    }
+
+    #[test]
+    fn container_focus_ring_shows_when_tab_focused_without_selection() {
+        // The reported gap: Tab into the tree with nothing selected and there is
+        // no visible focus indicator — no row paints a ring because no row is
+        // selected. The container focus ring fills it: paint outlines the whole
+        // view when it holds keyboard focus (`focus_scope_active`), the modality
+        // is keyboard (`focus_visible`), and the selection is empty. This guards
+        // those three paint inputs (paint output itself isn't unit-observable).
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+        use bastyde_core::event::{Key, Modifiers};
+        let source = Rc::new(MockI64Source::new());
+        let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new();
+        let tv = tree.add(
+            TreeView::from_source_keyed(
+                MockI64Wrapper(source.clone()),
+                keyed.clone(),
+                |_label: &String, _row: &TreeRow, _sel| Box::new(FixedLeaf(120.0, 24.0)),
+            )
+            .item_height(24.0),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view_focused = tree.focus_scope_active_for(tv);
+        let focus_visible = tree.focus_visible_signal();
+        assert!(
+            !view_focused.get() && !focus_visible.get(),
+            "before focus: no container ring (not focused, pointer modality)"
+        );
+
+        // Tab in: focus the view under keyboard modality. `Tab` is ignored by the
+        // tree's key handler, so the selection stays empty (no row ring).
+        tree.focus(tv);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert!(view_focused.get(), "view holds keyboard focus");
+        assert!(focus_visible.get(), "keyboard input → focus-visible");
+        assert_eq!(keyed.count(), 0, "nothing selected → no row ring, container ring shows");
+
+        // A pointer press flips modality off → container ring clears (matches the
+        // row ring's `:focus-visible` rule; clicking never leaves a ring).
+        tree.click(tv);
+        assert!(!focus_visible.get(), "pointer input clears focus-visible → ring hides");
     }
 
     #[test]
