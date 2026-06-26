@@ -110,6 +110,17 @@ type RowDelegate<T> = dyn Fn(usize, &T, &TreeRowMeta, bool) -> Box<dyn Widget>;
 /// })
 /// .item_height(28.0);
 /// ```
+/// Active drag-drop feedback the `TreeView` paints itself: a between-rows
+/// insertion line (Before/After) or a highlighted row (an into-container drop).
+#[derive(Clone, Copy, PartialEq)]
+enum DropViz {
+    /// Horizontal insertion line at `y`, spanning `width`.
+    Line { y: f32, width: f32 },
+    /// Highlighted target row `[top, top + height]`, spanning `width` — the
+    /// "drop into this folder" affordance.
+    Rect { top: f32, height: f32, width: f32 },
+}
+
 pub struct TreeView<T: 'static> {
     /// Index-keyed erased backing — the built-in `TreeSlice` or an external
     /// `TreeDataSource`. All virtualization / DnD / keyboard work goes through
@@ -147,7 +158,7 @@ pub struct TreeView<T: 'static> {
     /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
     /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
     /// `set(...)` call dirties the TreeView for repaint automatically.
-    drop_feedback: Signal<Option<(f32, f32)>>, // (y, width) for insertion line
+    drop_feedback: Signal<Option<DropViz>>, // insertion line OR folder highlight
 
     // Persistent scroll state
     scroll_y: Signal<f32>,
@@ -885,18 +896,39 @@ impl<T: 'static> Widget for TreeView<T> {
                 } else {
                     DropPosition::Into
                 };
-                match (source_for_hover.dnd.can_accept_fn)(payload, row_idx, drop_pos, my_view_id) {
+                // The source's verdict decides the *effective* position: a
+                // `Redirect` (e.g. Into-a-leaf → After) overrides the raw zone.
+                let effective = match (source_for_hover.dnd.can_accept_fn)(
+                    payload, row_idx, drop_pos, my_view_id,
+                ) {
                     DropResponse::Reject => {
                         feedback_for_hover.set(None);
-                        DropFeedback::NoFeedback
+                        return DropFeedback::NoFeedback;
                     }
-                    DropResponse::Accept | DropResponse::Redirect(_) => {
-                        let insertion_y = insertion_top - scroll;
-                        feedback_for_hover.set(Some((insertion_y, 400.0)));
-                        DropFeedback::InsertionLine {
-                            y: insertion_y,
-                            width: 400.0,
-                        }
+                    DropResponse::Accept => drop_pos,
+                    DropResponse::Redirect(p) => p,
+                };
+                if effective == DropPosition::Into {
+                    // Drop *into* the hovered container → highlight its whole row.
+                    let top = row_top - scroll;
+                    feedback_for_hover.set(Some(DropViz::Rect {
+                        top,
+                        height: row_h,
+                        width: 400.0,
+                    }));
+                    DropFeedback::HighlightRect {
+                        rect: Rect::new(0.0, top, 400.0, row_h),
+                        color: bastyde_tokens::Color::from_rgba(0.25, 0.47, 0.85, 0.25),
+                    }
+                } else {
+                    let insertion_y = insertion_top - scroll;
+                    feedback_for_hover.set(Some(DropViz::Line {
+                        y: insertion_y,
+                        width: 400.0,
+                    }));
+                    DropFeedback::InsertionLine {
+                        y: insertion_y,
+                        width: 400.0,
                     }
                 }
             });
@@ -1301,7 +1333,7 @@ impl<T: 'static> Widget for TreeView<T> {
     ) {
         // Draw insertion line during drag hover — recipe-driven role +
         // thickness via `ListContainerStyle::insertion()`.
-        if let Some((y, width)) = self.drop_feedback.get() {
+        if let Some(viz) = self.drop_feedback.get() {
             let recipe = ctx
                 .theme
                 .style_slots
@@ -1310,17 +1342,26 @@ impl<T: 'static> Widget for TreeView<T> {
                 .map(|s| s.insertion())
                 .unwrap_or_default();
             let color = recipe.role.resolve(&ctx.theme.colors);
-            let line_y = bounds.y + y;
-            let line_x = bounds.x;
-            let half = recipe.thickness * 0.5;
-            // Own paint isn't covered by `clips_children` — clip so an
-            // insertion line at the after-last boundary can't bleed
-            // past the widget's bottom edge.
+            // Own paint isn't covered by `clips_children` — clip so feedback at
+            // the after-last boundary can't bleed past the widget's bottom edge.
             canvas.set_clip(bounds);
-            canvas.fill_rect(
-                Rect::new(line_x, line_y - half, width, recipe.thickness),
-                color,
-            );
+            match viz {
+                DropViz::Line { y, width } => {
+                    let line_y = bounds.y + y;
+                    let half = recipe.thickness * 0.5;
+                    canvas.fill_rect(
+                        Rect::new(bounds.x, line_y - half, width, recipe.thickness),
+                        color,
+                    );
+                }
+                DropViz::Rect { top, height, width } => {
+                    // Into-container highlight: a translucent fill plus a solid
+                    // outline at the insertion role's color.
+                    let rect = Rect::new(bounds.x, bounds.y + top, width, height);
+                    canvas.fill_rect(rect, color.with_alpha(0.18));
+                    canvas.stroke_rect(rect, color, recipe.thickness.max(1.5));
+                }
+            }
             canvas.clear_clip();
         }
     }

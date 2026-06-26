@@ -1029,6 +1029,7 @@ impl OverlayManager {
                             | OverlayPlacement::FullViewport
                             | OverlayPlacement::BottomCenter
                             | OverlayPlacement::ViewportCorner { .. }
+                            | OverlayPlacement::AtPointer(_)
                     ) {
                         Rect::ZERO
                     } else {
