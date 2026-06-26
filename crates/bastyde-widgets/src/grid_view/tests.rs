@@ -511,6 +511,37 @@ fn type_ahead_jumps_to_match() {
 }
 
 #[test]
+fn type_ahead_fires_on_letter_key_variant() {
+    // Regression: letters arrive as the dedicated `Key::B`..`Key::Z` variants,
+    // not `Key::Character`. The handler matched only `Key::Character`, so
+    // pressing a real letter key never triggered type-ahead. `press_key` sends
+    // the `Key::B` variant a real keyboard would.
+    use bastyde_core::event::{Key, Modifiers};
+    let names = vec![
+        "apple".to_string(),
+        "banana".to_string(),
+        "cherry".to_string(),
+    ];
+    let model = ListModel::from_vec(names.clone());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel)
+            .type_ahead_label(move |i| names[i].clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    tree.press_key(Key::B, Modifiers::NONE);
+    assert!(
+        selection.is_selected(1),
+        "letter key 'B' must trigger type-ahead → banana"
+    );
+}
+
+#[test]
 fn fetch_more_fires_when_scrolled_near_the_end() {
     // Incremental loading now flows through the source's `can_fetch_more` /
     // `fetch_more` capabilities (the old `on_near_end` hook is gone): as the

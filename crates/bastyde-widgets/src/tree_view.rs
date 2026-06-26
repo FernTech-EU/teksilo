@@ -144,6 +144,14 @@ pub struct TreeView<T: 'static> {
     /// Keyboard-focused flat index.
     focused_index: Rc<Cell<Option<usize>>>,
 
+    /// Type-ahead ("type to jump") label extractor — opt-in via
+    /// [`type_ahead_label`](Self::type_ahead_label).
+    type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Reset window for the type-ahead search term.
+    type_ahead_timeout: Duration,
+    /// Persistent type-ahead buffer (survives the per-keystroke rebuild).
+    type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
+
     /// Enable intra-widget drag reordering.
     reorderable: bool,
 
@@ -366,6 +374,9 @@ impl<T: 'static> TreeView<T> {
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
+            type_ahead_label: None,
+            type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
+            type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             reorderable: false,
             row_click_expands: true,
             drop_feedback: Signal::new(None),
@@ -521,10 +532,11 @@ impl<T: 'static> TreeView<T> {
     }
 
     /// Set the row-**activation** handler — invoked with the flat row index on a
-    /// primary click on the row body, or Enter/Space on the focused row.
-    /// Activation is distinct from *selection*: arrow-key navigation moves the
-    /// selection but does **not** activate, so a view can open/commit a row on a
-    /// deliberate click/Enter without firing on every navigation step.
+    /// primary click on the row body, or **Enter** on the focused row.
+    /// Activation is distinct from *selection*: arrow-key navigation and
+    /// **Space** move / toggle the selection but do **not** activate, so a view
+    /// can open/commit a row on a deliberate click/Enter without firing on
+    /// every navigation step.
     pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
         self.on_activate = Some(Rc::new(f));
         self
@@ -533,9 +545,28 @@ impl<T: 'static> TreeView<T> {
     /// Choose single- vs double-click activation (default
     /// [`ActivateOn::DoubleClick`](crate::ActivateOn) — the cross-platform
     /// convention; pass [`SingleClick`](crate::ActivateOn::SingleClick) for the
-    /// KDE/web/Scrivener feel). Enter/Space activates in either mode.
+    /// KDE/web/Scrivener feel). Enter activates in either mode.
     pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
         self.activate_on = mode;
+        self
+    }
+
+    /// Enable **type-ahead** ("type to jump"): typing a printable character
+    /// while the tree has keyboard focus jumps the selection to the next
+    /// *visible* row whose label starts with the accumulated search term,
+    /// wrapping around (Qt `keyboardSearch` / macOS & Windows type-select).
+    /// `label(&item)` yields the searchable text; matching is
+    /// ASCII-case-insensitive. A pause longer than the
+    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
+        self.type_ahead_label = Some(Rc::new(label));
+        self
+    }
+
+    /// Reset window between keystrokes before the type-ahead search term
+    /// clears (default 500 ms). A zero duration disables type-ahead.
+    pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self {
+        self.type_ahead_timeout = timeout;
         self
     }
 
@@ -804,15 +835,70 @@ impl<T: 'static> Widget for TreeView<T> {
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
+            let ta_state = self.type_ahead.clone();
+            let ta_label = self.type_ahead_label.clone();
+            let ta_timeout = self.type_ahead_timeout;
 
             handlers = handlers.on_key(move |event, _ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
+                    use bastyde_core::event::Key;
                     let visible_count = source.visible_count();
                     if visible_count == 0 {
                         return bastyde_core::event::EventResponse::Ignored;
                     }
 
                     let current = fi.get().unwrap_or(0).min(visible_count - 1);
+
+                    // Helper: scroll so flat row `idx` is visible.
+                    let ensure_visible = |idx: usize| {
+                        let scroll = scroll_for_nav.get();
+                        let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
+                            idx,
+                            scroll,
+                            vh_for_nav.get(),
+                            max_for_nav.get(),
+                        );
+                        if (new_scroll - scroll).abs() > f32::EPSILON {
+                            scroll_for_nav.set(new_scroll);
+                        }
+                    };
+
+                    // Ctrl+A: select all visible rows (Multi only).
+                    if modifiers.ctrl() && matches!(key, Key::A) {
+                        if let Some(ref sel) = sel_for_key
+                            && sel.mode() == bastyde_data::SelectionMode::Multi
+                        {
+                            sel.select_all(visible_count);
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
+                        return bastyde_core::event::EventResponse::Ignored;
+                    }
+
+                    // Type-ahead: a printable char (no Ctrl/Alt/Super) jumps the
+                    // selection to the next visible row whose label starts with
+                    // the accumulated term. Opt-in via `type_ahead_label`.
+                    if ta_label.is_some()
+                        && !modifiers.ctrl()
+                        && !modifiers.alt()
+                        && !modifiers.super_key()
+                        && let Some(c) = key.to_char()
+                    {
+                        let label = ta_label.as_ref().unwrap();
+                        let source_ref = &source;
+                        if let Some(idx) =
+                            ta_state.search(c, current, visible_count, ta_timeout, |i| {
+                                source_ref.with_row_str(i, &|item| label(item))
+                            })
+                        {
+                            fi.set(Some(idx));
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(idx);
+                            }
+                            ensure_visible(idx);
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
+                        return bastyde_core::event::EventResponse::Ignored;
+                    }
 
                     // Alt+Arrow: sibling reorder (when reorderable). Routed
                     // through the source's own `accept_drop` (cycle-guarded),
@@ -870,21 +956,58 @@ impl<T: 'static> Widget for TreeView<T> {
 
                     // Navigation keys
                     let new_idx = match key {
-                        bastyde_core::event::Key::ArrowDown => {
-                            Some(current.saturating_add(1).min(visible_count - 1))
+                        Key::ArrowDown => Some((current + 1).min(visible_count - 1)),
+                        Key::ArrowUp => Some(current.saturating_sub(1)),
+                        Key::Home => Some(0),
+                        Key::End => Some(visible_count - 1),
+                        // Page keys: jump one viewport of rows by visual distance
+                        // (variable heights honored), then ensure-visible scrolls.
+                        Key::PageDown => {
+                            let vh = vh_for_nav.get();
+                            let r = {
+                                let mut m = metrics_for_nav.borrow_mut();
+                                m.resize(visible_count);
+                                let target = m.row_top(current) + vh;
+                                m.row_at(target)
+                            };
+                            Some(if r == current {
+                                (current + 1).min(visible_count - 1)
+                            } else {
+                                r.min(visible_count - 1)
+                            })
                         }
-                        bastyde_core::event::Key::ArrowUp => Some(current.saturating_sub(1)),
-                        bastyde_core::event::Key::Home => Some(0),
-                        bastyde_core::event::Key::End => Some(visible_count - 1),
-                        bastyde_core::event::Key::Enter | bastyde_core::event::Key::Space => {
+                        Key::PageUp => {
+                            let vh = vh_for_nav.get();
+                            let r = {
+                                let mut m = metrics_for_nav.borrow_mut();
+                                m.resize(visible_count);
+                                let target = (m.row_top(current) - vh).max(0.0);
+                                m.row_at(target)
+                            };
+                            Some(if r == current { current.saturating_sub(1) } else { r })
+                        }
+                        Key::Enter => {
+                            // Enter activates the focused row (open / commit).
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(current);
                             }
-                            // Enter/Space activates the focused row (open/commit),
-                            // unlike the arrow keys which only move the selection.
                             if let Some(ref cb) = activate_key {
                                 cb(current);
                             }
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
+                        Key::Space => {
+                            // Space moves/toggles the selection but does NOT
+                            // activate (Enter is the activator). Multi: toggle;
+                            // Single: select.
+                            if let Some(ref sel) = sel_for_key {
+                                if sel.mode() == bastyde_data::SelectionMode::Multi {
+                                    sel.toggle(current);
+                                } else {
+                                    sel.select(current);
+                                }
+                            }
+                            fi.set(Some(current));
                             return bastyde_core::event::EventResponse::Handled;
                         }
                         _ => None,
@@ -899,17 +1022,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 sel.select(idx);
                             }
                         }
-                        // Scroll into view
-                        let scroll = scroll_for_nav.get();
-                        let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
-                            idx,
-                            scroll,
-                            vh_for_nav.get(),
-                            max_for_nav.get(),
-                        );
-                        if (new_scroll - scroll).abs() > f32::EPSILON {
-                            scroll_for_nav.set(new_scroll);
-                        }
+                        ensure_visible(idx);
                         return bastyde_core::event::EventResponse::Handled;
                     }
                 }
@@ -1745,6 +1858,123 @@ mod tests {
             vec![2],
             "Second ArrowDown should select index 2 (third root)"
         );
+    }
+
+    /// A flat tree of `n` roots labelled "Node {i}", with a single-select model.
+    fn flat_tree_view(
+        n: usize,
+        mode: bastyde_data::SelectionMode,
+    ) -> (WidgetTree, WidgetId, bastyde_data::SelectionModel) {
+        use bastyde_data::SelectionModel;
+        let tree = TreeModel::new();
+        for i in 0..n {
+            tree.insert_root(i, format!("Node {i}"));
+        }
+        let selection = SelectionModel::new(mode);
+        let sel = selection.clone();
+        let mut wtree = WidgetTree::new();
+        let tv = wtree.add(
+            TreeView::new(tree, |_item, _entry, _sel| Box::new(FixedLeaf(120.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .type_ahead_label(|s: &String| s.clone())
+                .on_activate(|_| {}),
+        );
+        (wtree, tv, selection)
+    }
+
+    #[test]
+    fn page_down_up_moves_selection_by_viewport() {
+        use bastyde_core::event::{Key, Modifiers};
+        let (mut wtree, tv, selection) = flat_tree_view(100, bastyde_data::SelectionMode::Single);
+        let p = SizeProposal::exact(400.0, 200.0); // ~10 rows
+        wtree.layout(p);
+        wtree.focus(tv);
+        selection.select(0);
+
+        wtree.press_key(Key::PageDown, Modifiers::NONE);
+        wtree.layout(p);
+        let after = selection.selected_indices()[0];
+        assert!(after >= 8, "PageDown advances ~one viewport, got {after}");
+
+        wtree.press_key(Key::PageUp, Modifiers::NONE);
+        wtree.layout(p);
+        assert!(
+            selection.selected_indices()[0] < after,
+            "PageUp moves selection back up"
+        );
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_visible_in_multi_mode() {
+        use bastyde_core::event::{Key, Modifiers};
+        let (mut wtree, tv, selection) = flat_tree_view(7, bastyde_data::SelectionMode::Multi);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        wtree.focus(tv);
+        wtree.press_key(Key::A, Modifiers::CTRL);
+        assert_eq!(selection.selected_indices().len(), 7, "Ctrl+A selects all");
+    }
+
+    #[test]
+    fn space_toggles_enter_activates() {
+        use bastyde_core::event::{Key, Modifiers};
+        use std::cell::Cell;
+        let tree = TreeModel::new();
+        for i in 0..5 {
+            tree.insert_root(i, format!("Node {i}"));
+        }
+        let selection = bastyde_data::SelectionModel::new(bastyde_data::SelectionMode::Multi);
+        let sel = selection.clone();
+        let activated = Rc::new(Cell::new(None));
+        let act = activated.clone();
+        let mut wtree = WidgetTree::new();
+        let tv = wtree.add(
+            TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .on_activate(move |i| act.set(Some(i))),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 200.0));
+        wtree.focus(tv);
+
+        wtree.press_key(Key::ArrowDown, Modifiers::NONE); // → row 1
+        assert_eq!(selection.selected_indices(), vec![1]);
+        assert_eq!(activated.get(), None);
+
+        wtree.press_key(Key::Space, Modifiers::NONE); // toggle row 1 OFF
+        assert!(selection.selected_indices().is_empty(), "Space toggles off");
+        assert_eq!(activated.get(), None, "Space must NOT activate");
+
+        wtree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(activated.get(), Some(1), "Enter activates");
+    }
+
+    #[test]
+    fn type_ahead_jumps_to_matching_visible_row() {
+        use bastyde_core::event::{Key, Modifiers};
+        let tree = TreeModel::new();
+        tree.insert_root(0, "Apple".to_string());
+        tree.insert_root(1, "Banana".to_string());
+        tree.insert_root(2, "Cherry".to_string());
+        tree.insert_root(3, "Date".to_string());
+        let selection = bastyde_data::SelectionModel::new(bastyde_data::SelectionMode::Single);
+        let sel = selection.clone();
+        let mut wtree = WidgetTree::new();
+        let tv = wtree.add(
+            TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .type_ahead_label(|s: &String| s.clone()),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 200.0));
+        wtree.focus(tv);
+        selection.select(0);
+
+        wtree.press_key(Key::C, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2], "'c' → Cherry");
+        wtree.press_key(Key::B, Modifiers::NONE);
+        // "cb" matches nothing → selection unchanged.
+        assert_eq!(selection.selected_indices(), vec![2], "'cb' no match, stays");
     }
 
     // --- Chevron-vs-selection regression tests ---

@@ -190,6 +190,14 @@ pub struct TreeTableView<T: 'static> {
     filters_signal: Signal<HashMap<String, String>>,
     focused_cell: Signal<Option<(usize, usize)>>,
     editing_cell: Signal<Option<(usize, usize)>>,
+    /// Type-ahead ("type to jump") label extractor — opt-in via
+    /// [`type_ahead_label`](Self::type_ahead_label).
+    #[allow(clippy::type_complexity)]
+    type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Reset window for the type-ahead search term.
+    type_ahead_timeout: Duration,
+    /// Persistent type-ahead buffer (survives the per-keystroke rebuild).
+    type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
 
     // Build state
     header_row_id: Option<WidgetId>,
@@ -279,6 +287,9 @@ impl<T: 'static> TreeTableView<T> {
             column_pinning_signal: Signal::new(HashMap::new()),
             filters_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
+            type_ahead_label: None,
+            type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
+            type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             // Replaced at build with the live tree signals.
             view_focused: Signal::new(true),
             focus_visible: Signal::new(false),
@@ -319,6 +330,25 @@ impl<T: 'static> TreeTableView<T> {
     /// When disabled, wheel events snap immediately to the new offset.
     pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
         self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Enable **type-ahead** ("type to jump"): typing a printable character
+    /// while the tree-table has keyboard focus jumps the focused row to the
+    /// next *visible* row whose label starts with the accumulated search term,
+    /// wrapping around (Qt `keyboardSearch` / macOS & Windows type-select).
+    /// `label(&item)` yields the searchable text; matching is
+    /// ASCII-case-insensitive. A pause longer than the
+    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
+        self.type_ahead_label = Some(Rc::new(label));
+        self
+    }
+
+    /// Reset window between keystrokes before the type-ahead search term
+    /// clears (default 500 ms). A zero duration disables type-ahead.
+    pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self {
+        self.type_ahead_timeout = timeout;
         self
     }
 
@@ -879,6 +909,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
         };
 
         let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.proxy.clone()));
+        // Type-ahead resolver: read the visible row's item text through the
+        // projection (`None` if the flat index isn't currently visible).
+        let type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>> =
+            self.type_ahead_label.clone().map(|user| {
+                let proxy = self.proxy.clone();
+                Rc::new(move |i: usize| proxy.with_entry(i, |item, _entry| user(item)))
+                    as Rc<dyn Fn(usize) -> Option<String>>
+            });
+
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
             col_count: display_indices.len().max(1),
@@ -897,6 +936,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
             display_col_editable,
             on_cell_edit_request: self.on_cell_edit_request.clone(),
             on_row_activate: self.on_row_activate.clone(),
+            type_ahead: self.type_ahead.clone(),
+            type_ahead_label,
+            type_ahead_timeout: self.type_ahead_timeout,
         };
 
         // Alt+Arrow tree sibling reorder wraps the shared key handler: a move
@@ -1771,6 +1813,150 @@ mod tests {
             bastyde_core::event::Modifiers::NONE,
         );
         assert_eq!(proxy.visible_count(), 2);
+    }
+
+    #[test]
+    fn arrow_nav_scroll_follows_focused_row() {
+        // 100 flat rows × 20 px in a 200 px viewport. Walking focus down
+        // past the visible window must scroll to keep the focused row on
+        // screen ("selection always visible"), matching TreeView / the
+        // newly-fixed TableView. Regression for: TreeTableView keyboard
+        // nav left scroll_y untouched.
+        use bastyde_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(wide_tree(100));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        tree.focus(id);
+        let read_scroll = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .scroll_y_signal()
+                .get()
+        };
+        let read_focus = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .focused_cell_signal()
+                .get()
+        };
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 0);
+        }
+        assert_eq!(read_scroll(&tree), 0.0, "starts at top");
+
+        for _ in 0..20 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+            tree.layout(proposal);
+        }
+        assert_eq!(read_focus(&tree), Some((20, 0)));
+        assert!(
+            read_scroll(&tree) > 200.0,
+            "arrow-down nav must scroll to reveal row 20, got {}",
+            read_scroll(&tree)
+        );
+
+        // Ctrl+Home returns focus AND scroll to the top.
+        tree.press_key(Key::Home, Modifiers::CTRL);
+        tree.layout(proposal);
+        assert_eq!(read_focus(&tree), Some((0, 0)));
+        assert_eq!(read_scroll(&tree), 0.0, "Ctrl+Home scrolls to top");
+    }
+
+    #[test]
+    fn type_ahead_jumps_to_matching_row() {
+        use bastyde_core::event::{Key, Modifiers};
+        let model = TreeModel::new();
+        model.insert_root(0, "Apple");
+        model.insert_root(1, "Banana");
+        model.insert_root(2, "Cherry");
+        model.insert_root(3, "Cranberry");
+        let proxy = SortFilterTreeModel::new(model);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0)
+                .type_ahead_label(|s: &&'static str| s.to_string()),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        let read_focus = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .focused_cell_signal()
+                .get()
+        };
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 0);
+        }
+        tree.press_key(Key::C, Modifiers::NONE);
+        assert_eq!(read_focus(&tree), Some((2, 0)), "'c' → Cherry");
+        tree.press_key(Key::R, Modifiers::NONE);
+        assert_eq!(read_focus(&tree), Some((3, 0)), "'cr' → Cranberry");
+    }
+
+    #[test]
+    fn ctrl_tab_escapes_the_cell_grid() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_core::widget_builder::WidgetBuilder;
+        use crate::primitives::{TextWidget, VStack};
+
+        let proxy = SortFilterTreeModel::new(wide_tree(5));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+        let _root = tree.add(VStack::new().add_child(id).add_child(sink));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let read_focus = |tree: &WidgetTree| {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .focused_cell_signal()
+                .get()
+        };
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 0);
+        }
+        let before = read_focus(&tree);
+        tree.press_key(Key::Tab, Modifiers::CTRL);
+        assert_eq!(read_focus(&tree), before, "Ctrl+Tab must not navigate cells");
+        assert_eq!(
+            tree.focused(),
+            Some(sink),
+            "Ctrl+Tab moves focus out of the tree-table"
+        );
     }
 
     #[test]

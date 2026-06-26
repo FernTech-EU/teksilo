@@ -88,6 +88,19 @@ pub struct ListView<T: 'static> {
     /// Keyboard-focused item index within the list.
     focused_index: Rc<Cell<Option<usize>>>,
 
+    /// Type-ahead ("type to jump") label extractor — opt-in via
+    /// [`type_ahead_label`](Self::type_ahead_label). When set, typing a
+    /// printable character jumps the selection to the next row whose label
+    /// starts with the accumulated search term (Qt `keyboardSearch` /
+    /// macOS type-select convention).
+    type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Reset window for the type-ahead search term.
+    type_ahead_timeout: Duration,
+    /// Persistent type-ahead buffer — a field (not built in `build`) so the
+    /// accumulated term survives the selection-driven rebuild each
+    /// keystroke triggers.
+    type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
+
     /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
     reorderable: bool,
 
@@ -248,6 +261,9 @@ impl<T: 'static> ListView<T> {
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
+            type_ahead_label: None,
+            type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
+            type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             reorderable: false,
             show_scrollbar: true,
             drop_feedback: Signal::new(None),
@@ -371,19 +387,38 @@ impl<T: 'static> ListView<T> {
     }
 
     /// Set the row-**activation** handler — invoked with the flat row index on a
-    /// click (per [`activate_on`](Self::activate_on)) or Enter/Space on the
-    /// focused row. Distinct from *selection*: arrow-key navigation moves the
-    /// selection but does **not** activate.
+    /// click (per [`activate_on`](Self::activate_on)) or **Enter** on the
+    /// focused row. Distinct from *selection*: arrow-key navigation and
+    /// **Space** move / toggle the selection but do **not** activate.
     pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
         self.on_activate = Some(Rc::new(f));
         self
     }
 
     /// Choose single- vs double-click activation (default
-    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter/Space activates in
+    /// [`ActivateOn::DoubleClick`](crate::ActivateOn)). Enter activates in
     /// either mode.
     pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
         self.activate_on = mode;
+        self
+    }
+
+    /// Enable **type-ahead** ("type to jump"): with this set, typing a
+    /// printable character while the list has keyboard focus jumps the
+    /// selection to the next row whose label starts with the accumulated
+    /// search term, wrapping around (Qt `keyboardSearch` / macOS &
+    /// Windows type-select). `label(&item)` yields the searchable text for
+    /// a row; matching is ASCII-case-insensitive. A pause longer than the
+    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
+        self.type_ahead_label = Some(Rc::new(label));
+        self
+    }
+
+    /// Reset window between keystrokes before the type-ahead search term
+    /// clears (default 500 ms). A zero duration disables type-ahead.
+    pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self {
+        self.type_ahead_timeout = timeout;
         self
     }
 
@@ -682,11 +717,64 @@ impl<T: 'static> Widget for ListView<T> {
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
+            // Type-ahead state + label resolver (reads row text via the
+            // source's string accessor, so lazy/unloaded rows are skipped).
+            let ta_state = self.type_ahead.clone();
+            let ta_label = self.type_ahead_label.clone();
+            let ta_timeout = self.type_ahead_timeout;
+            let with_item_str = self.source.with_item_str_fn.clone();
 
             handlers = handlers.on_key(move |event, _ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
+                    use bastyde_core::event::Key;
                     let count = (len_for_key)();
                     if count == 0 {
+                        return bastyde_core::event::EventResponse::Ignored;
+                    }
+
+                    // Ctrl+A: select all (Multi selection only — a no-op for
+                    // Single / None, matching every list control).
+                    if modifiers.ctrl() && matches!(key, Key::A) {
+                        if let Some(ref sel) = sel_for_key
+                            && sel.mode() == bastyde_data::SelectionMode::Multi
+                        {
+                            sel.select_all(count);
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
+                        return bastyde_core::event::EventResponse::Ignored;
+                    }
+
+                    // Type-ahead: a printable char (no Ctrl/Alt/Super) jumps the
+                    // selection to the next row whose label starts with the
+                    // accumulated term. Opt-in via `type_ahead_label`.
+                    if ta_label.is_some()
+                        && !modifiers.ctrl()
+                        && !modifiers.alt()
+                        && !modifiers.super_key()
+                        && let Some(c) = key.to_char()
+                    {
+                        let current = fi.get().unwrap_or(0).min(count - 1);
+                        let label = ta_label.as_ref().unwrap();
+                        if let Some(idx) = ta_state.search(c, current, count, ta_timeout, |i| {
+                            (with_item_str)(i, &|item| label(item))
+                        }) {
+                            fi.set(Some(idx));
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(idx);
+                            }
+                            let scroll = scroll_for_nav.get();
+                            let new_scroll =
+                                metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
+                                    idx,
+                                    scroll,
+                                    vh_for_nav.get(),
+                                    max_for_nav.get(),
+                                );
+                            if (new_scroll - scroll).abs() > f32::EPSILON {
+                                scroll_for_nav.set(new_scroll);
+                            }
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
                         return bastyde_core::event::EventResponse::Ignored;
                     }
 
@@ -730,22 +818,62 @@ impl<T: 'static> Widget for ListView<T> {
                     }
 
                     // Navigation keys (no modifiers or with Shift for extend)
-                    let current = fi.get().unwrap_or(0);
+                    let current = fi.get().unwrap_or(0).min(count - 1);
                     let new_idx = match key {
-                        bastyde_core::event::Key::ArrowDown => {
-                            Some(current.saturating_add(1).min(count - 1))
+                        Key::ArrowDown => Some((current + 1).min(count - 1)),
+                        Key::ArrowUp => Some(current.saturating_sub(1)),
+                        Key::Home => Some(0),
+                        Key::End => Some(count - 1),
+                        // Page keys: jump one viewport of rows (geometry-driven,
+                        // so variable heights page by visual distance), then the
+                        // common ensure-visible below scrolls to follow.
+                        Key::PageDown => {
+                            let vh = vh_for_nav.get();
+                            let r = {
+                                let mut m = metrics_for_nav.borrow_mut();
+                                m.resize(count);
+                                let target = m.row_top(current) + vh;
+                                m.row_at(target)
+                            };
+                            Some(if r == current {
+                                (current + 1).min(count - 1)
+                            } else {
+                                r.min(count - 1)
+                            })
                         }
-                        bastyde_core::event::Key::ArrowUp => Some(current.saturating_sub(1)),
-                        bastyde_core::event::Key::Home => Some(0),
-                        bastyde_core::event::Key::End => Some(count - 1),
-                        bastyde_core::event::Key::Enter | bastyde_core::event::Key::Space => {
+                        Key::PageUp => {
+                            let vh = vh_for_nav.get();
+                            let r = {
+                                let mut m = metrics_for_nav.borrow_mut();
+                                m.resize(count);
+                                let target = (m.row_top(current) - vh).max(0.0);
+                                m.row_at(target)
+                            };
+                            Some(if r == current { current.saturating_sub(1) } else { r })
+                        }
+                        Key::Enter => {
+                            // Enter activates the focused row (open / commit).
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(current);
                             }
-                            // Enter/Space activates the focused row (open/commit).
                             if let Some(ref cb) = activate_key {
                                 cb(current);
                             }
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
+                        Key::Space => {
+                            // Space moves/toggles the selection but does NOT
+                            // activate — the platform convention (Enter is the
+                            // activator). Multi: toggle the focused row; Single:
+                            // select it.
+                            if let Some(ref sel) = sel_for_key {
+                                if sel.mode() == bastyde_data::SelectionMode::Multi {
+                                    sel.toggle(current);
+                                } else {
+                                    sel.select(current);
+                                }
+                            }
+                            fi.set(Some(current));
                             return bastyde_core::event::EventResponse::Handled;
                         }
                         _ => None,
@@ -1809,6 +1937,202 @@ mod tests {
         assert_eq!(model.with_item(0, |v| *v), Some(20));
         assert_eq!(model.with_item(1, |v| *v), Some(10));
         assert_eq!(model.with_item(2, |v| *v), Some(30));
+    }
+
+    #[test]
+    fn page_down_up_moves_selection_by_viewport() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..100usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        let p = SizeProposal::exact(400.0, 200.0); // ~10 rows visible
+        tree.layout(p);
+        tree.focus(lv);
+        selection.select(0);
+
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        tree.layout(p);
+        let after_pgdn = selection.selected_indices()[0];
+        assert!(
+            after_pgdn >= 8,
+            "PageDown should advance ~one viewport of rows, got {after_pgdn}"
+        );
+        let scroll = with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().get());
+        assert!(scroll > 0.0, "PageDown scrolls to follow, got {scroll}");
+
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        tree.layout(p);
+        assert!(
+            selection.selected_indices()[0] < after_pgdn,
+            "PageUp should move selection back up"
+        );
+    }
+
+    #[test]
+    fn space_toggles_selection_enter_activates() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+        use std::cell::Cell;
+
+        let model = ListModel::from_vec((0..5usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let sel = selection.clone();
+        let activated = Rc::new(Cell::new(None));
+        let act = activated.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .on_activate(move |i| act.set(Some(i))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+
+        // Move focus to row 2 (arrow down twice from default 0).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2]);
+        assert_eq!(activated.get(), None, "arrows never activate");
+
+        // Space toggles the focused row's selection OFF (Multi), no activate.
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(
+            selection.selected_indices().is_empty(),
+            "Space toggles row 2 off in Multi mode"
+        );
+        assert_eq!(activated.get(), None, "Space must NOT activate");
+
+        // Enter activates the focused row (and selects it).
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(activated.get(), Some(2), "Enter activates the focused row");
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_in_multi_mode() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..6usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+        tree.press_key(Key::A, Modifiers::CTRL);
+        assert_eq!(selection.selected_indices().len(), 6, "Ctrl+A selects all");
+    }
+
+    #[test]
+    fn type_ahead_jumps_to_matching_row() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec(vec![
+            "Apple".to_string(),
+            "Banana".to_string(),
+            "Cherry".to_string(),
+            "Cranberry".to_string(),
+            "Date".to_string(),
+        ]);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .type_ahead_label(|s: &String| s.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+        selection.select(0);
+
+        // Type 'c' → jumps to "Cherry" (first item after 0 starting with c).
+        tree.press_key(Key::C, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2], "'c' → Cherry");
+
+        // Type 'r' within timeout → buffer "cr" → "Cranberry".
+        tree.press_key(Key::R, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![3], "'cr' → Cranberry");
+    }
+
+    #[test]
+    fn type_ahead_buffer_survives_rebuild() {
+        // The persistent-field design under test: each keystroke changes the
+        // selection, which schedules a rebuild. Force that rebuild between the
+        // two keystrokes; the accumulated buffer ("c" then "cr") must survive,
+        // or multi-char search is impossible.
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec(vec![
+            "Apple".to_string(),
+            "Cherry".to_string(),
+            "Cranberry".to_string(),
+        ]);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let p = SizeProposal::exact(400.0, 200.0);
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel)
+                .type_ahead_label(|s: &String| s.clone()),
+        );
+        tree.layout(p);
+        tree.focus(lv);
+        selection.select(0);
+
+        tree.press_key(Key::C, Modifiers::NONE); // → Cherry (idx 1)
+        assert_eq!(selection.selected_indices(), vec![1]);
+        tree.layout(p); // <-- the rebuild that would reset a build()-local buffer
+        tree.press_key(Key::R, Modifiers::NONE); // "cr" → Cranberry (idx 2)
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "buffer 'c' must survive the rebuild so 'cr' matches Cranberry"
+        );
+    }
+
+    #[test]
+    fn page_down_on_short_list_jumps_to_last_without_panic() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        // 3 rows in a 200px (~10-row) viewport — content shorter than a page.
+        let model = ListModel::from_vec((0..3usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+        selection.select(0);
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2], "PageDown → last row");
+        tree.press_key(Key::PageDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2], "stays at last");
+        tree.press_key(Key::PageUp, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![0], "PageUp → first row");
     }
 
     #[test]

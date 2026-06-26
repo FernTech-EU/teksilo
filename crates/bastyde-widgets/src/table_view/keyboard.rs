@@ -10,6 +10,7 @@
 //! `toggle_expanded` methods are no-ops on a flat table.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
@@ -20,6 +21,7 @@ use super::column::{EditTrigger, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::common::type_ahead::TypeAheadState;
 use crate::data_views::RowSelection;
 
 /// Configuration captured from the table at build time and threaded
@@ -58,6 +60,14 @@ pub(crate) struct KeyHandlerConfig {
     /// Optional: row-activate (Enter) callback.
     #[allow(clippy::type_complexity)]
     pub on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
+    /// Persistent type-ahead buffer (survives the per-keystroke rebuild).
+    pub type_ahead: Rc<TypeAheadState>,
+    /// Type-ahead label resolver: `row -> Some(text)` for a resident row.
+    /// `None` (the option) disables type-ahead.
+    #[allow(clippy::type_complexity)]
+    pub type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>>,
+    /// Reset window for the type-ahead search term.
+    pub type_ahead_timeout: Duration,
 }
 
 /// Build the on_key closure. Captures config by value; the closure is
@@ -182,6 +192,12 @@ pub(crate) fn build_key_handler(
                 };
                 Some((r, col))
             }
+            // Ctrl+Tab / Ctrl+Shift+Tab escape the cell grid: return Ignored so
+            // the framework's focus cycling moves to the next / previous widget.
+            // Plain Tab still navigates cells (the `CellsThenRows` trap), but
+            // this gives keyboard users a reliable way out — the same un-trap
+            // affordance `RichTextEditor` leaves to OS focus navigation.
+            Key::Tab if modifiers.ctrl() => return EventResponse::Ignored,
             Key::Tab => {
                 if modifiers.shift() {
                     if col > 0 {
@@ -262,6 +278,29 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Ignored;
             }
+            // Type-ahead: a printable char (no Ctrl/Alt/Super) jumps the
+            // focused row to the next row whose label starts with the
+            // accumulated term. Reached only when the type-to-edit arm above
+            // didn't consume the char (no editor on this column / edit off).
+            k if cfg.type_ahead_label.is_some()
+                && !modifiers.ctrl()
+                && !modifiers.alt()
+                && !modifiers.super_key()
+                && k.to_char().is_some() =>
+            {
+                let c = k.to_char().unwrap();
+                let label = cfg.type_ahead_label.as_ref().unwrap();
+                if let Some(nr) =
+                    cfg.type_ahead
+                        .search(c, row, row_count, cfg.type_ahead_timeout, |i| label(i))
+                {
+                    cfg.focused_cell.set(Some((nr, col)));
+                    apply_selection_extension(&cfg, nr, col, false);
+                    ensure_row_visible(&cfg, nr, row_count);
+                    return EventResponse::Handled;
+                }
+                return EventResponse::Ignored;
+            }
             Key::A if modifiers.ctrl() => {
                 select_all(&cfg, row_count);
                 return EventResponse::Handled;
@@ -280,10 +319,38 @@ pub(crate) fn build_key_handler(
         if let Some((nr, nc)) = new_pos {
             cfg.focused_cell.set(Some((nr, nc)));
             apply_selection_extension(&cfg, nr, nc, modifiers.shift());
+            ensure_row_visible(&cfg, nr, row_count);
             return EventResponse::Handled;
         }
 
         EventResponse::Ignored
+    }
+}
+
+/// Scroll the viewport so `row` is fully visible — a no-op when it
+/// already is. Gives `TableView` / `TreeTableView` the same
+/// "keyboard-focused row stays on screen" behavior that `ListView` /
+/// `TreeView` already have: every Arrow / Home / End / Ctrl+Home/End /
+/// Tab move that lands on a new row keeps it visible.
+///
+/// `PageUp` / `PageDown` already set `scroll_y` to a page boundary and
+/// pick a focus row at the new viewport edge, so calling this for them
+/// only refines the offset (the chosen row is visible by construction —
+/// no extra jump).
+fn ensure_row_visible(cfg: &KeyHandlerConfig, row: usize, row_count: usize) {
+    let scroll = cfg.scroll_y.get();
+    let new_scroll = {
+        let mut m = cfg.row_metrics.borrow_mut();
+        m.resize(row_count);
+        m.scroll_for_ensure_visible(
+            row,
+            scroll,
+            cfg.viewport_height.get(),
+            cfg.max_scroll_y.get(),
+        )
+    };
+    if (new_scroll - scroll).abs() > f32::EPSILON {
+        cfg.scroll_y.set(new_scroll);
     }
 }
 

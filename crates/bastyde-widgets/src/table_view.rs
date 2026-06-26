@@ -221,6 +221,14 @@ pub struct TableView<T: 'static> {
     /// Currently keyboard-focused cell `(row_index, display_col)`, or
     /// `None` when no cell is focused.
     focused_cell: Signal<Option<(usize, usize)>>,
+    /// Type-ahead ("type to jump") label extractor — opt-in via
+    /// [`type_ahead_label`](Self::type_ahead_label).
+    #[allow(clippy::type_complexity)]
+    type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Reset window for the type-ahead search term.
+    type_ahead_timeout: Duration,
+    /// Persistent type-ahead buffer (survives the per-keystroke rebuild).
+    type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
     tab_traversal: TabTraversal,
     /// Cell currently in edit mode, or `None` when no editor is open.
     /// Cell delegates inspect this through `CellContext::is_editing` to
@@ -408,6 +416,9 @@ impl<T: 'static> TableView<T> {
             column_order_signal: Signal::new(Vec::new()),
             column_pinning_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
+            type_ahead_label: None,
+            type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
+            type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             // Replaced at build with the live tree signals; the defaults are
             // only the pre-build values (treat as focused, pointer modality).
             view_focused: Signal::new(true),
@@ -453,6 +464,29 @@ impl<T: 'static> TableView<T> {
     /// When disabled, wheel events snap immediately to the new offset.
     pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
         self.smooth_scrolling = enabled;
+        self
+    }
+
+    /// Enable **type-ahead** ("type to jump"): typing a printable character
+    /// while the table has keyboard focus jumps the focused row to the next
+    /// row whose label starts with the accumulated search term, wrapping
+    /// around (Qt `keyboardSearch` / macOS & Windows type-select).
+    /// `label(&item)` yields the searchable text for a row; matching is
+    /// ASCII-case-insensitive. A pause longer than the
+    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
+    ///
+    /// On an editable column whose [`EditTrigger`] is type-to-edit, typing
+    /// starts an edit instead — type-ahead applies on non-editable columns
+    /// (or when no type-to-edit trigger is configured).
+    pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
+        self.type_ahead_label = Some(Rc::new(label));
+        self
+    }
+
+    /// Reset window between keystrokes before the type-ahead search term
+    /// clears (default 500 ms). A zero duration disables type-ahead.
+    pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self {
+        self.type_ahead_timeout = timeout;
         self
     }
 
@@ -1221,6 +1255,22 @@ impl<T: 'static> Widget for TableView<T> {
             Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
         };
 
+        // Type-ahead label resolver (row -> Some(text)) built from the user's
+        // `Fn(&T) -> String` + the side-effect source read: the closure only
+        // fires for a resident row, so unloaded (lazy) rows resolve to `None`
+        // and the search skips them.
+        let type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>> =
+            self.type_ahead_label.clone().map(|user| {
+                let with_item = self.with_item_fn.clone();
+                Rc::new(move |i: usize| {
+                    let out = std::cell::RefCell::new(None);
+                    (with_item)(i, &|item| {
+                        *out.borrow_mut() = Some(user(item));
+                    });
+                    out.into_inner()
+                }) as Rc<dyn Fn(usize) -> Option<String>>
+            });
+
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
             col_count: display_indices_now.len().max(1),
@@ -1239,6 +1289,9 @@ impl<T: 'static> Widget for TableView<T> {
             display_col_editable,
             on_cell_edit_request: self.on_cell_edit_request.clone(),
             on_row_activate: self.on_row_activate.clone(),
+            type_ahead: self.type_ahead.clone(),
+            type_ahead_label,
+            type_ahead_timeout: self.type_ahead_timeout,
         };
 
         // Row DnD is owned by the backing source. The view computes the

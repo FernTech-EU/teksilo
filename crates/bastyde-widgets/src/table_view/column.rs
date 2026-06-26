@@ -103,10 +103,14 @@ pub enum EditTrigger {
 }
 
 /// Tab / Shift-Tab traversal policy across cells of a row.
+///
+/// Regardless of the policy, **Ctrl+Tab / Ctrl+Shift+Tab always move focus
+/// out of the table** to the next / previous focusable widget — the reliable
+/// escape from `CellsThenRows`, so keyboard focus is never trapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabTraversal {
     /// Tab moves to the next cell within the row, then wraps to the first
-    /// cell of the next row. **Default.**
+    /// cell of the next row. **Default.** (Ctrl+Tab leaves the table.)
     #[default]
     CellsThenRows,
     /// Tab leaves the table once the focused cell is reached at the row

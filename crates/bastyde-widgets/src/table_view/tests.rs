@@ -831,6 +831,100 @@ fn ctrl_home_end_jump_to_corners() {
     assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
 }
 
+fn read_scroll(tree: &WidgetTree, table: WidgetId) -> f32 {
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    tv.scroll_y_signal().get()
+}
+
+#[test]
+fn arrow_nav_scroll_follows_focused_row() {
+    // 100 rows × 20 px in a 200 px viewport. Walking the focus down past
+    // the visible window must scroll to keep the focused row visible
+    // ("selection always visible") — the behavior ListView / TreeView
+    // already have. Regression for: TableView keyboard nav left scroll_y
+    // untouched, so the focused row marched off-screen.
+    let model = rows(100);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0),
+    );
+    let proposal = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(proposal);
+    focus_at(&mut tree, table, 0, 0);
+    assert_eq!(read_scroll(&tree, table), 0.0, "starts at top");
+
+    // Arrow down to row 20 — far below the ~10-row viewport.
+    for _ in 0..20 {
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.layout(proposal);
+    }
+    assert_eq!(read_focused_cell(&tree, table), Some((20, 0)));
+    let scroll = read_scroll(&tree, table);
+    assert!(
+        scroll > 200.0,
+        "arrow-down nav must scroll to reveal row 20, got {scroll}"
+    );
+
+    // Ctrl+Home returns focus AND scroll to the very top.
+    tree.press_key(Key::Home, Modifiers::CTRL);
+    tree.layout(proposal);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+    assert_eq!(
+        read_scroll(&tree, table),
+        0.0,
+        "Ctrl+Home must scroll back to the top"
+    );
+
+    // Ctrl+End jumps focus AND scroll to reveal the last row.
+    tree.press_key(Key::End, Modifiers::CTRL);
+    tree.layout(proposal);
+    assert_eq!(read_focused_cell(&tree, table), Some((99, 1)));
+    assert!(
+        read_scroll(&tree, table) > 0.0,
+        "Ctrl+End must scroll to reveal the last row"
+    );
+}
+
+#[test]
+fn type_ahead_jumps_focus_to_matching_row() {
+    let model = ListModel::from_vec(vec![
+        Row { id: 0, name: "Apple".into() },
+        Row { id: 1, name: "Banana".into() },
+        Row { id: 2, name: "Cherry".into() },
+        Row { id: 3, name: "Cranberry".into() },
+    ]);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(name_col())
+            .row_height(20.0)
+            .type_ahead_label(|r: &Row| r.name.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+
+    // 'c' → Cherry (first row after 0 starting with c).
+    tree.press_key(Key::C, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((2, 0)), "'c' → Cherry");
+    // 'r' within the timeout → buffer "cr" → Cranberry.
+    tree.press_key(Key::R, Modifiers::NONE);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((3, 0)),
+        "'cr' → Cranberry"
+    );
+}
+
 #[test]
 fn page_down_advances_focus_and_scroll() {
     // 100 rows × 20 px in a 200 px viewport: 10 rows per page.
@@ -1028,6 +1122,52 @@ fn tab_moves_to_next_cell_with_row_wrap() {
     // Past the last column → wraps to next row, col 0.
     tree.press_key(Key::Tab, Modifiers::NONE);
     assert_eq!(read_focused_cell(&tree, table), Some((1, 0)));
+}
+
+#[test]
+fn ctrl_tab_escapes_the_cell_grid() {
+    use bastyde_core::widget_builder::WidgetBuilder;
+    use crate::primitives::VStack;
+
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0),
+    );
+    // A focusable sibling after the table so focus cycling has somewhere to go.
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().add_child(table).add_child(sink));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+
+    focus_at(&mut tree, table, 0, 0);
+    // Plain Tab still navigates within the grid.
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((0, 1)),
+        "plain Tab navigates cells"
+    );
+
+    // Ctrl+Tab escapes: the focused cell does NOT advance, and keyboard focus
+    // leaves the table (framework focus cycling moves to the sibling).
+    let before = read_focused_cell(&tree, table);
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        before,
+        "Ctrl+Tab must not navigate cells"
+    );
+    assert_eq!(
+        tree.focused(),
+        Some(sink),
+        "Ctrl+Tab moves focus out of the table to the next focusable"
+    );
 }
 
 #[test]

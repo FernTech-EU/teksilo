@@ -150,6 +150,11 @@ pub(crate) struct ListSource<T: 'static> {
     pub(crate) len_fn: Rc<dyn Fn() -> usize>,
     pub(crate) with_item_fn:
         Rc<dyn Fn(usize, &dyn Fn(&T) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>,
+    /// String-returning sibling of [`with_item_fn`](Self::with_item_fn) —
+    /// reads an arbitrary `String` from a resident item (or `None` if the
+    /// row isn't loaded). Powers type-ahead label extraction without
+    /// forcing the delegate's widget-building path.
+    pub(crate) with_item_str_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> String) -> Option<String>>,
     pub(crate) observe_fn: Rc<dyn Fn(Box<dyn Fn(&DataChange)>) -> ObserverHandle>,
     /// Only populated when backed by `ListModel` — external sources can't
     /// reorder in place.
@@ -177,9 +182,11 @@ impl<T: 'static> ListSource<T> {
         let m3 = model.clone();
         let m4 = model.clone();
         let m5 = model.clone();
+        let m6 = model.clone();
         Self {
             len_fn: Rc::new(move || m1.len()),
             with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
+            with_item_str_fn: Rc::new(move |index, f| m6.with_item(index, |item| f(item))),
             observe_fn: Rc::new(move |f| m3.observe_changes(move |c| f(c))),
             move_item_fn: Some(Rc::new(move |from, to| m4.move_item(from, to))),
             remove_item_fn: Some(Rc::new(move |index| {
@@ -205,9 +212,11 @@ impl<T: 'static> ListSource<T> {
         let s2 = s.clone();
         let s3 = s.clone();
         let s4 = s.clone();
+        let s5 = s.clone();
         Self {
             len_fn: Rc::new(move || s1.len()),
             with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
+            with_item_str_fn: Rc::new(move |index, f| s5.with_item(index, |item| f(item))),
             observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
             move_item_fn: None,
             remove_item_fn: None,
@@ -231,9 +240,11 @@ impl<T: 'static> ListSource<T> {
     where
         T: Clone,
     {
+        let item_at_str = item_at.clone();
         Self {
             len_fn,
             with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(f)),
+            with_item_str_fn: Rc::new(move |index, f| item_at_str(index).as_ref().map(f)),
             observe_fn,
             move_item_fn: None,
             remove_item_fn: None,

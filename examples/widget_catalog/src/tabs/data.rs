@@ -60,9 +60,13 @@ fn repeater_widget() -> Repeater<String> {
 }
 
 fn list_view_widget() -> ListView<String> {
-    ListView::new(make_list_model(), |_idx, item: &String, _sel| {
-        Box::new(StandardListItem::new(lit!(item.clone())))
+    // Wire a selection model + reflect `selected` in the row, like the
+    // TreeView below — otherwise arrow-key navigation moves the focus index
+    // but nothing highlights (only the container focus ring shows).
+    ListView::new(make_list_model(), |_idx, item: &String, selected| {
+        Box::new(StandardListItem::new(lit!(item.clone())).selected(selected))
     })
+    .selection(SelectionModel::new(SelectionMode::Single))
 }
 
 // ── TreeView (data_collections) ───────────────────────────────────────

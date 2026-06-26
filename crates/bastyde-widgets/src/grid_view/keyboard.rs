@@ -138,16 +138,21 @@ pub(crate) fn build_grid_key_handler(
         }
 
         // Type-ahead: a bare printable character jumps to the next match.
-        if !modifiers.ctrl() && !modifiers.alt() {
-            if let Key::Character(c) = key {
-                if let Some(idx) = type_ahead(&cfg, &ta_state, *c, current, n) {
-                    cfg.focused_index.set(Some(idx));
-                    if let Some(ref sel) = cfg.selection {
-                        sel.select(idx);
-                    }
-                    ensure_visible(&cfg, idx);
-                    return EventResponse::Handled;
+        // Use `to_char()` so letters (which arrive as the dedicated
+        // `Key::A`..`Key::Z` variants, NOT `Key::Character`) trigger it too —
+        // matching only `Key::Character` silently broke letter type-ahead.
+        if !modifiers.ctrl()
+            && !modifiers.alt()
+            && !modifiers.super_key()
+            && let Some(c) = key.to_char()
+        {
+            if let Some(idx) = type_ahead(&cfg, &ta_state, c, current, n) {
+                cfg.focused_index.set(Some(idx));
+                if let Some(ref sel) = cfg.selection {
+                    sel.select(idx);
                 }
+                ensure_visible(&cfg, idx);
+                return EventResponse::Handled;
             }
         }
 

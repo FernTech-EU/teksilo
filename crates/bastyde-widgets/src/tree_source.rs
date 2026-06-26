@@ -171,6 +171,10 @@ pub(crate) struct TreeSource<T: 'static> {
     /// `None` when the index is out of range OR its data is still `Loading`.
     with_row_fn:
         Rc<dyn Fn(usize, &dyn Fn(&T, &TreeRowMeta) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>,
+    /// String-returning sibling of [`with_row_fn`](Self::with_row_fn) — reads
+    /// an arbitrary `String` from a resident row's item, for type-ahead label
+    /// extraction. `None` when out of range or still loading.
+    with_row_str_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> String) -> Option<String>>,
     /// Flat metadata for `index` without building a widget (a11y, keyboard).
     meta_fn: Rc<dyn Fn(usize) -> Option<TreeRowMeta>>,
     /// Expand (`true`) / collapse (`false`) the row at `index` (index → key).
@@ -194,7 +198,8 @@ impl<T: 'static> TreeSource<T> {
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let dnd = TreeDndLazy::from_source(s.clone());
-        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10) = (
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -217,6 +222,9 @@ impl<T: 'static> TreeSource<T> {
                     };
                     build(item, &meta)
                 })
+            }),
+            with_row_str_fn: Rc::new(move |index, f| {
+                s11.with_entry(index, |item, _entry| f(item))
             }),
             meta_fn: Rc::new(move |index| {
                 s3.with_entry(index, |_item, entry| TreeRowMeta {
@@ -322,6 +330,15 @@ impl<T: 'static> TreeSource<T> {
 
     pub(crate) fn meta(&self, index: usize) -> Option<TreeRowMeta> {
         (self.meta_fn)(index)
+    }
+
+    /// Read a `String` from the resident row at `index` (type-ahead label).
+    pub(crate) fn with_row_str(
+        &self,
+        index: usize,
+        f: &dyn Fn(&T) -> String,
+    ) -> Option<String> {
+        (self.with_row_str_fn)(index, f)
     }
 
     pub(crate) fn set_expanded_at(&self, index: usize, expanded: bool) {
