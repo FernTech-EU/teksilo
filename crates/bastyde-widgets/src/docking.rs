@@ -85,6 +85,13 @@ pub struct DockingLayout {
     progress: HashMap<DockSide, bastyde_core::signal::Signal<f32>>,
     /// Per-side activity-rail configuration (size / slots / overflow).
     rails: HashMap<DockSide, DockRail>,
+    /// Per-side `WidgetId` of the `DockSidePanel` content region (the
+    /// `Role::Complementary` landmark), recorded in `build()`. Threaded into
+    /// each side's `DockActivityBar` so its rail tabs can advertise an AT
+    /// `controls` relationship pointing at the content region they govern
+    /// (the ARIA tab → tabpanel link). Owned per-`DockingLayout` instance so
+    /// it stays correct even if a model is shared across views.
+    side_panel_ids: Rc<RefCell<HashMap<DockSide, WidgetId>>>,
     /// Children in a fixed order so `place_children` can index them:
     /// `[center, (content, rail, handle) × {leading, trailing, top, bottom}]`.
     ordered: Vec<WidgetId>,
@@ -107,6 +114,7 @@ impl DockingLayout {
             container_bounds: Rc::new(Cell::new(Rect::ZERO)),
             progress: HashMap::new(),
             rails: HashMap::new(),
+            side_panel_ids: Rc::new(RefCell::new(HashMap::new())),
             ordered: Vec::new(),
         }
     }
@@ -211,6 +219,11 @@ impl Widget for DockingLayout {
         let mut ordered = vec![center];
         let anim = ctx.animate().collapse().standard();
 
+        // Re-derive the side → content-region id map on every (re)build; a
+        // disabled or rail-less side leaves no entry, so a rail tab simply
+        // omits its `controls` relation rather than dangling at a stale id.
+        self.side_panel_ids.borrow_mut().clear();
+
         for side in SIDES_ORDER {
             // A disabled side renders nothing and reserves no space. Push three
             // transparent placeholders so the fixed child order
@@ -258,6 +271,9 @@ impl Widget for DockingLayout {
                 self.model.clone(),
                 self.registry.clone(),
             ));
+            // Record the content region's id so this side's rail tabs can
+            // advertise `controls` → this panel (ARIA tab → tabpanel link).
+            self.side_panel_ids.borrow_mut().insert(side, panel);
             // Park the content dormant (out of paint/focus/AT) once the side is
             // fully collapsed, so it never bleeds past its 0-size clip. This is
             // `visible_when` (dormancy toggled only on the flip) — NOT
@@ -276,7 +292,12 @@ impl Widget for DockingLayout {
                     .get(&side)
                     .cloned()
                     .unwrap_or_else(|| DockRail::new(side));
-                ctx.add(DockActivityBar::new(side, self.model.clone(), config))
+                ctx.add(DockActivityBar::new(
+                    side,
+                    self.model.clone(),
+                    config,
+                    self.side_panel_ids.clone(),
+                ))
             } else {
                 ctx.add(RectWidget::new().background(SurfaceRole::Transparent))
             };

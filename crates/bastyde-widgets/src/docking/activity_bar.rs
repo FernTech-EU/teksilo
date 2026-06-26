@@ -18,18 +18,20 @@
 //!   that opens a popover list of the overflowed entries.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Rect, SizeProposal};
 use bastyde_core::{DragPayload, DropFeedback};
-use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::gesture::DragPhase;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
-    CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -55,6 +57,11 @@ use super::model::{DockIconFactory, DockRailItemSize, DockTabId, DockingModel};
 /// for a now-overflowed item is filtered out (the handler only considers
 /// positions below the current shown count).
 type RailItemBounds = Rc<RefCell<Vec<(usize, Rect)>>>;
+
+/// Shared list of `(visible position → WidgetId)` for the rail's items, used
+/// to move keyboard focus between sibling tabs (roving focus). Keyed by the
+/// same visible position as [`RailItemBounds`] so the two stay aligned.
+type RailItemIds = Rc<RefCell<Vec<(usize, WidgetId)>>>;
 
 /// Factory for a rail slot widget (rebuilt on each rail rebuild).
 ///
@@ -226,9 +233,20 @@ pub(crate) struct DockActivityBar {
     /// tabs + internal reorders, the rail is a drop target for whole dock tabs
     /// (`move_tab`) and single docks (`promote_to_tab`).
     item_bounds: RailItemBounds,
+    /// Shared list of `(visible position → WidgetId)` for the currently-built
+    /// rail items, populated in `build()`. Drives Arrow/Home/End roving focus
+    /// between sibling tabs (the `request_focus` target list), the same way
+    /// `TabBar` shares its `header_ids`. Filtered by `visible_count` at nav
+    /// time so overflowed (dormant) items are skipped — they live in the
+    /// overflow popover instead.
+    item_ids: RailItemIds,
     /// The rail's own world bounds, recorded in `place_children` so the drop
     /// handler can translate the item world rects into bar-local space.
     self_bounds: Rc<Cell<Rect>>,
+    /// Per-side content-region ids (owned by the enclosing `DockingLayout`),
+    /// so a rail tab can advertise an AT `controls` relationship pointing at
+    /// the `DockSidePanel` it governs (the ARIA tab → tabpanel link).
+    side_panel_ids: Rc<RefCell<HashMap<DockSide, WidgetId>>>,
     /// Bar-local y of the active drop insertion line (`None` = no drag over the
     /// rail). Painted by the `RailDropIndicator` overlay.
     drop_indicator: Signal<Option<f32>>,
@@ -244,7 +262,12 @@ impl std::fmt::Debug for DockActivityBar {
 }
 
 impl DockActivityBar {
-    pub(crate) fn new(side: DockSide, model: DockingModel, config: DockRail) -> Self {
+    pub(crate) fn new(
+        side: DockSide,
+        model: DockingModel,
+        config: DockRail,
+        side_panel_ids: Rc<RefCell<HashMap<DockSide, WidgetId>>>,
+    ) -> Self {
         Self {
             side,
             model,
@@ -252,7 +275,9 @@ impl DockActivityBar {
             visible_count: Signal::new(usize::MAX),
             item_count: 0,
             item_bounds: Rc::new(RefCell::new(Vec::new())),
+            item_ids: Rc::new(RefCell::new(Vec::new())),
             self_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            side_panel_ids,
             drop_indicator: Signal::new(None),
             root: None,
         }
@@ -315,6 +340,7 @@ impl Widget for DockActivityBar {
         // drop handler can translate a visible insertion position into a
         // `move_tab` index (a hidden tab in the middle shifts nothing).
         self.item_bounds.borrow_mut().clear();
+        self.item_ids.borrow_mut().clear();
         let mut model_indices: Vec<usize> = Vec::with_capacity(tabs.len());
         let mut items: Vec<WidgetId> = Vec::with_capacity(tabs.len());
         let mut pos = 0usize;
@@ -347,7 +373,12 @@ impl Widget for DockActivityBar {
                 visible.clone(),
                 self.model.clone(),
                 self.item_bounds.clone(),
+                self.item_ids.clone(),
+                self.visible_count.clone(),
+                self.side_panel_ids.clone(),
             ));
+            // Register the id for roving focus (keyed by visible position).
+            self.item_ids.borrow_mut().push((p, id));
             ctx.visible_when(id, visible_count.map(move |c| p < *c));
             items.push(id);
         }
@@ -570,6 +601,93 @@ fn shown_items(
     out
 }
 
+/// A roving-focus navigation step among the rail's shown items.
+enum RailNav {
+    Prev,
+    Next,
+    First,
+    Last,
+}
+
+/// Count of rail tabs currently in the AT tree = items whose visible position
+/// is below the live `visible_count` (overflowed items are dormant). Drives
+/// `size_of_set` on each `Role::Tab`.
+fn shown_rail_count(item_ids: &RailItemIds, visible_count: &Signal<usize>) -> usize {
+    let count = visible_count.get();
+    item_ids.borrow().iter().filter(|(p, _)| *p < count).count()
+}
+
+/// Roving-focus navigation among the rail's currently-shown items. Given the
+/// shared id list, the live visible count, the current item's visible
+/// position, and a navigation step, return the `WidgetId` to focus next
+/// (arrows wrap; Home/End clamp to ends). Overflowed (dormant) items are
+/// excluded — they live in the overflow popover, not the Tab cycle. Mirrors
+/// `TabBar`'s `request_focus(headers[next])` roving (`tab_widget/header.rs`).
+fn rail_focus_target(
+    item_ids: &RailItemIds,
+    visible_count: &Signal<usize>,
+    current_pos: usize,
+    nav: RailNav,
+) -> Option<WidgetId> {
+    let count = visible_count.get();
+    let mut shown: Vec<(usize, WidgetId)> = item_ids
+        .borrow()
+        .iter()
+        .filter(|(p, _)| *p < count)
+        .copied()
+        .collect();
+    shown.sort_by_key(|(p, _)| *p);
+    if shown.is_empty() {
+        return None;
+    }
+    let cur = shown.iter().position(|(p, _)| *p == current_pos)?;
+    let target = match nav {
+        RailNav::Prev => (cur + shown.len() - 1) % shown.len(),
+        RailNav::Next => (cur + 1) % shown.len(),
+        RailNav::First => 0,
+        RailNav::Last => shown.len() - 1,
+    };
+    Some(shown[target].1)
+}
+
+/// Count of overflow rows currently shown in the popover = items whose visible
+/// position is at or above the live `visible_count` (the parked ones). Drives
+/// `size_of_set` on each overflow `Role::MenuItem`.
+fn overflow_shown_count(row_ids: &RailItemIds, visible_count: &Signal<usize>) -> usize {
+    let count = visible_count.get();
+    row_ids.borrow().iter().filter(|(p, _)| *p >= count).count()
+}
+
+/// Roving-focus navigation among the overflow popover's shown rows — the
+/// counterpart of [`rail_focus_target`] for the parked (`pos >= visible_count`)
+/// items. Returns the row `WidgetId` to focus next.
+fn overflow_focus_target(
+    row_ids: &RailItemIds,
+    visible_count: &Signal<usize>,
+    current_pos: usize,
+    nav: RailNav,
+) -> Option<WidgetId> {
+    let count = visible_count.get();
+    let mut shown: Vec<(usize, WidgetId)> = row_ids
+        .borrow()
+        .iter()
+        .filter(|(p, _)| *p >= count)
+        .copied()
+        .collect();
+    shown.sort_by_key(|(p, _)| *p);
+    if shown.is_empty() {
+        return None;
+    }
+    let cur = shown.iter().position(|(p, _)| *p == current_pos)?;
+    let target = match nav {
+        RailNav::Prev => (cur + shown.len() - 1) % shown.len(),
+        RailNav::Next => (cur + 1) % shown.len(),
+        RailNav::First => 0,
+        RailNav::Last => shown.len() - 1,
+    };
+    Some(shown[target].1)
+}
+
 /// Given the pointer's bar-local y, the shown items (sorted by position, world
 /// bounds), and the bar's world origin/height, return the visible insertion
 /// position (`0..=count`) and the indicator's bar-local y.
@@ -739,6 +857,9 @@ struct DockOverflowMenu {
     side: DockSide,
     model: DockingModel,
     visible_count: Signal<usize>,
+    /// Shared `(visible position → row WidgetId)` list for roving Arrow/Home/End
+    /// focus among the overflowed rows.
+    row_ids: RailItemIds,
     root: Option<WidgetId>,
 }
 
@@ -748,6 +869,7 @@ impl DockOverflowMenu {
             side,
             model,
             visible_count,
+            row_ids: Rc::new(RefCell::new(Vec::new())),
             root: None,
         }
     }
@@ -757,6 +879,7 @@ impl Widget for DockOverflowMenu {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let tabs = self.model.side_tabs(self.side);
         let mut column = VStack::new().spacing(2.0);
+        self.row_ids.borrow_mut().clear();
         // Mirror the rail: only non-hidden tabs are rail items, and overflow is
         // keyed on the position among shown items (so an overflowed row appears
         // here exactly when its rail item is parked).
@@ -775,10 +898,14 @@ impl Widget for DockOverflowMenu {
             let row = ctx.add(DockOverflowRow::new(
                 self.side,
                 model_i,
+                p,
                 tab.id,
                 label,
                 self.model.clone(),
+                self.row_ids.clone(),
+                self.visible_count.clone(),
             ));
+            self.row_ids.borrow_mut().push((p, row));
             ctx.visible_when(row, self.visible_count.map(move |c| p >= *c));
             column = column.add_child(row);
         }
@@ -806,6 +933,12 @@ impl Widget for DockOverflowMenu {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use bastyde_core::accesskit::{Orientation, Role};
+        builder.set_role(Role::Menu);
+        builder.set_orientation(Orientation::Vertical);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -836,6 +969,15 @@ struct DockRailItem {
     /// The bar's shared item-bounds sink; this item upserts its world bounds
     /// (keyed by `pos`) here each layout pass.
     bounds_sink: RailItemBounds,
+    /// Shared sibling-id list (for Arrow/Home/End roving focus) and the live
+    /// overflow count (so nav and `size_of_set` skip parked items).
+    item_ids: RailItemIds,
+    visible_count: Signal<usize>,
+    /// Per-side content-region ids, for the `controls` (tab → tabpanel) link.
+    side_panel_ids: Rc<RefCell<HashMap<DockSide, WidgetId>>>,
+    /// Keyboard `:focus-visible` state — `true` only while this item holds
+    /// focus AND the last input was the keyboard; drives the focus ring.
+    focused: Signal<bool>,
     root: Option<WidgetId>,
 }
 
@@ -862,6 +1004,9 @@ impl DockRailItem {
         visible: Signal<bool>,
         model: DockingModel,
         bounds_sink: RailItemBounds,
+        item_ids: RailItemIds,
+        visible_count: Signal<usize>,
+        side_panel_ids: Rc<RefCell<HashMap<DockSide, WidgetId>>>,
     ) -> Self {
         Self {
             side,
@@ -876,6 +1021,10 @@ impl DockRailItem {
             visible,
             model,
             bounds_sink,
+            item_ids,
+            visible_count,
+            side_panel_ids,
+            focused: Signal::new(false),
             root: None,
         }
     }
@@ -895,11 +1044,29 @@ impl Widget for DockRailItem {
                 SurfaceRole::Transparent
             }
         });
+        // Keyboard focus ring, gated on `:focus-visible` (the item is focused
+        // AND the last input was the keyboard) — the same pattern as
+        // `IconButton` (`recipe_icon_button_style.rs`). The border IS the focus
+        // indicator; it coexists with the selection background on this rect.
+        let ring = self.focused.and(&ctx.focus_visible());
+        let focus_ring_width = ctx.theme().shape.focus_ring_width;
+        let border_color: ColorProp = ring
+            .map(|f| {
+                if *f {
+                    BorderRole::Focused
+                } else {
+                    BorderRole::Transparent
+                }
+            })
+            .into();
+        let border_width = ring.map(move |f| if *f { focus_ring_width } else { 0.0 });
         // Rounded selection highlight matching the IconButton corner style, so
         // the rail items read as buttons rather than full-square fills.
         let bg_rect = ctx.add(
             RectWidget::new()
                 .bind_background(bg)
+                .bind_border_color(border_color)
+                .bind_border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
         );
 
@@ -954,25 +1121,86 @@ impl Widget for DockRailItem {
 
         let self_id = ctx.self_id();
         let policy = self.model.policy();
-        let model = self.model.clone();
-        let selected = self.selected.clone();
-        let visible = self.visible.clone();
         let side = self.side;
         let tab_id = self.tab_id;
         let menu_model = self.model.clone();
         let allow_collapse = policy.allow_side_collapse;
-        let mut handlers = HandlerSet::new().on_tap(move |_e, _ctx| {
-            if selected.get() == idx && visible.get() {
-                // Click on the active item hides the side — unless collapsing is
-                // locked, in which case it stays shown (a no-op).
-                if allow_collapse {
-                    model.set_side_visible(side, false);
+
+        // The single activation path, shared by pointer tap, keyboard
+        // Enter/Space, and the AT `Click` action — so the rail item is
+        // operable by mouse, keyboard, and screen reader alike. Clicking the
+        // active item hides the side (a collapse toggle) unless collapse is
+        // locked; any other item selects it and shows the side.
+        let activate: Rc<dyn Fn(&mut EventContext)> = {
+            let model = self.model.clone();
+            let selected = self.selected.clone();
+            let visible = self.visible.clone();
+            Rc::new(move |_ctx: &mut EventContext| {
+                if selected.get() == idx && visible.get() {
+                    if allow_collapse {
+                        model.set_side_visible(side, false);
+                    }
+                } else {
+                    model.select_tab(side, idx);
+                    model.set_side_visible(side, true);
                 }
-            } else {
-                model.select_tab(side, idx);
-                model.set_side_visible(side, true);
-            }
-        });
+            })
+        };
+
+        // Reflect the keyboard `:focus-visible` ring.
+        let focused_sig = self.focused.clone();
+        // Roving tab stop (ARIA tabs pattern): only the selected item is a
+        // Tab/Shift+Tab stop; siblings stay reachable via Arrow keys +
+        // `request_focus`. Matches `TabBar` (`tab_widget/header.rs`).
+        ctx.set_tab_stop(self_id, self.selected.map(move |s| *s == idx));
+
+        let mut handlers = HandlerSet::new()
+            .on_tap({
+                let activate = activate.clone();
+                move |_e, ctx| activate(ctx)
+            })
+            .on_focus(move |gained, _ctx| focused_sig.set(gained))
+            .on_key({
+                let activate = activate.clone();
+                let item_ids = self.item_ids.clone();
+                let visible_count = self.visible_count.clone();
+                let pos = self.pos;
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    let WidgetEvent::KeyDown { key, .. } = event else {
+                        return EventResponse::Ignored;
+                    };
+                    let nav = match key {
+                        Key::ArrowUp | Key::ArrowLeft => RailNav::Prev,
+                        Key::ArrowDown | Key::ArrowRight => RailNav::Next,
+                        Key::Home => RailNav::First,
+                        Key::End => RailNav::Last,
+                        Key::Enter | Key::Space => {
+                            // Manual activation: arrows only move focus; the
+                            // panel is shown/hidden on explicit Enter/Space.
+                            activate(ctx);
+                            return EventResponse::Handled;
+                        }
+                        _ => return EventResponse::Ignored,
+                    };
+                    if let Some(target) = rail_focus_target(&item_ids, &visible_count, pos, nav) {
+                        ctx.request_focus(target);
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
+            .on_access_action({
+                let activate = activate.clone();
+                move |action: bastyde_core::accesskit::Action, ctx: &mut EventContext| {
+                    if action == bastyde_core::accesskit::Action::Click {
+                        activate(ctx);
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            });
         // Drag a rail item to reorder / move the activity — only when allowed.
         if policy.allow_activity_drag {
             handlers = handlers.on_drag(move |phase, ctx| {
@@ -1036,9 +1264,30 @@ impl Widget for DockRailItem {
         use bastyde_core::accesskit::{Action, Role};
         builder.set_role(Role::Tab);
         builder.set_name(self.label.resolve_now());
-        builder.set_selected(self.selected.get() == self.index && self.visible.get());
+        let is_selected = self.selected.get() == self.index;
+        builder.set_selected(is_selected && self.visible.get());
         builder.add_action(Action::Focus);
         builder.add_action(Action::Click);
+        // "panel N of M" — M counts only the rail tabs currently in the AT
+        // tree (overflowed items are dormant, represented by the popover rows).
+        // `pos` is this item's 0-based visible position; only shown items run
+        // `accessibility()`, so `pos < visible_count` holds here.
+        builder.set_position_in_set(self.pos + 1);
+        builder.set_size_of_set(shown_rail_count(&self.item_ids, &self.visible_count));
+        // Communicate the collapse toggle on the active tab: expanded when its
+        // panel is shown, collapsed when hidden. Omitted on the other tabs
+        // (the "expanded" concept doesn't apply to an inactive tab).
+        if is_selected {
+            builder.set_expanded(self.visible.get());
+        }
+        // `controls` → the side's content region (ARIA tab → tabpanel link).
+        // Only while the side is shown: a hidden side parks its `DockSidePanel`
+        // dormant (pruned from the AT tree), so linking it then would dangle.
+        if self.visible.get()
+            && let Some(&panel_id) = self.side_panel_ids.borrow().get(&self.side)
+        {
+            builder.push_controlled(widget_id_to_node_id(panel_id));
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1054,26 +1303,43 @@ impl Widget for DockRailItem {
 struct DockOverflowRow {
     side: DockSide,
     index: usize,
+    /// Visible position among the side's non-hidden tabs (matches the rail
+    /// item's `pos`); the key for roving focus + `position_in_set`.
+    pos: usize,
     tab_id: DockTabId,
     label: LocalizedString,
     model: DockingModel,
+    /// Shared sibling-row id list + live overflow count, for Arrow/Home/End
+    /// roving focus and `size_of_set` among the shown overflow rows.
+    row_ids: RailItemIds,
+    visible_count: Signal<usize>,
+    /// Keyboard `:focus-visible` state — drives the row's focus ring.
+    focused: Signal<bool>,
     root: Option<WidgetId>,
 }
 
 impl DockOverflowRow {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         side: DockSide,
         index: usize,
+        pos: usize,
         tab_id: DockTabId,
         label: LocalizedString,
         model: DockingModel,
+        row_ids: RailItemIds,
+        visible_count: Signal<usize>,
     ) -> Self {
         Self {
             side,
             index,
+            pos,
             tab_id,
             label,
             model,
+            row_ids,
+            visible_count,
+            focused: Signal::new(false),
             root: None,
         }
     }
@@ -1089,18 +1355,102 @@ impl Widget for DockOverflowRow {
         );
         let spacer = ctx.add(Spacer::new());
         let row = ctx.add(HStack::new().spacing(8.0).add_child(label).add_child(spacer));
-        let root = ctx.add(Padding::symmetric(6.0, 10.0).child_id(row));
+        let content = ctx.add(Padding::symmetric(6.0, 10.0).child_id(row));
+
+        // Backing surface: a subtle highlight on focus + the keyboard
+        // `:focus-visible` ring, so a row navigated to by keyboard is visible
+        // (it reads like a menu item).
+        let ring = self.focused.and(&ctx.focus_visible());
+        let focus_ring_width = ctx.theme().shape.focus_ring_width;
+        let bg_role: ColorProp = self
+            .focused
+            .map(|f| {
+                if *f {
+                    SurfaceRole::Hover
+                } else {
+                    SurfaceRole::Transparent
+                }
+            })
+            .into();
+        let border_color: ColorProp = ring
+            .map(|f| {
+                if *f {
+                    BorderRole::Focused
+                } else {
+                    BorderRole::Transparent
+                }
+            })
+            .into();
+        let border_width = ring.map(move |f| if *f { focus_ring_width } else { 0.0 });
+        let bg_rect = ctx.add(
+            RectWidget::new()
+                .bind_background(bg_role)
+                .bind_border_color(border_color)
+                .bind_border_width(border_width)
+                .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
+        );
+        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
         self.root = Some(root);
 
-        let model = self.model.clone();
-        let side = self.side;
-        let idx = self.index;
-        let _tab = self.tab_id;
+        // Single activation path (tap / Enter-Space / AT Click): select the
+        // tab and show the side.
+        let activate: Rc<dyn Fn(&mut EventContext)> = {
+            let model = self.model.clone();
+            let side = self.side;
+            let idx = self.index;
+            Rc::new(move |_ctx: &mut EventContext| {
+                model.select_tab(side, idx);
+                model.set_side_visible(side, true);
+            })
+        };
+        let focused_sig = self.focused.clone();
         ctx.apply_self_handlers(
             HandlerSet::new()
-                .on_tap(move |_e, _ctx| {
-                    model.select_tab(side, idx);
-                    model.set_side_visible(side, true);
+                .on_tap({
+                    let activate = activate.clone();
+                    move |_e, ctx| activate(ctx)
+                })
+                .on_focus(move |gained, _ctx| focused_sig.set(gained))
+                .on_key({
+                    let activate = activate.clone();
+                    let row_ids = self.row_ids.clone();
+                    let visible_count = self.visible_count.clone();
+                    let pos = self.pos;
+                    move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                        let WidgetEvent::KeyDown { key, .. } = event else {
+                            return EventResponse::Ignored;
+                        };
+                        let nav = match key {
+                            Key::ArrowUp | Key::ArrowLeft => RailNav::Prev,
+                            Key::ArrowDown | Key::ArrowRight => RailNav::Next,
+                            Key::Home => RailNav::First,
+                            Key::End => RailNav::Last,
+                            Key::Enter | Key::Space => {
+                                activate(ctx);
+                                return EventResponse::Handled;
+                            }
+                            _ => return EventResponse::Ignored,
+                        };
+                        if let Some(target) =
+                            overflow_focus_target(&row_ids, &visible_count, pos, nav)
+                        {
+                            ctx.request_focus(target);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                })
+                .on_access_action({
+                    let activate = activate.clone();
+                    move |action: bastyde_core::accesskit::Action, ctx: &mut EventContext| {
+                        if action == bastyde_core::accesskit::Action::Click {
+                            activate(ctx);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
                 })
                 .focusable(true)
                 .cursor(CursorIcon::Pointer),
@@ -1132,7 +1482,14 @@ impl Widget for DockOverflowRow {
         use bastyde_core::accesskit::{Action, Role};
         builder.set_role(Role::MenuItem);
         builder.set_name(self.label.resolve_now());
+        builder.add_action(Action::Focus);
         builder.add_action(Action::Click);
+        // "N of M" within the overflow set. Only shown (parked) rows run
+        // `accessibility()`, so `pos >= visible_count` holds; the 1-based
+        // position within the overflowed run is `pos - visible_count + 1`.
+        let count = self.visible_count.get();
+        builder.set_position_in_set(self.pos.saturating_sub(count) + 1);
+        builder.set_size_of_set(overflow_shown_count(&self.row_ids, &self.visible_count));
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1163,5 +1520,79 @@ mod tests {
     #[test]
     fn rail_insertion_on_empty_rail_is_front() {
         assert_eq!(rail_insertion(50.0, &[], 0.0, 100.0).0, 0);
+    }
+
+    /// Fabricate a `WidgetId` without an arena — same convention as the
+    /// `menu_bar` dispatcher unit tests.
+    fn wid(n: u64) -> WidgetId {
+        slotmap::KeyData::from_ffi(n).into()
+    }
+
+    fn ids(items: &[(usize, u64)]) -> RailItemIds {
+        Rc::new(RefCell::new(
+            items.iter().map(|(p, w)| (*p, wid(*w))).collect(),
+        ))
+    }
+
+    #[test]
+    fn rail_focus_target_wraps_among_shown_items() {
+        let item_ids = ids(&[(0, 10), (1, 11), (2, 12)]);
+        let vc = Signal::new(3usize);
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 0, RailNav::Next),
+            Some(wid(11))
+        );
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 2, RailNav::Next),
+            Some(wid(10)),
+            "ArrowDown past the last item wraps to the first"
+        );
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 0, RailNav::Prev),
+            Some(wid(12)),
+            "ArrowUp before the first item wraps to the last"
+        );
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 1, RailNav::First),
+            Some(wid(10))
+        );
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 1, RailNav::Last),
+            Some(wid(12))
+        );
+    }
+
+    #[test]
+    fn rail_focus_target_skips_overflowed_items() {
+        // visible_count = 2 → only positions 0,1 are navigable; pos 2 overflowed.
+        let item_ids = ids(&[(0, 10), (1, 11), (2, 12)]);
+        let vc = Signal::new(2usize);
+        assert_eq!(shown_rail_count(&item_ids, &vc), 2);
+        assert_eq!(
+            rail_focus_target(&item_ids, &vc, 1, RailNav::Next),
+            Some(wid(10)),
+            "nav wraps within the two shown items, skipping the overflowed one"
+        );
+    }
+
+    #[test]
+    fn overflow_helpers_target_the_parked_rows() {
+        // 4 items, 2 shown on the rail → positions 2,3 overflow into the popover.
+        let row_ids = ids(&[(0, 10), (1, 11), (2, 12), (3, 13)]);
+        let vc = Signal::new(2usize);
+        assert_eq!(overflow_shown_count(&row_ids, &vc), 2);
+        assert_eq!(
+            overflow_focus_target(&row_ids, &vc, 2, RailNav::Next),
+            Some(wid(13))
+        );
+        assert_eq!(
+            overflow_focus_target(&row_ids, &vc, 3, RailNav::Next),
+            Some(wid(12)),
+            "nav wraps within the overflowed set"
+        );
+        assert_eq!(
+            overflow_focus_target(&row_ids, &vc, 2, RailNav::Prev),
+            Some(wid(13))
+        );
     }
 }

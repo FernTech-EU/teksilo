@@ -8,7 +8,10 @@
 use std::time::Duration;
 
 use bastyde_canvas::{Point, Size, SizeProposal};
+use bastyde_core::accessibility::widget_id_to_node_id;
+use bastyde_core::accesskit;
 use bastyde_core::accesskit::Role;
+use bastyde_core::event::{Key, Modifiers, WidgetEvent};
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
@@ -1505,5 +1508,283 @@ fn disabling_a_side_with_docks_hides_then_restores_them() {
     assert!(
         count_role(&t, root, Role::Tab) >= 2,
         "re-enabling the side restores its tabs"
+    );
+}
+
+// ─── Activity-rail accessibility + keyboard ───────────────────────────────
+
+/// A Leading side in Rail presentation with two separate tabs (two rail
+/// items). Returns the tree, the model, and the layout root.
+fn rail_two_tabs() -> (WidgetTree, DockingModel, WidgetId) {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Explorer");
+    let (b, dwb) = dock("Search");
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    (t, model, root)
+}
+
+fn collect_role(t: &WidgetTree, id: WidgetId, role: Role, out: &mut Vec<WidgetId>) {
+    if t.accessibility_node(id).role() == role {
+        out.push(id);
+    }
+    for c in t.children(id) {
+        collect_role(t, c, role, out);
+    }
+}
+
+/// The rail's `Role::Tab` items, in visible (top-to-bottom) order.
+fn rail_tabs(t: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+    let tablist = find_first_role(t, root, Role::TabList).expect("a rail TabList");
+    let mut out = Vec::new();
+    collect_role(t, tablist, Role::Tab, &mut out);
+    out
+}
+
+fn find_a11y_node(
+    update: &accesskit::TreeUpdate,
+    id: accesskit::NodeId,
+) -> Option<&accesskit::Node> {
+    update.nodes.iter().find(|(nid, _)| *nid == id).map(|(_, n)| n)
+}
+
+#[test]
+fn rail_tabs_advertise_click_and_focus_actions() {
+    let (t, _model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    assert_eq!(tabs.len(), 2, "two docks → two rail tabs");
+    for &tab in &tabs {
+        let node = t.accessibility_node(tab);
+        assert!(
+            node.actions().contains(&accesskit::Action::Click),
+            "a rail tab must advertise Click (else AT cannot activate it)"
+        );
+        assert!(
+            node.actions().contains(&accesskit::Action::Focus),
+            "a rail tab must advertise Focus"
+        );
+    }
+    let selected = tabs
+        .iter()
+        .filter(|&&id| t.accessibility_node(id).is_selected())
+        .count();
+    assert_eq!(selected, 1, "exactly one rail tab reports selected");
+}
+
+#[test]
+fn rail_tabs_report_position_and_size_of_set() {
+    let (mut t, _model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let update = t.sync_accessibility();
+    for (i, &tab) in tabs.iter().enumerate() {
+        let node =
+            find_a11y_node(&update, widget_id_to_node_id(tab)).expect("rail tab in a11y tree");
+        assert_eq!(node.size_of_set(), Some(2), "rail tab {i} size_of_set");
+        assert_eq!(
+            node.position_in_set(),
+            Some(i + 1),
+            "rail tab {i} reports 1-based position_in_set"
+        );
+    }
+}
+
+#[test]
+fn rail_selected_tab_reports_expanded_matching_visibility() {
+    let (mut t, model, root) = rail_two_tabs();
+    let selected_idx = model.side_selected_tab_signal(DockSide::Leading).get();
+    let tabs = rail_tabs(&t, root);
+    let sel = widget_id_to_node_id(tabs[selected_idx]);
+    let other_idx = (0..tabs.len()).find(|&i| i != selected_idx).unwrap();
+    let other = widget_id_to_node_id(tabs[other_idx]);
+
+    // Side visible → the selected tab is expanded; the other tab omits the
+    // state entirely ("expanded" doesn't apply to an inactive tab).
+    let update = t.sync_accessibility();
+    assert_eq!(
+        find_a11y_node(&update, sel).unwrap().is_expanded(),
+        Some(true),
+        "the selected rail tab is expanded while its side is shown"
+    );
+    assert_eq!(
+        find_a11y_node(&update, other).unwrap().is_expanded(),
+        None,
+        "a non-selected rail tab omits the expanded state"
+    );
+
+    // Hide the side → the (still-selected) tab reports collapsed.
+    model.set_side_visible(DockSide::Leading, false);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let update = t.sync_accessibility();
+    assert_eq!(
+        find_a11y_node(&update, sel).unwrap().is_expanded(),
+        Some(false),
+        "hiding the side collapses the selected tab"
+    );
+}
+
+#[test]
+fn rail_tab_controls_its_side_content_region() {
+    let (mut t, model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let tab0 = widget_id_to_node_id(tabs[0]);
+    let update = t.sync_accessibility();
+    let node = find_a11y_node(&update, tab0).expect("rail tab node");
+    let controlled = node.controls();
+    assert!(
+        !controlled.is_empty(),
+        "a rail tab declares a controls relationship to its content region"
+    );
+    // The controlled node is the side's Role::Complementary content region,
+    // and it is actually present in the tree (no dangling relationship).
+    let emitted: std::collections::HashSet<_> = update.nodes.iter().map(|(id, _)| *id).collect();
+    assert!(controlled.iter().all(|t| emitted.contains(t)));
+    let target = find_a11y_node(&update, controlled[0]).expect("controlled node present in tree");
+    assert_eq!(
+        target.role(),
+        Role::Complementary,
+        "the rail tab controls the side's content landmark"
+    );
+    accesskit_consumer::Tree::new(update.clone(), false);
+
+    // Hiding the side parks its content dormant — the tab must then drop the
+    // controls relation rather than dangle at a pruned node.
+    model.set_side_visible(DockSide::Leading, false);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let update = t.sync_accessibility();
+    let node = find_a11y_node(&update, tab0).expect("rail tab still present (reopen affordance)");
+    assert!(
+        node.controls().is_empty(),
+        "a rail tab whose side is hidden advertises no (dangling) controls"
+    );
+    accesskit_consumer::Tree::new(update.clone(), false);
+}
+
+#[test]
+fn enter_activates_a_focused_rail_tab() {
+    let (mut t, model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let selected_idx = model.side_selected_tab_signal(DockSide::Leading).get();
+    let other = (0..tabs.len()).find(|&i| i != selected_idx).unwrap();
+
+    // Focus a non-selected tab and activate it by keyboard.
+    t.focus(tabs[other]);
+    t.press_key(Key::Enter, Modifiers::NONE);
+
+    assert_eq!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        other,
+        "Enter on a focused rail tab selects it"
+    );
+    assert!(
+        model.is_side_visible(DockSide::Leading),
+        "activating a rail tab shows the side"
+    );
+
+    // Enter on the now-active tab collapses the side (the toggle).
+    t.focus(tabs[other]);
+    t.press_key(Key::Space, Modifiers::NONE);
+    assert!(
+        !model.is_side_visible(DockSide::Leading),
+        "Space on the active rail tab hides the side (collapse toggle)"
+    );
+}
+
+#[test]
+fn access_action_click_activates_a_rail_tab() {
+    let (mut t, model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let selected_idx = model.side_selected_tab_signal(DockSide::Leading).get();
+    let other = (0..tabs.len()).find(|&i| i != selected_idx).unwrap();
+
+    t.dispatch_event(WidgetEvent::AccessAction {
+        action: accesskit::Action::Click,
+        target: Some(tabs[other]),
+        target_node: widget_id_to_node_id(tabs[other]),
+        data: None,
+    });
+
+    assert_eq!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        other,
+        "an AT Click selects the targeted rail tab"
+    );
+    assert!(model.is_side_visible(DockSide::Leading));
+}
+
+#[test]
+fn arrow_key_moves_rail_focus_without_changing_selection() {
+    let (mut t, model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let before = model.side_selected_tab_signal(DockSide::Leading).get();
+
+    t.focus(tabs[0]);
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+
+    assert_eq!(
+        t.focused(),
+        Some(tabs[1]),
+        "ArrowDown moves keyboard focus to the next rail tab"
+    );
+    assert_eq!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        before,
+        "arrow navigation is manual-activation: selection does not change"
+    );
+}
+
+#[test]
+fn only_the_selected_rail_tab_is_a_tab_stop() {
+    let (mut t, model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+    let selected_idx = model.side_selected_tab_signal(DockSide::Leading).get();
+
+    // Cycle through the Tab order and record which rail tabs are reachable.
+    let mut reached = std::collections::HashSet::new();
+    for _ in 0..16 {
+        t.press_key(Key::Tab, Modifiers::NONE);
+        if let Some(f) = t.focused() {
+            reached.insert(f);
+        }
+    }
+
+    assert!(
+        reached.contains(&tabs[selected_idx]),
+        "the selected rail tab participates in the Tab cycle"
+    );
+    for (i, &tab) in tabs.iter().enumerate() {
+        if i != selected_idx {
+            assert!(
+                !reached.contains(&tab),
+                "a non-selected rail tab is skipped by Tab (roving tab-index)"
+            );
+        }
+    }
+}
+
+#[test]
+fn keyboard_input_makes_focus_visible_pointer_input_clears_it() {
+    let (mut t, _model, root) = rail_two_tabs();
+    let tabs = rail_tabs(&t, root);
+
+    t.focus(tabs[0]);
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert!(
+        t.focus_visible_signal().get(),
+        "keyboard input turns :focus-visible on (drives the rail focus ring)"
+    );
+
+    t.pointer_down_button(Point::new(5.0, 5.0), bastyde_core::event::PointerButton::Primary);
+    assert!(
+        !t.focus_visible_signal().get(),
+        "pointer input turns :focus-visible off"
     );
 }
