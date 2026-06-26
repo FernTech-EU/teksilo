@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use bastyde_canvas::paint::{LineCap, StrokeSpace, StrokeStyle};
+use bastyde_canvas::paint::{LineCap, LineJoin, StrokeSpace, StrokeStyle};
 use bastyde_canvas::path::{Path, PathCommand};
 
 /// Upper bound on a cosmetic path's rasterized dimension (device px). At
@@ -582,6 +582,11 @@ fn rasterize_path(
             LineCap::Round => tiny_skia::LineCap::Round,
             LineCap::Square => tiny_skia::LineCap::Square,
         };
+        let line_join = match style.line_join {
+            LineJoin::Miter => tiny_skia::LineJoin::Miter,
+            LineJoin::Round => tiny_skia::LineJoin::Round,
+            LineJoin::Bevel => tiny_skia::LineJoin::Bevel,
+        };
         let dash = style
             .dash_pattern
             .as_ref()
@@ -589,6 +594,7 @@ fn rasterize_path(
         let stroke = tiny_skia::Stroke {
             width: style.width * stroke_scale,
             line_cap,
+            line_join,
             dash,
             ..Default::default()
         };

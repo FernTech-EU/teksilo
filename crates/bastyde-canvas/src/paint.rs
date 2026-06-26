@@ -62,6 +62,18 @@ pub enum LineCap {
     Square,
 }
 
+/// Line join style for strokes — how two connected segments meet at a
+/// shared vertex. Line-style SVG icons (Feather / Lucide / Tabler) set
+/// `stroke-linejoin="round"`; the default [`Miter`](LineJoin::Miter)
+/// matches every pre-existing stroke and SVG's own default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
 /// Whether a stroke's width is interpreted in logical pixels (and so scales
 /// with the canvas transform) or held transform-invariant ("cosmetic").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -88,6 +100,9 @@ pub struct StrokeStyle {
     /// Phase offset for the dash pattern.
     pub dash_offset: f32,
     pub line_cap: LineCap,
+    /// How connected segments meet at a vertex. Defaults to
+    /// [`LineJoin::Miter`] (SVG's default and every pre-existing stroke).
+    pub line_join: LineJoin,
     /// Whether `width` scales with the canvas transform
     /// ([`StrokeSpace::Logical`], default) or is held transform-invariant
     /// ([`StrokeSpace::Device`], a cosmetic / hairline stroke). See
@@ -102,6 +117,7 @@ impl StrokeStyle {
             dash_pattern: None,
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter,
             space: StrokeSpace::Logical,
         }
     }
@@ -112,6 +128,7 @@ impl StrokeStyle {
             dash_pattern: Some(vec![dash, gap]),
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter,
             space: StrokeSpace::Logical,
         }
     }
@@ -122,6 +139,7 @@ impl StrokeStyle {
             dash_pattern: Some(vec![width, spacing]),
             dash_offset: 0.0,
             line_cap: LineCap::Round,
+            line_join: LineJoin::Miter,
             space: StrokeSpace::Logical,
         }
     }
@@ -143,6 +161,7 @@ impl StrokeStyle {
             dash_pattern: None,
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter,
             space: StrokeSpace::Device,
         }
     }

@@ -442,13 +442,11 @@ impl IconWidget {
         self.display_size
     }
 
-    /// Create a scaled copy of the path to fit within the given bounds.
+    /// Create a scaled copy of a programmatic [`IconSource::Path`] to fit
+    /// within the given bounds. SVG sources are scaled separately in
+    /// `paint` (fill via `to_path_in_rect`, strokes via
+    /// `stroked_paths_in_rect`) so their stroke widths scale correctly.
     fn scaled_path(&self, bounds: Rect) -> Path {
-        // For SVG sources, use SvgIcon::to_path_in_rect which handles
-        // viewBox offset and aspect-ratio-preserving scaling.
-        if let IconSource::Svg(icon) = &self.source {
-            return icon.to_path_in_rect(bounds);
-        }
         let path = match &self.source {
             IconSource::Path(p) => p,
             _ => return Path::new(),
@@ -658,11 +656,27 @@ impl Widget for IconWidget {
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
 
         match &self.source {
-            IconSource::Path(_) | IconSource::Svg(_) => {
+            IconSource::Path(_) => {
                 if color.a() > 0.0 {
                     let scaled = self.scaled_path(bounds);
                     if !scaled.is_empty() {
                         canvas.fill_path(&scaled, color);
+                    }
+                }
+            }
+            IconSource::Svg(icon) => {
+                if color.a() > 0.0 {
+                    // Filled geometry (the default for most icons) +
+                    // stroked geometry (line-style icons). An icon may
+                    // carry both — a filled shape with a stroked border.
+                    let fill = icon.to_path_in_rect(bounds);
+                    if !fill.is_empty() {
+                        canvas.fill_path(&fill, color);
+                    }
+                    for (path, style) in icon.stroked_paths_in_rect(bounds) {
+                        if !path.is_empty() {
+                            canvas.stroke_path(&path, color, style);
+                        }
                     }
                 }
             }
@@ -857,6 +871,29 @@ mod tests {
         tree.layout(SizeProposal::exact(24.0, 24.0));
         let frame = tree.render();
         assert!(!frame.paths.is_empty(), "SVG icon should render a path");
+    }
+
+    #[test]
+    fn icon_from_svg_line_style_renders_stroke_not_fill() {
+        // A line-style (fill=none, stroke=…) SVG must render as a stroked
+        // outline, not a filled blob. Regression guard for the SVG icon
+        // parser gaining stroke support.
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+        </svg>"#;
+        let mut tree = WidgetTree::new();
+        tree.add(IconWidget::from_svg(svg).color(Color::BLACK));
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        assert_eq!(
+            frame.paths.len(),
+            1,
+            "line-style SVG should render exactly one (stroked) path"
+        );
+        assert!(
+            frame.paths[0].stroke_style.width > 0.0,
+            "the rendered path must be stroked, not filled"
+        );
     }
 
     #[test]

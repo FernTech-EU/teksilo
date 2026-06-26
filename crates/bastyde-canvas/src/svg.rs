@@ -4,13 +4,24 @@
 //! SVG parsing: load SVG icons as [`Path`] geometry for rendering.
 //!
 //! The main entry point is [`SvgIcon::parse`], which takes an SVG string
-//! and produces a merged [`Path`] in viewBox coordinates. Colors in the
-//! SVG are stripped — the rendering widget controls the fill color,
-//! enabling theme-aware icon tinting.
+//! and produces geometry in viewBox coordinates. Colors are stripped —
+//! the rendering widget controls the paint color, enabling theme-aware
+//! icon tinting.
+//!
+//! Both *filled* and *stroked* (line-style) icons are supported. The
+//! parser tracks each element's `fill` / `stroke` / `stroke-width` /
+//! `stroke-linecap` / `stroke-linejoin` presentation attributes (and
+//! their inline-`style` equivalents), inheriting them through `<g>`
+//! groups and the `<svg>` root the way SVG does. Filled geometry merges
+//! into one [`Path`] ([`SvgIcon::raw_path`]); stroked geometry is kept
+//! separately as [`SvgStroke`]s carrying their viewBox-space width and
+//! cap/join, so the line-style convention (`fill="none"
+//! stroke="currentColor"`) renders as outlines instead of solid blobs.
 
 pub(crate) mod path_parser;
 
 use crate::geometry::{Point, Rect, Transform2D};
+use crate::paint::{LineCap, LineJoin, StrokeStyle};
 use crate::path::Path;
 use crate::xml::{XmlElement, parse_dom};
 
@@ -34,12 +45,39 @@ pub enum SvgParseError {
     InvalidTransform(String),
 }
 
-/// A parsed SVG icon: merged path geometry + viewBox, ready to be
-/// scaled and rendered. All original fill/stroke colors are stripped.
+/// One stroked sub-path of an SVG icon: outline geometry plus the
+/// stroke width in viewBox units and the cap/join style. Produced for
+/// elements painted with `stroke` (the "line-style" icon convention,
+/// usually paired with `fill="none"`). Colors are stripped — the
+/// rendering widget supplies the tint.
+///
+/// The `width` is in **viewBox** coordinates; it scales together with
+/// the geometry when the icon is fitted to a display rect (see
+/// [`SvgIcon::stroked_paths_in_rect`]).
+#[derive(Debug, Clone)]
+pub struct SvgStroke {
+    /// Outline geometry in viewBox coordinates. May contain several
+    /// sub-contours (each `MoveTo` starts a new one); the renderer
+    /// strokes each contour independently.
+    pub path: Path,
+    /// Stroke width in viewBox units.
+    pub width: f32,
+    /// Line cap for open contours.
+    pub line_cap: LineCap,
+    /// Line join at contour vertices.
+    pub line_join: LineJoin,
+}
+
+/// A parsed SVG icon: geometry + viewBox, ready to be scaled and
+/// rendered. Original colors are stripped; filled and stroked geometry
+/// are kept separately so line-style icons render as outlines.
 #[derive(Debug, Clone)]
 pub struct SvgIcon {
-    /// Merged path in viewBox coordinates.
+    /// Merged *filled* path in viewBox coordinates.
     path: Path,
+    /// *Stroked* sub-paths in viewBox coordinates, grouped by stroke
+    /// style. Empty for the common all-filled icon.
+    strokes: Vec<SvgStroke>,
     /// The SVG viewBox (defines the coordinate space).
     view_box: Rect,
 }
@@ -62,11 +100,17 @@ impl SvgIcon {
 
         let view_box = parse_view_box(svg_el)?;
 
-        let mut merged = Path::new();
-        walk_element(svg_el, &Transform2D::IDENTITY, &mut merged)?;
+        let mut builder = SvgBuilder::default();
+        walk_element(
+            svg_el,
+            &Transform2D::IDENTITY,
+            SvgPaintState::default(),
+            &mut builder,
+        )?;
 
         Ok(SvgIcon {
-            path: merged,
+            path: builder.fill,
+            strokes: builder.strokes,
             view_box,
         })
     }
@@ -87,15 +131,53 @@ impl SvgIcon {
         self.to_path_in_rect(Rect::new(0.0, 0.0, size, size))
     }
 
-    /// Produce a [`Path`] scaled to fit within `rect`, preserving aspect
-    /// ratio and centering.
+    /// Produce the *filled* [`Path`] scaled to fit within `rect`,
+    /// preserving aspect ratio and centering. Empty for a pure
+    /// line-style icon (use [`stroked_paths_in_rect`](Self::stroked_paths_in_rect)
+    /// for its outlines).
     pub fn to_path_in_rect(&self, rect: Rect) -> Path {
-        if self.path.is_empty() || self.view_box.width <= 0.0 || self.view_box.height <= 0.0 {
+        if self.path.is_empty() {
             return Path::new();
         }
-        let scale_x = rect.width / self.view_box.width;
-        let scale_y = rect.height / self.view_box.height;
-        let scale = scale_x.min(scale_y);
+        match self.fit_transform(rect) {
+            Some((transform, _)) => self.path.transformed(&transform),
+            None => Path::new(),
+        }
+    }
+
+    /// Produce the *stroked* sub-paths scaled to fit within `rect`,
+    /// each paired with a ready-to-render [`StrokeStyle`] whose width is
+    /// scaled into display space. Empty for the common filled-only icon.
+    ///
+    /// Pair with [`to_path_in_rect`](Self::to_path_in_rect): fill the
+    /// returned path, then stroke each of these — an icon may carry both
+    /// (a filled shape with a stroked border).
+    pub fn stroked_paths_in_rect(&self, rect: Rect) -> Vec<(Path, StrokeStyle)> {
+        if self.strokes.is_empty() {
+            return Vec::new();
+        }
+        let Some((transform, scale)) = self.fit_transform(rect) else {
+            return Vec::new();
+        };
+        self.strokes
+            .iter()
+            .map(|s| {
+                let mut style = StrokeStyle::solid(s.width * scale);
+                style.line_cap = s.line_cap;
+                style.line_join = s.line_join;
+                (s.path.transformed(&transform), style)
+            })
+            .collect()
+    }
+
+    /// The aspect-ratio-preserving fit transform mapping viewBox
+    /// coordinates into `rect` (scale, then center), together with the
+    /// uniform scale factor applied. `None` if the viewBox is degenerate.
+    fn fit_transform(&self, rect: Rect) -> Option<(Transform2D, f32)> {
+        if self.view_box.width <= 0.0 || self.view_box.height <= 0.0 {
+            return None;
+        }
+        let scale = (rect.width / self.view_box.width).min(rect.height / self.view_box.height);
         let scaled_w = self.view_box.width * scale;
         let scaled_h = self.view_box.height * scale;
         let offset_x = rect.x + (rect.width - scaled_w) / 2.0;
@@ -106,13 +188,22 @@ impl SvgIcon {
             offset_x - self.view_box.x * scale,
             offset_y - self.view_box.y * scale,
         ));
-
-        self.path.transformed(&transform)
+        Some((transform, scale))
     }
 
-    /// Access the raw path in viewBox coordinates.
+    /// Access the raw *filled* path in viewBox coordinates.
     pub fn raw_path(&self) -> &Path {
         &self.path
+    }
+
+    /// Access the *stroked* sub-paths in viewBox coordinates.
+    pub fn strokes(&self) -> &[SvgStroke] {
+        &self.strokes
+    }
+
+    /// Whether this icon carries any geometry at all (filled or stroked).
+    pub fn is_empty(&self) -> bool {
+        self.path.is_empty() && self.strokes.is_empty()
     }
 
     /// Access the viewBox.
@@ -159,10 +250,73 @@ fn parse_length(s: &str) -> Option<f32> {
     s.parse::<f32>().ok()
 }
 
+/// Accumulates parsed geometry: one merged fill path plus stroked
+/// sub-paths grouped by stroke style.
+#[derive(Default)]
+struct SvgBuilder {
+    fill: Path,
+    strokes: Vec<SvgStroke>,
+}
+
+impl SvgBuilder {
+    /// Add a stroked sub-path, merging it into an existing group that
+    /// shares the same width / cap / join so the common "one stroke
+    /// style for the whole icon" case stays a single entry (and one
+    /// rasterized atlas tile). Strokes are per-contour, so appending
+    /// extra `MoveTo`-started contours is equivalent to stroking each
+    /// separately.
+    fn push_stroke(&mut self, path: Path, width: f32, line_cap: LineCap, line_join: LineJoin) {
+        const EPS: f32 = 1e-4;
+        if let Some(group) = self.strokes.iter_mut().find(|s| {
+            (s.width - width).abs() < EPS && s.line_cap == line_cap && s.line_join == line_join
+        }) {
+            group.path.append(&path);
+        } else {
+            self.strokes.push(SvgStroke {
+                path,
+                width,
+                line_cap,
+                line_join,
+            });
+        }
+    }
+}
+
+/// The resolved paint state for an element — what SVG's `fill` /
+/// `stroke` presentation attributes would compute to, with colors
+/// reduced to "is this paint active?" booleans (colors are stripped for
+/// theme tinting). Inherited down the element tree like real SVG.
+#[derive(Debug, Clone, Copy)]
+struct SvgPaintState {
+    /// Whether the shape's interior is filled (`fill` != `none`).
+    fill: bool,
+    /// Whether the shape's outline is stroked (`stroke` != `none`).
+    stroke: bool,
+    /// Stroke width in the element's local coordinate space.
+    stroke_width: f32,
+    line_cap: LineCap,
+    line_join: LineJoin,
+}
+
+impl Default for SvgPaintState {
+    fn default() -> Self {
+        // SVG initial values: fill = black (painted), stroke = none,
+        // stroke-width = 1, butt caps, miter joins.
+        Self {
+            fill: true,
+            stroke: false,
+            stroke_width: 1.0,
+            line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter,
+        }
+    }
+}
+
 fn walk_element(
     node: &XmlElement,
     parent_transform: &Transform2D,
-    merged: &mut Path,
+    parent_paint: SvgPaintState,
+    builder: &mut SvgBuilder,
 ) -> Result<(), SvgParseError> {
     let transform = if let Some(t_attr) = node.attribute("transform") {
         let local = parse_transform(t_attr)?;
@@ -171,68 +325,129 @@ fn walk_element(
         *parent_transform
     };
 
-    let tag = node.tag_name();
-    match tag {
-        "path" => {
-            if let Some(d) = node.attribute("d") {
-                let cmds = path_parser::parse_svg_path_data(d)?;
-                let mut sub = Path::new();
-                sub.commands = cmds;
-                if transform != Transform2D::IDENTITY {
-                    let transformed = sub.transformed(&transform);
-                    merged.append(&transformed);
-                } else {
-                    merged.append(&sub);
-                }
+    let paint = resolve_paint_state(node, parent_paint);
+
+    // Compute this element's shape in its local coordinate space (if it
+    // is a drawable shape at all), then emit fill and/or stroke.
+    let shape: Option<Path> = match node.tag_name() {
+        "path" => match node.attribute("d") {
+            Some(d) => {
+                let mut p = Path::new();
+                p.commands = path_parser::parse_svg_path_data(d)?;
+                Some(p)
             }
+            None => None,
+        },
+        "rect" => parse_rect_element(node),
+        "circle" => parse_circle_element(node),
+        "ellipse" => parse_ellipse_element(node),
+        "line" => parse_line_element(node),
+        "polygon" => parse_polygon_element(node),
+        "polyline" => parse_polyline_element(node),
+        _ => None,
+    };
+
+    if let Some(local) = shape {
+        let world = if transform != Transform2D::IDENTITY {
+            local.transformed(&transform)
+        } else {
+            local
+        };
+        if paint.fill {
+            builder.fill.append(&world);
         }
-        "rect" => {
-            if let Some(path) = parse_rect_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
+        if paint.stroke && paint.stroke_width > 0.0 {
+            // The width is in local space; bake it into viewBox space by
+            // the cumulative transform's scale so it tracks group scaling.
+            let width = paint.stroke_width * transform.geometric_scale();
+            builder.push_stroke(world, width, paint.line_cap, paint.line_join);
         }
-        "circle" => {
-            if let Some(path) = parse_circle_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
-        }
-        "ellipse" => {
-            if let Some(path) = parse_ellipse_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
-        }
-        "line" => {
-            if let Some(path) = parse_line_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
-        }
-        "polygon" => {
-            if let Some(path) = parse_polygon_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
-        }
-        "polyline" => {
-            if let Some(path) = parse_polyline_element(node) {
-                append_transformed(merged, &path, &transform);
-            }
-        }
-        _ => {}
     }
 
-    // Recurse into children (for <g>, <svg>, <defs>, etc.)
+    // Recurse into children (for <g>, <svg>, <defs>, etc.), passing the
+    // resolved transform and paint state down so they inherit.
     for child in node.children() {
-        walk_element(child, &transform, merged)?;
+        walk_element(child, &transform, paint, builder)?;
     }
 
     Ok(())
 }
 
-fn append_transformed(merged: &mut Path, path: &Path, transform: &Transform2D) {
-    if *transform != Transform2D::IDENTITY {
-        merged.append(&path.transformed(transform));
-    } else {
-        merged.append(path);
+/// Apply an element's paint-related presentation attributes (and inline
+/// `style`) onto the inherited parent state. Inline `style` wins over
+/// presentation attributes, both win over inheritance — matching SVG's
+/// cascade for these properties.
+fn resolve_paint_state(node: &XmlElement, parent: SvgPaintState) -> SvgPaintState {
+    let mut st = parent;
+
+    // Presentation attributes.
+    if let Some(v) = node.attribute("fill") {
+        st.fill = !is_none_paint(v);
     }
+    if let Some(v) = node.attribute("stroke") {
+        st.stroke = !is_none_paint(v);
+    }
+    if let Some(w) = node.attribute("stroke-width").and_then(parse_length) {
+        st.stroke_width = w;
+    }
+    if let Some(v) = node.attribute("stroke-linecap") {
+        st.line_cap = parse_line_cap(v);
+    }
+    if let Some(v) = node.attribute("stroke-linejoin") {
+        st.line_join = parse_line_join(v);
+    }
+
+    // Inline style declarations override presentation attributes.
+    if let Some(style) = node.attribute("style") {
+        for (key, value) in parse_inline_style(style) {
+            match key {
+                "fill" => st.fill = !is_none_paint(value),
+                "stroke" => st.stroke = !is_none_paint(value),
+                "stroke-width" => {
+                    if let Some(w) = parse_length(value) {
+                        st.stroke_width = w;
+                    }
+                }
+                "stroke-linecap" => st.line_cap = parse_line_cap(value),
+                "stroke-linejoin" => st.line_join = parse_line_join(value),
+                _ => {}
+            }
+        }
+    }
+
+    st
+}
+
+/// Whether a `fill` / `stroke` value means "no paint". Colors are
+/// stripped, so any value other than `none` (case-insensitive) counts as
+/// painted.
+fn is_none_paint(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("none")
+}
+
+fn parse_line_cap(value: &str) -> LineCap {
+    match value.trim() {
+        "round" => LineCap::Round,
+        "square" => LineCap::Square,
+        _ => LineCap::Butt,
+    }
+}
+
+fn parse_line_join(value: &str) -> LineJoin {
+    match value.trim() {
+        "round" => LineJoin::Round,
+        "bevel" => LineJoin::Bevel,
+        _ => LineJoin::Miter,
+    }
+}
+
+/// Split an inline `style="a:b;c:d"` attribute into `(property, value)`
+/// pairs, trimmed. Declarations without a `:` are skipped.
+fn parse_inline_style(style: &str) -> impl Iterator<Item = (&str, &str)> {
+    style.split(';').filter_map(|decl| {
+        let (key, value) = decl.split_once(':')?;
+        Some((key.trim(), value.trim()))
+    })
 }
 
 // --- Shape element parsers ---
@@ -580,5 +795,128 @@ mod tests {
         assert!(!icon.raw_path().is_empty());
         let path = icon.to_path(24.0);
         assert!(!path.is_empty());
+    }
+
+    // ── Stroke (line-style icon) support ──────────────────────────────
+
+    #[test]
+    fn filled_icon_has_no_strokes() {
+        // A plain icon with no fill/stroke attributes keeps the historic
+        // behavior: everything is filled, nothing is stroked.
+        let svg = r#"<svg viewBox="0 0 24 24"><path d="M0 0L24 0L24 24Z"/></svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(!icon.raw_path().is_empty());
+        assert!(
+            icon.strokes().is_empty(),
+            "plain fill icon should not emit strokes"
+        );
+    }
+
+    #[test]
+    fn line_style_icon_strokes_not_fills() {
+        // The Feather / Lucide / Tabler convention: stroke on the root,
+        // fill="none", bare shape children inheriting. Without stroke
+        // support these outlines would be filled into solid blobs.
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            "line-style icon must have no fill geometry (else outlines become blobs)"
+        );
+        // circle + line share width / cap / join → merged into one group.
+        assert_eq!(icon.strokes().len(), 1);
+        let stroke = &icon.strokes()[0];
+        assert!((stroke.width - 2.0).abs() < 0.01);
+        assert_eq!(stroke.line_cap, LineCap::Round);
+        assert_eq!(stroke.line_join, LineJoin::Round);
+        assert!(!icon.is_empty());
+    }
+
+    #[test]
+    fn element_with_fill_and_stroke_emits_both() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <rect x="2" y="2" width="20" height="20" fill="white" stroke="black" stroke-width="1"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(!icon.raw_path().is_empty(), "filled rect should fill");
+        assert_eq!(icon.strokes().len(), 1, "bordered rect should also stroke");
+    }
+
+    #[test]
+    fn inline_style_drives_stroke() {
+        let svg = r#"<svg viewBox="0 0 24 24">
+            <path d="M2 12L22 12" style="fill:none;stroke:#333;stroke-width:3"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(
+            icon.raw_path().is_empty(),
+            "fill:none in inline style must suppress fill"
+        );
+        assert_eq!(icon.strokes().len(), 1);
+        assert!((icon.strokes()[0].width - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn stroke_inherits_through_group_with_override() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2">
+            <g stroke-width="4">
+                <line x1="0" y1="0" x2="10" y2="0"/>
+            </g>
+            <line x1="0" y1="10" x2="10" y2="10"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        // Distinct widths (4 inside the group, 2 outside) → two groups.
+        assert_eq!(icon.strokes().len(), 2);
+        let mut widths: Vec<f32> = icon.strokes().iter().map(|s| s.width).collect();
+        widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((widths[0] - 2.0).abs() < 0.01);
+        assert!((widths[1] - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn group_scale_transform_scales_stroke_width() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2">
+            <g transform="scale(2)">
+                <line x1="0" y1="0" x2="5" y2="0"/>
+            </g>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert_eq!(icon.strokes().len(), 1);
+        // width 2 in local space × 2 group scale → 4 in viewBox space.
+        assert!((icon.strokes()[0].width - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn stroked_paths_scale_width_to_display() {
+        let svg = r#"<svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2">
+            <line x1="0" y1="0" x2="24" y2="0"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        // Fit into 48×48 → 2× scale → display stroke width 4.
+        let strokes = icon.stroked_paths_in_rect(Rect::new(0.0, 0.0, 48.0, 48.0));
+        assert_eq!(strokes.len(), 1);
+        assert!(
+            (strokes[0].1.width - 4.0).abs() < 0.01,
+            "stroke width must scale with the icon, got {}",
+            strokes[0].1.width
+        );
+    }
+
+    #[test]
+    fn stroke_none_suppresses_stroke() {
+        // An explicit stroke="none" on a child overrides an inherited
+        // stroke from the root.
+        let svg = r#"<svg viewBox="0 0 24 24" stroke="black" stroke-width="2" fill="none">
+            <rect x="2" y="2" width="20" height="20" stroke="none" fill="black"/>
+        </svg>"#;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert!(!icon.raw_path().is_empty(), "fill='black' should fill");
+        assert!(
+            icon.strokes().is_empty(),
+            "stroke='none' child must not stroke"
+        );
     }
 }
