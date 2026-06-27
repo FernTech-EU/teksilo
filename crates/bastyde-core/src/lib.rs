@@ -71,7 +71,7 @@ pub use event::{
 pub use event_source::{
     AppEventPoster, EventSource, EventSourceAdapter, SubscriptionHandle, SubscriptionId,
 };
-pub use focus::{FocusOrigin, FocusPolicy};
+pub use focus::{FocusOrigin, TraversalScopePolicy};
 pub use frame_tick_scheduler::{FrameTickScheduler, FrameTickSubscription};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,

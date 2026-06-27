@@ -131,11 +131,11 @@ pub struct WidgetTree {
     /// navigation reveals it.
     focus_visible: crate::signal::Signal<bool>,
     /// Active focus-scope stack during build. A data view pushes its scope
-    /// (`begin_focus_scope`) around its row loop so each row reads *its view's*
+    /// (`begin_view_focus`) around its row loop so each row reads *its view's*
     /// focus deterministically — independent of arena parenting, which may not
     /// be wired yet while rows build (docked / virtualized content). Drives
     /// focus-aware selection + focus rings in `StandardItem`.
-    focus_scope_stack: Vec<crate::signal::Signal<bool>>,
+    view_focus_stack: Vec<crate::signal::Signal<bool>>,
     /// Layout direction for RTL/LTR support.
     layout_direction: crate::environment::LayoutDirection,
     /// Animation scheduler for smooth animated state and signal transitions.
@@ -408,7 +408,7 @@ impl WidgetTree {
             hovered: None,
             hovered_signal: crate::signal::Signal::new(None),
             focus_visible: crate::signal::Signal::new(false),
-            focus_scope_stack: Vec::new(),
+            view_focus_stack: Vec::new(),
             last_pointer_position: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
@@ -1298,7 +1298,7 @@ impl WidgetTree {
             self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
-            self.update_scope_focus_signals(old, None);
+            self.update_view_focus_signals(old, None);
         }
         if self.focused.is_none() {
             self.focus_origin = None;
@@ -1577,7 +1577,7 @@ impl WidgetTree {
             self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
-            self.update_scope_focus_signals(old, None);
+            self.update_view_focus_signals(old, None);
         }
         if self.hovered == Some(widget_id) {
             let old = self.hovered;
@@ -2627,6 +2627,41 @@ impl WidgetTree {
             .and_then(|node| node.tab_stop.as_ref())
             .map(|prop| prop.get())
             .unwrap_or(true)
+    }
+
+    /// Declare `id` as a **traversal-scope boundary** with the given policy.
+    /// `cycle_focus` then treats the node's subtree as an independent Tab
+    /// group: `tab_index` values inside it are scoped (they never collide
+    /// with sibling scopes) and `policy` governs Tab at the scope's ends.
+    ///
+    /// The scope node is forced non-focusable — it is a transparent boundary,
+    /// never itself a Tab stop. Called from `BuildContext::set_traversal_scope`
+    /// (which the `FocusScope` wrapper widget invokes during `build`), and
+    /// directly usable from tests with no dependency on the widgets crate.
+    pub fn set_traversal_scope(
+        &mut self,
+        id: WidgetId,
+        policy: crate::focus::TraversalScopePolicy,
+    ) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.node_traversal_scope = Some(policy);
+            node.node_focusable = Some(false);
+        }
+    }
+
+    /// Remove a previously set traversal-scope marker from `id` (rebuild
+    /// paths where a `FocusScope` is replaced by a non-scope widget). Leaves
+    /// `node_focusable` untouched — a later handler-set application resets it.
+    pub fn clear_traversal_scope(&mut self, id: WidgetId) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.node_traversal_scope = None;
+        }
+    }
+
+    /// Current traversal-scope policy on `id`, if any. For tests asserting
+    /// the scope marker contract.
+    pub fn traversal_scope(&self, id: WidgetId) -> Option<crate::focus::TraversalScopePolicy> {
+        self.arena.get(id).and_then(|node| node.node_traversal_scope)
     }
 
     // --- Theme override ---

@@ -177,7 +177,7 @@ pub struct TreeView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while this view (root or descendant) holds keyboard focus — the
-    /// root's inclusive [`BuildContext::focus_scope_active`] signal, bound
+    /// root's inclusive [`BuildContext::view_focus_active`] signal, bound
     /// `RepaintOnly`. With [`focus_visible`](Self::focus_visible) it drives the
     /// **container focus ring**: when the view is Tab-focused but nothing is
     /// selected, no row ring shows, so the whole view outlines itself instead —
@@ -676,9 +676,9 @@ impl<T: 'static> Widget for TreeView<T> {
             BindingLevel::RepaintOnly,
         );
 
-        // Focus signals for the container ring. `begin_focus_scope` keys the
+        // Focus signals for the container ring. `begin_view_focus` keys the
         // scope signal on this root id directly (independent of the arena
-        // focusable flag, not yet wired here): a plain `focus_scope_active()`
+        // focusable flag, not yet wired here): a plain `view_focus_active()`
         // would find no focusable ancestor and fall back to the constant-`true`
         // "outside any scope" signal — lighting the ring whenever ANY other
         // widget takes keyboard focus. Pop straight back; the real row scope
@@ -686,8 +686,8 @@ impl<T: 'static> Widget for TreeView<T> {
         // keyboard/pointer modality. Bound `RepaintOnly` so focus-in/out
         // redraws the ring. (Selection-emptiness changes already rebuild via
         // `version`, so paint re-reads the selection without extra binding.)
-        self.view_focused = ctx.begin_focus_scope();
-        ctx.end_focus_scope();
+        self.view_focused = ctx.begin_view_focus();
+        ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -1227,7 +1227,7 @@ impl<T: 'static> Widget for TreeView<T> {
         // Establish this TreeView as the focus scope for the rows it builds, so
         // their `StandardItem`s read *its* keyboard focus deterministically
         // (rows may build before arena parenting is wired).
-        ctx.begin_focus_scope();
+        ctx.begin_view_focus();
         for i in start..end {
             let selected = self
                 .row_selection
@@ -1396,7 +1396,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 self.item_entries.push((i, child_id));
             }
         }
-        ctx.end_focus_scope();
+        ctx.end_view_focus();
 
         // --- Scrollbar ---
         let scrollbar = ScrollBar::new(
@@ -3121,7 +3121,7 @@ mod tests {
         let _shell = tree.add(ZStack::new().add_child(tv).add_child(editor).focusable(true));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let rows = tree.children(tv);
-        let scope = tree.focus_scope_active_for(rows[0]);
+        let scope = tree.view_focus_active_for(rows[0]);
 
         tree.focus(tv);
         assert!(scope.get(), "row scope active when the TreeView is focused");
@@ -3134,7 +3134,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_scope_active_tracks_view_focus_for_rows() {
+    fn view_focus_active_tracks_view_focus_for_rows() {
         // Diagnostic for focus-aware selection: a row's focus scope (its nearest
         // focusable ancestor = the TreeView) must read inactive before focus and
         // active once a click focuses the view.
@@ -3177,7 +3177,7 @@ mod tests {
         // The reported gap: Tab into the tree with nothing selected and there is
         // no visible focus indicator — no row paints a ring because no row is
         // selected. The container focus ring fills it: paint outlines the whole
-        // view when it holds keyboard focus (`focus_scope_active`), the modality
+        // view when it holds keyboard focus (`view_focus_active`), the modality
         // is keyboard (`focus_visible`), and the selection is empty. This guards
         // those three paint inputs (paint output itself isn't unit-observable).
         use bastyde_data::{KeyedSelectionModel, SelectionMode};
@@ -3195,7 +3195,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let view_focused = tree.focus_scope_active_for(tv);
+        let view_focused = tree.view_focus_active_for(tv);
         let focus_visible = tree.focus_visible_signal();
         assert!(
             !view_focused.get() && !focus_visible.get(),
@@ -3220,13 +3220,13 @@ mod tests {
     fn container_focus_ring_hidden_when_a_sibling_holds_focus() {
         // Regression: the container ring must track THIS view's own keyboard
         // focus, not a global signal. The view captured its focus signal at
-        // build time; a plain `focus_scope_active()` there found no focusable
+        // build time; a plain `view_focus_active()` there found no focusable
         // ancestor (the root's `.focusable(true)` isn't wired into the arena
         // yet) and fell back to the constant-`true` "outside any scope" signal —
         // so every data view lit its container ring whenever ANY other widget
-        // took keyboard focus. `begin_focus_scope` keys the signal on the root
+        // took keyboard focus. `begin_view_focus` keys the signal on the root
         // id and fixes it. This observes the painted ring (not just the signal,
-        // which `focus_scope_active_for` resolves correctly post-build).
+        // which `view_focus_active_for` resolves correctly post-build).
         use bastyde_core::event::{Key, Modifiers};
         use bastyde_core::widget_builder::WidgetBuilder;
         use bastyde_data::{KeyedSelectionModel, SelectionMode};

@@ -227,7 +227,7 @@ pub struct TreeTableView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while this view — its root or any descendant — holds keyboard
-    /// focus. Captured at build from [`BuildContext::focus_scope_active`], bound
+    /// focus. Captured at build from [`BuildContext::view_focus_active`], bound
     /// `RepaintOnly`. Drives focus-aware selection: the band paints `Selected`
     /// while focused, muted `SelectedInactive` once focus leaves the view.
     view_focused: Signal<bool>,
@@ -785,16 +785,16 @@ impl<T: 'static> Widget for TreeTableView<T> {
         );
 
         // Focus-aware selection + modality-gated focus ring (mirrors TableView).
-        // `begin_focus_scope` keys the scope signal on this root id directly —
+        // `begin_view_focus` keys the scope signal on this root id directly —
         // the same id the body pane uses for its row scope, and independent of
         // the arena focusable flag (not yet wired here). A plain
-        // `focus_scope_active()` would find no focusable ancestor and fall back
+        // `view_focus_active()` would find no focusable ancestor and fall back
         // to the constant-`true` "outside any scope" signal, lighting the ring
         // whenever ANY widget takes focus. Pop straight back; the body pane
         // re-pushes the same cached signal. `focus_visible` is the
         // keyboard/pointer modality. Both `RepaintOnly`.
-        self.view_focused = ctx.begin_focus_scope();
-        ctx.end_focus_scope();
+        self.view_focused = ctx.begin_view_focus();
+        ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),

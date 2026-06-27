@@ -33,7 +33,8 @@ directory.
   `AspectRatio`, `Center`, `Padding`, `Spacer`, `Divider`).
 - [events-and-gestures.md](events-and-gestures.md) — preview/bubble dispatch,
   attached handlers (`.on_tap`, `.on_hover`, …), `on_key_preview`,
-  `focus_within` / `hover_within`, gesture recognizers.
+  `focus_within` / `hover_within`, `FocusScope` Tab-traversal scopes, gesture
+  recognizers.
 - [styling-system.md](styling-system.md) — the four-tier styling ladder
   (tokens → variants → recipes → style protocols); `Theme` aggregator,
   `ThemeAppearance`, per-widget `*Variant` enums and `*Style` traits,

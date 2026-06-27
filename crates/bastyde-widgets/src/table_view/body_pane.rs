@@ -222,7 +222,7 @@ impl<T: 'static> Widget for BodyPane<T> {
         // Key the row focus scope on the table's focusable root (`drag_anchor`),
         // not this pane — keyboard focus lands on the root, so a `StandardItem`
         // cell's focus-aware selection must track the root's focus.
-        ctx.begin_focus_scope_for(self.drag_anchor);
+        ctx.begin_view_focus_for(self.drag_anchor);
         for row_idx in start..end {
             let row_selected_for_a11y = match (selection_mode, &self.selection) {
                 (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
@@ -488,7 +488,7 @@ impl<T: 'static> Widget for BodyPane<T> {
 
             self.row_entries.push((row_idx, row_id));
         }
-        ctx.end_focus_scope();
+        ctx.end_view_focus();
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

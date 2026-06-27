@@ -955,7 +955,7 @@ impl WidgetTree {
                     self.set_focused(None);
                     self.focus_origin = None;
                     self.update_focus_within_signals(old, None);
-                    self.update_scope_focus_signals(old, None);
+                    self.update_view_focus_signals(old, None);
                 }
             }
 

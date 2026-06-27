@@ -171,7 +171,7 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | Flag | Purpose |
 |---|---|
 | `.focusable(true)` | Opt the node into tab order |
-| `.tab_index(n)` | Explicit tab index override |
+| `.tab_index(n)` | Explicit tab index, **scoped to the nearest `FocusScope`** (see §6) — `Some` sorts before unindexed, ascending |
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
 | `.clips_children(true)` | Scissor clipping to bounds (ScrollArea, MaxSize) |
 | `.context_menu(factory)` | Right-click overlay factory — see §3.1.4 |
@@ -358,15 +358,42 @@ These are the methods that make it possible to build app-level behavior (menu ro
 
 ## 6. Focus management
 
-Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab cycles it in document order across widgets whose node has `focusable = true`. The framework publishes three signals that widgets can observe:
+Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves it across widgets whose node has `focusable = true`. The framework publishes three signals that widgets can observe:
 
 - The currently focused node id (read via `tree.focused()`).
 - **Focus origin** — `Keyboard` (tab/shift-tab/programmatic) or `Pointer` (tap) or `Programmatic`. Used to paint a focus ring only on keyboard focus by default; pointer focus typically omits the ring per Int UI style.
 - **Focus-gained / focus-lost** events dispatched to widgets via `on_focus(gained: bool, ctx)`.
 
-Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
+Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button — it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
 
 Focus cleanup on destroy is automatic: destroying a focused widget clears focus; the next input event that requires focus routes to the nearest focusable ancestor or root.
+
+### 6.1 Traversal scopes (`FocusScope`)
+
+Tab order is **not** one flat global ring — it is a tree of **traversal scopes**. Every focusable widget belongs to its nearest enclosing [`FocusScope`](../crates/bastyde-widgets/src/focus_scope.rs); the whole window (or, while a centered modal is open, that modal's content) is an implicit root scope. Within a scope, members — focusable leaves *and* nested scopes, each counted as one unit — are ordered by **scoped `tab_index`** (then document order). Because `tab_index` is compared only among siblings of the same scope, two sibling scopes that both number their children `1, 2, 3` never interleave. This is Bastyde's analogue of Flutter `FocusTraversalGroup` / WPF `KeyboardNavigation.TabNavigation`.
+
+A scope is declared by wrapping a subtree in the layout-transparent `FocusScope` wrapper, which carries a `TraversalScopePolicy` governing what Tab does at the scope's ends:
+
+| Policy | At the scope boundary |
+|---|---|
+| `Continue` | Tab flows **out** into the enclosing scope's next member. Groups + scopes `tab_index` numbering without trapping focus — e.g. dock panels in a continuous Tab order. |
+| `Cycle` | Tab **wraps** within the scope and never leaves via keyboard — e.g. modal dialogs and popovers. |
+
+```rust
+// bati!: a popover whose Tab order is trapped inside it
+FocusScope(TraversalScopePolicy::Cycle) {
+    Button::new(lit!("OK"))
+    Button::new(lit!("Cancel"))
+}
+// builder form
+FocusScope::new(TraversalScopePolicy::Cycle).child(popover_body)
+```
+
+The root scope is implicitly `Cycle` (whole-tree last↔first wrap, the historical behavior). A **centered modal overlay** folds into the same mechanism: its content subtree becomes the root `Cycle` scope, so Tab is confined to the modal with no special-case code. The `FocusScope` node itself is forced non-focusable (it is a boundary, never a Tab stop). A subtree with no `FocusScope` behaves exactly like the old flat wrapping ring.
+
+> **Not to be confused with `view_focus_*`.** `BuildContext::begin_view_focus` / `view_focus_active` (formerly the `focus_scope` chrome API) is an unrelated build-time mechanism that tracks "does this data view's subtree hold focus" to drive selection chrome and focus rings. It has nothing to do with Tab traversal. Traversal scopes are the `FocusScope` widget + `set_traversal_scope`.
+
+Implemented in [`cycle_focus`](../crates/bastyde-core/src/widget_tree/focus_impl.rs) (the recursive scope-tree walk) and [`set_traversal_scope`](../crates/bastyde-core/src/widget_tree.rs) (the node marker, directly usable from headless tests).
 
 ## 6.5 Drag-and-drop lifecycle
 
@@ -425,7 +452,7 @@ No Xvfb, no GPU, no display server required.
 - Gesture recognizers are auto-wired from attached handlers; `GestureArena` arbitrates cooperation and reset.
 - Handlers express mutations by calling methods on `EventContext`; the framework applies them after dispatch.
 - `ctx.send_intent(X)` is the single way to request app-level behavior from a handler; `ctx.set_theme / set_locale / close_window / request_focus / dismiss_all_overlays` cover the framework-level ambient ops.
-- Focus is a single optional WidgetId; transfers happen via `ctx.request_focus(id)`; Tab/Shift+Tab cycles in document order.
+- Focus is a single optional WidgetId; transfers happen via `ctx.request_focus(id)`; Tab/Shift+Tab walks a tree of `FocusScope`s (scoped `tab_index`, per-scope `Continue`/`Cycle` policy), defaulting to a flat document-order ring when no scopes are present.
 - Everything is headless-testable — dispatch synthetic events, advance the simulated clock, inspect the tree.
 
 ---
@@ -441,3 +468,5 @@ No Xvfb, no GPU, no display server required.
 - [crates/bastyde-core/src/gesture.rs](../crates/bastyde-core/src/gesture.rs) — recognizer state machines.
 - [crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
 - [crates/bastyde-core/src/widget.rs](../crates/bastyde-core/src/widget.rs) — `EventContext`.
+- [crates/bastyde-widgets/src/focus_scope.rs](../crates/bastyde-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).
+- [crates/bastyde-core/src/widget_tree/focus_impl.rs](../crates/bastyde-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal, `set_traversal_scope`, `view_focus_*` chrome signals.

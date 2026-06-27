@@ -224,7 +224,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
         // Key the row focus scope on the view's focusable root (`drag_anchor`),
         // not this pane — see TableView's body pane for the rationale.
-        ctx.begin_focus_scope_for(self.drag_anchor);
+        ctx.begin_view_focus_for(self.drag_anchor);
         for flat_idx in start..end {
             let entry = match proxy.entry_at(flat_idx) {
                 Some(e) => e,
@@ -448,7 +448,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             }
             ctx.apply_handlers(tree_row_id, row_handlers);
         }
-        ctx.end_focus_scope();
+        ctx.end_view_focus();
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

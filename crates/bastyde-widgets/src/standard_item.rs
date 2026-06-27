@@ -434,7 +434,7 @@ impl StandardListItem {
         // `SelectedInactive` chrome when focus is elsewhere. Items outside any
         // focusable scope read a constant `true`, so their selection always
         // looks active.
-        let is_focused = ctx.focus_scope_active();
+        let is_focused = ctx.view_focus_active();
         // Keyboard-vs-pointer modality so the recipe shows the focus ring only
         // during keyboard navigation (`:focus-visible`).
         let is_focus_visible = ctx.focus_visible();

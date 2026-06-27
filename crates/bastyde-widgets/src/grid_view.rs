@@ -1114,7 +1114,7 @@ impl<T: 'static> Widget for GridView<T> {
                 // Grid root's inclusive focus signal (stack empty here → resolves
                 // to this root) + input modality, so the ring is keyboard-only
                 // and hides when the grid loses focus.
-                view_focused: ctx.focus_scope_active(),
+                view_focused: ctx.view_focus_active(),
                 focus_visible: ctx.focus_visible(),
                 selection: self.selection.clone(),
                 scroll_y: self.scroll_y.clone(),
@@ -1384,7 +1384,7 @@ impl<T: 'static> Widget for GridView<T> {
 struct GridOverlay {
     focused_index: Signal<Option<usize>>,
     /// `true` while the grid (its root or a descendant) holds keyboard focus —
-    /// the grid root's inclusive [`BuildContext::focus_scope_active`] signal.
+    /// the grid root's inclusive [`BuildContext::view_focus_active`] signal.
     /// Gates the focus ring so an unfocused grid shows none.
     view_focused: Signal<bool>,
     /// Input-modality `:focus-visible`. Gates the focus ring to keyboard

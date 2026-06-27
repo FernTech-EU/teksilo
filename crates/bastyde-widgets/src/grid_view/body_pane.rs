@@ -226,7 +226,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         }
         let focused = self.focused_index.get();
 
-        ctx.begin_focus_scope_for(self.scope_owner);
+        ctx.begin_view_focus_for(self.scope_owner);
         for i in start..end {
             let row = i / cols;
             let col = i % cols;
@@ -365,7 +365,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
 
             self.tile_entries.push((i, tile_id));
         }
-        ctx.end_focus_scope();
+        ctx.end_view_focus();
 
         // Realize the visible section headers.
         self.header_entries.clear();

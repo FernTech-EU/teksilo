@@ -314,46 +314,46 @@ impl<'a> BuildContext<'a> {
     /// desktop affordance (Qt `SH_ItemView_...`, macOS inactive selection) that
     /// shows where the keyboard is. The scope is resolved at build time but the
     /// signal stays live across focus changes.
-    pub fn focus_scope_active(&mut self) -> Signal<bool> {
+    pub fn view_focus_active(&mut self) -> Signal<bool> {
         // Prefer the scope a containing data view explicitly established for its
         // rows (deterministic, parenting-independent); else resolve by walking
         // to the nearest focusable ancestor.
-        if let Some(scope) = self.tree.current_focus_scope() {
+        if let Some(scope) = self.tree.current_view_focus() {
             return scope;
         }
         let id = self.self_id();
-        self.tree.focus_scope_active_for(id)
+        self.tree.view_focus_active_for(id)
     }
 
     /// Mark the widget being built as a **focus scope** for the rows/items it
-    /// builds next: any descendant's [`focus_scope_active`](Self::focus_scope_active)
+    /// builds next: any descendant's [`view_focus_active`](Self::view_focus_active)
     /// (and `StandardItem`'s focus-aware selection / focus ring) reads *this*
     /// widget's keyboard focus. A data view calls this around its row loop, then
-    /// [`end_focus_scope`](Self::end_focus_scope). Deterministic — unaffected by
+    /// [`end_view_focus`](Self::end_view_focus). Deterministic — unaffected by
     /// arena parenting, which may not be wired while docked/virtualized rows build.
-    pub fn begin_focus_scope(&mut self) -> Signal<bool> {
+    pub fn begin_view_focus(&mut self) -> Signal<bool> {
         let id = self.self_id();
-        self.tree.begin_focus_scope(id)
+        self.tree.begin_view_focus(id)
     }
 
-    /// Like [`begin_focus_scope`](Self::begin_focus_scope) but keys the scope on
+    /// Like [`begin_view_focus`](Self::begin_view_focus) but keys the scope on
     /// an explicit `node_id` rather than the widget being built. A view whose
     /// rows are built by a **separate body-pane widget** (TableView /
     /// TreeTableView / GridView) passes its own focusable root id so descendant
     /// items resolve the *root's* keyboard focus — not the pane's, which is a
     /// child of the root and so never holds focus itself.
-    pub fn begin_focus_scope_for(&mut self, node_id: WidgetId) -> Signal<bool> {
-        self.tree.begin_focus_scope(node_id)
+    pub fn begin_view_focus_for(&mut self, node_id: WidgetId) -> Signal<bool> {
+        self.tree.begin_view_focus(node_id)
     }
 
-    /// End the focus scope opened by [`begin_focus_scope`](Self::begin_focus_scope).
-    pub fn end_focus_scope(&mut self) {
-        self.tree.end_focus_scope();
+    /// End the focus scope opened by [`begin_view_focus`](Self::begin_view_focus).
+    pub fn end_view_focus(&mut self) {
+        self.tree.end_view_focus();
     }
 
     /// Input-modality "focus-visible" signal — `true` after keyboard input,
     /// `false` after pointer input (the standard `:focus-visible` rule). Pair
-    /// with [`focus_scope_active`](Self::focus_scope_active) to draw a focus
+    /// with [`view_focus_active`](Self::view_focus_active) to draw a focus
     /// ring only during keyboard navigation, not on mouse clicks.
     pub fn focus_visible(&self) -> Signal<bool> {
         self.tree.focus_visible_signal()
@@ -452,6 +452,25 @@ impl<'a> BuildContext<'a> {
     /// roving-tabindex pattern (HTML `tabindex="-1"` semantics).
     pub fn set_tab_stop(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.set_tab_stop(id, state);
+    }
+
+    /// Declare the widget being built as a **traversal-scope boundary** for
+    /// Tab / Shift+Tab navigation. Descendants' `tab_index` values become
+    /// scoped to this node — they never collide with sibling scopes — and the
+    /// `policy` controls what happens at the scope's ends:
+    ///
+    /// - [`TraversalScopePolicy::Continue`](crate::focus::TraversalScopePolicy::Continue)
+    ///   — Tab flows out into the enclosing scope's next member (groups
+    ///   numbering only).
+    /// - [`TraversalScopePolicy::Cycle`](crate::focus::TraversalScopePolicy::Cycle)
+    ///   — Tab wraps within the scope, never exits (for modals / popovers).
+    ///
+    /// This node is automatically excluded from being a Tab stop itself.
+    /// Prefer the `FocusScope` wrapper widget in `bastyde-widgets` over
+    /// calling this directly.
+    pub fn set_traversal_scope(&mut self, policy: crate::focus::TraversalScopePolicy) {
+        let id = self.self_id();
+        self.tree.set_traversal_scope(id, policy);
     }
 
     /// Attach a tooltip to a widget.

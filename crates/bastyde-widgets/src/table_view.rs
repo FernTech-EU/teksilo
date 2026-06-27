@@ -260,7 +260,7 @@ pub struct TableView<T: 'static> {
 
     /// `true` while this view — its root or any descendant (e.g. a cell
     /// editor) — holds keyboard focus. Captured at build from
-    /// [`BuildContext::focus_scope_active`] and bound `RepaintOnly`. Drives
+    /// [`BuildContext::view_focus_active`] and bound `RepaintOnly`. Drives
     /// **focus-aware selection**: the selection band paints with the active
     /// `Selected` chrome while focused and the muted `SelectedInactive` chrome
     /// once focus leaves the table — the standard desktop affordance.
@@ -1205,11 +1205,11 @@ impl<T: 'static> Widget for TableView<T> {
             BindingLevel::RepaintOnly,
         );
 
-        // Focus-aware selection + modality-gated focus ring. `begin_focus_scope`
+        // Focus-aware selection + modality-gated focus ring. `begin_view_focus`
         // keys the scope signal on this root id directly — the same id the body
         // pane uses for its row scope (`drag_anchor = ctx.self_id()`), and
         // independent of the arena focusable flag (not yet wired here). A plain
-        // `focus_scope_active()` here would find no focusable ancestor and fall
+        // `view_focus_active()` here would find no focusable ancestor and fall
         // back to the constant-`true` "outside any scope" signal — `true`
         // whenever ANY widget holds focus, lighting every table's ring at once.
         // The signal is `true` whenever the table or any descendant holds focus,
@@ -1217,8 +1217,8 @@ impl<T: 'static> Widget for TableView<T> {
         // straight back; the body pane re-pushes the same cached signal.
         // `focus_visible` gates the cell ring to keyboard navigation. Both bound
         // `RepaintOnly`: a focus/modality change redraws without a rebuild.
-        self.view_focused = ctx.begin_focus_scope();
-        ctx.end_focus_scope();
+        self.view_focused = ctx.begin_view_focus();
+        ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),

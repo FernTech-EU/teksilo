@@ -44,7 +44,7 @@ impl WidgetTree {
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
         self.update_focus_within_signals(previously_focused, Some(id));
-        self.update_scope_focus_signals(previously_focused, Some(id));
+        self.update_view_focus_signals(previously_focused, Some(id));
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin }, &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
@@ -125,15 +125,22 @@ impl WidgetTree {
         self.focused.and_then(|id| self.arena.ime_context(id))
     }
 
-    /// Find the first focusable widget in depth-first order within a subtree.
+    /// Find the first focusable widget within a subtree, in **traversal
+    /// order** — the widget Tab would land on first. Respects nested
+    /// `FocusScope`s and scoped `tab_index` (not merely raw DFS order), so a
+    /// modal's initial focus matches its Tab order.
     pub fn first_focusable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
         if !self.arena.is_active(root) {
             return None;
         }
-
-        let mut focusable = Vec::new();
-        self.collect_focusable_tree_order(root, &mut focusable);
-        focusable.into_iter().next()
+        let mut entries = Vec::new();
+        self.collect_scope_entries(root, &mut entries);
+        sort_scope_entries(&mut entries);
+        let scope = ScopeNode {
+            policy: crate::focus::TraversalScopePolicy::Cycle,
+            entries,
+        };
+        enter_scope_edge(&scope, false)
     }
 
     /// Whether the given widget id currently exists and is active in the
@@ -192,73 +199,42 @@ impl WidgetTree {
         self.focus_visible.clone()
     }
 
-    /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab).
-    /// Traverses in document order (depth-first tree traversal).
+    /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab),
+    /// honoring nested **traversal scopes** (`FocusScope`).
+    ///
+    /// Builds a scope tree on demand (depth-first; `tab_index` scoped per
+    /// scope), then walks it with [`navigate_scope`]. The root is an implicit
+    /// `Cycle` scope (whole-tree last↔first wrap). A centered modal overlay
+    /// folds into the same mechanism: its content subtree becomes the root
+    /// `Cycle` scope, so Tab is confined to the modal.
     pub(super) fn cycle_focus(&mut self, reverse: bool, ops: &mut dyn crate::window::WindowOps) {
-        let mut focusable = Vec::new();
+        let mut entries = Vec::new();
         if let Some(modal_overlay) = self.overlay_manager.topmost_centered() {
-            self.collect_focusable_tree_order(modal_overlay.content_id, &mut focusable);
+            let content_id = modal_overlay.content_id;
+            self.collect_scope_entries(content_id, &mut entries);
         } else {
             let roots = self.arena.roots();
             for root in roots {
-                self.collect_focusable_tree_order(root, &mut focusable);
+                self.collect_scope_entries(root, &mut entries);
             }
         }
-
-        // Filter out widgets excluded from Tab traversal by a `tab_stop`
-        // binding that evaluates to `false` — they remain focusable via
-        // `request_focus` but are skipped by Tab. Implements the ARIA
-        // roving-tabindex pattern (HTML `tabindex="-1"`).
-        //
-        // The flag governs the node's whole **subtree**: a composite
-        // control (ComboBox, IconButton, the Toolbar chevron) exposes its
-        // real focusable node as an inner leaf, so a `tab_stop` set on the
-        // composing node must reach that leaf. We therefore walk up to the
-        // nearest ancestor (including the node itself) that carries an
-        // explicit `tab_stop` and use its value — closest wins, default
-        // `true`. Without this, setting `tab_stop(false)` on a composite
-        // would silently leak its inner leaf into the Tab order.
-        focusable.retain(|&id| self.tab_stop_effective(id));
-
-        if focusable.is_empty() {
-            return;
-        }
-
-        focusable.sort_by(|&a, &b| {
-            let ta = self.arena.get(a).and_then(|node| node.node_tab_index);
-            let tb = self.arena.get(b).and_then(|node| node.node_tab_index);
-            match (ta, tb) {
-                (Some(ia), Some(ib)) => ia.cmp(&ib),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-        });
-
-        let current_idx = self
-            .focused
-            .and_then(|focused| focusable.iter().position(|&id| id == focused));
-
-        let next_idx = match current_idx {
-            Some(idx) => {
-                if reverse {
-                    if idx == 0 {
-                        focusable.len() - 1
-                    } else {
-                        idx - 1
-                    }
-                } else {
-                    (idx + 1) % focusable.len()
-                }
-            }
-            None => 0,
+        sort_scope_entries(&mut entries);
+        let root_scope = ScopeNode {
+            policy: crate::focus::TraversalScopePolicy::Cycle,
+            entries,
         };
 
-        self.focus_with_origin_ops(
-            focusable[next_idx],
-            crate::focus::FocusOrigin::Keyboard,
-            &mut *ops,
-        );
+        if let StepResult::Found(next_id) =
+            navigate_scope(&root_scope, self.focused, reverse, true)
+        {
+            self.focus_with_origin_ops(
+                next_id,
+                crate::focus::FocusOrigin::Keyboard,
+                &mut *ops,
+            );
+        }
+        // `Escaped` only reaches here for an empty tree (the root Cycle scope
+        // wraps at its ends) — nothing to focus, so leave focus unchanged.
     }
 
     /// Whether `id` participates in Tab traversal, honoring a `tab_stop`
@@ -301,26 +277,64 @@ impl WidgetTree {
         None
     }
 
-    /// Collect focusable widgets in depth-first (document) order.
-    fn collect_focusable_tree_order(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
+    /// Collect the traversal entries of the subtree rooted at `id`, in
+    /// depth-first (document) order, into the current scope's `out` list.
+    ///
+    /// - A node carrying `node_traversal_scope` becomes a single
+    ///   [`ScopeEntry::Scope`] — its descendants are collected into a *nested*
+    ///   ordered list and the recursion does not flow past it at this level.
+    ///   (The scope node itself is never a focusable; the `FocusScope` wrapper
+    ///   forces `node_focusable = false`.)
+    /// - Any other node that is focusable and an effective Tab stop becomes a
+    ///   [`ScopeEntry::Focusable`].
+    ///
+    /// Disabled subtrees and dormant/destroyed nodes are skipped entirely, as
+    /// in the previous flat collector. The `tab_stop` ancestor-walk
+    /// (`tab_stop_effective`) is applied here at collection time rather than as
+    /// a post-pass `retain`.
+    fn collect_scope_entries(&self, id: WidgetId, out: &mut Vec<ScopeEntry>) {
         if !self.arena.is_active(id) {
             return;
         }
-        if let Some(node) = self.arena.get(id) {
-            if node
-                .enabled_state
-                .as_ref()
-                .map(|s| !s.get())
-                .unwrap_or(false)
-            {
-                return;
-            }
-            if self.is_node_focusable(node) {
-                out.push(id);
-            }
+        let Some(node) = self.arena.get(id) else {
+            return;
+        };
+        if node
+            .enabled_state
+            .as_ref()
+            .map(|s| !s.get())
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        // A traversal-scope boundary: collect its subtree as an independent,
+        // internally-ordered group; do not descend past it into `out`.
+        if let Some(policy) = node.node_traversal_scope {
+            let mut child_entries = Vec::new();
             for &child in &node.children {
-                self.collect_focusable_tree_order(child, out);
+                self.collect_scope_entries(child, &mut child_entries);
             }
+            sort_scope_entries(&mut child_entries);
+            out.push(ScopeEntry {
+                tab_index: node.node_tab_index,
+                kind: ScopeEntryKind::Scope(ScopeNode {
+                    policy,
+                    entries: child_entries,
+                }),
+            });
+            return;
+        }
+
+        // A normal node: a Tab stop iff focusable and not tab_stop-suppressed.
+        if self.is_node_focusable(node) && self.tab_stop_effective(id) {
+            out.push(ScopeEntry {
+                tab_index: node.node_tab_index,
+                kind: ScopeEntryKind::Focusable(id),
+            });
+        }
+        for &child in &node.children {
+            self.collect_scope_entries(child, out);
         }
     }
 
@@ -383,10 +397,10 @@ impl WidgetTree {
     }
 
     /// Mirror of [`update_focus_within_signals`](Self::update_focus_within_signals)
-    /// for `scope_focus_signal`, using *inclusive* ancestor chains — so a node
+    /// for `view_focus_signal`, using *inclusive* ancestor chains — so a node
     /// that is itself the focused widget (e.g. a data view holding focus
     /// directly) sees its own scope signal flip `true`.
-    pub(crate) fn update_scope_focus_signals(
+    pub(crate) fn update_view_focus_signals(
         &mut self,
         old: Option<WidgetId>,
         new: Option<WidgetId>,
@@ -396,7 +410,7 @@ impl WidgetTree {
         for &id in &old_chain {
             if !new_chain.contains(&id)
                 && let Some(node) = self.arena.get(id)
-                && let Some(sig) = node.scope_focus_signal.clone()
+                && let Some(sig) = node.view_focus_signal.clone()
             {
                 sig.set(false);
             }
@@ -404,25 +418,25 @@ impl WidgetTree {
         for &id in &new_chain {
             if !old_chain.contains(&id)
                 && let Some(node) = self.arena.get(id)
-                && let Some(sig) = node.scope_focus_signal.clone()
+                && let Some(sig) = node.view_focus_signal.clone()
             {
                 sig.set(true);
             }
         }
     }
 
-    /// Get-or-create the `scope_focus_signal` on `node_id`, initialised to the
+    /// Get-or-create the `view_focus_signal` on `node_id`, initialised to the
     /// node's current focus-containment (`focused` is `node_id` or a descendant).
-    pub(crate) fn scope_focus_signal_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+    pub(crate) fn view_focus_signal_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
         if let Some(node) = self.arena.get(node_id)
-            && let Some(sig) = node.scope_focus_signal.clone()
+            && let Some(sig) = node.view_focus_signal.clone()
         {
             return sig;
         }
         let active = self.inclusive_ancestors_of(self.focused).contains(&node_id);
         let sig = crate::signal::Signal::new(active);
         if let Some(node) = self.arena.get_mut(node_id) {
-            node.scope_focus_signal = Some(sig.clone());
+            node.view_focus_signal = Some(sig.clone());
         }
         sig
     }
@@ -432,31 +446,31 @@ impl WidgetTree {
     /// keyboard focus. With no focusable ancestor, returns a constant-`true`
     /// signal so selection renders active (the legacy behaviour for items
     /// outside any focus scope). Drives focus-aware selection in `StandardItem`.
-    pub fn focus_scope_active_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+    pub fn view_focus_active_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
         match self.find_focusable_at_or_above(node_id) {
-            Some(scope) => self.scope_focus_signal_for(scope),
+            Some(scope) => self.view_focus_signal_for(scope),
             None => crate::signal::Signal::new(true),
         }
     }
 
     /// Push `node_id`'s focus scope onto the build-time scope stack (creating its
-    /// `scope_focus_signal` if absent) so descendants built before arena
+    /// `view_focus_signal` if absent) so descendants built before arena
     /// parenting is wired (docked / virtualized rows) still read the correct
-    /// view focus. Pair with [`end_focus_scope`](Self::end_focus_scope).
-    pub fn begin_focus_scope(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
-        let sig = self.scope_focus_signal_for(node_id);
-        self.focus_scope_stack.push(sig.clone());
+    /// view focus. Pair with [`end_view_focus`](Self::end_view_focus).
+    pub fn begin_view_focus(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+        let sig = self.view_focus_signal_for(node_id);
+        self.view_focus_stack.push(sig.clone());
         sig
     }
 
-    /// Pop the innermost focus scope pushed by [`begin_focus_scope`].
-    pub fn end_focus_scope(&mut self) {
-        self.focus_scope_stack.pop();
+    /// Pop the innermost focus scope pushed by [`begin_view_focus`].
+    pub fn end_view_focus(&mut self) {
+        self.view_focus_stack.pop();
     }
 
     /// The innermost active build-time focus scope, if any.
-    pub fn current_focus_scope(&self) -> Option<crate::signal::Signal<bool>> {
-        self.focus_scope_stack.last().cloned()
+    pub fn current_view_focus(&self) -> Option<crate::signal::Signal<bool>> {
+        self.view_focus_stack.last().cloned()
     }
 
     /// Single point of mutation for `self.hovered`. Updates both the
@@ -511,6 +525,174 @@ impl WidgetTree {
             }
         }
     }
+}
+
+// ─── Traversal scope tree ────────────────────────────────────────────────
+//
+// `cycle_focus` builds a transient tree of these on each Tab press. A
+// `ScopeNode` is an ordered list of `ScopeEntry`s; an entry is either a
+// focusable leaf or a nested `ScopeNode`. Within a node, entries are ordered
+// by `tab_index` (scoped — only compared among siblings) then DFS order.
+// `navigate_scope` walks this tree, applying each scope's `policy` at its ends.
+
+/// One member of a traversal scope: a focusable leaf or a nested scope, plus
+/// the `tab_index` used to position it among its siblings (`None` sorts last,
+/// preserving DFS order).
+struct ScopeEntry {
+    tab_index: Option<i32>,
+    kind: ScopeEntryKind,
+}
+
+enum ScopeEntryKind {
+    Focusable(WidgetId),
+    Scope(ScopeNode),
+}
+
+/// An ordered group of entries with a boundary policy.
+struct ScopeNode {
+    policy: crate::focus::TraversalScopePolicy,
+    entries: Vec<ScopeEntry>,
+}
+
+/// Outcome of stepping within a scope.
+enum StepResult {
+    /// Focus should move to this widget.
+    Found(WidgetId),
+    /// Tab ran off this scope's end and the policy permits leaving — the
+    /// caller (parent scope) should continue stepping from this scope's slot.
+    /// Never produced by a `Cycle` scope or the root scope (they wrap).
+    Escaped,
+}
+
+/// Whether a scope wraps (vs. lets focus escape) when Tab hits its boundary.
+/// The root scope always wraps; otherwise only `Cycle` scopes do.
+fn scope_wraps(policy: crate::focus::TraversalScopePolicy, is_root: bool) -> bool {
+    is_root || matches!(policy, crate::focus::TraversalScopePolicy::Cycle)
+}
+
+/// Sort entries by scoped `tab_index`: `Some` before `None` (ascending);
+/// stable, so the DFS order is preserved within each group.
+fn sort_scope_entries(entries: &mut [ScopeEntry]) {
+    entries.sort_by(|a, b| match (a.tab_index, b.tab_index) {
+        (Some(ia), Some(ib)) => ia.cmp(&ib),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+}
+
+/// Whether the focused widget `f` lies anywhere within `entry`.
+fn scope_entry_contains(entry: &ScopeEntry, f: WidgetId) -> bool {
+    match &entry.kind {
+        ScopeEntryKind::Focusable(id) => *id == f,
+        ScopeEntryKind::Scope(child) => {
+            child.entries.iter().any(|e| scope_entry_contains(e, f))
+        }
+    }
+}
+
+/// First focusable when entering `scope` from its leading (forward) or
+/// trailing (reverse) edge, descending into nested scopes and skipping empty
+/// ones. `None` if the scope holds no focusable members.
+fn enter_scope_edge(scope: &ScopeNode, reverse: bool) -> Option<WidgetId> {
+    let n = scope.entries.len();
+    for k in 0..n {
+        let idx = if reverse { n - 1 - k } else { k };
+        match &scope.entries[idx].kind {
+            ScopeEntryKind::Focusable(id) => return Some(*id),
+            ScopeEntryKind::Scope(child) => {
+                if let Some(id) = enter_scope_edge(child, reverse) {
+                    return Some(id);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Move focus to the next/previous focusable within `scope`, recursing into
+/// the nested scope that currently holds focus before stepping to siblings.
+/// `is_root` marks the implicit top scope (always wraps, never escapes).
+fn navigate_scope(
+    scope: &ScopeNode,
+    focused: Option<WidgetId>,
+    reverse: bool,
+    is_root: bool,
+) -> StepResult {
+    if scope.entries.is_empty() {
+        return StepResult::Escaped;
+    }
+
+    let cur = focused
+        .and_then(|f| scope.entries.iter().position(|e| scope_entry_contains(e, f)));
+
+    let from = match cur {
+        None => {
+            // Focus is not in this scope (root with nothing focused, or the
+            // focused widget was destroyed): enter from the edge.
+            return match enter_scope_edge(scope, reverse) {
+                Some(id) => StepResult::Found(id),
+                None => StepResult::Escaped,
+            };
+        }
+        Some(i) => i,
+    };
+
+    // Focus is inside a nested scope: try to advance within it first.
+    if let ScopeEntryKind::Scope(child) = &scope.entries[from].kind {
+        if let StepResult::Found(id) = navigate_scope(child, focused, reverse, false) {
+            return StepResult::Found(id);
+        }
+        // Escaped — fall through and step to the sibling after this scope.
+    }
+
+    step_to_sibling(scope, from, reverse, is_root)
+}
+
+/// Step from entry `from` to the next/previous *non-empty* sibling, applying
+/// the boundary policy (wrap vs. escape) and entering the chosen entry from
+/// its near edge. Bounded to one full lap.
+fn step_to_sibling(
+    scope: &ScopeNode,
+    from: usize,
+    reverse: bool,
+    is_root: bool,
+) -> StepResult {
+    let n = scope.entries.len();
+    let mut idx = from;
+    for _ in 0..n {
+        let next = if reverse {
+            if idx == 0 {
+                if scope_wraps(scope.policy, is_root) {
+                    n - 1
+                } else {
+                    return StepResult::Escaped;
+                }
+            } else {
+                idx - 1
+            }
+        } else if idx + 1 >= n {
+            if scope_wraps(scope.policy, is_root) {
+                0
+            } else {
+                return StepResult::Escaped;
+            }
+        } else {
+            idx + 1
+        };
+
+        match &scope.entries[next].kind {
+            ScopeEntryKind::Focusable(id) => return StepResult::Found(*id),
+            ScopeEntryKind::Scope(child) => {
+                if let Some(id) = enter_scope_edge(child, reverse) {
+                    return StepResult::Found(id);
+                }
+                // Empty nested scope: keep stepping past it.
+                idx = next;
+            }
+        }
+    }
+    StepResult::Escaped
 }
 
 #[cfg(test)]
@@ -801,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_scope_active_is_inclusive_for_the_view_itself() {
+    fn view_focus_active_is_inclusive_for_the_view_itself() {
         // A non-focusable item inside a focusable "view" reads the view's scope
         // focus: true when the view OR a descendant holds focus (inclusive),
         // unlike `focus_within` (strict descendants only). This is what powers
@@ -816,7 +998,7 @@ mod tests {
         let outside = tree.add(FillWidget::new().focusable());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
-        let active = tree.focus_scope_active_for(item);
+        let active = tree.view_focus_active_for(item);
         assert!(!active.get(), "no focus yet → scope inactive");
 
         tree.focus(view);
@@ -830,11 +1012,11 @@ mod tests {
     }
 
     #[test]
-    fn begin_focus_scope_for_keys_on_the_view_root_not_the_building_pane() {
+    fn begin_view_focus_for_keys_on_the_view_root_not_the_building_pane() {
         // TableView / TreeTableView / GridView build their rows inside a
         // separate, non-focusable body *pane*; keyboard focus lands on the
         // focusable view *root* (the pane's ancestor). A row's focus scope must
-        // therefore be keyed on the root via `begin_focus_scope_for(root)`, so
+        // therefore be keyed on the root via `begin_view_focus_for(root)`, so
         // its selection reads "active" when the view is focused. Keying on the
         // pane — which never holds focus and is not an ancestor of the focused
         // root — would read constant-false (the latent bug this fixes).
@@ -848,10 +1030,10 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // What the pane opens for its rows: a scope keyed on the root.
-        let keyed_on_root = tree.begin_focus_scope(root);
-        tree.end_focus_scope();
+        let keyed_on_root = tree.begin_view_focus(root);
+        tree.end_view_focus();
         // What keying on the pane itself would have produced (the bug).
-        let keyed_on_pane = tree.scope_focus_signal_for(pane);
+        let keyed_on_pane = tree.view_focus_signal_for(pane);
 
         assert!(!keyed_on_root.get(), "no focus yet → inactive");
         tree.focus(root);
@@ -885,13 +1067,13 @@ mod tests {
     }
 
     #[test]
-    fn focus_scope_active_without_focusable_ancestor_is_constant_true() {
+    fn view_focus_active_without_focusable_ancestor_is_constant_true() {
         // An item with no focusable ancestor (e.g. a static list) always reads
         // active, so its selection chrome is never muted.
         let mut tree = WidgetTree::new();
         let item = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
-        assert!(tree.focus_scope_active_for(item).get());
+        assert!(tree.view_focus_active_for(item).get());
     }
 
     #[test]
@@ -1004,5 +1186,285 @@ mod tests {
             !glow.get(),
             "hovering the widget itself must not set its own hover_within"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_scope {
+    //! Scope-aware Tab traversal (`FocusScope` / `set_traversal_scope`).
+    //! These drive the scope marker directly via `WidgetTree::set_traversal_scope`
+    //! so the algorithm is exercised with no dependency on the widgets crate.
+
+    use super::*;
+    use crate::focus::TraversalScopePolicy::{Continue, Cycle};
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use crate::widget_builder::WidgetBuilder;
+
+    /// A focusable leaf with an explicit scoped `tab_index`.
+    fn indexed(tree: &mut WidgetTree, idx: i32) -> WidgetId {
+        tree.add(FillWidget::new().focusable().tab_index(idx))
+    }
+
+    fn tab(tree: &mut WidgetTree) {
+        tree.press_key(Key::Tab, Modifiers::NONE);
+    }
+    fn shift_tab(tree: &mut WidgetTree) {
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+    }
+
+    #[test]
+    fn overlapping_tab_index_in_sibling_scopes_does_not_interleave() {
+        let mut tree = WidgetTree::new();
+        let a1 = indexed(&mut tree, 1);
+        let a2 = indexed(&mut tree, 2);
+        let scope_a = tree.add(StackWidget::new().add_child(a1).add_child(a2));
+        let b1 = indexed(&mut tree, 1);
+        let b2 = indexed(&mut tree, 2);
+        let scope_b = tree.add(StackWidget::new().add_child(b1).add_child(b2));
+        let _root = tree.add(StackWidget::new().add_child(scope_a).add_child(scope_b));
+        tree.set_traversal_scope(scope_a, Continue);
+        tree.set_traversal_scope(scope_b, Continue);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Grouped: a1,a2 then b1,b2 — never a1,b1,a2,b2.
+        for expected in [a1, a2, b1, b2, a1] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn continue_scope_flows_out_at_the_ends() {
+        // root[A, scopeC(Continue)[c1,c2], B] — no tab_index, DFS order.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let c1 = tree.add(FillWidget::new().focusable());
+        let c2 = tree.add(FillWidget::new().focusable());
+        let scope_c = tree.add(StackWidget::new().add_child(c1).add_child(c2));
+        let b = tree.add(FillWidget::new().focusable());
+        let _root = tree.add(StackWidget::new().add_child(a).add_child(scope_c).add_child(b));
+        tree.set_traversal_scope(scope_c, Continue);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        for expected in [a, c1, c2, b, a] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+        // Reverse: from c1, Shift+Tab leaves the scope to A (not c2).
+        tree.focus(c1);
+        shift_tab(&mut tree);
+        assert_eq!(tree.focused(), Some(a));
+    }
+
+    #[test]
+    fn cycle_scope_wraps_and_never_escapes() {
+        // root[A, scopeD(Cycle)[d1,d2]].
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let d1 = tree.add(FillWidget::new().focusable());
+        let d2 = tree.add(FillWidget::new().focusable());
+        let scope_d = tree.add(StackWidget::new().add_child(d1).add_child(d2));
+        let _root = tree.add(StackWidget::new().add_child(a).add_child(scope_d));
+        tree.set_traversal_scope(scope_d, Cycle);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.focus(d1);
+        for _ in 0..10 {
+            tab(&mut tree);
+            let f = tree.focused();
+            assert!(
+                f == Some(d1) || f == Some(d2),
+                "Cycle scope must trap Tab inside {{d1,d2}}, got {f:?}"
+            );
+        }
+        // Forward d1→d2→d1 and reverse d1→d2 (wrap at the start).
+        tree.focus(d1);
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(d2));
+        shift_tab(&mut tree);
+        assert_eq!(tree.focused(), Some(d1));
+        shift_tab(&mut tree);
+        assert_eq!(tree.focused(), Some(d2), "Shift+Tab at start wraps to last");
+    }
+
+    #[test]
+    fn empty_scope_is_skipped() {
+        // root[A, emptyScope(Continue)[], B].
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let empty = tree.add(StackWidget::new());
+        let b = tree.add(FillWidget::new().focusable());
+        let _root = tree.add(StackWidget::new().add_child(a).add_child(empty).add_child(b));
+        tree.set_traversal_scope(empty, Continue);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        for expected in [a, b, a] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn single_member_cycle_scope_stays_put() {
+        let mut tree = WidgetTree::new();
+        let e = tree.add(FillWidget::new().focusable());
+        let scope_e = tree.add(StackWidget::new().add_child(e));
+        tree.set_traversal_scope(scope_e, Cycle);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.focus(e);
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(e));
+        shift_tab(&mut tree);
+        assert_eq!(tree.focused(), Some(e));
+    }
+
+    #[test]
+    fn nested_continue_in_cycle_flows_out_to_outer() {
+        // outer(Cycle)[X, inner(Continue)[i1,i2], Y] — outer is the only root.
+        let mut tree = WidgetTree::new();
+        let x = tree.add(FillWidget::new().focusable());
+        let i1 = tree.add(FillWidget::new().focusable());
+        let i2 = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
+        let y = tree.add(FillWidget::new().focusable());
+        let outer = tree.add(StackWidget::new().add_child(x).add_child(inner).add_child(y));
+        tree.set_traversal_scope(inner, Continue);
+        tree.set_traversal_scope(outer, Cycle);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        for expected in [x, i1, i2, y, x] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+        // Shift+Tab from i1 escapes inner to X.
+        tree.focus(i1);
+        shift_tab(&mut tree);
+        assert_eq!(tree.focused(), Some(x));
+    }
+
+    #[test]
+    fn nested_cycle_in_cycle_traps_in_the_inner_scope() {
+        // outer(Cycle)[X, inner(Cycle)[i1,i2], Y]: once inside inner, Y is
+        // unreachable via Tab.
+        let mut tree = WidgetTree::new();
+        let x = tree.add(FillWidget::new().focusable());
+        let i1 = tree.add(FillWidget::new().focusable());
+        let i2 = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
+        let y = tree.add(FillWidget::new().focusable());
+        let outer = tree.add(StackWidget::new().add_child(x).add_child(inner).add_child(y));
+        tree.set_traversal_scope(inner, Cycle);
+        tree.set_traversal_scope(outer, Cycle);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        tree.focus(i1);
+        for _ in 0..6 {
+            tab(&mut tree);
+            let f = tree.focused();
+            assert!(
+                f == Some(i1) || f == Some(i2),
+                "inner Cycle must trap Tab; reached {f:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_tab_index_orders_within_a_scope() {
+        // scopeF(Cycle)[f3#3, f1#1, f2#2] added out of order → visited 1,2,3.
+        let mut tree = WidgetTree::new();
+        let f3 = indexed(&mut tree, 3);
+        let f1 = indexed(&mut tree, 1);
+        let f2 = indexed(&mut tree, 2);
+        let scope_f = tree.add(StackWidget::new().add_child(f3).add_child(f1).add_child(f2));
+        tree.set_traversal_scope(scope_f, Cycle);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        for expected in [f1, f2, f3, f1] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn destroyed_focused_widget_re_enters_at_first() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.focus(b);
+        tree.destroy_subtree(b);
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(a), "Tab after destroy enters at first");
+    }
+
+    #[test]
+    fn set_traversal_scope_forces_node_non_focusable() {
+        // A scope marker on an otherwise-focusable node must drop it from Tab
+        // (it is a boundary, not a stop).
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().focusable());
+        let scope = tree.add(StackWidget::new().add_child(inner).focusable(true));
+        tree.set_traversal_scope(scope, Continue);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Only `inner` is a Tab stop; the scope node itself never gets focus.
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(inner));
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(inner));
+    }
+
+    #[test]
+    fn no_scopes_behaves_like_a_flat_cycle() {
+        // Regression: without any scopes, traversal is a flat wrapping ring,
+        // ordered by tab_index then DFS — identical to the pre-scope behavior.
+        let mut tree = WidgetTree::new();
+        let a = indexed(&mut tree, 2);
+        let b = indexed(&mut tree, 1);
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // b(#1), a(#2), then c(no index) — wrapping.
+        for expected in [b, a, c, b] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn centered_modal_confines_tab_to_its_content() {
+        // A centered overlay folds into the traversal model as an implicit
+        // Cycle scope rooted at its content — Tab must stay inside it.
+        let mut tree = WidgetTree::new();
+        let outside1 = tree.add(FillWidget::new().focusable());
+        let outside2 = tree.add(FillWidget::new().focusable());
+        let m1 = tree.add(FillWidget::new().focusable());
+        let m2 = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new().add_child(m1).add_child(m2));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor: outside1,
+            placement: crate::overlay::OverlayPlacement::Centered,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+
+        for _ in 0..6 {
+            tab(&mut tree);
+            let f = tree.focused();
+            assert!(
+                f == Some(m1) || f == Some(m2),
+                "modal must trap Tab inside its content, reached {f:?}"
+            );
+        }
+        assert_ne!(tree.focused(), Some(outside1));
+        assert_ne!(tree.focused(), Some(outside2));
     }
 }

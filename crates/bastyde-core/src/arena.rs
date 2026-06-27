@@ -88,8 +88,8 @@ pub struct WidgetNode {
     /// is an *inclusive* ancestor of the focused widget). Unlike
     /// `focus_within_signal` (strict descendants), this includes the node being
     /// focused itself — so a data view that holds focus directly reads `true`.
-    /// Powers focus-aware selection (`BuildContext::focus_scope_active`).
-    pub(crate) scope_focus_signal: Option<Signal<bool>>,
+    /// Powers focus-aware selection (`BuildContext::view_focus_active`).
+    pub(crate) view_focus_signal: Option<Signal<bool>>,
     /// User-bound signal that the framework sets to `true` whenever
     /// the hovered widget is a strict descendant of this node.
     /// Symmetric to `focus_within_signal`. See
@@ -229,6 +229,15 @@ pub struct WidgetNode {
     pub(crate) node_focusable: Option<bool>,
     /// Tab index override set via HandlerSet.
     pub(crate) node_tab_index: Option<i32>,
+    /// Traversal-scope marker. When `Some(policy)`, `cycle_focus` treats this
+    /// node's subtree as an independent Tab group: `tab_index` numbering is
+    /// scoped to its descendants (so sibling scopes never interleave) and
+    /// `policy` governs what Tab does at the scope's ends. `None` (default)
+    /// means the node is transparent to traversal scoping. Set by the
+    /// `FocusScope` wrapper via `BuildContext::set_traversal_scope`. A node
+    /// carrying this marker is forced non-focusable (it is a boundary, never a
+    /// Tab stop). See [`crate::focus::TraversalScopePolicy`].
+    pub(crate) node_traversal_scope: Option<crate::focus::TraversalScopePolicy>,
     /// Cursor override set via HandlerSet.
     pub(crate) node_cursor: Option<CursorIcon>,
     /// RAII observer handles for effects registered during build().
@@ -299,7 +308,7 @@ impl WidgetNode {
             enabled_state: None,
             tab_stop: None,
             focus_within_signal: None,
-            scope_focus_signal: None,
+            view_focus_signal: None,
             hover_within_signal: None,
             activation_signal: None,
             alignment_override: None,
@@ -319,6 +328,7 @@ impl WidgetNode {
             external_handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
+            node_traversal_scope: None,
             node_cursor: None,
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),

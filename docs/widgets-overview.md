@@ -81,6 +81,7 @@ slack distribution math, and worked examples.
 - [MaxSize](../crates/bastyde-widgets/src/primitives/max_size.rs) — clamps response to a ceiling.
 - [AspectRatio](../crates/bastyde-widgets/src/primitives/aspect_ratio.rs) — constrains a child to a fixed width-to-height ratio.
 - [Switcher](../crates/bastyde-widgets/src/primitives/switcher.rs) — shows one of N children, driven by `Signal<usize>`.
+- [FocusScope](../crates/bastyde-widgets/src/focus_scope.rs) — layout-transparent **Tab traversal boundary** (lives at crate root). Scopes its descendants' `tab_index` so sibling regions don't interleave, and traps or passes Tab via `TraversalScopePolicy::{Cycle, Continue}`. See [events-and-gestures.md §6.1](events-and-gestures.md).
 
 ## Visual primitives
 

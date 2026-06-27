@@ -143,7 +143,7 @@ pub struct ListView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while the view holds keyboard focus (root's inclusive
-    /// [`BuildContext::focus_scope_active`] signal). With `focus_visible`, drives
+    /// [`BuildContext::view_focus_active`] signal). With `focus_visible`, drives
     /// the **container focus ring** shown when the view is Tab-focused but
     /// nothing is selected. Bound `RepaintOnly`.
     view_focused: Signal<bool>,
@@ -557,15 +557,15 @@ impl<T: 'static> Widget for ListView<T> {
 
         // Focus signals for the container ring (see TreeView). `RepaintOnly` so
         // focus-in/out redraws; selection-emptiness changes already rebuild.
-        // `begin_focus_scope` keys the scope signal on this root id directly,
+        // `begin_view_focus` keys the scope signal on this root id directly,
         // independent of the arena focusable flag (not yet wired at this point):
-        // a plain `focus_scope_active()` would `find_focusable_at_or_above`
+        // a plain `view_focus_active()` would `find_focusable_at_or_above`
         // nothing and fall back to the constant-`true` "outside any scope"
         // signal — lighting the ring whenever ANY other widget takes keyboard
         // focus. Pop straight back; the real row scope below resolves the same
         // cached signal.
-        self.view_focused = ctx.begin_focus_scope();
-        ctx.end_focus_scope();
+        self.view_focused = ctx.begin_view_focus();
+        ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -1029,7 +1029,7 @@ impl<T: 'static> Widget for ListView<T> {
         let model_id = self.model_id;
         let self_id = ctx.self_id();
         let row_state_fn = self.source.dnd.row_state_fn.clone();
-        ctx.begin_focus_scope();
+        ctx.begin_view_focus();
         for i in start..end {
             let selected = selection
                 .as_ref()
@@ -1152,7 +1152,7 @@ impl<T: 'static> Widget for ListView<T> {
                 self.item_entries.push((i, child_id));
             }
         }
-        ctx.end_focus_scope();
+        ctx.end_view_focus();
 
         // --- Create scrollbar ---
         // Skipped when the caller opted out via `show_scrollbar(false)`
