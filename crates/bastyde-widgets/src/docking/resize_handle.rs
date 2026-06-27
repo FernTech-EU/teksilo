@@ -128,12 +128,21 @@ impl Widget for DockResizeHandle {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.is_hovered
-            .bind_to(self_id, registry, bastyde_core::binding::BindingLevel::RepaintOnly);
-        self.is_dragging
-            .bind_to(self_id, registry, bastyde_core::binding::BindingLevel::RepaintOnly);
-        self.focus_origin
-            .bind_to(self_id, registry, bastyde_core::binding::BindingLevel::RepaintOnly);
+        self.is_hovered.bind_to(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.is_dragging.bind_to(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.focus_origin.bind_to(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::RepaintOnly,
+        );
 
         // Body: the SAME visual the Splitter draws — resolved from the active
         // `SplitterStyle` (per-call override → theme slot → recipe default), so
@@ -221,52 +230,53 @@ impl Widget for DockResizeHandle {
             let is_dragging_h = is_dragging.clone();
             let focus = focus_h.clone();
             let drag_self_id = self_id;
-            handlers = handlers.on_pointer_event(move |event, ctx: &mut EventContext| match event {
-                WidgetEvent::PointerDown {
-                    position, button, ..
-                } => {
-                    if *button != PointerButton::Primary {
-                        return EventResponse::Ignored;
+            handlers =
+                handlers.on_pointer_event(move |event, ctx: &mut EventContext| match event {
+                    WidgetEvent::PointerDown {
+                        position, button, ..
+                    } => {
+                        if *button != PointerButton::Primary {
+                            return EventResponse::Ignored;
+                        }
+                        let container = container_bounds.get();
+                        let main = side_main(side, *position, self_bounds.get(), container, rtl);
+                        let rail = model.side_rail_thickness(side);
+                        let size = model.side_size(side);
+                        drag_offset.set(main - (rail + size));
+                        is_dragging_h.set(true);
+                        focus.set(Some(FocusOrigin::Pointer));
+                        ctx.capture_pointer();
+                        ctx.request_focus(drag_self_id);
+                        EventResponse::Ignored
                     }
-                    let container = container_bounds.get();
-                    let main = side_main(side, *position, self_bounds.get(), container, rtl);
-                    let rail = model.side_rail_thickness(side);
-                    let size = model.side_size(side);
-                    drag_offset.set(main - (rail + size));
-                    is_dragging_h.set(true);
-                    focus.set(Some(FocusOrigin::Pointer));
-                    ctx.capture_pointer();
-                    ctx.request_focus(drag_self_id);
-                    EventResponse::Ignored
-                }
-                WidgetEvent::PointerMove { position } => {
-                    if !is_dragging_h.get() {
-                        return EventResponse::Ignored;
+                    WidgetEvent::PointerMove { position } => {
+                        if !is_dragging_h.get() {
+                            return EventResponse::Ignored;
+                        }
+                        let container = container_bounds.get();
+                        let main = side_main(side, *position, self_bounds.get(), container, rtl);
+                        let rail = model.side_rail_thickness(side);
+                        let new_size = main - rail - drag_offset.get();
+                        let min = model.side_min_size(side);
+                        if allow_collapse && new_size < min - SNAP_OFFSET {
+                            model.set_side_visible_immediate(side, false);
+                            is_dragging_h.set(false);
+                            ctx.release_pointer();
+                            return EventResponse::Handled;
+                        }
+                        // Collapse locked: clamp at min instead of snapping shut.
+                        model.set_side_size(side, new_size.max(min));
+                        EventResponse::Handled
                     }
-                    let container = container_bounds.get();
-                    let main = side_main(side, *position, self_bounds.get(), container, rtl);
-                    let rail = model.side_rail_thickness(side);
-                    let new_size = main - rail - drag_offset.get();
-                    let min = model.side_min_size(side);
-                    if allow_collapse && new_size < min - SNAP_OFFSET {
-                        model.set_side_visible_immediate(side, false);
-                        is_dragging_h.set(false);
-                        ctx.release_pointer();
-                        return EventResponse::Handled;
+                    WidgetEvent::PointerUp { .. } => {
+                        if is_dragging_h.get() {
+                            is_dragging_h.set(false);
+                            ctx.release_pointer();
+                        }
+                        EventResponse::Ignored
                     }
-                    // Collapse locked: clamp at min instead of snapping shut.
-                    model.set_side_size(side, new_size.max(min));
-                    EventResponse::Handled
-                }
-                WidgetEvent::PointerUp { .. } => {
-                    if is_dragging_h.get() {
-                        is_dragging_h.set(false);
-                        ctx.release_pointer();
-                    }
-                    EventResponse::Ignored
-                }
-                _ => EventResponse::Ignored,
-            });
+                    _ => EventResponse::Ignored,
+                });
         }
 
         // Double-click to hide (suppressed when collapsing is locked).

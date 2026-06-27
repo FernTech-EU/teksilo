@@ -15,8 +15,10 @@
 
 use bastyde_core::signal::Signal;
 
-use crate::dnd_types::{DragEligibility, DropCommit, DropPosition, DropQuery, DropResponse, RowState};
 use crate::dnd_types::ItemKey;
+use crate::dnd_types::{
+    DragEligibility, DropCommit, DropPosition, DropQuery, DropResponse, RowState,
+};
 use crate::tree_change::NodeId;
 use crate::tree_model::TreeModel;
 

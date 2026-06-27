@@ -1534,7 +1534,7 @@ impl Widget for GridOverlay {
             // No current tile. If nothing is selected either, no tile chrome
             // marks the focus — outline the whole grid so a Tab-focused empty
             // grid still shows where focus landed (mirrors TreeView / ListView).
-            let empty = self.selection.as_ref().map_or(true, |s| s.count() == 0);
+            let empty = self.selection.as_ref().is_none_or(|s| s.count() == 0);
             if empty {
                 let inset = 1.0_f32;
                 let rect = Rect::new(

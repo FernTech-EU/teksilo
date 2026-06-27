@@ -895,10 +895,22 @@ fn arrow_nav_scroll_follows_focused_row() {
 #[test]
 fn type_ahead_jumps_focus_to_matching_row() {
     let model = ListModel::from_vec(vec![
-        Row { id: 0, name: "Apple".into() },
-        Row { id: 1, name: "Banana".into() },
-        Row { id: 2, name: "Cherry".into() },
-        Row { id: 3, name: "Cranberry".into() },
+        Row {
+            id: 0,
+            name: "Apple".into(),
+        },
+        Row {
+            id: 1,
+            name: "Banana".into(),
+        },
+        Row {
+            id: 2,
+            name: "Cherry".into(),
+        },
+        Row {
+            id: 3,
+            name: "Cranberry".into(),
+        },
     ]);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let table = tree.add(
@@ -915,7 +927,11 @@ fn type_ahead_jumps_focus_to_matching_row() {
 
     // 'c' → Cherry (first row after 0 starting with c).
     tree.press_key(Key::C, Modifiers::NONE);
-    assert_eq!(read_focused_cell(&tree, table), Some((2, 0)), "'c' → Cherry");
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((2, 0)),
+        "'c' → Cherry"
+    );
     // 'r' within the timeout → buffer "cr" → Cranberry.
     tree.press_key(Key::R, Modifiers::NONE);
     assert_eq!(
@@ -1052,7 +1068,10 @@ fn keyed_selection_stores_row_key_not_index() {
     // Focus row 2 (key 700) and toggle it.
     focus_at(&mut tree, table, 2, 0);
     tree.press_key(Key::Space, Modifiers::NONE);
-    assert!(keyed.is_selected(&700), "the row KEY is selected, not the index");
+    assert!(
+        keyed.is_selected(&700),
+        "the row KEY is selected, not the index"
+    );
     assert!(!keyed.is_selected(&2), "the index is not used as a key");
 }
 
@@ -1126,8 +1145,8 @@ fn tab_moves_to_next_cell_with_row_wrap() {
 
 #[test]
 fn ctrl_tab_escapes_the_cell_grid() {
-    use bastyde_core::widget_builder::WidgetBuilder;
     use crate::primitives::VStack;
+    use bastyde_core::widget_builder::WidgetBuilder;
 
     let model = rows(3);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());

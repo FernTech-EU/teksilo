@@ -194,7 +194,7 @@ impl WidgetTree {
 
     /// Input-modality "focus-visible" signal: `true` after keyboard input,
     /// `false` after pointer input. Focus rings observe this so they show only
-    /// during keyboard navigation. See [`BuildContext::focus_visible`].
+    /// during keyboard navigation. See [`BuildContext::focus_visible`](crate::BuildContext::focus_visible).
     pub fn focus_visible_signal(&self) -> crate::signal::Signal<bool> {
         self.focus_visible.clone()
     }
@@ -224,14 +224,9 @@ impl WidgetTree {
             entries,
         };
 
-        if let StepResult::Found(next_id) =
-            navigate_scope(&root_scope, self.focused, reverse, true)
+        if let StepResult::Found(next_id) = navigate_scope(&root_scope, self.focused, reverse, true)
         {
-            self.focus_with_origin_ops(
-                next_id,
-                crate::focus::FocusOrigin::Keyboard,
-                &mut *ops,
-            );
+            self.focus_with_origin_ops(next_id, crate::focus::FocusOrigin::Keyboard, &mut *ops);
         }
         // `Escaped` only reaches here for an empty tree (the root Cycle scope
         // wraps at its ends) — nothing to focus, so leave focus unchanged.
@@ -281,12 +276,12 @@ impl WidgetTree {
     /// depth-first (document) order, into the current scope's `out` list.
     ///
     /// - A node carrying `node_traversal_scope` becomes a single
-    ///   [`ScopeEntry::Scope`] — its descendants are collected into a *nested*
+    ///   [`ScopeEntryKind::Scope`] — its descendants are collected into a *nested*
     ///   ordered list and the recursion does not flow past it at this level.
     ///   (The scope node itself is never a focusable; the `FocusScope` wrapper
     ///   forces `node_focusable = false`.)
     /// - Any other node that is focusable and an effective Tab stop becomes a
-    ///   [`ScopeEntry::Focusable`].
+    ///   [`ScopeEntryKind::Focusable`].
     ///
     /// Disabled subtrees and dormant/destroyed nodes are skipped entirely, as
     /// in the previous flat collector. The `tab_stop` ancestor-walk
@@ -427,7 +422,10 @@ impl WidgetTree {
 
     /// Get-or-create the `view_focus_signal` on `node_id`, initialised to the
     /// node's current focus-containment (`focused` is `node_id` or a descendant).
-    pub(crate) fn view_focus_signal_for(&mut self, node_id: WidgetId) -> crate::signal::Signal<bool> {
+    pub(crate) fn view_focus_signal_for(
+        &mut self,
+        node_id: WidgetId,
+    ) -> crate::signal::Signal<bool> {
         if let Some(node) = self.arena.get(node_id)
             && let Some(sig) = node.view_focus_signal.clone()
         {
@@ -463,7 +461,7 @@ impl WidgetTree {
         sig
     }
 
-    /// Pop the innermost focus scope pushed by [`begin_view_focus`].
+    /// Pop the innermost focus scope pushed by [`begin_view_focus`](Self::begin_view_focus).
     pub fn end_view_focus(&mut self) {
         self.view_focus_stack.pop();
     }
@@ -585,9 +583,7 @@ fn sort_scope_entries(entries: &mut [ScopeEntry]) {
 fn scope_entry_contains(entry: &ScopeEntry, f: WidgetId) -> bool {
     match &entry.kind {
         ScopeEntryKind::Focusable(id) => *id == f,
-        ScopeEntryKind::Scope(child) => {
-            child.entries.iter().any(|e| scope_entry_contains(e, f))
-        }
+        ScopeEntryKind::Scope(child) => child.entries.iter().any(|e| scope_entry_contains(e, f)),
     }
 }
 
@@ -623,8 +619,12 @@ fn navigate_scope(
         return StepResult::Escaped;
     }
 
-    let cur = focused
-        .and_then(|f| scope.entries.iter().position(|e| scope_entry_contains(e, f)));
+    let cur = focused.and_then(|f| {
+        scope
+            .entries
+            .iter()
+            .position(|e| scope_entry_contains(e, f))
+    });
 
     let from = match cur {
         None => {
@@ -639,11 +639,11 @@ fn navigate_scope(
     };
 
     // Focus is inside a nested scope: try to advance within it first.
-    if let ScopeEntryKind::Scope(child) = &scope.entries[from].kind {
-        if let StepResult::Found(id) = navigate_scope(child, focused, reverse, false) {
-            return StepResult::Found(id);
-        }
-        // Escaped — fall through and step to the sibling after this scope.
+    // (Escaped — fall through and step to the sibling after this scope.)
+    if let ScopeEntryKind::Scope(child) = &scope.entries[from].kind
+        && let StepResult::Found(id) = navigate_scope(child, focused, reverse, false)
+    {
+        return StepResult::Found(id);
     }
 
     step_to_sibling(scope, from, reverse, is_root)
@@ -652,12 +652,7 @@ fn navigate_scope(
 /// Step from entry `from` to the next/previous *non-empty* sibling, applying
 /// the boundary policy (wrap vs. escape) and entering the chosen entry from
 /// its near edge. Bounded to one full lap.
-fn step_to_sibling(
-    scope: &ScopeNode,
-    from: usize,
-    reverse: bool,
-    is_root: bool,
-) -> StepResult {
+fn step_to_sibling(scope: &ScopeNode, from: usize, reverse: bool, is_root: bool) -> StepResult {
     let n = scope.entries.len();
     let mut idx = from;
     for _ in 0..n {
@@ -1008,7 +1003,10 @@ mod tests {
         );
 
         tree.focus(outside);
-        assert!(!active.get(), "focus moved outside the view → scope inactive");
+        assert!(
+            !active.get(),
+            "focus moved outside the view → scope inactive"
+        );
     }
 
     #[test]
@@ -1049,7 +1047,6 @@ mod tests {
         // `:focus-visible` — keyboard input reveals focus rings, pointer input
         // hides them. The recipe gates the row focus ring on this signal.
         use crate::event::{Key, Modifiers};
-        use crate::widget_builder::WidgetBuilder;
         let mut tree = WidgetTree::new();
         let w = tree.add(FillWidget::new().focusable());
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1242,7 +1239,12 @@ mod tests_scope {
         let c2 = tree.add(FillWidget::new().focusable());
         let scope_c = tree.add(StackWidget::new().add_child(c1).add_child(c2));
         let b = tree.add(FillWidget::new().focusable());
-        let _root = tree.add(StackWidget::new().add_child(a).add_child(scope_c).add_child(b));
+        let _root = tree.add(
+            StackWidget::new()
+                .add_child(a)
+                .add_child(scope_c)
+                .add_child(b),
+        );
         tree.set_traversal_scope(scope_c, Continue);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -1294,7 +1296,12 @@ mod tests_scope {
         let a = tree.add(FillWidget::new().focusable());
         let empty = tree.add(StackWidget::new());
         let b = tree.add(FillWidget::new().focusable());
-        let _root = tree.add(StackWidget::new().add_child(a).add_child(empty).add_child(b));
+        let _root = tree.add(
+            StackWidget::new()
+                .add_child(a)
+                .add_child(empty)
+                .add_child(b),
+        );
         tree.set_traversal_scope(empty, Continue);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -1328,7 +1335,12 @@ mod tests_scope {
         let i2 = tree.add(FillWidget::new().focusable());
         let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
         let y = tree.add(FillWidget::new().focusable());
-        let outer = tree.add(StackWidget::new().add_child(x).add_child(inner).add_child(y));
+        let outer = tree.add(
+            StackWidget::new()
+                .add_child(x)
+                .add_child(inner)
+                .add_child(y),
+        );
         tree.set_traversal_scope(inner, Continue);
         tree.set_traversal_scope(outer, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -1353,7 +1365,12 @@ mod tests_scope {
         let i2 = tree.add(FillWidget::new().focusable());
         let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
         let y = tree.add(FillWidget::new().focusable());
-        let outer = tree.add(StackWidget::new().add_child(x).add_child(inner).add_child(y));
+        let outer = tree.add(
+            StackWidget::new()
+                .add_child(x)
+                .add_child(inner)
+                .add_child(y),
+        );
         tree.set_traversal_scope(inner, Cycle);
         tree.set_traversal_scope(outer, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));

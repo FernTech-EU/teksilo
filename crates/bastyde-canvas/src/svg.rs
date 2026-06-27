@@ -669,7 +669,9 @@ fn walk_element(
 
     // `visibility:hidden` suppresses this element's own shape (but not its
     // children — they recurse below and may set `visibility:visible`).
-    if paint.visible && let Some(local) = shape {
+    if paint.visible
+        && let Some(local) = shape
+    {
         let world = if transform != Transform2D::IDENTITY {
             local.transformed(&transform)
         } else {
@@ -769,9 +771,14 @@ fn symbol_viewport_transform(
     placed: &Transform2D,
 ) -> Transform2D {
     let vb = symbol.attribute("viewBox").and_then(parse_view_box_values);
-    match (vb, attr_f32(use_node, "width"), attr_f32(use_node, "height")) {
+    match (
+        vb,
+        attr_f32(use_node, "width"),
+        attr_f32(use_node, "height"),
+    ) {
         (Some((vx, vy, vw, vh)), Some(uw), Some(uh)) if vw > 0.0 && vh > 0.0 => {
-            let vb_local = Transform2D::translate(-vx, -vy).then(&Transform2D::scale(uw / vw, uh / vh));
+            let vb_local =
+                Transform2D::translate(-vx, -vy).then(&Transform2D::scale(uw / vw, uh / vh));
             vb_local.then(placed)
         }
         _ => *placed,
@@ -1824,7 +1831,10 @@ mod tests {
             <use href="#sq" x="20" y="5"/>
         </svg>"##;
         let icon = SvgIcon::parse(svg).unwrap();
-        assert!(!icon.raw_path().is_empty(), "<use> of a <symbol> must render");
+        assert!(
+            !icon.raw_path().is_empty(),
+            "<use> of a <symbol> must render"
+        );
         match icon.raw_path().commands.first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
@@ -1884,7 +1894,10 @@ mod tests {
             <path class="icon" d="M2 12L22 12"/>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        assert!(icon.raw_path().is_empty(), "CSS fill:none must suppress fill");
+        assert!(
+            icon.raw_path().is_empty(),
+            "CSS fill:none must suppress fill"
+        );
         assert_eq!(icon.strokes().len(), 1, "CSS stroke must apply");
         assert!((icon.strokes()[0].width - 2.0).abs() < 0.01);
     }

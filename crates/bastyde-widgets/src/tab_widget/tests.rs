@@ -2368,15 +2368,24 @@ fn pinned_tabs_with_dividers_build() {
         .tab_divider_color(bastyde_tokens::BorderRole::DividerStrong)
         .show_scroll_arrows(false)
         .show_overflow_dropdown(false)
-        .static_tab(TabInfo::new().title(label("P1")).pinned(true), FixedLeaf(40.0, 48.0))
-        .static_tab(TabInfo::new().title(label("P2")).pinned(true), FixedLeaf(40.0, 48.0))
+        .static_tab(
+            TabInfo::new().title(label("P1")).pinned(true),
+            FixedLeaf(40.0, 48.0),
+        )
+        .static_tab(
+            TabInfo::new().title(label("P2")).pinned(true),
+            FixedLeaf(40.0, 48.0),
+        )
         .static_tab(TabInfo::new().title(label("Doc")), FixedLeaf(120.0, 48.0));
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let id = tree.add(tw);
     tree.layout(SizeProposal::exact(800.0, 320.0));
     // Two pinned tabs + one unpinned all render (smoke: no panic, tabs present).
     let tab_count = count_role(&tree, id, accesskit::Role::Tab);
-    assert_eq!(tab_count, 3, "all three tabs render with pinned-strip dividers");
+    assert_eq!(
+        tab_count, 3,
+        "all three tabs render with pinned-strip dividers"
+    );
 }
 
 #[test]

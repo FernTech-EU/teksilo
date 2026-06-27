@@ -32,12 +32,12 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use activity_bar::{DockRail, DockRailSlot};
 pub use geometry::{CornerOwners, DockCorner, DockSide, DockingRects, SideLayout, SideRects};
 pub use model::{
     DockIconFactory, DockLoc, DockOpenLocation, DockOpenMode, DockPolicy, DockRailItemSize,
     DockTabDisplay, DockTabId, DockWidgetId, DockingModel, TabPresentation,
 };
-pub use activity_bar::{DockRail, DockRailSlot};
 pub use panel::{DockContentFactory, DockWidget};
 pub use state::{DockLayoutState, DockSideState, DockTabState};
 
@@ -179,9 +179,11 @@ impl Widget for DockingLayout {
         self.model
             .version()
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
-        self.model
-            .geometry_version()
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+        self.model.geometry_version().bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
 
         // Content is built **in-context** by each side's panels (via the
         // registry handle passed down) — never pre-built here, so it is
@@ -379,11 +381,13 @@ impl Widget for DockingLayout {
                     has_rail: false,
                 };
             }
-            let p = self
-                .progress
-                .get(&side)
-                .map(|s| s.get())
-                .unwrap_or(if self.model.is_side_visible(side) { 1.0 } else { 0.0 });
+            let p = self.progress.get(&side).map(|s| s.get()).unwrap_or(
+                if self.model.is_side_visible(side) {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
             // The rail strip width follows the side's size mode (it shrinks for
             // Compact), derived from the rail's configured item size.
             let rail_thickness = if self.model.side_has_rail(side) {
@@ -407,9 +411,15 @@ impl Widget for DockingLayout {
 
         // RTL: swap leading/trailing inputs, then swap the outputs back.
         let (lead_in, trail_in) = if rtl {
-            (side_layout(DockSide::Trailing), side_layout(DockSide::Leading))
+            (
+                side_layout(DockSide::Trailing),
+                side_layout(DockSide::Leading),
+            )
         } else {
-            (side_layout(DockSide::Leading), side_layout(DockSide::Trailing))
+            (
+                side_layout(DockSide::Leading),
+                side_layout(DockSide::Trailing),
+            )
         };
         let rects = compute_rects(
             bounds,
@@ -482,7 +492,9 @@ struct SideClipPane {
 
 impl std::fmt::Debug for SideClipPane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SideClipPane").field("side", &self.side).finish()
+        f.debug_struct("SideClipPane")
+            .field("side", &self.side)
+            .finish()
     }
 }
 
@@ -507,7 +519,10 @@ impl Widget for SideClipPane {
         };
         let _ = ctx.child_size(self.child, full_proposal);
         proposal
-            .resolve(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0))
+            .resolve(
+                proposal.width.unwrap_or(0.0),
+                proposal.height.unwrap_or(0.0),
+            )
             .into()
     }
 

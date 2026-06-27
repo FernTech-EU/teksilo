@@ -4,10 +4,10 @@
 //! View-side magnetism internals: the in-flight port-drag state and the
 //! built-in feedback renderer.
 //!
-//! The public magnetism types ([`MagnetismConfig`](crate::MagnetismConfig),
-//! [`MagnetFeedback`](crate::MagnetFeedback), …) and the snap mechanism
+//! The public magnetism types ([`MagnetismConfig`],
+//! [`MagnetFeedback`], …) and the snap mechanism
 //! live in [`crate::magnet`] / [`crate::scene`]. This module holds only
-//! the per-view runtime state the [`SceneView`](crate::SceneView) drag /
+//! the per-view runtime state the [`SceneView`] drag /
 //! paint / keyboard code threads around, plus the default renderer used
 //! when the consumer installs no custom [`MagnetismConfig::feedback`].
 
@@ -201,10 +201,11 @@ pub(super) fn handle_connect_key(
                     Some(src) => {
                         if src != cur
                             && let (Some(a), Some(b)) = (model.magnet(src), model.magnet(cur))
-                                && let MagnetVerdict::Accept(payload) = (cfg.predicate)(&a, &b)
-                                    && let Some(conn) = build_connection(model, src, cur, payload) {
-                                        (cfg.on_connect)(&conn, ctx);
-                                    }
+                            && let MagnetVerdict::Accept(payload) = (cfg.predicate)(&a, &b)
+                            && let Some(conn) = build_connection(model, src, cur, payload)
+                        {
+                            (cfg.on_connect)(&conn, ctx);
+                        }
                         pending.set(None);
                     }
                 }
@@ -285,7 +286,11 @@ fn marker_color(state: MagnetVisualState) -> Color {
 /// The default magnetism feedback renderer: a marker dot per eligible
 /// magnet (coloured by state, constant pixel size) plus a bezier
 /// connector for any forming connection. Paints in scene coordinates.
-pub(crate) fn render_default_feedback(canvas: &mut Canvas, _ctx: &PaintContext, fb: &MagnetFeedback) {
+pub(crate) fn render_default_feedback(
+    canvas: &mut Canvas,
+    _ctx: &PaintContext,
+    fb: &MagnetFeedback,
+) {
     let zoom = if fb.zoom.is_finite() && fb.zoom > 0.0 {
         fb.zoom
     } else {
@@ -435,9 +440,10 @@ impl SceneView {
                             state = MagnetVisualState::PendingSource;
                         } else if let Some(p) = pending
                             && let Some(src) = scene.magnet(p)
-                                && (cfg.predicate)(&src, &m).is_accept() {
-                                    state = MagnetVisualState::Candidate;
-                                }
+                            && (cfg.predicate)(&src, &m).is_accept()
+                        {
+                            state = MagnetVisualState::Candidate;
+                        }
                     }
                     if let Some(port) = &port {
                         if mid == port.source {
@@ -472,15 +478,13 @@ impl SceneView {
             Some((port.source_scene, to, port.snapped.is_some()))
         } else if connect {
             match (pending, focus) {
-                (Some(p), Some(f)) if p != f => {
-                    match (scene.magnet(p), scene.magnet(f)) {
-                        (Some(src), Some(dst)) => {
-                            let accepted = (cfg.predicate)(&src, &dst).is_accept();
-                            Some((src.scene_pos, dst.scene_pos, accepted))
-                        }
-                        _ => None,
+                (Some(p), Some(f)) if p != f => match (scene.magnet(p), scene.magnet(f)) {
+                    (Some(src), Some(dst)) => {
+                        let accepted = (cfg.predicate)(&src, &dst).is_accept();
+                        Some((src.scene_pos, dst.scene_pos, accepted))
                     }
-                }
+                    _ => None,
+                },
                 _ => None,
             }
         } else {

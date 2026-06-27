@@ -45,8 +45,8 @@ use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement}
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{
-    DataChange, DropPosition, DropResponse, ItemKey, KeyedSelectionModel, ListDataSource, ListModel,
-    SelectionModel,
+    DataChange, DropPosition, DropResponse, ItemKey, KeyedSelectionModel, ListDataSource,
+    ListModel, SelectionModel,
 };
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, Easing, SurfaceRole};
@@ -331,8 +331,7 @@ impl<T: 'static> TableView<T> {
     pub fn from_source<S: ListDataSource<Item = T>>(source: S) -> Self {
         let s = Rc::new(source);
         let dnd = DndLazy::from_source(s.clone());
-        let (len_fn, with_item_fn, observe_fn, first_changed_fn) =
-            erase_data_source::<S, T>(s);
+        let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_data_source::<S, T>(s);
         Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
     }
 
@@ -366,8 +365,7 @@ impl<T: 'static> TableView<T> {
                 as Rc<dyn Fn(&S::Key) -> bool>
         };
         let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
-        let (len_fn, with_item_fn, observe_fn, first_changed_fn) =
-            erase_data_source::<S, T>(s);
+        let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_data_source::<S, T>(s);
         let mut view = Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd);
         view.row_selection = Some(row_selection);
         view
@@ -1359,11 +1357,10 @@ impl<T: 'static> Widget for TableView<T> {
                             _ => None,
                         };
                         if let Some((target, position, dest)) = mv {
-                            let payload =
-                                bastyde_core::drag_payload::DragPayload::typed(RowDrag {
-                                    source_index: idx,
-                                    source_view_id: view_id,
-                                });
+                            let payload = bastyde_core::drag_payload::DragPayload::typed(RowDrag {
+                                source_index: idx,
+                                source_view_id: view_id,
+                            });
                             if (accept_drop_kbd)(&payload, target, position, view_id) {
                                 if let Some(ref s) = sel_kbd {
                                     s.select(dest);
@@ -1710,8 +1707,7 @@ impl<T: 'static> Widget for TableView<T> {
         let needs_scrollbar = self.show_internal_scrollbars && total_height > body_height + 0.5;
         // Permanent reserves a column for the bar; Overlay / Thin float
         // over the content, so rows span the full width.
-        let reserves_bar =
-            needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let reserves_bar = needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
         let body_width = if reserves_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
@@ -1993,8 +1989,8 @@ impl<T: 'static> Widget for TableView<T> {
             && self
                 .row_selection
                 .as_ref()
-                .map_or(true, |s| s.selected_indices().is_empty())
-            && self.cell_selection.as_ref().map_or(true, |s| s.count() == 0);
+                .is_none_or(|s| s.selected_indices().is_empty())
+            && self.cell_selection.as_ref().is_none_or(|s| s.count() == 0);
         if self.view_focused.get() && self.focus_visible.get() && nothing_indicated {
             let inset = 1.0_f32;
             let rect = Rect::new(

@@ -340,9 +340,15 @@ impl Widget for PreviewerRoot {
         // their pixel widths.
         let layout = SplitterModel::from_panes(
             vec![
-                PaneDescriptor::new().size(260.0).min_size(180.0).stretch(0.0),
+                PaneDescriptor::new()
+                    .size(260.0)
+                    .min_size(180.0)
+                    .stretch(0.0),
                 PaneDescriptor::new().min_size(360.0).stretch(1.0),
-                PaneDescriptor::new().size(320.0).min_size(260.0).stretch(0.0),
+                PaneDescriptor::new()
+                    .size(320.0)
+                    .min_size(260.0)
+                    .stretch(0.0),
             ],
             Orientation::Horizontal,
         );

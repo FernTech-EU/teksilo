@@ -495,8 +495,11 @@ impl Widget for DateRangeEdit {
         // claims the VStack's full width (a VStack doesn't stretch a child),
         // while keeping its natural width as the basis when unconstrained. A
         // bounded proposal narrows it and the `Shrinkable` halves compress.
-        let framed_in_vstack =
-            ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(sized_id));
+        let framed_in_vstack = ctx.add(
+            crate::primitives::Expand::horizontal()
+                .respect_intrinsic()
+                .child_id(sized_id),
+        );
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)

@@ -1818,7 +1818,11 @@ mod tests {
         assert_eq!(mgr.stack.len(), 1, "overlay lingers during the fade");
 
         // Both predicates now agree it's gone.
-        assert_eq!(mgr.hit_test(point), None, "fading overlay no longer eats clicks");
+        assert_eq!(
+            mgr.hit_test(point),
+            None,
+            "fading overlay no longer eats clicks"
+        );
         assert!(!mgr.active_ids().contains(&id));
     }
 

@@ -127,16 +127,19 @@ impl Widget for SplitterDemo {
                         status_x.set(format!("Exported  {}", describe(&state)));
                         *saved_x.borrow_mut() = Some(state);
                     }))
-                    .child(Button::new(lit!("Restore layout")).on_activate_fn(move |_| {
-                        if let Some(state) = saved_i.borrow().clone() {
-                            if layout_i.import_state(&state) {
-                                status_i.set(format!("Restored  {}", describe(&state)));
+                    .child(
+                        Button::new(lit!("Restore layout")).on_activate_fn(move |_| {
+                            if let Some(state) = saved_i.borrow().clone() {
+                                if layout_i.import_state(&state) {
+                                    status_i.set(format!("Restored  {}", describe(&state)));
+                                }
+                            } else {
+                                status_i.set(String::from(
+                                    "Nothing exported yet — click Export first.",
+                                ));
                             }
-                        } else {
-                            status_i
-                                .set(String::from("Nothing exported yet — click Export first."));
-                        }
-                    }))
+                        }),
+                    )
                     .child(Spacer::new())
                     .child(
                         Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {

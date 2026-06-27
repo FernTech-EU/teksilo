@@ -14,13 +14,16 @@ use std::rc::Rc;
 use bastyde_core::ObserverHandle;
 use bastyde_data::{DataChange, ListDataSource, RowState};
 
+/// A change observer registered against the source.
+type ChangeObserver = Rc<dyn Fn(&DataChange)>;
+
 /// A source over a virtual 1M-row table that keeps only the rows it has been
 /// asked to load resident.
 struct WindowedSource {
     total: usize,
     resident: RefCell<HashMap<usize, String>>,
     fetches: Rc<Cell<usize>>,
-    observers: RefCell<Vec<Rc<dyn Fn(&DataChange)>>>,
+    observers: RefCell<Vec<ChangeObserver>>,
     next_id: Cell<u64>,
 }
 
@@ -74,7 +77,9 @@ impl ListDataSource for WindowedSource {
 
     fn request_window(&self, range: Range<usize>) {
         // Count a fetch only when the window has at least one unloaded row.
-        let missing = range.clone().any(|i| !self.resident.borrow().contains_key(&i));
+        let missing = range
+            .clone()
+            .any(|i| !self.resident.borrow().contains_key(&i));
         if missing {
             self.fetches.set(self.fetches.get() + 1);
         }
@@ -104,7 +109,11 @@ fn million_row_window_only_fetches_visible_range() {
     // The view realizes a ~25-row window and nudges the source to load it.
     let window = 0..25;
     src.request_window(window.clone());
-    assert_eq!(fetches.get(), 1, "exactly one page fetch for the visible window");
+    assert_eq!(
+        fetches.get(),
+        1,
+        "exactly one page fetch for the visible window"
+    );
 
     // Page load completes; those rows are now Ready, the rest stay Loading.
     src.deliver_window(window.clone());

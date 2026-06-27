@@ -137,72 +137,77 @@ fn main() {
     BastydeAppBuilder::new()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
-        .initial_window(WindowConfig::new().title("TreeTableView").size(900, 580).root(
-            move |tree, _| {
-                let proxy_for_table = proxy.clone();
-                let table = TreeTableView::from_projection(proxy_for_table.clone())
-                    .add_column(
-                        Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
-                            // Name plus the optional multi-line
-                            // description — the row's measured height
-                            // follows this cell.
-                            let mut v = VStack::new()
-                                .spacing(1.0)
-                                .child(TextWidget::new(lit!(row.name.clone())));
-                            for line in row.desc.lines() {
-                                v = v.child(TextWidget::new(lit!(line)).color(TextRole::Secondary));
-                            }
-                            Box::new(v)
-                        })
-                        .width(ColumnWidth::Flex(3.0))
-                        .sortable(true)
-                        .filterable(true),
-                    )
-                    .add_column(
-                        Column::<FsNode>::new("size", lit!("Size"), |row, _: &CellContext| {
-                            let s = if row.size == 0 {
-                                String::new()
-                            } else {
-                                format!("{} B", row.size)
-                            };
-                            Box::new(TextWidget::new(lit!(s)))
-                        })
-                        .width(ColumnWidth::Fixed(96.0))
-                        .sortable(true)
-                        .alignment(Alignment::Trailing),
-                    )
-                    .add_column(
-                        Column::<FsNode>::new("kind", lit!("Kind"), |row, _: &CellContext| {
-                            Box::new(TextWidget::new(lit!(row.kind)))
-                        })
-                        .width(ColumnWidth::Flex(1.0))
-                        .sortable(true)
-                        .filterable(true)
-                        .alignment(Alignment::Center),
-                    )
-                    // Rows measure to their tallest cell (described
-                    // files are 2–4 lines); 26 px is just the estimate.
-                    .auto_row_height(26.0)
-                    .alternating_rows(true)
-                    .grid_lines(GridLines::Horizontal)
-                    .selection_mode(TableSelectionMode::MultiRow)
-                    .selection(selection.clone())
-                    .tree_column("name");
+        .initial_window(
+            WindowConfig::new()
+                .title("TreeTableView")
+                .size(900, 580)
+                .root(move |tree, _| {
+                    let proxy_for_table = proxy.clone();
+                    let table = TreeTableView::from_projection(proxy_for_table.clone())
+                        .add_column(
+                            Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
+                                // Name plus the optional multi-line
+                                // description — the row's measured height
+                                // follows this cell.
+                                let mut v = VStack::new()
+                                    .spacing(1.0)
+                                    .child(TextWidget::new(lit!(row.name.clone())));
+                                for line in row.desc.lines() {
+                                    v = v.child(
+                                        TextWidget::new(lit!(line)).color(TextRole::Secondary),
+                                    );
+                                }
+                                Box::new(v)
+                            })
+                            .width(ColumnWidth::Flex(3.0))
+                            .sortable(true)
+                            .filterable(true),
+                        )
+                        .add_column(
+                            Column::<FsNode>::new("size", lit!("Size"), |row, _: &CellContext| {
+                                let s = if row.size == 0 {
+                                    String::new()
+                                } else {
+                                    format!("{} B", row.size)
+                                };
+                                Box::new(TextWidget::new(lit!(s)))
+                            })
+                            .width(ColumnWidth::Fixed(96.0))
+                            .sortable(true)
+                            .alignment(Alignment::Trailing),
+                        )
+                        .add_column(
+                            Column::<FsNode>::new("kind", lit!("Kind"), |row, _: &CellContext| {
+                                Box::new(TextWidget::new(lit!(row.kind)))
+                            })
+                            .width(ColumnWidth::Flex(1.0))
+                            .sortable(true)
+                            .filterable(true)
+                            .alignment(Alignment::Center),
+                        )
+                        // Rows measure to their tallest cell (described
+                        // files are 2–4 lines); 26 px is just the estimate.
+                        .auto_row_height(26.0)
+                        .alternating_rows(true)
+                        .grid_lines(GridLines::Horizontal)
+                        .selection_mode(TableSelectionMode::MultiRow)
+                        .selection(selection.clone())
+                        .tree_column("name");
 
-                // Wire the proxy to the table's signals.
-                proxy_for_table.bind_sort_signal(table.sort_signal().clone());
-                proxy_for_table.bind_filters_signal(table.filters_signal().clone());
+                    // Wire the proxy to the table's signals.
+                    proxy_for_table.bind_sort_signal(table.sort_signal().clone());
+                    proxy_for_table.bind_filters_signal(table.filters_signal().clone());
 
-                // Default sort by name ascending.
-                table.set_sort(Some("name"), SortDirection::Ascending);
+                    // Default sort by name ascending.
+                    table.set_sort(Some("name"), SortDirection::Ascending);
 
-                let table_id = tree.add(table);
-                tree.add(
-                    VStack::new()
-                        .child(dark_mode_toolbar())
-                        .child(Expand::new().child_id(table_id)),
-                )
-            },
-        ))
+                    let table_id = tree.add(table);
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child_id(table_id)),
+                    )
+                }),
+        )
         .run();
 }

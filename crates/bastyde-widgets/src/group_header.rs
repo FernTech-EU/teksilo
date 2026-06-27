@@ -36,7 +36,7 @@ pub struct GroupHeader {
     /// [`TextStyleRole::Body`] — IntelliJ/Jewel group headers render at
     /// normal body size, not as a smaller caption. Accepts a static
     /// [`TextStyle`](bastyde_tokens::TextStyle) or a
-    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole), so the default
+    /// [`TextStyleRole`], so the default
     /// (and any role override) tracks runtime theme changes.
     style: Option<TextStyleProp>,
     /// Optional label-color override. Defaults to [`TextRole::Primary`]
@@ -64,7 +64,7 @@ impl GroupHeader {
 
     /// Override the label's text style (font, size, weight, …). Accepts a
     /// static [`TextStyle`](bastyde_tokens::TextStyle) or a
-    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    /// [`TextStyleRole`].
     pub fn style(mut self, style: impl Into<TextStyleProp>) -> Self {
         self.style = Some(style.into());
         self

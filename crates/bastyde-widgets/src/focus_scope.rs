@@ -129,8 +129,8 @@ mod tests {
     #[test]
     fn marks_node_with_its_policy() {
         let mut tree = WidgetTree::new();
-        let scope =
-            tree.add(FocusScope::new(TraversalScopePolicy::Cycle).child(TextWidget::new(lit!("x"))));
+        let scope = tree
+            .add(FocusScope::new(TraversalScopePolicy::Cycle).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert_eq!(
             tree.traversal_scope(scope),
@@ -144,8 +144,9 @@ mod tests {
         // The wrapper's bounds match the bare child's — it imposes no layout.
         let mut tree = WidgetTree::new();
         let bare = tree.add(TextWidget::new(lit!("hello")));
-        let scoped = tree
-            .add(FocusScope::new(TraversalScopePolicy::Continue).child(TextWidget::new(lit!("hello"))));
+        let scoped = tree.add(
+            FocusScope::new(TraversalScopePolicy::Continue).child(TextWidget::new(lit!("hello"))),
+        );
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

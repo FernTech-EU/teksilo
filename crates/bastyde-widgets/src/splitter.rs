@@ -54,8 +54,8 @@ use self::distribute::distribute;
 use self::handle::{SplitterHandle, SplitterHandleConfig};
 
 pub use self::model::{
-    PaneDescriptor, PaneState, PaneSnapshot, SplitterModel, SplitterState,
-    SPLITTER_GUTTER_THICKNESS, SPLITTER_KEYBOARD_STEP, SPLITTER_MIN_PANE_SIZE, SPLITTER_SNAP_OFFSET,
+    PaneDescriptor, PaneSnapshot, PaneState, SPLITTER_GUTTER_THICKNESS, SPLITTER_KEYBOARD_STEP,
+    SPLITTER_MIN_PANE_SIZE, SPLITTER_SNAP_OFFSET, SplitterModel, SplitterState,
 };
 
 /// Below this collapse progress, a pane's content is parked dormant
@@ -418,8 +418,7 @@ impl Widget for Splitter {
                 }
             }
         }
-        let min_main: f32 =
-            (0..n).map(|i| self.model.min_size(i)).sum::<f32>() + total_gutter;
+        let min_main: f32 = (0..n).map(|i| self.model.min_size(i)).sum::<f32>() + total_gutter;
         let intrinsic_main = sum_main + total_gutter;
 
         match orientation {
@@ -512,21 +511,19 @@ impl Widget for Splitter {
         }
 
         // Place panes + handles, walking a local main-axis cursor.
-        let place = |child: &mut WidgetPlacement, local_start: f32, extent: f32| {
-            match orientation {
-                Orientation::Horizontal => {
-                    let x = if rtl {
-                        bounds.x + bounds.width - local_start - extent
-                    } else {
-                        bounds.x + local_start
-                    };
-                    child.origin = Point::new(x, bounds.y);
-                    child.size = Size::new(extent, bounds.height);
-                }
-                Orientation::Vertical => {
-                    child.origin = Point::new(bounds.x, bounds.y + local_start);
-                    child.size = Size::new(bounds.width, extent);
-                }
+        let place = |child: &mut WidgetPlacement, local_start: f32, extent: f32| match orientation {
+            Orientation::Horizontal => {
+                let x = if rtl {
+                    bounds.x + bounds.width - local_start - extent
+                } else {
+                    bounds.x + local_start
+                };
+                child.origin = Point::new(x, bounds.y);
+                child.size = Size::new(extent, bounds.height);
+            }
+            Orientation::Vertical => {
+                child.origin = Point::new(bounds.x, bounds.y + local_start);
+                child.size = Size::new(bounds.width, extent);
             }
         };
 

@@ -172,11 +172,7 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
         if new.len() != old.len() {
             self.selection.set(new);
         }
-        let drop_anchor = self
-            .anchor
-            .borrow()
-            .as_ref()
-            .is_some_and(|a| !exists(a));
+        let drop_anchor = self.anchor.borrow().as_ref().is_some_and(|a| !exists(a));
         if drop_anchor {
             *self.anchor.borrow_mut() = None;
         }

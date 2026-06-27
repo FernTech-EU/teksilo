@@ -284,7 +284,11 @@ impl ImageWidget {
             ImageFit::None => (img_w, img_h),
         };
 
-        let x = bounds.x + self.alignment.horizontal.resolve(content_w, bounds.width, rtl);
+        let x = bounds.x
+            + self
+                .alignment
+                .horizontal
+                .resolve(content_w, bounds.width, rtl);
         let y = bounds.y + self.alignment.vertical.resolve(content_h, bounds.height);
         Rect::new(x, y, content_w, content_h)
     }
@@ -512,13 +516,21 @@ mod tests {
             .layout_response(SizeProposal::exact(999.0, 999.0), &ctx)
             .size;
         assert!((w_pinned.width - 200.0).abs() < 0.01);
-        assert!((w_pinned.height - 50.0).abs() < 0.01, "h: {}", w_pinned.height);
+        assert!(
+            (w_pinned.height - 50.0).abs() < 0.01,
+            "h: {}",
+            w_pinned.height
+        );
         // Height pinned to 20 → width = 20 * 4 = 80.
         let h_pinned = ImageWidget::new(&icon)
             .height(20.0)
             .layout_response(SizeProposal::exact(999.0, 999.0), &ctx)
             .size;
-        assert!((h_pinned.width - 80.0).abs() < 0.01, "w: {}", h_pinned.width);
+        assert!(
+            (h_pinned.width - 80.0).abs() < 0.01,
+            "w: {}",
+            h_pinned.width
+        );
         assert!((h_pinned.height - 20.0).abs() < 0.01);
     }
 
@@ -557,10 +569,12 @@ mod tests {
     fn alignment_positions_content_within_box() {
         use bastyde_tokens::{HAlignment, VAlignment};
         let icon = RasterIcon::from_raw(vec![255; 10 * 10 * 4], 10, 10);
-        let widget = ImageWidget::new(&icon).fit(ImageFit::Contain).alignment(Alignment {
-            horizontal: HAlignment::Trailing,
-            vertical: VAlignment::Bottom,
-        });
+        let widget = ImageWidget::new(&icon)
+            .fit(ImageFit::Contain)
+            .alignment(Alignment {
+                horizontal: HAlignment::Trailing,
+                vertical: VAlignment::Bottom,
+            });
         let r = widget.fitted_rect(Rect::new(0.0, 0.0, 200.0, 100.0), false);
         // 100×100 pushed to bottom-trailing: x = 200-100, y = 100-100.
         assert!((r.x - 100.0).abs() < 0.01, "x: {}", r.x);
@@ -588,7 +602,11 @@ mod tests {
         // be clipped — the frame should carry a SetClip/ClearClip pair.
         let icon = RasterIcon::from_raw(vec![255; 20 * 10 * 4], 20, 10);
         let mut tree = WidgetTree::new();
-        tree.add(ImageWidget::new(&icon).size(50.0, 50.0).fit(ImageFit::Cover));
+        tree.add(
+            ImageWidget::new(&icon)
+                .size(50.0, 50.0)
+                .fit(ImageFit::Cover),
+        );
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let frame = tree.render();
         let has_set_clip = frame
@@ -608,7 +626,11 @@ mod tests {
         // Contain never overflows, so no clip commands are emitted.
         let icon = RasterIcon::from_raw(vec![255; 10 * 10 * 4], 10, 10);
         let mut tree = WidgetTree::new();
-        tree.add(ImageWidget::new(&icon).size(50.0, 50.0).fit(ImageFit::Contain));
+        tree.add(
+            ImageWidget::new(&icon)
+                .size(50.0, 50.0)
+                .fit(ImageFit::Contain),
+        );
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let frame = tree.render();
         let has_set_clip = frame

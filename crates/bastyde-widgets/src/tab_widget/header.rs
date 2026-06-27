@@ -183,7 +183,7 @@ pub(crate) struct TabHeader {
     /// `idle_text_role(...)`.
     idle_text_role: TextRole,
     /// Which edge the active-tab highlight indicator hugs, forwarded into
-    /// the [`TabStyleConfig`](bastyde_core::styles::TabStyleConfig).
+    /// the [`TabStyleConfig`].
     active_indicator: bastyde_core::styles::TabIndicatorPosition,
     /// Per-call style override propagated from the parent `TabBar`'s
     /// `.style(impl TabStyle)` builder. `None` means "use the theme
@@ -652,11 +652,14 @@ impl Widget for TabHeader {
                 *sel != index_for_bg && !matches!(*inter, TabHeaderInteraction::Hovered)
             });
 
-            let sel_bg = ctx.add(RectWidget::new().background(effective(&self.selected_tab_background)));
+            let sel_bg =
+                ctx.add(RectWidget::new().background(effective(&self.selected_tab_background)));
             ctx.visible_when(sel_bg, is_selected);
-            let hov_bg = ctx.add(RectWidget::new().background(effective(&self.hover_tab_background)));
+            let hov_bg =
+                ctx.add(RectWidget::new().background(effective(&self.hover_tab_background)));
             ctx.visible_when(hov_bg, is_hover_only);
-            let idle_bg = ctx.add(RectWidget::new().background(effective(&self.idle_tab_background)));
+            let idle_bg =
+                ctx.add(RectWidget::new().background(effective(&self.idle_tab_background)));
             ctx.visible_when(idle_bg, is_idle);
 
             // The chrome (a `ZStack[indicator-painter, label-row]`) reports

@@ -1459,7 +1459,10 @@ mod tests {
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         let info = t.accessibility_node(item_id);
         assert_eq!(info.role(), Role::MenuItemCheckBox);
-        assert!(info.is_toggled(), "checkmark reflects the bound signal (true)");
+        assert!(
+            info.is_toggled(),
+            "checkmark reflects the bound signal (true)"
+        );
     }
 
     #[test]
@@ -1476,7 +1479,10 @@ mod tests {
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         t.click(item_id);
-        assert!(!visible.get(), "reflect_checked must not write the bound signal on click");
+        assert!(
+            !visible.get(),
+            "reflect_checked must not write the bound signal on click"
+        );
     }
 
     #[test]

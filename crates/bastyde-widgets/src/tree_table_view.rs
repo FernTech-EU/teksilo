@@ -1584,8 +1584,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
             && self
                 .row_selection
                 .as_ref()
-                .map_or(true, |s| s.selected_indices().is_empty())
-            && self.cell_selection.as_ref().map_or(true, |s| s.count() == 0);
+                .is_none_or(|s| s.selected_indices().is_empty())
+            && self.cell_selection.as_ref().is_none_or(|s| s.count() == 0);
         if self.view_focused.get() && self.focus_visible.get() && nothing_indicated {
             let inset = 1.0_f32;
             let rect = Rect::new(
@@ -1918,9 +1918,9 @@ mod tests {
 
     #[test]
     fn ctrl_tab_escapes_the_cell_grid() {
+        use crate::primitives::{TextWidget, VStack};
         use bastyde_core::event::{Key, Modifiers};
         use bastyde_core::widget_builder::WidgetBuilder;
-        use crate::primitives::{TextWidget, VStack};
 
         let proxy = SortFilterTreeModel::new(wide_tree(5));
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -1951,7 +1951,11 @@ mod tests {
         }
         let before = read_focus(&tree);
         tree.press_key(Key::Tab, Modifiers::CTRL);
-        assert_eq!(read_focus(&tree), before, "Ctrl+Tab must not navigate cells");
+        assert_eq!(
+            read_focus(&tree),
+            before,
+            "Ctrl+Tab must not navigate cells"
+        );
         assert_eq!(
             tree.focused(),
             Some(sink),
@@ -2556,7 +2560,11 @@ mod tests {
         let h = cp::HEADER_HEIGHT;
         // Drag docs (flat 0, [h, h+20]) onto the bottom third of src (flat 1,
         // [h+20, h+40]) → After src.
-        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 38.0));
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
         assert_eq!(proxy.tree().root_count(), 2);
         assert_eq!(proxy.tree().root(0), src, "src becomes the first root");
         assert_eq!(proxy.tree().root(1), docs, "docs moves after src");
@@ -2582,7 +2590,11 @@ mod tests {
         let h = cp::HEADER_HEIGHT;
         // Drag docs (flat 0) into the middle third of readme (flat 1, a child
         // of docs) → cycle → refused; tree unchanged, no panic.
-        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 30.0));
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 30.0),
+        );
         assert_eq!(proxy.tree().parent(docs), None, "docs stays a root");
         assert_eq!(proxy.tree().root_count(), 2);
     }
@@ -2612,7 +2624,11 @@ mod tests {
             .expect("TreeTableView")
             .set_sort(Some("name"), bastyde_data::SortDirection::Ascending);
         let h = cp::HEADER_HEIGHT;
-        drag(&mut tree, Point::new(40.0, h + 10.0), Point::new(40.0, h + 38.0));
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
         assert_eq!(proxy.tree().root(0), docs, "docs unchanged while sorted");
         assert_eq!(proxy.tree().root(1), src, "src unchanged while sorted");
     }

@@ -152,7 +152,10 @@ fn empty_layout_center_fills() {
     t.layout(SizeProposal::exact(1000.0, 800.0));
     let center = t.children(root)[0];
     let cb = t.bounds(center);
-    assert!((cb.width - 1000.0).abs() < 0.5, "center fills with no docks");
+    assert!(
+        (cb.width - 1000.0).abs() < 0.5,
+        "center fills with no docks"
+    );
 }
 
 #[test]
@@ -304,7 +307,9 @@ fn clicking_a_toggle_button_does_not_hang() {
             let layout = ctx.add(
                 DockingLayout::new(self.model.clone())
                     .center(FixedLeaf(200.0, 200.0))
-                    .dock(DockWidget::new(dock, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0))),
+                    .dock(DockWidget::new(dock, lit!("Explorer"), |_| {
+                        FixedLeaf(120.0, 120.0)
+                    })),
             );
             self.model
                 .open_dock(dock, DockOpenLocation::side(DockSide::Leading));
@@ -354,7 +359,10 @@ fn clicking_a_toggle_button_does_not_hang() {
         t.layout(SizeProposal::exact(1000.0, 800.0));
         t.tick_animations(Duration::from_millis(16));
     }
-    assert!(!model.is_side_visible(DockSide::Leading), "click hid the side");
+    assert!(
+        !model.is_side_visible(DockSide::Leading),
+        "click hid the side"
+    );
 }
 
 #[test]
@@ -768,7 +776,11 @@ fn rail_slot_resizes_with_the_activity_bar_size() {
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
     // Default mode → the rail's configured Large size reaches the slot.
-    assert_eq!(seen.get(), Some(IconButtonSize::Large), "slot gets the rail size");
+    assert_eq!(
+        seen.get(),
+        Some(IconButtonSize::Large),
+        "slot gets the rail size"
+    );
 
     // Switching to Compact rebuilds the rail and re-hands the slot the new size.
     model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
@@ -920,7 +932,11 @@ fn dragging_a_rail_item_reorders_within_the_side() {
     t.tick_animations(Duration::from_millis(600));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
-    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a, "A is first");
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        a,
+        "A is first"
+    );
 
     // Drag A's rail item down past B → A relocates to the end of the side.
     let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
@@ -1149,8 +1165,8 @@ fn hamburger_restores_activities_when_all_hidden_in_strip() {
 
     // The strip still renders a trailing hamburger button; tapping it opens the
     // activities menu, from which the activity can be re-checked.
-    let hb = find_first_role(&t, root, Role::Button)
-        .expect("a hamburger renders in the empty strip");
+    let hb =
+        find_first_role(&t, root, Role::Button).expect("a hamburger renders in the empty strip");
     let b = t.bounds(hb);
     let c = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
     assert!(t.active_overlays().is_empty());
@@ -1236,7 +1252,11 @@ fn locking_activity_drag_freezes_rail_reorder() {
     t.tick_animations(Duration::from_millis(600));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
-    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a, "A is first");
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        a,
+        "A is first"
+    );
 
     // Drag A's rail item past B — with activity drag locked the rail item is not
     // a drag source, so nothing happens.
@@ -1488,7 +1508,10 @@ fn disabling_a_side_with_docks_hides_then_restores_them() {
     model.open_dock(a, DockOpenLocation::side(DockSide::Bottom));
     model.open_dock(b, DockOpenLocation::side(DockSide::Bottom).new_tab());
     t.layout(SizeProposal::exact(1000.0, 800.0));
-    assert!(count_role(&t, root, Role::Tab) >= 2, "two tabs render initially");
+    assert!(
+        count_role(&t, root, Role::Tab) >= 2,
+        "two tabs render initially"
+    );
 
     // Disable the bottom side: its content is gone, but the docks remain in the
     // model.
@@ -1499,7 +1522,11 @@ fn disabling_a_side_with_docks_hides_then_restores_them() {
         0,
         "a disabled side renders no tabs"
     );
-    assert_eq!(model.tab_count(DockSide::Bottom), 2, "docks stay in the model");
+    assert_eq!(
+        model.tab_count(DockSide::Bottom),
+        2,
+        "docks stay in the model"
+    );
     assert!(model.is_dock_open(a) && model.is_dock_open(b));
 
     // Re-enable → the docks reappear.
@@ -1554,7 +1581,11 @@ fn find_a11y_node(
     update: &accesskit::TreeUpdate,
     id: accesskit::NodeId,
 ) -> Option<&accesskit::Node> {
-    update.nodes.iter().find(|(nid, _)| *nid == id).map(|(_, n)| n)
+    update
+        .nodes
+        .iter()
+        .find(|(nid, _)| *nid == id)
+        .map(|(_, n)| n)
 }
 
 #[test]
@@ -1782,7 +1813,10 @@ fn keyboard_input_makes_focus_visible_pointer_input_clears_it() {
         "keyboard input turns :focus-visible on (drives the rail focus ring)"
     );
 
-    t.pointer_down_button(Point::new(5.0, 5.0), bastyde_core::event::PointerButton::Primary);
+    t.pointer_down_button(
+        Point::new(5.0, 5.0),
+        bastyde_core::event::PointerButton::Primary,
+    );
     assert!(
         !t.focus_visible_signal().get(),
         "pointer input turns :focus-visible off"

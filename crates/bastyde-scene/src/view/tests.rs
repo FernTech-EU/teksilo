@@ -2273,8 +2273,7 @@ fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
     // 1) Press deep in the AABB interior (70, 130) — far from both strokes.
     let mut tree = WidgetTree::new();
     let view_id = tree.add(
-        SceneView::new(thin_l_scene())
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        SceneView::new(thin_l_scene()).selection_mode(crate::selection::SceneSelectionMode::Multi),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(70.0, 130.0));
@@ -2301,8 +2300,7 @@ fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
     // 2) Press ON the top stroke (100, 50) — must grab it (drag-to-move).
     let mut tree = WidgetTree::new();
     let view_id = tree.add(
-        SceneView::new(thin_l_scene())
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        SceneView::new(thin_l_scene()).selection_mode(crate::selection::SceneSelectionMode::Multi),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.pointer_move(Point::new(100.0, 50.0));

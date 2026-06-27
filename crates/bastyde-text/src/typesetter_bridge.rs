@@ -811,7 +811,7 @@ impl TextBackend for TypesetterBridge {
     fn debug_layout_text(&self, layout_key: u64) -> Option<String> {
         #[cfg(debug_assertions)]
         {
-            return self.debug_text_by_key.get(&layout_key).cloned();
+            self.debug_text_by_key.get(&layout_key).cloned()
         }
         #[cfg(not(debug_assertions))]
         {

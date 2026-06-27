@@ -143,7 +143,7 @@ pub struct ListView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while the view holds keyboard focus (root's inclusive
-    /// [`BuildContext::view_focus_active`] signal). With `focus_visible`, drives
+    /// [`BuildContext::view_focus_active`](bastyde_core::BuildContext::view_focus_active) signal). With `focus_visible`, drives
     /// the **container focus ring** shown when the view is Tab-focused but
     /// nothing is selected. Bound `RepaintOnly`.
     view_focused: Signal<bool>,
@@ -849,7 +849,11 @@ impl<T: 'static> Widget for ListView<T> {
                                 let target = (m.row_top(current) - vh).max(0.0);
                                 m.row_at(target)
                             };
-                            Some(if r == current { current.saturating_sub(1) } else { r })
+                            Some(if r == current {
+                                current.saturating_sub(1)
+                            } else {
+                                r
+                            })
                         }
                         Key::Enter => {
                             // Enter activates the focused row (open / commit).
@@ -1038,8 +1042,9 @@ impl<T: 'static> Widget for ListView<T> {
             // A `Loading` row (data not yet resident) renders a placeholder
             // skeleton instead of being skipped, so the scrollbar and layout
             // stay stable while the window loads.
-            let row_widget = (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
-                .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
+            let row_widget =
+                (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
+                    .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
             if let Some(widget) = row_widget {
                 let inner_id = ctx.add_boxed(widget);
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
@@ -1424,11 +1429,11 @@ mod tests {
         // Regression: pressing an embedded checkbox toggles it but must NOT
         // select the row. The row's select-on-press handler yields to the
         // checkbox's own tap via `ctx.press_claimed_by_interactive_child()`.
+        use crate::styles::recipe_standard_item_style as si;
         use bastyde_canvas::Point;
         use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
         use bastyde_data::{SelectionMode, SelectionModel};
         use bastyde_i18n::lit;
-        use crate::styles::recipe_standard_item_style as si;
 
         let model = ListModel::from_vec(vec!["alpha", "beta", "gamma"]);
         let checks: Vec<Signal<bool>> = (0..3).map(|_| Signal::new(false)).collect();

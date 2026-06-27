@@ -359,7 +359,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     {
                         if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
                             sel_for_click.toggle(row_index_for_click);
-                        } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi {
+                        } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi
+                        {
                             sel_for_click.extend_to(row_index_for_click);
                         } else {
                             sel_for_click.select(row_index_for_click);
@@ -381,12 +382,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let tree_pos_for_preview = tree_display_pos;
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                        let payload = bastyde_core::drag_payload::DragPayload::typed(
-                            TreeTableRowDragData {
+                        let payload =
+                            bastyde_core::drag_payload::DragPayload::typed(TreeTableRowDragData {
                                 source_node,
                                 source_table_id: table_id,
-                            },
-                        );
+                            });
                         // Flat multi-cell preview of the dragged row (indent is
                         // dropped in the floating preview — it reads as the
                         // row's content picked up).

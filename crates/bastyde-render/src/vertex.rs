@@ -649,13 +649,8 @@ mod tests {
         // Quad size (30×40) ≠ atlas size (64×64) → no snap; identity
         // transform passes positions through unchanged.
         let quad = glyph([10.0, 20.0, 30.0, 40.0], [0.0, 0.0, 64.0, 64.0], false);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            1.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts.len(), 4);
         assert_eq!(verts[0].position, [10.0, 20.0]);
         assert_eq!(verts[1].position, [40.0, 20.0]); // x + w
@@ -669,13 +664,8 @@ mod tests {
     fn scale_factor_applied_to_glyph_coords() {
         // Physical size 60×80 ≠ atlas 128×128 → no snap.
         let quad = glyph([10.0, 20.0, 30.0, 40.0], [0.0, 0.0, 128.0, 128.0], false);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            2.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 2.0, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts[0].position, [20.0, 40.0]);
         assert_eq!(verts[1].position, [80.0, 40.0]);
     }
@@ -686,13 +676,8 @@ mod tests {
         // origin rounds to the pixel grid and the far corner is pinned at
         // exactly origin + bitmap size.
         let quad = glyph([10.3, 20.7, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], false);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            1.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts[0].position, [10.0, 21.0]);
         assert_eq!(verts[1].position, [40.0, 21.0]);
         assert_eq!(verts[2].position, [40.0, 61.0]);
@@ -705,13 +690,8 @@ mod tests {
         // logical origin (5.7, 8.3) → physical (11.4, 16.6) → snaps to
         // (11, 17).
         let quad = glyph([5.7, 8.3, 16.0, 16.0], [0.0, 0.0, 32.0, 32.0], false);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            2.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 2.0, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts[0].position, [11.0, 17.0]);
         assert_eq!(verts[2].position, [43.0, 49.0]);
     }
@@ -722,13 +702,8 @@ mod tests {
         // 25×25 == atlas bitmap. Origin (4.2, 7.8) → (5.25, 9.75) →
         // snaps to (5, 10).
         let quad = glyph([4.2, 7.8, 20.0, 20.0], [0.0, 0.0, 25.0, 25.0], false);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            1.25,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.25, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts[0].position, [5.0, 10.0]);
         assert_eq!(verts[2].position, [30.0, 35.0]);
     }
@@ -800,13 +775,8 @@ mod tests {
     #[test]
     fn glyph_snap_color_emoji_flag_preserved() {
         let quad = glyph([10.3, 20.7, 30.0, 40.0], [0.0, 0.0, 30.0, 40.0], true);
-        let verts = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            1.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let verts =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &Transform2D::IDENTITY);
         assert_eq!(verts[0].position, [10.0, 21.0]);
         for v in &verts {
             assert_eq!(v.flags, QUAD_FLAG_COLOR_GLYPH);
@@ -818,18 +788,12 @@ mod tests {
         // UVs come from the atlas rect alone — identical whether the
         // position path snapped or not.
         let quad = glyph([10.3, 20.7, 30.0, 40.0], [16.0, 32.0, 30.0, 40.0], false);
-        let snapped = QuadVertex::from_glyph_quad_transformed(
-            &quad,
-            1.0,
-            256,
-            256,
-            &Transform2D::IDENTITY,
-        );
+        let snapped =
+            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &Transform2D::IDENTITY);
         let residual = Transform2D {
             m: [1.1, 0.0, 0.0, 1.1, 0.0, 0.0],
         };
-        let unsnapped =
-            QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &residual);
+        let unsnapped = QuadVertex::from_glyph_quad_transformed(&quad, 1.0, 256, 256, &residual);
         for (a, b) in snapped.iter().zip(unsnapped.iter()) {
             assert_eq!(a.tex_coord, b.tex_coord);
         }

@@ -23,9 +23,7 @@ use std::ops::Range;
 use bastyde_core::ObserverHandle;
 
 use crate::data_change::DataChange;
-use crate::dnd_types::{
-    DragEligibility, DropCommit, DropQuery, DropResponse, ItemKey, RowState,
-};
+use crate::dnd_types::{DragEligibility, DropCommit, DropQuery, DropResponse, ItemKey, RowState};
 
 /// A data source for a flat collection.
 pub trait ListDataSource: 'static {

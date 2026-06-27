@@ -110,7 +110,10 @@ impl CommandLinkButton {
     /// Override the title's text style (font, size, weight). Accepts a
     /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
     /// (unset) is `TextStyleRole::BodyBold`.
-    pub fn title_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+    pub fn title_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
         self.title_style = Some(style.into());
         self
     }
@@ -196,8 +199,10 @@ impl Widget for CommandLinkButton {
         let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
-        let title_color: bastyde_core::color_prop::ColorProp =
-            self.title_color.clone().unwrap_or_else(|| title_role.into());
+        let title_color: bastyde_core::color_prop::ColorProp = self
+            .title_color
+            .clone()
+            .unwrap_or_else(|| title_role.into());
         let title_style: bastyde_core::color_prop::TextStyleProp = self
             .title_style
             .clone()

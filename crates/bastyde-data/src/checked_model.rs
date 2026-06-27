@@ -101,7 +101,11 @@ impl CheckedModel {
     fn rekey(&self, map: impl Fn(usize) -> Option<usize>) {
         let entries: Vec<(usize, Signal<bool>)> = {
             let inner = self.inner.borrow();
-            inner.per_index.iter().map(|(&i, s)| (i, s.clone())).collect()
+            inner
+                .per_index
+                .iter()
+                .map(|(&i, s)| (i, s.clone()))
+                .collect()
         };
         {
             let mut inner = self.inner.borrow_mut();

@@ -177,7 +177,7 @@ mod tests {
     fn newer_than_current_is_refused() {
         // A file written by a future build must be refused, not silently
         // truncated.
-        let mut value = toml::Value::try_from(&sample_state()).unwrap();
+        let mut value = toml::Value::try_from(sample_state()).unwrap();
         value
             .as_table_mut()
             .unwrap()
@@ -224,7 +224,7 @@ mod tests {
         // `size`; a 0→1 step renames it to `size_px`. Without the step the
         // payload fails to deserialize (`size_px` is a required field), so this
         // proves the step both fires and is load-bearing.
-        let mut value = toml::Value::try_from(&sample_state()).unwrap();
+        let mut value = toml::Value::try_from(sample_state()).unwrap();
         {
             let t = value.as_table_mut().unwrap();
             t.insert("version".into(), toml::Value::Integer(0));

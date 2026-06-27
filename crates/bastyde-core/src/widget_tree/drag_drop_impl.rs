@@ -633,10 +633,8 @@ impl WidgetTree {
     ) -> crate::drag_state::DropFeedback {
         use crate::drag_state::DropFeedback;
         let target_bounds = self.arena.bounds(target_id);
-        let local = bastyde_canvas::Point::new(
-            position.x - target_bounds.x,
-            position.y - target_bounds.y,
-        );
+        let local =
+            bastyde_canvas::Point::new(position.x - target_bounds.x, position.y - target_bounds.y);
         let (mut ext_handler, mut own_handler, has_on_drop) = match self.arena.get_mut(target_id) {
             Some(node) => {
                 let has_on_drop = node.any_handler(|h| h.on_drop.is_some());
@@ -709,7 +707,10 @@ impl WidgetTree {
             let hit = self.hit_test(position);
             let mut candidate = hit.and_then(|t| self.find_drop_target_at_or_above(t));
             while let Some(cand) = candidate {
-                if self.fire_on_drag_hover(cand, position, &mut *ops).is_engaged() {
+                if self
+                    .fire_on_drag_hover(cand, position, &mut *ops)
+                    .is_engaged()
+                {
                     drop_target = Some(cand);
                     break;
                 }
@@ -1001,15 +1002,15 @@ mod tests {
                 .on_drag_leave(move |_ctx| lv.set(lv.get() + 1)),
         );
         // Ancestor container wrapping the child: engages conditionally.
-        let _ancestor = tree.add(
-            StackWidget::new().add_child(child).on_drag_hover(move |_payload, _pos, _ctx| {
+        let _ancestor = tree.add(StackWidget::new().add_child(child).on_drag_hover(
+            move |_payload, _pos, _ctx| {
                 if eg.get() {
                     crate::drag_state::DropFeedback::Accept
                 } else {
                     crate::drag_state::DropFeedback::NoFeedback
                 }
-            }),
-        );
+            },
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let mut ctx = crate::widget::EventContext::new();
@@ -1020,7 +1021,10 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(100.0, 50.0),
         });
-        assert_eq!(tree.active_drag.as_ref().unwrap().current_target, Some(child));
+        assert_eq!(
+            tree.active_drag.as_ref().unwrap().current_target,
+            Some(child)
+        );
         assert_eq!(leaves.get(), 0, "no leave yet — child is freshly tracked");
 
         // Frame 2: ancestor engages while child still rejects.
@@ -1219,11 +1223,12 @@ mod tests {
                     false // reject → the framework should bubble past
                 }),
         );
-        let _parent =
-            tree.add(StackWidget::new().add_child(child).on_drop(move |_p, _pos, _ctx| {
+        let _parent = tree.add(StackWidget::new().add_child(child).on_drop(
+            move |_p, _pos, _ctx| {
                 pd.set(true);
                 true
-            }));
+            },
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let mut ctx = crate::widget::EventContext::new();

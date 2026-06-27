@@ -32,8 +32,7 @@ pub(crate) struct DndLazy {
     /// Whether the row at `index` may begin a drag.
     pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
     /// `(payload, target_index, position, this_view_id) -> verdict`.
-    pub(crate) can_accept_fn:
-        Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
+    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
     pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
     /// Source-side completion: row at `index` was accepted elsewhere.
@@ -56,9 +55,7 @@ impl DndLazy {
     /// shaped differently from `ListSource`'s single-widget reader, so it
     /// doesn't fold into a `ListSource` — but the DnD + lazy protocol is
     /// identical and shared from here).
-    pub(crate) fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(
-        s: Rc<S>,
-    ) -> Self {
+    pub(crate) fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let (s1, s2, s3, s4, s5, s6, s7, s8) = (
             s.clone(),
             s.clone(),

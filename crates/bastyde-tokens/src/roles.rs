@@ -359,15 +359,34 @@ mod role_variant_tests {
     #[test]
     fn role_variant_names_cover_defaults() {
         fn check(names: &[&str], default_dbg: &str) {
-            assert!(names.contains(&default_dbg), "default {default_dbg} missing from {names:?}");
+            assert!(
+                names.contains(&default_dbg),
+                "default {default_dbg} missing from {names:?}"
+            );
             let mut sorted = names.to_vec();
             sorted.sort_unstable();
             sorted.dedup();
-            assert_eq!(sorted.len(), names.len(), "duplicate role variant in {names:?}");
+            assert_eq!(
+                sorted.len(),
+                names.len(),
+                "duplicate role variant in {names:?}"
+            );
         }
-        check(TextRole::variant_names(), &format!("{:?}", TextRole::default()));
-        check(SurfaceRole::variant_names(), &format!("{:?}", SurfaceRole::default()));
-        check(BorderRole::variant_names(), &format!("{:?}", BorderRole::default()));
-        check(TextStyleRole::variant_names(), &format!("{:?}", TextStyleRole::default()));
+        check(
+            TextRole::variant_names(),
+            &format!("{:?}", TextRole::default()),
+        );
+        check(
+            SurfaceRole::variant_names(),
+            &format!("{:?}", SurfaceRole::default()),
+        );
+        check(
+            BorderRole::variant_names(),
+            &format!("{:?}", BorderRole::default()),
+        );
+        check(
+            TextStyleRole::variant_names(),
+            &format!("{:?}", TextStyleRole::default()),
+        );
     }
 }

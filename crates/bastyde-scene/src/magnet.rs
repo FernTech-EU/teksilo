@@ -398,9 +398,7 @@ impl MagnetismConfig {
     /// feedback renderer, `m` to toggle keyboard connect mode, enabled.
     /// Install an `on_connect` handler to actually do something on
     /// connect.
-    pub fn new(
-        predicate: impl Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict + 'static,
-    ) -> Self {
+    pub fn new(predicate: impl Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict + 'static) -> Self {
         Self {
             predicate: Rc::new(predicate),
             on_connect: Rc::new(|_, _| {}),
@@ -494,8 +492,9 @@ mod tests {
             return MagnetVerdict::Reject;
         }
         match (a.role, b.role) {
-            (MagnetRole::Source, MagnetRole::Target)
-            | (MagnetRole::Target, MagnetRole::Source) => MagnetVerdict::accept(),
+            (MagnetRole::Source, MagnetRole::Target) | (MagnetRole::Target, MagnetRole::Source) => {
+                MagnetVerdict::accept()
+            }
             _ => MagnetVerdict::Reject,
         }
     }
@@ -541,16 +540,18 @@ mod tests {
     fn item_snap_snaps_to_nearest_accepting_magnet() {
         let mut scene = Scene::new();
         // Dragged item at origin with a Source magnet at its local (0,0).
-        let dragged = scene.add_item(crate::RectItem::new(bastyde_canvas::Rect::new(
-            0.0, 0.0, 10.0, 10.0,
-        )), Point::new(0.0, 0.0));
+        let dragged = scene.add_item(
+            crate::RectItem::new(bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
         scene.add_magnet(dragged, Magnet::new(Point::ZERO).role(MagnetRole::Source));
 
         // Target item at (100, 0) with a Target magnet at its local (0,0),
         // i.e. scene (100, 0).
-        let target = scene.add_item(crate::RectItem::new(bastyde_canvas::Rect::new(
-            0.0, 0.0, 10.0, 10.0,
-        )), Point::new(100.0, 0.0));
+        let target = scene.add_item(
+            crate::RectItem::new(bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(100.0, 0.0),
+        );
         let tmag = scene.add_magnet(target, Magnet::new(Point::ZERO).role(MagnetRole::Target));
 
         // Drag so the source magnet sits at scene (95, 0): 5 px shy of the
@@ -612,7 +613,10 @@ mod tests {
         // Two magnets on the SAME item that would otherwise satisfy the
         // predicate (Source + Target) and be near each other.
         scene.add_magnet(dragged, Magnet::new(Point::ZERO).role(MagnetRole::Source));
-        scene.add_magnet(dragged, Magnet::new(Point::new(2.0, 0.0)).role(MagnetRole::Target));
+        scene.add_magnet(
+            dragged,
+            Magnet::new(Point::new(2.0, 0.0)).role(MagnetRole::Target),
+        );
 
         let snap = scene.compute_item_snap(dragged, Vec2::ZERO, 20.0, &source_to_target);
         assert!(snap.is_none(), "a dragged item must not snap to itself");

@@ -290,8 +290,7 @@ impl SettingsStore {
         // not stay alive via its own observer.
         let key_owned = key.to_string();
         let weak: Weak<RefCell<StoreInner>> = Rc::downgrade(&self.inner);
-        let weak_pending: Weak<RefCell<Vec<(String, toml::Value)>>> =
-            Rc::downgrade(&self.pending);
+        let weak_pending: Weak<RefCell<Vec<(String, toml::Value)>>> = Rc::downgrade(&self.pending);
         let handle = sig.observe(move |new_val: &T| {
             let Some(inner_rc) = weak.upgrade() else {
                 return;

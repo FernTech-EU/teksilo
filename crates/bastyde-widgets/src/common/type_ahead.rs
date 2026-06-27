@@ -59,7 +59,10 @@ impl TypeAheadState {
         let now = Instant::now();
         let buffer = {
             let mut st = self.inner.borrow_mut();
-            let stale = st.last.map(|t| now.duration_since(t) > timeout).unwrap_or(true);
+            let stale = st
+                .last
+                .map(|t| now.duration_since(t) > timeout)
+                .unwrap_or(true);
             if stale {
                 st.buffer.clear();
             }

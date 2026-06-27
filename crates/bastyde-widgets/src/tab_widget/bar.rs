@@ -586,7 +586,7 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Like [`tab_dividers`](Self::tab_dividers), but with an explicit
-    /// colour. Accepts any `Color`, [`BorderRole`](bastyde_tokens::BorderRole),
+    /// colour. Accepts any `Color`, [`BorderRole`],
     /// or `Signal<Color>`. Implies `tab_dividers()`.
     pub fn tab_divider_color(
         mut self,
@@ -2195,8 +2195,11 @@ impl std::fmt::Debug for TabRowDividers {
 impl Widget for TabRowDividers {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Repaint when the (possibly bound) divider colour changes.
-        self.color
-            .register_if_bound(ctx.self_id(), ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.color.register_if_bound(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
         vec![]
     }
@@ -2258,8 +2261,7 @@ fn apply_tab_display(
         // tooltip, and fall back to the initial letter when there is no icon.
         TabDisplayMode::Icon => {
             let resolved = label.clone().resolve_now();
-            let tip =
-                tooltip.or_else(|| (!resolved.trim().is_empty()).then(|| label.clone()));
+            let tip = tooltip.or_else(|| (!resolved.trim().is_empty()).then(|| label.clone()));
             if icon.is_some() {
                 (lit!(""), icon, tip)
             } else {

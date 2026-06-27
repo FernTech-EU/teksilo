@@ -150,20 +150,23 @@ fn list_panel(title: &str, items: &[&str]) -> impl Widget {
 }
 
 fn text_panel(title: &str, body: &str) -> impl Widget {
-    Panel::new().background(SurfaceRole::Raised).padding(14.0).child(
-        VStack::new()
-            .spacing(8.0)
-            .child(
-                TextWidget::new(lit!(title))
-                    .style(TextStyleRole::BodyBold)
-                    .color(TextRole::Primary),
-            )
-            .child(
-                TextWidget::new(lit!(body))
-                    .style(TextStyleRole::Body)
-                    .color(TextRole::Secondary),
-            ),
-    )
+    Panel::new()
+        .background(SurfaceRole::Raised)
+        .padding(14.0)
+        .child(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new(lit!(title))
+                        .style(TextStyleRole::BodyBold)
+                        .color(TextRole::Primary),
+                )
+                .child(
+                    TextWidget::new(lit!(body))
+                        .style(TextStyleRole::Body)
+                        .color(TextRole::Secondary),
+                ),
+        )
 }
 
 impl DockingDemo {
@@ -229,7 +232,11 @@ impl Widget for DockingDemo {
                             } else {
                                 IconButtonSize::Large
                             };
-                            let glyph = if size == IconButtonSize::Compact { 14.0 } else { 20.0 };
+                            let glyph = if size == IconButtonSize::Compact {
+                                14.0
+                            } else {
+                                20.0
+                            };
                             IconButton::new(IconWidget::chevron_up(glyph))
                                 .size(size)
                                 .tooltip(lit!("Settings"))
@@ -239,14 +246,20 @@ impl Widget for DockingDemo {
             )
             .dock(
                 DockWidget::new(ids.explorer, lit!("Explorer"), |_| {
-                    list_panel("Explorer", &["src", "crates", "examples", "docs", "Cargo.toml"])
+                    list_panel(
+                        "Explorer",
+                        &["src", "crates", "examples", "docs", "Cargo.toml"],
+                    )
                 })
                 .icon(|| dock_icon(DockIcon::Explorer, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Leading)),
             )
             .dock(
                 DockWidget::new(ids.search, lit!("Search"), |_| {
-                    list_panel("Search results", &["main.rs:42", "model.rs:17", "geometry.rs:9"])
+                    list_panel(
+                        "Search results",
+                        &["main.rs:42", "model.rs:17", "geometry.rs:9"],
+                    )
                 })
                 .icon(|| dock_icon(DockIcon::Search, 18.0))
                 .default_location(DockOpenLocation::side(DockSide::Leading)),
@@ -278,12 +291,16 @@ impl Widget for DockingDemo {
         // trailing Properties.
         self.model
             .open_dock(ids.explorer, DockOpenLocation::side(DockSide::Leading));
-        self.model
-            .open_dock(ids.search, DockOpenLocation::side(DockSide::Leading).stack());
+        self.model.open_dock(
+            ids.search,
+            DockOpenLocation::side(DockSide::Leading).stack(),
+        );
         self.model
             .open_dock(ids.terminal, DockOpenLocation::side(DockSide::Bottom));
-        self.model
-            .open_dock(ids.problems, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        self.model.open_dock(
+            ids.problems,
+            DockOpenLocation::side(DockSide::Bottom).new_tab(),
+        );
         self.model
             .open_dock(ids.properties, DockOpenLocation::side(DockSide::Trailing));
 

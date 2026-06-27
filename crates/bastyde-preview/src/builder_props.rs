@@ -85,7 +85,10 @@ mod tests {
         assert_eq!(groups.len(), 3);
         for (label, spec) in &groups {
             assert!(!label.is_empty());
-            assert!(!spec.declarations().is_empty(), "group {label} has no knobs");
+            assert!(
+                !spec.declarations().is_empty(),
+                "group {label} has no knobs"
+            );
         }
     }
 

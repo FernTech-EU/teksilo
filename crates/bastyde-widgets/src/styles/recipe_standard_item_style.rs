@@ -120,9 +120,8 @@ fn bg_signal(
     is_focused: &Signal<bool>,
 ) -> Signal<SurfaceRole> {
     let combined = is_selected.zip3(is_pressed, is_hovered);
-    combined
-        .zip3(is_disabled, is_focused)
-        .map(|((selected, pressed, hovered), disabled, focused)| {
+    combined.zip3(is_disabled, is_focused).map(
+        |((selected, pressed, hovered), disabled, focused)| {
             if *disabled {
                 SurfaceRole::Transparent
             } else if *selected {
@@ -140,5 +139,6 @@ fn bg_signal(
             } else {
                 SurfaceRole::Transparent
             }
-        })
+        },
+    )
 }

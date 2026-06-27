@@ -172,7 +172,13 @@ fn shrink(sizes: &mut [f32], emin: &[f32], panes: &[PaneSnapshot], mut deficit: 
 mod tests {
     use super::*;
 
-    fn pane(stored: f32, min: f32, max: Option<f32>, stretch: f32, collapsed: bool) -> PaneSnapshot {
+    fn pane(
+        stored: f32,
+        min: f32,
+        max: Option<f32>,
+        stretch: f32,
+        collapsed: bool,
+    ) -> PaneSnapshot {
         PaneSnapshot {
             stored_size: stored,
             min_size: min,

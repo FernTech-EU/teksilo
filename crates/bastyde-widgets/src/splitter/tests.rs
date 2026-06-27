@@ -102,8 +102,14 @@ fn vertical_places_panes_and_dividers() {
     let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
     let model = SplitterModel::from_panes(
         vec![
-            PaneDescriptor::new().size(avail * 0.25).min_size(0.0).stretch(0.0),
-            PaneDescriptor::new().size(avail * 0.75).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new()
+                .size(avail * 0.25)
+                .min_size(0.0)
+                .stretch(0.0),
+            PaneDescriptor::new()
+                .size(avail * 0.75)
+                .min_size(0.0)
+                .stretch(0.0),
         ],
         Orientation::Vertical,
     );
@@ -205,8 +211,14 @@ fn drag_tracks_cursor_across_relayouts() {
 fn minimum_sizes_clamp() {
     let model = SplitterModel::from_panes(
         vec![
-            PaneDescriptor::new().size(10.0).min_size(120.0).stretch(0.0),
-            PaneDescriptor::new().size(10.0).min_size(120.0).stretch(0.0),
+            PaneDescriptor::new()
+                .size(10.0)
+                .min_size(120.0)
+                .stretch(0.0),
+            PaneDescriptor::new()
+                .size(10.0)
+                .min_size(120.0)
+                .stretch(0.0),
         ],
         Orientation::Horizontal,
     );
@@ -272,7 +284,10 @@ fn rtl_vertical_still_stacks_top_to_bottom() {
     tree.layout(SizeProposal::exact(200.0, 400.0));
     let first = tree.bounds(tree.child_widget(root, 0));
     let second = tree.bounds(tree.child_widget(root, 2));
-    assert!(first.y < second.y, "first pane stays above under RTL+vertical");
+    assert!(
+        first.y < second.y,
+        "first pane stays above under RTL+vertical"
+    );
 }
 
 #[test]
@@ -315,8 +330,14 @@ fn programmatic_collapse_shrinks_pane_to_zero() {
     let avail = 400.0 - SPLITTER_GUTTER_THICKNESS;
     let model = SplitterModel::from_panes(
         vec![
-            PaneDescriptor::new().size(avail * 0.5).collapsible(true).stretch(0.0),
-            PaneDescriptor::new().size(avail * 0.5).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new()
+                .size(avail * 0.5)
+                .collapsible(true)
+                .stretch(0.0),
+            PaneDescriptor::new()
+                .size(avail * 0.5)
+                .min_size(0.0)
+                .stretch(0.0),
         ],
         Orientation::Horizontal,
     );
@@ -361,7 +382,10 @@ fn enter_on_focused_handle_toggles_adjacent_collapse() {
     tree.focus(handle);
     assert!(!model.is_collapsed(0));
     tree.press_key(Key::Enter, Modifiers::NONE);
-    assert!(model.is_collapsed(0), "Enter collapses the collapsible pane");
+    assert!(
+        model.is_collapsed(0),
+        "Enter collapses the collapsible pane"
+    );
 }
 
 #[test]
@@ -410,7 +434,10 @@ fn drag_past_min_snaps_to_collapsed() {
     let start = tree.bounds(handle).center();
     // Drag the divider hard to the leading edge → pane0 below min−snap.
     tree.drag(start, Point::new(8.0, start.y));
-    assert!(model.is_collapsed(0), "dragging past min snaps to collapsed");
+    assert!(
+        model.is_collapsed(0),
+        "dragging past min snaps to collapsed"
+    );
 }
 
 #[test]
@@ -420,7 +447,10 @@ fn drag_restores_collapsed_pane_and_keeps_it_open() {
     // because the cursor is still in the collapse zone (inverted hysteresis).
     let model = SplitterModel::from_panes(
         vec![
-            PaneDescriptor::new().collapsible(true).collapsed(true).min_size(96.0),
+            PaneDescriptor::new()
+                .collapsible(true)
+                .collapsed(true)
+                .min_size(96.0),
             PaneDescriptor::new().min_size(0.0),
         ],
         Orientation::Horizontal,
@@ -445,7 +475,10 @@ fn drag_restores_collapsed_pane_and_keeps_it_open() {
     }
     tree.pointer_up_button(Point::new(210.0, start.y), PointerButton::Primary);
 
-    assert!(!model.is_collapsed(0), "pane should be restored, not re-collapsed");
+    assert!(
+        !model.is_collapsed(0),
+        "pane should be restored, not re-collapsed"
+    );
     assert!(
         tree.bounds(tree.child_widget(root, 0)).width > 150.0,
         "restored pane should track the cursor, got {}",
@@ -488,7 +521,10 @@ fn collapsed_pane_content_is_dormant() {
     model.set_collapsed(0, false);
     tree.tick_animations(std::time::Duration::from_millis(400));
     tree.layout(SizeProposal::exact(400.0, 200.0));
-    assert!(tree.is_active(inner0), "re-expanded content must reactivate");
+    assert!(
+        tree.is_active(inner0),
+        "re-expanded content must reactivate"
+    );
 }
 
 #[test]
@@ -497,7 +533,11 @@ fn collapsing_content_keeps_full_layout_size() {
     // (and be clipped) rather than reflow into the shrinking pane.
     let model = SplitterModel::from_panes(
         vec![
-            PaneDescriptor::new().size(200.0).min_size(0.0).stretch(0.0).collapsible(true),
+            PaneDescriptor::new()
+                .size(200.0)
+                .min_size(0.0)
+                .stretch(0.0)
+                .collapsible(true),
             PaneDescriptor::new().size(194.0).min_size(0.0).stretch(0.0),
         ],
         Orientation::Horizontal,
@@ -541,7 +581,10 @@ fn hiding_a_pane_removes_pane_and_its_gutter() {
     tree.tick_animations(std::time::Duration::from_millis(400));
     tree.layout(SizeProposal::exact(400.0, 200.0));
 
-    assert!(tree.bounds(tree.child_widget(root, 0)).width < 2.0, "hidden pane → 0");
+    assert!(
+        tree.bounds(tree.child_widget(root, 0)).width < 2.0,
+        "hidden pane → 0"
+    );
     assert!(
         tree.bounds(tree.child_widget(root, 1)).width < 2.0,
         "its gutter → 0 (handle removed)"
@@ -598,14 +641,18 @@ fn hidden_pane_content_is_dormant_and_handle_at_hidden() {
     );
     tree.layout(SizeProposal::exact(400.0, 200.0));
     let inner0 = tree.child_widget(tree.child_widget(root, 0), 0);
-    assert!(tree.find_by_role(bastyde_core::accesskit::Role::Splitter).is_some());
+    assert!(
+        tree.find_by_role(bastyde_core::accesskit::Role::Splitter)
+            .is_some()
+    );
 
     model.set_pane_visible(0, false);
     tree.tick_animations(std::time::Duration::from_millis(400));
     tree.layout(SizeProposal::exact(400.0, 200.0));
     assert!(!tree.is_active(inner0), "hidden pane content dormant");
     assert!(
-        tree.find_by_role(bastyde_core::accesskit::Role::Splitter).is_none(),
+        tree.find_by_role(bastyde_core::accesskit::Role::Splitter)
+            .is_none(),
         "the now-inactive handle is removed from the AT tree"
     );
 
@@ -613,7 +660,10 @@ fn hidden_pane_content_is_dormant_and_handle_at_hidden() {
     tree.tick_animations(std::time::Duration::from_millis(400));
     tree.layout(SizeProposal::exact(400.0, 200.0));
     assert!(tree.is_active(inner0), "shown pane content reactivates");
-    assert!(tree.find_by_role(bastyde_core::accesskit::Role::Splitter).is_some());
+    assert!(
+        tree.find_by_role(bastyde_core::accesskit::Role::Splitter)
+            .is_some()
+    );
 }
 
 #[test]
@@ -633,12 +683,24 @@ fn hiding_a_middle_pane_drops_both_its_gutters() {
     tree.layout(SizeProposal::exact(600.0, 200.0));
 
     // children: clip0, handle0, clip1, handle1, clip2
-    assert!(tree.bounds(tree.child_widget(root, 2)).width < 2.0, "middle pane gone");
-    assert!(tree.bounds(tree.child_widget(root, 1)).width < 2.0, "gutter 0 gone");
-    assert!(tree.bounds(tree.child_widget(root, 3)).width < 2.0, "gutter 1 gone");
+    assert!(
+        tree.bounds(tree.child_widget(root, 2)).width < 2.0,
+        "middle pane gone"
+    );
+    assert!(
+        tree.bounds(tree.child_widget(root, 1)).width < 2.0,
+        "gutter 0 gone"
+    );
+    assert!(
+        tree.bounds(tree.child_widget(root, 3)).width < 2.0,
+        "gutter 1 gone"
+    );
     let w0 = tree.bounds(tree.child_widget(root, 0)).width;
     let w2 = tree.bounds(tree.child_widget(root, 4)).width;
-    assert!((w0 + w2 - 600.0).abs() < 2.0, "the two visible panes fill the container");
+    assert!(
+        (w0 + w2 - 600.0).abs() < 2.0,
+        "the two visible panes fill the container"
+    );
 }
 
 #[test]

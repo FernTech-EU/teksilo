@@ -1661,10 +1661,11 @@ impl Scene {
             return;
         };
         if let Some(list) = self.magnets.get_mut(&owner)
-            && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet) {
-                m.local_pos = local_pos;
-                self.bump_a11y_change();
-            }
+            && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet)
+        {
+            m.local_pos = local_pos;
+            self.bump_a11y_change();
+        }
     }
 
     /// Enable or disable a magnet. Disabled magnets are skipped by
@@ -1676,10 +1677,11 @@ impl Scene {
         };
         if let Some(list) = self.magnets.get_mut(&owner)
             && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet)
-                && m.enabled != enabled {
-                    m.enabled = enabled;
-                    self.bump_a11y_change();
-                }
+            && m.enabled != enabled
+        {
+            m.enabled = enabled;
+            self.bump_a11y_change();
+        }
     }
 
     /// The ids of every magnet attached to `item`, in insertion order
@@ -1838,10 +1840,7 @@ impl Scene {
                     item: dragged,
                     role: m.role,
                     payload: m.payload.clone(),
-                    scene_pos: Point::new(
-                        committed.x + drag_delta.x,
-                        committed.y + drag_delta.y,
-                    ),
+                    scene_pos: Point::new(committed.x + drag_delta.x, committed.y + drag_delta.y),
                 }
             })
             .collect();

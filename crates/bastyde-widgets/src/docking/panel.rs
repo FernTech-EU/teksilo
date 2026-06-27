@@ -14,11 +14,11 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
@@ -30,12 +30,12 @@ use crate::primitives::{Center, IconWidget, RectWidget, TextWidget, ZStack};
 use crate::splitter::Splitter;
 use bastyde_core::overlay::OverlayPlacement;
 
+use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
 use super::drag::{
     DockDragData, DockDropOverlay, DropZone, compute_drop_zone, dropped_dock_tab,
     dropped_dock_widget,
 };
 use super::geometry::DockSide;
-use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
 use super::model::{
     DockIconFactory, DockOpenLocation, DockTabId, DockTabView, DockWidgetId, DockWidgetMeta,
     DockingModel, side_orientation,
@@ -263,9 +263,7 @@ impl Widget for DockSidePanel {
             .map(|(i, _)| i)
             .collect();
         let presentation = self.model.side_presentation(self.side);
-        if model_indices.is_empty()
-            && presentation == super::model::TabPresentation::Rail
-        {
+        if model_indices.is_empty() && presentation == super::model::TabPresentation::Rail {
             // Every activity hidden in Rail presentation: the activity rail (with
             // its own background menu) is the restore affordance — blank content.
             let empty = ctx.add(RectWidget::new().background(SurfaceRole::Transparent));
@@ -296,9 +294,9 @@ impl Widget for DockSidePanel {
             let side = self.side;
             let tw = tw_selected.clone();
             ctx.effect(&dock_selected, move |&idx| {
-                let target = model
-                    .side_tab_id_at(side, idx)
-                    .map(|id| TabId::from_raw(NonZeroU64::new(id.raw()).unwrap_or(NonZeroU64::MIN)));
+                let target = model.side_tab_id_at(side, idx).map(|id| {
+                    TabId::from_raw(NonZeroU64::new(id.raw()).unwrap_or(NonZeroU64::MIN))
+                });
                 if tw.get() != target {
                     tw.set(target);
                 }
@@ -454,8 +452,8 @@ impl Widget for DockSidePanel {
                 })
                 // Cross-side drop: relocate the whole tab to this side.
                 .on_tab_received(move |handle, idx, ctx| {
-                    if let Some(p) = (handle.payload.as_ref() as &dyn Any)
-                        .downcast_ref::<DockTabPayload>()
+                    if let Some(p) =
+                        (handle.payload.as_ref() as &dyn Any).downcast_ref::<DockTabPayload>()
                     {
                         let at = recv_indices.get(idx).copied().unwrap_or(total_tabs);
                         recv_model.move_tab(p.tab_id, side, at);
@@ -605,7 +603,13 @@ impl Widget for DockTabContentWidget {
             match self.tab.panes.first() {
                 Some(dock) => {
                     let inner = self.build_pane_inner(ctx, *dock, 0, None);
-                    ctx.add(DockPanePane::new(self.side, tab_idx, 0, self.model.clone(), inner))
+                    ctx.add(DockPanePane::new(
+                        self.side,
+                        tab_idx,
+                        0,
+                        self.model.clone(),
+                        inner,
+                    ))
                 }
                 None => ctx.add(RectWidget::new().background(SurfaceRole::Transparent)),
             }
@@ -681,10 +685,7 @@ impl DockTabContentWidget {
         // Initial expanded state follows the Splitter (so a rebuild preserves a
         // collapsed pane); toggling drives the pane collapse/expand.
         let expanded = ctx.signal(!splitter.is_collapsed(pane_idx));
-        splitter.set_collapsed_size(
-            pane_idx,
-            crate::accordion::ACCORDION_FILL_COLLAPSED_EXTENT,
-        );
+        splitter.set_collapsed_size(pane_idx, crate::accordion::ACCORDION_FILL_COLLAPSED_EXTENT);
         {
             let sp = splitter.clone();
             ctx.effect(&expanded, move |&e| {

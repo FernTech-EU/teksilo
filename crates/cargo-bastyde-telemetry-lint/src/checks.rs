@@ -530,11 +530,9 @@ events:
         std::fs::remove_dir_all(&dir).ok();
 
         assert!(
-            issues
-                .iter()
-                .any(|i| i.severity == Severity::Warning
-                    && i.message.contains("emit_tset_event")
-                    && i.message.contains("no matching event is declared")),
+            issues.iter().any(|i| i.severity == Severity::Warning
+                && i.message.contains("emit_tset_event")
+                && i.message.contains("no matching event is declared")),
             "the typo'd emit call must be flagged: {issues:?}"
         );
         assert!(
@@ -542,10 +540,8 @@ events:
             "the definition site must not be flagged as an undeclared call: {issues:?}"
         );
         assert!(
-            !issues
-                .iter()
-                .any(|i| i.message.contains("emit_test_event")
-                    && i.message.contains("no matching event")),
+            !issues.iter().any(|i| i.message.contains("emit_test_event")
+                && i.message.contains("no matching event")),
             "a declared event's call must not be flagged: {issues:?}"
         );
     }

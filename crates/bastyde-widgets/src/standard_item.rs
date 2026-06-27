@@ -258,7 +258,10 @@ impl StandardListItem {
     /// Override the label's text style (font, size, weight). Accepts a
     /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
     /// `TextStyleRole::Body`.
-    pub fn label_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+    pub fn label_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
         self.label_style = style.into();
         self
     }
@@ -666,7 +669,10 @@ impl StandardTreeItem {
         self
     }
 
-    pub fn label_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
+    pub fn label_style(
+        mut self,
+        style: impl Into<bastyde_core::color_prop::TextStyleProp>,
+    ) -> Self {
         self.inner = self.inner.label_style(style);
         self
     }

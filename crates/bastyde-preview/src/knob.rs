@@ -106,7 +106,11 @@ impl KnobKind {
     /// label-only `Choice` kinds. The role variant lists come from
     /// `bastyde_tokens`, so they never drift from the actual enums.
     pub fn enum_info(&self) -> Option<EnumInfo> {
-        fn role(path: &'static str, names: &'static [&'static str], default_dbg: String) -> EnumInfo {
+        fn role(
+            path: &'static str,
+            names: &'static [&'static str],
+            default_dbg: String,
+        ) -> EnumInfo {
             EnumInfo {
                 enum_path: path,
                 variants: names.to_vec(),
@@ -114,23 +118,35 @@ impl KnobKind {
             }
         }
         match self {
-            KnobKind::Enum { enum_path, variants, default } => Some(EnumInfo {
+            KnobKind::Enum {
+                enum_path,
+                variants,
+                default,
+            } => Some(EnumInfo {
                 enum_path,
                 variants: variants.clone(),
                 default: *default,
             }),
-            KnobKind::TextRole { default } => {
-                Some(role("TextRole", TextRole::variant_names(), format!("{default:?}")))
-            }
-            KnobKind::SurfaceRole { default } => {
-                Some(role("SurfaceRole", SurfaceRole::variant_names(), format!("{default:?}")))
-            }
-            KnobKind::BorderRole { default } => {
-                Some(role("BorderRole", BorderRole::variant_names(), format!("{default:?}")))
-            }
-            KnobKind::TextStyle { default } => {
-                Some(role("TextStyleRole", TextStyleRole::variant_names(), format!("{default:?}")))
-            }
+            KnobKind::TextRole { default } => Some(role(
+                "TextRole",
+                TextRole::variant_names(),
+                format!("{default:?}"),
+            )),
+            KnobKind::SurfaceRole { default } => Some(role(
+                "SurfaceRole",
+                SurfaceRole::variant_names(),
+                format!("{default:?}"),
+            )),
+            KnobKind::BorderRole { default } => Some(role(
+                "BorderRole",
+                BorderRole::variant_names(),
+                format!("{default:?}"),
+            )),
+            KnobKind::TextStyle { default } => Some(role(
+                "TextStyleRole",
+                TextStyleRole::variant_names(),
+                format!("{default:?}"),
+            )),
             _ => None,
         }
     }
@@ -282,7 +298,12 @@ impl KnobSpec {
             label,
             group: None,
             ctor_position: None,
-            kind: KnobKind::OptI32 { default, min, max, step: 1 },
+            kind: KnobKind::OptI32 {
+                default,
+                min,
+                max,
+                step: 1,
+            },
         })
     }
 
@@ -299,7 +320,12 @@ impl KnobSpec {
             label,
             group: None,
             ctor_position: None,
-            kind: KnobKind::OptF32 { default, min, max, step: ((max - min) / 100.0).max(0.01) },
+            kind: KnobKind::OptF32 {
+                default,
+                min,
+                max,
+                step: ((max - min) / 100.0).max(0.01),
+            },
         })
     }
 
@@ -626,7 +652,7 @@ impl KnobValues {
             // declared kind — it would otherwise fall through to the default
             // arm and be silently dropped. Dev tooling: panic on misuse.
             debug_assert!(
-                ov.map_or(true, |v| override_matches_kind(&decl.kind, v)),
+                ov.is_none_or(|v| override_matches_kind(&decl.kind, v)),
                 "knob '{}' override type does not match its declared kind",
                 decl.id
             );
@@ -959,7 +985,15 @@ mod tests {
         assert_eq!(info.variants, TextRole::variant_names().to_vec());
         assert_eq!(info.variants[info.default], "Secondary");
         // A scalar kind has no enum_info.
-        assert!(KnobSpec::new().bool_("x", "X", false).get("x").unwrap().kind.enum_info().is_none());
+        assert!(
+            KnobSpec::new()
+                .bool_("x", "X", false)
+                .get("x")
+                .unwrap()
+                .kind
+                .enum_info()
+                .is_none()
+        );
     }
 
     #[test]
@@ -974,12 +1008,18 @@ mod tests {
 
     #[test]
     fn enum_knob_resolves_to_its_default_index() {
-        let spec = KnobSpec::new().enum_("variant", "Variant", "ButtonVariant", &["A", "B", "C"], 1);
+        let spec =
+            KnobSpec::new().enum_("variant", "Variant", "ButtonVariant", &["A", "B", "C"], 1);
         let values = KnobValues::from_spec(&spec, None);
         assert_eq!(values.enum_("variant").get(), 1);
         // An override moves it.
         let ov = KnobOverrides::new().enum_("variant", 2);
-        assert_eq!(KnobValues::from_spec(&spec, Some(&ov)).enum_("variant").get(), 2);
+        assert_eq!(
+            KnobValues::from_spec(&spec, Some(&ov))
+                .enum_("variant")
+                .get(),
+            2
+        );
     }
 
     #[test]

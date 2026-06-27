@@ -602,7 +602,9 @@ pub fn step_date_field(date: Date, kind: SegmentKind, delta: i32) -> Date {
         SegmentKind::Year => {
             // `saturating_add` so a huge `delta` from the public API can't
             // overflow i32 before the clamp.
-            let new_year = (date.year() as i32).saturating_add(delta).clamp(-9999, 9999) as i16;
+            let new_year = (date.year() as i32)
+                .saturating_add(delta)
+                .clamp(-9999, 9999) as i16;
             let last_day = Date::new(new_year, date.month(), 1)
                 .map(|d| d.last_of_month().day())
                 .unwrap_or(date.day());
@@ -625,7 +627,8 @@ pub fn step_date_field(date: Date, kind: SegmentKind, delta: i32) -> Date {
                 .map(|d| d.last_of_month().day())
                 .unwrap_or(28) as i32;
             // Reduce `delta` modulo the month length before adding (overflow-safe).
-            let new_day = ((date.day() as i32 - 1) + delta.rem_euclid(last_day)).rem_euclid(last_day) + 1;
+            let new_day =
+                ((date.day() as i32 - 1) + delta.rem_euclid(last_day)).rem_euclid(last_day) + 1;
             Date::new(date.year(), date.month(), new_day as i8).unwrap_or(date)
         }
         _ => date,

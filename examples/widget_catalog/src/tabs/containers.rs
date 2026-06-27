@@ -9,8 +9,8 @@ use bastyde::tokens::Orientation;
 use bastyde::widgets::scroll_bar::ScrollBarOrientation;
 use bastyde::widgets::{
     Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Padding, Panel,
-    ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabIndicatorPosition, TabInfo, TabWidget,
-    TextWidget, ToolBox, ToolBoxItem, VStack,
+    ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabIndicatorPosition, TabInfo,
+    TabWidget, TextWidget, ToolBox, ToolBoxItem, VStack,
 };
 
 use crate::shared::{Signals, color_cell, section, tab_header};

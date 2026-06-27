@@ -28,12 +28,12 @@ pub mod color_picker;
 pub mod combo_box;
 pub mod command_link_button;
 pub mod common;
+pub(crate) mod data_views;
 pub mod date_edit;
 pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub mod docking;
-pub(crate) mod data_views;
 pub use data_views::ActivateOn;
 pub(crate) mod drag_preview;
 pub mod drop_target;
@@ -135,9 +135,9 @@ pub use date_range_edit::DateRangeEdit;
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
 pub use docking::{
-    CornerOwners, DockCorner, DockLayoutState, DockOpenLocation, DockOpenMode, DockPolicy, DockRail,
-    DockRailItemSize, DockRailSlot, DockSide, DockTabDisplay, DockTabId, DockWidget, DockWidgetId,
-    DockingLayout, DockingModel, TabPresentation,
+    CornerOwners, DockCorner, DockLayoutState, DockOpenLocation, DockOpenMode, DockPolicy,
+    DockRail, DockRailItemSize, DockRailSlot, DockSide, DockTabDisplay, DockTabId, DockWidget,
+    DockWidgetId, DockingLayout, DockingModel, TabPresentation,
 };
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
@@ -235,8 +235,8 @@ pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
 pub use toolbar::{
     Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
 };
-pub use tree_table_view::TreeTableView;
 pub use tree_source::{TreeRow, TreeRowMeta};
+pub use tree_table_view::TreeTableView;
 pub use tree_view::{TreeRowContext, TreeView};
 
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped

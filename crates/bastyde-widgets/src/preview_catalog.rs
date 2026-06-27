@@ -33,13 +33,13 @@
 mod icons;
 
 use bastyde_core::signal::Signal;
+use bastyde_core::styles::{CheckboxVariant, TextInputVariant};
 use bastyde_core::widget::Widget;
 use bastyde_i18n::lit;
 use bastyde_preview::{
     KnobOverrides, KnobSpec, KnobValues, PreviewVariant, SlottedChild, WidgetCatalog,
     WidgetCategory, register_widget_catalog_at,
 };
-use bastyde_core::styles::{CheckboxVariant, TextInputVariant};
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
@@ -54,10 +54,10 @@ use crate::primitives::{MaxSize, RectWidget};
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, GridSizing, GridView, GroupBox, GroupHeader,
-    IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar,
-    Orientation, PaneDescriptor, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider,
-    Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar,
-    TabWidget, TextInput, Toggle, ToolBox, Toolbar, TreeView,
+    IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Orientation, PaneDescriptor,
+    Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar,
+    SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar, TabWidget,
+    TextInput, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -114,7 +114,15 @@ impl WidgetCatalog for Button {
                 "variant",
                 "Variant",
                 "ButtonVariant",
-                &["Filled", "Tinted", "Outlined", "Plain", "Ghost", "Link", "Destructive"],
+                &[
+                    "Filled",
+                    "Tinted",
+                    "Outlined",
+                    "Plain",
+                    "Ghost",
+                    "Link",
+                    "Destructive",
+                ],
                 3,
             )
             .bool_("enabled", "Enabled", true)
@@ -125,11 +133,15 @@ impl WidgetCatalog for Button {
             PreviewVariant::defaults("default"),
             PreviewVariant::knobs(
                 "primary",
-                KnobOverrides::new().enum_("variant", 0).text("label", "Save"),
+                KnobOverrides::new()
+                    .enum_("variant", 0)
+                    .text("label", "Save"),
             ),
             PreviewVariant::knobs(
                 "flat",
-                KnobOverrides::new().enum_("variant", 4).text("label", "More…"),
+                KnobOverrides::new()
+                    .enum_("variant", 4)
+                    .text("label", "More…"),
             ),
             PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
             PreviewVariant::knobs(
@@ -526,8 +538,14 @@ impl WidgetCatalog for TextWidget {
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("default"),
-            PreviewVariant::knobs("secondary", KnobOverrides::new().text_role("color", TextRole::Secondary)),
-            PreviewVariant::knobs("bold", KnobOverrides::new().text_style("style", TextStyleRole::BodyBold)),
+            PreviewVariant::knobs(
+                "secondary",
+                KnobOverrides::new().text_role("color", TextRole::Secondary),
+            ),
+            PreviewVariant::knobs(
+                "bold",
+                KnobOverrides::new().text_style("style", TextStyleRole::BodyBold),
+            ),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
@@ -541,7 +559,10 @@ impl WidgetCatalog for TextWidget {
         Some(icons::text_widget())
     }
 }
-register_widget_catalog_at!("crates/bastyde-widgets/src/primitives/text_widget.rs", TextWidget);
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/primitives/text_widget.rs",
+    TextWidget
+);
 
 impl WidgetCatalog for TextInput {
     fn id() -> &'static str {
@@ -604,7 +625,13 @@ impl WidgetCatalog for Checkbox {
         KnobSpec::new()
             .bool_("checked", "Checked", false)
             .ctor(0)
-            .enum_("variant", "Variant", "CheckboxVariant", &["Square", "Rounded", "Circle"], 0)
+            .enum_(
+                "variant",
+                "Variant",
+                "CheckboxVariant",
+                &["Square", "Rounded", "Circle"],
+                0,
+            )
             .text("label", "Label", "Enable feature")
             .bool_("enabled", "Enabled", true)
     }
@@ -737,7 +764,13 @@ impl WidgetCatalog for Slider {
         KnobSpec::new()
             .f32_("value", "Value", 0.5, 0.0, 1.0)
             .ctor(0)
-            .enum_("orientation", "Orientation", "Orientation", &["Horizontal", "Vertical"], 0)
+            .enum_(
+                "orientation",
+                "Orientation",
+                "Orientation",
+                &["Horizontal", "Vertical"],
+                0,
+            )
             .f32_step("step", "Step (0 = continuous)", 0.0, 0.0, 0.5, 0.05)
             .bool_("enabled", "Enabled", true)
             .opt_text("label", "Label", None)
@@ -2395,9 +2428,15 @@ impl WidgetCatalog for Splitter {
         fn build_three_pane() -> Box<dyn Widget> {
             let model = SplitterModel::from_panes(
                 vec![
-                    PaneDescriptor::new().size(120.0).collapsible(true).stretch(0.0),
+                    PaneDescriptor::new()
+                        .size(120.0)
+                        .collapsible(true)
+                        .stretch(0.0),
                     PaneDescriptor::new().stretch(1.0),
-                    PaneDescriptor::new().size(120.0).collapsible(true).stretch(0.0),
+                    PaneDescriptor::new()
+                        .size(120.0)
+                        .collapsible(true)
+                        .stretch(0.0),
                 ],
                 Orientation::Horizontal,
             );
@@ -2408,12 +2447,15 @@ impl WidgetCatalog for Splitter {
                     .child(sample_text(label))
             };
             Box::new(
-                FixedSize::new().bind_width(480.0_f32).bind_height(220.0_f32).child(
-                    Splitter::new(model)
-                        .pane(pane("Sidebar", SurfaceRole::Sunken))
-                        .pane(pane("Editor", SurfaceRole::Raised))
-                        .pane(pane("Inspector", SurfaceRole::Sunken)),
-                ),
+                FixedSize::new()
+                    .bind_width(480.0_f32)
+                    .bind_height(220.0_f32)
+                    .child(
+                        Splitter::new(model)
+                            .pane(pane("Sidebar", SurfaceRole::Sunken))
+                            .pane(pane("Editor", SurfaceRole::Raised))
+                            .pane(pane("Inspector", SurfaceRole::Sunken)),
+                    ),
             )
         }
         vec![
@@ -2833,7 +2875,10 @@ mod build_with_children_tests {
     }
 
     /// Collect every descendant id under `root` (exclusive).
-    fn descendants(tree: &WidgetTree, root: bastyde_core::widget_id::WidgetId) -> Vec<bastyde_core::widget_id::WidgetId> {
+    fn descendants(
+        tree: &WidgetTree,
+        root: bastyde_core::widget_id::WidgetId,
+    ) -> Vec<bastyde_core::widget_id::WidgetId> {
         let mut out = Vec::new();
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
@@ -2856,7 +2901,10 @@ mod build_with_children_tests {
         let w = entry.build_with_children(
             "default",
             &knobs,
-            vec![SlottedChild { slot: None, id: stray }],
+            vec![SlottedChild {
+                slot: None,
+                id: stray,
+            }],
         );
         let id = tree.add_boxed(w);
         tree.layout(SizeProposal::exact(400.0, 200.0));
@@ -2902,9 +2950,18 @@ mod build_with_children_tests {
             "default",
             &knobs,
             vec![
-                SlottedChild { slot: Some("header".into()), id: header },
-                SlottedChild { slot: Some("content".into()), id: content },
-                SlottedChild { slot: Some("footer".into()), id: footer },
+                SlottedChild {
+                    slot: Some("header".into()),
+                    id: header,
+                },
+                SlottedChild {
+                    slot: Some("content".into()),
+                    id: content,
+                },
+                SlottedChild {
+                    slot: Some("footer".into()),
+                    id: footer,
+                },
             ],
         );
         let id = tree.add_boxed(w);
@@ -2918,9 +2975,24 @@ mod build_with_children_tests {
     #[test]
     fn curated_widgets_have_icons() {
         for id in [
-            "vstack", "hstack", "zstack", "grid", "padding", "expand", "center", "spacer",
-            "button", "text_widget", "checkbox", "text_input", "toggle", "combo_box", "slider",
-            "card", "panel", "scroll_area",
+            "vstack",
+            "hstack",
+            "zstack",
+            "grid",
+            "padding",
+            "expand",
+            "center",
+            "spacer",
+            "button",
+            "text_widget",
+            "checkbox",
+            "text_input",
+            "toggle",
+            "combo_box",
+            "slider",
+            "card",
+            "panel",
+            "scroll_area",
         ] {
             let entry = find_by_id(id).unwrap_or_else(|| panic!("{id} registered"));
             assert!(entry.icon().is_some(), "{id} should have an icon");

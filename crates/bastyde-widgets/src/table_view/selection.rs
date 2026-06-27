@@ -213,9 +213,7 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
-        self.remap_base(|(r, c)| {
-            Some(if r >= at_row { (r + count, c) } else { (r, c) })
-        });
+        self.remap_base(|(r, c)| Some(if r >= at_row { (r + count, c) } else { (r, c) }));
         if let Some((r, c)) = self.anchor.get()
             && r >= at_row
         {
@@ -292,9 +290,7 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
-        self.remap_base(|(r, c)| {
-            Some(if c >= at_col { (r, c + count) } else { (r, c) })
-        });
+        self.remap_base(|(r, c)| Some(if c >= at_col { (r, c + count) } else { (r, c) }));
         if let Some((r, c)) = self.anchor.get()
             && c >= at_col
         {
@@ -402,7 +398,10 @@ mod tests {
         assert_eq!(m.count(), 9);
         m.extend_to(1, 1); // 2×2 = 4
         assert_eq!(m.count(), 4, "rectangle must shrink, not accrete");
-        assert!(!m.is_selected(2, 2), "the dropped corner must be deselected");
+        assert!(
+            !m.is_selected(2, 2),
+            "the dropped corner must be deselected"
+        );
     }
 
     #[test]

@@ -373,7 +373,12 @@ impl MenuBar {
         let mut row = HStack::new().spacing(2.0);
         row = Self::add_slot(ctx, row, &mut self.leading_slot, &mut self.leading_slot_ids);
         row = row.child(Spacer::new());
-        row = Self::add_slot(ctx, row, &mut self.trailing_slot, &mut self.trailing_slot_ids);
+        row = Self::add_slot(
+            ctx,
+            row,
+            &mut self.trailing_slot,
+            &mut self.trailing_slot_ids,
+        );
         let row_id = ctx.add(row);
         self.root_child_id = Some(row_id);
         self.bar_id = Some(row_id);
@@ -961,7 +966,12 @@ impl Widget for MenuBar {
         row = row.child(Spacer::new());
 
         // Trailing slot (memoized — the same widgets survive each rebuild)
-        row = Self::add_slot(ctx, row, &mut self.trailing_slot, &mut self.trailing_slot_ids);
+        row = Self::add_slot(
+            ctx,
+            row,
+            &mut self.trailing_slot,
+            &mut self.trailing_slot_ids,
+        );
 
         let row_id = ctx.add(row);
 
@@ -1551,7 +1561,10 @@ mod tests {
         };
         let light_rgb = rgb_of(bastyde_core::presets::intui::light().colors.text_primary);
         let dark_rgb = rgb_of(bastyde_core::presets::intui::dark().colors.text_primary);
-        assert_ne!(light_rgb, dark_rgb, "presets must differ for this test to mean anything");
+        assert_ne!(
+            light_rgb, dark_rgb,
+            "presets must differ for this test to mean anything"
+        );
 
         for use_model in [false, true] {
             let glyphs = light_menubar_trigger_glyph_rgb(use_model);
@@ -1803,7 +1816,11 @@ mod tests {
                 .trailing_slot(SlotMarker),
         );
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
-        assert_eq!(count_by_type(&t, "SlotMarker"), 2, "both slots before rebuild");
+        assert_eq!(
+            count_by_type(&t, "SlotMarker"),
+            2,
+            "both slots before rebuild"
+        );
         assert_eq!(count_by_type(&t, "MenuBarTrigger"), 1);
 
         t.arena_mark_needs_rebuild_for_testing(mb);
@@ -1824,10 +1841,9 @@ mod tests {
         // frame ever painted — a model bar's leading/trailing slots rendered for
         // zero frames. A single layout must leave both slots present.
         let file = bastyde_core::MenuItemId::next();
-        let model = crate::menu::MenuModel::new()
-            .menu_with_id(file, lit!("File"), |m| {
-                m.item(crate::menu::MenuEntry::new(lit!("New")))
-            });
+        let model = crate::menu::MenuModel::new().menu_with_id(file, lit!("File"), |m| {
+            m.item(crate::menu::MenuEntry::new(lit!("New")))
+        });
         let mut t = tree_with_window();
         let _mb = t.add(
             MenuBar::from_model(model.clone())
@@ -1866,10 +1882,12 @@ mod tests {
             m.item(crate::menu::MenuEntry::new(lit!("New")))
         });
         let mut t = tree_with_window();
-        t.add(MenuBar::from_model(model.clone()).leading_slot(CountingSlot {
-            builds: builds.clone(),
-            id_out: id_out.clone(),
-        }));
+        t.add(
+            MenuBar::from_model(model.clone()).leading_slot(CountingSlot {
+                builds: builds.clone(),
+                id_out: id_out.clone(),
+            }),
+        );
         t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
         let first_id = id_out.get().expect("slot built");
         assert_eq!(builds.get(), 1, "slot built exactly once initially");
@@ -2468,7 +2486,10 @@ mod tests {
         );
         t.advance_time(std::time::Duration::from_secs(1));
         t.layout(SizeProposal::exact(800.0, 100.0));
-        assert!(!t.is_active(bar), "bar dormant after the roll-back finishes");
+        assert!(
+            !t.is_active(bar),
+            "bar dormant after the roll-back finishes"
+        );
     }
 
     #[test]

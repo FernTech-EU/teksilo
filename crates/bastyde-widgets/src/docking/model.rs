@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bastyde_canvas::Size;
 use bastyde_core::signal::Signal;
-use bastyde_settings::Versioned;
 use bastyde_i18n::LocalizedString;
+use bastyde_settings::Versioned;
 use bastyde_tokens::Orientation;
 
 use crate::primitives::IconWidget;
@@ -938,7 +938,8 @@ impl DockingModel {
                         let tab = &mut st.tabs[ti];
                         let at = tab.panes.len();
                         tab.panes.push(id);
-                        tab.splitter.insert_pane(at, PaneDescriptor::new().stretch(1.0));
+                        tab.splitter
+                            .insert_pane(at, PaneDescriptor::new().stretch(1.0));
                         st.selected_tab = ti;
                     }
                 }
@@ -1019,7 +1020,8 @@ impl DockingModel {
                 let at = if before { pane_idx } else { pane_idx + 1 };
                 let at = at.min(tab.panes.len());
                 tab.panes.insert(at, id);
-                tab.splitter.insert_pane(at, PaneDescriptor::new().stretch(1.0));
+                tab.splitter
+                    .insert_pane(at, PaneDescriptor::new().stretch(1.0));
                 st.visible = true;
                 st.selected_tab = tab_idx;
             }
@@ -1059,7 +1061,8 @@ impl DockingModel {
             {
                 let at = tab.panes.len();
                 tab.panes.push(id);
-                tab.splitter.insert_pane(at, PaneDescriptor::new().stretch(1.0));
+                tab.splitter
+                    .insert_pane(at, PaneDescriptor::new().stretch(1.0));
                 st.visible = true;
                 st.selected_tab = tab_idx;
             }
@@ -1262,7 +1265,12 @@ impl DockingModel {
     }
 
     pub fn side_size(&self, side: DockSide) -> f32 {
-        self.0.borrow().sides.get(&side).map(|s| s.size).unwrap_or(0.0)
+        self.0
+            .borrow()
+            .sides
+            .get(&side)
+            .map(|s| s.size)
+            .unwrap_or(0.0)
     }
 
     pub fn side_min_size(&self, side: DockSide) -> f32 {
@@ -1279,10 +1287,12 @@ impl DockingModel {
             .borrow()
             .sides
             .get(&side)
-            .map(|s| if matches!(s.presentation, TabPresentation::Rail) {
-                s.rail_thickness
-            } else {
-                0.0
+            .map(|s| {
+                if matches!(s.presentation, TabPresentation::Rail) {
+                    s.rail_thickness
+                } else {
+                    0.0
+                }
             })
             .unwrap_or(0.0)
     }
@@ -1318,7 +1328,12 @@ impl DockingModel {
     }
 
     pub(crate) fn dock_closable(&self, id: DockWidgetId) -> bool {
-        self.0.borrow().docks.get(&id).map(|m| m.closable).unwrap_or(true)
+        self.0
+            .borrow()
+            .docks
+            .get(&id)
+            .map(|m| m.closable)
+            .unwrap_or(true)
     }
 
     /// Snapshot a side's tabs for rendering.
@@ -1410,7 +1425,10 @@ impl DockingModel {
                         hidden: tab.hidden,
                     })
                     .collect(),
-                rail_size: st.rail_size_sig.get().min(DockRailItemSize::Labeled as usize),
+                rail_size: st
+                    .rail_size_sig
+                    .get()
+                    .min(DockRailItemSize::Labeled as usize),
                 tab_display: st.tab_display_sig.get(),
             }
         };
@@ -1558,7 +1576,10 @@ mod tests {
         m.open_dock(id, DockOpenLocation::side(DockSide::Trailing));
         // Only one location; it moved to trailing.
         assert_eq!(m.dock_location(id).unwrap().side, DockSide::Trailing);
-        assert!(!m.is_side_visible(DockSide::Leading), "leading emptied → hidden");
+        assert!(
+            !m.is_side_visible(DockSide::Leading),
+            "leading emptied → hidden"
+        );
     }
 
     #[test]
@@ -1642,7 +1663,11 @@ mod tests {
         m.move_tab(tab_id, DockSide::Bottom, 0);
         assert_eq!(m.dock_location(a).unwrap().side, DockSide::Bottom);
         assert!(!m.is_side_visible(DockSide::Leading));
-        assert_eq!(splitter.orientation(), Orientation::Horizontal, "re-derived");
+        assert_eq!(
+            splitter.orientation(),
+            Orientation::Horizontal,
+            "re-derived"
+        );
     }
 
     #[test]
@@ -1803,8 +1828,16 @@ mod tests {
 
         m.split_into_tab(a, DockSide::Bottom, 0, 0, true);
         assert_eq!(m.version().get(), v, "no-op must not bump the version");
-        assert_eq!(m.dock_location(a).unwrap(), loc_before, "location unchanged");
-        assert_eq!(m.side_tabs(DockSide::Bottom)[0].panes.len(), 1, "still one pane");
+        assert_eq!(
+            m.dock_location(a).unwrap(),
+            loc_before,
+            "location unchanged"
+        );
+        assert_eq!(
+            m.side_tabs(DockSide::Bottom)[0].panes.len(),
+            1,
+            "still one pane"
+        );
 
         m.split_into_tab(a, DockSide::Bottom, 0, 0, false);
         assert_eq!(m.version().get(), v, "after-split self-drop also a no-op");
@@ -1843,7 +1876,11 @@ mod tests {
         m.open_dock(a, DockOpenLocation::side(DockSide::Bottom).new_tab());
         let v = m.version().get();
         m.promote_to_tab(a, DockSide::Bottom, 0);
-        assert_eq!(m.version().get(), v, "promoting an already-sole tab is a no-op");
+        assert_eq!(
+            m.version().get(),
+            v,
+            "promoting an already-sole tab is a no-op"
+        );
         assert_eq!(m.tab_count(DockSide::Bottom), 1);
     }
 
@@ -1862,7 +1899,11 @@ mod tests {
 
         m.split_into_tab(a, DockSide::Bottom, 0, 1, false); // drop A after B
 
-        assert_eq!(m.side_tabs(DockSide::Bottom)[0].panes.len(), 3, "still 3 panes");
+        assert_eq!(
+            m.side_tabs(DockSide::Bottom)[0].panes.len(),
+            3,
+            "still 3 panes"
+        );
         assert_eq!(m.dock_location(b).unwrap().pane_idx, 0, "B leads");
         assert_eq!(m.dock_location(a).unwrap().pane_idx, 1, "A lands after B");
         assert_eq!(m.dock_location(c).unwrap().pane_idx, 2, "C trails");
@@ -1959,7 +2000,10 @@ mod tests {
         use crate::docking::{DockRailItemSize, DockTabDisplay};
         let m = model();
         // Defaults.
-        assert_eq!(m.side_rail_size(DockSide::Leading), DockRailItemSize::Default);
+        assert_eq!(
+            m.side_rail_size(DockSide::Leading),
+            DockRailItemSize::Default
+        );
         assert_eq!(m.side_tab_display(DockSide::Leading), DockTabDisplay::Text);
 
         // The reactive signals the rail / strip bind to.
@@ -1967,19 +2011,32 @@ mod tests {
         let disp_sig = m.tab_display_signal(DockSide::Leading);
 
         m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
-        assert_eq!(m.side_rail_size(DockSide::Leading), DockRailItemSize::Compact);
-        assert_eq!(rail_sig.get(), 1, "signal reflects the change (drives rebuild)");
+        assert_eq!(
+            m.side_rail_size(DockSide::Leading),
+            DockRailItemSize::Compact
+        );
+        assert_eq!(
+            rail_sig.get(),
+            1,
+            "signal reflects the change (drives rebuild)"
+        );
         assert!(!DockRailItemSize::Compact.shows_label());
 
         // The third "icon + 90° label" rail mode.
         m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
-        assert_eq!(m.side_rail_size(DockSide::Leading), DockRailItemSize::Labeled);
+        assert_eq!(
+            m.side_rail_size(DockSide::Leading),
+            DockRailItemSize::Labeled
+        );
         assert_eq!(rail_sig.get(), 2, "labeled mode drives a rebuild too");
         assert!(DockRailItemSize::Labeled.shows_label());
         assert!(!DockRailItemSize::Default.shows_label());
 
         m.set_side_tab_display(DockSide::Leading, DockTabDisplay::IconText);
-        assert_eq!(m.side_tab_display(DockSide::Leading), DockTabDisplay::IconText);
+        assert_eq!(
+            m.side_tab_display(DockSide::Leading),
+            DockTabDisplay::IconText
+        );
         assert_eq!(disp_sig.get(), 2);
     }
 
@@ -2030,7 +2087,10 @@ mod tests {
         m2.import_state(&state);
 
         assert!(m2.is_tab_hidden(tb), "hidden activity restored");
-        assert_eq!(m2.side_rail_size(DockSide::Leading), DockRailItemSize::Labeled);
+        assert_eq!(
+            m2.side_rail_size(DockSide::Leading),
+            DockRailItemSize::Labeled
+        );
         assert_eq!(m2.side_tab_display(DockSide::Leading), DockTabDisplay::Icon);
     }
 }

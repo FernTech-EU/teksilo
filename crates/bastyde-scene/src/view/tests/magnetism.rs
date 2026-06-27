@@ -83,12 +83,18 @@ fn two_node_scene() -> (Scene, ItemId, MagnetId, ItemId, MagnetId) {
             .draggable(true),
         Point::new(0.0, 0.0),
     );
-    let am = scene.add_magnet(a, Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source));
+    let am = scene.add_magnet(
+        a,
+        Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source),
+    );
     let b = scene.add_item(
         RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(bastyde_tokens::Color::BLUE),
         Point::new(200.0, 0.0),
     );
-    let bm = scene.add_magnet(b, Magnet::new(Point::new(0.0, 20.0)).role(MagnetRole::Target));
+    let bm = scene.add_magnet(
+        b,
+        Magnet::new(Point::new(0.0, 20.0)).role(MagnetRole::Target),
+    );
     (scene, a, am, b, bm)
 }
 
@@ -300,7 +306,10 @@ fn multi_view_magnet_at_nodes_are_per_view() {
         RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(bastyde_tokens::Color::RED),
         Point::new(0.0, 0.0),
     );
-    let am = model.add_magnet(a, Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source));
+    let am = model.add_magnet(
+        a,
+        Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source),
+    );
 
     let (cfg, _rec) = recording_config(source_to_target);
     let mut tree = WidgetTree::new();
@@ -334,9 +343,15 @@ fn compute_item_snap_serves_heavyweight_consumer_path() {
     // drag wiring would call.
     let mut scene = Scene::new();
     let a = scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 40.0, 40.0));
-    let am = scene.add_magnet(a, Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source));
+    let am = scene.add_magnet(
+        a,
+        Magnet::new(Point::new(40.0, 20.0)).role(MagnetRole::Source),
+    );
     let b = scene.add_widget(FillWidget::new(), Rect::new(200.0, 0.0, 40.0, 40.0));
-    let bm = scene.add_magnet(b, Magnet::new(Point::new(0.0, 20.0)).role(MagnetRole::Target));
+    let bm = scene.add_magnet(
+        b,
+        Magnet::new(Point::new(0.0, 20.0)).role(MagnetRole::Target),
+    );
 
     // Heavyweight items are not snap-candidates of the SceneView drag
     // path, but compute_item_snap works on them directly.

@@ -640,8 +640,11 @@ impl Widget for DateTimeEdit {
         // natural width as the basis when unconstrained, so the widget reports
         // its natural mask width rather than collapsing; a bounded proposal
         // narrows it and the `Shrinkable` halves compress to fit.
-        let framed_in_vstack =
-            ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(sized_id));
+        let framed_in_vstack = ctx.add(
+            crate::primitives::Expand::horizontal()
+                .respect_intrinsic()
+                .child_id(sized_id),
+        );
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)

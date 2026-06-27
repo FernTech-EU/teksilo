@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use super::*;
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
+use super::*;
 
 impl SceneView {
     pub(super) fn register_pointer_handlers(
@@ -215,8 +215,13 @@ impl SceneView {
                         // with the on_drag drag-start hit-test below.
                         let over_draggable = {
                             let snap = bounds_snapshot.borrow();
-                            super::hit_draggable_item(&snap, *position, scene_pt, view_xform_signal.get())
-                                .is_some()
+                            super::hit_draggable_item(
+                                &snap,
+                                *position,
+                                scene_pt,
+                                view_xform_signal.get(),
+                            )
+                            .is_some()
                         };
                         let cursor = if drag_target_for_cursor.get().is_some() {
                             CursorIcon::Grabbing
@@ -645,9 +650,10 @@ impl SceneView {
                         &magnet_pending_keys,
                         self_id_for_keys,
                         ctx,
-                    ) {
-                        return EventResponse::Handled;
-                    }
+                    )
+                {
+                    return EventResponse::Handled;
+                }
                 let pan_axes_keys = pan_axes_sig_keys.get();
                 let zoomable_keys = zoomable_sig_keys.get() && !adopt_scene_size_keys;
                 let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
@@ -844,15 +850,16 @@ impl SceneView {
                         let zoom = xform.geometric_scale().max(1e-3);
                         let grab = cfg.capture_px / zoom;
                         if let Some(mid) = model_for_drag.nearest_magnet(scene_press, grab)
-                            && let Some(src) = model_for_drag.magnet_scene_pos(mid) {
-                                port_drag.replace(Some(PortDragState {
-                                    source: mid,
-                                    source_scene: src,
-                                    cursor_scene: scene_press,
-                                    snapped: None,
-                                }));
-                                return;
-                            }
+                            && let Some(src) = model_for_drag.magnet_scene_pos(mid)
+                        {
+                            port_drag.replace(Some(PortDragState {
+                                source: mid,
+                                source_scene: src,
+                                cursor_scene: scene_press,
+                                snapped: None,
+                            }));
+                            return;
+                        }
                     }
                     // Narrow-phase hit-test: target the topmost draggable
                     // item whose actual SHAPE (not just its AABB) contains the
@@ -971,15 +978,11 @@ impl SceneView {
                                 cursor,
                                 radius,
                                 &*cfg.predicate,
-                            )
-                                && let Some(conn) = build_connection(
-                                    &model_for_drag,
-                                    pd.source,
-                                    target.id,
-                                    payload,
-                                ) {
-                                    (cfg.on_connect)(&conn, ctx);
-                                }
+                            ) && let Some(conn) =
+                                build_connection(&model_for_drag, pd.source, target.id, payload)
+                            {
+                                (cfg.on_connect)(&conn, ctx);
+                            }
                         }
                         return;
                     }

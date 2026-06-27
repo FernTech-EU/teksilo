@@ -4,7 +4,7 @@
 //! Type-erased data source for `TreeView`.
 //!
 //! The tree analogue of [`ListSource`](crate::list_source::ListSource): wraps any
-//! [`TreeDataSource`](bastyde_data::TreeDataSource) behind a uniform set of
+//! [`TreeDataSource`] behind a uniform set of
 //! `Rc<dyn Fn(..)>` closures keyed on the **visible flat index**, so `TreeView`
 //! stays `TreeView<T>` (no `Key` / source type parameter) and works in indices
 //! throughout. Each closure resolves index → the source's `Key` (via `key_at`)
@@ -72,8 +72,7 @@ pub(crate) struct TreeDndLazy {
     /// Whether the row at `index` may begin a drag.
     pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
     /// `(payload, target_index, position, this_view_id) -> verdict`.
-    pub(crate) can_accept_fn:
-        Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
+    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
     pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
     /// Source-side completion: row at `index` was accepted elsewhere.
@@ -223,9 +222,7 @@ impl<T: 'static> TreeSource<T> {
                     build(item, &meta)
                 })
             }),
-            with_row_str_fn: Rc::new(move |index, f| {
-                s11.with_entry(index, |item, _entry| f(item))
-            }),
+            with_row_str_fn: Rc::new(move |index, f| s11.with_entry(index, |item, _entry| f(item))),
             meta_fn: Rc::new(move |index| {
                 s3.with_entry(index, |_item, entry| TreeRowMeta {
                     depth: entry.depth,
@@ -239,7 +236,9 @@ impl<T: 'static> TreeSource<T> {
                 }
             }),
             is_expanded_at_fn: Rc::new(move |index| {
-                s5.key_at(index).map(|k| s5.is_expanded(&k)).unwrap_or(false)
+                s5.key_at(index)
+                    .map(|k| s5.is_expanded(&k))
+                    .unwrap_or(false)
             }),
             parent_index_fn: Rc::new(move |index| {
                 let k = s6.key_at(index)?;
@@ -263,8 +262,7 @@ impl<T: 'static> TreeSource<T> {
                         let mut roots = 0usize;
                         let mut pos = 1usize;
                         for j in 0..n {
-                            let is_root =
-                                s7.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
+                            let is_root = s7.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
                             if is_root {
                                 roots += 1;
                                 if j == index {
@@ -285,8 +283,7 @@ impl<T: 'static> TreeSource<T> {
                     Some(p) => s10.child_keys(&p),
                     None => (0..s10.visible_count())
                         .filter_map(|j| {
-                            let is_root =
-                                s10.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
+                            let is_root = s10.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
                             if is_root { s10.key_at(j) } else { None }
                         })
                         .collect(),
@@ -333,11 +330,7 @@ impl<T: 'static> TreeSource<T> {
     }
 
     /// Read a `String` from the resident row at `index` (type-ahead label).
-    pub(crate) fn with_row_str(
-        &self,
-        index: usize,
-        f: &dyn Fn(&T) -> String,
-    ) -> Option<String> {
+    pub(crate) fn with_row_str(&self, index: usize, f: &dyn Fn(&T) -> String) -> Option<String> {
         (self.with_row_str_fn)(index, f)
     }
 

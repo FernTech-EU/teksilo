@@ -142,7 +142,7 @@ pub struct Accordion {
     /// Optional override for the header title's text style. Defaults to
     /// [`TextStyleRole::Body`] when `None`. Accepts a static
     /// [`TextStyle`](bastyde_tokens::TextStyle) or a
-    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    /// [`TextStyleRole`].
     title_style: Option<TextStyleProp>,
     /// Header orientation (default [`AccordionOrientation::Vertical`]).
     orientation: AccordionOrientation,
@@ -224,7 +224,7 @@ impl Accordion {
     /// disclosure label smaller (e.g. inside a tooltip) or to match a
     /// non-body typography role. Accepts a static
     /// [`TextStyle`](bastyde_tokens::TextStyle) or a
-    /// [`TextStyleRole`](bastyde_tokens::TextStyleRole).
+    /// [`TextStyleRole`].
     pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self {
         self.title_style = Some(style.into());
         self
@@ -310,8 +310,7 @@ impl Widget for Accordion {
             ctx.visible_when(chevron_left_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
             let title_id = ctx.add(
-                RotatedLabel::new(self.title.clone(), header_fg.clone())
-                    .style(title_style.clone()),
+                RotatedLabel::new(self.title.clone(), header_fg.clone()).style(title_style.clone()),
             );
             let spacer_id = ctx.add(Spacer::new());
             ctx.add(
@@ -513,7 +512,10 @@ impl Widget for Accordion {
         if self.fill {
             // Fill the allotted slot (the dock pane forces our bounds anyway).
             return proposal
-                .resolve(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0))
+                .resolve(
+                    proposal.width.unwrap_or(0.0),
+                    proposal.height.unwrap_or(0.0),
+                )
                 .into();
         }
         if let Some(root) = self.root_child_id
@@ -694,7 +696,10 @@ impl Widget for FillBody {
     ) -> bastyde_core::widget::LayoutResponse {
         // Fill the leftover the accordion proposes (bounded on both axes).
         proposal
-            .resolve(proposal.width.unwrap_or(0.0), proposal.height.unwrap_or(0.0))
+            .resolve(
+                proposal.width.unwrap_or(0.0),
+                proposal.height.unwrap_or(0.0),
+            )
             .into()
     }
 
@@ -991,7 +996,10 @@ mod tests {
         assert!(expanded.get(), "header tap re-expands");
 
         // A tap deep in the content area is absorbed — it must NOT toggle.
-        tap_at(&mut tree, bastyde_canvas::Point::new(b.x + 110.0, b.y + 200.0));
+        tap_at(
+            &mut tree,
+            bastyde_canvas::Point::new(b.x + 110.0, b.y + 200.0),
+        );
         assert!(expanded.get(), "content tap does not collapse the panel");
     }
 
@@ -1014,7 +1022,10 @@ mod tests {
         tree.layout(SizeProposal::exact(220.0, 300.0));
         let b = tree.bounds(acc);
         let from = bastyde_canvas::Point::new(b.x + 20.0, b.y + 6.0);
-        tree.drag(from, bastyde_canvas::Point::new(from.x + 130.0, from.y + 30.0));
+        tree.drag(
+            from,
+            bastyde_canvas::Point::new(from.x + 130.0, from.y + 30.0),
+        );
         assert!(dragged.get(), "dragging the header fires on_header_drag");
     }
 
@@ -1084,6 +1095,9 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(320.0, 120.0));
         let b = tree.bounds(acc);
-        assert!(b.width > 0.0 && b.height > 0.0, "horizontal accordion builds");
+        assert!(
+            b.width > 0.0 && b.height > 0.0,
+            "horizontal accordion builds"
+        );
     }
 }

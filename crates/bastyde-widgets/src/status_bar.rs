@@ -76,7 +76,7 @@ impl StatusBar {
     }
 
     /// Override the background surface. Accepts `Color`, a
-    /// [`SurfaceRole`](bastyde_tokens::SurfaceRole), or a `Signal<Color>`.
+    /// [`SurfaceRole`], or a `Signal<Color>`.
     /// Default (unset) is `SurfaceRole::Sunken`.
     pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
         self.background = Some(color.into());

@@ -119,15 +119,11 @@ impl WidgetTree {
         // focus rings, pointer input hides them. Updated at the dispatch root so
         // every handler (and the next paint) observes the current modality.
         match &event {
-            WidgetEvent::KeyDown { .. } => {
-                if !self.focus_visible.get() {
-                    self.focus_visible.set(true);
-                }
+            WidgetEvent::KeyDown { .. } if !self.focus_visible.get() => {
+                self.focus_visible.set(true);
             }
-            WidgetEvent::PointerDown { .. } => {
-                if self.focus_visible.get() {
-                    self.focus_visible.set(false);
-                }
+            WidgetEvent::PointerDown { .. } if self.focus_visible.get() => {
+                self.focus_visible.set(false);
             }
             _ => {}
         }
@@ -735,11 +731,9 @@ impl WidgetTree {
                 button: *button,
                 modifiers: *modifiers,
             },
-            WidgetEvent::PointerMove { position } => {
-                crate::gesture::RawPointerEvent::Move {
-                    position: *position,
-                }
-            }
+            WidgetEvent::PointerMove { position } => crate::gesture::RawPointerEvent::Move {
+                position: *position,
+            },
             WidgetEvent::PointerUp {
                 position,
                 button,
@@ -2706,14 +2700,26 @@ mod tests {
         // Focus inside the editor: the scoped binding wins over global.
         tree.focus(editor_inner);
         tree.press_key(Key::S, Modifiers::CTRL);
-        assert_eq!(scoped_fired.get(), 1, "in-focus scoped must win over global");
-        assert_eq!(global_fired.get(), 0, "global must yield to the scoped binding");
+        assert_eq!(
+            scoped_fired.get(),
+            1,
+            "in-focus scoped must win over global"
+        );
+        assert_eq!(
+            global_fired.get(),
+            0,
+            "global must yield to the scoped binding"
+        );
 
         // Focus outside the editor: global reclaims the chord.
         tree.focus(sidebar);
         tree.press_key(Key::S, Modifiers::CTRL);
         assert_eq!(scoped_fired.get(), 1, "scoped stays put outside its scope");
-        assert_eq!(global_fired.get(), 1, "global fires when focus leaves the scope");
+        assert_eq!(
+            global_fired.get(),
+            1,
+            "global fires when focus leaves the scope"
+        );
     }
 
     #[test]
@@ -3579,13 +3585,19 @@ mod tests {
         let mut ops = crate::window::NoopWindowOps;
 
         tree.dispatch_intent(source, Intent::new("test.global"), true, &mut ops);
-        assert!(fired.get(), "global action must fire from an unrelated source");
+        assert!(
+            fired.get(),
+            "global action must fire from an unrelated source"
+        );
 
         // And it is torn down with its owner.
         fired.set(false);
         tree.destroy_subtree(registrar);
         tree.dispatch_intent(source, Intent::new("test.global"), true, &mut ops);
-        assert!(!fired.get(), "destroying the owner must remove its global action");
+        assert!(
+            !fired.get(),
+            "destroying the owner must remove its global action"
+        );
     }
 
     // --- Transform-aware hit-testing -------------------------------------

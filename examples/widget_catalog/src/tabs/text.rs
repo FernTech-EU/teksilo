@@ -185,23 +185,25 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let search_id =
         ctx.add(MaxSize::width(FIELD_MAX_WIDTH).child(search_field(sigs.search_text.clone())));
     let password_signal = ctx.signal(String::new());
-    let password_id = ctx.add(MaxSize::width(FIELD_MAX_WIDTH).child(
-        PasswordField::new(password_signal)
-            .label(tr!(txt_password_label()))
-            .placeholder(tr!(txt_password_placeholder()))
-            .validator({
-                let msg = tr!(txt_password_validation());
-                move |s| {
-                    if s.chars().count() >= 8 {
-                        bastyde::widgets::ValidationOutcome::Valid
-                    } else {
-                        bastyde::widgets::ValidationOutcome::Invalid {
-                            message: msg.clone(),
+    let password_id = ctx.add(
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            PasswordField::new(password_signal)
+                .label(tr!(txt_password_label()))
+                .placeholder(tr!(txt_password_placeholder()))
+                .validator({
+                    let msg = tr!(txt_password_validation());
+                    move |s| {
+                        if s.chars().count() >= 8 {
+                            bastyde::widgets::ValidationOutcome::Valid
+                        } else {
+                            bastyde::widgets::ValidationOutcome::Invalid {
+                                message: msg.clone(),
+                            }
                         }
                     }
-                }
-            }),
-    ));
+                }),
+        ),
+    );
 
     bati!(ctx => VStack {
             spacing: 20.0

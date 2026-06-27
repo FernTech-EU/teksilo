@@ -137,7 +137,11 @@ pub(crate) fn activity_context_menu(
 /// The background menu (right-click empty rail / side chrome): the checkable
 /// activities list + the kind-appropriate size submenu. This is the affordance
 /// to restore an activity after every item has been hidden.
-pub(crate) fn background_menu(model: &DockingModel, side: DockSide, kind: DockMenuKind) -> MenuList {
+pub(crate) fn background_menu(
+    model: &DockingModel,
+    side: DockSide,
+    kind: DockMenuKind,
+) -> MenuList {
     let tabs = model.side_tabs(side);
     // The checklist is the hide / restore affordance — omit it when activity
     // hiding is locked (leaving just the appearance submenu).

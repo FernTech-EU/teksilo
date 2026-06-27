@@ -3575,7 +3575,10 @@ fn color_overrides_store_reactive_props() {
     let state = editor.state_handle();
     let st = state.borrow();
     assert!(st.text_color_prop.is_some(), "text_color stored as a prop");
-    assert!(st.caret_color_prop.is_some(), "caret_color stored as a prop");
+    assert!(
+        st.caret_color_prop.is_some(),
+        "caret_color stored as a prop"
+    );
     assert!(
         st.selection_color_prop.is_some(),
         "selection_color stored as a prop"

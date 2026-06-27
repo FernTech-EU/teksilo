@@ -229,13 +229,11 @@ impl Widget for SplitterHandle {
         let drag_pair = Rc::new(Cell::new(0.0_f32));
         let drag_gutter = Rc::new(Cell::new(gutter));
 
-        let mut handlers = HandlerSet::new()
-            .focusable(enabled)
-            .cursor(if enabled {
-                resize_cursor
-            } else {
-                CursorIcon::Default
-            });
+        let mut handlers = HandlerSet::new().focusable(enabled).cursor(if enabled {
+            resize_cursor
+        } else {
+            CursorIcon::Default
+        });
 
         // --- Pointer drag (anti-jump) + snap-to-collapse / restore ------
         {
@@ -279,8 +277,13 @@ impl Widget for SplitterHandle {
                         };
                         let container = container_bounds.get();
                         let rtl = is_rtl.get();
-                        let p_main =
-                            container_main(*position, self_bounds.get(), container, orientation, rtl);
+                        let p_main = container_main(
+                            *position,
+                            self_bounds.get(),
+                            container,
+                            orientation,
+                            rtl,
+                        );
                         let handle_center = pre + size_i + gut / 2.0;
                         drag_offset.set(p_main - handle_center);
                         drag_pre.set(pre);
@@ -306,8 +309,13 @@ impl Widget for SplitterHandle {
                         }
                         let container = container_bounds.get();
                         let rtl = is_rtl.get();
-                        let p_main =
-                            container_main(*position, self_bounds.get(), container, orientation, rtl);
+                        let p_main = container_main(
+                            *position,
+                            self_bounds.get(),
+                            container,
+                            orientation,
+                            rtl,
+                        );
                         let pre = drag_pre.get();
                         let pair = drag_pair.get();
                         let raw_i = p_main - drag_offset.get() - drag_gutter.get() / 2.0 - pre;
@@ -528,7 +536,11 @@ impl Widget for SplitterHandle {
                     return EventResponse::Ignored;
                 };
                 let target = if grow { size_i + step } else { size_i - step };
-                let new_i = if lo > hi { pair * 0.5 } else { target.clamp(lo, hi) };
+                let new_i = if lo > hi {
+                    pair * 0.5
+                } else {
+                    target.clamp(lo, hi)
+                };
                 commit_resize(&model, i, new_i, pair);
                 focus_origin.set(Some(FocusOrigin::Keyboard));
                 EventResponse::Handled
@@ -653,9 +665,7 @@ impl Widget for SplitterHandle {
             return;
         }
         builder.set_role(Role::Splitter);
-        builder.set_name(
-            bastyde_i18n::tr_widget!(a11y_splitter_divider_name()).resolve_now(),
-        );
+        builder.set_name(bastyde_i18n::tr_widget!(a11y_splitter_divider_name()).resolve_now());
 
         // Value = pane i's share of the pair, as a percent.
         let sizes = self.layout_sizes.borrow();

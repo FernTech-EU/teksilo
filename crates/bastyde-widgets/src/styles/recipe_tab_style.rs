@@ -447,15 +447,25 @@ mod tests {
 
     #[test]
     fn horizontal_outer_edge_is_top_and_rtl_invariant() {
-        let p = painter(TabBarOrientation::Horizontal, TabIndicatorPosition::OuterEdge);
+        let p = painter(
+            TabBarOrientation::Horizontal,
+            TabIndicatorPosition::OuterEdge,
+        );
         let expected = Rect::new(B.x, B.y, B.width, T);
         assert_eq!(p.indicator_rect(B, T, false), expected);
-        assert_eq!(p.indicator_rect(B, T, true), expected, "top edge is RTL-invariant");
+        assert_eq!(
+            p.indicator_rect(B, T, true),
+            expected,
+            "top edge is RTL-invariant"
+        );
     }
 
     #[test]
     fn horizontal_inner_edge_is_bottom() {
-        let p = painter(TabBarOrientation::Horizontal, TabIndicatorPosition::InnerEdge);
+        let p = painter(
+            TabBarOrientation::Horizontal,
+            TabIndicatorPosition::InnerEdge,
+        );
         let expected = Rect::new(B.x, B.bottom() - T, B.width, T);
         assert_eq!(p.indicator_rect(B, T, false), expected);
         assert_eq!(p.indicator_rect(B, T, true), expected);
@@ -465,7 +475,10 @@ mod tests {
     fn vertical_outer_edge_is_leading() {
         let p = painter(TabBarOrientation::Vertical, TabIndicatorPosition::OuterEdge);
         // LTR leading = left, RTL leading = right.
-        assert_eq!(p.indicator_rect(B, T, false), Rect::new(B.x, B.y, T, B.height));
+        assert_eq!(
+            p.indicator_rect(B, T, false),
+            Rect::new(B.x, B.y, T, B.height)
+        );
         assert_eq!(
             p.indicator_rect(B, T, true),
             Rect::new(B.right() - T, B.y, T, B.height)
@@ -480,6 +493,9 @@ mod tests {
             p.indicator_rect(B, T, false),
             Rect::new(B.right() - T, B.y, T, B.height)
         );
-        assert_eq!(p.indicator_rect(B, T, true), Rect::new(B.x, B.y, T, B.height));
+        assert_eq!(
+            p.indicator_rect(B, T, true),
+            Rect::new(B.x, B.y, T, B.height)
+        );
     }
 }

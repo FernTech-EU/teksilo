@@ -171,8 +171,8 @@ impl PathAtlas {
         // Only the just-completed frame's working set is worth keeping
         // (temporal locality); anything older is fragmentation to reclaim.
         let keep_from = self.current_frame - 1;
-        let near_full = self.shelf_y.saturating_add(self.shelf_height) + COMPACT_SLACK_PX
-            >= self.height;
+        let near_full =
+            self.shelf_y.saturating_add(self.shelf_height) + COMPACT_SLACK_PX >= self.height;
         let has_stale = self.cache.values().any(|r| r.last_used_frame < keep_from);
         if near_full && has_stale {
             self.compact(keep_from);
@@ -257,7 +257,15 @@ impl PathAtlas {
         }
 
         // Rasterize
-        let pixels = rasterize_path(path, color, style, fill_rule, bounds, geom_scale, stroke_scale)?;
+        let pixels = rasterize_path(
+            path,
+            color,
+            style,
+            fill_rule,
+            bounds,
+            geom_scale,
+            stroke_scale,
+        )?;
         let region = self.allocate_and_write(key, raster_w, raster_h, &pixels)?;
         Some(region)
     }
@@ -719,7 +727,15 @@ mod tests {
 
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, bounds, 1.0, 1.0);
+        let pixels = rasterize_path(
+            &path,
+            [1.0, 0.0, 0.0, 1.0],
+            &style,
+            FillRule::Winding,
+            bounds,
+            1.0,
+            1.0,
+        );
         assert!(pixels.is_some());
         let px = pixels.unwrap();
         assert_eq!(px.len(), 10 * 10 * 4);
@@ -738,7 +754,15 @@ mod tests {
 
         let style = StrokeStyle::solid(2.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, [0.0, 1.0, 0.0, 1.0], &style, FillRule::Winding, bounds, 1.0, 1.0);
+        let pixels = rasterize_path(
+            &path,
+            [0.0, 1.0, 0.0, 1.0],
+            &style,
+            FillRule::Winding,
+            bounds,
+            1.0,
+            1.0,
+        );
         assert!(pixels.is_some());
     }
 
@@ -811,10 +835,26 @@ mod tests {
         let bounds = [0.0, 0.0, 10.0, 10.0];
 
         let r1 = atlas
-            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(
+                &path,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                FillRule::Winding,
+                bounds,
+                1.0,
+                1.0,
+            )
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(
+                &path,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                FillRule::Winding,
+                bounds,
+                1.0,
+                1.0,
+            )
             .unwrap();
 
         // Same region (cache hit)
@@ -848,7 +888,15 @@ mod tests {
         let bounds = [0.0, 0.0, 8.0, 8.0];
 
         atlas.begin_frame(); // frame 1
-        atlas.lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, bounds, 1.0, 1.0);
+        atlas.lookup_or_rasterize(
+            &path,
+            [1.0, 0.0, 0.0, 1.0],
+            &style,
+            FillRule::Winding,
+            bounds,
+            1.0,
+            1.0,
+        );
 
         // Advance well past the entry
         atlas.begin_frame(); // frame 2
@@ -962,17 +1010,43 @@ mod tests {
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, [0.0, 0.0, 60.0, 60.0], 1.0, 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                FillRule::Winding,
+                [0.0, 0.0, 60.0, 60.0],
+                1.0,
+                1.0,
+            )
             .expect("p1 fits");
 
         // p2 can't fit, can't grow → must be skipped, not placed by moving p1.
-        let r2 =
-            atlas.lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, FillRule::Winding, [0.0, 0.0, 62.0, 62.0], 1.0, 1.0);
-        assert!(r2.is_none(), "an unfittable path is skipped, never placed by evicting a live entry");
+        let r2 = atlas.lookup_or_rasterize(
+            &p2,
+            [0.0, 1.0, 0.0, 1.0],
+            &style,
+            FillRule::Winding,
+            [0.0, 0.0, 62.0, 62.0],
+            1.0,
+            1.0,
+        );
+        assert!(
+            r2.is_none(),
+            "an unfittable path is skipped, never placed by evicting a live entry"
+        );
 
         // p1's region is byte-for-byte unchanged.
         let r1b = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, [0.0, 0.0, 60.0, 60.0], 1.0, 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                FillRule::Winding,
+                [0.0, 0.0, 60.0, 60.0],
+                1.0,
+                1.0,
+            )
             .expect("p1 still cached");
         assert_eq!(r1.x, r1b.x, "live entry must not move");
         assert_eq!(r1.y, r1b.y, "live entry must not move");
@@ -987,21 +1061,39 @@ mod tests {
         atlas.begin_frame(); // frame 1
 
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(8.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(8.0, 8.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(8.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(8.0, 8.0)));
         path.commands.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         atlas
-            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, FillRule::Winding, [0.0, 0.0, 8.0, 8.0], 1.0, 1.0)
+            .lookup_or_rasterize(
+                &path,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                FillRule::Winding,
+                [0.0, 0.0, 8.0, 8.0],
+                1.0,
+                1.0,
+            )
             .expect("entry fits");
         assert_eq!(atlas.cache.len(), 1);
 
         atlas.begin_frame(); // frame 2 — keep_from = 1, entry (used f1) kept
-        assert_eq!(atlas.cache.len(), 1, "entry from the last completed frame is kept");
+        assert_eq!(
+            atlas.cache.len(),
+            1,
+            "entry from the last completed frame is kept"
+        );
 
         atlas.begin_frame(); // frame 3 — keep_from = 2, entry (used f1) is stale
-        assert!(atlas.cache.is_empty(), "stale entry compacted away on begin_frame");
+        assert!(
+            atlas.cache.is_empty(),
+            "stale entry compacted away on begin_frame"
+        );
     }
 
     #[test]

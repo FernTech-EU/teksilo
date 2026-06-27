@@ -18,7 +18,7 @@
 //! children would pan and zoom along with the content. Instead — exactly like
 //! `ScrollArea` wraps arbitrary content and `SceneMinimap` is a sibling overlay
 //! — this widget hosts the `SceneView` as content plus two reusable
-//! [`ScrollBar`](bastyde_widgets::ScrollBar) children *outside* the transform,
+//! [`ScrollBar`] children *outside* the transform,
 //! and bridges the bars' scroll signals to the view's `pan_x`/`pan_y`.
 //!
 //! ## How the bridge works
@@ -409,8 +409,10 @@ impl Widget for SceneScrollView {
             // bindings are RepaintOnly; this drives the layout side.
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
-            self.pan_x.bind_to(self_id, registry, BindingLevel::Relayout);
-            self.pan_y.bind_to(self_id, registry, BindingLevel::Relayout);
+            self.pan_x
+                .bind_to(self_id, registry, BindingLevel::Relayout);
+            self.pan_y
+                .bind_to(self_id, registry, BindingLevel::Relayout);
             self.zoom.bind_to(self_id, registry, BindingLevel::Relayout);
             self.model
                 .pan_bounds_signal()
@@ -569,14 +571,19 @@ mod tests {
         let mut scene = Scene::new();
         scene.set_pan_bounds(Some(extent));
         scene.pan_axes(axes);
-        SceneView::new(scene).with_scroll_bars().scroll_bar_mode(mode)
+        SceneView::new(scene)
+            .with_scroll_bars()
+            .scroll_bar_mode(mode)
     }
 
     #[test]
     fn metrics_from_known_extent() {
         let mut tree = WidgetTree::new();
-        let scrollable =
-            bounded(Rect::new(0.0, 0.0, 800.0, 600.0), PanAxes::Both, ScrollBarMode::Overlay);
+        let scrollable = bounded(
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            PanAxes::Both,
+            ScrollBarMode::Overlay,
+        );
         let max_x = scrollable.max_scroll_x_signal().clone();
         let max_y = scrollable.max_scroll_y_signal().clone();
         let ratio_x = scrollable.viewport_ratio_x_signal().clone();
@@ -587,7 +594,11 @@ mod tests {
 
         assert!((max_x.get() - 400.0).abs() < 0.5, "max_x = {}", max_x.get());
         assert!((max_y.get() - 300.0).abs() < 0.5, "max_y = {}", max_y.get());
-        assert!((ratio_x.get() - 0.5).abs() < 0.01, "ratio_x = {}", ratio_x.get());
+        assert!(
+            (ratio_x.get() - 0.5).abs() < 0.01,
+            "ratio_x = {}",
+            ratio_x.get()
+        );
         assert!(pos_x.get().abs() < 0.5, "pos_x = {}", pos_x.get());
     }
 
@@ -595,17 +606,28 @@ mod tests {
     fn as_needed_hides_bar_when_content_fits() {
         // Extent smaller than the viewport → nothing to scroll.
         let mut tree = WidgetTree::new();
-        let scrollable =
-            bounded(Rect::new(0.0, 0.0, 200.0, 200.0), PanAxes::Both, ScrollBarMode::Overlay);
+        let scrollable = bounded(
+            Rect::new(0.0, 0.0, 200.0, 200.0),
+            PanAxes::Both,
+            ScrollBarMode::Overlay,
+        );
         let id = tree.add(scrollable);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         let children = tree.children(id);
         assert_eq!(children.len(), 3);
         let v_sb = tree.bounds(children[1]);
-        assert!(v_sb.width.abs() < 0.01 && v_sb.height.abs() < 0.01, "v_sb = {:?}", v_sb);
+        assert!(
+            v_sb.width.abs() < 0.01 && v_sb.height.abs() < 0.01,
+            "v_sb = {:?}",
+            v_sb
+        );
         let h_sb = tree.bounds(children[2]);
-        assert!(h_sb.width.abs() < 0.01 && h_sb.height.abs() < 0.01, "h_sb = {:?}", h_sb);
+        assert!(
+            h_sb.width.abs() < 0.01 && h_sb.height.abs() < 0.01,
+            "h_sb = {:?}",
+            h_sb
+        );
     }
 
     #[test]
@@ -655,7 +677,11 @@ mod tests {
         );
         // Horizontal bar still present.
         let h_sb = tree.bounds(children[2]);
-        assert!(h_sb.width > 0.0, "horizontal bar should be visible, got {:?}", h_sb);
+        assert!(
+            h_sb.width > 0.0,
+            "horizontal bar should be visible, got {:?}",
+            h_sb
+        );
     }
 
     #[test]
@@ -670,12 +696,20 @@ mod tests {
         let mut tree = WidgetTree::new();
         let _id = tree.add(scrollable);
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert!((max_x.get() - 400.0).abs() < 0.5, "zoom=1 max_x = {}", max_x.get());
+        assert!(
+            (max_x.get() - 400.0).abs() < 0.5,
+            "zoom=1 max_x = {}",
+            max_x.get()
+        );
 
         zoom.set(2.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
         // content width = 800 * 2 = 1600; max_x = 1600 - 400 = 1200.
-        assert!((max_x.get() - 1200.0).abs() < 0.5, "zoom=2 max_x = {}", max_x.get());
+        assert!(
+            (max_x.get() - 1200.0).abs() < 0.5,
+            "zoom=2 max_x = {}",
+            max_x.get()
+        );
     }
 
     /// The load-bearing interaction direction: writing `scroll_pos_x` (what a

@@ -71,10 +71,7 @@ pub(crate) fn next_view_id() -> usize {
 /// a `ListDataSource::can_accept` / `accept_drop` understands. `None` for an
 /// empty list. Insertion *before* row `i` is `(i, Before)`; insertion past the
 /// end is `(len-1, After)`.
-pub(crate) fn flat_insertion_target(
-    insertion: usize,
-    len: usize,
-) -> Option<(usize, DropPosition)> {
+pub(crate) fn flat_insertion_target(insertion: usize, len: usize) -> Option<(usize, DropPosition)> {
     if len == 0 {
         None
     } else if insertion >= len {

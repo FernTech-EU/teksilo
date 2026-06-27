@@ -609,7 +609,7 @@ impl SceneView {
     }
 
     /// Enable magnetism on this view with the given
-    /// [`MagnetismConfig`](crate::MagnetismConfig).
+    /// [`MagnetismConfig`].
     ///
     /// Once installed, this view's lightweight item drags snap their
     /// magnets onto compatible magnets on other items, magnet handles

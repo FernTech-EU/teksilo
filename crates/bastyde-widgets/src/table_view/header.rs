@@ -418,7 +418,8 @@ impl Widget for HeaderCell {
                         // the filter popover (out-of-cell y) must leave the
                         // cursor alone, or the x-only resize-zone test below
                         // paints `ColResize` across the popover.
-                        let in_cell_y = cell_h <= 0.0 || (position.y >= 0.0 && position.y <= cell_h);
+                        let in_cell_y =
+                            cell_h <= 0.0 || (position.y >= 0.0 && position.y <= cell_h);
                         if resizable && in_cell_y {
                             let w = widths_handle
                                 .borrow()

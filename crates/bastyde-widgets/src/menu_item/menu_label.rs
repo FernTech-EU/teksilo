@@ -202,7 +202,7 @@ impl Widget for MenuLabel {
         let cur_gen = canvas
             .text_backend()
             .map(|b| b.borrow().layout_cache_generation());
-        let gen_ok = cur_gen.map_or(true, |c| c == *self.last_cache_gen.borrow());
+        let gen_ok = cur_gen.is_none_or(|c| c == *self.last_cache_gen.borrow());
         let mut layout = if gen_ok {
             self.last_layout.borrow().clone()
         } else {

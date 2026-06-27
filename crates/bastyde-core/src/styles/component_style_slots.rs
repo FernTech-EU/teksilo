@@ -36,9 +36,8 @@ use crate::styles::{
     SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
     SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
     SharedSplitButtonStyle, SharedSplitterStyle, SharedStandardItemStyle, SharedTabStyle,
-    SharedTableStyle,
-    SharedTextInputStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
-    SharedWebViewStyle,
+    SharedTableStyle, SharedTextInputStyle, SharedToastStyle, SharedToggleStyle,
+    SharedTooltipStyle, SharedWebViewStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per

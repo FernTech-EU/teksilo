@@ -413,8 +413,11 @@ impl Widget for PasswordField {
         // (Mirrors `TextInput`.)
         let text_column_id = if self.placeholder.resolve_now().is_empty() {
             ctx.add(
-                Shrinkable::new()
-                    .child(Expand::horizontal().respect_intrinsic().child_id(padded_field)),
+                Shrinkable::new().child(
+                    Expand::horizontal()
+                        .respect_intrinsic()
+                        .child_id(padded_field),
+                ),
             )
         } else {
             let ph = TextWidget::new(self.placeholder.clone())

@@ -22,7 +22,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Rect, SizeProposal};
-use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
@@ -35,15 +34,16 @@ use bastyde_core::widget::{
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_tokens::{BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::icon_button::{IconButton, IconButtonSize};
-use crate::styles::recipe_icon_button_style::ICON_BUTTON_CORNER_RADIUS;
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
+use crate::styles::recipe_icon_button_style::ICON_BUTTON_CORNER_RADIUS;
 use crate::tool_box::RotatedLabel;
 
 use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
@@ -146,7 +146,7 @@ impl DockRail {
     }
 
     /// Override the rail strip's background. Accepts `Color`, a
-    /// [`SurfaceRole`](bastyde_tokens::SurfaceRole), or a `Signal<Color>`.
+    /// [`SurfaceRole`], or a `Signal<Color>`.
     /// Default (unset) is `SurfaceRole::Sunken`.
     pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
         self.background = Some(color.into());
@@ -163,7 +163,7 @@ impl DockRail {
     }
 
     /// Like [`divider`](Self::divider), but with an explicit colour. Accepts
-    /// `Color`, a [`BorderRole`](bastyde_tokens::BorderRole), or a
+    /// `Color`, a [`BorderRole`], or a
     /// `Signal<Color>`.
     pub fn divider_color(mut self, color: impl Into<ColorProp>) -> Self {
         self.divider = Some(color.into());
@@ -465,7 +465,11 @@ impl Widget for DockActivityBar {
         ctx.apply_self_handlers(
             HandlerSet::new()
                 .context_menu(move |_pos, _ctx| {
-                    Some(Box::new(background_menu(&menu_model, menu_side, DockMenuKind::Rail)))
+                    Some(Box::new(background_menu(
+                        &menu_model,
+                        menu_side,
+                        DockMenuKind::Rail,
+                    )))
                 })
                 .on_drag_hover(move |payload, pos, _ctx| {
                     if dropped_dock_tab(payload).is_none() && dropped_dock_widget(payload).is_none()
@@ -474,8 +478,11 @@ impl Widget for DockActivityBar {
                         return DropFeedback::NoFeedback;
                     }
                     let bar = self_bounds_hover.get();
-                    let shown =
-                        shown_items(&item_bounds_hover, &model_indices_hover, &visible_count_hover);
+                    let shown = shown_items(
+                        &item_bounds_hover,
+                        &model_indices_hover,
+                        &visible_count_hover,
+                    );
                     let (_, line_y) = rail_insertion(pos.y, &shown, bar.y, bar.height);
                     indicator_hover.set(Some(line_y));
                     DropFeedback::InsertionLine {
@@ -757,8 +764,11 @@ impl RailDropIndicator {
 
 impl Widget for RailDropIndicator {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        self.y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         ctx.apply_self_handlers(HandlerSet::new().event_pass_through(true));
         vec![]
     }
@@ -1354,7 +1364,12 @@ impl Widget for DockOverflowRow {
                 .single_line(),
         );
         let spacer = ctx.add(Spacer::new());
-        let row = ctx.add(HStack::new().spacing(8.0).add_child(label).add_child(spacer));
+        let row = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .add_child(label)
+                .add_child(spacer),
+        );
         let content = ctx.add(Padding::symmetric(6.0, 10.0).child_id(row));
 
         // Backing surface: a subtle highlight on focus + the keyboard
@@ -1511,10 +1526,26 @@ mod tests {
             (1, Rect::new(100.0, 142.0, 40.0, 40.0)),
             (2, Rect::new(100.0, 184.0, 40.0, 40.0)),
         ];
-        assert_eq!(rail_insertion(5.0, &items, 100.0, 300.0).0, 0, "above all → front");
-        assert_eq!(rail_insertion(40.0, &items, 100.0, 300.0).0, 1, "past item 0 → 1");
-        assert_eq!(rail_insertion(70.0, &items, 100.0, 300.0).0, 2, "past item 1 → 2");
-        assert_eq!(rail_insertion(290.0, &items, 100.0, 300.0).0, 3, "below all → end");
+        assert_eq!(
+            rail_insertion(5.0, &items, 100.0, 300.0).0,
+            0,
+            "above all → front"
+        );
+        assert_eq!(
+            rail_insertion(40.0, &items, 100.0, 300.0).0,
+            1,
+            "past item 0 → 1"
+        );
+        assert_eq!(
+            rail_insertion(70.0, &items, 100.0, 300.0).0,
+            2,
+            "past item 1 → 2"
+        );
+        assert_eq!(
+            rail_insertion(290.0, &items, 100.0, 300.0).0,
+            3,
+            "below all → end"
+        );
     }
 
     #[test]

@@ -2387,7 +2387,7 @@ impl BastydeAppBuilder {
         self
     }
 
-    /// Register an app-wide [`DefaultPostRoot`] hook that wraps every
+    /// Register an app-wide [`DefaultPostRoot`](crate::DefaultPostRoot) hook that wraps every
     /// window's root after its `root_builder` runs.
     ///
     /// Unlike `app_state(DefaultPostRoot::new(..))` — which stores a single

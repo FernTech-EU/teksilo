@@ -352,7 +352,12 @@ pub fn compute_rects(
     };
 
     // Outer region rects (the whole side band).
-    let leading_region = Rect::new(x, leading_y_top, l, (leading_y_bottom - leading_y_top).max(0.0));
+    let leading_region = Rect::new(
+        x,
+        leading_y_top,
+        l,
+        (leading_y_bottom - leading_y_top).max(0.0),
+    );
     let trailing_region = Rect::new(
         x + w - r,
         trailing_y_top,
@@ -384,11 +389,22 @@ pub fn compute_rects(
 /// as a **column on the leading cross-edge** (left in LTR, right in RTL) and
 /// split content / handle along the band depth to its inboard side. `total` is
 /// the (possibly clamped) band extent.
-fn split_side(side: DockSide, region: Rect, layout: &SideLayout, total: f32, rtl: bool) -> SideRects {
+fn split_side(
+    side: DockSide,
+    region: Rect,
+    layout: &SideLayout,
+    total: f32,
+    rtl: bool,
+) -> SideRects {
     if total <= EPS || region.width <= 0.0 || region.height <= 0.0 {
         // Rail-only sides still get a rail rect when there is room.
         if layout.rail_extent() > EPS && region.width > 0.0 && region.height > 0.0 {
-            return rail_only(side, region, layout.rail_extent().min(extent_along(side, region)), rtl);
+            return rail_only(
+                side,
+                region,
+                layout.rail_extent().min(extent_along(side, region)),
+                rtl,
+            );
         }
         return SideRects::ZERO;
     }
@@ -427,7 +443,11 @@ fn split_side(side: DockSide, region: Rect, layout: &SideLayout, total: f32, rtl
                 (region.x, region.x + rail_w)
             };
             let raw_depth = layout.content_extent() + layout.gutter_extent();
-            let scale = if raw_depth > 0.0 { total / raw_depth } else { 0.0 };
+            let scale = if raw_depth > 0.0 {
+                total / raw_depth
+            } else {
+                0.0
+            };
             let content = layout.content_extent() * scale;
             let gutter = layout.gutter_extent() * scale;
             let rail = Rect::new(rail_x, region.y, rail_w, region.height);
@@ -464,9 +484,18 @@ fn rail_only(side: DockSide, region: Rect, rail: f32, rtl: bool) -> SideRects {
     let mut rects = SideRects::ZERO;
     rects.rail = match side {
         DockSide::Leading => Rect::new(region.x, region.y, rail, region.height),
-        DockSide::Trailing => Rect::new(region.x + region.width - rail, region.y, rail, region.height),
+        DockSide::Trailing => Rect::new(
+            region.x + region.width - rail,
+            region.y,
+            rail,
+            region.height,
+        ),
         DockSide::Top | DockSide::Bottom => {
-            let rail_x = if rtl { region.x + region.width - rail } else { region.x };
+            let rail_x = if rtl {
+                region.x + region.width - rail
+            } else {
+                region.x
+            };
             Rect::new(rail_x, region.y, rail, region.height)
         }
     };
@@ -527,7 +556,10 @@ mod tests {
         );
         assert_eq!(r.leading.content.x, 0.0);
         assert!((r.leading.content.width - 200.0).abs() < 0.01);
-        assert!((r.center.x - 206.0).abs() < 0.01, "center after content+gutter");
+        assert!(
+            (r.center.x - 206.0).abs() < 0.01,
+            "center after content+gutter"
+        );
         assert!((r.center.width - (1000.0 - 206.0)).abs() < 0.01);
         assert_eq!(r.trailing, SideRects::ZERO);
     }
@@ -569,7 +601,10 @@ mod tests {
         );
         // Leading now extends to y=0; top starts after the leading column.
         assert_eq!(r.leading.content.y, 0.0);
-        assert!((r.top.content.x - 206.0).abs() < 0.01, "top pushed right of leading");
+        assert!(
+            (r.top.content.x - 206.0).abs() < 0.01,
+            "top pushed right of leading"
+        );
     }
 
     #[test]
@@ -586,7 +621,10 @@ mod tests {
             owners,
             false,
         );
-        assert_eq!(r.top.content.x, 0.0, "top fills since its corner-owner is gone");
+        assert_eq!(
+            r.top.content.x, 0.0,
+            "top fills since its corner-owner is gone"
+        );
     }
 
     #[test]
@@ -603,7 +641,10 @@ mod tests {
             false,
         );
         assert!((r.leading.content.width - 100.0).abs() < 0.01);
-        assert!(r.leading.handle.width > 0.0, "gutter present while expanding");
+        assert!(
+            r.leading.handle.width > 0.0,
+            "gutter present while expanding"
+        );
     }
 
     #[test]
@@ -628,7 +669,10 @@ mod tests {
         assert!((r.leading.rail.width - 48.0).abs() < 0.01, "rail persists");
         assert!(r.leading.content.width.abs() < 0.01, "content hidden");
         assert!(r.leading.handle.width.abs() < 0.01, "no handle when hidden");
-        assert!((r.center.x - 48.0).abs() < 0.01, "center inset only by rail");
+        assert!(
+            (r.center.x - 48.0).abs() < 0.01,
+            "center inset only by rail"
+        );
     }
 
     #[test]
@@ -705,7 +749,10 @@ mod tests {
             CornerOwners::default(),
             true,
         );
-        assert!((r.top.rail.x - (1000.0 - 48.0)).abs() < 0.01, "rail on the right in RTL");
+        assert!(
+            (r.top.rail.x - (1000.0 - 48.0)).abs() < 0.01,
+            "rail on the right in RTL"
+        );
         assert_eq!(r.top.content.x, 0.0, "content on the left in RTL");
     }
 
@@ -746,7 +793,10 @@ mod tests {
         // right of the rail; content is below it.
         assert!((r.bottom.handle.x - 48.0).abs() < 0.01);
         assert!((r.bottom.handle.y - (800.0 - 106.0)).abs() < 0.01);
-        assert!(r.bottom.content.y > r.bottom.handle.y, "content below the inboard handle");
+        assert!(
+            r.bottom.content.y > r.bottom.handle.y,
+            "content below the inboard handle"
+        );
     }
 
     #[test]

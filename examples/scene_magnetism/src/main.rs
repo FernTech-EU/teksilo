@@ -123,10 +123,34 @@ fn add_wire(model: &SceneModel, conn: &MagnetConnection) {
 
 fn build_view() -> SceneView {
     let model = SceneModel::new();
-    add_node(&model, 60.0, 120.0, "Input", Color::new(0.30, 0.45, 0.85, 1.0));
-    add_node(&model, 360.0, 50.0, "Blur", Color::new(0.55, 0.40, 0.80, 1.0));
-    add_node(&model, 360.0, 220.0, "Sharpen", Color::new(0.80, 0.50, 0.35, 1.0));
-    add_node(&model, 660.0, 140.0, "Output", Color::new(0.30, 0.65, 0.45, 1.0));
+    add_node(
+        &model,
+        60.0,
+        120.0,
+        "Input",
+        Color::new(0.30, 0.45, 0.85, 1.0),
+    );
+    add_node(
+        &model,
+        360.0,
+        50.0,
+        "Blur",
+        Color::new(0.55, 0.40, 0.80, 1.0),
+    );
+    add_node(
+        &model,
+        360.0,
+        220.0,
+        "Sharpen",
+        Color::new(0.80, 0.50, 0.35, 1.0),
+    );
+    add_node(
+        &model,
+        660.0,
+        140.0,
+        "Output",
+        Color::new(0.30, 0.65, 0.45, 1.0),
+    );
 
     let on_connect_model = model.clone();
     let config = MagnetismConfig::new(predicate).on_connect(move |conn, _ctx| {

@@ -49,7 +49,11 @@ pub fn map_index_after_move(idx: usize, from: usize, to: usize, count: usize) ->
         return to + (idx - from);
     }
     // Everyone else: apply the removal of the block, then its reinsertion.
-    let after_remove = if idx >= from + count { idx - count } else { idx };
+    let after_remove = if idx >= from + count {
+        idx - count
+    } else {
+        idx
+    };
     if after_remove >= to {
         after_remove + count
     } else {

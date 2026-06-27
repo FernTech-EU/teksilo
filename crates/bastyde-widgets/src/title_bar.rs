@@ -745,8 +745,7 @@ mod tests {
         );
 
         tree.layout(SizeProposal::exact(900.0, 600.0));
-        let light_glyphs: Vec<[f32; 4]> =
-            tree.render().glyphs.iter().map(|g| g.color).collect();
+        let light_glyphs: Vec<[f32; 4]> = tree.render().glyphs.iter().map(|g| g.color).collect();
         assert!(
             !light_glyphs.is_empty(),
             "control glyphs (—, □, ×) should have rendered"

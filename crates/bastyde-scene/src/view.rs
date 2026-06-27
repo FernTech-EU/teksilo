@@ -352,8 +352,7 @@ fn hit_draggable_item(
             if !screen_rect.contains(screen_pt) {
                 continue;
             }
-            let local_pt =
-                Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
+            let local_pt = Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
             // Screen-anchored items ignore the view transform → unit scale.
             if (entry.shape_contains)(local_pt, 1.0) {
                 return Some(entry.id);

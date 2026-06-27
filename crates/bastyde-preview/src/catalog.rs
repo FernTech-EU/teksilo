@@ -222,7 +222,8 @@ macro_rules! __register_widget_catalog_with {
                 }
                 fn icon(
                     &self,
-                ) -> ::std::option::Option<::std::boxed::Box<dyn $crate::__widget::Widget>> {
+                ) -> ::std::option::Option<::std::boxed::Box<dyn $crate::__widget::Widget>>
+                {
                     <$t as $crate::WidgetCatalog>::icon()
                 }
                 fn category(&self) -> $crate::WidgetCategory {

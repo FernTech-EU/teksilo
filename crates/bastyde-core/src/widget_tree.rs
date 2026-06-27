@@ -2661,7 +2661,9 @@ impl WidgetTree {
     /// Current traversal-scope policy on `id`, if any. For tests asserting
     /// the scope marker contract.
     pub fn traversal_scope(&self, id: WidgetId) -> Option<crate::focus::TraversalScopePolicy> {
-        self.arena.get(id).and_then(|node| node.node_traversal_scope)
+        self.arena
+            .get(id)
+            .and_then(|node| node.node_traversal_scope)
     }
 
     // --- Theme override ---

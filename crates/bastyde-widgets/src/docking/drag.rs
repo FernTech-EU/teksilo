@@ -11,8 +11,8 @@ use bastyde_core::DragPayload;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{BorderRole, SurfaceRole};
@@ -118,8 +118,11 @@ impl DockDropOverlay {
 
 impl Widget for DockDropOverlay {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        self.zone
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.zone.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         // Pure decoration: let pointer events pass straight through to the
         // content below, so the panel stays interactive even though the
         // overlay sits on top of it in the ZStack.
@@ -192,12 +195,18 @@ mod tests {
     #[test]
     fn edges_snap_to_splits() {
         let s = Size::new(400.0, 300.0);
-        assert_eq!(compute_drop_zone(Point::new(5.0, 150.0), s), DropZone::SplitLeading);
+        assert_eq!(
+            compute_drop_zone(Point::new(5.0, 150.0), s),
+            DropZone::SplitLeading
+        );
         assert_eq!(
             compute_drop_zone(Point::new(395.0, 150.0), s),
             DropZone::SplitTrailing
         );
-        assert_eq!(compute_drop_zone(Point::new(200.0, 5.0), s), DropZone::SplitTop);
+        assert_eq!(
+            compute_drop_zone(Point::new(200.0, 5.0), s),
+            DropZone::SplitTop
+        );
         assert_eq!(
             compute_drop_zone(Point::new(200.0, 295.0), s),
             DropZone::SplitBottom
@@ -208,7 +217,13 @@ mod tests {
     fn edge_threshold_capped_keeps_center_reachable_on_small_pane() {
         // A 500-px-wide pane: 20% = 100, but the cap is 48, so x=60 is centre.
         let s = Size::new(500.0, 80.0);
-        assert_eq!(compute_drop_zone(Point::new(60.0, 40.0), s), DropZone::Center);
-        assert_eq!(compute_drop_zone(Point::new(20.0, 40.0), s), DropZone::SplitLeading);
+        assert_eq!(
+            compute_drop_zone(Point::new(60.0, 40.0), s),
+            DropZone::Center
+        );
+        assert_eq!(
+            compute_drop_zone(Point::new(20.0, 40.0), s),
+            DropZone::SplitLeading
+        );
     }
 }

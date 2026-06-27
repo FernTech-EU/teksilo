@@ -177,7 +177,7 @@ pub struct TreeView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while this view (root or descendant) holds keyboard focus — the
-    /// root's inclusive [`BuildContext::view_focus_active`] signal, bound
+    /// root's inclusive [`BuildContext::view_focus_active`](bastyde_core::BuildContext::view_focus_active) signal, bound
     /// `RepaintOnly`. With [`focus_visible`](Self::focus_visible) it drives the
     /// **container focus ring**: when the view is Tab-focused but nothing is
     /// selected, no row ring shows, so the whole view outlines itself instead —
@@ -984,7 +984,11 @@ impl<T: 'static> Widget for TreeView<T> {
                                 let target = (m.row_top(current) - vh).max(0.0);
                                 m.row_at(target)
                             };
-                            Some(if r == current { current.saturating_sub(1) } else { r })
+                            Some(if r == current {
+                                current.saturating_sub(1)
+                            } else {
+                                r
+                            })
                         }
                         Key::Enter => {
                             // Enter activates the focused row (open / commit).
@@ -1345,9 +1349,8 @@ impl<T: 'static> Widget for TreeView<T> {
                             crate::data_views::ActivateOn::SingleClick => {
                                 HandlerSet::new().on_tap(move |_tap, _ctx| cb(activate_index))
                             }
-                            crate::data_views::ActivateOn::DoubleClick => {
-                                HandlerSet::new().on_double_tap(move |_tap, _ctx| cb(activate_index))
-                            }
+                            crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
+                                .on_double_tap(move |_tap, _ctx| cb(activate_index)),
                         };
                         ctx.apply_handlers(child_id, handlers);
                     }
@@ -1381,7 +1384,8 @@ impl<T: 'static> Widget for TreeView<T> {
                                             PREVIEW_WIDTH,
                                             h,
                                             rd(flat_idx, item, m, false),
-                                        )) as Box<dyn Widget>
+                                        ))
+                                            as Box<dyn Widget>
                                     });
                                 if let Some(preview) = preview_opt {
                                     ctx.start_drag_with_preview(drag_self_id, payload, preview);
@@ -1974,7 +1978,11 @@ mod tests {
         assert_eq!(selection.selected_indices(), vec![2], "'c' → Cherry");
         wtree.press_key(Key::B, Modifiers::NONE);
         // "cb" matches nothing → selection unchanged.
-        assert_eq!(selection.selected_indices(), vec![2], "'cb' no match, stays");
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "'cb' no match, stays"
+        );
     }
 
     // --- Chevron-vs-selection regression tests ---
@@ -2921,7 +2929,10 @@ mod tests {
         // Delete A1 → the slice reflattens (version bump) and prune drops the
         // orphaned key; B1 (still present) survives.
         model.remove(a1);
-        assert!(!keyed.is_selected(&a1), "deleted node is pruned from selection");
+        assert!(
+            !keyed.is_selected(&a1),
+            "deleted node is pruned from selection"
+        );
         assert!(keyed.is_selected(&b1), "surviving node stays selected");
     }
 
@@ -2948,10 +2959,26 @@ mod tests {
         fn new() -> Self {
             // root1(1) { a(2), b(3) }   root2(4)
             let nodes = vec![
-                MockNode { id: 1, parent: None, label: "root1".into() },
-                MockNode { id: 2, parent: Some(1), label: "a".into() },
-                MockNode { id: 3, parent: Some(1), label: "b".into() },
-                MockNode { id: 4, parent: None, label: "root2".into() },
+                MockNode {
+                    id: 1,
+                    parent: None,
+                    label: "root1".into(),
+                },
+                MockNode {
+                    id: 2,
+                    parent: Some(1),
+                    label: "a".into(),
+                },
+                MockNode {
+                    id: 3,
+                    parent: Some(1),
+                    label: "b".into(),
+                },
+                MockNode {
+                    id: 4,
+                    parent: None,
+                    label: "root2".into(),
+                },
             ];
             Self {
                 nodes: RefCell::new(nodes),
@@ -2961,7 +2988,11 @@ mod tests {
             }
         }
         fn parent_of(&self, id: i64) -> Option<i64> {
-            self.nodes.borrow().iter().find(|n| n.id == id).and_then(|n| n.parent)
+            self.nodes
+                .borrow()
+                .iter()
+                .find(|n| n.id == id)
+                .and_then(|n| n.parent)
         }
         fn exists(&self, id: i64) -> bool {
             self.nodes.borrow().iter().any(|n| n.id == id)
@@ -3005,7 +3036,9 @@ mod tests {
             d
         }
         fn remove(&self, id: i64) {
-            self.nodes.borrow_mut().retain(|n| n.id != id && n.parent != Some(id));
+            self.nodes
+                .borrow_mut()
+                .retain(|n| n.id != id && n.parent != Some(id));
             self.bump();
         }
         fn bump(&self) {
@@ -3046,7 +3079,12 @@ mod tests {
             self.parent_of(*key)
         }
         fn child_keys(&self, key: &i64) -> Vec<i64> {
-            self.nodes.borrow().iter().filter(|n| n.parent == Some(*key)).map(|n| n.id).collect()
+            self.nodes
+                .borrow()
+                .iter()
+                .filter(|n| n.parent == Some(*key))
+                .map(|n| n.id)
+                .collect()
         }
         fn version_signal(&self) -> Signal<u64> {
             self.version.clone()
@@ -3088,7 +3126,9 @@ mod tests {
             if src == commit.target || self.is_descendant(commit.target, src) {
                 return false;
             }
-            self.accept_log.borrow_mut().push((src, commit.target, commit.position));
+            self.accept_log
+                .borrow_mut()
+                .push((src, commit.target, commit.position));
             self.bump();
             true
         }
@@ -3118,7 +3158,12 @@ mod tests {
         );
         let editor = tree.add(FixedLeaf(100.0, 24.0).focusable(true));
         // Outer shell holds both, and is itself focusable (like `App`).
-        let _shell = tree.add(ZStack::new().add_child(tv).add_child(editor).focusable(true));
+        let _shell = tree.add(
+            ZStack::new()
+                .add_child(tv)
+                .add_child(editor)
+                .focusable(true),
+        );
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let rows = tree.children(tv);
         let scope = tree.view_focus_active_for(rows[0]);
@@ -3180,8 +3225,8 @@ mod tests {
         // view when it holds keyboard focus (`view_focus_active`), the modality
         // is keyboard (`focus_visible`), and the selection is empty. This guards
         // those three paint inputs (paint output itself isn't unit-observable).
-        use bastyde_data::{KeyedSelectionModel, SelectionMode};
         use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
         let source = Rc::new(MockI64Source::new());
         let keyed = KeyedSelectionModel::<i64>::new(SelectionMode::Single);
         let mut tree = WidgetTree::new();
@@ -3208,12 +3253,19 @@ mod tests {
         tree.press_key(Key::Tab, Modifiers::NONE);
         assert!(view_focused.get(), "view holds keyboard focus");
         assert!(focus_visible.get(), "keyboard input → focus-visible");
-        assert_eq!(keyed.count(), 0, "nothing selected → no row ring, container ring shows");
+        assert_eq!(
+            keyed.count(),
+            0,
+            "nothing selected → no row ring, container ring shows"
+        );
 
         // A pointer press flips modality off → container ring clears (matches the
         // row ring's `:focus-visible` rule; clicking never leaves a ring).
         tree.click(tv);
-        assert!(!focus_visible.get(), "pointer input clears focus-visible → ring hides");
+        assert!(
+            !focus_visible.get(),
+            "pointer input clears focus-visible → ring hides"
+        );
     }
 
     #[test]
@@ -3307,7 +3359,10 @@ mod tests {
         // must store the KEY 2, proving index→key translation + the render path.
         let rows = tree.children(tv);
         tree.click(rows[1]);
-        assert!(keyed.is_selected(&2), "click stores the row's i64 key, not its index");
+        assert!(
+            keyed.is_selected(&2),
+            "click stores the row's i64 key, not its index"
+        );
         assert!(!keyed.is_selected(&1));
 
         // Collapse root1 → node 2 leaves the visible projection (version bump
@@ -3385,9 +3440,10 @@ mod tests {
         let valid = Rc::new(MockI64Source::new());
         let mut t1 = WidgetTree::new();
         let v1 = t1.add(
-            TreeView::from_source(MockI64Wrapper(valid.clone()), |_l: &String, _r: &TreeRow, _s| {
-                Box::new(FixedLeaf(120.0, 24.0))
-            })
+            TreeView::from_source(
+                MockI64Wrapper(valid.clone()),
+                |_l: &String, _r: &TreeRow, _s| Box::new(FixedLeaf(120.0, 24.0)),
+            )
             .item_height(24.0)
             .reorderable(true),
         );
@@ -3401,16 +3457,25 @@ mod tests {
             1,
             "a valid drop is routed to the source's accept_drop"
         );
-        assert_eq!(valid.accept_log.borrow()[0].0, 3, "dragged key recovered from RowDrag");
-        assert_eq!(valid.accept_log.borrow()[0].1, 4, "target key resolved from the hovered row");
+        assert_eq!(
+            valid.accept_log.borrow()[0].0,
+            3,
+            "dragged key recovered from RowDrag"
+        );
+        assert_eq!(
+            valid.accept_log.borrow()[0].1,
+            4,
+            "target key resolved from the hovered row"
+        );
 
         // Cycle: drag "root1" (id 1, row 0) onto its child "a" (id 2, row 1).
         let cyclic = Rc::new(MockI64Source::new());
         let mut t2 = WidgetTree::new();
         let v2 = t2.add(
-            TreeView::from_source(MockI64Wrapper(cyclic.clone()), |_l: &String, _r: &TreeRow, _s| {
-                Box::new(FixedLeaf(120.0, 24.0))
-            })
+            TreeView::from_source(
+                MockI64Wrapper(cyclic.clone()),
+                |_l: &String, _r: &TreeRow, _s| Box::new(FixedLeaf(120.0, 24.0)),
+            )
             .item_height(24.0)
             .reorderable(true),
         );
@@ -3439,17 +3504,20 @@ mod tests {
         let src = Rc::new(MockI64Source::new());
         let mut t = WidgetTree::new();
         let v = t.add(
-            TreeView::from_source(MockI64Wrapper(src.clone()), |_l: &String, _r: &TreeRow, _s| {
-                // Match the designer row exactly: a DropTarget wrapped by an
-                // on_pointer_event (selection) + context_menu handler node.
-                Box::new(
-                    DropTarget::new()
-                        .on_drop_typed::<Palette>(|_p, _pos, _ctx| true)
-                        .child(FixedLeaf(120.0, 24.0))
-                        .on_pointer_event(|_ev, _ctx| EventResponse::Ignored)
-                        .context_menu(|_pos, _ctx| None),
-                ) as Box<dyn Widget>
-            })
+            TreeView::from_source(
+                MockI64Wrapper(src.clone()),
+                |_l: &String, _r: &TreeRow, _s| {
+                    // Match the designer row exactly: a DropTarget wrapped by an
+                    // on_pointer_event (selection) + context_menu handler node.
+                    Box::new(
+                        DropTarget::new()
+                            .on_drop_typed::<Palette>(|_p, _pos, _ctx| true)
+                            .child(FixedLeaf(120.0, 24.0))
+                            .on_pointer_event(|_ev, _ctx| EventResponse::Ignored)
+                            .context_menu(|_pos, _ctx| None),
+                    ) as Box<dyn Widget>
+                },
+            )
             .item_height(24.0)
             .reorderable(true),
         );
@@ -3485,15 +3553,18 @@ mod tests {
         let mut t = WidgetTree::new();
         let picked_for_rows = picked.clone();
         let v = t.add(
-            TreeView::from_source(MockI64Wrapper(src.clone()), move |_l: &String, _r: &TreeRow, _s| {
-                let picked = picked_for_rows.clone();
-                Box::new(FixedLeaf(120.0, 24.0).on_pointer_event(move |ev, _c| {
-                    if let WidgetEvent::PointerDown { .. } = ev {
-                        picked.set(Some(7));
-                    }
-                    EventResponse::Ignored
-                })) as Box<dyn Widget>
-            })
+            TreeView::from_source(
+                MockI64Wrapper(src.clone()),
+                move |_l: &String, _r: &TreeRow, _s| {
+                    let picked = picked_for_rows.clone();
+                    Box::new(FixedLeaf(120.0, 24.0).on_pointer_event(move |ev, _c| {
+                        if let WidgetEvent::PointerDown { .. } = ev {
+                            picked.set(Some(7));
+                        }
+                        EventResponse::Ignored
+                    })) as Box<dyn Widget>
+                },
+            )
             .item_height(24.0)
             .reorderable(true),
         );
@@ -3502,7 +3573,10 @@ mod tests {
         let from = t.bounds(rows[2]).center();
         let to = t.bounds(rows[3]).center();
         drag_item(&mut t, from, to);
-        assert!(picked.get().is_some(), "press still selects via on_pointer_event");
+        assert!(
+            picked.get().is_some(),
+            "press still selects via on_pointer_event"
+        );
         assert_eq!(
             src.accept_log.borrow().len(),
             1,

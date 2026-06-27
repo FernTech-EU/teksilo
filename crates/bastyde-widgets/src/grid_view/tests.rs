@@ -432,7 +432,9 @@ fn pointer_drag_reorders_tile_through_source_accept_drop() {
         modifiers: Modifiers::NONE,
     });
     // Cross the drag threshold, then move past the last tile (insertion = end).
-    tree.dispatch_event(WidgetEvent::PointerMove { position: Point::new(72.0, 25.0) });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(72.0, 25.0),
+    });
     let to = Point::new(430.0, 25.0);
     tree.dispatch_event(WidgetEvent::PointerMove { position: to });
     tree.dispatch_event(WidgetEvent::PointerUp {
@@ -546,10 +548,10 @@ fn fetch_more_fires_when_scrolled_near_the_end() {
     // Incremental loading now flows through the source's `can_fetch_more` /
     // `fetch_more` capabilities (the old `on_near_end` hook is gone): as the
     // realized window nears the end, the body pane asks the source to grow.
-    use std::cell::Cell;
-    use std::rc::Rc;
     use bastyde_core::ObserverHandle;
     use bastyde_data::ListDataSource;
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     struct Growing {
         total: usize,
@@ -588,19 +590,25 @@ fn fetch_more_fires_when_scrolled_near_the_end() {
         fetched: fetched.clone(),
     };
     let mut tree = WidgetTree::new();
-    let gv =
-        GridView::from_source(source, |_tc| Box::new(FixedLeaf(100.0, 50.0))).tile_size(100.0, 50.0);
+    let gv = GridView::from_source(source, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+        .tile_size(100.0, 50.0);
     let scroll = gv.scroll_y_signal().clone();
     let max_sig = gv.max_scroll_y_signal().clone();
     let _id = tree.add(gv);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     // At the top the window is far from the end — no fetch yet.
-    assert!(!fetched.get(), "fetch_more must not fire while far from the end");
+    assert!(
+        !fetched.get(),
+        "fetch_more must not fire while far from the end"
+    );
     // Scroll to the bottom; the body pane re-realizes and asks the source to
     // fetch the next page as the window nears the end.
     scroll.set(max_sig.get());
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    assert!(fetched.get(), "fetch_more should fire as the window nears the end");
+    assert!(
+        fetched.get(),
+        "fetch_more should fire as the window nears the end"
+    );
 }
 
 #[test]

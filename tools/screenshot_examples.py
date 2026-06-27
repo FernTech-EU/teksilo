@@ -16,7 +16,7 @@ produces one PNG per example window — plus one PNG per *page* of the
     python3 tools/screenshot_examples.py --skip web-view-demo
     python3 tools/screenshot_examples.py --no-build      # reuse existing binaries
     python3 tools/screenshot_examples.py --out shots     # output dir (default dist/screenshots)
-    python3 tools/screenshot_examples.py --no-package    # leave PNGs loose, skip the tarball
+    python3 tools/screenshot_examples.py --no-package    # leave PNG files loose, skip the tarball
     python3 tools/screenshot_examples.py --catalog cycle # use widget-catalog --cycle (see below)
 
 The Wayland / KDE catch

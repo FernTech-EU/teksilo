@@ -536,11 +536,15 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(move |_p, _c| t.set(true)));
         // Ancestor container carries the drag; child sits on top and taps.
-        let _parent = tree.add(StackWidget::new().add_child(child).on_drag(move |phase, _c| {
-            if matches!(phase, DragPhase::Started { .. }) {
-                d.set(true);
-            }
-        }));
+        let _parent = tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // 1) A plain click on the child fires the child's tap, not the drag.
@@ -554,8 +558,14 @@ mod tests {
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
-        assert!(tapped.get(), "a click on the child fires the descendant tap");
-        assert!(!drag_started.get(), "a click must not start the ancestor drag");
+        assert!(
+            tapped.get(),
+            "a click on the child fires the descendant tap"
+        );
+        assert!(
+            !drag_started.get(),
+            "a click must not start the ancestor drag"
+        );
 
         tapped.set(false);
         drag_started.set(false);
@@ -608,11 +618,15 @@ mod tests {
                 .on_tap(move |_p, _c| { /* select */ }),
         );
         // Canvas: an on_drag container holding the card.
-        let _canvas = tree.add(StackWidget::new().add_child(card).on_drag(move |phase, _c| {
-            if matches!(phase, DragPhase::Started { .. }) {
-                d.set(true);
-            }
-        }));
+        let _canvas = tree.add(
+            StackWidget::new()
+                .add_child(card)
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.dispatch_event(WidgetEvent::PointerDown {

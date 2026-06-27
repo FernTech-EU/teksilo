@@ -36,8 +36,8 @@ use std::rc::Rc;
 use bastyde_canvas::{Point, Rect, Size, SizeProposal, Transform2D};
 use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
-use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
@@ -49,13 +49,11 @@ use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
-    Divider, FixedSize, HStack, IconWidget, MinSize, RectWidget, Spacer, TextWidget,
-    VStack, ZStack,
+    Divider, FixedSize, HStack, IconWidget, MinSize, RectWidget, Spacer, TextWidget, VStack, ZStack,
 };
 use crate::tooltip::{
     RichTooltipSource, TooltipContent, TooltipWidget, attach_rich_tooltip_source,
 };
-
 
 /// Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
 ///
@@ -607,8 +605,9 @@ impl Widget for ToolBoxHeader {
             //   [indicator] [leading?] [chevron L/R] [rotated label] [trailing?] [spacer]
             // Chevron points right while collapsed (content expands to the
             // trailing side) and left once expanded.
-            let chevron_right_id = ctx
-                .add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            let chevron_right_id = ctx.add(
+                IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()),
+            );
             let chevron_left_id = ctx
                 .add(IconWidget::chevron_left(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
             ctx.visible_when(chevron_left_id, is_selected.clone());
@@ -990,8 +989,11 @@ impl Widget for ToolBoxPanel {
         ctx.visible_when(content_id, is_selected);
         self.root_child_id = Some(content_id);
         // Re-measure the panel when the active section changes.
-        self.selected
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.selected.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         vec![content_id]
     }
 
@@ -1776,7 +1778,10 @@ mod tests {
         let h1 = t.bounds(header_id(&t, tb, 1));
         let from = bastyde_canvas::Point::new(h1.x + h1.width * 0.5, h1.y + h1.height * 0.5);
         // Drag well past the threshold to trigger DragPhase::Started.
-        t.drag(from, bastyde_canvas::Point::new(from.x + 120.0, from.y + 40.0));
+        t.drag(
+            from,
+            bastyde_canvas::Point::new(from.x + 120.0, from.y + 40.0),
+        );
         assert_eq!(
             dragged.get(),
             Some(1),
@@ -1898,7 +1903,10 @@ mod tests {
                 .item(lit!("B"), TextWidget::new(lit!("bbb"))),
         );
         t.layout(SizeProposal::exact(300.0, 400.0));
-        assert!(t.bounds(panel_id(&t, tb, 0)).height > 0.0, "A starts expanded");
+        assert!(
+            t.bounds(panel_id(&t, tb, 0)).height > 0.0,
+            "A starts expanded"
+        );
 
         // Click the active header → collapse it (all sections closed).
         t.click(header_id(&t, tb, 0));
@@ -1907,12 +1915,18 @@ mod tests {
             t.bounds(panel_id(&t, tb, 0)).height < 0.5,
             "active header click collapses its content"
         );
-        assert!(t.bounds(panel_id(&t, tb, 1)).height < 0.5, "B stays collapsed");
+        assert!(
+            t.bounds(panel_id(&t, tb, 1)).height < 0.5,
+            "B stays collapsed"
+        );
 
         // Click again → re-expand.
         t.click(header_id(&t, tb, 0));
         t.layout(SizeProposal::exact(300.0, 400.0));
-        assert!(t.bounds(panel_id(&t, tb, 0)).height > 0.0, "re-expands on next click");
+        assert!(
+            t.bounds(panel_id(&t, tb, 0)).height > 0.0,
+            "re-expands on next click"
+        );
     }
 
     #[test]
