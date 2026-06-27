@@ -121,8 +121,29 @@ fn present_in_tree_modal_request(
 ) {
     let dismiss = modal_close_behavior_to_overlay_dismiss(request.close_behavior);
     let requested_focus = request.focus_target;
-    let on_dismiss = request.on_dismiss;
+    let user_on_dismiss = request.on_dismiss;
     let close_behavior = request.close_behavior;
+    // Capture the focus owner BEFORE the modal moves focus into itself
+    // (below). Recorded as the modal overlay's `focus_restore` so that
+    // dismissing the dialog returns keyboard focus to the trigger — e.g.
+    // tabbing to a "Rename…" button, opening the InputDialog, then
+    // accepting/cancelling lands back on that button. Without this, the
+    // modal shows via `show_overlay` (which, unlike
+    // `show_overlay_from_source`, records no restore target) and focus is
+    // dropped on dismiss.
+    let focus_before_modal = tree.focused();
+    // Capture the `:focus-visible` input modality at the same instant. A
+    // modal is a transient interruption: when it closes and focus snaps
+    // back to the trigger, the trigger's focus ring should look exactly as
+    // it did before the modal opened — NOT inherit keyboard modality from
+    // input directed *at the dialog* (typing a name, pressing Enter to
+    // accept). Without restoring this, mouse-clicking the trigger then
+    // pressing Enter inside the dialog leaves the global modality "keyboard"
+    // and the trigger sprouts a focus ring it never had. We restore it on
+    // dismiss alongside focus. (`focus_ops` itself never touches this
+    // signal, so the value we restore is the value that sticks.)
+    let focus_visible_before = tree.focus_visible_signal().get();
+    let focus_visible_signal = tree.focus_visible_signal();
     let content_id = match request.content {
         ModalContent::ExistingWidget(id) => id,
         ModalContent::Deferred(builder) => {
@@ -162,6 +183,27 @@ fn present_in_tree_modal_request(
     });
 
     tree.activate(content_id);
+    // Wrap the caller's `on_dismiss` so the framework also restores the
+    // pre-modal `:focus-visible` modality when the dialog closes (by any
+    // path: OK, Cancel, Escape, click-outside). Only when a focus owner
+    // was captured — if nothing was focused before, there's no prior state
+    // to return to. The overlay fires `on_dismiss` during dismissal, just
+    // before focus is restored to the trigger, so the value we set here is
+    // the one the trigger paints with.
+    let restore_modality = focus_before_modal.is_some();
+    let on_dismiss: Option<bastyde_core::overlay::OverlayDismissCallback> =
+        if restore_modality || user_on_dismiss.is_some() {
+            Some(std::rc::Rc::new(move || {
+                if restore_modality {
+                    focus_visible_signal.set(focus_visible_before);
+                }
+                if let Some(cb) = &user_on_dismiss {
+                    cb();
+                }
+            }))
+        } else {
+            None
+        };
     // Present the modal as a WINDOW-LEVEL overlay via `show_overlay` rather than
     // `show_overlay_from_source`: the latter re-parents the overlay to the source
     // widget's overlay ancestor, so a modal opened from a menu item would be
@@ -178,6 +220,14 @@ fn present_in_tree_modal_request(
         on_dismiss,
         fade_duration: None,
     });
+    // The modal is now the topmost overlay; record where focus should
+    // return when it dismisses. Mirrors `show_overlay_from_source`'s
+    // capture-then-set-top pattern. The `is_active` guard on the restore
+    // side makes a stale id (e.g. a menu trigger that went dormant) a
+    // graceful no-op.
+    if let Some(restore) = focus_before_modal {
+        tree.overlay_manager_mut().set_top_focus_restore(restore);
+    }
     // Cascade-dismiss the scrim when the modal is dismissed (by any
     // path: Escape, click-outside, manual). The scrim is below the
     // modal in the stack but counts as its "child" in the parent-
@@ -3299,6 +3349,131 @@ mod tests {
 
         let continue_button = tree.find_by_label("Continue").unwrap();
         assert_eq!(tree.focused(), Some(continue_button));
+    }
+
+    #[test]
+    fn present_in_tree_modal_restores_focus_to_trigger_on_dismiss() {
+        // Regression: tabbing to a trigger, opening a modal, then
+        // dismissing it must return keyboard focus to the trigger. The
+        // modal overlay carries the pre-modal focus owner as its
+        // `focus_restore`, which every dismiss path replays.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+        assert_eq!(tree.focused(), Some(source), "precondition: trigger focused");
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(ModalContainer::new(Button::new(lit!("Continue"))))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        // Focus moved into the modal (existing behavior).
+        let continue_button = tree.find_by_label("Continue").unwrap();
+        assert_eq!(tree.focused(), Some(continue_button));
+
+        // The modal overlay is the topmost; dismissing it must surface
+        // the trigger as the focus_restore target.
+        let modal_overlay = *tree
+            .active_overlays()
+            .last()
+            .expect("modal overlay registered");
+        let (_dismissed, focus_restore) = tree
+            .overlay_manager_mut()
+            .dismiss_with_focus_restore(modal_overlay);
+        assert_eq!(
+            focus_restore,
+            Some(source),
+            "dismissing the modal must restore focus to the trigger that opened it",
+        );
+    }
+
+    #[test]
+    fn mouse_opened_modal_restores_pointer_modality_on_dismiss() {
+        // Regression: a modal opened by mouse (focus_visible = false) must
+        // not leave the trigger sporting a keyboard `:focus-visible` ring
+        // after the user types / presses Enter inside the dialog — which
+        // flips the global modality to keyboard. The pre-modal modality is
+        // captured and replayed when the overlay dismisses.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Mouse-style entry: pointer modality, trigger focused.
+        let focus_visible = tree.focus_visible_signal();
+        focus_visible.set(false);
+        tree.focus(source);
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(ModalContainer::new(Button::new(lit!("Continue"))))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        // Keyboard input *inside* the dialog (typing the name, Enter to
+        // accept) flips the global modality to keyboard.
+        focus_visible.set(true);
+
+        // Dismiss fires the overlay's on_dismiss, which restores modality.
+        let modal_overlay = *tree
+            .active_overlays()
+            .last()
+            .expect("modal overlay registered");
+        tree.overlay_manager_mut()
+            .dismiss_with_focus_restore(modal_overlay);
+
+        assert!(
+            !focus_visible.get(),
+            "a mouse-opened modal must restore pointer modality on dismiss, \
+             not leave a keyboard focus ring on the trigger",
+        );
+    }
+
+    #[test]
+    fn keyboard_opened_modal_keeps_focus_visible_on_dismiss() {
+        // Invariant guard for the fix above: a modal opened while in
+        // keyboard modality must KEEP the focus ring on the trigger when it
+        // closes — restoring the captured modality must not blanket-clear it.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Keyboard-style entry: keyboard modality, trigger focused.
+        let focus_visible = tree.focus_visible_signal();
+        focus_visible.set(true);
+        tree.focus(source);
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(ModalContainer::new(Button::new(lit!("Continue"))))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        // Even if a pointer event flipped modality off inside the dialog,
+        // dismiss restores the captured (keyboard) modality.
+        focus_visible.set(false);
+
+        let modal_overlay = *tree
+            .active_overlays()
+            .last()
+            .expect("modal overlay registered");
+        tree.overlay_manager_mut()
+            .dismiss_with_focus_restore(modal_overlay);
+
+        assert!(
+            focus_visible.get(),
+            "a keyboard-opened modal must restore keyboard modality on dismiss",
+        );
     }
 
     /// Test content widget: a focusable container with two focusable
