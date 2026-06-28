@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+# Build the documentation site and publish it to Cloudflare Pages
+# (https://bastyde-docs.pages.dev). The site has two layers:
+#   * mdBook — the curated guides under docs/ plus a generated Widget Catalog,
+#     at the site root.
+#   * rustdoc — the deep API reference under /api/ (catalog pages deep-link in).
+#
+# Modelled on qleany's mdbook-gh-pages.yml (same Cloudflare Pages deploy via
+# wrangler-action + CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets), with
+# the Bastyde-specific steps added: regenerate the catalog from widget source and
+# build the rustdoc API reference.
+
+name: Deploy documentation to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "docs/**"
+      - "tools/extract_widget_api.py"
+      - "book.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MDBOOK_VERSION: "0.4.52"
+  BASE_URL: "https://bastyde-docs.pages.dev"
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # full history for sitemap lastmod dates
+
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install mdBook
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the rustdoc API reference
+        # Only bastyde-widgets: its module paths (bastyde_widgets/<module>/) are
+        # what the catalog pages deep-link to, and it keeps the deployed file
+        # count well under Cloudflare Pages' 20,000-files-per-deployment limit.
+        # Built BEFORE the catalog so --api-dir can verify each deep-link target.
+        run: cargo doc -p bastyde-widgets --no-deps
+
+      - name: Generate the Widget Catalog pages
+        run: python3 tools/extract_widget_api.py --all --md-dir docs/widgets --api-dir target/doc
+
+      - name: Fix internal doc links for the book
+        # Rewrite the guides' repo-relative source links (../crates/…) to
+        # absolute GitHub URLs and neutralize rustdoc intra-doc links, so nothing
+        # 404s inside the rendered book. Mutates the runner's checkout only.
+        run: python3 tools/fix_book_links.py docs --repo-url "${{ github.server_url }}/${{ github.repository }}" --branch "${{ github.ref_name }}"
+
+      - name: Build the book (mdBook)
+        run: mdbook build
+
+      - name: Assemble the site (book + /api)
+        run: |
+          cp -r target/doc book/api
+          printf '<meta http-equiv="refresh" content="0; url=bastyde_widgets/index.html">' > book/api/index.html
+
+      - name: Generate sitemap.xml
+        run: |
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > book/sitemap.xml
+          echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' >> book/sitemap.xml
+          # Only the mdBook pages (skip the large rustdoc tree under api/).
+          find book -name '*.html' -not -path 'book/api/*' \
+            -not -name 'print.html' -not -name '404.html' | sort | while read -r file; do
+            path="${file#book/}"
+            base="${path%.html}"
+            src_file="docs/${base}.md"
+            if [ -f "$src_file" ]; then
+              lastmod=$(git log -1 --format="%aI" -- "$src_file")
+            else
+              lastmod=$(git log -1 --format="%aI")
+            fi
+            echo "  <url>" >> book/sitemap.xml
+            echo "    <loc>${BASE_URL}/${path}</loc>" >> book/sitemap.xml
+            echo "    <lastmod>${lastmod:-$(git log -1 --format="%aI")}</lastmod>" >> book/sitemap.xml
+            echo "    <priority>0.80</priority>" >> book/sitemap.xml
+            echo "  </url>" >> book/sitemap.xml
+          done
+          echo '</urlset>' >> book/sitemap.xml
+
+      - name: Add robots.txt
+        run: |
+          cat > book/robots.txt << EOF
+          User-agent: *
+          Allow: /
+
+          Sitemap: ${BASE_URL}/sitemap.xml
+          EOF
+
+      - name: Generate llms.txt
+        run: |
+          cat > book/llms.txt << EOF
+          # Bastyde
+
+          > A pure-Rust GUI framework for serious desktop applications: a retained widget tree with SwiftUI-style layout negotiation, AccessKit accessibility, reactive Signal/Prop state, and a wgpu renderer. ~56 widgets + ~21 layout primitives, a four-tier theming system, i18n, data models, and persistence.
+
+          ## Documentation
+
+          - [Introduction](${BASE_URL}/introduction.html): Overview and where to start
+          - [Widget Catalog](${BASE_URL}/widgets/index.html): Per-widget discovery pages (abilities + example + API link)
+          - [Widgets overview](${BASE_URL}/widgets-overview.html): Every shipped widget, categorized
+          - [Layout primitives](${BASE_URL}/layout-primitives.html): HStack/VStack/ZStack, Grid, Wrap, size wrappers
+          - [Events & gestures](${BASE_URL}/events-and-gestures.html): Dispatch, attached handlers, gestures
+          - [Styling system](${BASE_URL}/styling-system.html): Tokens → variants → recipes → style protocols
+          - [Accessibility overrides](${BASE_URL}/accessibility-overrides.html): Builder-level .access_* modifiers
+          - [Data models](${BASE_URL}/data-models.html): ListModel/TreeModel/SelectionModel and projections
+          - [Shortcuts, intents & actions](${BASE_URL}/shortcut-intent-action.html): The input-to-behaviour pipeline
+          - [Architecture](${BASE_URL}/architecture.html): Framework internals reference
+          - [API reference](${BASE_URL}/api/bastyde_widgets/index.html): rustdoc for every public item
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: book
+          path: book
+
+  deploy:
+    name: Deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: book
+          path: book
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy book --project-name=bastyde-docs

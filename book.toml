@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+# mdBook configuration for the Bastyde documentation site.
+#
+# The book sources ARE the existing `docs/` tree: `docs/SUMMARY.md` is the table
+# of contents, and the "Widget Catalog" section is regenerated from widget source
+# by `tools/extract_widget_api.py --md-dir docs/widgets` (the generated pages live
+# under docs/widgets/ and are gitignored — regenerate before building).
+#
+# Build:  python3 tools/extract_widget_api.py --all --md-dir docs/widgets && mdbook build
+# Serve:  mdbook serve --open
+
+[book]
+title = "Bastyde Documentation"
+authors = ["Cyril Jacquet"]
+description = "Reference and design documentation for the Bastyde pure-Rust GUI framework."
+src = "docs"
+language = "en"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/ferntech-eu/bastyde"
+edit-url-template = "https://github.com/ferntech-eu/bastyde/edit/main/{path}"
+# The site is served at the domain root (bastyde-docs.pages.dev), not a subpath.
+site-url = "/"
+no-section-label = false
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30

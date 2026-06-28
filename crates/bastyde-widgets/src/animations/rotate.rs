@@ -58,8 +58,8 @@ fn pivoted_rotation(pivot: Point, theta: f32) -> Transform2D {
     }
 }
 
-/// Wraps a child and rotates its subtree by an externally-driven
-/// `Prop<f32>` (radians).
+/// Wraps a child widget and rotates its entire subtree by an
+/// externally-driven angle in radians.
 pub struct Rotate {
     angle: Prop<f32>,
     origin: ScaleOrigin,
@@ -76,8 +76,8 @@ pub struct Rotate {
 }
 
 impl Rotate {
-    /// Build a rotate wrapper bound to `angle` (radians). Default
-    /// pivot: `Center`.
+    /// Create a rotate wrapper bound to `angle` (radians); accepts a
+    /// static `f32` or a reactive `Signal<f32>`. Default pivot: `Center`.
     pub fn new(angle: impl Into<Prop<f32>>) -> Self {
         Self {
             angle: angle.into(),

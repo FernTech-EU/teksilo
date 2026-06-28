@@ -1,16 +1,40 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! ScrollBar — pointer + keyboard affordance for scrolling a `ScrollArea`.
+//! ScrollBar — pointer and keyboard affordance for a [`ScrollArea`](crate::scroll_area::ScrollArea).
 //!
-//! The widget itself owns interaction (drag, track click, keyboard,
-//! hover) and delegates all canvas work to a [`ScrollBarStyle`] impl.
-//! The IntUI default ([`crate::styles::RecipeScrollBarStyle`]) ships
-//! three visual variants (`Permanent`, `Overlay`, `Thin`) that mirror
-//! the historical `ScrollBarVisual` enum.
+//! `ScrollBar` reads and writes a shared `Signal<f32>` scroll position and a
+//! `Signal<f32>` viewport/content ratio, both supplied by its owning `ScrollArea`.
+//! Interaction (thumb drag, track click, keyboard Up/Down/Home/End, hover) is
+//! handled here; all painting is delegated to the active [`ScrollBarStyle`] impl so
+//! the look is fully theme-overridable.
 //!
-//! No `paint()` method on this widget — the only canvas work happens
-//! inside the active `ScrollBarStyle::make_body` subtree.
+//! Most applications do not need to construct a `ScrollBar` directly — `ScrollArea`
+//! creates and manages the bars automatically. Use this type when building a custom
+//! scroll host (e.g. the `RichTextEditor` manages its own bars to avoid the
+//! wrap/scrollbar circular dependency).
+//!
+//! ## Accessibility
+//!
+//! Hidden from AT via `set_hidden()`. Scroll actions (Up/Down/Left/Right) are
+//! advertised on the parent `ScrollView` node, not on the bar, so screen readers
+//! navigate the content region directly without stopping on the thumb.
+//!
+//! ```rust
+//! # use bastyde_widgets::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
+//! # use bastyde_core::signal::Signal;
+//! let position = Signal::new(0.0_f32);
+//! let max_scroll = Signal::new(500.0_f32);
+//! let viewport_ratio = Signal::new(0.4_f32);
+//! let _bar = ScrollBar::new(
+//!     ScrollBarOrientation::Vertical,
+//!     position,
+//!     max_scroll,
+//!     viewport_ratio,
+//! )
+//! .thickness(8.0)
+//! .variant(ScrollBarVariant::Overlay);
+//! ```
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -33,18 +57,10 @@ pub use bastyde_core::styles::ScrollBarOrientation;
 pub use bastyde_core::styles::ScrollBarVariant;
 pub use bastyde_core::styles::ScrollBarVariant as ScrollBarVisual;
 
-/// A standalone Level 2 scroll bar widget.
+/// A scroll bar that shares reactive scroll-position state with a [`ScrollArea`](crate::scroll_area::ScrollArea).
 ///
-/// The ScrollBar reads and writes a shared `Signal<f32>` for the scroll
-/// position, and reads a `Signal<f32>` for the content-to-viewport ratio
-/// (viewport_size / content_size, clamped to 0.0..1.0).
-///
-/// Supports:
-/// - Thumb drag to scroll
-/// - Track click to page-scroll toward the click position
-/// - Keyboard: Up/Down (vertical) or Left/Right (horizontal) to step
-/// - Accessibility: hidden from AT (scroll actions live on the parent
-///   `ScrollView` node)
+/// Supports thumb drag, track-click page scroll, and keyboard
+/// Up/Down/Left/Right/Home/End navigation. Hidden from AT — see module docs.
 pub struct ScrollBar {
     orientation: ScrollBarOrientation,
     /// Scroll position: 0.0 = start, max_scroll = end.

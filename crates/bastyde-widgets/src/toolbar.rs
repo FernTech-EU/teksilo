@@ -47,6 +47,16 @@
 //! `HasPopup::Menu` and its expanded state; overflowed actions are dormant
 //! (absent from the AT tree), represented instead by their menu items — so no
 //! action is announced twice. Toggle actions carry `Toggled`.
+//!
+//! ```ignore
+//! // on_activate requires an EventContext — use ignore.
+//! use bastyde_widgets::toolbar::{Toolbar, ToolbarAction, ToolbarItem};
+//! use bastyde_i18n::lit;
+//! let _bar = Toolbar::new()
+//!     .action(ToolbarAction::new(lit!("Save")).on_activate(|ctx| { /* ... */ }))
+//!     .action(ToolbarAction::new(lit!("Undo")).priority(-1))
+//!     .item(ToolbarItem::flexible_space());
+//! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -94,8 +104,10 @@ pub enum ToolbarDisplayMode {
 /// Layout axis of the toolbar.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ToolbarOrientation {
+    /// Items flow left-to-right (default).
     #[default]
     Horizontal,
+    /// Items flow top-to-bottom.
     Vertical,
 }
 
@@ -411,6 +423,9 @@ pub struct Toolbar {
 }
 
 impl Toolbar {
+    /// Create an empty toolbar with the default orientation (horizontal) and
+    /// `IconAndText` display mode. Add commands with [`action`](Self::action) or
+    /// layout items with [`item`](Self::item).
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -455,16 +470,21 @@ impl Toolbar {
         self.item(ToolbarItem::custom_id(id))
     }
 
+    /// Set the layout axis (default [`ToolbarOrientation::Horizontal`]).
     pub fn orientation(mut self, orientation: ToolbarOrientation) -> Self {
         self.orientation = orientation;
         self
     }
 
+    /// Set how inline actions render their label and icon (default
+    /// [`ToolbarDisplayMode::IconAndText`]).
     pub fn display_mode(mut self, mode: ToolbarDisplayMode) -> Self {
         self.display_mode = mode;
         self
     }
 
+    /// Gap between consecutive toolbar items in logical pixels (default
+    /// [`TOOLBAR_SPACING`]).
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = spacing;
         self

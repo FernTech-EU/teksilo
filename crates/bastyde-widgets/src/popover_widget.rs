@@ -98,15 +98,22 @@ pub trait PopoverTrigger: Widget + Sized + 'static {
     // The remaining methods delegate to inherent builder methods that
     // exist on both triggers; they're on the trait so the generic can
     // call them on a bare `T`.
+
+    /// Share an externally-allocated interaction signal so the caret colour
+    /// tracks the trigger's state (hover / press / focus / disabled) exactly.
     fn with_shared_interaction(self, signal: Signal<InteractionState>) -> Self;
+
+    /// Annotate the trigger with the given `has_popup` kind for AT.
     fn with_has_popup(self, kind: HasPopup) -> Self;
+
+    /// Bind the trigger's `set_expanded` disclosure state to `open`.
     fn with_expanded_when(self, open: Signal<bool>) -> Self;
+
+    /// Install the popover's open/close handler as the trigger's activate callback.
     fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self;
 
-    /// Whether the trigger already carries an activate handler. The
-    /// wrapper owns the activate slot (it opens the popover), so a
-    /// caller-set handler would be silently discarded — this lets
-    /// `build()` warn instead.
+    /// Return `true` if the trigger already has an activate handler set by
+    /// the caller — the wrapper replaces it and will warn at build time.
     fn has_on_activate(&self) -> bool;
 }
 

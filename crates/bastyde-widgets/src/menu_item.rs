@@ -1,25 +1,39 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! MenuItem widget — a single item in a menu or context menu.
+//! MenuItem — a single command row in a menu or context menu.
 //!
-//! Non-generic, closure-based command erasure (same pattern as Button).
-//! Supports icons, shortcut labels, disabled state, and submenu triggers.
+//! Each item consists of an optional leading icon, a label, an optional
+//! trailing shortcut label, and an activation closure. `MenuItem` is
+//! non-generic: actions are type-erased closures identical to `Button`'s
+//! `on_activate_fn` model. Submenus are declared with `MenuItem::submenu`
+//! — the factory builds the nested `MenuList` lazily at hover time.
 //!
-//! ### Modes
+//! Every item operates in one of three **modes** selected by builder methods:
 //!
-//! Every item is one of three modes — `Plain` (the default), `Check`
-//! (two-state or tri-state checkmark), or `Radio` (one of N
-//! mutually-exclusive options) — selected through builder methods:
+//! | Builder | AT Role | Leading glyph |
+//! |---|---|---|
+//! | (default) | `Role::MenuItem` | icon or blank |
+//! | `.bind_checked(signal)` | `Role::MenuItemCheckBox` | checkmark / blank |
+//! | `.bind_check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
+//! | `.reflect_checked(signal)` | `Role::MenuItemCheckBox` | checkmark (read-only) |
+//! | `.radio(value, selected)` | `Role::MenuItemRadio` | filled dot / blank |
 //!
-//! - `.bind_checked(Signal<bool>)`     → `Role::MenuItemCheckBox`, checkmark glyph
-//! - `.bind_check_state(Signal<CheckState>)` → tri-state (`Checked` / `Indeterminate` / `Unchecked`)
-//! - `.radio(value, selected)`          → `Role::MenuItemRadio`, filled-dot glyph
+//! Check and radio modes are mutually exclusive with `.icon(...)` — the
+//! Windows convention reserves the leading slot for state glyphs on
+//! checkable items; a `debug_assert!` fires when both are set.
 //!
-//! The three setters are mutually exclusive (last call wins). They are
-//! also mutually exclusive with `.icon(...)` — by Windows convention a
-//! checkable item carries no icon; if both are set the check/radio
-//! glyph wins and a debug assertion fires.
+//! **Mnemonic markers** use the in-string `&` convention (`&Save` →
+//! underline 'S' when Alt is held; `&&` → literal `&`). The enclosing
+//! `MenuList` wires bare-letter in-menu activation automatically.
+//!
+//! ```rust
+//! # use bastyde_widgets::MenuItem;
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! let _w = MenuItem::new(lit!("&Save"))
+//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
+//! ```
 
 use bastyde_data::CheckState;
 use bastyde_i18n::lit;
@@ -113,7 +127,10 @@ enum CheckKind {
     Reflect(Signal<bool>),
 }
 
-/// A single menu item: icon + label + shortcut label + optional submenu chevron.
+/// A single command row in a `MenuList` or context menu.
+///
+/// See the module documentation for the full mode table, mnemonic syntax, and
+/// submenu construction pattern.
 pub struct MenuItem {
     label: LocalizedString,
     icon: Option<IconWidget>,
@@ -189,6 +206,7 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
+    /// Create a plain menu item with the given label and no action yet.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {

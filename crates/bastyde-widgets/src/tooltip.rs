@@ -28,6 +28,14 @@
 //! tracking, and dwell-promotion timer in `bastyde-core`. The per-widget
 //! setters (`.tooltip` / `.rich_tooltip` / `.composite_tooltip`) are
 //! mutually exclusive (last-one-wins): each setter clears the others.
+//!
+//! ## Example — plain tooltip
+//!
+//! ```rust
+//! # use bastyde_widgets::tooltip::TooltipWidget;
+//! # use bastyde_i18n::lit;
+//! let _tip = TooltipWidget::new(lit!("Save the current file"));
+//! ```
 
 pub mod attach;
 pub mod composite;

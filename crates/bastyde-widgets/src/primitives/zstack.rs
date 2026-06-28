@@ -1,6 +1,35 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! ZStack — a layout container that layers children on top of each other.
+//!
+//! The container sizes itself to the maximum width and maximum height across
+//! all children (each measured at an unspecified proposal so background rects
+//! do not inflate the size).  Each child is then offered the full container
+//! bounds and positioned according to the container-level `Alignment`
+//! (default: `CENTER`); individual children can override alignment via
+//! `WidgetTree::set_alignment`.
+//!
+//! The primary use-cases are layered UIs — a background `RectWidget` beneath
+//! a `TextWidget`, a floating badge over a button icon — and card-like
+//! compositions where a paint layer and a content layer share the same bounds.
+//! Children that expand to fill their proposal (e.g. `RectWidget`) fill the
+//! full ZStack area; children with fixed intrinsic sizes are positioned by
+//! alignment.
+//!
+//! Propagates shrink weight and minimum size when any child opts in, so
+//! wrapping a shrinkable single-line label in a `ZStack` stays shrinkable.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{ZStack, TextWidget};
+//! # use bastyde_widgets::RectWidget;
+//! # use bastyde_i18n::lit;
+//! # use bastyde_tokens::SurfaceRole;
+//! let _card = ZStack::new()
+//!     .child(RectWidget::new().background(SurfaceRole::Raised))
+//!     .child(TextWidget::new(lit!("Hello")));
+//! ```
+
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use bastyde_core::WidgetId;
@@ -19,6 +48,7 @@ pub struct ZStack {
 }
 
 impl ZStack {
+    /// Create an empty `ZStack` with center alignment.
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
@@ -27,6 +57,8 @@ impl ZStack {
         }
     }
 
+    /// Set the alignment applied to every child that does not have a
+    /// per-child override set via `WidgetTree::set_alignment`.
     pub fn alignment(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
         self

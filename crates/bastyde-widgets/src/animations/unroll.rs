@@ -28,6 +28,17 @@
 //! Honors `prefers-reduced-motion`: the self-animated driver snaps to
 //! its end value instead of tweening (the external driver's owner is
 //! responsible for its own reduced-motion policy).
+//!
+//! ```rust
+//! # use bastyde_widgets::animations::{Unroll, UnrollFrom};
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! let expanded = Signal::new(false);
+//! let _w = Unroll::new(expanded)
+//!     .reveal_from(UnrollFrom::Leading)
+//!     .child(TextWidget::new(lit!("Reveal me")));
+//! ```
 
 use std::cell::Cell;
 
@@ -61,8 +72,9 @@ enum Driver {
     Progress(Signal<f32>),
 }
 
-/// Wraps a child and animates its width between rolled-up (progress=0)
-/// and natural (progress=1). See the module docs.
+/// Wraps a child widget and reveals or hides it along the horizontal
+/// axis by animating the wrapper's reported width between zero and the
+/// child's natural width. See the module docs for the two available drivers.
 pub struct Unroll {
     driver: Driver,
     pending_child: Option<PendingChild>,
@@ -121,9 +133,10 @@ impl Unroll {
         self
     }
 
-    /// The live progress signal (0 = rolled up, 1 = unrolled). `None`
-    /// before `build()`. Lets tests and external integrations read the
-    /// current animated progress.
+    /// Return the live progress signal (0.0 = rolled up, 1.0 = fully
+    /// unrolled). Returns `None` before the first `build()`. Useful for
+    /// tests and external coordinators that need to observe or gate on
+    /// the current animated progress.
     pub fn progress_signal(&self) -> Option<Signal<f32>> {
         self.progress.clone()
     }

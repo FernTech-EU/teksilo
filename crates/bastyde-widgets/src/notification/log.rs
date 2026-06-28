@@ -1,24 +1,34 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `NotificationLog` — the persistent-archive UI.
+//! `NotificationLog` — a scrollable, day-bucketed list of archived notifications.
 //!
-//! Composition: `VStack { toolbar, ScrollArea { day_bucket_sections },
-//! empty_state }` where
-//! - toolbar is a horizontal row with mark-all-read + clear buttons;
-//! - day-bucket sections are `[Today header, …rows, Yesterday
-//!   header, …rows, This week header, …rows, Earlier header,
-//!   …rows]` — entries grouped by their local-calendar bucket;
-//! - each row is a [`StandardListItem`] (severity glyph leading,
-//!   title + body subtitle, action buttons trailing). Unread rows
-//!   render the title in `BodyBold`; read rows in `Body`;
-//! - empty_state is shown only when the archive is empty.
+//! Renders a [`NotificationArchiveModel`] as a scrollable column of
+//! [`StandardListItem`] rows grouped under section headers (Today /
+//! Yesterday / This week / Earlier), computed against the user's local
+//! timezone on every archive mutation. An optional toolbar row provides
+//! mark-all-read and clear buttons. Unread rows show the title in
+//! `BodyBold`; read rows use `Body`. An empty-state hint is shown when the
+//! archive is empty.
 //!
-//! Apps embed the log directly (e.g. inside a sidebar panel), wrap
-//! it in [`NotificationCenterButton`](super::center_button::NotificationCenterButton)
-//! to get the bell-icon-with-popover pattern, or call
-//! [`NotificationLogDialog::show`](super::log_dialog::NotificationLogDialog::show)
-//! for a one-line modal presentation.
+//! ## When to use
+//!
+//! - Embed directly inside a side panel or settings page for an in-app
+//!   notification centre.
+//! - Wrap in [`NotificationCenterButton`](super::center_button::NotificationCenterButton)
+//!   for the standard bell-icon-with-popover pattern.
+//! - Call [`NotificationLogDialog::show`](super::log_dialog::NotificationLogDialog::show)
+//!   for a one-line modal presentation.
+//!
+//! ```ignore
+//! let archive: Rc<NotificationArchiveModel> = ctx.app_state().unwrap();
+//! let log = NotificationLog::new(archive)
+//!     .on_action_invoked(|_entry, action, ctx| {
+//!         if let Some(name) = &action.intent_name {
+//!             ctx.send_intent(bastyde_core::Intent::new(name));
+//!         }
+//!     });
+//! ```
 
 use bastyde_i18n::lit;
 use std::rc::Rc;

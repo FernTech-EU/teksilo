@@ -1,34 +1,32 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Rich text editor widget.
+//! Rich text editor and viewer widget.
 //!
-//! See [`§27.10` of the architecture doc](../../../../../docs/architecture.md)
-//! for the design rationale. Two construction presets:
-//! [`RichTextEditor::read_only`] (view documents, select/copy, click links)
-//! and [`RichTextEditor::editor`] (full editing).
+//! Two construction presets share the same implementation: [`RichTextEditor::editor`]
+//! provides a full editing surface (blinking caret, keyboard commands, clipboard,
+//! undo/redo, `Role::MultilineTextInput`) and [`RichTextEditor::read_only`] is a
+//! view-only surface (hidden caret, mutations rejected, `Role::Document`). Both
+//! bind to an external [`TextDocument`]
+//! via `on_change` subscriptions, so any number of editors and viewers can share
+//! one document and observe each other's edits live.
 //!
-//! The widget owns its own `bastyde_text::RichTextEngine` (per-widget
-//! typesetter), subscribes to document events via `on_change` so
-//! multiple editors can share a `TextDocument` like QTextEdit views,
-//! and drives its own scroll bars outside of `ScrollArea` to break the
-//! wrap/scrollbar circular dependency of §27.10.5.
+//! The widget owns a per-widget `RichTextEngine` (typesetter), and drives its own
+//! scroll bars independently of `ScrollArea` to avoid the wrap/scrollbar circular
+//! measurement dependency. Use [`RichTextEditor::min_lines`] /
+//! [`RichTextEditor::max_lines`] to switch from greedy sizing to intrinsic
+//! (messenger-composer) sizing. A detachable [`EditorHandle`] lets toolbars and
+//! palette panels issue formatting commands from closures that cannot borrow the
+//! editor directly.
 //!
-//! Constructors: [`RichTextEditor::read_only`] (hidden caret, filter
-//! rejects mutations, accessibility role `Document`) and
-//! [`RichTextEditor::editor`] (blinking caret, full command filter,
-//! role `MultilineTextInput`, `SetValue` action declared). Both
-//! widgets subscribe to `TextDocument::on_change` independently so
-//! any number of editors / viewers can share a document and observe
-//! each other's edits independently.
-//!
-//! This file owns the struct, its builder methods and signal
-//! accessors, `Widget` trait impl (`build` / `size_that_fits` /
-//! `place_children` / `paint` / `accessibility`), and the shared
-//! `sync_cursor_signals` helper used by both `keyboard` and `mouse`
-//! dispatch modules. Key / pointer / gesture handlers live in
-//! `keyboard` and `mouse`; the frame-tick loop lives in
-//! `frame_loop`; clipboard actions in `clipboard`.
+//! ```ignore
+//! use bastyde_text::text_document::TextDocument;
+//! let doc = TextDocument::new();
+//! let editor = RichTextEditor::editor(doc)
+//!     .min_lines(3)
+//!     .max_lines(8)
+//!     .wrap_mode(WrapMode::Word);
+//! ```
 
 mod clipboard;
 mod context_menu;
@@ -77,16 +75,16 @@ use self::state::{EditorState, SharedState};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use crate::styles::RecipeRichTextEditorStyle;
 
-/// Scrollbar visibility policy, applied independently per axis.
+/// Scroll bar visibility policy for [`RichTextEditor`], applied independently per axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollPolicy {
-    /// Visible only when the corresponding `max_scroll_axis > 0`.
+    /// Show the scroll bar only when content overflows the visible area (default).
     #[default]
     Auto,
-    /// Always visible (reserves gutter width even when content fits).
+    /// Always show the scroll bar, reserving gutter space even when content fits.
     AlwaysOn,
-    /// Never rendered. Useful when embedding the editor in an outer
-    /// scroll container, or in tests.
+    /// Never show the scroll bar; useful when embedding the editor inside an outer
+    /// `ScrollArea` or in headless tests.
     AlwaysOff,
 }
 

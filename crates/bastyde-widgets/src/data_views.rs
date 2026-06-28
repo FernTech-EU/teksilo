@@ -32,11 +32,15 @@ use bastyde_data::{
 /// the platform split other toolkits expose (Qt
 /// `SH_ItemView_ActivateItemOnSingleClick`, GTK `activate-on-single-click`).
 /// Enter/Space always activates regardless of this mode.
+///
+/// Pass to `ListView::activate_on`, `TreeView::activate_on`, etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ActivateOn {
-    /// Activate on a single primary click (KDE / web / Scrivener convention).
+    /// One primary click activates the row (KDE / web / Scrivener convention).
+    /// Selection and activation happen on the same click.
     SingleClick,
-    /// Activate on a double primary click (Finder / Explorer / Qt & GTK default).
+    /// A double primary click activates the row; the first click only selects
+    /// it (Finder / Explorer / Qt and GTK default). This is the [`Default`].
     #[default]
     DoubleClick,
 }

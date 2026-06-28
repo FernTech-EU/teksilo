@@ -2,6 +2,32 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Badge — a pill-shaped label for tags, status indicators, and counts.
+//!
+//! `Badge` renders a short piece of text inside a rounded-pill container.
+//! Common uses include tag chips on list items, unread-count bubbles in
+//! navigation rails, and severity labels in alert rows. The pill chrome
+//! (corner radius, padding, surface tint) is driven by the active
+//! `BadgeStyle`; callers may swap it per-instance (`.style(...)`) or
+//! theme-wide via `theme.style_slots.badge`.
+//!
+//! ## When to use
+//!
+//! - Inline chip that annotates another widget (version tag, "NEW" label).
+//! - Standalone count indicator; pair with `SeverityBadge` for icon-backed
+//!   status glyphs.
+//!
+//! ## Accessibility
+//!
+//! Announces as `Role::Label` with its resolved text as the AT name.
+//! The inner `TextWidget` is hidden from AT to avoid double-announcement.
+//!
+//! ```rust
+//! # use bastyde_widgets::Badge;
+//! # use bastyde_i18n::lit;
+//! # use bastyde_tokens::Color;
+//! let _badge = Badge::new(lit!("NEW"))
+//!     .background(Color::new(0.2, 0.6, 1.0, 1.0));
+//! ```
 
 use std::rc::Rc;
 
@@ -31,6 +57,7 @@ pub struct Badge {
 }
 
 impl Badge {
+    /// Construct a badge with the given label text.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),

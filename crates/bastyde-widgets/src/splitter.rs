@@ -64,7 +64,10 @@ pub use self::model::{
 /// animation and only drops out once it's effectively gone.
 const COLLAPSED_VISIBLE_EPSILON: f32 = 0.01;
 
-/// An N-pane splitter bound to a [`SplitterModel`].
+/// An N-pane resizable split container driven by a [`SplitterModel`].
+///
+/// See the [module-level documentation](self) for a usage overview and
+/// constructor patterns.
 pub struct Splitter {
     model: SplitterModel,
     enabled: bool,
@@ -103,6 +106,8 @@ pub struct Splitter {
 }
 
 impl Splitter {
+    /// Create a `Splitter` bound to the given model. Panes must be appended
+    /// with [`pane`](Self::pane) in model order.
     pub fn new(model: SplitterModel) -> Self {
         Self {
             model,
@@ -162,6 +167,9 @@ impl Splitter {
         self
     }
 
+    /// Enable or disable handle dragging. When `false`, divider handles are
+    /// rendered inert — the pane layout is still valid but the user cannot
+    /// resize panes.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self

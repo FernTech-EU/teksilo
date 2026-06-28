@@ -1,37 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `TreeTableView<T>` — hierarchical multi-column widget.
+//! `TreeTableView<T>` — hierarchical multi-column data table with expand/collapse.
 //!
-//! Sibling of [`TableView`](crate::TableView). Backed by
-//! [`SortFilterTreeModel<T>`](bastyde_data::SortFilterTreeModel) so sort
-//! and filter compose with expand/collapse for free.
+//! Sibling of [`TableView`](crate::TableView) for tree-shaped data. Each row carries
+//! a depth level; one designated column (the *tree column*, defaulting to the first)
+//! shows a twist (chevron) and an indent gutter that toggles the row's children.
+//! Backed by a [`SortFilterTreeModel<T>`] so sort, filter, and expand state compose
+//! without extra bookkeeping. Shares the header, column, keyboard, and selection
+//! modules with `TableView`.
 //!
-//! Reuses the shared `column`, `header`, `layout`, `keyboard`, and
-//! `selection` modules of [`crate::table_view`]. Differences from
-//! `TableView`:
+//! Rows live in a `TreeBodyPane` — a sibling of the scrollbar — so buffer-exit /
+//! selection / expand rebuilds are never deferred mid-thumb-drag. Three row-height
+//! modes: uniform (`row_height`, fast path), exact per-flat-index callback
+//! (`row_height_fn`), and auto-measured (`auto_row_height` — grows to tallest cell).
 //!
-//! - Rows come from the proxy's flattened visible list (depth carried
-//!   in [`FlatEntry`](bastyde_data::FlatEntry)).
-//! - One column is the **tree column**: cells gain an indent gutter
-//!   plus a twist (chevron) that toggles expansion. Defaults to the
-//!   first column declared.
-//! - `Role::TreeGrid` on the root, `TreeRowA11y` on rows (carries
-//!   `set_level` + `set_expanded`).
-//! - ArrowLeft / ArrowRight on the tree column collapse / expand.
-//! - Row drag-drop is NOT shipped here: insertion-vs-reparent UX
-//!   requires its own design pass and is out-of-scope.
+//! ## Accessibility
 //!
-//! Rows live in a `TreeBodyPane` — a sibling
-//! of the scrollbar, so buffer-exit / selection / expand rebuilds are
-//! never deferred mid-thumb-drag (see that module's doc).
+//! Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
+//! ArrowLeft / ArrowRight on the tree column collapse / expand.
 //!
-//! Row heights come in three modes: uniform (`row_height`, the default
-//! fast path), exact per-flat-index callback (`row_height_fn`), and
-//! auto-measured (`auto_row_height` — rows grow to their tallest cell);
-//! expand/collapse/sort keep measured heights above the change via the
-//! proxy's `first_changed_index` divergence. See docs/table-view.md
-//! "Row heights".
+//! ```ignore
+//! // Column delegates capture closures — use ignore.
+//! use bastyde_widgets::TreeTableView;
+//! use bastyde_data::TreeModel;
+//! # struct File { name: String }
+//! # let model: TreeModel<File> = TreeModel::new();
+//! let _view = TreeTableView::new(model).row_height(28.0);
+//! ```
 
 mod body_pane;
 
@@ -366,6 +362,8 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Append a column definition. Columns are displayed in declaration order unless
+    /// reordered by the user.
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
         self
@@ -393,6 +391,7 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Append multiple columns from an iterator.
     pub fn columns(mut self, cols: impl IntoIterator<Item = Column<T>>) -> Self {
         self.columns.extend(cols);
         self
@@ -405,6 +404,8 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Override the per-depth indent in the tree column in logical pixels (default
+    /// comes from the active `TableStyle`).
     pub fn indent_per_level(mut self, px: f32) -> Self {
         self.indent_per_level = Some(px);
         self
@@ -454,16 +455,19 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Override the header row height in logical pixels.
     pub fn header_height(mut self, height: f32) -> Self {
         self.header_height = Some(height);
         self
     }
 
+    /// Show or hide the column header row (default `true`).
     pub fn show_header(mut self, visible: bool) -> Self {
         self.show_header = visible;
         self
     }
 
+    /// Set the row/cell selection mode (default `RowSingle`).
     pub fn selection_mode(mut self, mode: TableSelectionMode) -> Self {
         self.selection_mode = mode;
         self
@@ -503,46 +507,64 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Attach a cell-level selection model (row and column axes tracked
+    /// independently).
     pub fn cell_selection(mut self, sel: CellSelectionModel) -> Self {
         self.cell_selection = Some(sel);
         self
     }
 
+    /// Paint odd-indexed rows with the `SurfaceRole::AlternatingRow` tint
+    /// (default `false`).
     pub fn alternating_rows(mut self, enabled: bool) -> Self {
         self.alternating_rows = enabled;
         self
     }
 
+    /// Paint horizontal and/or vertical dividers between cells.
     pub fn grid_lines(mut self, kind: GridLines) -> Self {
         self.grid_lines = kind;
         self
     }
 
+    /// Accessible label for the whole tree table, announced by AT as the
+    /// table's name.
     pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.a11y_label = Some(label.into());
         self
     }
 
+    /// Show or hide the widget's internal vertical and horizontal scroll bars
+    /// (default `true`). Set to `false` when the table lives inside an external
+    /// `ScrollArea`.
     pub fn show_internal_scrollbars(mut self, show: bool) -> Self {
         self.show_internal_scrollbars = show;
         self
     }
 
+    /// Control how column widths are distributed when the table is resized
+    /// (default `Proportional`).
     pub fn column_resize_policy(mut self, policy: ColumnResizePolicy) -> Self {
         self.column_resize_policy = policy;
         self
     }
 
+    /// Set the keyboard Tab traversal direction inside the table (default `Cells`).
     pub fn tab_traversal(mut self, mode: TabTraversal) -> Self {
         self.tab_traversal = mode;
         self
     }
 
+    /// Set which user gesture starts an in-place cell edit (default
+    /// `DoubleClick`).
     pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self {
         self.edit_trigger = trigger;
         self
     }
 
+    /// Callback invoked when the user requests an in-place cell edit (e.g.
+    /// double-click when `edit_trigger` is `DoubleClick`). Receives the flat row
+    /// index, the column id, and a mutable `EventContext`.
     pub fn on_cell_edit_request(
         mut self,
         f: impl Fn(usize, &str, &mut EventContext) + 'static,
@@ -551,6 +573,8 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    /// Callback invoked when a row is activated (double-click or Enter, per
+    /// `activate_on`). Receives the flat row index.
     pub fn on_row_activate(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self {
         self.on_row_activate = Some(Rc::new(f));
         self
@@ -567,80 +591,100 @@ impl<T: 'static> TreeTableView<T> {
 
     // ── Reactive signals ──────────────────────────────────────────────
 
+    /// Current vertical scroll offset in logical pixels.
     pub fn scroll_y_signal(&self) -> &Signal<f32> {
         &self.scroll_y
     }
 
+    /// Maximum vertical scroll offset (content height − viewport height).
     pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
         &self.max_scroll_y
     }
 
+    /// Viewport-to-content height ratio — drives the scrollbar thumb size.
     pub fn viewport_ratio_y_signal(&self) -> &Signal<f32> {
         &self.viewport_ratio_y
     }
 
+    /// Active sort state: `Some((col_id, direction))` or `None` for unsorted.
     pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>> {
         &self.sort_signal
     }
 
+    /// Active per-column filters keyed by column id.
     pub fn filters_signal(&self) -> &Signal<HashMap<String, String>> {
         &self.filters_signal
     }
 
+    /// Current column widths in logical pixels, keyed by column id.
     pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>> {
         &self.column_widths_signal
     }
 
+    /// Current column display order as a list of column ids.
     pub fn column_order_signal(&self) -> &Signal<Vec<String>> {
         &self.column_order_signal
     }
 
+    /// Keyboard-focused cell as `(row, display_column_index)`, or `None`.
     pub fn focused_cell_signal(&self) -> &Signal<Option<(usize, usize)>> {
         &self.focused_cell
     }
 
+    /// Cell currently being edited as `(row, display_column_index)`, or `None`.
     pub fn editing_cell_signal(&self) -> &Signal<Option<(usize, usize)>> {
         &self.editing_cell
     }
 
+    /// Access the underlying `SortFilterTreeModel` (for programmatic sort /
+    /// filter / expand outside of the builder API).
     pub fn projection(&self) -> &SortFilterTreeModel<T> {
         &self.proxy
     }
 
     // ── Imperative API ─────────────────────────────────────────────────
 
+    /// Expand the subtree rooted at `node`.
     pub fn expand(&self, node: NodeId) {
         self.proxy.expand(node);
     }
 
+    /// Collapse the subtree rooted at `node`.
     pub fn collapse(&self, node: NodeId) {
         self.proxy.collapse(node);
     }
 
+    /// Toggle the expand/collapse state of `node`.
     pub fn toggle(&self, node: NodeId) {
         self.proxy.toggle(node);
     }
 
+    /// Expand all nodes in the tree.
     pub fn expand_all(&self) {
         self.proxy.expand_all();
     }
 
+    /// Collapse all nodes in the tree.
     pub fn collapse_all(&self) {
         self.proxy.collapse_all();
     }
 
+    /// Move keyboard focus to the cell at `(row, col)`.
     pub fn set_focused_cell(&self, row: usize, col: usize) {
         self.focused_cell.set(Some((row, col)));
     }
 
+    /// Clear the keyboard-focused cell.
     pub fn clear_focused_cell(&self) {
         self.focused_cell.set(None);
     }
 
+    /// Programmatically sort by `col_id` (pass `None` to clear the sort).
     pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection) {
         self.sort_signal.set(col_id.map(|c| (c.to_string(), dir)));
     }
 
+    /// Set or clear the filter text for a single column.
     pub fn set_filter(&self, col_id: &str, text: &str) {
         let mut m = self.filters_signal.get();
         if text.is_empty() {

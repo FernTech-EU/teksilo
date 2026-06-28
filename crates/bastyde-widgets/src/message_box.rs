@@ -148,23 +148,41 @@ pub enum ButtonRole {
 /// intent-name string used internally for shortcut/action routing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StandardButton {
+    /// Accept / confirm. `ButtonRole::Accept`.
     Ok,
+    /// Cancel the operation. `ButtonRole::Reject`.
     Cancel,
+    /// Close the dialog. `ButtonRole::Reject`.
     Close,
+    /// Confirm with "Yes". `ButtonRole::Accept`.
     Yes,
+    /// Decline with "No". `ButtonRole::Reject`.
     No,
+    /// Confirm all remaining items. `ButtonRole::Accept`.
     YesToAll,
+    /// Decline all remaining items. `ButtonRole::Reject`.
     NoToAll,
+    /// Save changes. `ButtonRole::Accept`.
     Save,
+    /// Save all open items. `ButtonRole::Accept`.
     SaveAll,
+    /// Discard changes without saving. `ButtonRole::Destructive`.
     Discard,
+    /// Apply changes without closing. `ButtonRole::Accept`.
     Apply,
+    /// Reset to defaults. `ButtonRole::Action`.
     Reset,
+    /// Restore factory defaults. `ButtonRole::Action`.
     RestoreDefaults,
+    /// Abort the current operation. `ButtonRole::Reject`.
     Abort,
+    /// Retry the failed operation. `ButtonRole::Accept`.
     Retry,
+    /// Ignore the error and continue. `ButtonRole::Action`.
     Ignore,
+    /// Open a file or resource. `ButtonRole::Accept`.
     Open,
+    /// Show help. `ButtonRole::Action`.
     Help,
 }
 
@@ -461,11 +479,13 @@ impl State {
 
 // ── The MessageBox widget ──────────────────────────────────────────
 
-/// A QMessageBox-style alert dialog. Constructed via severity-named
-/// constructors ([`MessageBox::information`], [`MessageBox::warning`],
-/// [`MessageBox::critical`], [`MessageBox::question`],
+/// A modal alert dialog that displays a severity icon, title, body text, and
+/// one or more buttons.
+///
+/// Constructed via severity-named constructors ([`MessageBox::information`],
+/// [`MessageBox::warning`], [`MessageBox::critical`], [`MessageBox::question`],
 /// [`MessageBox::plain`]), configured fluently, and presented with
-/// [`MessageBox::present`].
+/// [`MessageBox::present`]. See the module documentation for the full guide.
 pub struct MessageBox {
     severity: MessageBoxSeverity,
     title: LocalizedString,

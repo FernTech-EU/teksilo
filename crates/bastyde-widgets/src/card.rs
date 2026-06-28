@@ -1,17 +1,39 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Card — a Panel with shadow and optional header/content/footer slots.
+//! Card — a surface container with optional header, content, and footer slots.
 //!
-//! Card composes its chrome (shadow + background + corner radius +
-//! padding) via the `CardStyle` trait protocol. The default
-//! `RecipeCardStyle` honours all four `CardVariant` values (Plain,
-//! Elevated, Outlined, Filled) plus per-call manual overrides
-//! (background, corner_radius, padding, shadow). Apps that want a
-//! different chrome (frosted-glass card, brutalist box, neumorphic
-//! raised surface) plug their own `impl CardStyle` per-call
-//! (`.style(...)`) or theme-wide via
-//! `theme.style_slots.card = Some(Rc::new(MyCard))`.
+//! `Card` renders an opaque or tinted rounded-rectangle backdrop, an optional
+//! drop shadow, and up to three stacked content slots (header / content /
+//! footer). It is the standard building block for list-item cards, dashboard
+//! tiles, onboarding panels, and any widget that needs a visually distinct
+//! raised or outlined surface. Chrome (shadow, background, corner radius,
+//! padding) is delegated to the active [`CardStyle`](bastyde_core::styles::CardStyle)
+//! so the visual language can be changed per-call (`.style(...)`) or
+//! theme-wide via `theme.style_slots.card`.
+//!
+//! ## When to use
+//!
+//! - `CardVariant::Elevated` — a dashboard tile or list card that should
+//!   "float" above the page surface.
+//! - `CardVariant::Outlined` — a bordered grouping box without shadow.
+//! - `CardVariant::Plain` — the content sits on the default surface; no
+//!   visible chrome (useful for spacing only).
+//!
+//! ## Accessibility
+//!
+//! Announces as `Role::Group`. The slots' own accessibility nodes are
+//! included in the subtree; the card itself carries no additional AT name.
+//!
+//! ```rust
+//! # use bastyde_widgets::Card;
+//! # use bastyde_core::styles::CardVariant;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _card = Card::new()
+//!     .variant(CardVariant::Elevated)
+//!     .content(TextWidget::new(lit!("Hello, card!")));
+//! ```
 
 use std::rc::Rc;
 
@@ -52,6 +74,7 @@ impl std::fmt::Debug for Card {
 }
 
 impl Card {
+    /// Construct an empty card with no slots and the default `CardVariant::Plain`.
     pub fn new() -> Self {
         Self {
             header_id: None,
@@ -70,36 +93,45 @@ impl Card {
         }
     }
 
+    /// Set the header slot (topmost section) to an inline widget.
     pub fn header(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_header = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Set the header slot to a pre-registered `WidgetId`.
     pub fn header_id(mut self, id: WidgetId) -> Self {
         self.pending_header = Some(PendingChild::Id(id));
         self
     }
 
+    /// Set the main content slot (middle section) to an inline widget.
     pub fn content(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Set the main content slot to a pre-registered `WidgetId`.
     pub fn content_id(mut self, id: WidgetId) -> Self {
         self.pending_content = Some(PendingChild::Id(id));
         self
     }
 
+    /// Set the footer slot (bottommost section) to an inline widget.
     pub fn footer(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_footer = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Set the footer slot to a pre-registered `WidgetId`.
     pub fn footer_id(mut self, id: WidgetId) -> Self {
         self.pending_footer = Some(PendingChild::Id(id));
         self
     }
 
+    /// Override the drop shadow. Accepts a `Shadow` token (see
+    /// `bastyde_tokens::Shadow`). The default shadow comes from the active
+    /// `CardStyle` for the chosen `CardVariant`.
     pub fn shadow(mut self, shadow: Shadow) -> Self {
         self.shadow = Some(shadow);
         self

@@ -1,10 +1,32 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Grid — a 2D layout container with row and column tracks.
+//! Grid — a 2D layout container with explicit row and column tracks.
 //!
-//! Supports fixed, fractional, and auto-sized tracks. Children are placed
-//! in row-major order: child 0 at (row=0, col=0), child 1 at (row=0, col=1), etc.
+//! Columns and rows are declared as [`TrackSize`] slices supporting three
+//! sizing modes: `Fixed(px)` (exact logical pixels), `Auto` (sized to the
+//! largest child in that track), and `Fractional(fr)` (share of the remaining
+//! space after fixed and auto tracks are allocated — the CSS `fr` unit).
+//! Children are placed in **row-major order**: child 0 occupies cell
+//! `(row=0, col=0)`, child 1 `(row=0, col=1)`, and so on. Dormant children
+//! are excluded from placement while keeping their siblings at their original
+//! cell positions, so toggling a cell visible/dormant does not shift other
+//! cells.
+//!
+//! Fractional columns fall back to the child's natural width when the parent
+//! provides no width constraint (intrinsic-measurement pass), preventing
+//! wrap-aware children from reporting inflated heights.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{Grid, TrackSize, RectWidget};
+//! // Two equal columns with a fixed 40 dp row, separated by an 8 dp gap
+//! let _grid = Grid::new()
+//!     .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(1.0)])
+//!     .rows(vec![TrackSize::Fixed(40.0)])
+//!     .column_gap(8.0)
+//!     .child(RectWidget::new())
+//!     .child(RectWidget::new());
+//! ```
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -12,18 +34,21 @@ use bastyde_core::signal::Prop;
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 
-/// How a grid track (row or column) is sized.
+/// Sizing mode for a single row or column track in a [`Grid`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TrackSize {
-    /// Fixed size in logical pixels.
+    /// Fixed size in logical pixels regardless of available space.
     Fixed(f32),
-    /// Fraction of remaining space after fixed and auto tracks are allocated.
+    /// Share of the remaining space after `Fixed` and `Auto` tracks are
+    /// resolved; equivalent to the CSS `fr` unit.  Multiple `Fractional`
+    /// tracks divide the remainder proportionally to their weights.
     Fractional(f32),
-    /// Sized to fit content (uses the largest child in that track).
+    /// Sized to the largest intrinsic dimension among all children in the
+    /// track; expands to fill content, never clips.
     Auto,
 }
 
-/// A 2D grid layout container.
+/// A 2D grid layout container with explicit track declarations.
 #[derive(Debug)]
 pub struct Grid {
     columns: Vec<TrackSize>,
@@ -35,7 +60,9 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// Create a new grid. Columns and rows default to a single Auto track each.
+    /// Create a new `Grid` with a single `Auto` column and a single `Auto`
+    /// row; configure track definitions with [`columns`](Self::columns) and
+    /// [`rows`](Self::rows).
     pub fn new() -> Self {
         Self {
             columns: vec![TrackSize::Auto],
@@ -47,11 +74,15 @@ impl Grid {
         }
     }
 
+    /// Set the column track definitions; each entry describes one column's
+    /// sizing mode.
     pub fn columns(mut self, columns: Vec<TrackSize>) -> Self {
         self.columns = columns;
         self
     }
 
+    /// Set the row track definitions; each entry describes one row's sizing
+    /// mode.
     pub fn rows(mut self, rows: Vec<TrackSize>) -> Self {
         self.rows = rows;
         self
@@ -69,16 +100,21 @@ impl Grid {
         self
     }
 
+    /// Append a pre-registered child by ID; children are placed in row-major
+    /// order starting at `(row=0, col=0)`.
     pub fn add_child(mut self, id: WidgetId) -> Self {
         self.pending.push(PendingChild::Id(id));
         self
     }
 
+    /// Append an inline child widget in the next cell (row-major order).
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Append multiple inline children from an iterator, each occupying the
+    /// next cell in row-major order.
     pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
@@ -86,6 +122,8 @@ impl Grid {
         self
     }
 
+    /// Append an optional inline child; a `None` value is a no-op, keeping
+    /// subsequent children at their original cell positions.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));

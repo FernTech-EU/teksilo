@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `ValidationStrip` — small inline text rendered below a text field
-//! to surface a validation outcome.
+//! ValidationStrip — a small inline message shown below a text field to
+//! surface a validation outcome.
 //!
-//! Bound to a `Signal<ValidationFeedback>` from a
-//! [`TextInputField`](super::text_input_field::TextInputField). Renders
-//! nothing when the feedback is `Pristine` or `Valid`; renders a
-//! single-line `TextWidget` in the appropriate role when `Invalid`
-//! (red, `Live::Assertive`) or `Corrected` (secondary text,
-//! `Live::Polite`).
+//! Bound to a `Signal<ValidationFeedback>` produced by a
+//! [`TextInputField`](super::text_input_field::TextInputField).  The strip
+//! renders nothing when the feedback is `Pristine` or `Valid`, and shows a
+//! single-line message in the appropriate role when `Invalid` (error colour,
+//! `Live::Assertive`) or `Corrected` (secondary text, `Live::Polite`).
+//! The strip is layout-stable: in the hidden state it reports zero height so
+//! the surrounding layout does not reflow on every commit.
+//! It carries `Role::Status` so screen readers announce the message through
+//! the appropriate live region without any composite-side wiring.
 //!
-//! Layout-stable: when no message is shown, the strip reports zero
-//! height so the surrounding layout doesn't reflow on every commit.
-//!
-//! Carries `Role::Status` so screen readers announce the message
-//! through the appropriate Live region without composite-side wiring.
+//! ```ignore
+//! // ValidationStrip is constructed with a `Signal<ValidationFeedback>`
+//! // obtained from a live `TextInputField` — it needs BuildContext to wire up.
+//! // Typical usage inside a composing widget's build():
+//! let (field_id, fb_signal) = build_text_input_field(ctx, ...);
+//! let strip = ctx.add(ValidationStrip::new(fb_signal));
+//! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;

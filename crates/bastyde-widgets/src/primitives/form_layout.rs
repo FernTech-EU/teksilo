@@ -1,8 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! FormLayout — a two-column form layout where children are added as
-//! label/field pairs, with support for full-width rows.
+//! FormLayout — a two-column settings or preferences form layout.
+//!
+//! Children are added as label/field pairs via [`FormLayout::line`] (inline
+//! widgets) or [`FormLayout::line_ids`] (pre-registered IDs). Full-width rows
+//! that span both columns — section headers, `Divider`s, or banners — are
+//! added via [`FormLayout::full_width`] / [`FormLayout::full_width_id`]. The
+//! label column auto-sizes to the widest label across all pairs so all field
+//! inputs are left-aligned. RTL layouts are handled automatically: the label
+//! column migrates to the trailing side and the field column moves to the
+//! leading side. Dormant rows are excluded from both measurement and
+//! placement.
+//!
+//! When an accessible name is provided via [`FormLayout::label`], the widget
+//! emits `Role::Form` so screen-reader users can navigate directly to the
+//! form. Without a name it demotes to a presentational `GenericContainer`.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{FormLayout, TextWidget, RectWidget};
+//! # use bastyde_i18n::lit;
+//! let _form = FormLayout::new()
+//!     .label_gap(8.0)
+//!     .row_spacing(6.0)
+//!     .line(TextWidget::new(lit!("Name:")),  RectWidget::new())
+//!     .line(TextWidget::new(lit!("Email:")), RectWidget::new());
+//! ```
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -64,7 +87,7 @@ pub struct FormLayout {
 }
 
 impl FormLayout {
-    /// Create an empty form layout.
+    /// Create an empty `FormLayout` with zero label gap and zero row spacing.
     pub fn new() -> Self {
         Self {
             rows: Vec::new(),

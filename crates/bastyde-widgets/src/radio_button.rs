@@ -1,11 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! RadioButton — mutually exclusive selection within a group.
+//! RadioButton — mutually exclusive selection control.
 //!
-//! Non-generic: uses `usize` for values. Multiple RadioButtons share a
-//! `Signal<usize>` — selecting one automatically deselects others.
-//! V2 attached handlers — no event() override.
+//! Multiple `RadioButton`s share a `Signal<usize>`; selecting one writes its
+//! `value` to the signal, which automatically deselects every sibling that
+//! observes the same signal. The widget is non-generic: values are `usize`
+//! indices into the caller's choice list. Wrap related buttons in a
+//! [`RadioGroup`](crate::radio_group::RadioGroup) to provide the AT "2 of 3"
+//! positional announcement required by ARIA.
+//!
+//! ## Accessibility
+//!
+//! Reports `Role::RadioButton` with `set_toggled` mirroring the selected
+//! state. Responds to `Action::Click` from assistive technology. The focus
+//! ring is keyboard-only (`:focus-visible` gated by the input-modality
+//! signal). When wrapped in `RadioGroup`, each button emits
+//! `push_to_radio_group([sibling_ids])` so screen readers can announce
+//! positional membership.
+//!
+//! ```rust
+//! # use bastyde_widgets::RadioButton;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! let selected = Signal::new(0_usize);
+//! let _r0 = RadioButton::new(0, selected.clone()).label(lit!("Light"));
+//! let _r1 = RadioButton::new(1, selected.clone()).label(lit!("Dark"));
+//! let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
+//! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -25,7 +47,7 @@ use crate::button::InteractionState;
 use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 use bastyde_i18n::LocalizedString;
 
-/// A radio button that sets a shared `Signal<usize>` to its value when selected.
+/// A single radio button option that writes `value` into a shared `Signal<usize>` on selection.
 pub struct RadioButton {
     label: Option<LocalizedString>,
     caption: Option<LocalizedString>,
@@ -49,6 +71,7 @@ pub struct RadioButton {
 }
 
 impl RadioButton {
+    /// Create a radio button with the given `value` and shared selection signal.
     pub fn new(value: usize, selected: Signal<usize>) -> Self {
         Self {
             label: None,
@@ -74,6 +97,7 @@ impl RadioButton {
         self.group_ids = Some(ids);
     }
 
+    /// Set the visible label text displayed to the right of the radio circle.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -111,6 +135,7 @@ impl RadioButton {
         self
     }
 
+    /// Attach a plain single-line tooltip shown on hover.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;

@@ -122,7 +122,8 @@ pub(crate) struct EditorState {
 
     /// Whether this editor follows the global accessibility text scale
     /// (`ctx.text_scale`). `true` by default; set `false` via
-    /// [`RichTextEditor::follow_text_scale`] for documents whose font sizes are
+    /// [`RichTextEditor::follow_text_scale`](crate::rich_text::RichTextEditor::follow_text_scale)
+    /// for documents whose font sizes are
     /// content (e.g. a WYSIWYG editor) that should not inflate with the UI
     /// accessibility setting.
     pub follow_text_scale: bool,

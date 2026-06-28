@@ -37,9 +37,9 @@ use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 use crate::primitives::{Center, FixedSize, HStack, RectWidget, Switcher, TextWidget, ZStack};
 use crate::title_bar::CloseAction;
 
-/// Layout snapshot a `WindowControls` exports back to its parent
-/// `TitleBar` so the parent's `after_paint` aggregator can read the
-/// per-button `WidgetId`s. Populated during `WindowControls::build`.
+/// Layout snapshot that [`WindowControls`] exports to its parent `TitleBar`
+/// so the `after_paint` aggregator can read the per-button [`WidgetId`]s.
+/// Populated during `WindowControls::build`.
 ///
 /// The maximize slot is the **Switcher** that wraps the two glyph
 /// buttons (`□` / `❐`), not either child directly: the inactive
@@ -102,6 +102,9 @@ impl std::fmt::Debug for ControlButton {
 }
 
 impl ControlButton {
+    /// Create a control button with the given Unicode glyph, fixed cell dimensions, and
+    /// foreground color role. The hover background defaults to transparent until overridden
+    /// via [`hover_background`](ControlButton::hover_background).
     pub fn new(glyph: &'static str, width: f32, height: f32, fg: impl Into<ColorProp>) -> Self {
         Self {
             glyph,
@@ -127,11 +130,14 @@ impl ControlButton {
         self
     }
 
+    /// Set the surface role painted over the title bar background while the pointer is inside
+    /// the button cell. The default is `SurfaceRole::Transparent` (flat).
     pub fn hover_background(mut self, role: SurfaceRole) -> Self {
         self.hover_role = role;
         self
     }
 
+    /// Register the callback invoked when the user taps this button.
     pub fn on_tap(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Rc::new(action));
         self
@@ -289,6 +295,9 @@ impl std::fmt::Debug for WindowControls {
 }
 
 impl WindowControls {
+    /// Build the minimize / maximize / close cluster for the given platform host. `is_maximized`
+    /// drives the maximize ↔ restore glyph swap; `close_action` overrides the default
+    /// `ctx.close_window()` behaviour (e.g. to show a "save before closing?" dialog).
     pub fn new(
         host: Rc<dyn PlatformTitleBarHost>,
         is_maximized: Signal<bool>,

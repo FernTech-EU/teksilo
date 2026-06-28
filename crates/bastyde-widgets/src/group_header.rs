@@ -51,6 +51,7 @@ pub struct GroupHeader {
 }
 
 impl GroupHeader {
+    /// Create a section header with the given `label`.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {

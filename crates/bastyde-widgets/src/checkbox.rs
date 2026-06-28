@@ -1,15 +1,38 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Checkbox — a togglable checkbox with optional label and tristate support.
+//! Checkbox — a two-state or tristate checkbox with an optional label.
 //!
-//! Two modes:
-//! - **Two-state** (`Checkbox::new(Signal<bool>)`): toggles between checked/unchecked.
-//! - **Tristate** (`Checkbox::tristate(Signal<CheckState>)`): cycles through
-//!   Unchecked → Checked → Indeterminate → Unchecked. Useful for tree views
-//!   where a parent represents partially-selected children.
+//! `Checkbox` renders a square (or rounded-square / circle) toggle box
+//! alongside an optional label and caption. Two modes are supported:
 //!
-//! V2 attached handlers — no event() override.
+//! - **Two-state** ([`Checkbox::new`]): toggles a `Signal<bool>` between
+//!   `true` (checked) and `false` (unchecked) on click or Space.
+//! - **Tristate** ([`Checkbox::tristate`]): cycles a `Signal<CheckState>`
+//!   between `Checked` and `Unchecked` on user interaction; the
+//!   `Indeterminate` state is set only by external sources such as
+//!   `TreeCheckedModel` aggregation — clicking from `Indeterminate` goes
+//!   to `Checked`, not a further third state.
+//!
+//! Chrome (box shape, fill, focus ring) is driven by the active
+//! `CheckboxStyle`; three visual variants are available via
+//! [`CheckboxVariant`].
+//!
+//! ## Accessibility
+//!
+//! Announces as `Role::CheckBox`. A label is required in debug builds
+//! unless `.labels_hidden(true)` is set (for embedding inside a composite
+//! row that owns the AT name). Keyboard: Space toggles; lone-KeyUp guard
+//! prevents spurious toggle when focus is restored after a shortcut.
+//!
+//! ```rust
+//! # use bastyde_widgets::Checkbox;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! let checked = Signal::new(false);
+//! let _cb = Checkbox::new(checked)
+//!     .label(lit!("Accept terms and conditions"));
+//! ```
 
 use std::rc::Rc;
 
@@ -187,6 +210,8 @@ impl Checkbox {
         self
     }
 
+    /// Set the visible label rendered to the right of the checkbox box,
+    /// also used as the AT name. Required unless `.labels_hidden(true)` is set.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -229,6 +254,8 @@ impl Checkbox {
         self
     }
 
+    /// Attach a plain tooltip shown after a hover delay.
+    /// Clears any previously set rich or composite tooltip (last-call wins).
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;

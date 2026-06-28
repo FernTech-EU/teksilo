@@ -1,7 +1,25 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! StatusBar — a horizontal bar at the bottom for status information.
+//! StatusBar — a horizontal chrome bar at the bottom of a window for status
+//! information.
+//!
+//! The bar publishes `Role::Status` so assistive technology can discover it as
+//! a status landmark. It is **not** a live region by default — use
+//! [`announce_changes(true)`](StatusBar::announce_changes) only for bars that
+//! surface transient messages worth reading aloud (e.g. "Saved"), not for bars
+//! showing continuous data like cursor position or zoom level that would flood
+//! the screen reader. Visual chrome (background, border, corner radius) is
+//! delegated to an inner [`Panel`].
+//!
+//! ```rust
+//! # use bastyde_widgets::StatusBar;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _bar = StatusBar::new()
+//!     .child(TextWidget::new(lit!("Ln 1, Col 1")))
+//!     .announce_changes(false);
+//! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -49,6 +67,8 @@ pub struct StatusBar {
 }
 
 impl StatusBar {
+    /// Create an empty status bar with default styling (`SurfaceRole::Sunken`,
+    /// square corners, no live region).
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),

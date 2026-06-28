@@ -1,10 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Link — a clickable text label with underline.
+//! Link — a clickable text label rendered as underlined inline text.
 //!
-//! Follows the Button pattern for interaction but renders as underlined text.
-//! V2 attached handlers — no event() override.
+//! `Link` is Bastyde's hyperlink control: it responds to tap, Enter, and
+//! Space like a `Button`, but renders as styled underlined text rather than a
+//! bordered box. It supports an optional `url` field (informational — the app
+//! decides whether and how to open it), a reactive `visited` state that shifts
+//! the text colour, and all three tooltip tiers (plain / rich / composite).
+//!
+//! Keyboard behaviour follows the platform link convention: Space and Enter
+//! activate; a bare KeyUp with no preceding KeyDown is ignored (lone-KeyUp
+//! guard). The focus ring appears only after keyboard navigation
+//! (`focus_visible`), not after a mouse click.
+//!
+//! ## Accessibility
+//!
+//! `Role::Link` with the label as the AT name. When `url` is set it is
+//! forwarded to `set_url` so screen readers can announce the destination.
+//! Exposes `Action::Click` and `Action::Focus`.
+//!
+//! ```rust
+//! # use bastyde_widgets::Link;
+//! # use bastyde_i18n::lit;
+//! let _w = Link::new(lit!("Open documentation"))
+//!     .url("https://example.com/docs");
+//! ```
 
 use std::rc::Rc;
 
@@ -23,7 +44,7 @@ use bastyde_i18n::LocalizedString;
 
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
-/// A clickable text link with underline.
+/// A clickable text link that renders as underlined inline text.
 pub struct Link {
     text: LocalizedString,
     url: Option<String>,
@@ -46,6 +67,7 @@ pub struct Link {
 }
 
 impl Link {
+    /// Create a link with the given display text.
     pub fn new(text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         Self {
@@ -90,6 +112,8 @@ impl Link {
         self
     }
 
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    /// Mutually exclusive with `rich_tooltip` / `composite_tooltip` — last call wins.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
@@ -126,7 +150,7 @@ impl Link {
         self
     }
 
-    /// Get the URL, if set.
+    /// Return the URL previously set via [`url`](Self::url), if any.
     pub fn get_url(&self) -> Option<&str> {
         self.url.as_deref()
     }

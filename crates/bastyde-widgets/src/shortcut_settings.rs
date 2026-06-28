@@ -24,6 +24,17 @@
 //! the widget cancels the capture, so navigating away mid-rebind
 //! cannot leak a stray rebind onto the next keystroke pressed
 //! somewhere else in the app.
+//!
+//! ```ignore
+//! // Inside a settings Dialog build():
+//! let filter = ctx.signal(String::new());
+//! ctx.add(
+//!     ShortcutSettings::new()
+//!         .with_filter(filter)
+//!         .confirm_conflicts(true)
+//!         .on_conflict(|c| println!("displaced: {}", c.displaced_name)),
+//! );
+//! ```
 
 use bastyde_i18n::lit;
 use std::cell::RefCell;
@@ -58,9 +69,11 @@ struct CaptureTarget {
     slot: SlotKind,
 }
 
-/// Describes a rebind that collides with an existing binding. Passed to
-/// the [`ShortcutSettings::on_conflict`] callback (so apps can surface a
-/// toast) and used to drive the optional confirm prompt.
+/// Describes a rebind that collides with an existing binding.
+///
+/// Passed to the [`ShortcutSettings::on_conflict`] callback so the app
+/// can surface a toast ("Save lost its Ctrl+S binding"); also used
+/// internally to drive the optional inline confirm prompt.
 #[derive(Debug, Clone)]
 pub struct ShortcutConflict {
     /// Id of the shortcut that currently owns the chord and will be
@@ -68,7 +81,7 @@ pub struct ShortcutConflict {
     pub displaced_id: String,
     /// Display name of that shortcut (its registry `name`).
     pub displaced_name: String,
-    /// The chord being assigned.
+    /// The chord being assigned to the new target.
     pub keystroke: KeyStroke,
 }
 
@@ -83,7 +96,12 @@ struct PendingRebind {
     conflict_name: String,
 }
 
-/// Settings widget for browsing and rebinding shortcuts.
+/// A settings panel for browsing and rebinding application shortcuts.
+///
+/// Reads every `Shortcut` in the tree's `ShortcutRegistry`, groups rows
+/// by category, and renders primary + secondary keystroke slots with
+/// Rebind, Unbind, and Reset controls. See the module-level docs for the
+/// full feature list.
 pub struct ShortcutSettings {
     /// Target of the current capture (`None` when idle). Drives the
     /// "Press any key…" hint on the correct row + slot.
@@ -119,6 +137,8 @@ impl Default for ShortcutSettings {
 }
 
 impl ShortcutSettings {
+    /// Create a settings panel that lists every shortcut currently
+    /// registered in the tree's `ShortcutRegistry`, without a filter.
     pub fn new() -> Self {
         Self {
             capturing: Signal::new(None),

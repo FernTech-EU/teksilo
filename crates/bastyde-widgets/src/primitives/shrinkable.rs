@@ -1,6 +1,37 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Shrinkable — a layout modifier that allows its child to compress under an over-constraint.
+//!
+//! By default every widget is rigid: when a stack runs out of main-axis room, rigid
+//! children keep their wanted size and overflow the bounds. `Shrinkable` opts a child
+//! into the over-constraint distribution: the stack divides any deficit across all
+//! shrinkable children proportional to their [`shrink`](Shrinkable::shrink) weight,
+//! never below the [`min_width`](Shrinkable::min_width) / [`min_height`](Shrinkable::min_height)
+//! floor set here.
+//!
+//! `Shrinkable` is the shrink counterpart to
+//! [`Expand`](crate::primitives::Expand): while `Expand` claims leftover slack
+//! (grow), `Shrinkable` absorbs excess pressure (shrink). The two are independent
+//! — a child can both grow on surplus and shrink on deficit by wrapping with
+//! `Shrinkable` and setting a non-zero `flex` on the inner widget.
+//!
+//! ## When to use
+//!
+//! - A long text label that should ellipsize before a rigid icon/badge loses space.
+//! - A thumbnail image column that may compress while a fixed sidebar stays at full width.
+//! - "Compress A before B": give A `Shrinkable`, leave B rigid (`shrink = 0`).
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{HStack, Shrinkable, TextWidget};
+//! # use bastyde_i18n::lit;
+//! // The label shrinks as far as 48 dp; the button stays rigid.
+//! let _row = HStack::new()
+//!     .child(Shrinkable::new().min_width(48.0)
+//!         .child(TextWidget::new(lit!("A long label that may compress")).single_line()))
+//!     .child(TextWidget::new(lit!("Rigid")));
+//! ```
+
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::widget::{LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;

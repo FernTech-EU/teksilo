@@ -7,16 +7,22 @@
 //! The retained renderer's `Canvas::set_clip` is rectangular-only, so to
 //! crop a photo into a circle (avatar, contact icon, channel thumbnail,
 //! etc.) we modulate the source image's alpha channel with a per-pixel
-//! coverage value computed analytically. 4× × 4× super-sampling (16
+//! coverage value computed analytically. 4×4 super-sampling (16
 //! sub-samples per pixel) gives a smooth edge at the small sizes these
 //! masks are typically used at (≤96 logical pixels).
 //!
-//! The same RGBA pixel-walking pattern is used by
-//! [`bastyde_canvas::raster::RasterIcon::to_alpha_mask`] for icon tinting.
-//!
 //! Used directly by [`ImageWidget::mask`](super::ImageWidget::mask) and
-//! by [`Avatar`](crate::Avatar). Other widgets that want a non-rectangular
-//! image silhouette can call these helpers as well.
+//! by `Avatar`. Other widgets that want a non-rectangular image silhouette
+//! can call [`apply_alpha_mask`] and [`center_crop_square`] directly.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::image_mask::{ImageMaskShape, apply_alpha_mask};
+//! let mut pixels = vec![255u8; 32 * 32 * 4]; // opaque white 32×32
+//! apply_alpha_mask(&mut pixels, 32, 32, ImageMaskShape::Circle);
+//! // Corner pixels are now transparent; the center is still opaque.
+//! assert_eq!(pixels[3], 0);         // top-left alpha
+//! assert_eq!(pixels[(16 * 32 + 16) * 4 + 3], 255); // center alpha
+//! ```
 
 /// Shape of the alpha mask applied to an image.
 ///

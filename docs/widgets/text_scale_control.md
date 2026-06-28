@@ -1,0 +1,66 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
+# TextScaleControl
+
+[`TextScaleControl`] — the settings control that grows all text in the app.
+
+Drop this into a preferences/settings window to let low-vision users scale
+every piece of text uniformly (the framework multiplies the active theme's
+typography by the chosen factor — see
+`WidgetTree::set_user_text_scale`).
+It is a thin specialization of [`SpinBox`] that displays a percent
+(80 %–200 %, step 10 %) and, on each edit, both **persists** the value and
+**applies it app-wide** — so the developer only has to place the widget.
+
+Bind it to the persisted factor signal, typically the settings-backed
+`bastyde_settings::TEXT_SCALE_KEY`:
+
+```ignore
+use bastyde::prelude::*;
+use bastyde::widgets::TextScaleControl;
+
+// inside build():
+let scale = ctx.settings().signal_for(&bastyde_settings::TEXT_SCALE_KEY);
+ctx.add(TextScaleControl::new(scale).label(tr!(text_size())));
+```
+
+Writing the bound signal triggers the `SettingsStore`'s debounced auto-save
+(persistence), and the widget's `on_value_changed` calls
+`EventContext::set_text_scale`
+(immediate app-wide application). At startup `bastyde-app` reads the saved
+key and seeds every window, so the chosen size is restored automatically.
+
+## Builder methods at a glance
+
+`label`
+
+## API reference
+
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/text_scale_control/index.html)
+
+## `pub struct TextScaleControl`
+
+A specialized [`SpinBox`] for the global user text-scale setting.
+
+See the `module docs` for the persistence + app-wide application
+contract. Construct with [`TextScaleControl::new`], optionally attach a
+visible `label`, and place it in a settings view.
+
+```rust
+pub struct TextScaleControl { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(factor_signal: Signal<f32>) -> Self`
+
+Construct bound to `factor_signal` (a scale factor where `1.0` = 100 %).
+
+Pass `ctx.settings().signal_for(&bastyde_settings::TEXT_SCALE_KEY)` to get
+automatic persistence; any `Signal<f32>` works for ad-hoc / preview use.
+
+#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
+
+Attach a visible label placed to the leading side of the spinbox
+(e.g. `tr!(text_size())`). Also used as the control's accessible name.

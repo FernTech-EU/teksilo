@@ -86,6 +86,10 @@ impl std::fmt::Debug for ToastSurface {
 }
 
 impl ToastSurface {
+    /// Build a surface for a single live toast entry. Called by [`ToastHost`](crate::toast::host::ToastHost)
+    /// once per live registry entry during each rebuild pass. `leading_widget` is `Some` for
+    /// `Toast::loading` (a spinner) and `None` for severity-glyph entries (a `SeverityBadge`
+    /// is synthesised in `build`). `closable_on_escape` mirrors the matching `Toast` field.
     pub fn new(
         data: ToastSurfaceData,
         leading_widget: Option<Box<dyn Widget>>,

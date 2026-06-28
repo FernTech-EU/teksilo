@@ -1,6 +1,32 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! `Popover` — a button that opens a floating panel anchored to itself.
+//!
+//! `Popover` is the legacy one-type-does-everything disclosure widget: it
+//! pairs a labelled [`Button`] trigger (or any custom trigger supplied via
+//! `.trigger(...)`) with a themed popover surface and the full overlay
+//! wiring (dormant pre-build, `activate` on open, `show_overlay`, dismiss
+//! callback). For the more ergonomic generic form that works with both
+//! `Button` and `IconButton` triggers see
+//! [`PopoverWidget`](crate::popover_widget::PopoverWidget) /
+//! [`PopoverButton`](crate::popover_widget::PopoverButton) /
+//! [`PopoverIconButton`](crate::popover_widget::PopoverIconButton).
+//!
+//! ## Accessibility
+//!
+//! The trigger announces `HasPopup::Dialog` and tracks open/closed state
+//! via `set_expanded`. The popover surface carries `Role::Dialog` named
+//! after the trigger label.
+//!
+//! ```rust
+//! # use bastyde_widgets::popover::Popover;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _w = Popover::new(lit!("Choose…"))
+//!     .content(TextWidget::new(lit!("Pick an option")));
+//! ```
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -270,6 +296,7 @@ impl Widget for PopoverSurface {
     }
 }
 
+/// Labelled button that opens a floating popover panel. See the [module docs](self).
 pub struct Popover {
     label: LocalizedString,
     variant: ButtonVariant,
@@ -307,6 +334,8 @@ pub struct Popover {
 }
 
 impl Popover {
+    /// Construct a popover with the given trigger-button label. Supply content via
+    /// [`.content(...)`](Self::content) before mounting.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {
@@ -345,51 +374,67 @@ impl Popover {
         self
     }
 
+    /// Set the popover body widget (required). Built as a dormant subtree during
+    /// `build()` and woken when the trigger is activated.
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
         self
     }
 
+    /// Set the popover body by pre-registered [`WidgetId`].
     pub fn content_id(mut self, id: WidgetId) -> Self {
         self.pending_content = Some(PendingChild::Id(id));
         self
     }
 
+    /// Set the [`ButtonVariant`] used for the built-in text trigger. Default `Plain`.
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
         self
     }
 
+    /// Enable or disable the trigger button. Default `true`.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
+    /// Set the [`OverlayPlacement`] of the popover surface. Default
+    /// [`OverlayPlacement::BelowPreferred`].
     pub fn placement(mut self, placement: OverlayPlacement) -> Self {
         self.placement = placement;
         self
     }
 
+    /// Override the dismiss gesture. Default
+    /// [`DismissBehavior::EscapeOrClickOutside`].
     pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self {
         self.dismiss = dismiss;
         self
     }
 
+    /// Replace the built-in text `Button` with a custom trigger widget. The
+    /// custom trigger is wrapped in overlay machinery (focusable, tap / key /
+    /// AT-click open the panel) via an internal `OverlayTrigger`.
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
         self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
         self
     }
 
+    /// Set a custom trigger by pre-registered [`WidgetId`].
     pub fn trigger_id(mut self, id: WidgetId) -> Self {
         self.pending_trigger = Some(PendingChild::Id(id));
         self
     }
 
+    /// Show or hide the pointing caret between the popover panel and the
+    /// trigger. Default `true`.
     pub fn caret(mut self, show_caret: bool) -> Self {
         self.show_caret = show_caret;
         self
     }
 
+    /// Override the caret size in logical pixels (clamped to `0`). Default `10`.
     pub fn caret_size(mut self, caret_size: f32) -> Self {
         self.caret_size = caret_size.max(0.0);
         self

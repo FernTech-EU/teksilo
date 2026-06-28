@@ -1,6 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! FixedSize — a layout modifier that pins a child to its natural size,
+//! optionally overriding one or both dimensions with a reactive value.
+//!
+//! Without bindings, `FixedSize` ignores the parent's size proposal and
+//! always reports the child's intrinsic size. This is useful for widgets
+//! that must not be stretched or compressed by their containing stack —
+//! icons, chips, or thumbnails that must stay at their designed size
+//! regardless of the surrounding layout.
+//!
+//! With [`bind_width`](FixedSize::bind_width) or
+//! [`bind_height`](FixedSize::bind_height), the corresponding dimension is
+//! locked to a reactive `Signal<f32>` value; the signal change triggers a
+//! relayout automatically. Unbound dimensions still fall back to the child's
+//! natural size.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{FixedSize, RectWidget};
+//! # use bastyde_core::signal::Signal;
+//! let sidebar_width = Signal::new(240.0_f32);
+//! // Pin the sidebar width to a reactive signal
+//! let _sidebar = FixedSize::new()
+//!     .bind_width(sidebar_width)
+//!     .child(RectWidget::new());
+//! ```
+
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::signal::Prop;
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
@@ -20,6 +45,8 @@ pub struct FixedSize {
 }
 
 impl FixedSize {
+    /// Create a `FixedSize` with no child and no dimension bindings; the child's
+    /// natural size will be used for both axes.
     pub fn new() -> Self {
         Self {
             child_id: None,

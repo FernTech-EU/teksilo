@@ -68,6 +68,7 @@ pub struct RadioGroup {
 }
 
 impl RadioGroup {
+    /// Create an empty radio group with vertical orientation and 8 dp spacing.
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),

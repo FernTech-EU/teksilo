@@ -1,32 +1,28 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Notification archive model — the persistent layer behind
-//! [`Toast`](crate::toast::Toast).
+//! Persistent notification archive — the storage and data-model layer
+//! backing [`NotificationLog`], [`NotificationCenterButton`], and
+//! [`NotificationLogDialog`].
 //!
-//! Every toast presented through the registry is mirrored into a
-//! [`NotificationArchiveModel`]
-//! (when archiving is enabled via `ToastInstallOptions::archive`).
-//! The model is a [`ListModel<NotificationEntry>`](bastyde_data::ListModel)
-//! plus an unread-count signal — pre-shaped for binding to a
-//! `NotificationLog` / `NotificationCenterButton` (the
-//! widgets that consume this archive).
+//! Every toast presented through the toast registry is mirrored into a
+//! [`NotificationArchiveModel`] when archiving is enabled via
+//! `ToastInstallOptions::archive`. The model is a
+//! [`ListModel<NotificationEntry>`](bastyde_data::ListModel) plus an
+//! unread-count signal — shaped for one-line binding to the notification
+//! UI family. Two storage variants are available: an in-memory session-only
+//! ring buffer ([`NotificationArchive::InMemory`]) and a file-backed
+//! persistent store ([`NotificationArchive::Persistent`]) that survives app
+//! restarts. Action callbacks attached via raw closures are lost on
+//! archival; actions that should remain re-invokable from the log carry an
+//! `intent_name` that the log replays through `ctx.send_intent(...)`.
 //!
-//! Two storage variants are supported:
-//! - [`NotificationArchive::InMemory`] — session-only ring buffer.
-//! - [`NotificationArchive::Persistent`] — file-backed via
-//!   [`bastyde_settings::PersistedListModel`] so the archive survives
-//!   app restarts. Standard atomic write-temp+rename through the
-//!   shared bastyde-settings I/O thread.
+//! ## When to use
 //!
-//! Archive entries are independent of `Toast` request types — they
-//! carry plain owned fields (no closures) so they survive
-//! serialization. Action callbacks attached via raw closures are
-//! lost on archival; actions that should remain re-invokable from
-//! the log carry an `intent_name` (set via
-//! [`ToastAction::shortcut_id`](crate::toast::ToastAction::shortcut_id))
-//! that the log replays through the existing `ctx.send_intent(...)`
-//! dispatcher.
+//! - Pair with `BastydeAppBuilder::install_toast_default()` to get the full
+//!   bell-button + log + persistence stack for free.
+//! - Construct [`NotificationArchiveModel::in_memory`] directly in tests or
+//!   custom toast setups.
 //!
 //! ```ignore
 //! // In app boot, after install_toast:
@@ -50,10 +46,9 @@ pub use center_button::NotificationCenterButton;
 pub use log::NotificationLog;
 pub use log_dialog::NotificationLogDialog;
 
-/// A single archived notification — what
-/// [`NotificationLog`] renders, what survives across
-/// app restarts under `NotificationArchive::Persistent`. Owned, plain
-/// fields only; no closures, no `Rc<dyn Fn>`.
+/// A single archived notification entry rendered by [`NotificationLog`] and
+/// persisted under `NotificationArchive::Persistent`. Carries plain owned
+/// fields only — no closures, no `Rc<dyn Fn>` — so it is `Serialize`-friendly.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NotificationEntry {
     /// Stable per-archive id (separate from the runtime `Toast::id`
@@ -89,11 +84,9 @@ pub struct NotificationEntry {
     pub updates: Vec<NotificationUpdate>,
 }
 
-/// One mutation applied via the update-in-place pattern (a `Toast`
-/// presented with the same `id` as an existing live entry). The
-/// archive merges these onto the existing row rather than appending
-/// a new one — that's the "Uploading 3 of 7… → Upload complete"
-/// pattern.
+/// One in-place mutation applied when a `Toast` with the same `id` as an
+/// existing entry is presented again. The archive merges these onto the
+/// existing row — the "Uploading 3 of 7 → Upload complete" pattern.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NotificationUpdate {
     pub timestamp: jiff::Timestamp,
@@ -102,12 +95,9 @@ pub struct NotificationUpdate {
     pub progress: Option<f32>,
 }
 
-/// Style hint for an archived action. Re-declared here as a small
-/// owned enum (rather than re-using `crate::toast::ToastActionStyle`)
-/// because the archive type must be `Serialize`-friendly — the toast
-/// variant carries a `ButtonVariant`, which has its own dependencies
-/// and `Serialize` would have to be re-exported through bastyde-tokens.
-/// The mapping is one-to-one with `ToastActionStyle`.
+/// Visual presentation of an archived action button. Maps one-to-one to
+/// `ToastActionStyle`; re-declared as a self-contained `Serialize`-friendly
+/// enum so the archive type does not depend on `ButtonVariant`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ArchivedActionStyle {
     /// JetBrains-style hyperlink in the body row.
@@ -120,9 +110,9 @@ pub enum ArchivedActionStyle {
     Destructive,
 }
 
-/// A single action stored alongside an archived notification.
-/// Re-invokable from the [`NotificationLog`] only when `intent_name`
-/// is set (see the module-level docs).
+/// A single action stored alongside an archived notification entry. Only
+/// re-invokable from [`NotificationLog`] when `intent_name` is set — actions
+/// whose live closure has torn down render as inert descriptive labels.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ArchivedAction {
     /// Resolved label snapshot.

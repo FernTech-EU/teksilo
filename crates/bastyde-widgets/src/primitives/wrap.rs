@@ -1,8 +1,29 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Wrap — a horizontal flow layout that wraps children to the next line
-//! when they exceed the available width.
+//! Wrap — a horizontal flow layout that wraps children to the next line when
+//! they exceed the available width.
+//!
+//! Children are placed left-to-right (or right-to-left under RTL layout) and
+//! wrapped to the next line when the next item would exceed the container
+//! width.  Each line's height is the tallest child on that line.  Use
+//! [`spacing`](Wrap::spacing) for the horizontal gap between items and
+//! [`line_spacing`](Wrap::line_spacing) for the vertical gap between lines.
+//!
+//! `Wrap` is the right choice for chip rows, badge lists, and any collection
+//! whose items vary in width and should reflow as the container resizes.  For
+//! a fixed grid use [`crate::primitives::Grid`] instead.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{Wrap, TextWidget};
+//! # use bastyde_i18n::lit;
+//! let _chips = Wrap::new()
+//!     .spacing(8.0)
+//!     .line_spacing(6.0)
+//!     .child(TextWidget::new(lit!("Rust")))
+//!     .child(TextWidget::new(lit!("GUI")))
+//!     .child(TextWidget::new(lit!("Desktop")));
+//! ```
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -20,6 +41,7 @@ pub struct Wrap {
 }
 
 impl Wrap {
+    /// Create an empty `Wrap` container with zero spacing.
     pub fn new() -> Self {
         Self {
             spacing: Prop::Static(0.0),
@@ -43,16 +65,19 @@ impl Wrap {
         self
     }
 
+    /// Add a pre-registered child by ID.
     pub fn add_child(mut self, id: WidgetId) -> Self {
         self.pending.push(PendingChild::Id(id));
         self
     }
 
+    /// Add an inline child widget (deferred insertion).
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Add multiple inline children from an iterator.
     pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
@@ -60,6 +85,7 @@ impl Wrap {
         self
     }
 
+    /// Conditionally add a child. No-op if `None`.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));

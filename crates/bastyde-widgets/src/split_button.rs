@@ -73,6 +73,9 @@ pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
 pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 
+/// A button split into a default-action region and a chevron dropdown region.
+///
+/// See the [module-level documentation](self) for a usage overview.
 pub struct SplitButton {
     rows: Vec<Row>,
     variant: ButtonVariant,
@@ -186,6 +189,9 @@ impl SplitButton {
         self
     }
 
+    /// Set the visual style variant (filled, plain, ghost, …) for the entire
+    /// button frame. Mirrors the same variants as
+    /// [`Button::variant`](crate::button::Button::variant).
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
         self

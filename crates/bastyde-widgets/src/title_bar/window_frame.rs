@@ -40,6 +40,9 @@ use bastyde_core::{PlatformTitleBarHost, ResizeEdge};
 
 use super::resize_strip::ResizeStrip;
 
+/// Invisible overlay of resize strips and corner cells that gives a borderless window
+/// draggable edges. The content child fills the full client area with no visible inset;
+/// the strips are hit-test-only overlays along the outer `thickness` pixels.
 pub struct WindowFrame {
     host: Rc<dyn PlatformTitleBarHost>,
     thickness: f32,
@@ -61,6 +64,8 @@ impl std::fmt::Debug for WindowFrame {
 }
 
 impl WindowFrame {
+    /// Create a frame bound to the given platform host. Use [`thickness`](WindowFrame::thickness)
+    /// and [`content`](WindowFrame::content) to configure it before adding to the tree.
     pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self {
         Self {
             host,
@@ -85,11 +90,15 @@ impl WindowFrame {
         self
     }
 
+    /// Set the inner content widget from an already-boxed value. Prefer [`content`](WindowFrame::content)
+    /// for unboxed widgets; use this variant when the concrete type is not known at the call site.
     pub fn content_boxed(mut self, w: Box<dyn Widget>) -> Self {
         self.pending_content = Some(PendingChild::Deferred(w));
         self
     }
 
+    /// Set the inner content widget by its already-registered `WidgetId`. Use when the content
+    /// was added to the tree before the frame was constructed and you need to retain its id.
     pub fn content_id(mut self, id: WidgetId) -> Self {
         self.pending_content = Some(PendingChild::Id(id));
         self

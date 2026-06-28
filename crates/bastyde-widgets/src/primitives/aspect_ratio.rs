@@ -3,6 +3,27 @@
 
 //! AspectRatio — a single-child wrapper that constrains layout to a fixed
 //! width-to-height ratio.
+//!
+//! Given a proposal, `AspectRatio` computes the largest rectangle that fits
+//! within both dimensions while satisfying `width / height == ratio`. When
+//! only one axis is constrained by the parent, the other is derived from the
+//! ratio. The child is stretched to the resulting rectangle. The widget is
+//! invisible to assistive technology (`set_hidden`); its child carries all
+//! semantic meaning.
+//!
+//! ## When to use
+//!
+//! - Embedding images, thumbnails, or video placeholders that must stay
+//!   letter-boxed regardless of the available space.
+//! - Ensuring a square avatar or tile layout against an unconstrained parent
+//!   axis.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{AspectRatio, RectWidget};
+//! // 16:9 video placeholder
+//! let _thumbnail = AspectRatio::new(16.0 / 9.0)
+//!     .child(RectWidget::new());
+//! ```
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -38,11 +59,14 @@ impl AspectRatio {
         Self::new(1.0)
     }
 
+    /// Set an inline child widget to constrain; the child is stretched to the
+    /// computed aspect-ratio rectangle.
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Set a pre-registered child widget by ID.
     pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self

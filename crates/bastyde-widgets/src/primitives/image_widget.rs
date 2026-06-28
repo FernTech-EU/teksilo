@@ -36,6 +36,22 @@
 //! For a fixed 32×32 logo: `ImageWidget::new(icon).size(32.0, 32.0)` — the
 //! box is exactly 32×32 and the artwork is letterboxed inside it
 //! (`Contain`, the default).
+//!
+//! ```rust
+//! # use bastyde_canvas::RasterIcon;
+//! # use bastyde_widgets::primitives::image_widget::{ImageWidget, ImageFit};
+//! # use bastyde_widgets::primitives::image_mask::ImageMaskShape;
+//! // A 64×64 image shown at natural size with no masking.
+//! let icon = RasterIcon::from_raw(vec![255; 64 * 64 * 4], 64, 64);
+//! let _logo = ImageWidget::new(&icon).size(32.0, 32.0);
+//!
+//! // Cover a square avatar slot and crop to a circle.
+//! let _avatar = ImageWidget::new(&icon)
+//!     .mask(ImageMaskShape::Circle)
+//!     .fit(ImageFit::Cover)
+//!     .alt("User avatar")
+//!     .size(48.0, 48.0);
+//! ```
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -70,7 +86,7 @@ pub enum ImageFit {
     None,
 }
 
-/// A widget that displays a raster image.
+/// A widget that displays a raster image (PNG, WebP, or raw RGBA pixels) with configurable fit and alignment.
 pub struct ImageWidget {
     name: String,
     width: u32,

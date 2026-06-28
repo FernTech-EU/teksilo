@@ -195,6 +195,9 @@ impl HexColorInput {
         }
     }
 
+    /// Enable or disable the alpha channel (`#RRGGBBAA` form). Default `false`
+    /// (`#RRGGBB` only). When enabled, the input mask and parser both switch
+    /// to the 8-digit form; existing values are immediately reformatted.
     pub fn alpha_enabled(mut self, enabled: bool) -> Self {
         self.alpha_enabled = enabled;
         // Re-seed text in the new shape so the widget renders consistently
@@ -206,16 +209,24 @@ impl HexColorInput {
         self
     }
 
+    /// Allow CSS `#RGB` short-form input (each digit doubles: `#F0A` →
+    /// `#FF00AA`). Default `true`. When committed, the short form is expanded
+    /// and a `Corrected` feedback is shown to the user.
     pub fn short_form_enabled(mut self, enabled: bool) -> Self {
         self.short_form_enabled = enabled;
         self
     }
 
+    /// Require the `#` prefix during input. Default `true`. Set to `false`
+    /// to accept bare `RRGGBB` hex digits (e.g. CSS custom property editors).
     pub fn require_hash(mut self, required: bool) -> Self {
         self.require_hash = required;
         self
     }
 
+    /// Normalize committed values to uppercase hex digits. Default `true`
+    /// (`#FF0000`). Set to `false` for lowercase (`#ff0000`). Existing
+    /// values are reformatted immediately.
     pub fn uppercase(mut self, upper: bool) -> Self {
         self.uppercase = upper;
         if let Some(c) = self.value.current() {
@@ -225,11 +236,14 @@ impl HexColorInput {
         self
     }
 
+    /// Attach a visible label above the field and use it as the AT name.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self
     }
 
+    /// Placeholder text shown when the field is empty. Defaults to the
+    /// framework's locale-specific `#RRGGBB` / `#RRGGBBAA` hint.
     pub fn placeholder(mut self, placeholder: impl Into<LocalizedString>) -> Self {
         self.placeholder = Some(placeholder.into());
         self
@@ -241,16 +255,22 @@ impl HexColorInput {
         self
     }
 
+    /// Put the field in read-only mode; the value is displayed but cannot be
+    /// edited. Forwarded to the inner `TextInput`.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
     }
 
+    /// Set a minimum intrinsic width for the field in logical pixels.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width.max(0.0));
         self
     }
 
+    /// Called after a successful commit with the new color value (`None` on a
+    /// nullable binding when the field is cleared). Not called when the previous
+    /// and new values are identical.
     pub fn on_value_changed(
         mut self,
         f: impl Fn(Option<Color>, &mut bastyde_core::widget::EventContext) + 'static,
@@ -259,6 +279,8 @@ impl HexColorInput {
         self
     }
 
+    /// Called after a commit attempt when the input is invalid, with the raw
+    /// typed string. The field is left as-is so the user can correct the value.
     pub fn on_invalid(
         mut self,
         f: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static,

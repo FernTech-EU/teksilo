@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Small interactive chevron that toggles a tree node's expansion.
+//! TwistArrow — a small chevron that indicates and toggles a tree node's expansion.
 //!
-//! Renders a right-pointing arrow when collapsed, down-pointing when
-//! expanded; a leaf node renders nothing (just empty space) so the
-//! indent column lines up. Accessibility-decorative: the parent row's
-//! AT node owns `set_expanded`.
+//! Renders a right-pointing arrow when collapsed and a down-pointing arrow when
+//! expanded; a leaf node (where `has_children` is false) paints nothing but
+//! reserves its slot so the indent column stays aligned across all rows.
+//! The glyph flips direction under right-to-left layout.
+//! Accessibility-decorative: the chevron hides itself from the AT tree and
+//! the parent row's node owns `set_expanded`.
+//!
+//! ```ignore
+//! // TwistArrow is typically instantiated by TreeView row delegates and requires
+//! // an EventContext to wire the tap callback. The snippet below shows the
+//! // construction pattern used inside a custom tree-row build().
+//! let arrow = TwistArrow::new(16.0, true, false)
+//!     .on_click(|ctx| ctx.send_intent(bastyde_core::Intent::new("tree.toggle")));
+//! ```
 
 use std::rc::Rc;
 
@@ -23,6 +33,7 @@ use bastyde_tokens::{SurfaceRole, TextRole};
 
 use crate::primitives::rect_widget::RectWidget;
 
+/// Small interactive chevron rendered in the leading indent column of a tree row.
 pub struct TwistArrow {
     size: f32,
     has_children: bool,
@@ -31,6 +42,9 @@ pub struct TwistArrow {
 }
 
 impl TwistArrow {
+    /// Construct a chevron. `size` is the square side length in logical pixels;
+    /// `has_children` determines whether the glyph is painted; `expanded`
+    /// determines the glyph direction (down = expanded, right/left = collapsed).
     pub fn new(size: f32, has_children: bool, expanded: bool) -> Self {
         Self {
             size,

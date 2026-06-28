@@ -94,6 +94,7 @@ Direct draw surfaces with no internal composition.
 - [ImageMask](../crates/bastyde-widgets/src/primitives/image_mask.rs) — CPU-side anti-aliased alpha mask (`ImageMaskShape`); used by Avatar and other shaped-image patterns.
 - [ValidationStrip](../crates/bastyde-widgets/src/primitives/validation_strip.rs) — inline error/warning/success strip under a field.
 - [TextInputField](../crates/bastyde-widgets/src/primitives/text_input_field.rs) — primitive single-line editable text used inside the higher-level field widgets.
+- [TwistArrow](../crates/bastyde-widgets/src/primitives/twist_arrow.rs) — small chevron that indicates and toggles a tree node's expansion (used by `TreeView` / `TreeTableView`).
 
 ---
 
@@ -117,7 +118,8 @@ Themed framing, sectioning, and window-level structure.
 - [Splitter](../crates/bastyde-widgets/src/splitter.rs) — N-pane resizable splitter with draggable, collapsible dividers, per-pane stretch, and a serializable `SplitterModel`. See [docs/splitter.md](splitter.md).
 - [DockingLayout](../crates/bastyde-widgets/src/docking.rs) — VS Code-style dockable layout: a centre slot + 4 collapsible/splittable/draggable side regions (leading/trailing/top/bottom), per-corner ownership, activity rail, drag-to-dock five-zone overlay, and a serializable `DockingModel`. See [docs/docking.md](docking.md).
 - [TabWidget](../crates/bastyde-widgets/src/tab_widget.rs) — tab bar + content switcher; data-source-driven `TabBar<T>` underneath. See [tab-widget.md](tab-widget.md).
-- [Wizard](../crates/bastyde-widgets/src/wizard.rs) — multi-step flow with header, footer, and step switching (`WizardStep`).
+- [Stepper](../crates/bastyde-widgets/src/stepper.rs) — embeddable step-flow widget (Material / Ant / Flutter "stepper"): horizontal or vertical, linear or non-linear, per-step completion state.
+- [Wizard](../crates/bastyde-widgets/src/stepper/wizard.rs) — thin modal launcher built on `Stepper`: a multi-step flow with header, footer, and step switching.
 - [Breadcrumb](../crates/bastyde-widgets/src/breadcrumb.rs) — clickable path segments with chevron separators (`BreadcrumbItem`). **Automatic overflow**: when too narrow the middle crumbs collapse into a trailing-of-root `…` `MenuList` dropdown (Windows Explorer / web breadcrumb pattern) while the root + current crumb stay; `is_overflowing()` signal. RTL-aware separators (chevron mirrors). Built on `measure_intrinsic` + `MenuList::item_when`.
 - [TitleBar](../crates/bastyde-widgets/src/title_bar.rs) — custom window title bar with drag region, resize strip, and window controls. See [title-bar.md](title-bar.md).
 
@@ -257,6 +259,7 @@ Wrappers that animate a child subtree without the caller managing scheduler stat
 - [Cycle](../crates/bastyde-widgets/src/animations/cycle.rs) — cycles through children on a fixed period.
 - [Crossfade](../crates/bastyde-widgets/src/animations/crossfade.rs) — keyed builder; old fades to new on key change.
 - [Collapse](../crates/bastyde-widgets/src/animations/collapse.rs) — height-collapse tween used by Accordion and disclosure patterns.
+- [Unroll](../crates/bastyde-widgets/src/animations/unroll.rs) — the horizontal sibling of `Collapse`: a width-unroll tween for side panels and inline reveals.
 - [SmoothSize](../crates/bastyde-widgets/src/animations/smooth_size.rs) — auto-sizes to the child's intrinsic size and animates every change (`SmoothSizeAxes`).
 - [Slide](../crates/bastyde-widgets/src/animations/slide.rs) — slides a child in/out from a chosen edge (`SlideEdge`); layout-stable.
 - [Shake](../crates/bastyde-widgets/src/animations/shake.rs) — damped horizontal oscillation triggered by a `Signal<u32>` bump (invalid-input feedback).
@@ -273,6 +276,8 @@ Pre-built UI for common app-level concerns.
 - [ShortcutSettings](../crates/bastyde-widgets/src/shortcut_settings.rs) — full keyboard-shortcut rebind UI (Rebind / Reset / conflict auto-unbind / key capture). See [shortcut-intent-action.md](shortcut-intent-action.md).
 - [PrivacySettings](../crates/bastyde-widgets/src/privacy_settings.rs) **(`telemetry` feature)** — consent toggles for telemetry adapters; ties into the [telemetry.md](telemetry.md) consent gate.
 - [TextScaleControl](../crates/bastyde-widgets/src/text_scale_control.rs) — a specialized `SpinBox` (80 %–200 %) for the global "grow all text" accessibility setting; binds the persisted `TEXT_SCALE_KEY`, applies app-wide on edit. See [text-scale.md](text-scale.md).
+- [ThemeSwitcher](../crates/bastyde-widgets/src/theme_switcher.rs) — drop-in app-theme picker for settings screens & toolbars (native / OS-follow themes, persistence); applies app-wide on select.
+- [LanguageSwitcher](../crates/bastyde-widgets/src/language_switcher.rs) — drop-in UI-language picker for settings screens; switches the active locale app-wide. See [i18n.md](i18n.md).
 
 ---
 

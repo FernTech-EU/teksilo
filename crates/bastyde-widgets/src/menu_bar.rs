@@ -1,11 +1,36 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! MenuBar — a horizontal menu bar with dropdown menus.
+//! MenuBar — a horizontal application menu bar with keyboard-driven dropdowns.
 //!
-//! # Bastyde
+//! `MenuBar` renders a row of labelled trigger buttons; activating one opens a
+//! dropdown `MenuList` as an overlay. Menus can be added via the fluent
+//! `.menu(label, factory)` API or built from a declarative `MenuModel`
+//! (the single source of truth shared with the native macOS menu bar via
+//! `from_model` + `native_on_macos`). Leading and trailing slots accept
+//! arbitrary widget content (an app icon or a search field, for example).
+//!
+//! **Keyboard.** F10 and bare-Alt-tap focus the first trigger without opening
+//! a menu; Alt+letter opens the menu whose label carries a matching mnemonic
+//! marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed
+//! because the OS rewrites Option+letter for accented character composition —
+//! F10 and bare-Alt-tap continue to work. Once a dropdown is open, ArrowLeft
+//! and ArrowRight cycle between top-level menus, and Escape closes the active
+//! one and returns focus to the trigger.
+//!
+//! **Hamburger / collapsible mode.** Call `.collapsible()` to let the bar
+//! collapse to a single hamburger `IconButton` when its intrinsic width
+//! exceeds the allotted space (`CollapsePolicy::Responsive`). `.collapse_policy(Always)`
+//! forces the hamburger regardless of width.
+//!
+//! ## Accessibility
+//!
+//! The bar carries `Role::MenuBar`; each trigger is `Role::MenuItem` with
+//! `set_has_popup(Menu)` and `set_expanded` tracking the open dropdown.
+//! Mnemonic letters are announced via `set_access_key` for Windows Narrator.
+//!
 //! ```rust
-//! # use bastyde_widgets::{Button, MenuBar, MenuList, MenuItem};
+//! # use bastyde_widgets::{MenuBar, MenuList, MenuItem};
 //! # use bastyde_i18n::lit;
 //! # use bastyde_core::Intent;
 //! let _w = MenuBar::new()
@@ -18,9 +43,7 @@
 //!     .menu(lit!("Edit"), || Box::new(
 //!         MenuList::new()
 //!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
-//!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
-//!     ))
-//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.settings"))));
+//!     ));
 //! ```
 
 use std::cell::{Cell, RefCell};
@@ -52,8 +75,8 @@ use crate::menu_item::parse_mnemonic;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, ZStack};
 use bastyde_i18n::LocalizedString;
 
-/// Controls how a [`MenuBar`] made collapsible via [`MenuBar::collapsible`]
-/// decides between the full inline bar and the hamburger representation.
+/// Controls when a collapsible [`MenuBar`] switches from the full inline bar
+/// to the hamburger `IconButton` representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CollapsePolicy {
     /// Collapse to a hamburger only when the bar's intrinsic width
@@ -79,11 +102,11 @@ struct MenuBarEntry {
 // MenuBar — public widget
 // ---------------------------------------------------------------------------
 
-/// A horizontal menu bar with dropdown menus.
+/// A horizontal application menu bar with labelled trigger buttons and dropdown menus.
 ///
-/// Supports named content slots:
-/// - `leading_slot`: content before the menu buttons (e.g., app icon)
-/// - `trailing_slot`: content after the menu buttons (e.g., search, user avatar)
+/// Each top-level entry becomes a focusable trigger; activating it opens a
+/// floating `MenuList` overlay. See the module documentation for the full
+/// keyboard, mnemonic, and collapsible-mode details.
 pub struct MenuBar {
     entries: Vec<MenuBarEntry>,
     /// Pending leading/trailing slot content (the standard by-value slot
@@ -154,6 +177,7 @@ pub struct MenuBar {
 }
 
 impl MenuBar {
+    /// Create an empty menu bar with no menus, slots, or collapse policy.
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -330,6 +354,9 @@ impl MenuBar {
         self
     }
 
+    /// Add a top-level menu entry. `label` is the trigger text (supports `&`
+    /// mnemonic markers, e.g. `"&File"`); `factory` is called each build to
+    /// produce the dropdown content — typically a `MenuList`.
     pub fn menu(
         mut self,
         label: impl Into<LocalizedString>,
