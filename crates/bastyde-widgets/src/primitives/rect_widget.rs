@@ -4,14 +4,17 @@
 //! RectWidget — a leaf widget that paints a filled and/or stroked rounded rectangle.
 //!
 //! `RectWidget` has no intrinsic content: it fills whatever space its parent
-//! proposes (or reports `0×0` when unconstrained) and draws a solid or reactive
-//! background color, an optional border, and an optional corner radius. It is
-//! the low-level building block for card backgrounds, focus rings, dividers, and
-//! highlight overlays.
+//! proposes (or reports `0×0` when unconstrained) and draws a fill (solid color
+//! or gradient), an optional border (a uniform stroke positioned inside / center
+//! / outside, or per-side edge fills for an underline), and an optional corner
+//! radius. It is the low-level building block for card backgrounds, focus rings,
+//! dividers, underlined fields, and highlight overlays.
 //!
-//! All visual properties accept `impl Into<ColorProp>` (a raw `Color`, a theme
-//! role such as `SurfaceRole::Hover`, or a `Signal<Color>`) so reactive
-//! interaction-driven colors require no extra wiring.
+//! The fill accepts `impl Into<PaintProp>` — anything `Into<ColorProp>` (a raw
+//! `Color`, a theme role such as `SurfaceRole::Hover`, or a `Signal<Color>`) for
+//! a solid, plus `PaintProp::Linear` / `Radial` for a gradient. Border color
+//! accepts `impl Into<ColorProp>`, so reactive interaction-driven colors require
+//! no extra wiring.
 //!
 //! ```rust
 //! # use bastyde_tokens::{Color, CornerRadius};
@@ -22,12 +25,14 @@
 //!     .corner_radius(CornerRadius::uniform(12.0));
 //! ```
 
-use bastyde_canvas::{Canvas, Rect, SizeProposal};
+use bastyde_canvas::{Canvas, Paint, Rect, Size, SizeProposal};
 use bastyde_tokens::{Color, CornerRadius};
 
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::paint_prop::PaintProp;
 use bastyde_core::signal::Prop;
+use bastyde_core::styles::{BorderPosition, BorderSides, apply_border_position};
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 
 /// A leaf widget that paints a filled and/or stroked rounded rectangle.
@@ -38,27 +43,51 @@ use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 /// — so the common "fill with theme surface, border with theme border" setup is
 /// just `.background(SurfaceRole::Main).border_color(BorderRole::Default)`.
 pub struct RectWidget {
-    background: ColorProp,
+    background: PaintProp,
     border_color: ColorProp,
     border_width: Prop<f32>,
     corner_radius: Prop<CornerRadius>,
+    /// `None` = a uniform stroke on all four sides (honouring
+    /// `border_position`). `Some(..)` = per-side edge fills (e.g. a
+    /// bottom-only underline), drawn with `border_color`.
+    border_sides: Prop<Option<BorderSides>>,
+    /// Where a uniform stroke sits relative to the rect edge. Default
+    /// `Center` matches the SDF stroke's native behaviour.
+    border_position: BorderPosition,
 }
 
 impl RectWidget {
     /// Create a fully transparent, zero-border rectangle with no corner radius.
     pub fn new() -> Self {
         Self {
-            background: ColorProp::Static(Color::TRANSPARENT),
+            background: PaintProp::Solid(ColorProp::Static(Color::TRANSPARENT)),
             border_color: ColorProp::Static(Color::TRANSPARENT),
             border_width: Prop::Static(0.0),
             corner_radius: Prop::Static(CornerRadius::ZERO),
+            border_sides: Prop::Static(None),
+            border_position: BorderPosition::Center,
         }
     }
 
-    /// Fill color. Accepts `Color`, a theme role (`SurfaceRole`, etc.),
-    /// or a `Signal<Color>`.
-    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
-        self.background = color.into();
+    /// Fill. Accepts `Color`, a theme role (`SurfaceRole`, etc.), a
+    /// `Signal<Color>`, or a [`PaintProp`] (e.g. a gradient).
+    pub fn background(mut self, paint: impl Into<PaintProp>) -> Self {
+        self.background = paint.into();
+        self
+    }
+
+    /// Per-side border widths (e.g. [`BorderSides::bottom`] for an
+    /// underline). When set, overrides the uniform stroke; sides are
+    /// drawn as edge fills in `border_color`.
+    pub fn border_sides(mut self, sides: impl Into<Prop<Option<BorderSides>>>) -> Self {
+        self.border_sides = sides.into();
+        self
+    }
+
+    /// Where a uniform stroke sits relative to the rect edge
+    /// (inside / center / outside). Ignored when `border_sides` is set.
+    pub fn border_position(mut self, position: BorderPosition) -> Self {
+        self.border_position = position;
         self
     }
 
@@ -83,7 +112,7 @@ impl RectWidget {
     }
 
     /// Compatibility shim — `.bind_background(signal)` → `.background(signal)`.
-    pub fn bind_background(self, state: impl Into<ColorProp>) -> Self {
+    pub fn bind_background(self, state: impl Into<PaintProp>) -> Self {
         self.background(state)
     }
 
@@ -142,6 +171,11 @@ impl Widget for RectWidget {
             registry,
             bastyde_core::binding::BindingLevel::RepaintOnly,
         );
+        self.border_sides.register_if_bound(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -156,19 +190,78 @@ impl Widget for RectWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = self.background.resolve(ctx.theme, ctx.effective_enabled);
         let radius = self.corner_radius.get();
-        if bg.a() > 0.0 {
-            canvas.fill_rounded_rect(bounds, radius, bg);
+
+        // Fill — a solid color or a gradient. Gradient endpoints are
+        // rect-local, so only the size is needed.
+        let paint = self.background.resolve(
+            ctx.theme,
+            ctx.effective_enabled,
+            Size::new(bounds.width, bounds.height),
+        );
+        let skip_fill = matches!(&paint, Paint::Solid(c) if c.a() <= 0.0);
+        if !skip_fill {
+            canvas.fill_rounded_rect(bounds, radius, paint);
         }
-        let bw = self.border_width.get();
+
+        // Border — per-side edge fills, or a uniform stroke.
         let bc = self.border_color.resolve(ctx.theme, ctx.effective_enabled);
-        if bw > 0.0 && bc.a() > 0.0 {
-            canvas.stroke_rounded_rect(bounds, radius, bc, bw);
+        if bc.a() <= 0.0 {
+            return;
+        }
+        match self.border_sides.get() {
+            Some(sides) => paint_border_sides(canvas, bounds, sides, bc),
+            None => {
+                let bw = self.border_width.get();
+                if bw > 0.0 {
+                    let stroke_rect = apply_border_position(bounds, bw, self.border_position);
+                    canvas.stroke_rounded_rect(stroke_rect, radius, bc, bw);
+                }
+            }
         }
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+}
+
+/// Draw the non-zero edges of a per-side border as filled rects.
+/// `Leading`/`Trailing` map to left/right (LTR); RTL flipping is a
+/// follow-up — the common case (a bottom underline) is direction-neutral.
+fn paint_border_sides(canvas: &mut Canvas, bounds: Rect, sides: BorderSides, color: Color) {
+    if sides.top > 0.0 {
+        canvas.fill_rect(
+            Rect::new(bounds.x, bounds.y, bounds.width, sides.top),
+            color,
+        );
+    }
+    if sides.bottom > 0.0 {
+        canvas.fill_rect(
+            Rect::new(
+                bounds.x,
+                bounds.y + bounds.height - sides.bottom,
+                bounds.width,
+                sides.bottom,
+            ),
+            color,
+        );
+    }
+    if sides.leading > 0.0 {
+        canvas.fill_rect(
+            Rect::new(bounds.x, bounds.y, sides.leading, bounds.height),
+            color,
+        );
+    }
+    if sides.trailing > 0.0 {
+        canvas.fill_rect(
+            Rect::new(
+                bounds.x + bounds.width - sides.trailing,
+                bounds.y,
+                sides.trailing,
+                bounds.height,
+            ),
+            color,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +301,57 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
         assert_eq!(frame.shapes[0].color, Color::BLUE.to_array());
+    }
+
+    #[test]
+    fn underline_draws_a_bottom_decoration() {
+        let mut tree = WidgetTree::new();
+        tree.add(
+            RectWidget::new()
+                .border_color(Color::RED)
+                .border_sides(Some(BorderSides::bottom(2.0))),
+        );
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        let frame = tree.render();
+        // The bottom underline is an edge-fill decoration in the border color.
+        let underline = frame
+            .decorations
+            .iter()
+            .find(|d| d.color == Color::RED.to_array())
+            .expect("underline decoration present");
+        // rect = [x, y, w, h]; bottom edge sits at y = height - width.
+        assert_eq!(underline.rect[1], 38.0);
+        assert_eq!(underline.rect[3], 2.0);
+        // No uniform stroke shape was emitted.
+        assert!(frame.shapes.iter().all(|s| s.stroke_width == 0.0));
+    }
+
+    #[test]
+    fn gradient_background_emits_linear_gradient_paint() {
+        use bastyde_canvas::render_frame::PaintData;
+        use bastyde_core::paint_prop::{GradientStopProp, PaintProp};
+
+        let mut tree = WidgetTree::new();
+        tree.add(RectWidget::new().background(PaintProp::Linear {
+            stops: vec![
+                GradientStopProp {
+                    offset: 0.0,
+                    color: Color::RED.into(),
+                },
+                GradientStopProp {
+                    offset: 1.0,
+                    color: Color::BLUE.into(),
+                },
+            ],
+            angle_deg: 90.0,
+        }));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+        assert!(matches!(
+            frame.shapes[0].paint_data,
+            PaintData::LinearGradient { .. }
+        ));
     }
 
     #[test]

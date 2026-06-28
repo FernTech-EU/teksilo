@@ -18,6 +18,7 @@ use std::rc::Rc;
 use bastyde_canvas::{EdgeInsets, Size};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::paint_prop::PaintProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{
     BorderRecipe, ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, FillRecipe,
@@ -119,13 +120,20 @@ impl ButtonStyle for RecipeButtonStyle {
             .child_id(cfg.label),
         );
 
-        let rect_id = ctx.add(
-            RectWidget::new()
-                .bind_background(bg_color)
-                .bind_border_color(border_color)
-                .bind_border_width(border_width)
-                .corner_radius(radius),
-        );
+        // Border geometry (position / per-side widths) is state-
+        // independent — read it from the idle border recipe.
+        let border_position = recipe.border.idle.position;
+        let border_sides = recipe.border.idle.sides;
+        let mut rect = RectWidget::new()
+            .bind_background(bg_color)
+            .bind_border_color(border_color)
+            .bind_border_width(border_width)
+            .corner_radius(radius)
+            .border_position(border_position);
+        if border_sides.is_some() {
+            rect = rect.border_sides(border_sides);
+        }
+        let rect_id = ctx.add(rect);
 
         let zstack_id = ctx.add(ZStack::new().add_child(rect_id).add_child(padding_id));
 
@@ -163,13 +171,32 @@ fn bind_fill(
     state: &Signal<WidgetState>,
     recipe: &PerStateRecipe<FillRecipe>,
     ctx: &BuildContext,
-) -> ColorProp {
+) -> PaintProp {
+    // Gradient fills can't fold into a single reactive flat color. If any
+    // state carries a gradient, paint the idle fill as a theme-reactive
+    // gradient `PaintProp` (per-state gradient *switching* is unsupported —
+    // use solid/state-layer for interactive feedback). Otherwise produce
+    // the reactive flat color, which covers Solid / StateLayer / None.
+    let is_gradient = |f: &FillRecipe| {
+        matches!(
+            f,
+            FillRecipe::LinearGradient { .. } | FillRecipe::RadialGradient { .. }
+        )
+    };
+    let any_gradient = is_gradient(&recipe.idle)
+        || recipe.hover.as_ref().is_some_and(is_gradient)
+        || recipe.pressed.as_ref().is_some_and(is_gradient)
+        || recipe.focused.as_ref().is_some_and(is_gradient)
+        || recipe.disabled.as_ref().is_some_and(is_gradient);
+    if any_gradient {
+        return PaintProp::from_fill(&recipe.idle, &ctx.theme().colors);
+    }
     let recipe = recipe.clone();
     let theme_sig = ctx.theme_signal();
-    state
+    let sig: Signal<Color> = state
         .zip(&theme_sig)
-        .map(move |(s, theme)| resolve_fill_to_color(recipe.resolve(*s), &theme.colors))
-        .into()
+        .map(move |(s, theme)| resolve_fill_to_color(recipe.resolve(*s), &theme.colors));
+    PaintProp::Solid(ColorProp::Bound(sig))
 }
 
 fn bind_border(

@@ -225,6 +225,18 @@ impl From<Signal<BorderRole>> for ColorProp {
     }
 }
 
+impl From<crate::styles::RecipeColor> for ColorProp {
+    fn from(c: crate::styles::RecipeColor) -> Self {
+        use crate::styles::RecipeColor;
+        match c {
+            RecipeColor::Static(color) => ColorProp::Static(color),
+            RecipeColor::Surface(r) => ColorProp::SurfaceRole(r),
+            RecipeColor::Border(r) => ColorProp::BorderRole(r),
+            RecipeColor::Text(r) => ColorProp::TextRole(r),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TextStyleProp — static or role-based TextStyle
 // ---------------------------------------------------------------------------

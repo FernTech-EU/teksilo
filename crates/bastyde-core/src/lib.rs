@@ -30,6 +30,7 @@ pub mod modal;
 pub mod motion_visibility;
 pub mod overlay;
 pub mod overscroll;
+pub mod paint_prop;
 pub mod presets;
 pub mod raw_handle;
 pub mod shortcut;
@@ -90,6 +91,7 @@ pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
 pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
+pub use paint_prop::{GradientStopProp, PaintProp, angle_to_endpoints};
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
