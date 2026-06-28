@@ -759,7 +759,7 @@ impl AccessNodeBuilder {
     ///
     /// Returns `true` if the parent was found (and the child was
     /// attached), `false` if the parent isn't in
-    /// `children_collected` — the caller mis-ordered the pushes.
+    /// `children_collected` — the caller misordered the pushes.
     pub fn attach_scene_child_under(&mut self, parent: NodeId, child: NodeId) -> bool {
         for (id, node) in self.children_collected.iter_mut() {
             if *id == parent {
@@ -836,7 +836,7 @@ impl AccessNodeBuilder {
     /// `Role::Heading` with the given hierarchical level. Used by
     /// the rich text editor when a block carries a
     /// `BlockFormat::heading_level`. Returns `true` if the node was
-    /// found and updated, `false` otherwise (caller mis-used the
+    /// found and updated, `false` otherwise (caller misused the
     /// api — the paragraph must have been pushed earlier).
     pub fn set_paragraph_as_heading(&mut self, node_id: NodeId, level: u8) -> bool {
         for (id, node) in self.children_collected.iter_mut() {
@@ -919,7 +919,7 @@ impl AccessNodeBuilder {
             }
         }
         // Parent not found — push as a direct child of the widget's
-        // own node as a fallback. Caller mis-used the API.
+        // own node as a fallback. Caller misused the API.
         self.inner.push_child(node_id);
         node_id
     }
@@ -1018,7 +1018,7 @@ pub fn node_id_to_widget_id_maybe(node_id: NodeId) -> Option<WidgetId> {
 /// Legacy infallible converter kept for existing call sites that
 /// never encounter synthetic NodeIds. New code should prefer
 /// [`node_id_to_widget_id_maybe`]. Panics in debug for synthetic
-/// ids to catch mis-routed calls early.
+/// ids to catch misrouted calls early.
 pub fn node_id_to_widget_id(node_id: NodeId) -> WidgetId {
     debug_assert!(
         !is_synthetic(node_id),

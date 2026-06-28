@@ -517,7 +517,7 @@ PrivacySettings
 ```
 
 Confirmation dialogs (`MessageBox::question` + `OkCancel`) gate the
-destructive actions: erase, withdraw, mode switch. Mis-clicks survive
+destructive actions: erase, withdraw, mode switch. Misclicks survive
 a confirm step.
 
 The "Inspect data sent" accordion auto-refreshes as events land —

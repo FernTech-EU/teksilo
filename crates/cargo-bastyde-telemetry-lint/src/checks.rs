@@ -280,7 +280,7 @@ fn find_emit_call_idents(line: &str) -> Vec<String> {
     // contents are stripped first, so prose like `// emit_foo()`, doc
     // comments, and literals like `"emit_bar(arg)"` don't masquerade as
     // call sites. (Char literals / lifetimes are left alone — a char
-    // literal can't contain `emit_foo(`, and tracking `'` would mis-handle
+    // literal can't contain `emit_foo(`, and tracking `'` would mishandle
     // `&'a`.)
     let code = code_portion(line);
     let line = code.as_str();
