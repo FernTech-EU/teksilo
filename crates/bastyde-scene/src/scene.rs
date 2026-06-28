@@ -1,15 +1,60 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! The [`Scene`] data model.
+//! The [`Scene`] data model — the owner of all items in a pannable/zoomable
+//! scene.
 //!
-//! Scene holds a flat list of items (heavyweight `Widget`s and
-//! lightweight `SceneItem`s) in a parent-relative scene-graph plus a
-//! pluggable [`SpatialIndex`] for rectangular queries. Items are
-//! positioned by `local_pos` (in parent coords) and an optional
-//! `transform` (rotation/scale around the local origin); the Scene
-//! composes those up the parent chain to derive each item's
-//! `scene_transform` and AABB for hit-test, paint and culling.
+//! `Scene` holds a flat list of entries in a parent-relative scene-graph, plus
+//! a pluggable [`SpatialIndex`] for rectangular queries. Items are positioned
+//! by `local_pos` (in their parent's coordinate frame, or scene-root if they
+//! have none) and an optional `transform` (rotation/scale around the local
+//! origin); the Scene composes those up the parent chain to derive each item's
+//! `scene_transform` and axis-aligned bounding box for hit-test, paint, and
+//! culling. Two content tiers coexist in one `Scene`: heavyweight `Widget`s
+//! (full focus/animation/DnD/AT — placed at scene coordinates) and lightweight
+//! [`SceneItem`]s (paint-only, no arena overhead, thousands
+//! cheap). All mutations update the [`SpatialIndex`] in lockstep, so
+//! [`Scene::items_in_rect`] and [`Scene::item_at`] stay `O(visible)`.
+//!
+//! `Scene` is rarely used directly. The normal entry point is
+//! [`SceneModel`](crate::SceneModel), a cloneable `Rc<RefCell<Scene>>` handle
+//! with `&self` mutators (the `ListModel` pattern) that lets multiple handlers
+//! and multiple [`SceneView`](crate::SceneView)s share one model.
+//!
+//! ## When to use
+//!
+//! Use `Scene` (via `SceneModel`) when you need a pannable/zoomable canvas —
+//! story corkboards, node-graph editors, mind maps, timeline views, CAD
+//! canvases, or simple spatial maps. Prefer a plain `ListView` or `TreeView`
+//! when the content is linear or tree-shaped without spatial relationships.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use bastyde_scene::{Scene, ItemChange, SceneLayer};
+//! use bastyde_scene::{RectItem, ItemId};
+//! use bastyde_canvas::{Point, Rect};
+//! use bastyde_tokens::Color;
+//!
+//! let mut scene = Scene::new();
+//!
+//! // Add a lightweight rectangle item at scene coordinates (50, 50).
+//! let id: ItemId = scene.add_item(
+//!     RectItem::new(Rect::new(0.0, 0.0, 80.0, 40.0)).fill(Color::BLUE),
+//!     Point::new(50.0, 50.0),
+//! );
+//!
+//! // Observe every mutation — fires after the change is already applied.
+//! let _guard = scene.item_change_signal().observe(|change| {
+//!     if let ItemChange::LocalPosChanged { id: _, old: _, new } = change {
+//!         let _ = new; // react to the new position
+//!     }
+//! });
+//!
+//! // Move the item; the observer fires and the spatial index updates.
+//! scene.set_local_pos(id, Point::new(100.0, 100.0));
+//! assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
+//! ```
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -291,15 +336,20 @@ pub(crate) enum SceneEntryKind {
 
 /// The data model behind a `SceneView`: a flat list of entries in a
 /// parent-relative scene-graph plus a [`SpatialIndex`] for rectangular
-/// queries. The Scene itself does no rendering — it's a passive
-/// container the view reads from at build / place / paint time.
+/// queries.
 ///
-/// Mutations (`add_widget`, `add_item`, `set_local_pos`,
-/// `set_transform`, `set_local_bounds`, `remove`) update the spatial
-/// index in lockstep, so `items_in_rect`, `item_at`, and SceneView's
-/// viewport-cull path are all `O(visible)` instead of `O(N)`. When a
-/// parent's `local_pos` or `transform` changes, every descendant's
+/// The Scene itself does no rendering — it's a passive container the view
+/// reads from at build / place / paint time. Mutations (`add_widget`,
+/// `add_item`, `set_local_pos`, `set_transform`, `set_local_bounds`, `remove`)
+/// update the spatial index in lockstep, so `items_in_rect`, `item_at`, and
+/// SceneView's viewport-cull path are all `O(visible)` instead of `O(N)`. When
+/// a parent's `local_pos` or `transform` changes, every descendant's
 /// scene-AABB shifts; the Scene re-buckets the entire subtree.
+///
+/// In practice most callers operate on a [`SceneModel`](crate::SceneModel)
+/// handle (`Rc<RefCell<Scene>>` with `&self` mutators) rather than a bare
+/// `Scene`. Prefer `SceneModel` for any widget or handler that needs to share
+/// the scene across multiple owners.
 pub struct Scene {
     pub(crate) entries: Vec<SceneEntry>,
     /// `ItemId` → index into `entries` for O(1) lookup.

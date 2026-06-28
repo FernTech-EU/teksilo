@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Camera controls for [`SceneView`]: pan, zoom, rotation, viewport queries,
+//! and fit-to-content helpers.
+//!
+//! Every mutating method in this file operates on `&self` via `Signal::set` /
+//! `Signal::animate_to`, so a handler or clone of the view can drive the
+//! camera without `with_widget_mut`. The view transform is composed in
+//! [`compose_view`] from four independent
+//! `Signal<f32>` values (`pan_x`, `pan_y`, `zoom`, `rotation`) so each axis
+//! can animate with its own easing and epsilon. Reactive viewport queries
+//! ([`viewport_in_scene_signal`](SceneView::viewport_in_scene_signal)) expose
+//! the visible scene region as a `Signal<Rect>` suitable for driving a
+//! [`SceneMinimap`](crate::minimap::SceneMinimap) or lazy-loading logic.
+
 use super::*;
 
 impl SceneView {

@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! [`SceneView::build_impl`] — the `build()` entry point for `SceneView`.
+//!
+//! Runs on every rebuild: drains pending item-move and marquee-commit closures,
+//! materialises or destroys heavyweight widgets for `Once`/`Delegated` scene
+//! entries, sorts them by z-order, wires all reactive signal bindings and
+//! event-handler sets (scroll, pinch, drag, pointer-hover), and gates
+//! AccessKit re-walks behind a mutation-version delta to avoid per-frame AT
+//! churn during animated pan/zoom.
+
 use super::*;
 
 impl SceneView {

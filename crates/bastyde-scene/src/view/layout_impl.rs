@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Layout pass for [`SceneView`]: size negotiation, per-child placement at
+//! scene coordinates, and drag / handler snapshot refresh.
+//!
+//! `layout_response_impl` reports the view's desired size to the parent and,
+//! as a side-effect, refreshes the per-layout snapshots that pointer-event
+//! dispatch and drag hit-testing rely on (these snapshots cannot live in
+//! `place_children` alone because a scene with only lightweight items has no
+//! heavyweight children and `place_children` would never run). `place_children_impl`
+//! positions each materialised heavyweight child at its pure scene-coordinate
+//! origin, mirroring `bounds.origin` into a signal so the renderer's transform
+//! stack composes it in automatically; it also culls invisible children by
+//! collapsing their layout size to zero.
+
 use super::*;
 
 impl SceneView {

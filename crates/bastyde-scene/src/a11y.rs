@@ -104,6 +104,8 @@ pub enum A11yRelation {
 pub struct A11yCategory(pub std::borrow::Cow<'static, str>);
 
 impl A11yCategory {
+    /// Create a new category tag from a string or `&'static str`.
+    /// Accepts `"node"`, `"connector"`, `String`, or any `Cow<'static, str>`.
     pub fn new(name: impl Into<std::borrow::Cow<'static, str>>) -> Self {
         Self(name.into())
     }

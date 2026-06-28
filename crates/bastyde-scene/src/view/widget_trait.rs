@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! `Widget` trait implementation for [`SceneView`].
+//!
+//! Each method is a thin delegation to its `*_impl` counterpart in the
+//! appropriate impl-split module (`build_impl`, `layout_impl`, `paint_impl`,
+//! `a11y_impl`). Notable flags: `clips_children` is `true` (the scene clips
+//! at the viewport boundary), `preserves_children_on_rebuild` is `true`
+//! (heavyweight widgets survive scene rebuild and are only destroyed when their
+//! item is removed), and `wants_descendant_redirects` is `true` (lightweight
+//! item AT nodes are synthetic — the a11y walker reparents them into the
+//! scene's virtual accessibility tree rather than as normal widget children).
+
 use super::*;
 
 impl Widget for SceneView {

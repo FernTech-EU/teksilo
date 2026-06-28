@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Gesture and input registration for [`SceneView`].
+//!
+//! This module implements the three `pub(super)` methods that attach all
+//! interactive `HandlerSet` callbacks to the view: pointer events (hover
+//! transitions, tooltip scheduling, cursor shape, tap dispatch),
+//! scroll / pinch / keyboard navigation (pan, zoom-about-pointer, Ctrl+wheel,
+//! arrow keys, `+`/`-`/`0` zoom shortcuts), and drag handling (item
+//! drag-to-move, rubber-band marquee selection, scroll-hand-drag panning, and
+//! port-drag wire initiation for the magnetism subsystem).  All handlers read
+//! scene and view state through `Signal` captures; none hold `&mut` to
+//! `SceneView` at call time.
+
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
 use super::*;
 

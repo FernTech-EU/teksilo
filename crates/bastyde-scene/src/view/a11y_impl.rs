@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Accessibility implementation for [`SceneView`].
+//!
+//! Implements `SceneView::accessibility` and the redirect hook
+//! `a11y_redirect_descendant_impl`, which together build the two-tier
+//! logical AT tree: lightweight `SceneItem`s and virtual `A11yGroup`s
+//! become synthetic AccessKit nodes, while heavyweight `Widget` entries
+//! are auto-grafted under their declared logical parents via the
+//! framework's redirect mechanism. The DFS walker `emit_logical_node`
+//! drives the tree and also emits `SceneMagnet` nodes for the
+//! keyboard-connect roving-focus pattern.
+
 use super::*;
 
 impl SceneView {
