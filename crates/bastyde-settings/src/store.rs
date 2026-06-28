@@ -12,6 +12,15 @@
 //! ad-hoc strings via [`SettingsStore::signal`]. Same key, same type,
 //! across any number of call sites returns clones of the same `Signal`.
 //!
+//! ## When to use
+//!
+//! Use `SettingsStore` for **scalar and array-of-scalar** preferences
+//! (numbers, strings, booleans, `Vec<String>`). It is the right choice
+//! for the majority of user-facing prefs that have a flat, well-known key
+//! name. For rich structs with migrations, use
+//! [`SettingsFile<T>`](crate::SettingsFile) instead — struct values
+//! serialize as TOML tables and collide with the dotted-key model.
+//!
 //! ## Invariants enforced at registration
 //!
 //! * **Type stability** — once a key has been registered with type
@@ -29,6 +38,28 @@
 //! the store has already been dropped. This avoids a reference cycle: a
 //! strong capture would trap the entire store inside its own observer,
 //! leaking for the life of the process.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_settings::{SettingsKey, SettingsStore};
+//! use std::time::Duration;
+//!
+//! // Declare a typed, statically-named key once — typically at the module level.
+//! const FONT_SIZE: SettingsKey<f32> = SettingsKey::new("editor.font_size", || 14.0);
+//!
+//! // Open the store (uses `tempfile` in tests, a real path in production).
+//! let store = SettingsStore::open_with_delay(
+//!     "settings.toml".into(),
+//!     Duration::from_millis(500),
+//! )?;
+//!
+//! // Each call for the same key returns a clone of the same Signal<T>.
+//! let font_size = store.signal_for(&FONT_SIZE); // Signal<f32>, seeded from disk
+//! font_size.set(18.0);                          // writes back to TOML on next flush
+//! store.flush_now()?;                           // force sync (useful in tests)
+//! # Ok::<(), bastyde_settings::SettingsStoreError>(())
+//! ```
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
@@ -53,10 +84,14 @@ pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Errors surfaced by [`SettingsStore::open`].
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsStoreError {
+    /// The settings file could not be read or written (missing directory,
+    /// permission denied, etc.).
     #[error("settings store I/O: {0}")]
     Io(#[from] io::Error),
+    /// The settings file exists but its contents are not valid TOML.
     #[error("settings store parse: {0}")]
     Parse(#[source] toml::de::Error),
+    /// An attempt to flush the in-memory state to disk failed.
     #[error("settings store flush: {0}")]
     Flush(#[source] FlushError),
 }
@@ -71,11 +106,14 @@ pub enum SettingsStoreError {
 ///     SettingsKey::new("editor.font_size", || 14.0);
 /// ```
 pub struct SettingsKey<T: 'static> {
+    /// The dotted TOML path used to look up this setting (e.g. `"editor.font_size"`).
     pub key: &'static str,
+    /// Factory that produces the default value when the key is absent from disk.
     pub default: fn() -> T,
 }
 
 impl<T: 'static> SettingsKey<T> {
+    /// Create a new key descriptor; intended for use in `const` declarations.
     pub const fn new(key: &'static str, default: fn() -> T) -> Self {
         Self { key, default }
     }

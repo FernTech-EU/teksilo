@@ -13,6 +13,34 @@
 //! all writes flush via [`DebouncedWriter`]. Corrupt or unmigratable
 //! files are renamed to `<path>.broken-<unix_ts>` and the in-memory
 //! value falls back to `T::default()` so the app keeps running.
+//!
+//! ## When to use
+//!
+//! Prefer [`SettingsFile<T>`] over [`crate::SettingsStore`] when the
+//! settings form a known typed struct (e.g. a window-layout blob or a
+//! recents list). Use `SettingsStore` for open-ended scalar K/V pairs
+//! that arrive at different call sites.
+//!
+//! ```ignore
+//! use bastyde_settings::{SettingsFile, Migrator, Versioned};
+//! use serde::{Serialize, Deserialize};
+//! use std::time::Duration;
+//!
+//! #[derive(Serialize, Deserialize, Debug, Default, Clone)]
+//! struct AppPrefs { version: u32, font_size: f32 }
+//! impl Versioned for AppPrefs {
+//!     const CURRENT_VERSION: u32 = 1;
+//!     fn version(&self) -> u32 { self.version }
+//!     fn set_version(&mut self, v: u32) { self.version = v; }
+//! }
+//!
+//! let path = dirs::config_dir().unwrap().join("myapp/prefs.toml");
+//! let file: SettingsFile<AppPrefs> =
+//!     SettingsFile::load(path, Duration::from_millis(500), &Migrator::new()).unwrap();
+//!
+//! file.mutate(|p| p.font_size = 16.0).unwrap();
+//! file.flush_now().unwrap();
+//! ```
 
 use std::cell::{Ref, RefCell};
 use std::fs;
@@ -30,14 +58,20 @@ use crate::migration::{MigrationError, Migrator, Versioned};
 /// Errors surfaced by [`SettingsFile`] operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsFileError {
+    /// An OS-level file I/O error (read, write, or rename).
     #[error("settings file I/O: {0}")]
     Io(#[from] io::Error),
+    /// The file's TOML could not be parsed.
     #[error("settings file parse: {0}")]
     Parse(#[source] toml::de::Error),
+    /// A migration step failed; the file version could not be brought
+    /// up to `T::CURRENT_VERSION`.
     #[error("settings file migration: {0}")]
     Migrate(#[source] MigrationError),
+    /// The in-memory value could not be serialized to TOML before writing.
     #[error("settings file serialize: {0}")]
     Serialize(#[source] toml::ser::Error),
+    /// The debounced background write failed.
     #[error("settings file flush: {0}")]
     Flush(#[source] FlushError),
 }

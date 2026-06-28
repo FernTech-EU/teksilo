@@ -1,21 +1,62 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Built-in service: per-window geometry persistence.
+//! Per-window geometry persistence via [`WindowStateService`].
 //!
-//! Apps that want their windows to come back at the same place and
-//! size after a restart construct a [`WindowStateService`] and ask it
-//! for `state_for("main")` before opening a window. After the window
-//! closes (or moves), the manager calls `record(...)` and the service
-//! debounces the write.
+//! Each named window — identified by a stable string label such as
+//! `"main"` or `"inspector"` — can have its position, size, and
+//! placement (`Floating` / `Maximized` / `Fullscreen`) saved across
+//! sessions. In-memory is the source of truth: [`record`] updates an
+//! in-memory [`WindowStateFile`] and schedules a debounced atomic write
+//! (write-temp + rename); [`state_for`] reads directly from memory
+//! without touching disk. On load, the file is migrated through
+//! [`Migrator`] steps (currently v1 → v2: `maximized: bool` →
+//! `placement: WindowPlacement`) before deserializing, and corrupt
+//! files are quarantined automatically by [`SettingsFile`].
+//!
+//! In a typical Bastyde app, `WindowStateService` is managed by the
+//! framework's `SettingsBundle` and wired automatically when the
+//! `WindowConfig` carries a stable `id(...)` — no widget-side plumbing
+//! needed. The service is only used directly when building custom window
+//! management or embedding it outside the standard `BastydeAppBuilder`
+//! path.
 //!
 //! ## Wayland caveat
 //!
 //! Wayland does not let applications choose their window position;
-//! the compositor places windows. Position fields are still recorded
-//! and persisted (so the same config roams across an X11 / Wayland
-//! switch), but a Wayland host should ignore `x` / `y` when restoring.
-//! Width / height / maximized are honored on every platform.
+//! the compositor places windows. Position fields (`x`, `y`) are still
+//! recorded and persisted (so the config roams across an X11/Wayland
+//! switch), but a Wayland host must ignore them when restoring.
+//! Width, height, and [`WindowPlacement`] are honored on every platform.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use std::time::Duration;
+//! use bastyde_settings::{AppPaths, WindowStateService, PerWindowState};
+//! use bastyde_core::WindowPlacement;
+//!
+//! // In tests use AppPaths::for_testing(tmp_dir); in production use AppPaths::new(...).
+//! let paths = AppPaths::for_testing(std::path::Path::new("/tmp/my-app"));
+//! let svc = WindowStateService::open_with_delay(&paths, Duration::ZERO).unwrap();
+//!
+//! // On window move / resize, record the new geometry.
+//! svc.record(PerWindowState {
+//!     label: "main".into(),
+//!     x: 100, y: 80,
+//!     width: 1280, height: 800,
+//!     placement: WindowPlacement::Floating,
+//! }).unwrap();
+//!
+//! // On next launch, restore if available.
+//! if let Some(saved) = svc.state_for("main") {
+//!     let ready = saved.sanitize((400, 300), (1920, 1080));
+//!     println!("restore to {}x{} at ({},{})", ready.width, ready.height, ready.x, ready.y);
+//! }
+//! ```
+//!
+//! [`record`]: WindowStateService::record
+//! [`state_for`]: WindowStateService::state_for
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -203,22 +244,38 @@ fn make_migrator() -> Migrator<WindowStateFile> {
 #[allow(dead_code)]
 fn _migration_error_is_exported(_: MigrationError) {}
 
-/// Per-window geometry persistence.
+/// Persistent, in-memory-backed store for per-window geometry.
+///
+/// Holds a [`SettingsFile`]-backed collection of [`PerWindowState`] entries
+/// keyed by a stable string label. Each [`record`] call updates the
+/// in-memory snapshot and schedules a debounced atomic flush to disk;
+/// [`state_for`] reads directly from memory with no I/O.
+///
+/// [`record`]: WindowStateService::record
+/// [`state_for`]: WindowStateService::state_for
 #[derive(Clone)]
 pub struct WindowStateService {
     file: SettingsFile<WindowStateFile>,
 }
 
 impl WindowStateService {
+    /// Open the window-state file at the standard location inside `paths`,
+    /// using the default debounce delay.
     pub fn open(paths: &AppPaths) -> Result<Self, SettingsFileError> {
         Self::open_with_delay(paths, DEFAULT_DEBOUNCE)
     }
 
+    /// Open the window-state file at the standard location inside `paths`,
+    /// flushing debounced writes after `delay`. Pass `Duration::ZERO` in
+    /// tests for synchronous behaviour.
     pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError> {
         let file = SettingsFile::load(paths.data_file("window_state"), delay, &make_migrator())?;
         Ok(Self { file })
     }
 
+    /// Open the window-state file at an explicit `path` with the given
+    /// debounce `delay`. Useful when the caller controls the file location
+    /// directly (e.g. integration tests writing to a known temp path).
     pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError> {
         let file = SettingsFile::load(path, delay, &make_migrator())?;
         Ok(Self { file })
@@ -264,12 +321,14 @@ impl WindowStateService {
             .collect()
     }
 
-    /// Synchronously flush.
+    /// Write any pending in-memory changes to disk immediately, bypassing
+    /// the debounce timer. Useful before process exit or in tests that
+    /// verify on-disk content.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
         self.file.flush_now()
     }
 
-    /// Path of the underlying file.
+    /// Absolute path of the underlying TOML file managed by this service.
     pub fn path(&self) -> &Path {
         self.file.path()
     }

@@ -1,21 +1,48 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! OS-correct path resolution for application config and data dirs.
+//! OS-correct path resolution for application config and data directories.
 //!
-//! Wraps `etcetera`'s native [`AppStrategy`] so the rest of the crate
-//! has a single point of truth for where config files live, and so
-//! tests can supply a deterministic `tempdir`-rooted [`AppPaths`]
-//! without ever consulting the real OS dirs.
+//! [`AppPaths`] wraps `etcetera`'s native [`AppStrategy`] so the rest of the
+//! crate has a single point of truth for where settings files live. In
+//! production, [`AppPaths::new`] queries the OS (XDG on Linux,
+//! `%APPDATA%` on Windows, `~/Library/Application Support` on macOS); in
+//! tests, [`AppPaths::for_testing`] roots everything inside a `tempdir` so no
+//! test ever touches the user's real config tree.
+//!
+//! ## Usage
+//!
+//! Pass an `AppPaths` instance to [`SettingsBundle`](crate::SettingsBundle),
+//! [`SettingsStore`](crate::SettingsStore), or [`MruList`](crate::MruList); the
+//! individual files within it are addressed by name via
+//! [`config_file`](AppPaths::config_file) and
+//! [`data_file`](AppPaths::data_file).
+//!
+//! ```ignore
+//! use bastyde_settings::AppPaths;
+//!
+//! // Production: returns None when no home directory is detectable.
+//! if let Some(paths) = AppPaths::new("eu", "FernTech", "MyApp") {
+//!     let general_toml = paths.config_file("general");
+//!     let cache_toml   = paths.data_file("cache");
+//! }
+//!
+//! // Tests: deterministic, tempdir-rooted, never touches user files.
+//! let tmp = tempfile::tempdir().unwrap();
+//! let paths = AppPaths::for_testing(tmp.path());
+//! assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
+//! ```
 
 use std::path::{Path, PathBuf};
 
 use etcetera::{AppStrategy, AppStrategyArgs, choose_app_strategy};
 
-/// Resolves OS-correct application directories.
+/// Resolved OS-correct application directories (config and data).
 ///
-/// Construct with [`AppPaths::new`] for production, or
-/// [`AppPaths::for_testing`] in tests.
+/// Construct with [`AppPaths::new`] for production code, or
+/// [`AppPaths::for_testing`] in tests and headless CI environments.
+/// Use [`AppPaths::from_dirs`] when the application manages its own
+/// directory layout (e.g. portable mode).
 #[derive(Debug, Clone)]
 pub struct AppPaths {
     config_dir: PathBuf,
