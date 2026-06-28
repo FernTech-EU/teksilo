@@ -23,7 +23,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::OverlayPlacement;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{PopoverStyleConfig, PopoverVariant};
-use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
@@ -34,6 +34,10 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 use super::item::DropdownItem;
 use super::state::ItemSource;
 use bastyde_i18n::LocalizedString;
+
+/// Selection-commit callback threaded down from `ComboBox::on_select`,
+/// fired by each `DropdownItem`'s tap with a live `EventContext`.
+pub(super) type OnSelect<T> = Option<Rc<dyn Fn(&T, &mut EventContext)>>;
 
 /// Build the static (unfiltered) item list subtree.
 ///
@@ -57,6 +61,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     selected: &Signal<Option<T>>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    on_select: &OnSelect<T>,
     max_visible_items: usize,
 ) -> WidgetId {
     let total = source.len();
@@ -75,6 +80,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
                     total,
                     selected_signal: selected.clone(),
                     render: render_item.clone(),
+                    on_select: on_select.clone(),
                     root_child_id: None,
                 });
             }
@@ -89,6 +95,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
         selected,
         item_label,
         render_item,
+        on_select,
         max_visible_items,
         None,
     )
@@ -107,6 +114,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     selected: &Signal<Option<T>>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    on_select: &OnSelect<T>,
     max_visible_items: usize,
     filtered_indices: Option<Vec<usize>>,
 ) -> WidgetId {
@@ -154,6 +162,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     let selected_for_delegate = selected.clone();
     let item_label_for_delegate = item_label.clone();
     let render_item_for_delegate = render_item.clone();
+    let on_select_for_delegate = on_select.clone();
     let delegate = move |index: usize, value: &T, _selected: bool| -> Box<dyn Widget> {
         // Panel is ephemeral (rebuilt on open / panel_version change),
         // so resolving the label at build time is acceptable even in
@@ -166,6 +175,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
             total: visible_count,
             selected_signal: selected_for_delegate.clone(),
             render: render_item_for_delegate.clone(),
+            on_select: on_select_for_delegate.clone(),
             root_child_id: None,
         })
     };
@@ -299,6 +309,9 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     pub(super) selected: Signal<Option<T>>,
     pub(super) item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     pub(super) render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    /// Fired (with a live `EventContext`) when the user commits a row by
+    /// tapping it; threaded from `ComboBox::on_select`.
+    pub(super) on_select: OnSelect<T>,
     pub(super) max_visible_items: usize,
     /// Bumped on every model mutation so the panel rebuilds.
     pub(super) version: Signal<u64>,
@@ -324,6 +337,7 @@ struct FilteredItemList<T: Clone + PartialEq + 'static> {
     selected: Signal<Option<T>>,
     item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    on_select: OnSelect<T>,
     max_visible_items: usize,
     version: Signal<u64>,
     search_query: Signal<String>,
@@ -386,6 +400,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 &self.selected,
                 &self.item_label,
                 &self.render_item,
+                &self.on_select,
                 self.max_visible_items,
                 Some(visible_indices),
             )
@@ -404,6 +419,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                         total: visible_count,
                         selected_signal: self.selected.clone(),
                         render: self.render_item.clone(),
+                        on_select: self.on_select.clone(),
                         root_child_id: None,
                     });
                 }
@@ -480,6 +496,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 selected: self.selected.clone(),
                 item_label: self.item_label.clone(),
                 render_item: self.render_item.clone(),
+                on_select: self.on_select.clone(),
                 max_visible_items: self.max_visible_items,
                 version: self.version.clone(),
                 search_query: query.clone(),
@@ -493,6 +510,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 &self.selected,
                 &self.item_label,
                 &self.render_item,
+                &self.on_select,
                 self.max_visible_items,
             )
         };

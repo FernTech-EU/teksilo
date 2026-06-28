@@ -72,6 +72,9 @@ pub(super) struct DropdownItem<T: Clone + PartialEq + 'static> {
     pub(super) total: usize,
     pub(super) selected_signal: Signal<Option<T>>,
     pub(super) render: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    /// Fired after the tap commits this row's value to `selected_signal`,
+    /// with a live `EventContext`. Threaded down from `ComboBox::on_select`.
+    pub(super) on_select: Option<Rc<dyn Fn(&T, &mut EventContext)>>,
     pub(super) root_child_id: Option<WidgetId>,
 }
 
@@ -90,6 +93,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let theme = theme_signal.get();
         let selected_signal = self.selected_signal.clone();
         let value_for_tap = self.value.clone();
+        let on_select = self.on_select.clone();
 
         // Track whether this item is highlighted (hovered or selected).
         let highlighted = ctx.signal(false);
@@ -139,6 +143,9 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let handler_set = HandlerSet::new()
             .on_tap(move |_pos, ctx: &mut EventContext| {
                 selected_signal.set(Some(value_for_tap.clone()));
+                if let Some(cb) = &on_select {
+                    cb(&value_for_tap, ctx);
+                }
                 ctx.dismiss_self_overlay_chain();
             })
             .on_hover({

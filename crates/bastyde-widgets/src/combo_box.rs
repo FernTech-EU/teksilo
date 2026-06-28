@@ -85,6 +85,13 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     selected: Signal<Option<T>>,
     item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    /// Optional callback fired whenever the user commits a selection —
+    /// from a dropdown-row tap or keyboard pick — with a live
+    /// `EventContext`. Distinct from observing the `selected` signal:
+    /// it provides the `EventContext` needed for context-bearing actions
+    /// (navigation, `set_locale`, opening overlays). Fires only on
+    /// user-driven commits, not on external writes to `selected`.
+    on_select: Option<Rc<dyn Fn(&T, &mut EventContext)>>,
     placeholder: LocalizedString,
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
@@ -172,6 +179,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             selected,
             item_label,
             render_item: None,
+            on_select: None,
             placeholder: LocalizedString::literal(String::new()),
             label: None,
             initial_enabled: true,
@@ -268,6 +276,21 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// duplication, and reserve visible widgets for presentation only.
     pub fn render_item(mut self, f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static) -> Self {
         self.render_item = Some(Rc::new(f));
+        self
+    }
+
+    /// Register a callback fired when the user commits a selection — by
+    /// tapping a dropdown row or picking one with the keyboard (arrows /
+    /// type-ahead / Home / End). The callback receives the chosen value
+    /// and a live [`EventContext`], so it can run context-bearing actions
+    /// that observing the bound `selected` signal cannot — e.g.
+    /// `ctx.set_locale(...)`, navigation, or opening another overlay.
+    ///
+    /// It fires **only on user-driven commits**, not on external writes
+    /// to the `selected` signal (those are observed via `ctx.effect`).
+    /// The `selected` signal is updated *before* the callback runs.
+    pub fn on_select(mut self, f: impl Fn(&T, &mut EventContext) + 'static) -> Self {
+        self.on_select = Some(Rc::new(f));
         self
     }
 
@@ -577,6 +600,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             selected: self.selected.clone(),
             item_label: self.item_label.clone(),
             render_item: self.render_item.clone(),
+            on_select: self.on_select.clone(),
             max_visible_items: self.max_visible_items,
             version: panel_version,
             search_query,
@@ -680,16 +704,22 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 let typeahead: Rc<RefCell<(String, Instant)>> =
                     Rc::new(RefCell::new((String::new(), Instant::now())));
                 let type_ahead_timeout = self.type_ahead_timeout;
-                // Helper: set selection to the item at `index` and update
-                // the cached hint in one shot.
+                // Helper: set selection to the item at `index`, update the
+                // cached hint, and fire `on_select` (with the live
+                // `EventContext`) in one shot — mirroring the dropdown-row
+                // tap path so keyboard and mouse commits are equivalent.
+                let on_select_for_keys = self.on_select.clone();
                 let pick_at = {
                     let source = source.clone();
                     let selected = selected.clone();
                     let hint = hint.clone();
-                    Rc::new(move |index: usize| {
+                    Rc::new(move |index: usize, ctx: &mut EventContext| {
                         if let Some(v) = source.get(index) {
                             hint.set(Some(index));
-                            selected.set(Some(v));
+                            selected.set(Some(v.clone()));
+                            if let Some(cb) = &on_select_for_keys {
+                                cb(&v, ctx);
+                            }
                         }
                     })
                 };
@@ -758,7 +788,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 .and_then(|v| resolve_index(&source, v, &hint))
                                 .unwrap_or(0);
                             let target = (current_idx + 1) % n;
-                            pick_at(target);
+                            pick_at(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
@@ -781,14 +811,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             } else {
                                 current_idx - 1
                             };
-                            pick_at(target);
+                            pick_at(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown { key: Key::Home, .. } => {
                             if source.len() == 0 {
                                 return EventResponse::Handled;
                             }
-                            pick_at(0);
+                            pick_at(0, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown { key: Key::End, .. } => {
@@ -796,7 +826,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            pick_at(n - 1);
+                            pick_at(n - 1, ctx);
                             EventResponse::Handled
                         }
                         // PageDown / PageUp — advance or retreat selection
@@ -820,7 +850,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 .and_then(|v| resolve_index(&source, v, &hint))
                                 .unwrap_or(0);
                             let target = current_idx.saturating_add(page_size).min(n - 1);
-                            pick_at(target);
+                            pick_at(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
@@ -839,7 +869,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 .and_then(|v| resolve_index(&source, v, &hint))
                                 .unwrap_or(0);
                             let target = current_idx.saturating_sub(page_size);
-                            pick_at(target);
+                            pick_at(target, ctx);
                             EventResponse::Handled
                         }
                         // Type-ahead: letter/character keys jump to matching item.
@@ -867,7 +897,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 if let Some(v) = source.get(i) {
                                     let label = (item_label_for_keys)(&v).resolve_now();
                                     if label.to_lowercase().starts_with(&prefix) {
-                                        pick_at(i);
+                                        pick_at(i, ctx);
                                         break;
                                     }
                                 }

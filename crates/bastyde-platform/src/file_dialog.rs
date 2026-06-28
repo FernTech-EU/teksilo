@@ -238,6 +238,9 @@ impl FileDialogRequest {
         Ok(())
     }
 
+    /// Only consumed by feature-gated real backends (e.g. `RfdAsyncBackend`
+    /// under `rfd-backend`); dead in a default build that compiles none.
+    #[allow(dead_code)]
     fn kind(&self) -> DialogKind {
         self.kind
     }

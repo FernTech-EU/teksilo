@@ -1441,3 +1441,78 @@ fn accessibility_non_searchable_omits_autocomplete() {
         "non-searchable combobox must not advertise autocomplete",
     );
 }
+
+// ─── on_select callback ───────────────────────────────────────────
+
+#[test]
+fn on_select_fires_once_on_keyboard_pick() {
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let picks = Rc::new(RefCell::new(Vec::<String>::new()));
+    let picks_h = picks.clone();
+    let cb = tree.add(
+        ComboBox::new(fruits(), selected.clone())
+            .on_select(move |v: &String, _ctx| picks_h.borrow_mut().push(v.clone())),
+    );
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    tree.focus(cb);
+
+    tree.press_key(Key::ArrowDown, bastyde_core::event::Modifiers::NONE);
+
+    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(
+        *picks.borrow(),
+        vec!["Banana".to_string()],
+        "keyboard pick must fire on_select exactly once with the chosen value"
+    );
+}
+
+#[test]
+fn on_select_fires_once_on_row_tap() {
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let picks = Rc::new(RefCell::new(Vec::<String>::new()));
+    let picks_h = picks.clone();
+    let cb = tree.add(
+        ComboBox::new(fruits(), selected.clone())
+            .on_select(move |v: &String, _ctx| picks_h.borrow_mut().push(v.clone())),
+    );
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+
+    // Open the dropdown, then tap the first row (Apple).
+    tree.click(cb);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let row = tree
+        .find_by_role(bastyde_core::accesskit::Role::ListBoxOption)
+        .expect("an open dropdown should expose a ListBoxOption row");
+    tree.click(row);
+
+    assert_eq!(selected.get().as_deref(), Some("Apple"));
+    assert_eq!(
+        *picks.borrow(),
+        vec!["Apple".to_string()],
+        "row tap must fire on_select exactly once with the tapped value"
+    );
+}
+
+#[test]
+fn on_select_not_fired_on_external_signal_write() {
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let picks = Rc::new(RefCell::new(Vec::<String>::new()));
+    let picks_h = picks.clone();
+    let _cb = tree.add(
+        ComboBox::new(fruits(), selected.clone())
+            .on_select(move |v: &String, _ctx| picks_h.borrow_mut().push(v.clone())),
+    );
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+
+    // Programmatic write to the bound signal is NOT a user commit.
+    selected.set(Some("Cherry".to_string()));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+
+    assert!(
+        picks.borrow().is_empty(),
+        "on_select must fire only on user-driven commits, not external signal writes"
+    );
+}

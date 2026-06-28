@@ -47,6 +47,7 @@ pub mod hex_color_input;
 pub mod icon_button;
 pub mod input_dialog;
 pub mod keystroke_format;
+pub mod language_switcher;
 pub mod link;
 pub(crate) mod list_item_a11y;
 pub(crate) mod list_source;
@@ -156,6 +157,7 @@ pub use group_header::GroupHeader;
 pub use hex_color_input::HexColorInput;
 pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
+pub use language_switcher::LanguageSwitcher;
 pub use link::Link;
 pub use list_view::ListView;
 pub use menu::{

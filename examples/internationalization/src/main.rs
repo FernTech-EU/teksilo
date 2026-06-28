@@ -36,7 +36,8 @@ use bastyde::i18n::{
 };
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack,
+    Button, ButtonVariant, Expand, HStack, LanguageSwitcher, Panel, ScrollArea, Spacer, TextWidget,
+    Toolbar, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -87,7 +88,10 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
+        // Text uses theme *roles* (`TextRole` / `TextStyleRole`), not a
+        // snapshot of `ctx.theme_signal().get()`. Roles resolve against the
+        // active theme at paint time, so a `ctx.set_theme(...)` toggle
+        // (dark/light) recolours every label without a composite rebuild.
         let name = self.user_name.clone();
 
         // A `Signal<String>` that tracks which direction the tree is
@@ -110,33 +114,33 @@ impl Widget for Root {
 
         let heading = ctx.add(
             TextWidget::new(tr!(heading()))
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
         );
 
         let greeting = ctx.add(
             TextWidget::new(tr!(greeting(name = name)))
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
         );
 
         let body = ctx.add(
             TextWidget::new(tr!(body_paragraph()))
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::Body)
+                .color(TextRole::Primary),
         );
 
         let direction_note = ctx.add(
             TextWidget::new(lit!(""))
                 .bind_text(direction_label)
-                .style(theme.typography.small.clone())
-                .color(theme.colors.text_secondary),
+                .style(TextStyleRole::Small)
+                .color(TextRole::Secondary),
         );
 
         let lang_label = ctx.add(
             TextWidget::new(tr!(language_label()))
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
         );
 
         let en_btn = ctx.add(
@@ -162,6 +166,23 @@ impl Widget for Root {
                 .add_child(en_btn)
                 .add_child(fr_btn)
                 .add_child(ar_btn),
+        );
+
+        // The same locale switch as a single drop-in `LanguageSwitcher`:
+        // self-populates from the app's supported locales, shows each
+        // language in its own tongue + tag ("français (fr-FR)"), and
+        // switches on selection. Settings-screen ergonomics in one line.
+        let switcher_label = ctx.add(
+            TextWidget::new(tr!(language_label()))
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
+        );
+        let switcher = ctx.add(LanguageSwitcher::new());
+        let switcher_row = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .add_child(switcher_label)
+                .add_child(switcher),
         );
 
         // The RTL showcase: `Button::new(tr!(leading_button()))` + trailing
@@ -205,20 +226,20 @@ impl Widget for Root {
 
         let formatting_heading = ctx.add(
             TextWidget::new(tr!(formatting_heading()))
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
         );
 
         // ---- Bundle-side rows (locale-reactive only) ----
         let bundle_currency = ctx.add(
             TextWidget::new(tr!(bundle_currency_row(price = self.price.get())))
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::Body)
+                .color(TextRole::Primary),
         );
         let bundle_date = ctx.add(
             TextWidget::new(tr!(bundle_date_row(ts = BastydeDateTime::from(self.today))))
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::Body)
+                .color(TextRole::Primary),
         );
 
         // ---- Signal-side rows (value- AND locale-reactive) ----
@@ -241,10 +262,10 @@ impl Widget for Root {
             .date_style(DateStyle::Long)
             .format(self.today);
 
-        let signal_decimal_row = formatting_row(ctx, &theme, "Decimal:", decimal_value);
-        let signal_currency_row = formatting_row(ctx, &theme, "Currency:", currency_value);
-        let signal_percent_row = formatting_row(ctx, &theme, "Percent:", percent_value);
-        let signal_date_row = formatting_row(ctx, &theme, "Date:", date_value);
+        let signal_decimal_row = formatting_row(ctx, "Decimal:", decimal_value);
+        let signal_currency_row = formatting_row(ctx, "Currency:", currency_value);
+        let signal_percent_row = formatting_row(ctx, "Percent:", percent_value);
+        let signal_date_row = formatting_row(ctx, "Date:", date_value);
 
         // ---- tr_signal! row (everything-reactive) ----
         let cart_summary_signal: Signal<String> =
@@ -252,15 +273,15 @@ impl Widget for Root {
         let cart_summary_text = ctx.add(
             TextWidget::new(lit!(""))
                 .bind_text(cart_summary_signal)
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
         );
 
         // ---- Controls: ± price and ± count ----
         let price_label = ctx.add(
             TextWidget::new(tr!(price_label()))
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_secondary),
+                .style(TextStyleRole::Body)
+                .color(TextRole::Secondary),
         );
         let price_minus = ctx.add(
             Button::new(lit!("− 100"))
@@ -288,8 +309,8 @@ impl Widget for Root {
 
         let count_label = ctx.add(
             TextWidget::new(tr!(count_label()))
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_secondary),
+                .style(TextStyleRole::Body)
+                .color(TextRole::Secondary),
         );
         let count_minus = ctx.add(
             Button::new(lit!("− 1"))
@@ -323,6 +344,7 @@ impl Widget for Root {
                 .add_child(body)
                 .add_child(direction_note)
                 .add_child(language_row)
+                .add_child(switcher_row)
                 .add_child(direction_row)
                 .add_child(formatting_heading)
                 .add_child(bundle_currency)
@@ -336,7 +358,11 @@ impl Widget for Root {
                 .add_child(count_controls),
         );
 
-        let root_id = ctx.add(Panel::new().padding(24.0).child_id(column));
+        // The showcase column is taller than the window once every
+        // formatting row is present, so wrap it in a ScrollArea (inside the
+        // full-window Panel chrome) to keep all content reachable.
+        let scroll = ctx.add(ScrollArea::from_id(column));
+        let root_id = ctx.add(Panel::new().padding(24.0).child_id(scroll));
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
@@ -369,22 +395,17 @@ impl Widget for Root {
 /// One row of the formatting showcase: a literal English label paired
 /// with a `Signal<String>` that the Number/DateTime formatters produced.
 /// Pulled out as a helper because four rows share the same layout.
-fn formatting_row(
-    ctx: &mut BuildContext,
-    theme: &bastyde::prelude::Theme,
-    label: &'static str,
-    value: Signal<String>,
-) -> WidgetId {
+fn formatting_row(ctx: &mut BuildContext, label: &'static str, value: Signal<String>) -> WidgetId {
     let label_widget = ctx.add(
         TextWidget::new(lit!(label))
-            .style(theme.typography.body.clone())
-            .color(theme.colors.text_secondary),
+            .style(TextStyleRole::Body)
+            .color(TextRole::Secondary),
     );
     let value_widget = ctx.add(
         TextWidget::new(lit!(""))
             .bind_text(value)
-            .style(theme.typography.body.clone())
-            .color(theme.colors.text_primary),
+            .style(TextStyleRole::Body)
+            .color(TextRole::Primary),
     );
     ctx.add(
         HStack::new()

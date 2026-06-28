@@ -14,6 +14,7 @@
 
 pub mod config;
 pub mod direction;
+pub mod display_names;
 pub mod file_watcher;
 pub mod format;
 pub mod localized_string;
@@ -37,6 +38,7 @@ pub use bastyde_core::signal::{Signal, WeakSignal};
 pub use bastyde_i18n_macros::{tr, tr_signal, tr_signal_widget, tr_widget};
 pub use config::I18nConfig;
 pub use direction::rtl_from_locale;
+pub use display_names::language_endonym;
 pub use file_watcher::{FtlFileWatcher, ReloadSink};
 pub use fluent_bundle::FluentValue;
 pub use format::{

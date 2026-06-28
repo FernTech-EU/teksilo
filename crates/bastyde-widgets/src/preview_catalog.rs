@@ -54,10 +54,10 @@ use crate::primitives::{MaxSize, RectWidget};
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, GridSizing, GridView, GroupBox, GroupHeader,
-    IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Orientation, PaneDescriptor,
-    Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar,
-    SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem, StatusBar, TabWidget,
-    TextInput, Toggle, ToolBox, Toolbar, TreeView,
+    IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList, Orientation,
+    PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl,
+    Slider, Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem,
+    StatusBar, TabWidget, TextInput, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1213,6 +1213,44 @@ impl WidgetCatalog for ComboBox<String> {
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/combo_box.rs", ComboBox<String>);
+
+// ---------------------------------------------------------------------------
+// LanguageSwitcher
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for LanguageSwitcher {
+    fn id() -> &'static str {
+        "language_switcher"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "LanguageSwitcher"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        // The previewer has no `I18nManager`, so seed an explicit locale
+        // list to demonstrate the endonym + tag display ("français (fr-FR)").
+        let locales = ["en-US", "fr-FR", "de-DE", "es-ES", "ar-SA", "ja-JP"]
+            .iter()
+            .map(|t| t.parse().expect("valid BCP-47 tag"))
+            .collect();
+        Box::new(LanguageSwitcher::new().locales(locales))
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::combo_box())
+    }
+}
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/language_switcher.rs",
+    LanguageSwitcher
+);
 
 // ---------------------------------------------------------------------------
 // Divider
