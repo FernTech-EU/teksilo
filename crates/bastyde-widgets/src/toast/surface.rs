@@ -11,11 +11,11 @@
 
 use std::rc::Rc;
 
-use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
+use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::styles::{SharedToastStyle, ToastStyleConfig};
-use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
@@ -23,6 +23,7 @@ use crate::button::Button;
 use crate::icon_button::IconButton;
 use crate::link::Link;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
+use crate::severity_badge::SeverityBadge;
 use crate::styles::recipe_toast_style as toast_tokens;
 use crate::toast::registry::ToastRegistry;
 use crate::toast::{
@@ -58,56 +59,6 @@ impl std::fmt::Debug for ToastSurfaceData {
             .field("actions_count", &self.actions.len())
             .field("show_close", &self.show_close_button)
             .finish()
-    }
-}
-
-/// Internal severity glyph leaf — circle for Info / Success / Error,
-/// triangle for Warning. Hidden from the AT tree (the toast surface
-/// already carries the role and announcement).
-struct SeverityGlyph {
-    severity: ToastSeverity,
-    size: f32,
-}
-
-impl std::fmt::Debug for SeverityGlyph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SeverityGlyph")
-            .field("severity", &self.severity)
-            .finish()
-    }
-}
-
-impl Widget for SeverityGlyph {
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        proposal.resolve(self.size, self.size).into()
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.severity.glyph_color(ctx.theme);
-        let cx = bounds.x + bounds.width / 2.0;
-        let cy = bounds.y + bounds.height / 2.0;
-        let half = (bounds.width.min(bounds.height) / 2.0).max(2.0);
-        let path = match self.severity {
-            ToastSeverity::Warning => {
-                let mut p = Path::new();
-                p.move_to(Point::new(cx, cy - half));
-                p.line_to(Point::new(cx + half, cy + half));
-                p.line_to(Point::new(cx - half, cy + half));
-                p.close();
-                p
-            }
-            _ => Path::circle(Point::new(cx, cy), half),
-        };
-        canvas.fill_path(&path, color);
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
-        builder.set_hidden();
     }
 }
 
@@ -232,10 +183,10 @@ impl Widget for ToastSurface {
         // default severity glyph.
         let leading_id = match self.leading_widget.take() {
             Some(w) => ctx.add_boxed(w),
-            None => ctx.add(SeverityGlyph {
-                severity,
-                size: toast_tokens::TOAST_GLYPH_SIZE,
-            }),
+            None => ctx.add(SeverityBadge::new(
+                severity.into(),
+                toast_tokens::TOAST_GLYPH_SIZE,
+            )),
         };
 
         // Title + optional body column.

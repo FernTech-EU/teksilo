@@ -3361,7 +3361,11 @@ mod tests {
         let source = tree.add(Button::new(lit!("Rename")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         tree.focus(source);
-        assert_eq!(tree.focused(), Some(source), "precondition: trigger focused");
+        assert_eq!(
+            tree.focused(),
+            Some(source),
+            "precondition: trigger focused"
+        );
 
         present_in_tree_modal_request(
             &mut tree,

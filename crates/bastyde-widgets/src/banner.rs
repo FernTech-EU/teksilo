@@ -19,11 +19,11 @@
 
 use std::rc::Rc;
 
-use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
+use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::styles::{BannerStyleConfig, SharedBannerStyle};
-use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole, VAlignment};
 
@@ -31,59 +31,9 @@ pub use bastyde_core::styles::BannerSeverity;
 
 use crate::icon_button::IconButton;
 use crate::primitives::{Expand, HStack, TextWidget, VStack};
+use crate::severity_badge::SeverityBadge;
 use crate::styles::recipe_banner_style as banner_tokens;
 use bastyde_i18n::LocalizedString;
-
-/// Small leaf widget that paints the severity glyph (circle or
-/// triangle). The glyph is a functional renderer — it draws domain
-/// data (the info/warn/error mark), so it stays widget-owned rather
-/// than moving behind `BannerStyle` (principle 6).
-struct SeverityGlyph {
-    severity: BannerSeverity,
-    size: f32,
-}
-
-impl std::fmt::Debug for SeverityGlyph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SeverityGlyph")
-            .field("severity", &self.severity)
-            .finish()
-    }
-}
-
-impl Widget for SeverityGlyph {
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        proposal.resolve(self.size, self.size).into()
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.severity.glyph_color(ctx.theme);
-        let cx = bounds.x + bounds.width / 2.0;
-        let cy = bounds.y + bounds.height / 2.0;
-        let half = (bounds.width.min(bounds.height) / 2.0).max(2.0);
-        let path = match self.severity {
-            BannerSeverity::Warning => {
-                let mut p = Path::new();
-                p.move_to(Point::new(cx, cy - half));
-                p.line_to(Point::new(cx + half, cy + half));
-                p.line_to(Point::new(cx - half, cy + half));
-                p.close();
-                p
-            }
-            _ => Path::circle(Point::new(cx, cy), half),
-        };
-        canvas.fill_path(&path, color);
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
-        builder.set_hidden();
-    }
-}
 
 /// A persistent inline status strip.
 pub struct Banner {
@@ -175,12 +125,12 @@ impl Widget for Banner {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let severity = self.severity;
 
-        // Severity glyph — a functional renderer, built by the widget
+        // Severity glyph — a two-tone status badge, built by the widget
         // (principle 6) and handed to the style as the leading glyph.
-        let glyph = ctx.add(SeverityGlyph {
-            severity,
-            size: banner_tokens::BANNER_GLYPH_SIZE,
-        });
+        let glyph = ctx.add(SeverityBadge::new(
+            severity.into(),
+            banner_tokens::BANNER_GLYPH_SIZE,
+        ));
 
         // Title + optional description column.
         let title = ctx.add(

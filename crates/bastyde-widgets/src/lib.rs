@@ -76,6 +76,7 @@ pub mod scroll_area;
 pub mod scroll_bar;
 pub mod search_field;
 pub mod segmented_control;
+pub(crate) mod severity_badge;
 pub mod shadow;
 pub mod shortcut_settings;
 pub mod slider;

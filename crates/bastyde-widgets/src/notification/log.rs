@@ -23,12 +23,11 @@
 use bastyde_i18n::lit;
 use std::rc::Rc;
 
-use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
+use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::styles::BannerSeverity;
-use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole};
@@ -40,6 +39,7 @@ use crate::notification::{
 };
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::scroll_area::ScrollArea;
+use crate::severity_badge::SeverityBadge;
 use crate::standard_item::StandardListItem;
 use bastyde_i18n::LocalizedString;
 
@@ -140,10 +140,7 @@ impl NotificationLog {
         on_entry: Option<&Rc<dyn Fn(&NotificationEntry, &mut EventContext)>>,
         on_action: Option<&Rc<dyn Fn(&NotificationEntry, &ArchivedAction, &mut EventContext)>>,
     ) -> Box<dyn Widget> {
-        let glyph: Box<dyn Widget> = Box::new(SeverityGlyph {
-            severity: entry.severity,
-            size: 14.0,
-        });
+        let glyph: Box<dyn Widget> = Box::new(SeverityBadge::new(entry.severity.into(), 14.0));
         let mut row = StandardListItem::new(lit!(entry.title.clone()))
             .leading_slot_boxed(glyph)
             // Unread rows get a bold title (`BodyBold`); read rows
@@ -441,62 +438,6 @@ fn bucket_label(bucket: DayBucket) -> LocalizedString {
         DayBucket::Yesterday => bastyde_i18n::tr_widget!(notifications_bucket_yesterday()),
         DayBucket::ThisWeek => bastyde_i18n::tr_widget!(notifications_bucket_this_week()),
         DayBucket::Earlier => bastyde_i18n::tr_widget!(notifications_bucket_earlier()),
-    }
-}
-
-// ------------------------------------------------------------------
-// SeverityGlyph (mirrors the one inside ToastSurface; kept duplicated
-// because both widgets sit at the same crate tier and live in
-// different submodules without a shared `glyph` parent module).
-// ------------------------------------------------------------------
-
-/// Tiny leaf that paints the severity glyph for an archive row.
-/// Smaller than the toast's 16 dp glyph — the row context needs
-/// less visual weight.
-struct SeverityGlyph {
-    severity: BannerSeverity,
-    size: f32,
-}
-
-impl std::fmt::Debug for SeverityGlyph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SeverityGlyph")
-            .field("severity", &self.severity)
-            .finish()
-    }
-}
-
-impl Widget for SeverityGlyph {
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        proposal.resolve(self.size, self.size).into()
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.severity.glyph_color(ctx.theme);
-        let cx = bounds.x + bounds.width / 2.0;
-        let cy = bounds.y + bounds.height / 2.0;
-        let half = (bounds.width.min(bounds.height) / 2.0).max(2.0);
-        let path = match self.severity {
-            BannerSeverity::Warning => {
-                let mut p = Path::new();
-                p.move_to(Point::new(cx, cy - half));
-                p.line_to(Point::new(cx + half, cy + half));
-                p.line_to(Point::new(cx - half, cy + half));
-                p.close();
-                p
-            }
-            _ => Path::circle(Point::new(cx, cy), half),
-        };
-        canvas.fill_path(&path, color);
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
-        builder.set_hidden();
     }
 }
 

@@ -1,0 +1,7 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <circle cx="8" cy="4.5" r="1.05"/>
+  <line x1="8" y1="7.0" x2="8" y2="11.6" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round"/>
+</svg>

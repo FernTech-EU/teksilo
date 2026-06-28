@@ -82,7 +82,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use bastyde_canvas::{Path, Point, Rect, Size, SizeProposal};
+use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::action::Action;
 use bastyde_core::build_context::BuildContext;
@@ -93,14 +93,14 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
-use bastyde_tokens::{Color, VAlignment};
+use bastyde_tokens::VAlignment;
 
 use crate::accordion::Accordion;
 use crate::button::{Button, ButtonVariant};
 use crate::checkbox::Checkbox;
 use crate::dialog::ModalContainer;
-use crate::primitives::icon_widget::IconMode;
-use crate::primitives::{Expand, HStack, IconWidget, Spacer, TextWidget, VStack};
+use crate::primitives::{Expand, HStack, Spacer, TextWidget, VStack};
+use crate::severity_badge::{SeverityBadge, SeverityIconKind};
 
 // ── Severity ────────────────────────────────────────────────────────
 
@@ -385,32 +385,15 @@ const SEVERITY_ICON_SIZE: f32 = 48.0;
 const DEFAULT_INTENT_NAME: &str = "messagebox.accept_default";
 const ESCAPE_INTENT_NAME: &str = "messagebox.escape";
 
-fn severity_icon(severity: MessageBoxSeverity) -> Option<Path> {
-    let size = SEVERITY_ICON_SIZE;
-    let center = Point::new(size / 2.0, size / 2.0);
+/// Map a `MessageBoxSeverity` onto the shared severity-badge kind.
+/// `None` has no badge (the dialog reads as a plain notice).
+fn severity_icon_kind(severity: MessageBoxSeverity) -> Option<SeverityIconKind> {
     match severity {
         MessageBoxSeverity::None => None,
-        MessageBoxSeverity::Information
-        | MessageBoxSeverity::Question
-        | MessageBoxSeverity::Critical => Some(Path::circle(center, size / 2.0)),
-        MessageBoxSeverity::Warning => {
-            let mut path = Path::new();
-            path.move_to(Point::new(size / 2.0, 2.0));
-            path.line_to(Point::new(size - 2.0, size - 2.0));
-            path.line_to(Point::new(2.0, size - 2.0));
-            path.close();
-            Some(path)
-        }
-    }
-}
-
-fn severity_color(theme: &bastyde_core::Theme, severity: MessageBoxSeverity) -> Color {
-    match severity {
-        MessageBoxSeverity::None => theme.colors.text_secondary,
-        MessageBoxSeverity::Information => theme.colors.status_info_fg,
-        MessageBoxSeverity::Question => theme.colors.accent,
-        MessageBoxSeverity::Warning => theme.colors.status_warning_fg,
-        MessageBoxSeverity::Critical => theme.colors.status_error_fg,
+        MessageBoxSeverity::Information => Some(SeverityIconKind::Info),
+        MessageBoxSeverity::Question => Some(SeverityIconKind::Question),
+        MessageBoxSeverity::Warning => Some(SeverityIconKind::Warning),
+        MessageBoxSeverity::Critical => Some(SeverityIconKind::Error),
     }
 }
 
@@ -736,7 +719,7 @@ impl Widget for MessageBox {
             );
         }
 
-        let header: Box<dyn Widget> = if let Some(icon_path) = severity_icon(self.severity) {
+        let header: Box<dyn Widget> = if let Some(kind) = severity_icon_kind(self.severity) {
             // Wrap the text stack in `Expand::horizontal()` so HStack
             // distributes its width slack to the text column. Without
             // this the HStack measures the text stack with width=None
@@ -746,12 +729,7 @@ impl Widget for MessageBox {
                 HStack::new()
                     .spacing(16.0)
                     .alignment(VAlignment::Top)
-                    .child(
-                        IconWidget::from_path(icon_path, SEVERITY_ICON_SIZE)
-                            .icon_size(SEVERITY_ICON_SIZE)
-                            .mode(IconMode::Tintable)
-                            .color(severity_color(&theme, self.severity)),
-                    )
+                    .child(SeverityBadge::new(kind, SEVERITY_ICON_SIZE))
                     .child(Expand::horizontal().child(header_text_stack)),
             )
         } else {
