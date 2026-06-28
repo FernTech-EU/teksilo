@@ -13,7 +13,6 @@ use bastyde_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayReque
 use bastyde_core::{WidgetId, WidgetTree};
 use bastyde_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use bastyde_platform::event_translation;
-use bastyde_tokens::ColorTokens;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -429,7 +428,6 @@ struct BastydeAppHandler {
     initial_created: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
-    theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: SharedTypesetter,
     /// Kept alive for the lifetime of the event loop so that the
@@ -463,6 +461,13 @@ impl BastydeAppHandler {
         wm.set_theme_mode(theme_mode);
         wm.set_event_proxy(event_proxy);
         if let Some(template) = app_context_template {
+            // Seed the persisted user text-scale factor (if settings are
+            // installed) so every initially-created window opens at the saved
+            // scale. No per-app boilerplate: apps without settings stay at 1.0.
+            if let Some(store) = template.app_state::<bastyde_settings::SettingsStore>() {
+                let scale = store.signal_for(&bastyde_settings::TEXT_SCALE_KEY).get();
+                wm.set_initial_text_scale(scale);
+            }
             wm.set_app_context_template(template);
         }
 
@@ -478,7 +483,6 @@ impl BastydeAppHandler {
             initial_created: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
-            theme_mode,
             #[cfg(feature = "text")]
             typesetter,
             _i18n_watcher: i18n_watcher,
@@ -659,6 +663,8 @@ impl BastydeAppHandler {
         // `request_redraw_all()` below (gated on these flags) fixes that.
         let had_locale = self.wm.drain_pending_locale_requests();
         let had_theme = self.wm.drain_pending_theme_requests();
+        let had_follow_system = self.wm.drain_pending_follow_system_requests();
+        let had_text_scale = self.wm.drain_pending_text_scale_requests();
         let had_commands = self.wm.drain_close_window_requests();
         let had_modal_requests = self.process_modal_requests(event_loop);
         let had_modal_dismissals = self.process_modal_dismissals();
@@ -671,7 +677,14 @@ impl BastydeAppHandler {
         // registry routes through the per-window queue. Translate each
         // into the appropriate winit call.
         self.wm.drain_window_commands();
-        if had_locale || had_theme || had_commands || had_modal_requests || had_modal_dismissals {
+        if had_locale
+            || had_theme
+            || had_follow_system
+            || had_text_scale
+            || had_commands
+            || had_modal_requests
+            || had_modal_dismissals
+        {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }
@@ -1911,29 +1924,27 @@ impl BastydeAppHandler {
     }
 
     fn handle_theme_changed(&mut self, winit_theme: winit::window::Theme) {
-        match self.theme_mode {
+        // Read the mode from the WindowManager (the live owner) so a runtime
+        // switch to "follow system" via `EventContext::follow_system_theme`
+        // is honoured here too. OS-following results carry the id "system".
+        match self.wm.theme_mode() {
             ThemeMode::Manual => {} // ignore OS theme changes
             ThemeMode::FollowSystem => {
+                // Trust winit's per-window signal (authoritative on
+                // macOS/Windows where OS-colour querying is unimplemented).
                 let theme = match winit_theme {
                     winit::window::Theme::Dark => bastyde_core::presets::intui::dark(),
                     winit::window::Theme::Light => bastyde_core::presets::intui::light(),
-                };
+                }
+                .with_id("system");
                 self.wm.set_theme(theme);
             }
-            ThemeMode::Native => {
-                // Re-query OS colors and rebuild theme
-                let os = bastyde_platform::os_theme::query_os_theme_colors();
-                let base = if os.color_scheme.is_dark() {
-                    bastyde_core::presets::intui::dark()
-                } else {
-                    bastyde_core::presets::intui::light()
-                };
-                let theme = Theme {
-                    colors: ColorTokens::from_os_colors(&os),
-                    ..base
-                };
-                self.wm.set_theme(theme);
-            }
+            // Native adopts the OS's actual colours on Linux; on macOS/Windows
+            // (no OS-colour query) it follows winit's authoritative light/dark
+            // hint. The shared helper stamps the "system" id.
+            ThemeMode::Native => self
+                .wm
+                .apply_os_theme(Some(matches!(winit_theme, winit::window::Theme::Dark))),
         }
     }
 }

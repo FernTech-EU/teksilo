@@ -29,23 +29,16 @@ use bastyde::i18n::I18nConfig;
 use bastyde::prelude::*;
 use bastyde::tokens::Color;
 use bastyde::widgets::{
-    Button, ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding,
-    Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding, Panel,
+    ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 #[derive(Debug)]

@@ -921,7 +921,6 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
 }
 
 fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
-    let is_dark = Signal::new(false);
     Toolbar::new().child(
         HStack::new()
             .spacing(12.0)
@@ -936,17 +935,7 @@ fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
                 }),
             )
             .child(Spacer::new())
-            .child(
-                Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-                    let next = !is_dark.get();
-                    is_dark.set(next);
-                    ctx.set_theme(if next {
-                        bastyde::presets::intui::dark()
-                    } else {
-                        bastyde::presets::intui::light()
-                    });
-                }),
-            ),
+            .child(bastyde::widgets::ThemeSwitcher::new()),
     )
 }
 

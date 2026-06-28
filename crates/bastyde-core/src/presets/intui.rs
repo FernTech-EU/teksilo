@@ -17,11 +17,12 @@
 
 use bastyde_tokens::{ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens};
 
-use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions};
+use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions, ThemeId};
 
 /// IntUI light theme.
 pub fn light() -> Theme {
     Theme {
+        id: ThemeId::new("intui.light"),
         appearance: ThemeAppearance::Light,
         colors: ColorTokens::light_default(),
         layout: LayoutTokens::default(),
@@ -37,6 +38,7 @@ pub fn light() -> Theme {
 /// variant so they read against dark surfaces.
 pub fn dark() -> Theme {
     Theme {
+        id: ThemeId::new("intui.dark"),
         appearance: ThemeAppearance::Dark,
         colors: ColorTokens::dark_default(),
         layout: LayoutTokens::default(),

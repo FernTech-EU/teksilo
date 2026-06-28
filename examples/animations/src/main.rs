@@ -29,8 +29,7 @@ use std::time::Duration;
 use bastyde::core::app_event::AppEvent;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar,
-    VStack,
+    Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar, VStack,
 };
 
 /// External `AppEvent` payload — the 5 s sleeper thread sends one to
@@ -39,18 +38,11 @@ use bastyde::widgets::{
 struct SwitchToStaticTab;
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 fn main() {

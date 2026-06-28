@@ -25,23 +25,16 @@ use bastyde::data::{
 };
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, CellContext, Column, ColumnWidth, Expand, GridLines, HStack, Spacer,
+    CellContext, Column, ColumnWidth, Expand, GridLines, HStack, Spacer,
     TableAlignment as Alignment, TableSelectionMode, TextWidget, Toolbar, TreeTableView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 #[derive(Clone, Debug)]

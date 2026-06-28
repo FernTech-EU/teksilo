@@ -103,8 +103,6 @@ impl Widget for SplitterDemo {
             let saved_i = self.saved.clone();
             let status_x = self.status.clone();
             let status_i = self.status.clone();
-            let is_dark = Signal::new(false);
-
             Toolbar::new().child(
                 HStack::new()
                     .spacing(8.0)
@@ -141,17 +139,7 @@ impl Widget for SplitterDemo {
                         }),
                     )
                     .child(Spacer::new())
-                    .child(
-                        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-                            let next = !is_dark.get();
-                            is_dark.set(next);
-                            ctx.set_theme(if next {
-                                bastyde::presets::intui::dark()
-                            } else {
-                                bastyde::presets::intui::light()
-                            });
-                        }),
-                    ),
+                    .child(bastyde::widgets::ThemeSwitcher::new()),
             )
         };
 

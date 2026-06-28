@@ -62,7 +62,6 @@ struct Root {
     /// them and the framework rebuilds.
     orientation: Signal<TabBarOrientation>,
     sizing: Signal<TabSizing>,
-    is_dark: Rc<Cell<bool>>,
     /// Counter to give new docs unique titles.
     next_doc_n: Rc<Cell<u32>>,
 
@@ -83,7 +82,6 @@ impl Root {
             model,
             orientation: Signal::new(TabBarOrientation::Horizontal),
             sizing: Signal::new(TabSizing::Shared),
-            is_dark: Rc::new(Cell::new(false)),
             next_doc_n: Rc::new(Cell::new(4)),
             root_child_id: None,
         }
@@ -141,19 +139,7 @@ impl Widget for Root {
                 model_for_new.push(new_doc_tab(n));
             });
 
-        let is_dark = self.is_dark.clone();
-        let theme_btn = Button::new(lit!("Theme"))
-            .variant(ButtonVariant::Ghost)
-            .tooltip(lit!("Toggle theme"))
-            .on_activate_fn(move |ctx: &mut EventContext| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    bastyde::presets::intui::dark()
-                } else {
-                    bastyde::presets::intui::light()
-                });
-            });
+        let theme_btn = bastyde::widgets::ThemeSwitcher::new();
 
         let orientation_for_btn = self.orientation.clone();
         let orient_btn = Button::new(lit!("Orient"))

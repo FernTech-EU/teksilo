@@ -26,26 +26,15 @@ use bastyde::core::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Spacer, SpinBox, StepType, TextWidget,
-    Toolbar, VStack, WheelMode, WrapMode,
+    ThemeSwitcher, Toolbar, VStack, WheelMode, WrapMode,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
     bati!(
         Toolbar {
             HStack {
                 Spacer
-                Button::new(lit!("Toggle Dark Mode")) {
-                    on_activate_fn: move |ctx| {
-                        let next = !is_dark.get();
-                        is_dark.set(next);
-                        ctx.set_theme(if next {
-                            bastyde::presets::intui::dark()
-                        } else {
-                            bastyde::presets::intui::light()
-                        });
-                    }
-                }
+                ThemeSwitcher::new()
             }
         }
     )

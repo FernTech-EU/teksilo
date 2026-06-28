@@ -183,7 +183,7 @@ pub use text_input_style::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
     TextInputVariant,
 };
-pub use theme::Theme;
+pub use theme::{Theme, ThemeId};
 pub use theme_appearance::ThemeAppearance;
 pub use theme_extension::ThemeExtensions;
 pub use toast_style::{SharedToastStyle, ToastPriority, ToastStyle, ToastStyleConfig};

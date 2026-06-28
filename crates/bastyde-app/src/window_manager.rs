@@ -21,7 +21,7 @@ use bastyde_platform::AccessibilityPreferences;
 use bastyde_platform::PlatformWindow;
 use bastyde_platform::create_title_bar_host;
 use bastyde_platform::event_translation::TranslationState;
-use bastyde_tokens::ColorTokens;
+use bastyde_tokens::{ColorSchemePreference, ColorTokens};
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::UserAttentionType;
@@ -118,6 +118,11 @@ pub struct WindowManager {
     modal_blocked: HashMap<BastydeWindowId, BastydeWindowId>,
     /// OS-level accessibility preferences, queried once at startup.
     a11y_prefs: AccessibilityPreferences,
+    /// User-controlled global text-scale factor (`1.0` = 100 %). Seeded from
+    /// `bastyde_settings::TEXT_SCALE_KEY` before the first window opens and
+    /// applied to every tree created afterwards; updated at runtime via
+    /// [`set_text_scale`](Self::set_text_scale).
+    user_text_scale: f32,
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
     /// Per-tree app context shared with every window's WidgetTree when an
@@ -147,6 +152,7 @@ impl WindowManager {
             typesetter: None,
             modal_blocked: HashMap::new(),
             a11y_prefs,
+            user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
             app_context_template: None,
             event_proxy: None,
@@ -182,6 +188,74 @@ impl WindowManager {
     /// Get the current theme mode.
     pub fn theme_mode(&self) -> ThemeMode {
         self.theme_mode
+    }
+
+    /// Recompute and broadcast the theme from the **current OS appearance**,
+    /// per the active theme mode. A no-op under `Manual`. Under `Native` it
+    /// adopts the OS's actual colours (GNOME/KDE/Cinnamon on Linux); under
+    /// `FollowSystem` it picks the built-in light/dark preset. Both results
+    /// carry the id `"system"`.
+    ///
+    /// `os_dark_hint` is the OS light/dark state as reported by winit (e.g.
+    /// from a `WindowEvent::ThemeChanged`), used as the authoritative source on
+    /// platforms where Bastyde's own OS-colour query is unimplemented
+    /// (macOS / Windows, where `query_os_theme_colors()` returns
+    /// `NoPreference`). On Linux the query reports a real scheme and the hint
+    /// is unused. Pass `None` when no winit signal is available (e.g. a runtime
+    /// "follow system" request) — the current window's reported theme is used
+    /// where possible, otherwise it resolves to light.
+    pub fn apply_os_theme(&mut self, os_dark_hint: Option<bool>) {
+        // Fall back to a window's currently-reported winit theme when the
+        // caller didn't supply a hint (so picking "System" on macOS/Windows
+        // adopts the right light/dark immediately, not just on the next toggle).
+        let hint = os_dark_hint.or_else(|| {
+            self.windows
+                .values()
+                .next()
+                .and_then(|m| m.platform_window.window().theme())
+                .map(|t| matches!(t, winit::window::Theme::Dark))
+        });
+        let theme = match self.theme_mode {
+            ThemeMode::Manual => return,
+            ThemeMode::FollowSystem => {
+                let dark = match bastyde_platform::os_theme::query_color_scheme() {
+                    ColorSchemePreference::Dark => true,
+                    ColorSchemePreference::Light => false,
+                    ColorSchemePreference::NoPreference => hint.unwrap_or(false),
+                };
+                if dark {
+                    bastyde_core::presets::intui::dark()
+                } else {
+                    bastyde_core::presets::intui::light()
+                }
+                .with_id("system")
+            }
+            ThemeMode::Native => {
+                let os = bastyde_platform::os_theme::query_os_theme_colors();
+                match os.color_scheme {
+                    // Real OS scheme (Linux): adopt the OS's actual colours.
+                    ColorSchemePreference::Dark => Theme {
+                        colors: ColorTokens::from_os_colors(&os),
+                        ..bastyde_core::presets::intui::dark()
+                    },
+                    ColorSchemePreference::Light => Theme {
+                        colors: ColorTokens::from_os_colors(&os),
+                        ..bastyde_core::presets::intui::light()
+                    },
+                    // No OS-colour support (macOS/Windows): follow the winit
+                    // light/dark hint using the built-in presets.
+                    ColorSchemePreference::NoPreference => {
+                        if hint.unwrap_or(false) {
+                            bastyde_core::presets::intui::dark()
+                        } else {
+                            bastyde_core::presets::intui::light()
+                        }
+                    }
+                }
+                .with_id("system")
+            }
+        };
+        self.set_theme(theme);
     }
 
     #[cfg(feature = "text")]
@@ -407,10 +481,13 @@ impl WindowManager {
         // Resolve the initial theme from ThemeMode before building the tree
         let initial_theme = match self.theme_mode {
             ThemeMode::Manual => self.theme.clone(),
+            // OS-following modes carry the id "system" so a `ThemeSwitcher`
+            // recognizes the active theme as "follow OS", not a fixed pick.
             ThemeMode::FollowSystem => match window.theme() {
                 Some(winit::window::Theme::Dark) => bastyde_core::presets::intui::dark(),
                 _ => bastyde_core::presets::intui::light(),
-            },
+            }
+            .with_id("system"),
             ThemeMode::Native => {
                 let os = bastyde_platform::os_theme::query_os_theme_colors();
                 let base = if os.color_scheme.is_dark() {
@@ -422,6 +499,7 @@ impl WindowManager {
                     colors: ColorTokens::from_os_colors(&os),
                     ..base
                 }
+                .with_id("system")
             }
         };
         // Update the shared theme so all subsequent windows use the same base
@@ -531,6 +609,9 @@ impl WindowManager {
             self.a11y_prefs.reduced_motion,
             self.a11y_prefs.text_scale_factor,
         );
+        if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
+            tree.set_user_text_scale(self.user_text_scale);
+        }
 
         #[cfg_attr(not(feature = "text"), allow(unused_mut))]
         let mut primed_atlas_version: u64 = 0;
@@ -991,6 +1072,23 @@ impl WindowManager {
         }
     }
 
+    /// Broadcast a user text-scale change to all windows. Stores the factor so
+    /// windows created later inherit it, then re-scales every existing tree's
+    /// text without rebuilding.
+    pub fn set_text_scale(&mut self, factor: f32) {
+        self.user_text_scale = factor;
+        for managed in self.windows.values_mut() {
+            managed.tree.set_user_text_scale(factor);
+        }
+    }
+
+    /// Seed the user text-scale factor before the first window opens. Called by
+    /// `BastydeAppHandler` after reading `bastyde_settings::TEXT_SCALE_KEY`, so
+    /// every initially-created tree starts at the persisted scale.
+    pub fn set_initial_text_scale(&mut self, factor: f32) {
+        self.user_text_scale = factor;
+    }
+
     /// Broadcast a locale switch to all windows. Updates the i18n manager
     /// (incrementing the version signal) and seeds each tree with the new
     /// locale and layout direction. No-op if no `I18nConfig` was registered.
@@ -1173,6 +1271,54 @@ impl WindowManager {
         let had_requests = !requests.is_empty();
         for theme in requests {
             self.set_theme(theme);
+        }
+        if had_requests {
+            // An explicit theme pick disables OS-following so a later OS
+            // light/dark change won't override the chosen theme. (The
+            // internal `apply_os_theme` path calls `set_theme` directly, not
+            // through this drain, so it is unaffected.)
+            self.theme_mode = ThemeMode::Manual;
+        }
+        had_requests
+    }
+
+    /// Drain per-tree "follow OS theme" requests raised by handlers via
+    /// [`EventContext::follow_system_theme`](bastyde_core::widget::EventContext::follow_system_theme).
+    /// Switches the app to [`ThemeMode::Native`] and recomputes the theme from
+    /// the current OS colours, fanning it to every window. Returns `true` if
+    /// any window requested it (so the caller schedules a repaint).
+    pub fn drain_pending_follow_system_requests(&mut self) -> bool {
+        let mut requested = false;
+        for managed in self.windows.values_mut() {
+            if managed.tree.take_pending_follow_system_request() {
+                requested = true;
+            }
+        }
+        if requested {
+            self.theme_mode = ThemeMode::Native;
+            // No winit hint at request time; apply_os_theme falls back to the
+            // current window's reported theme.
+            self.apply_os_theme(None);
+        }
+        requested
+    }
+
+    /// Drain per-tree text-scale requests raised by handlers via
+    /// [`EventContext::set_text_scale`](bastyde_core::widget::EventContext::set_text_scale)
+    /// and route each through [`WindowManager::set_text_scale`] so the new
+    /// factor is applied to *every* window. Returns `true` if any request was
+    /// drained (so the caller schedules a repaint). Last writer wins if several
+    /// windows requested in the same tick.
+    pub fn drain_pending_text_scale_requests(&mut self) -> bool {
+        let mut requests: Vec<f32> = Vec::new();
+        for managed in self.windows.values_mut() {
+            if let Some(scale) = managed.tree.take_pending_text_scale_request() {
+                requests.push(scale);
+            }
+        }
+        let had_requests = !requests.is_empty();
+        for scale in requests {
+            self.set_text_scale(scale);
         }
         had_requests
     }

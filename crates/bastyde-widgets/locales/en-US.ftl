@@ -359,3 +359,9 @@ drop-zone-added-text = Added text
 drop-zone-added-link-one = Added 1 link
 drop-zone-added-link-many = Added { $count } links
 drop-zone-rejected = Item not accepted
+
+# ThemeSwitcher widget. See crates/bastyde-widgets/src/theme_switcher.rs.
+theme-switcher-label = Theme
+theme-switcher-light = Light
+theme-switcher-dark = Dark
+theme-switcher-system = System

@@ -1733,6 +1733,12 @@ impl WidgetTree {
             // originating window.
             self.pending_theme_request = Some(theme);
         }
+        if ctx.follow_system_request {
+            // Stored, not applied: the app layer switches to
+            // `ThemeMode::Native` and recomputes the theme from the current
+            // OS colours, fanning it to every window.
+            self.pending_follow_system_request = true;
+        }
         if let Some(locale) = ctx.locale_request {
             // Stored, not applied: the app layer must route this through
             // `WindowManager::set_locale` so the `I18nManager`'s active
@@ -1740,6 +1746,13 @@ impl WidgetTree {
             // `WidgetTree::set_locale` alone would leave `tr!` bindings
             // reading the old translations.
             self.pending_locale_request = Some(locale);
+        }
+        if let Some(scale) = ctx.text_scale_request {
+            // Stored, not applied: the app layer routes this through
+            // `WindowManager::set_text_scale` so every window re-scales its
+            // text. Applying `WidgetTree::set_user_text_scale` inline would
+            // grow only the originating window.
+            self.pending_text_scale_request = Some(scale);
         }
     }
 

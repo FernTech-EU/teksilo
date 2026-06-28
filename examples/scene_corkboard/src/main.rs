@@ -360,7 +360,6 @@ fn build_toolbar(
     main_cam: Camera,
     overview_cam: Camera,
 ) -> impl Widget + 'static {
-    let is_dark = Signal::new(false);
     Toolbar::new().child(
         HStack::new()
             .spacing(8.0)
@@ -391,17 +390,7 @@ fn build_toolbar(
                 Button::new(lit!("Reset Overview")).on_activate_fn(move |_ctx| cam.reset(0.5))
             })
             .child(Spacer::new())
-            .child(
-                Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-                    let next = !is_dark.get();
-                    is_dark.set(next);
-                    ctx.set_theme(if next {
-                        bastyde::presets::intui::dark()
-                    } else {
-                        bastyde::presets::intui::light()
-                    });
-                }),
-            ),
+            .child(bastyde::widgets::ThemeSwitcher::new()),
     )
 }
 

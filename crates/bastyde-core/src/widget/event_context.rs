@@ -101,9 +101,17 @@ pub struct EventContext<'ops> {
     /// Replace the tree-level theme. Drained after dispatch; triggers a
     /// composite-widget rebuild and full repaint.
     pub(crate) theme_request: Option<crate::styles::Theme>,
+    /// Request that the app follow the OS theme (native / system mode).
+    /// Drained after dispatch; the app switches to `ThemeMode::Native` and
+    /// recomputes the theme from the current OS colours. Parameterless so
+    /// `bastyde-widgets` never needs the app-layer `ThemeMode` enum.
+    pub(crate) follow_system_request: bool,
     /// Replace the tree-level locale identifier. Drained after dispatch;
     /// triggers a composite-widget rebuild and full repaint.
     pub(crate) locale_request: Option<String>,
+    /// Set the user-controlled text-scale factor. Drained after dispatch and
+    /// fanned out to every window; grows all text without a rebuild.
+    pub(crate) text_scale_request: Option<f32>,
     /// Set by `request_frame()`; consumed by the event dispatcher which
     /// forwards it to `WidgetTree::request_frame()` so the next layout
     /// pass advances the per-frame tick signal.
@@ -259,7 +267,9 @@ impl<'ops> EventContext<'ops> {
             cancel_drag: false,
             drag_is_external: false,
             theme_request: None,
+            follow_system_request: false,
             locale_request: None,
+            text_scale_request: None,
             frame_requested: false,
             app_context: None,
             pending_intents: Vec::new(),
@@ -990,8 +1000,25 @@ impl<'ops> EventContext<'ops> {
     /// Replace the tree-level theme. Composite widgets are rebuilt so any
     /// derived values they captured at build time pick up the new tokens,
     /// and all widgets are marked dirty for repaint.
+    ///
+    /// An explicit theme also turns **off** OS-following: the app's theme
+    /// mode is reset to manual, so a later OS light/dark change won't
+    /// override the chosen theme.
     pub fn set_theme(&mut self, theme: crate::styles::Theme) {
         self.theme_request = Some(theme);
+    }
+
+    /// Switch the application to follow the OS theme (native / system mode):
+    /// the app adopts the OS's colours and tracks OS light/dark changes at
+    /// runtime. On platforms without OS-colour support it falls back to
+    /// following the built-in light/dark presets.
+    ///
+    /// This is the counterpart to [`set_theme`](Self::set_theme): calling
+    /// `set_theme` pins a fixed theme (manual mode), while this resumes
+    /// OS-following. Parameterless by design, so widgets need not reference
+    /// the app-layer theme-mode enum.
+    pub fn follow_system_theme(&mut self) {
+        self.follow_system_request = true;
     }
 
     /// Replace the tree-level locale identifier. Composite widgets are
@@ -999,6 +1026,17 @@ impl<'ops> EventContext<'ops> {
     /// against the new locale.
     pub fn set_locale(&mut self, locale: impl Into<String>) {
         self.locale_request = Some(locale.into());
+    }
+
+    /// Set the user-controlled global text-scale factor (`1.0` = 100 %).
+    ///
+    /// The change is applied app-wide (every window) after the handler returns,
+    /// mirroring [`set_theme`](Self::set_theme) / [`set_locale`](Self::set_locale).
+    /// All text grows uniformly without a rebuild. Persist the value through
+    /// `ctx.settings()` (e.g. `bastyde_settings::TEXT_SCALE_KEY`) so it survives
+    /// a restart — the `TextScaleControl` widget does both for you.
+    pub fn set_text_scale(&mut self, factor: f32) {
+        self.text_scale_request = Some(factor);
     }
 }
 

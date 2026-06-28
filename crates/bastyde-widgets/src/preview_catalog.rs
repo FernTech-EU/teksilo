@@ -57,7 +57,8 @@ use crate::{
     IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList, Orientation,
     PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl,
     Slider, Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem,
-    StatusBar, TabWidget, TextInput, Toggle, ToolBox, Toolbar, TreeView,
+    StatusBar, TabWidget, TextInput, TextScaleControl, ThemeSwitcher, Toggle, ToolBox, Toolbar,
+    TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -606,6 +607,34 @@ impl WidgetCatalog for TextInput {
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/text_input.rs", TextInput);
+
+// ---------------------------------------------------------------------------
+// TextScaleControl
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for TextScaleControl {
+    fn id() -> &'static str {
+        "text_scale_control"
+    }
+    fn group() -> &'static str {
+        "Accessibility"
+    }
+    fn display_name() -> &'static str {
+        "TextScaleControl"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        // Ephemeral signal: the catalog has no app context, so this previews
+        // the control's chrome without driving real app-wide rescaling.
+        Box::new(TextScaleControl::new(Signal::new(1.0_f32)).label(lit!("Text size")))
+    }
+}
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/text_scale_control.rs",
+    TextScaleControl
+);
 
 // ---------------------------------------------------------------------------
 // Checkbox
@@ -1250,6 +1279,39 @@ impl WidgetCatalog for LanguageSwitcher {
 register_widget_catalog_at!(
     "crates/bastyde-widgets/src/language_switcher.rs",
     LanguageSwitcher
+);
+
+// ---------------------------------------------------------------------------
+// ThemeSwitcher
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for ThemeSwitcher {
+    fn id() -> &'static str {
+        "theme_switcher"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "ThemeSwitcher"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![PreviewVariant::defaults("default")]
+    }
+    fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        // Default Light / Dark / System — the System entry follows the OS.
+        Box::new(ThemeSwitcher::new())
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::combo_box())
+    }
+}
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/theme_switcher.rs",
+    ThemeSwitcher
 );
 
 // ---------------------------------------------------------------------------

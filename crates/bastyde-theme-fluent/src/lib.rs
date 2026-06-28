@@ -30,14 +30,14 @@ use bastyde_core::styles::{Theme, ThemeAppearance};
 
 /// Fluent light theme. Stub — currently returns IntUI light.
 pub fn light() -> Theme {
-    let mut theme = intui::light();
+    let mut theme = intui::light().with_id("fluent.light");
     apply_fluent_overrides(&mut theme, ThemeAppearance::Light);
     theme
 }
 
 /// Fluent dark theme. Stub — currently returns IntUI dark.
 pub fn dark() -> Theme {
-    let mut theme = intui::dark();
+    let mut theme = intui::dark().with_id("fluent.dark");
     apply_fluent_overrides(&mut theme, ThemeAppearance::Dark);
     theme
 }

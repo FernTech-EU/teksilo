@@ -17,7 +17,7 @@
 
 use bastyde::prelude::*;
 use bastyde::tokens::{FontWeight, TextStyle};
-use bastyde::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, TextWidget, VStack};
+use bastyde::widgets::{HStack, Padding, Panel, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -58,20 +58,7 @@ impl Widget for RootContent {
                                     .color(TextRole::Primary),
                             )
                             .child(Spacer::new())
-                            .child({
-                                let is_dark = std::rc::Rc::new(std::cell::Cell::new(false));
-                                Button::new(lit!("Toggle Dark Mode"))
-                                    .variant(ButtonVariant::Plain)
-                                    .on_activate_fn(move |ctx: &mut EventContext| {
-                                        let next = !is_dark.get();
-                                        is_dark.set(next);
-                                        ctx.set_theme(if next {
-                                            bastyde::presets::intui::dark()
-                                        } else {
-                                            bastyde::presets::intui::light()
-                                        });
-                                    })
-                            }),
+                            .child(bastyde::widgets::ThemeSwitcher::new()),
                     )
                     // Typography showcase
                     .child(

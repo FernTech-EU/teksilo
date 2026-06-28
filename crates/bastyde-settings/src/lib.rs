@@ -64,5 +64,7 @@ pub use crate::flush::{DebouncedWriter, FlushError};
 pub use crate::migration::{MigrationError, Migrator, Versioned};
 pub use crate::mru::{MruEntry, MruList};
 pub use crate::path::AppPaths;
-pub use crate::store::{DEFAULT_DEBOUNCE, SettingsKey, SettingsStore, SettingsStoreError};
+pub use crate::store::{
+    DEFAULT_DEBOUNCE, SettingsKey, SettingsStore, SettingsStoreError, TEXT_SCALE_KEY,
+};
 pub use crate::window_state::{PerWindowState, WindowStateService};

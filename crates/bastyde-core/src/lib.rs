@@ -96,7 +96,7 @@ pub use shortcut::{
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
 };
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
-pub use styles::{Theme, ThemeAppearance, ThemeExtensions};
+pub use styles::{Theme, ThemeAppearance, ThemeExtensions, ThemeId};
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,

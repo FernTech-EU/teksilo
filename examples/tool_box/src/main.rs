@@ -9,36 +9,27 @@
 use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Badge, Button, ButtonVariant, Card, Expand, HStack, IconWidget, Panel, Spacer, TextWidget,
-    ToolBox, ToolBoxItem, Toolbar, VStack,
+    Badge, Card, Expand, HStack, IconWidget, Panel, Spacer, TextWidget, ToolBox, ToolBoxItem,
+    Toolbar, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 #[derive(Debug)]
 struct Root {
     root_child_id: Option<WidgetId>,
-    is_dark: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl Root {
     fn new() -> Self {
         Self {
             root_child_id: None,
-            is_dark: std::rc::Rc::new(std::cell::Cell::new(false)),
         }
     }
 }
@@ -95,19 +86,6 @@ impl Widget for Root {
             .add(ToolBoxItem::new(lit!("Build tasks"), build_panel).enabled(false))
             .show_dividers(false);
 
-        let is_dark = self.is_dark.clone();
-        let theme_button = Button::new(lit!("Toggle theme"))
-            .variant(ButtonVariant::Ghost)
-            .on_activate_fn(move |ctx: &mut EventContext| {
-                let next_dark = !is_dark.get();
-                is_dark.set(next_dark);
-                ctx.set_theme(if next_dark {
-                    bastyde::presets::intui::dark()
-                } else {
-                    bastyde::presets::intui::light()
-                });
-            });
-
         let selected_hint = TextWidget::new(lit!("Section index:"))
             .bind_text(selected.map(|i| format!("Section index: {}", i)));
 
@@ -118,8 +96,7 @@ impl Widget for Root {
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             )
-            .child(selected_hint)
-            .child(theme_button);
+            .child(selected_hint);
 
         let instructions = TextWidget::new(lit!(
             "Click a section header to expand it, or Tab into the palette and use \

@@ -93,6 +93,8 @@ pub mod styles;
 pub mod tab_widget;
 pub mod table_view;
 pub mod text_input;
+pub mod text_scale_control;
+pub mod theme_switcher;
 pub mod time_edit;
 pub mod title_bar;
 pub mod toast;
@@ -227,6 +229,8 @@ pub use table_view::{
     TabTraversal, TableSelectionMode, TableView, TruncationPolicy,
 };
 pub use text_input::{TextInput, ValidationState};
+pub use text_scale_control::TextScaleControl;
+pub use theme_switcher::ThemeSwitcher;
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toast::{

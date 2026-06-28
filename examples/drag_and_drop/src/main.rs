@@ -20,23 +20,16 @@ use bastyde::core::WidgetPlacement;
 use bastyde::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, Divider, Expand, HStack, ListView, Padding, Panel, Spacer, StandardListItem,
-    StandardTreeItem, TextWidget, Toolbar, TreeView, VStack,
+    Divider, Expand, HStack, ListView, Padding, Panel, Spacer, StandardListItem, StandardTreeItem,
+    TextWidget, Toolbar, TreeView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 fn main() {

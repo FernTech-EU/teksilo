@@ -134,7 +134,7 @@ pub mod prelude {
     // Theme + appearance + extensions live in bastyde-core (so they can
     // co-locate with the per-widget style trait protocols and the typed
     // `Arc<dyn FooStyle>` slots).
-    pub use bastyde_core::{Theme, ThemeAppearance, ThemeExtensions};
+    pub use bastyde_core::{Theme, ThemeAppearance, ThemeExtensions, ThemeId};
 
     // Theme presets — apps explicitly pick one (no Theme::default()):
     //   let theme = intui::light();
@@ -164,7 +164,7 @@ pub mod prelude {
     // Settings (persistence layer)
     pub use bastyde_settings::{
         AppPaths, MruEntry, MruList, PerWindowState, SettingsBundle, SettingsExt, SettingsFile,
-        SettingsKey, SettingsStore, WindowStateService,
+        SettingsKey, SettingsStore, TEXT_SCALE_KEY, WindowStateService,
     };
 
     // Multi-window API

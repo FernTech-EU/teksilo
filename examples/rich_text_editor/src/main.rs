@@ -73,7 +73,7 @@ use bastyde::prelude::*;
 use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
 use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 use bastyde::widgets::{
-    Button, Expand, HStack, Orientation, PaneDescriptor, Spacer, Splitter, SplitterModel, Toolbar,
+    Expand, HStack, Orientation, PaneDescriptor, Spacer, Splitter, SplitterModel, Toolbar,
 };
 
 use format_toolbar::FormatToolbar;
@@ -149,18 +149,11 @@ fn apply_alignment_demos(doc: &TextDocument) {
 }
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 const SAMPLE: &str = r#"# RichTextEditor — Capability Showcase

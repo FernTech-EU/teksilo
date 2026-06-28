@@ -110,7 +110,9 @@ impl WidgetTree {
         let paint_epoch = self.paint_epoch;
 
         let mut frame = RenderFrame::new();
-        let base_theme = self.theme.clone();
+        // `effective_theme` carries the user/OS text-scale multiplier baked into
+        // its typography, so painted glyphs match the scaled layout sizes.
+        let base_theme = self.effective_theme.clone();
         let text_backend = self.text_backend.clone();
         let a11y_prefs = A11yPaintPrefs {
             high_contrast: self.prefers_high_contrast,

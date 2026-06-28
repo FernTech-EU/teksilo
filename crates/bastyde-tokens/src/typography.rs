@@ -29,6 +29,32 @@ pub struct TypographyTokens {
     pub mono: TextStyle,
 }
 
+impl TypographyTokens {
+    /// Return a copy with every [`TextStyle::size`] multiplied by `factor`.
+    ///
+    /// Used by the global user text-scale accessibility feature: the
+    /// `WidgetTree` derives a scaled typography bag from the active theme so
+    /// every text widget grows uniformly. `factor` is clamped to `[0.25, 8.0]`
+    /// to guard against absurd inputs, and each resulting size is floored at
+    /// `1.0` pt so rounding toward zero never produces invisible text. Font
+    /// weight, family, line height, and letter spacing are preserved.
+    pub fn scaled(&self, factor: f32) -> Self {
+        let f = factor.clamp(0.25, 8.0);
+        let scale = |s: &TextStyle| TextStyle {
+            size: (s.size * f).max(1.0),
+            ..s.clone()
+        };
+        Self {
+            body: scale(&self.body),
+            body_bold: scale(&self.body_bold),
+            small: scale(&self.small),
+            small_bold: scale(&self.small_bold),
+            tiny: scale(&self.tiny),
+            mono: scale(&self.mono),
+        }
+    }
+}
+
 impl Default for TypographyTokens {
     fn default() -> Self {
         let family = "Inter".to_string();
@@ -96,6 +122,47 @@ mod tests {
     fn body_larger_than_tiny() {
         let t = TypographyTokens::default();
         assert!(t.body.size > t.tiny.size);
+    }
+
+    #[test]
+    fn scaled_identity_preserves_sizes_and_weights() {
+        let t = TypographyTokens::default();
+        let s = t.scaled(1.0);
+        assert_eq!(s.body.size, t.body.size);
+        assert_eq!(s.small.size, t.small.size);
+        assert_eq!(s.tiny.size, t.tiny.size);
+        assert_eq!(s.mono.size, t.mono.size);
+        assert_eq!(s.body_bold.weight, t.body_bold.weight);
+        assert_eq!(s.mono.family, t.mono.family);
+    }
+
+    #[test]
+    fn scaled_doubles_every_size() {
+        let t = TypographyTokens::default();
+        let s = t.scaled(2.0);
+        for (scaled, base) in [
+            (&s.body, &t.body),
+            (&s.body_bold, &t.body_bold),
+            (&s.small, &t.small),
+            (&s.small_bold, &t.small_bold),
+            (&s.tiny, &t.tiny),
+            (&s.mono, &t.mono),
+        ] {
+            assert!((scaled.size - base.size * 2.0).abs() < 0.001);
+            assert_eq!(scaled.weight, base.weight);
+        }
+    }
+
+    #[test]
+    fn scaled_clamps_extremes_and_floors_at_one() {
+        let t = TypographyTokens::default();
+        // Below the clamp floor: factor clamps to 0.25 but size never < 1.0.
+        let small = t.scaled(0.0);
+        assert!(small.body.size >= 1.0);
+        assert!((small.body.size - (t.body.size * 0.25).max(1.0)).abs() < 0.001);
+        // Above the clamp ceiling: factor clamps to 8.0.
+        let large = t.scaled(100.0);
+        assert!((large.body.size - t.body.size * 8.0).abs() < 0.001);
     }
 
     #[test]

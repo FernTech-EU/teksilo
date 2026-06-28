@@ -81,6 +81,16 @@ impl<T: 'static> SettingsKey<T> {
     }
 }
 
+/// Persisted user-controlled global text-scale factor (`1.0` = 100 %).
+///
+/// Read at startup by `bastyde-app` to seed every window's text scale, and
+/// bound by the `TextScaleControl` widget so edits persist. The key accepts
+/// any `f32`; the UI control restricts the user-facing range to 80 %–200 %.
+/// The effective rendered scale is this value multiplied by the OS
+/// accessibility text-scale preference.
+pub const TEXT_SCALE_KEY: SettingsKey<f32> =
+    SettingsKey::new("accessibility.text_scale", || 1.0_f32);
+
 impl<T: 'static> std::fmt::Debug for SettingsKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SettingsKey")

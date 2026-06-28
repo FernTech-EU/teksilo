@@ -311,7 +311,9 @@ impl WidgetTree {
         // passes. See `WidgetArena::cached_layout_response`.
         self.arena.clear_layout_cache();
 
-        let base_theme = self.theme.clone();
+        // `effective_theme` carries the user/OS text-scale multiplier baked into
+        // its typography, so every text widget measures at the scaled size.
+        let base_theme = self.effective_theme.clone();
 
         let overlay_content_ids = self.overlay_manager.active_content_ids();
         let roots: Vec<WidgetId> = self.arena.roots();

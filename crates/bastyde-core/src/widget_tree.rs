@@ -65,6 +65,17 @@ pub struct WidgetTree {
     /// rebuilding the widget tree, so interaction state (focus, scroll, expanded
     /// panels, …) survives theme switches.
     theme_signal: crate::signal::Signal<Theme>,
+    /// User-controlled global text-scale factor (`1.0` = 100 %). Layered on top
+    /// of the OS `text_scale_factor`: the two multiply. Set via
+    /// `set_user_text_scale`; persisted by the application through
+    /// `bastyde_settings::TEXT_SCALE_KEY`.
+    user_text_scale: f32,
+    /// Cached projection of `theme` whose `typography` is scaled by
+    /// `user_text_scale * text_scale_factor`. Recomputed by
+    /// `recompute_effective_theme` whenever the theme or either scale factor
+    /// changes; the layout and paint walkers read this instead of `theme` so
+    /// all text grows uniformly. Equal to `theme` when the combined factor is 1.
+    effective_theme: Theme,
     text_backend: Option<Rc<RefCell<dyn bastyde_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     /// Reactive mirror of `focused`. Same pattern as `hovered_signal`
@@ -335,6 +346,18 @@ pub struct WidgetTree {
     /// would only re-theme the originating window — the rest of the app
     /// would stay on the old theme. Mirrors `pending_locale_request`.
     pub(crate) pending_theme_request: Option<crate::styles::Theme>,
+    /// Raised by [`EventContext::follow_system_theme`] during dispatch;
+    /// drained by the application event loop (see
+    /// `WindowManager::drain_pending_follow_system_requests`), which switches
+    /// the app to `ThemeMode::Native` and recomputes the theme from current
+    /// OS colours. Mirrors `pending_theme_request`.
+    pub(crate) pending_follow_system_request: bool,
+    /// Raised by [`EventContext::set_text_scale`] during dispatch; drained by
+    /// the application event loop (see
+    /// `WindowManager::drain_pending_text_scale_requests`) so the change is
+    /// routed through `WindowManager::set_text_scale`, fanning the new factor
+    /// out to *every* window. Mirrors `pending_theme_request`.
+    pub(crate) pending_text_scale_request: Option<f32>,
     /// The `WindowState` for this tree's hosting window. Populated
     /// by the app-level window manager when the tree is registered;
     /// `None` for standalone trees. Cloned into every `EventContext`
@@ -401,7 +424,9 @@ impl WidgetTree {
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
-            theme_signal: crate::signal::Signal::new(initial_theme),
+            theme_signal: crate::signal::Signal::new(initial_theme.clone()),
+            user_text_scale: 1.0,
+            effective_theme: initial_theme,
             text_backend: None,
             focused: None,
             focused_signal: crate::signal::Signal::new(None),
@@ -461,6 +486,8 @@ impl WidgetTree {
             close_window_requested: false,
             pending_locale_request: None,
             pending_theme_request: None,
+            pending_follow_system_request: false,
+            pending_text_scale_request: None,
             window_state: None,
         }
     }
@@ -981,6 +1008,7 @@ impl WidgetTree {
         // builder-time analogue that forgot to keep them aligned.
         self.theme = theme.clone();
         self.theme_signal.set(theme);
+        self.recompute_effective_theme();
         self
     }
 
@@ -1282,7 +1310,45 @@ impl WidgetTree {
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
         self.theme_signal.set(theme);
+        self.recompute_effective_theme();
         self.arena.mark_all_dirty();
+    }
+
+    /// Recompute [`Self::effective_theme`] from the current `theme` and the
+    /// combined text scale (`user_text_scale * text_scale_factor`). Callers
+    /// that change either input are responsible for `mark_all_dirty()`.
+    fn recompute_effective_theme(&mut self) {
+        let combined = (self.user_text_scale as f64 * self.text_scale_factor) as f32;
+        self.effective_theme = if (combined - 1.0).abs() < f32::EPSILON {
+            self.theme.clone()
+        } else {
+            let mut t = self.theme.clone();
+            t.typography = t.typography.scaled(combined);
+            t
+        };
+    }
+
+    /// Set the user-controlled global text-scale factor (`1.0` = 100 %).
+    ///
+    /// The factor multiplies with the OS accessibility text-scale preference to
+    /// produce the rendered scale. Recomputes the effective theme and marks all
+    /// widgets dirty so every text widget grows on the next pass; no rebuild,
+    /// so focus/scroll/interaction state survive. Values outside `[0.25, 8.0]`
+    /// are clamped. Persisted by the application via
+    /// `bastyde_settings::TEXT_SCALE_KEY`.
+    pub fn set_user_text_scale(&mut self, factor: f32) {
+        let clamped = factor.clamp(0.25, 8.0);
+        if (self.user_text_scale - clamped).abs() < f32::EPSILON {
+            return;
+        }
+        self.user_text_scale = clamped;
+        self.recompute_effective_theme();
+        self.arena.mark_all_dirty();
+    }
+
+    /// The current user-controlled text-scale factor (`1.0` = 100 %).
+    pub fn user_text_scale(&self) -> f32 {
+        self.user_text_scale
     }
 
     /// After a rebuild that destroyed subtrees, drop any interaction state
@@ -1629,6 +1695,9 @@ impl WidgetTree {
             self.prefers_high_contrast = high_contrast;
             self.prefers_reduced_motion = reduced_motion;
             self.text_scale_factor = text_scale_factor;
+            // The OS factor feeds the effective text scale (multiplied with the
+            // user factor), so refresh the cached scaled typography.
+            self.recompute_effective_theme();
             self.arena.mark_all_dirty();
         }
     }
@@ -2031,6 +2100,24 @@ impl WidgetTree {
     /// window, not just the one whose handler requested it.
     pub fn take_pending_theme_request(&mut self) -> Option<crate::styles::Theme> {
         self.pending_theme_request.take()
+    }
+
+    /// Drain the pending "follow OS theme" request raised by
+    /// [`EventContext::follow_system_theme`] during dispatch. The app layer
+    /// (`WindowManager::drain_pending_follow_system_requests`) switches to
+    /// `ThemeMode::Native` and recomputes the theme from the OS for every
+    /// window. Returns `true` if a request was pending.
+    pub fn take_pending_follow_system_request(&mut self) -> bool {
+        std::mem::take(&mut self.pending_follow_system_request)
+    }
+
+    /// Drain the pending text-scale change raised by
+    /// [`EventContext::set_text_scale`] during dispatch. The app layer
+    /// (`WindowManager::drain_pending_text_scale_requests`) routes it through
+    /// `WindowManager::set_text_scale` so the new factor is applied to every
+    /// window, not just the one whose handler requested it.
+    pub fn take_pending_text_scale_request(&mut self) -> Option<f32> {
+        self.pending_text_scale_request.take()
     }
 
     /// Drain all pending modal requests recorded during event handling.
@@ -2856,5 +2943,62 @@ mod visible_when_builder_tests {
 
         let node = tree.arena.get(id).expect("node exists");
         assert!(matches!(node.visible_state, Some(Prop::Static(false))));
+    }
+}
+
+#[cfg(test)]
+mod text_scale_tests {
+    use super::*;
+
+    #[test]
+    fn effective_theme_starts_equal_to_theme() {
+        let tree = WidgetTree::new();
+        assert_eq!(
+            tree.effective_theme.typography.body.size,
+            tree.theme.typography.body.size
+        );
+        assert_eq!(tree.user_text_scale(), 1.0);
+    }
+
+    #[test]
+    fn set_user_text_scale_scales_effective_typography() {
+        let mut tree = WidgetTree::new();
+        let base = tree.theme.typography.body.size;
+        tree.set_user_text_scale(1.5);
+        assert!((tree.effective_theme.typography.body.size - base * 1.5).abs() < 0.001);
+        // The unscaled base theme is untouched.
+        assert_eq!(tree.theme.typography.body.size, base);
+    }
+
+    #[test]
+    fn set_theme_preserves_existing_user_scale() {
+        let mut tree = WidgetTree::new();
+        tree.set_user_text_scale(2.0);
+        let dark = crate::presets::intui::dark();
+        let dark_base = dark.typography.body.size;
+        tree.set_theme(dark);
+        assert!((tree.effective_theme.typography.body.size - dark_base * 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn os_text_scale_multiplies_with_user_scale() {
+        let mut tree = WidgetTree::new();
+        let base = tree.theme.typography.body.size;
+        tree.set_user_text_scale(1.5);
+        // OS preference reports 1.2 → combined 1.8.
+        tree.set_accessibility_preferences(false, false, 1.2);
+        assert!((tree.effective_theme.typography.body.size - base * 1.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn same_scale_is_a_noop_and_factor_is_clamped() {
+        let mut tree = WidgetTree::new();
+        tree.set_user_text_scale(1.5);
+        // Re-setting the same value should not panic / change anything.
+        tree.set_user_text_scale(1.5);
+        assert_eq!(tree.user_text_scale(), 1.5);
+        // Out-of-range clamps into [0.25, 8.0].
+        tree.set_user_text_scale(100.0);
+        assert_eq!(tree.user_text_scale(), 8.0);
     }
 }

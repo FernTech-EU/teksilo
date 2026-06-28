@@ -14,7 +14,7 @@
 use bastyde::prelude::*;
 use bastyde::text_document::TextDocument;
 use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Button, Expand, HStack, Spacer, Toolbar};
+use bastyde::widgets::{Expand, HStack, Spacer, Toolbar};
 
 const SAMPLE: &str = r#"# Bastyde Rich Text Viewer
 
@@ -73,18 +73,11 @@ tables needs test hardware with a range of DPIs.
 "#;
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .child(Spacer::new())
+            .child(bastyde::widgets::ThemeSwitcher::new()),
+    )
 }
 
 fn main() {

@@ -361,7 +361,6 @@ impl DockingDemo {
         let corner_flag = self.bottom_corner_to_leading.clone();
         let model_lock = self.model.clone();
         let locked = Signal::new(false);
-        let is_dark = Signal::new(false);
 
         Toolbar::new().child(
             HStack::new()
@@ -423,17 +422,7 @@ impl DockingDemo {
                     }
                 }))
                 .child(Spacer::new())
-                .child(
-                    Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
-                        let next = !is_dark.get();
-                        is_dark.set(next);
-                        ctx.set_theme(if next {
-                            bastyde::presets::intui::dark()
-                        } else {
-                            bastyde::presets::intui::light()
-                        });
-                    }),
-                ),
+                .child(bastyde::widgets::ThemeSwitcher::new()),
         )
     }
 }

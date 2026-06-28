@@ -25,8 +25,8 @@ use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, ScrollArea,
-    Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
-    WindowFrame, keystroke_format::format_keystroke,
+    Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextScaleControl, TextWidget, TitleBar,
+    Toggle, VStack, WindowFrame, keystroke_format::format_keystroke,
 };
 use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
 
@@ -148,9 +148,12 @@ fn main() {
                         let catalog_filled =
                             tree.add(Expand::vertical().respect_intrinsic().child_id(catalog));
 
+                        // Invisible: persists + restores the chosen theme.
+                        let theme_persist = tree.add(ThemePersistenceSlot);
                         let inner = tree.add(
                             VStack::new()
                                 .spacing(0.0)
+                                .add_child(theme_persist)
                                 .add_child(title_bar_id)
                                 .add_child(catalog_filled),
                         );
@@ -213,51 +216,24 @@ fn build_title_bar(
         .variant(ButtonVariant::Ghost)
         .on_activate_fn(|ctx| ctx.set_locale("ar-SA"));
 
-    // Theme toggle — flips between light and dark. Tracks state in a
-    // `Signal<bool>` captured by the closure so the next click flips
-    // back. Matches the title_bar_demo / internationalization patterns.
-    let is_dark = Signal::new(false);
-    let theme_btn = Button::new(tr!(theme_label()))
-        .variant(ButtonVariant::Ghost)
-        .tooltip(tr!(theme_tooltip()))
-        .on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        });
+    // Global text-scale control — grows all text in the app for low-vision
+    // users. Lives next to the language buttons because it is the same kind of
+    // app-wide accessibility/locale preference. `TextScaleSlot` binds it to the
+    // persisted `TEXT_SCALE_KEY` from inside a `build()` (where `ctx.settings()`
+    // is reachable), so the chosen size persists and restores on restart.
+    let scale_ctrl = TextScaleSlot::default();
 
-    // OS theme — pull the live desktop theme colors (accent, surfaces,
-    // text) and overlay them onto the matching intui base. Same
-    // construction as the app's `ThemeMode::Native` path; here it's
-    // driven on demand by a button so the catalog can show it off
-    // regardless of how the app was launched.
-    let os_theme_btn = Button::new(tr!(os_theme_label()))
-        .variant(ButtonVariant::Ghost)
-        .tooltip(tr!(os_theme_tooltip()))
-        .on_activate_fn(|ctx| {
-            let os = bastyde::platform::os_theme::query_os_theme_colors();
-            let base = if os.color_scheme.is_dark() {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            };
-            ctx.set_theme(Theme {
-                colors: bastyde::tokens::ColorTokens::from_os_colors(&os),
-                ..base
-            });
-        });
+    // Theme switcher — Light / Dark / System, covers both the manual
+    // toggle and the OS-theme button that were here before.
+    let theme_switcher = bastyde::widgets::ThemeSwitcher::new();
 
     let trailing = HStack::new()
         .spacing(4.0)
         .child(en_btn)
         .child(fr_btn)
         .child(ar_btn)
-        .child(theme_btn)
-        .child(os_theme_btn);
+        .child(scale_ctrl)
+        .child(theme_switcher);
 
     TitleBar::new(host)
         .height(40.0)
@@ -267,6 +243,99 @@ fn build_title_bar(
         .center(center)
         .trailing(trailing)
         .close_action(|ctx| ctx.close_window())
+}
+
+/// Thin wrapper that binds [`TextScaleControl`] to the persisted
+/// `TEXT_SCALE_KEY`. The title bar is built without a `BuildContext`, so the
+/// settings handle isn't reachable there — this slot defers the binding to its
+/// own `build()`, where `ctx.settings()` is available. Edits then persist (and
+/// restore on the next launch) while still applying app-wide live.
+#[derive(Debug, Default)]
+struct TextScaleSlot {
+    root_child_id: Option<WidgetId>,
+}
+
+impl Widget for TextScaleSlot {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let scale = ctx.settings().signal_for(&TEXT_SCALE_KEY);
+        let id = ctx.add(TextScaleControl::new(scale));
+        self.root_child_id = Some(id);
+        vec![id]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}
+
+/// Invisible slot that persists the active theme to settings and restores it
+/// on the next launch — so a user who picks Dark (or System) via the
+/// `ThemeSwitcher` finds it preserved across runs. The selection is keyed by
+/// the theme's stable [`bastyde::core::ThemeId`]: `"intui.light"` /
+/// `"intui.dark"` for fixed themes, `"system"` for follow-OS. Mirrors
+/// `TextScaleSlot` (which does the same for the text-scale preference); the
+/// binding lives in `build()` where `ctx.settings()` is reachable.
+#[derive(Debug, Default)]
+struct ThemePersistenceSlot;
+
+const THEME_PREF_KEY: &str = "ui.theme";
+
+impl Widget for ThemePersistenceSlot {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let pref = ctx
+            .settings()
+            .signal::<String>(THEME_PREF_KEY, String::new());
+
+        // Persist whenever the active theme changes (debounced by the store).
+        {
+            let pref = pref.clone();
+            ctx.effect(&ctx.theme_signal(), move |theme| {
+                let id = theme.id.as_str().to_string();
+                if pref.get() != id {
+                    pref.set(id);
+                }
+            });
+        }
+
+        // Restore the saved theme once, after mount (an `EventContext` — needed
+        // for set_theme / follow_system_theme — is only reachable post-mount).
+        let saved = pref.get();
+        if !saved.is_empty() {
+            ctx.run_after_mount(move |ectx| match saved.as_str() {
+                "system" => ectx.follow_system_theme(),
+                "intui.dark" => ectx.set_theme(bastyde::presets::intui::dark()),
+                "intui.light" => ectx.set_theme(bastyde::presets::intui::light()),
+                // Unknown / custom id: keep the builder default.
+                _ => {}
+            });
+        }
+
+        Vec::new()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
 }
 
 /// Minimal menubar — `&File → &Quit` and `&Help → &Documentation,

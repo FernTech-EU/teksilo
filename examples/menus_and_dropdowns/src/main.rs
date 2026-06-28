@@ -18,8 +18,6 @@
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
-use bastyde::IntentKind;
-use bastyde::core::Action;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconButton, IconWidget, MenuBar,
@@ -27,12 +25,6 @@ use bastyde::widgets::{
     Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 use bastyde_data::CheckState;
-
-#[derive(Debug, IntentKind)]
-enum AppIntent {
-    #[name = "menus.toggle_dark_mode"]
-    ToggleDarkMode,
-}
 
 // ---------------------------------------------------------------------------
 // Root composite
@@ -58,7 +50,6 @@ impl Widget for Root {
         // State for the View-menu showcase. All three patterns share the
         // same MenuList-built `Signal`s so MenuList's auto-grouping
         // (`Signal::same`) bundles the three radio items.
-        let is_dark = ctx.signal(false);
         let word_wrap = ctx.signal(true);
         let inspector_state = ctx.signal(CheckState::Indeterminate);
         // 0 = Light, 1 = Dark, 2 = System. Named `theme_radio_choice`
@@ -66,27 +57,6 @@ impl Widget for Root {
         // `Signal<Option<String>>` further down used by the
         // SettingsPanel-style ComboBox demo.
         let theme_radio_choice = ctx.signal(0_usize);
-
-        // The Toggle-Dark-Mode action inverts `is_dark` and applies
-        // the matching theme. The checkable menu item separately
-        // shows the current state via `.bind_checked(is_dark)` so
-        // the visible checkmark always matches the active theme;
-        // the View → Toggle Dark Mode item omits the mode-flip
-        // mutation and routes through this action instead so the
-        // toolbar Button and the menu item share one source of
-        // truth.
-        let is_dark_for_action = is_dark.clone();
-        ctx.register_action(Action::new("menus.toggle_dark_mode").on_invoke(
-            move |_intent, ctx| {
-                let dark = !is_dark_for_action.get();
-                is_dark_for_action.set(dark);
-                ctx.set_theme(if dark {
-                    bastyde::presets::intui::dark()
-                } else {
-                    bastyde::presets::intui::light()
-                });
-            },
-        ));
 
         // --- Section 1: ComboBox demos ---
 
@@ -680,13 +650,7 @@ impl Widget for Root {
                             .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
-                    .child(
-                        Button::new(lit!("Toggle Dark Mode"))
-                            .variant(ButtonVariant::Plain)
-                            .on_activate_fn(|ctx| {
-                                ctx.send_intent(AppIntent::ToggleDarkMode);
-                            }),
-                    ),
+                    .child(bastyde::widgets::ThemeSwitcher::new()),
             ),
         );
 
@@ -822,19 +786,28 @@ impl Widget for Root {
                             // RADIO GROUP — three items sharing one
                             // `Signal<usize>`. MenuList groups them by
                             // signal identity and announces "2 of 3"
-                            // via `push_to_radio_group`. Clicking writes
-                            // the matching value into `theme_choice`.
+                            // via `push_to_radio_group`. Clicking writes the
+                            // matching value into `theme_radio_choice` AND
+                            // applies the theme (set_theme / follow_system_theme),
+                            // staying in sync with the toolbar's ThemeSwitcher.
                             .item(
                                 MenuItem::new(lit!("&Light Theme"))
-                                    .radio(0, theme_choice_for_view.clone()),
+                                    .radio(0, theme_choice_for_view.clone())
+                                    .on_activate_fn(|ctx| {
+                                        ctx.set_theme(bastyde::presets::intui::light())
+                                    }),
                             )
                             .item(
                                 MenuItem::new(lit!("&Dark Theme"))
-                                    .radio(1, theme_choice_for_view.clone()),
+                                    .radio(1, theme_choice_for_view.clone())
+                                    .on_activate_fn(|ctx| {
+                                        ctx.set_theme(bastyde::presets::intui::dark())
+                                    }),
                             )
                             .item(
                                 MenuItem::new(lit!("&System Theme"))
-                                    .radio(2, theme_choice_for_view.clone()),
+                                    .radio(2, theme_choice_for_view.clone())
+                                    .on_activate_fn(|ctx| ctx.follow_system_theme()),
                             )
                             .separator()
                             .item(MenuItem::submenu(lit!("&Alignment"), || {
@@ -857,26 +830,7 @@ impl Widget for Root {
                                                 .on_activate_fn(|_| println!("AlignJustify")),
                                         ),
                                 )
-                            }))
-                            .separator()
-                            // Checkable view of the live `is_dark`
-                            // state plus an intent send. We do NOT
-                            // use `.bind_checked(...)` here — that
-                            // would flip the signal twice (once via
-                            // mode_activate, once via the action),
-                            // landing back on the original value. The
-                            // toolbar Button shares the same action,
-                            // so routing both clickers through the
-                            // action keeps one source of truth. The
-                            // visible checkmark would need a separate
-                            // reactive read of `is_dark`; the menu
-                            // rebuilds on every open so the role
-                            // alone (Plain) is acceptable here.
-                            .item(
-                                MenuItem::new(lit!("&Toggle Dark Mode")).on_activate_fn(|ctx| {
-                                    ctx.send_intent(AppIntent::ToggleDarkMode);
-                                }),
-                            ),
+                            })),
                     )
                 })
                 .trailing_slot(

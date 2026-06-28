@@ -29,11 +29,11 @@ use bastyde::core::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     AtRevealPolicy, Button, ButtonVariant, EchoMode, Expand, GroupBox, HStack, Padding,
-    PasswordField, RevealMode, Spacer, TextInput, TextWidget, Toolbar, VStack, ValidationOutcome,
+    PasswordField, RevealMode, Spacer, TextInput, TextWidget, ThemeSwitcher, Toolbar, VStack,
+    ValidationOutcome,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
-    let is_dark = Signal::new(false);
     bati!(
         Toolbar {
             HStack {
@@ -41,17 +41,7 @@ fn dark_mode_toolbar() -> impl Widget {
                     style: TextStyleRole::BodyBold
                 }
                 Spacer
-                Button::new(lit!("Toggle Dark Mode")) {
-                    on_activate_fn: move |ctx| {
-                        let next = !is_dark.get();
-                        is_dark.set(next);
-                        ctx.set_theme(if next {
-                            bastyde::presets::intui::dark()
-                        } else {
-                            bastyde::presets::intui::light()
-                        });
-                    }
-                }
+                ThemeSwitcher::new()
             }
         }
     )
