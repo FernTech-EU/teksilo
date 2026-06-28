@@ -1293,8 +1293,10 @@ dependencies = [
 name = "bastyde-theme-material3"
 version = "0.6.2"
 dependencies = [
+ "bastyde-canvas",
  "bastyde-core",
  "bastyde-tokens",
+ "bastyde-widgets",
 ]
 
 [[package]]

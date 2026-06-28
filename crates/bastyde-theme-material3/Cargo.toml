@@ -13,3 +13,8 @@ repository.workspace = true
 [dependencies]
 bastyde-core = { workspace = true }
 bastyde-tokens = { workspace = true }
+# Needed for the Tier-3 widget styles installed in `style_slots` (the
+# `Recipe*Style` defaults + layout primitives live in bastyde-widgets).
+# bastyde-widgets does NOT depend on the theme crates, so this is acyclic.
+bastyde-canvas = { workspace = true }
+bastyde-widgets = { workspace = true }
