@@ -1262,9 +1262,38 @@ _MD_SPDX_HEADER = [
     "",
 ]
 
-# Display order for the catalog index; any directory not listed is appended
-# afterwards, alphabetically, as a "<Dir> (submodule)" group.
-_CATEGORY_ORDER = ["Layout primitives", "Widgets", "Animations"]
+_OVERVIEW = REPO_ROOT / "docs" / "widgets-overview.md"
+_OV_SECTION_RE = re.compile(r"^#{2,3}\s+(.+?)(?:\s+[—-].*)?$")
+_OV_LINK_RE = re.compile(r"\]\([^)]*crates/bastyde-widgets/src/([^)\s]+?\.rs)[^)]*\)")
+
+
+def _overview_category_map() -> "tuple[dict[str, str], list[str]]":
+    """Parse docs/widgets-overview.md into {src-relative-path -> section} plus the
+    section order. This is the single source of truth for catalog grouping, so the
+    catalog index matches the hand-maintained overview (data-collection views land
+    under "Data-driven widgets", buttons under "Buttons", etc.)."""
+    mapping: dict[str, str] = {}
+    order: list[str] = []
+    if not _OVERVIEW.exists():
+        return mapping, order
+    cur: str | None = None
+    for ln in _OVERVIEW.read_text(encoding="utf-8").splitlines():
+        s = ln.strip()
+        if s.startswith("#"):
+            m = _OV_SECTION_RE.match(s)
+            if m:
+                name = m.group(1).strip()
+                if name.lower() in ("cross-references", "styling status"):
+                    cur = None
+                else:
+                    cur = name
+                    if cur not in order:
+                        order.append(cur)
+            continue
+        if cur and s.startswith("- "):
+            for lm in _OV_LINK_RE.finditer(ln):
+                mapping[lm.group(1)] = cur
+    return mapping, order
 
 
 def _catalog_title(reg: "Registry", pf: ParsedFile) -> str:
@@ -1275,11 +1304,17 @@ def _catalog_title(reg: "Registry", pf: ParsedFile) -> str:
     return _stem_to_camel(pf.module_name)
 
 
-def _catalog_category(fp: Path) -> str:
-    """Group label derived from a file's location under `bastyde-widgets/src`."""
+def _catalog_category(fp: Path, overview: "dict[str, str] | None" = None) -> str:
+    """Group label for a widget file: prefer the section it appears under in
+    widgets-overview.md, then fall back to its location under bastyde-widgets/src."""
     rel = fp.relative_to(WIDGETS_SRC)
+    if overview:
+        hit = overview.get(rel.as_posix())
+        if hit:
+            return hit
     if len(rel.parts) == 1:
-        return "Widgets"
+        # Top-level file not in the overview (substrate / data types / aliases).
+        return "Other"
     top = rel.parts[0]
     return {
         "primitives": "Layout primitives",
@@ -1486,15 +1521,18 @@ def format_catalog_index(
     reg: "Registry", parsed: list[ParsedFile], slugs: dict[Path, str]
 ) -> str:
     """The catalog landing page: every widget grouped by category, with a brief."""
+    overview, ov_order = _overview_category_map()
     groups: dict[str, list[tuple[str, str, str]]] = {}
     for pf in parsed:
-        cat = _catalog_category(pf.file_path)
+        cat = _catalog_category(pf.file_path, overview)
         title = _catalog_title(reg, pf)
         brief = _clean_catalog_links(_first_sentence(pf.header_doc))
         groups.setdefault(cat, []).append((title, slugs[pf.file_path], brief))
 
-    ordered = [c for c in _CATEGORY_ORDER if c in groups]
-    ordered += sorted(c for c in groups if c not in _CATEGORY_ORDER)
+    # Order by the overview's section order, then any remaining groups (submodule
+    # helpers, uncategorised) alphabetically.
+    ordered = [c for c in ov_order if c in groups]
+    ordered += sorted(c for c in groups if c not in ordered)
 
     out: list[str] = list(_MD_SPDX_HEADER)
     out.append("# Widget Catalog")
@@ -1754,7 +1792,14 @@ def main(argv: list[str]) -> int:
         return cmd_list(reg)
 
     if args.md_dir:
-        api_dir = Path(args.api_dir) if args.api_dir else None
+        if args.api_dir:
+            api_dir: "Path | None" = Path(args.api_dir)
+        else:
+            # Auto-use the built rustdoc tree if present, so a plain `--md-dir`
+            # run still resolves deep-links for private / cfg-gated modules
+            # (data_views, privacy_settings, tree_source) instead of 404ing.
+            _doc = REPO_ROOT / "target" / "doc"
+            api_dir = _doc if (_doc / "bastyde_widgets").exists() else None
         return cmd_md_dir(reg, args.md_dir, args.api_base, api_dir)
 
     if args.all:

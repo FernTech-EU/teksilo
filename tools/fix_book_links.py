@@ -63,7 +63,7 @@ def _classify(target: str, src_dir: Path, base: str) -> tuple[str, str | None]:
         t.startswith("#")
         or "://" in t
         or t.startswith("mailto:")
-        or t.startswith("../api/")
+        or re.match(r"(\.\./)*api/", t)  # the in-book rustdoc tree, at any depth
     ):
         return ("keep", t)
 
