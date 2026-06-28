@@ -63,6 +63,22 @@ pub struct ButtonStyleConfig {
 /// safety here would be inconsistent and pay no benefit.
 pub trait ButtonStyle: 'static {
     fn make_body(&self, cfg: &ButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// Optional per-variant override of the label/icon text role.
+    ///
+    /// The `Button` picks its label color from its built-in
+    /// variant→role mapping (`OnAccent` for accent-filled variants,
+    /// `Primary` otherwise, `Link` for `Link`) *before* the style runs.
+    /// Returning `Some(role)` here lets a design-language style redirect
+    /// it — e.g. Material 3 paints text/outlined buttons in the accent
+    /// color (`TextRole::Accent`) rather than `Primary`.
+    ///
+    /// Default `None` preserves the built-in mapping, so existing styles
+    /// (and the IntUI default) are unaffected. A per-call
+    /// `Button::text_role(...)` still wins over this.
+    fn label_text_role(&self, _variant: ButtonVariant) -> Option<bastyde_tokens::TextRole> {
+        None
+    }
 }
 
 /// Shared handle for a `ButtonStyle` impl. Cheap to clone; one shared

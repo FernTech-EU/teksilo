@@ -710,6 +710,18 @@ impl bastyde_core::widget::Widget for Button {
             bastyde_core::binding::BindingLevel::AccessibilityOnly,
         );
 
+        // Resolve the active `ButtonStyle` (per-call override > theme
+        // slot > IntUI default). Both the label color (immediately below)
+        // and the chrome (`make_body`, further down) consult it. The
+        // lookup reads only `self.style_override` + `ctx.theme()`, so
+        // resolving it here instead of just before `make_body` changes
+        // nothing for existing styles.
+        let style: SharedButtonStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.button.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeButtonStyle::default()));
+
         // Label/icon color: a caller-supplied override wins over the
         // auto cascade. The override replaces ALL states (idle / hover /
         // press / focus / disabled) — chrome that uses this opts out of
@@ -721,10 +733,14 @@ impl bastyde_core::widget::Widget for Button {
         // resolved here — the active `ButtonStyle` owns it via
         // `make_body(cfg, ctx)` below. This widget only resolves the
         // CONTENT color (label + icon) since that's part of the inner
-        // subtree we hand to the style as `cfg.label`.
+        // subtree we hand to the style as `cfg.label`. The active style
+        // may also redirect the content role (`label_text_role`) — e.g.
+        // Material 3 paints text/outlined buttons in the accent color.
         let text_role: bastyde_core::color_prop::ColorProp =
             if let Some(ref over) = self.text_role_override {
                 over.clone()
+            } else if let Some(role) = style.label_text_role(variant) {
+                role.into()
             } else {
                 interaction
                     .map(move |s| resolve_text_role(variant, *s))
@@ -797,15 +813,10 @@ impl bastyde_core::widget::Widget for Button {
         };
 
         // Delegate chrome (background fill, border, focus ring,
-        // padding, min size) to the active `ButtonStyle`. The four
-        // boolean signals derive from the local `interaction` state
-        // signal so the style can `.zip` them and pick a per-state
-        // recipe slot.
-        let style: SharedButtonStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.button.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeButtonStyle::default()));
+        // padding, min size) to the active `ButtonStyle` (resolved
+        // above). The four boolean signals derive from the local
+        // `interaction` state signal so the style can `.zip` them and
+        // pick a per-state recipe slot.
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         // `:focus-visible`: reveal the focus ring during keyboard navigation
@@ -1420,6 +1431,54 @@ mod tests {
             frame.shapes.iter().any(|s| s.color == sentinel),
             "the theme's `style_slots.button` impl should drive Button chrome \
              — saw no sentinel magenta rect in the rendered frame",
+        );
+    }
+
+    #[test]
+    fn style_label_text_role_overrides_default_label_color() {
+        // A `ButtonStyle` returning `Some(role)` from `label_text_role`
+        // redirects the label/icon color — the Material 3 "text and
+        // outlined buttons are accent-colored" need. Styles that return
+        // `None` (the IntUI default) keep the Button's built-in mapping,
+        // so this is purely additive (the rest of the suite covers the
+        // default path).
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::styles::{ButtonStyle, ButtonStyleConfig, ButtonVariant};
+        use bastyde_tokens::TextRole;
+        use std::cell::RefCell;
+
+        struct LabelRoleSentinel;
+        impl ButtonStyle for LabelRoleSentinel {
+            fn make_body(
+                &self,
+                cfg: &ButtonStyleConfig,
+                ctx: &mut bastyde_core::build_context::BuildContext,
+            ) -> bastyde_core::widget_id::WidgetId {
+                ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+            }
+            fn label_text_role(&self, _variant: ButtonVariant) -> Option<TextRole> {
+                Some(TextRole::Error)
+            }
+        }
+
+        let want = bastyde_core::presets::intui::light()
+            .colors
+            .text_error
+            .to_array();
+        let mut theme = bastyde_core::presets::intui::light();
+        theme.style_slots.button = Some(Rc::new(LabelRoleSentinel));
+        let mut tree = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let _btn = tree.add(Button::new(lit!("T")).on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame = tree.render();
+
+        assert!(
+            frame.glyphs.iter().any(|g| g.color == want),
+            "style.label_text_role(...) should drive the label glyph color; \
+             expected the theme error color {want:?}, saw {:?}",
+            frame.glyphs.iter().map(|g| g.color).collect::<Vec<_>>(),
         );
     }
 

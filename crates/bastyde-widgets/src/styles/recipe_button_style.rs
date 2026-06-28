@@ -24,7 +24,7 @@ use bastyde_core::styles::{
     PerStateRecipe, RecipeColor, ShapeRecipe, WidgetState,
 };
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
+use bastyde_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole};
 
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
@@ -47,9 +47,16 @@ pub const BUTTON_ICON_LABEL_GAP: f32 = 4.0;
 /// Holds a `HashMap<ButtonVariant, ButtonRecipe>`. Variants that
 /// aren't explicitly populated fall back to `ButtonVariant::Plain`
 /// (the Int UI house default).
+///
+/// `label_roles` optionally redirects the label/icon color per variant
+/// (see [`ButtonStyle::label_text_role`]). It is empty in the IntUI
+/// default — the `Button`'s built-in mapping is kept — but
+/// design-language presets (Material 3) populate it so e.g. text and
+/// outlined buttons read in the accent color.
 #[derive(Debug, Clone)]
 pub struct RecipeButtonStyle {
     pub recipes: HashMap<ButtonVariant, ButtonRecipe>,
+    pub label_roles: HashMap<ButtonVariant, TextRole>,
 }
 
 impl RecipeButtonStyle {
@@ -67,7 +74,11 @@ impl RecipeButtonStyle {
         recipes.insert(ButtonVariant::Ghost, intui_ghost_recipe());
         // IntUI maps Link → Ghost.
         recipes.insert(ButtonVariant::Link, intui_ghost_recipe());
-        Self { recipes }
+        // IntUI keeps the Button's built-in label-role mapping.
+        Self {
+            recipes,
+            label_roles: HashMap::new(),
+        }
     }
 }
 
@@ -119,6 +130,10 @@ impl ButtonStyle for RecipeButtonStyle {
         let zstack_id = ctx.add(ZStack::new().add_child(rect_id).add_child(padding_id));
 
         ctx.add(MinSize::new(recipe.min_size.width, recipe.min_size.height).child_id(zstack_id))
+    }
+
+    fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {
+        self.label_roles.get(&variant).copied()
     }
 }
 
