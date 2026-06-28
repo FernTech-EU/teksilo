@@ -223,9 +223,19 @@ fn build_title_bar(
     // is reachable), so the chosen size persists and restores on restart.
     let scale_ctrl = TextScaleSlot::default();
 
-    // Theme switcher — Light / Dark / System, covers both the manual
-    // toggle and the OS-theme button that were here before.
-    let theme_switcher = bastyde::widgets::ThemeSwitcher::new();
+    // Theme switcher — IntUI Light/Dark plus the Material 3 preset, with
+    // the OS-follow "System" entry kept on. Selecting a Material 3 entry
+    // restyles the whole catalog live (pill buttons, M3 switch, purple
+    // accent), which is the quickest way to eyeball the preset.
+    let theme_switcher = bastyde::widgets::ThemeSwitcher::new().themes([
+        (lit!("IntUI Light"), bastyde::presets::intui::light()),
+        (lit!("IntUI Dark"), bastyde::presets::intui::dark()),
+        (
+            lit!("Material 3 Light"),
+            bastyde::prelude::material3::light(),
+        ),
+        (lit!("Material 3 Dark"), bastyde::prelude::material3::dark()),
+    ]);
 
     let trailing = HStack::new()
         .spacing(4.0)
@@ -325,6 +335,8 @@ impl Widget for ThemePersistenceSlot {
                 "system" => ectx.follow_system_theme(),
                 "intui.dark" => ectx.set_theme(bastyde::presets::intui::dark()),
                 "intui.light" => ectx.set_theme(bastyde::presets::intui::light()),
+                "material3.dark" => ectx.set_theme(bastyde::prelude::material3::dark()),
+                "material3.light" => ectx.set_theme(bastyde::prelude::material3::light()),
                 // Unknown / custom id: keep the builder default.
                 _ => {}
             });

@@ -10,7 +10,11 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["system-emoji", "telemetry"] }
+bastyde = { workspace = true, features = [
+    "system-emoji",
+    "telemetry",
+    "theme-material3",
+] }
 bastyde-charts = { workspace = true }
 bastyde-scene = { workspace = true }
 bastyde-telemetry = { workspace = true }
