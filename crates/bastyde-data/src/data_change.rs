@@ -1,30 +1,51 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Change notifications for flat collections.
+//! `DataChange` — change notifications for flat collections.
+//!
+//! Describes the mutations that [`crate::ListModel`] (and [`crate::ListDataSource`]
+//! implementors) emit to their subscribers. Consumers such as `ListView`,
+//! `TableView`, and `SortFilterListModel` receive a `DataChange` through their
+//! observer and update their internal state (measured row heights, selection
+//! indices, sort projections) incrementally rather than rebuilding from scratch.
+//!
+//! Most variants carry index ranges so that observers can perform O(affected)
+//! work. `Reset` is the fallback when the change cannot be expressed
+//! incrementally; consumers must discard all cached state and re-query the source.
+//!
+//! Also provided: [`map_index_after_move`], a pure function that maps a single
+//! index through an `ItemsMoved` operation — used by [`crate::CheckedModel`] and
+//! [`crate::SelectionModel`] to keep index-based state in sync after reorders.
+//!
+//! ```rust
+//! # use bastyde_data::data_change::{DataChange, map_index_after_move};
+//! // An insertion at row 2 shifts index 5 to 6.
+//! let change = DataChange::ItemsInserted { range: 2..3 };
+//! // map_index_after_move: move row 0 to position 2 (post-removal index).
+//! let new_idx = map_index_after_move(0, 0, 2, 1);
+//! assert_eq!(new_idx, 2);
+//! ```
 
 use std::ops::Range;
 
-/// Describes a mutation to a flat list. Emitted by `ListModel<T>` automatically
-/// and by `ListDataSource` implementors manually.
+/// Describes a mutation to a flat list. Emitted by [`crate::ListModel`] automatically
+/// and by [`crate::ListDataSource`] implementors manually.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataChange {
-    /// Items were inserted at the given range.
-    /// The range represents the indices of the newly inserted items.
+    /// Rows were inserted; `range` holds the indices of the newly inserted items.
     ItemsInserted { range: Range<usize> },
 
-    /// Items were removed from the given range.
-    /// The range represents the indices the items occupied before removal.
+    /// Rows were removed; `range` holds the indices they occupied *before* removal.
     ItemsRemoved { range: Range<usize> },
 
-    /// Items were moved within the list.
+    /// A contiguous block of `count` rows moved from `from` to `to` (post-removal index).
     ItemsMoved {
         from: usize,
         to: usize,
         count: usize,
     },
 
-    /// A single item was updated in place.
+    /// A single row's data changed in place without any structural shift.
     ItemUpdated { index: usize },
 
     /// A window of previously-`Loading` rows became `Ready` (lazy / windowed
@@ -33,7 +54,7 @@ pub enum DataChange {
     /// already declared — so a `SelectionModel` must NOT index-shift for it.
     WindowLoaded { range: Range<usize> },
 
-    /// The entire list was replaced. Consumers should discard all state and rebuild.
+    /// The entire list was replaced; consumers must discard all cached state and rebuild.
     Reset,
 }
 

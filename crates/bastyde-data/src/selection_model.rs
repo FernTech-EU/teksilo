@@ -1,11 +1,42 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Selection state for collection widgets.
+//! SelectionModel — index-based selection state for collection widgets.
 //!
-//! `SelectionModel` manages which indices are selected in a `ListView` or
-//! `TreeView`. Supports single-select, multi-select (Ctrl+click toggle),
-//! and range-select (Shift+click extension).
+//! [`SelectionModel`] manages which flat indices are selected in a
+//! `ListView`, `TreeView`, `TableView`, or `GridView`. It is a
+//! share-by-clone handle (`Rc<RefCell<…>>` internally): pass a clone to
+//! each view that should share selection state. The current selection is
+//! exposed as a reactive `Signal<BTreeSet<usize>>` so widgets can bind to
+//! it without polling.
+//!
+//! Three selection behaviours are available via [`SelectionMode`]: `None`
+//! (read-only / no interaction), `Single` (at most one item), and `Multi`
+//! (Ctrl+click toggle + Shift+click range extension via an internal anchor).
+//! Mutators automatically notify all `Signal` observers after every change,
+//! and the helper methods `adjust_for_insert` / `adjust_for_remove` /
+//! `adjust_for_move` keep selected indices consistent when the underlying
+//! source mutates.
+//!
+//! ## When to use `SelectionModel` vs `KeyedSelectionModel`
+//!
+//! Use `SelectionModel` (this type) for views that are backed by a plain
+//! `ListModel<T>` or a `SortFilterListModel<T>` where *position* is the
+//! natural identity. Use [`crate::KeyedSelectionModel`] when items carry a
+//! stable app-defined key (e.g. a `NodeId` or a UUID) and selection must
+//! survive sort/filter rebuilds or window slides that renumber visible indices.
+//!
+//! ```rust
+//! # use bastyde_data::{SelectionModel, SelectionMode};
+//! let sel = SelectionModel::new(SelectionMode::Multi);
+//! sel.select(2);         // clear-and-select index 2, anchor = 2
+//! sel.toggle(5);         // add index 5 (Ctrl+click behaviour)
+//! sel.extend_to(8);      // extend from anchor 5 to 8 (Shift+click behaviour)
+//! assert!(sel.is_selected(2));
+//! assert_eq!(sel.count(), 5); // 2, 5, 6, 7, 8
+//! sel.clear();
+//! assert_eq!(sel.count(), 0);
+//! ```
 
 use std::cell::Cell;
 #[cfg(debug_assertions)]

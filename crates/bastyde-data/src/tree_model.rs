@@ -1,9 +1,40 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Concrete reactive tree. Owns a hierarchy of items in a flat arena
-//! (SlotMap) with parent-child links. Mutations emit `TreeChange` automatically.
-//! Cloneable for shared access.
+//! `TreeModel` — concrete reactive tree with shared, cloneable handles.
+//!
+//! `TreeModel<T>` owns a hierarchy of `T` items in a flat SlotMap arena with
+//! parent-child links. Every structural mutation (`insert_root`, `insert_child`,
+//! `remove`, `move_node`, `update`) emits a [`TreeChange`] to all registered
+//! observers before returning. Node identity is a stable, versioned `NodeId`
+//! (a SlotMap key) that is never reused after removal.
+//!
+//! Cloning produces a second handle to the **same** data — all handles see the
+//! same hierarchy and receive the same change notifications. Register observers
+//! via [`observe_changes`](TreeModel::observe_changes); the returned
+//! [`ObserverHandle`] is RAII — dropping it
+//! unregisters the callback.
+//!
+//! For per-view expand/collapse state wrap the model in a
+//! [`TreeSlice`](crate::TreeSlice). For sort/filter projections use
+//! [`SortFilterTreeModel`](crate::SortFilterTreeModel).
+//!
+//! ## Example
+//!
+//! ```rust
+//! # use bastyde_data::{TreeModel, TreeChange};
+//! let tree = TreeModel::new();
+//! let root = tree.insert_root(0, "root");
+//! let child = tree.insert_child(root, 0, "child");
+//!
+//! assert_eq!(tree.root_count(), 1);
+//! assert_eq!(tree.child_count(root), 1);
+//! assert_eq!(tree.parent(child), Some(root));
+//!
+//! let clone = tree.clone();
+//! clone.insert_root(1, "root2");
+//! assert_eq!(tree.root_count(), 2); // both handles share the same data
+//! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,19 +70,19 @@ struct TreeModelInner<T> {
     debug_adapter: Option<Rc<dyn crate::debug_registry::ModelDebug>>,
 }
 
-/// A concrete reactive tree that stores a hierarchy of items.
+/// A concrete reactive tree that stores a hierarchy of `T` items in a flat arena.
 ///
 /// `TreeModel<T>` is `Clone` — cloning produces a second handle to the same
-/// data. All handles see the same hierarchy and receive the same notifications.
-///
-/// Nodes are identified by opaque `NodeId` handles that remain stable across
-/// mutations (they are SlotMap keys).
+/// underlying data. All handles see the same hierarchy and receive the same
+/// [`TreeChange`] notifications from [`observe_changes`](Self::observe_changes).
+/// Nodes are identified by opaque [`NodeId`] handles that are stable and
+/// non-reusable across mutations (versioned SlotMap keys).
 pub struct TreeModel<T: 'static> {
     inner: Rc<RefCell<TreeModelInner<T>>>,
 }
 
 impl<T: 'static> TreeModel<T> {
-    /// Create an empty tree model.
+    /// Create an empty tree model with no roots and no observers.
     pub fn new() -> Self {
         Self {
             inner: Rc::new(RefCell::new(TreeModelInner {

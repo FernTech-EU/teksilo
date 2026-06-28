@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Per-node checkbox state for a `TreeModel<T>`, with optional
+//! `TreeCheckedModel` — per-node checkbox state for a tree, with optional
 //! descendant→ancestor tristate aggregation.
 //!
-//! Companion to [`crate::CheckedModel`] for trees. Defaults to the
-//! standard "Outlook folder selection" semantic: a parent's state
-//! is `Checked` if all descendants are checked, `Unchecked` if none,
-//! `Indeterminate` otherwise; toggling a parent cascades to all
-//! descendants. Set the mode to `AggregateMode::None` to give every
-//! node independent state.
+//! Companion to [`crate::CheckedModel`] for trees. Defaults to the standard
+//! "Outlook folder selection" semantic: a parent's state is `Checked` if all
+//! descendants are checked, `Unchecked` if none, `Indeterminate` otherwise;
+//! toggling a parent cascades `Checked`/`Unchecked` down to all descendants.
+//! Set the mode to [`AggregateMode::None`] to give every node independent
+//! state instead. The model is a share-by-clone handle (`Rc<RefCell<…>>`
+//! internally) — cloning produces a second view onto the same checkbox state.
 //!
 //! External writes (e.g. a `Checkbox` widget bound to
 //! `signal_for(node)` setting it directly) trigger the same
@@ -17,6 +18,25 @@
 //! `check`/`uncheck`/`toggle` methods, via per-node observers. A
 //! re-entry guard prevents the cascade pass from re-firing
 //! observers it triggers itself.
+//!
+//! ## Example
+//!
+//! ```rust
+//! # use bastyde_data::{TreeModel, TreeCheckedModel, CheckState};
+//! let tree = TreeModel::new();
+//! let root = tree.insert_root(0, "root");
+//! let child_a = tree.insert_child(root, 0, "a");
+//! let child_b = tree.insert_child(root, 1, "b");
+//!
+//! let model = TreeCheckedModel::new(tree);
+//! // Pre-register signal chains before mutating.
+//! let _ = (model.signal_for(root), model.signal_for(child_a), model.signal_for(child_b));
+//!
+//! model.check(child_a);
+//! assert_eq!(model.check_state(root), CheckState::Indeterminate);
+//! model.check(child_b);
+//! assert_eq!(model.check_state(root), CheckState::Checked);
+//! ```
 //!
 //! ## Limitation: tree-mutation desync
 //!
@@ -50,14 +70,16 @@ use crate::check_state::CheckState;
 use crate::tree_change::NodeId;
 use crate::tree_model::TreeModel;
 
-/// How a parent's `CheckState` relates to its descendants.
+/// How a parent's [`CheckState`] relates to its descendants.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AggregateMode {
-    /// Each node owns its state; parents do not reflect their descendants.
+    /// Each node owns its state independently; parent states do not reflect
+    /// their descendants and cascades do not occur.
     None,
     /// All-checked → `Checked`; all-unchecked → `Unchecked`; mixed →
-    /// `Indeterminate`. Toggling a parent cascades to all descendants.
-    /// Default.
+    /// `Indeterminate`. Toggling a parent cascades `Checked`/`Unchecked` to
+    /// all descendants and recomputes every ancestor. This is the default and
+    /// corresponds to the "Outlook folder selection" tristate pattern.
     #[default]
     DescendantsDriveAncestors,
 }
@@ -81,6 +103,11 @@ struct Inner {
     suppress: bool,
 }
 
+/// Per-node checkbox state for a [`TreeModel<T>`](crate::TreeModel), with optional
+/// descendant→ancestor tristate aggregation.
+///
+/// See the [module documentation](self) for the full semantics and limitations.
+/// Clone to share the same checkbox state between multiple call sites.
 pub struct TreeCheckedModel<T: 'static> {
     tree: TreeModel<T>,
     inner: Rc<RefCell<Inner>>,
@@ -88,6 +115,8 @@ pub struct TreeCheckedModel<T: 'static> {
 }
 
 impl<T: 'static> TreeCheckedModel<T> {
+    /// Create a new model wrapping `tree` with the default
+    /// [`AggregateMode::DescendantsDriveAncestors`] cascade behaviour.
     pub fn new(tree: TreeModel<T>) -> Self {
         Self {
             tree,
@@ -103,16 +132,19 @@ impl<T: 'static> TreeCheckedModel<T> {
         }
     }
 
+    /// Create a new model wrapping `tree` with an explicit [`AggregateMode`].
     pub fn with_mode(tree: TreeModel<T>, mode: AggregateMode) -> Self {
         let m = Self::new(tree);
         m.mode.set(mode);
         m
     }
 
+    /// Returns the current [`AggregateMode`] controlling cascade behaviour.
     pub fn aggregate_mode(&self) -> AggregateMode {
         self.mode.get()
     }
 
+    /// Change the cascade behaviour; takes effect on the next write to any node's signal.
     pub fn set_aggregate_mode(&self, mode: AggregateMode) {
         self.mode.set(mode);
     }
@@ -236,6 +268,8 @@ impl<T: 'static> TreeCheckedModel<T> {
         bool_sig
     }
 
+    /// Returns the current [`CheckState`] for `node` (defaults to `Unchecked`
+    /// if the node's signal has never been written or read).
     pub fn check_state(&self, node: NodeId) -> CheckState {
         self.inner
             .borrow()
@@ -245,16 +279,23 @@ impl<T: 'static> TreeCheckedModel<T> {
             .unwrap_or(CheckState::Unchecked)
     }
 
+    /// Set `node` to [`CheckState::Checked`], triggering the configured cascade and
+    /// ancestor recompute; notifies observers of every affected node's signal.
     pub fn check(&self, node: NodeId) {
         // Setting via signal_for runs through the observer, which
         // performs the cascade. No need to duplicate logic here.
         self.signal_for(node).set(CheckState::Checked);
     }
 
+    /// Set `node` to [`CheckState::Unchecked`], triggering the configured cascade and
+    /// ancestor recompute; notifies observers of every affected node's signal.
     pub fn uncheck(&self, node: NodeId) {
         self.signal_for(node).set(CheckState::Unchecked);
     }
 
+    /// Toggle `node`'s check state: under `DescendantsDriveAncestors` a leaf
+    /// cycles two-state (`Unchecked` ↔ `Checked`); a branch or `AggregateMode::None`
+    /// cycles the full tristate sequence via [`CheckState::next_tristate`].
     pub fn toggle(&self, node: NodeId) {
         let current = self.check_state(node);
         let next = match (self.mode.get(), self.is_leaf(node), current) {
@@ -267,6 +308,10 @@ impl<T: 'static> TreeCheckedModel<T> {
         self.signal_for(node).set(next);
     }
 
+    /// Returns all `NodeId`s whose current state is exactly [`CheckState::Checked`].
+    ///
+    /// Note: may include stale ids if the underlying tree has been mutated since
+    /// the signals were first registered — see the module-level limitation note.
     pub fn checked_nodes(&self) -> Vec<NodeId> {
         self.inner
             .borrow()
@@ -276,6 +321,7 @@ impl<T: 'static> TreeCheckedModel<T> {
             .collect()
     }
 
+    /// Reset all known nodes to [`CheckState::Unchecked`] and notify observers.
     pub fn clear(&self) {
         // Snapshot keys to avoid borrow-during-iteration.
         let keys: Vec<NodeId> = self.inner.borrow().state.keys().copied().collect();

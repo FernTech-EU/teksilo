@@ -1,7 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Change notifications and node identifiers for tree collections.
+//! TreeChange — change notifications and stable node identifiers for tree collections.
+//!
+//! [`NodeId`] is an opaque, stable handle for a node in a [`crate::TreeModel`].
+//! Because `TreeModel` is backed by a slotmap, `NodeId` values survive arbitrary
+//! insertions, removals, and moves — only deleting the node itself invalidates it.
+//! [`TreeChange`] describes exactly what mutated in the tree so that projections
+//! (`SortFilterTreeModel`, `TreeSlice`) can refresh efficiently and emit
+//! fine-grained divergence hints.
+//!
+//! Consumers typically receive `TreeChange` values through an observer registered
+//! via [`crate::TreeModel::observe_changes`], which fires synchronously (before
+//! the registering call returns) after each mutation. The projections listed above
+//! subscribe internally; app code rarely needs to subscribe directly.
+//!
+//! ```ignore
+//! // TreeModel::observe_changes returns an ObserverHandle whose drop
+//! // unregisters the callback — keep it alive for the observer's lifetime.
+//! use bastyde_data::{TreeModel, TreeChange};
+//! let tree: TreeModel<String> = TreeModel::new();
+//! let _handle = tree.observe_changes(|change| {
+//!     println!("{change:?}");
+//! });
+//! tree.insert_root(0, "root".to_string());
+//! // prints: NodeInserted { parent: None, index: 0, node: NodeId(...) }
+//! ```
 
 /// Opaque identifier for a node in a `TreeModel`.
 ///

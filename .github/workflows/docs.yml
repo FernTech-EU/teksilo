@@ -69,11 +69,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build the rustdoc API reference
-        # Only bastyde-widgets: its module paths (bastyde_widgets/<module>/) are
-        # what the catalog pages deep-link to, and it keeps the deployed file
-        # count well under Cloudflare Pages' 20,000-files-per-deployment limit.
-        # Built BEFORE the catalog so --api-dir can verify each deep-link target.
-        run: cargo doc -p bastyde-widgets --no-deps
+        # bastyde-widgets (its module paths bastyde_widgets/<module>/ are what the
+        # catalog pages deep-link to) plus bastyde-data (the reactive data-model
+        # layer the Data models guide references). --no-deps keeps the deployed
+        # file count well under Cloudflare Pages' 20,000-files-per-deployment
+        # limit. Built BEFORE the catalog so --api-dir can verify each deep-link.
+        run: cargo doc -p bastyde-widgets -p bastyde-data --no-deps
 
       - name: Generate the Widget Catalog pages
         run: python3 tools/extract_widget_api.py --all --md-dir docs/widgets --api-dir target/doc
