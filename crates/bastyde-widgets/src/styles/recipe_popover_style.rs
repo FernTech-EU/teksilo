@@ -38,13 +38,47 @@ pub const MENU_POPUP_CORNER_RADIUS: f32 = 8.0;
 /// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
 pub const POPOVER_SHADOW_DENSITY: f32 = 0.5;
 
+/// Configurable dimensions for [`RecipePopoverStyle`].
+///
+/// [`Default`] fills every field from the corresponding `POPOVER_*` /
+/// `MENU_POPUP_*` constant, so existing code that relies on the defaults
+/// is unaffected.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PopoverRecipe {
+    pub padding: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+    pub menu_popup_corner_radius: f32,
+    pub shadow_density: f32,
+}
+
+impl Default for PopoverRecipe {
+    fn default() -> Self {
+        Self {
+            padding: POPOVER_PADDING,
+            corner_radius: POPOVER_CORNER_RADIUS,
+            border_width: POPOVER_BORDER_WIDTH,
+            menu_popup_corner_radius: MENU_POPUP_CORNER_RADIUS,
+            shadow_density: POPOVER_SHADOW_DENSITY,
+        }
+    }
+}
+
 /// Default `PopoverStyle` shipped with Bastyde. The `Default` and
 /// `Tooltip` variants produce the elevated `surface_main` panel with
 /// 16 px content padding; the `Menu` variant produces a `surface_raised`
 /// panel with zero content padding (so menu rows reach the edge) and a
 /// presentational a11y node (the caller owns the container role).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipePopoverStyle;
+pub struct RecipePopoverStyle {
+    pub recipe: PopoverRecipe,
+}
+
+impl RecipePopoverStyle {
+    pub fn new(recipe: PopoverRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl PopoverStyle for RecipePopoverStyle {
     fn make_body(&self, cfg: &PopoverStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -52,13 +86,13 @@ impl PopoverStyle for RecipePopoverStyle {
             PopoverVariant::Menu => (
                 EdgeInsets::ZERO,
                 SurfaceRole::Raised,
-                MENU_POPUP_CORNER_RADIUS,
+                self.recipe.menu_popup_corner_radius,
                 true,
             ),
             PopoverVariant::Default | PopoverVariant::Tooltip => (
-                EdgeInsets::uniform(POPOVER_PADDING),
+                EdgeInsets::uniform(self.recipe.padding),
                 SurfaceRole::Main,
-                POPOVER_CORNER_RADIUS,
+                self.recipe.corner_radius,
                 false,
             ),
         };

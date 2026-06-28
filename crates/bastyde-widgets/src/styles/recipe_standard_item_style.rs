@@ -41,9 +41,60 @@ pub const STANDARD_ITEM_BG_HORIZONTAL_INSET: f32 = 4.0;
 /// Keyboard-focus ring thickness for the current item while its view is focused.
 pub const STANDARD_ITEM_FOCUS_RING_WIDTH: f32 = 1.5;
 
+/// Configurable dimensions for [`RecipeStandardItemStyle`].
+///
+/// The [`Default`] implementation reads the module-level `pub const` tokens,
+/// so a `RecipeStandardItemStyle::default()` is identical to the old unit struct.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardItemRecipe {
+    pub icon_size: f32,
+    pub subtitle_icon_size: f32,
+    pub slot_gap: f32,
+    pub subtitle_slot_gap: f32,
+    pub label_subtitle_gap: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub min_height_single_line: f32,
+    pub min_height_two_line: f32,
+    pub chevron_column_width: f32,
+    pub tree_indent_step: f32,
+    pub item_corner_radius: f32,
+    pub bg_horizontal_inset: f32,
+    pub focus_ring_width: f32,
+}
+
+impl Default for StandardItemRecipe {
+    fn default() -> Self {
+        Self {
+            icon_size: STANDARD_ITEM_ICON_SIZE,
+            subtitle_icon_size: STANDARD_ITEM_SUBTITLE_ICON_SIZE,
+            slot_gap: STANDARD_ITEM_SLOT_GAP,
+            subtitle_slot_gap: STANDARD_ITEM_SUBTITLE_SLOT_GAP,
+            label_subtitle_gap: STANDARD_ITEM_LABEL_SUBTITLE_GAP,
+            padding_horizontal: STANDARD_ITEM_PADDING_HORIZONTAL,
+            padding_vertical: STANDARD_ITEM_PADDING_VERTICAL,
+            min_height_single_line: STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE,
+            min_height_two_line: STANDARD_ITEM_MIN_HEIGHT_TWO_LINE,
+            chevron_column_width: STANDARD_ITEM_CHEVRON_COLUMN_WIDTH,
+            tree_indent_step: STANDARD_ITEM_TREE_INDENT_STEP,
+            item_corner_radius: STANDARD_ITEM_ITEM_CORNER_RADIUS,
+            bg_horizontal_inset: STANDARD_ITEM_BG_HORIZONTAL_INSET,
+            focus_ring_width: STANDARD_ITEM_FOCUS_RING_WIDTH,
+        }
+    }
+}
+
 /// Default `StandardItemStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeStandardItemStyle;
+pub struct RecipeStandardItemStyle {
+    pub recipe: StandardItemRecipe,
+}
+
+impl RecipeStandardItemStyle {
+    pub fn new(recipe: StandardItemRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl StandardItemStyle for RecipeStandardItemStyle {
     fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -64,12 +115,13 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // / arrow navigation but NOT on a mouse click, and clears on any pointer
         // input. Width collapses to 0 otherwise. `BorderRole::Focused` is the
         // theme's focus-ring color.
+        let focus_ring_width = self.recipe.focus_ring_width;
         let ring_width = cfg
             .is_selected
             .zip3(&cfg.is_focused, &cfg.is_focus_visible)
-            .map(|(sel, foc, vis)| {
+            .map(move |(sel, foc, vis)| {
                 if *sel && *foc && *vis {
-                    STANDARD_ITEM_FOCUS_RING_WIDTH
+                    focus_ring_width
                 } else {
                     0.0
                 }
@@ -80,16 +132,16 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         let bg_rect = ctx.add(
             RectWidget::new()
                 .bind_background(bg_role)
-                .corner_radius(CornerRadius::uniform(STANDARD_ITEM_ITEM_CORNER_RADIUS))
+                .corner_radius(CornerRadius::uniform(self.recipe.item_corner_radius))
                 .border_color(BorderRole::Focused)
                 .border_width(ring_width),
         );
         let bg_padded = ctx.add(
             Padding::new(
                 0.0,
-                STANDARD_ITEM_BG_HORIZONTAL_INSET,
+                self.recipe.bg_horizontal_inset,
                 0.0,
-                STANDARD_ITEM_BG_HORIZONTAL_INSET,
+                self.recipe.bg_horizontal_inset,
             )
             .child_id(bg_rect),
         );
@@ -101,11 +153,8 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // and leave (e.g.) tree chevrons shifted off the leading edge.
         let content_expanded = ctx.add(Expand::horizontal().child_id(cfg.content));
         let content_padded = ctx.add(
-            Padding::symmetric(
-                STANDARD_ITEM_PADDING_VERTICAL,
-                STANDARD_ITEM_PADDING_HORIZONTAL,
-            )
-            .child_id(content_expanded),
+            Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
+                .child_id(content_expanded),
         );
 
         ctx.add(ZStack::new().add_child(bg_padded).add_child(content_padded))

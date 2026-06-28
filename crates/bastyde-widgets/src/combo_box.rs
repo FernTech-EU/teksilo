@@ -551,7 +551,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.combo_box.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeComboBoxStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeComboBoxStyle::default()));
 
         let cfg = ComboBoxStyleConfig {
             selected_label: label_id,

@@ -44,18 +44,47 @@ pub const COMBO_BOX_PADDING_HORIZONTAL: f32 = 9.0;
 pub const COMBO_BOX_ARROW_COLUMN_WIDTH: f32 = 23.0;
 pub const COMBO_BOX_CORNER_RADIUS: f32 = 4.0;
 
+/// Configurable dimensions for [`RecipeComboBoxStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ComboBoxRecipe {
+    pub height: f32,
+    pub padding_horizontal: f32,
+    pub arrow_column_width: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for ComboBoxRecipe {
+    fn default() -> Self {
+        Self {
+            height: COMBO_BOX_HEIGHT,
+            padding_horizontal: COMBO_BOX_PADDING_HORIZONTAL,
+            arrow_column_width: COMBO_BOX_ARROW_COLUMN_WIDTH,
+            corner_radius: COMBO_BOX_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `ComboBoxStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeComboBoxStyle;
+pub struct RecipeComboBoxStyle {
+    pub recipe: ComboBoxRecipe,
+}
+
+impl RecipeComboBoxStyle {
+    pub fn new(recipe: ComboBoxRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl ComboBoxStyle for RecipeComboBoxStyle {
     fn make_body(&self, cfg: &ComboBoxStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme();
         let border_width = theme.shape.border_width;
         let focus_ring_width = theme.shape.focus_ring_width;
-        let divider_height = COMBO_BOX_HEIGHT * 0.6;
-        let padding_h = COMBO_BOX_PADDING_HORIZONTAL;
-        let corner_radius = COMBO_BOX_CORNER_RADIUS;
+        let height = self.recipe.height;
+        let divider_height = height * 0.6;
+        let padding_h = self.recipe.padding_horizontal;
+        let corner_radius = self.recipe.corner_radius;
 
         // Plain variant — no chrome at all. Hand the label back
         // wrapped only in the min-height enforcement; callers using
@@ -64,8 +93,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
             let row_id = build_inner_row(ctx, cfg.selected_label, border_width, divider_height);
             let padded_id =
                 ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
-            return ctx
-                .add(crate::primitives::MinSize::new(0.0, COMBO_BOX_HEIGHT).child_id(padded_id));
+            return ctx.add(crate::primitives::MinSize::new(0.0, height).child_id(padded_id));
         }
 
         // Derived role signals. Roles encode "what this colour means";
@@ -136,7 +164,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let bg_id = ctx.add(bg);
 
         let visual_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
-        ctx.add(crate::primitives::MinSize::new(0.0, COMBO_BOX_HEIGHT).child_id(visual_id))
+        ctx.add(crate::primitives::MinSize::new(0.0, height).child_id(visual_id))
     }
 }
 

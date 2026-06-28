@@ -53,18 +53,61 @@ pub const TEXT_FIELD_ERROR_PULSE_DURATION_MS: u32 = 240;
 pub const TEXT_FIELD_CORRECTED_PULSE_DURATION_MS: u32 = 1500;
 pub const TEXT_FIELD_MASK_PLACEHOLDER_CHAR: char = '_';
 
+/// Dimension recipe for [`RecipeTextInputStyle`].
+///
+/// Every `pub const TEXT_FIELD_*` is mirrored as a typed field so callers
+/// can override individual dimensions without writing a full custom style.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextInputRecipe {
+    pub height: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub border_width: f32,
+    pub corner_radius: f32,
+    pub caret_width: f32,
+    pub validation_strip_gap: f32,
+    pub error_pulse_duration_ms: u32,
+    pub corrected_pulse_duration_ms: u32,
+    pub mask_placeholder_char: char,
+}
+
+impl Default for TextInputRecipe {
+    fn default() -> Self {
+        Self {
+            height: TEXT_FIELD_HEIGHT,
+            padding_horizontal: TEXT_FIELD_PADDING_HORIZONTAL,
+            padding_vertical: TEXT_FIELD_PADDING_VERTICAL,
+            border_width: TEXT_FIELD_BORDER_WIDTH,
+            corner_radius: TEXT_FIELD_CORNER_RADIUS,
+            caret_width: TEXT_FIELD_CARET_WIDTH,
+            validation_strip_gap: TEXT_FIELD_VALIDATION_STRIP_GAP,
+            error_pulse_duration_ms: TEXT_FIELD_ERROR_PULSE_DURATION_MS,
+            corrected_pulse_duration_ms: TEXT_FIELD_CORRECTED_PULSE_DURATION_MS,
+            mask_placeholder_char: TEXT_FIELD_MASK_PLACEHOLDER_CHAR,
+        }
+    }
+}
+
 /// Default `TextInputStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeTextInputStyle;
+pub struct RecipeTextInputStyle {
+    pub recipe: TextInputRecipe,
+}
+
+impl RecipeTextInputStyle {
+    pub fn new(recipe: TextInputRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl TextInputStyle for RecipeTextInputStyle {
     fn make_body(&self, cfg: &TextInputStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme();
-        let border_width = TEXT_FIELD_BORDER_WIDTH;
+        let border_width = self.recipe.border_width;
         let focus_ring_width = theme.shape.focus_ring_width;
-        let padding_h = TEXT_FIELD_PADDING_HORIZONTAL;
-        let corner_radius = TEXT_FIELD_CORNER_RADIUS;
-        let height = TEXT_FIELD_HEIGHT;
+        let padding_h = self.recipe.padding_horizontal;
+        let corner_radius = self.recipe.corner_radius;
+        let height = self.recipe.height;
 
         // Bare variant: no chrome at all. Just hand the editor back
         // wrapped in a MinSize so consumers still get a predictable

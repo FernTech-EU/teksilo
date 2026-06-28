@@ -191,7 +191,7 @@ impl Widget for Panel {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.panel.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle::default()));
         let cfg = PanelStyleConfig {
             content,
             variant: self.variant,

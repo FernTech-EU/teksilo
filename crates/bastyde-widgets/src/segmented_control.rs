@@ -471,7 +471,7 @@ impl Widget for SegmentedControl {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.segmented_control.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSegmentedControlStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSegmentedControlStyle::default()));
         let chrome_id = style.make_body(
             &SegmentedControlStyleConfig {
                 segment_count: n,

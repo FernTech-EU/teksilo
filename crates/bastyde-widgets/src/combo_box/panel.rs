@@ -568,7 +568,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             .style_slots
             .popover
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
         let surface_cfg = PopoverStyleConfig {
             content: content_id,
             variant: PopoverVariant::Menu,

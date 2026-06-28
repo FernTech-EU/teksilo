@@ -49,16 +49,50 @@ pub const DROP_TARGET_BORDER_WIDTH_PROMINENT: f32 = 3.0;
 /// Border thickness for the `Subtle` variant.
 pub const DROP_TARGET_BORDER_WIDTH_SUBTLE: f32 = 1.0;
 
+/// Configurable dimensions for [`RecipeDropTargetStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DropTargetRecipe {
+    /// Corner radius of the overlay's rounded border.
+    pub corner_radius: f32,
+    /// Border thickness for the `Default` variant.
+    pub border_width_default: f32,
+    /// Border thickness for the `Prominent` variant.
+    pub border_width_prominent: f32,
+    /// Border thickness for the `Subtle` variant.
+    pub border_width_subtle: f32,
+}
+
+impl Default for DropTargetRecipe {
+    fn default() -> Self {
+        Self {
+            corner_radius: DROP_TARGET_CORNER_RADIUS,
+            border_width_default: DROP_TARGET_BORDER_WIDTH_DEFAULT,
+            border_width_prominent: DROP_TARGET_BORDER_WIDTH_PROMINENT,
+            border_width_subtle: DROP_TARGET_BORDER_WIDTH_SUBTLE,
+        }
+    }
+}
+
 /// Default `DropTargetStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeDropTargetStyle;
+pub struct RecipeDropTargetStyle {
+    /// Tunable dimensions for this style instance.
+    pub recipe: DropTargetRecipe,
+}
+
+impl RecipeDropTargetStyle {
+    /// Create a style with custom recipe dimensions.
+    pub fn new(recipe: DropTargetRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl DropTargetStyle for RecipeDropTargetStyle {
     fn make_body(&self, cfg: &DropTargetStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let border_width = match cfg.variant {
-            DropTargetVariant::Default => DROP_TARGET_BORDER_WIDTH_DEFAULT,
-            DropTargetVariant::Prominent => DROP_TARGET_BORDER_WIDTH_PROMINENT,
-            DropTargetVariant::Subtle => DROP_TARGET_BORDER_WIDTH_SUBTLE,
+            DropTargetVariant::Default => self.recipe.border_width_default,
+            DropTargetVariant::Prominent => self.recipe.border_width_prominent,
+            DropTargetVariant::Subtle => self.recipe.border_width_subtle,
             DropTargetVariant::None => 0.0,
         };
 
@@ -78,7 +112,7 @@ impl DropTargetStyle for RecipeDropTargetStyle {
                 RectWidget::new()
                     .border_color(border)
                     .border_width(border_width)
-                    .corner_radius(CornerRadius::uniform(DROP_TARGET_CORNER_RADIUS))
+                    .corner_radius(CornerRadius::uniform(self.recipe.corner_radius))
                     .event_pass_through(true),
             );
             zstack = zstack.add_child(rect);

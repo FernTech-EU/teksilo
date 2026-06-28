@@ -31,9 +31,44 @@ pub const SEGMENTED_CONTROL_PADDING_VERTICAL: f32 = 6.0;
 pub const SEGMENTED_CONTROL_CORNER_RADIUS: f32 = 3.0;
 pub const SEGMENTED_CONTROL_BORDER_WIDTH: f32 = 1.0;
 
+/// Tuneable dimensions for [`RecipeSegmentedControlStyle`].
+///
+/// All fields default to the corresponding `SEGMENTED_CONTROL_*` consts so
+/// a `RecipeSegmentedControlStyle::default()` is identical to the original
+/// hard-coded behaviour.  Pass a customised `SegmentedControlRecipe` to
+/// `RecipeSegmentedControlStyle::new(recipe)` to override individual dims.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SegmentedControlRecipe {
+    pub height: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+}
+
+impl Default for SegmentedControlRecipe {
+    fn default() -> Self {
+        Self {
+            height: SEGMENTED_CONTROL_HEIGHT,
+            padding_horizontal: SEGMENTED_CONTROL_PADDING_HORIZONTAL,
+            padding_vertical: SEGMENTED_CONTROL_PADDING_VERTICAL,
+            corner_radius: SEGMENTED_CONTROL_CORNER_RADIUS,
+            border_width: SEGMENTED_CONTROL_BORDER_WIDTH,
+        }
+    }
+}
+
 /// Default `SegmentedControlStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeSegmentedControlStyle;
+pub struct RecipeSegmentedControlStyle {
+    pub recipe: SegmentedControlRecipe,
+}
+
+impl RecipeSegmentedControlStyle {
+    pub fn new(recipe: SegmentedControlRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl SegmentedControlStyle for RecipeSegmentedControlStyle {
     fn make_body(&self, cfg: &SegmentedControlStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -43,6 +78,7 @@ impl SegmentedControlStyle for RecipeSegmentedControlStyle {
             hovered_segment: cfg.hovered_segment.clone(),
             focus_origin: cfg.focus_origin.clone(),
             is_enabled: cfg.is_enabled.clone(),
+            recipe: self.recipe,
         })
     }
 }
@@ -59,6 +95,7 @@ struct SegmentedControlChrome {
     focus_origin: Signal<Option<FocusOrigin>>,
     /// Reactive — re-paints on arena `enabled_state` flip.
     is_enabled: Signal<bool>,
+    recipe: SegmentedControlRecipe,
 }
 
 impl std::fmt::Debug for SegmentedControlChrome {
@@ -133,7 +170,7 @@ impl Widget for SegmentedControlChrome {
         }
 
         let visual = self.compute_visual(bounds, ctx.theme);
-        let bw = SEGMENTED_CONTROL_BORDER_WIDTH;
+        let bw = self.recipe.border_width;
         let inner = Self::compute_inner(visual, bw);
 
         let selected = self.selected.get();
@@ -141,7 +178,7 @@ impl Widget for SegmentedControlChrome {
         let focus_origin = self.focus_origin.get();
         let focused = focus_origin.is_some();
         let keyboard_focused = focus_origin == Some(FocusOrigin::Keyboard);
-        let frame_cr = CornerRadius::uniform(SEGMENTED_CONTROL_CORNER_RADIUS);
+        let frame_cr = CornerRadius::uniform(self.recipe.corner_radius);
         // Snapshot the reactive enabled-state once per paint. The
         // chrome subscribed to this signal in build() so a flip
         // re-paints with the new palette.
@@ -200,8 +237,7 @@ impl Widget for SegmentedControlChrome {
                 (bounds.width - half_stroke * 2.0).max(0.0),
                 (bounds.height - half_stroke * 2.0).max(0.0),
             );
-            let ring_radius =
-                SEGMENTED_CONTROL_CORNER_RADIUS + shape.focus_ring_offset + half_stroke;
+            let ring_radius = self.recipe.corner_radius + shape.focus_ring_offset + half_stroke;
             canvas.stroke_rounded_rect(
                 ring_rect,
                 CornerRadius::uniform(ring_radius),

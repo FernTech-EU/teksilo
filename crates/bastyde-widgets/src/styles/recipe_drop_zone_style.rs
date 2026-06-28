@@ -29,9 +29,40 @@ pub const DROP_ZONE_BORDER_WIDTH: f32 = 2.0;
 /// Inner padding between the border and the content column.
 pub const DROP_ZONE_PADDING: f32 = 20.0;
 
+/// Configurable dimensions for [`RecipeDropZoneStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DropZoneRecipe {
+    /// Corner radius of the zone's rounded rectangle.
+    pub corner_radius: f32,
+    /// Border thickness in logical pixels.
+    pub border_width: f32,
+    /// Inner padding between the border and the content column.
+    pub padding: f32,
+}
+
+impl Default for DropZoneRecipe {
+    fn default() -> Self {
+        Self {
+            corner_radius: DROP_ZONE_CORNER_RADIUS,
+            border_width: DROP_ZONE_BORDER_WIDTH,
+            padding: DROP_ZONE_PADDING,
+        }
+    }
+}
+
 /// Default `DropZoneStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeDropZoneStyle;
+pub struct RecipeDropZoneStyle {
+    /// Dimension recipe used when painting the drop zone chrome.
+    pub recipe: DropZoneRecipe,
+}
+
+impl RecipeDropZoneStyle {
+    /// Create a style with a custom dimension recipe.
+    pub fn new(recipe: DropZoneRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl DropZoneStyle for RecipeDropZoneStyle {
     fn make_body(&self, cfg: &DropZoneStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -43,12 +74,12 @@ impl DropZoneStyle for RecipeDropZoneStyle {
             RectWidget::new()
                 .background(bg)
                 .border_color(border)
-                .border_width(DROP_ZONE_BORDER_WIDTH)
-                .corner_radius(CornerRadius::uniform(DROP_ZONE_CORNER_RADIUS)),
+                .border_width(self.recipe.border_width)
+                .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
 
         let centered =
-            Center::new().child(Padding::uniform(DROP_ZONE_PADDING).child_id(cfg.content));
+            Center::new().child(Padding::uniform(self.recipe.padding).child_id(cfg.content));
 
         ctx.add(ZStack::new().add_child(rect).child(centered))
     }

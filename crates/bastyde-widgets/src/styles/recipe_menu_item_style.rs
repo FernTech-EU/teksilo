@@ -42,13 +42,55 @@ pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
 /// Corner radius of the per-row hover / pressed highlight rect.
 pub const MENU_ITEM_CORNER_RADIUS: f32 = 8.0;
 
+/// Recipe dimensions for [`RecipeMenuItemStyle`].
+///
+/// All fields default to the corresponding module-level `pub const`.
+/// Override individual fields to tune the menu row without writing a full
+/// custom `MenuItemStyle` impl.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MenuItemRecipe {
+    pub item_height: f32,
+    pub padding_horizontal: f32,
+    pub padding_leading: f32,
+    pub icon_column_width: f32,
+    pub icon_label_gap: f32,
+    pub shortcut_left_gap: f32,
+    pub separator_height: f32,
+    pub item_corner_radius: f32,
+}
+
+impl Default for MenuItemRecipe {
+    fn default() -> Self {
+        Self {
+            item_height: MENU_ITEM_HEIGHT,
+            padding_horizontal: MENU_ITEM_PADDING_HORIZONTAL,
+            padding_leading: MENU_ITEM_PADDING_LEADING,
+            icon_column_width: MENU_ICON_COLUMN_WIDTH,
+            icon_label_gap: MENU_ICON_LABEL_GAP,
+            shortcut_left_gap: MENU_SHORTCUT_LEFT_GAP,
+            separator_height: MENU_SEPARATOR_HEIGHT,
+            item_corner_radius: MENU_ITEM_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `MenuItemStyle` shipped with Bastyde. Chrome roles come from
 /// the active theme.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeMenuItemStyle;
+pub struct RecipeMenuItemStyle {
+    pub recipe: MenuItemRecipe,
+}
+
+impl RecipeMenuItemStyle {
+    pub fn new(recipe: MenuItemRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl MenuItemStyle for RecipeMenuItemStyle {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        let recipe = self.recipe;
+
         // Row composition: leading | gap | label | Spacer | trailing.
         // HStack spacing is 0 — the only inter-child gap is between
         // leading and label (`icon_label_gap`); everything else is
@@ -63,7 +105,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
             let gap_spacer = ctx.add(Spacer::new());
             let gap = ctx.add(
                 FixedSize::new()
-                    .bind_width(MENU_ICON_LABEL_GAP)
+                    .bind_width(recipe.icon_label_gap)
                     .bind_height(1.0_f32)
                     .child_id(gap_spacer),
             );
@@ -73,7 +115,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         row = row.add_child(cfg.label);
         // MinSize ensures the shortcut never abuts the label when the menu
         // is narrower than label + shortcut combined.
-        row = row.child(MinSize::width(MENU_SHORTCUT_LEFT_GAP).child(Spacer::new()));
+        row = row.child(MinSize::width(recipe.shortcut_left_gap).child(Spacer::new()));
 
         if let Some(trailing) = cfg.trailing {
             row = row.add_child(trailing);
@@ -88,9 +130,9 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         // MenuItem semantic so submenu and regular items line up).
         let body = &ctx.theme().typography.body;
         let body_line = body.size * body.line_height;
-        let pad_v = ((MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
+        let pad_v = ((recipe.item_height - body_line) * 0.5).max(0.0);
         let padding =
-            ctx.add(Padding::new(pad_v, 0.0, pad_v, MENU_ITEM_PADDING_LEADING).child_id(row_id));
+            ctx.add(Padding::new(pad_v, 0.0, pad_v, recipe.padding_leading).child_id(row_id));
 
         // Background — Hover / Highlighted both use AccentSubtle (the
         // same row tint), Pressed uses Pressed, Disabled stays
@@ -104,7 +146,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let bg = ctx.add(
             RectWidget::new()
                 .bind_background(bg_role)
-                .corner_radius(CornerRadius::uniform(MENU_ITEM_CORNER_RADIUS)),
+                .corner_radius(CornerRadius::uniform(recipe.item_corner_radius)),
         );
 
         ctx.add(ZStack::new().add_child(bg).add_child(padding))

@@ -40,15 +40,49 @@ pub const BANNER_CONTENT_GAP: f32 = 10.0;
 /// inside the body column.
 pub const BANNER_TITLE_DESCRIPTION_GAP: f32 = 2.0;
 
+/// Dimension recipe for [`RecipeBannerStyle`]. All fields default to the
+/// corresponding `BANNER_*` constants so callers can override individual
+/// measurements without touching the rest.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BannerRecipe {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    pub glyph_size: f32,
+    pub content_gap: f32,
+    pub title_description_gap: f32,
+}
+
+impl Default for BannerRecipe {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: BANNER_PADDING_HORIZONTAL,
+            padding_vertical: BANNER_PADDING_VERTICAL,
+            corner_radius: BANNER_CORNER_RADIUS,
+            glyph_size: BANNER_GLYPH_SIZE,
+            content_gap: BANNER_CONTENT_GAP,
+            title_description_gap: BANNER_TITLE_DESCRIPTION_GAP,
+        }
+    }
+}
+
 /// Default `BannerStyle` shipped with Bastyde. Surface tint comes from
 /// the per-severity `SurfaceRole` (no border — the status surface
 /// tokens already encode contrast with the page background).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeBannerStyle;
+pub struct RecipeBannerStyle {
+    pub recipe: BannerRecipe,
+}
+
+impl RecipeBannerStyle {
+    pub fn new(recipe: BannerRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl BannerStyle for RecipeBannerStyle {
     fn make_body(&self, cfg: &BannerStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let radius = CornerRadius::uniform(BANNER_CORNER_RADIUS);
+        let radius = CornerRadius::uniform(self.recipe.corner_radius);
 
         // Background panel — status surface tint, no border.
         let bg = ctx.add(
@@ -61,13 +95,14 @@ impl BannerStyle for RecipeBannerStyle {
         let content = ctx.add(Expand::horizontal().child_id(cfg.content));
         let row = ctx.add(
             HStack::new()
-                .spacing(BANNER_CONTENT_GAP)
+                .spacing(self.recipe.content_gap)
                 .alignment(VAlignment::Center)
                 .add_child(cfg.leading_glyph)
                 .add_child(content),
         );
         let padded = ctx.add(
-            Padding::symmetric(BANNER_PADDING_VERTICAL, BANNER_PADDING_HORIZONTAL).child_id(row),
+            Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
+                .child_id(row),
         );
 
         ctx.add(ZStack::new().add_child(bg).add_child(padded))

@@ -46,9 +46,33 @@ pub fn link_text_role(
     TextRole::Link
 }
 
+/// Configurable dimensions for [`RecipeLinkStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkRecipe {
+    pub corner_radius: f32,
+    pub underline_thickness: f32,
+}
+
+impl Default for LinkRecipe {
+    fn default() -> Self {
+        Self {
+            corner_radius: LINK_CORNER_RADIUS,
+            underline_thickness: LINK_UNDERLINE_THICKNESS,
+        }
+    }
+}
+
 /// Default `LinkStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeLinkStyle;
+pub struct RecipeLinkStyle {
+    pub recipe: LinkRecipe,
+}
+
+impl RecipeLinkStyle {
+    pub fn new(recipe: LinkRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl LinkStyle for RecipeLinkStyle {
     fn make_body(&self, cfg: &LinkStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -86,7 +110,7 @@ impl LinkStyle for RecipeLinkStyle {
         let underline = ctx.add(RectWidget::new().bind_background(text_role));
         let underline_sized = ctx.add(
             FixedSize::new()
-                .bind_height(LINK_UNDERLINE_THICKNESS)
+                .bind_height(self.recipe.underline_thickness)
                 .child_id(underline),
         );
 
@@ -116,7 +140,7 @@ impl LinkStyle for RecipeLinkStyle {
             RectWidget::new()
                 .bind_border_color(focus_border_role)
                 .bind_border_width(focus_border_width)
-                .corner_radius(CornerRadius::uniform(LINK_CORNER_RADIUS)),
+                .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
 
         ctx.add(ZStack::new().add_child(focus_rect_id).add_child(content_id))

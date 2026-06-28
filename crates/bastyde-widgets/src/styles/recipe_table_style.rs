@@ -62,12 +62,80 @@ pub const TREE_TWIST_SIZE: f32 = 12.0;
 /// `TreeTableView` only — gap between the twist chevron and the cell content.
 pub const TREE_TWIST_LABEL_GAP: f32 = 4.0;
 
+/// Configurable dimensions for [`RecipeTableStyle`].
+///
+/// All fields default to the corresponding `pub const` in this module so
+/// that `TableRecipe::default()` reproduces the IntUI look exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TableRecipe {
+    /// Body row height. Headers use `header_height`.
+    pub row_height: f32,
+    /// Sticky header row height.
+    pub header_height: f32,
+    /// Horizontal padding inside each cell (also applied to header cells).
+    pub cell_padding_horizontal: f32,
+    /// Vertical padding inside each cell.
+    pub cell_padding_vertical: f32,
+    /// Width of the right-edge resize hit zone on header cells.
+    pub resize_handle_width: f32,
+    /// Stroke width of grid lines drawn between rows / columns.
+    pub grid_line_thickness: f32,
+    /// Outer-frame corner radius.
+    pub corner_radius: f32,
+    /// Edge length of the sort-direction chevron in the header.
+    pub sort_indicator_size: f32,
+    /// Edge length of the filter glyph in the header.
+    pub filter_indicator_size: f32,
+    /// Spacing between adjacent header cells (in addition to grid lines).
+    pub header_inter_cell_spacing: f32,
+    /// Inset between the focused-cell bounds and the focus-ring stroke.
+    pub focus_ring_inset: f32,
+    /// Default minimum column width, used when a column does not set its own.
+    pub min_column_width_default: f32,
+    /// `TreeTableView` only — pixels per indent level on the tree column.
+    pub tree_indent_per_level: f32,
+    /// `TreeTableView` only — edge length of the twist (expand/collapse) chevron.
+    pub tree_twist_size: f32,
+    /// `TreeTableView` only — gap between the twist chevron and the cell content.
+    pub tree_twist_label_gap: f32,
+}
+
+impl Default for TableRecipe {
+    fn default() -> Self {
+        Self {
+            row_height: ROW_HEIGHT,
+            header_height: HEADER_HEIGHT,
+            cell_padding_horizontal: CELL_PADDING_HORIZONTAL,
+            cell_padding_vertical: CELL_PADDING_VERTICAL,
+            resize_handle_width: RESIZE_HANDLE_WIDTH,
+            grid_line_thickness: GRID_LINE_THICKNESS,
+            corner_radius: CORNER_RADIUS,
+            sort_indicator_size: SORT_INDICATOR_SIZE,
+            filter_indicator_size: FILTER_INDICATOR_SIZE,
+            header_inter_cell_spacing: HEADER_INTER_CELL_SPACING,
+            focus_ring_inset: FOCUS_RING_INSET,
+            min_column_width_default: MIN_COLUMN_WIDTH_DEFAULT,
+            tree_indent_per_level: TREE_INDENT_PER_LEVEL,
+            tree_twist_size: TREE_TWIST_SIZE,
+            tree_twist_label_gap: TREE_TWIST_LABEL_GAP,
+        }
+    }
+}
+
 /// Default `TableStyle` shipped with Bastyde. The trait methods return
 /// reference subtrees; the widgets themselves still own their batched
 /// paint passes for performance (pending the chrome-decomposition
 /// follow-up).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeTableStyle;
+pub struct RecipeTableStyle {
+    pub recipe: TableRecipe,
+}
+
+impl RecipeTableStyle {
+    pub fn new(recipe: TableRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl TableStyle for RecipeTableStyle {
     fn make_header_cell(&self, cfg: &TableHeaderCellConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -89,7 +157,7 @@ impl TableStyle for RecipeTableStyle {
         let bg = ctx.add(
             RectWidget::new()
                 .background(ColorProp::DynamicSurfaceRole(role))
-                .corner_radius(CornerRadius::uniform(0.0)),
+                .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
         ctx.add(ZStack::new().add_child(bg).add_child(cfg.label))
     }

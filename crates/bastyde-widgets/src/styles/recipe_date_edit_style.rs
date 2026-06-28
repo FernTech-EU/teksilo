@@ -27,12 +27,45 @@ pub const CALENDAR_ICON_SIZE: f32 = 14.0;
 /// this gap). Used by the segmented date/time editors.
 pub const SEGMENT_GAP: f32 = 1.0;
 
+/// Configurable dimension bundle for `RecipeDateEditStyle`.
+///
+/// The `Default` impl reads the module-level `pub const`s, so calling
+/// `DateEditRecipe::default()` is equivalent to the pre-recipe behaviour.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DateEditRecipe {
+    /// Width of the trailing calendar / clock trigger button slot.
+    pub calendar_button_width: f32,
+    /// Edge length of the calendar / clock trigger glyph.
+    pub calendar_icon_size: f32,
+    /// Gap between adjacent segments (visual separator characters sit in
+    /// this gap). Used by the segmented date/time editors.
+    pub segment_gap: f32,
+}
+
+impl Default for DateEditRecipe {
+    fn default() -> Self {
+        Self {
+            calendar_button_width: CALENDAR_BUTTON_WIDTH,
+            calendar_icon_size: CALENDAR_ICON_SIZE,
+            segment_gap: SEGMENT_GAP,
+        }
+    }
+}
+
 /// Default `DateEditStyle` shipped with Bastyde. Currently a
 /// passthrough — IntUI's date-edit chrome lives inside `TextInput`,
 /// which is already themed. Custom styles can wrap the body to add
 /// extra siblings (clear button, status icon, etc.).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeDateEditStyle;
+pub struct RecipeDateEditStyle {
+    pub recipe: DateEditRecipe,
+}
+
+impl RecipeDateEditStyle {
+    pub fn new(recipe: DateEditRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl DateEditStyle for RecipeDateEditStyle {
     fn make_body(&self, cfg: &DateEditStyleConfig, _ctx: &mut BuildContext) -> WidgetId {
@@ -54,5 +87,5 @@ pub fn resolve_date_edit_style(
         .style_slots
         .date_edit
         .clone()
-        .unwrap_or_else(|| std::rc::Rc::new(RecipeDateEditStyle) as SharedDateEditStyle)
+        .unwrap_or_else(|| std::rc::Rc::new(RecipeDateEditStyle::default()) as SharedDateEditStyle)
 }

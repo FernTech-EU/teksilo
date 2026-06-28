@@ -27,16 +27,43 @@ pub const SNACKBAR_PADDING_HORIZONTAL: f32 = 12.0;
 pub const SNACKBAR_PADDING_VERTICAL: f32 = 10.0;
 pub const SNACKBAR_CORNER_RADIUS: f32 = 8.0;
 
+/// Configurable dimensions for [`RecipeSnackbarStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnackbarRecipe {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for SnackbarRecipe {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: SNACKBAR_PADDING_HORIZONTAL,
+            padding_vertical: SNACKBAR_PADDING_VERTICAL,
+            corner_radius: SNACKBAR_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `SnackbarStyle` shipped with Bastyde. Chrome from
 /// `theme.colors.tooltip_bg` + `tooltip_border`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeSnackbarStyle;
+pub struct RecipeSnackbarStyle {
+    pub recipe: SnackbarRecipe,
+}
+
+impl RecipeSnackbarStyle {
+    pub fn new(recipe: SnackbarRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl SnackbarStyle for RecipeSnackbarStyle {
     fn make_body(&self, cfg: &SnackbarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SnackbarFrame {
             child_id: None,
             pending_child: Some(PendingChild::Id(cfg.content)),
+            recipe: self.recipe,
         })
     }
 }
@@ -48,6 +75,7 @@ impl SnackbarStyle for RecipeSnackbarStyle {
 struct SnackbarFrame {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
+    recipe: SnackbarRecipe,
 }
 
 impl std::fmt::Debug for SnackbarFrame {
@@ -68,8 +96,8 @@ impl Widget for SnackbarFrame {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let inset_x = SNACKBAR_PADDING_HORIZONTAL * 2.0;
-        let inset_y = SNACKBAR_PADDING_VERTICAL * 2.0;
+        let inset_x = self.recipe.padding_horizontal * 2.0;
+        let inset_y = self.recipe.padding_vertical * 2.0;
         let content = self
             .child_id
             .and_then(|id| {
@@ -95,18 +123,18 @@ impl Widget for SnackbarFrame {
     ) {
         for child in children.iter_mut() {
             child.origin = bastyde_canvas::Point::new(
-                bounds.x + SNACKBAR_PADDING_HORIZONTAL,
-                bounds.y + SNACKBAR_PADDING_VERTICAL,
+                bounds.x + self.recipe.padding_horizontal,
+                bounds.y + self.recipe.padding_vertical,
             );
             child.size = Size::new(
-                (bounds.width - SNACKBAR_PADDING_HORIZONTAL * 2.0).max(0.0),
-                (bounds.height - SNACKBAR_PADDING_VERTICAL * 2.0).max(0.0),
+                (bounds.width - self.recipe.padding_horizontal * 2.0).max(0.0),
+                (bounds.height - self.recipe.padding_vertical * 2.0).max(0.0),
             );
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(SNACKBAR_CORNER_RADIUS);
+        let radius = CornerRadius::uniform(self.recipe.corner_radius);
         // Notifications use the (dark) tooltip surface for high-contrast popups.
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         canvas.stroke_rounded_rect(

@@ -34,11 +34,54 @@ pub const ROW_PADDING_HORIZONTAL: f32 = 10.0;
 pub const ROW_PADDING_VERTICAL: f32 = 4.0;
 pub const ROW_HEIGHT: f32 = 26.0;
 
+/// Dimension tokens for `SearchField` bundled into a copyable struct.
+///
+/// `RecipeSearchFieldStyle::default()` fills every field from the
+/// corresponding `pub const` above.  Apps that want a custom size can
+/// construct `SearchFieldRecipe { row_height: 32.0, ..Default::default() }`
+/// and pass it to `RecipeSearchFieldStyle::new(recipe)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SearchFieldRecipe {
+    pub glyph_size: f32,
+    pub glyph_slot_width: f32,
+    pub input_panel_gap: f32,
+    pub panel_padding: f32,
+    pub panel_corner_radius: f32,
+    pub row_corner_radius: f32,
+    pub row_padding_horizontal: f32,
+    pub row_padding_vertical: f32,
+    pub row_height: f32,
+}
+
+impl Default for SearchFieldRecipe {
+    fn default() -> Self {
+        Self {
+            glyph_size: GLYPH_SIZE,
+            glyph_slot_width: GLYPH_SLOT_WIDTH,
+            input_panel_gap: INPUT_PANEL_GAP,
+            panel_padding: PANEL_PADDING,
+            panel_corner_radius: PANEL_CORNER_RADIUS,
+            row_corner_radius: ROW_CORNER_RADIUS,
+            row_padding_horizontal: ROW_PADDING_HORIZONTAL,
+            row_padding_vertical: ROW_PADDING_VERTICAL,
+            row_height: ROW_HEIGHT,
+        }
+    }
+}
+
 /// Default `SearchFieldStyle` shipped with Bastyde. Passthrough —
 /// IntUI's search-field chrome lives inside `TextInput`'s leading
 /// slot + clear button, which are already themed.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeSearchFieldStyle;
+pub struct RecipeSearchFieldStyle {
+    pub recipe: SearchFieldRecipe,
+}
+
+impl RecipeSearchFieldStyle {
+    pub fn new(recipe: SearchFieldRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl SearchFieldStyle for RecipeSearchFieldStyle {
     fn make_body(&self, cfg: &SearchFieldStyleConfig, _ctx: &mut BuildContext) -> WidgetId {
@@ -58,5 +101,7 @@ pub fn resolve_search_field_style(
         .style_slots
         .search_field
         .clone()
-        .unwrap_or_else(|| std::rc::Rc::new(RecipeSearchFieldStyle) as SharedSearchFieldStyle)
+        .unwrap_or_else(|| {
+            std::rc::Rc::new(RecipeSearchFieldStyle::default()) as SharedSearchFieldStyle
+        })
 }

@@ -180,7 +180,7 @@ impl Widget for ModalContainer {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
         let cfg = DialogStyleConfig {
             content: content_id,
             has_scrim: true,
@@ -322,7 +322,7 @@ impl Widget for ModalScrim {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
         let chrome_id = style.make_scrim(ctx);
 
         if self.click_to_dismiss {

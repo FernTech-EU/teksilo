@@ -29,19 +29,50 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, 
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
-// IntUI design tokens for the Toggle chrome. The recipe owns its own
-// dimension data; no parallel store. Custom design languages override
-// these by providing their own `impl ToggleStyle`.
+// IntUI design tokens for the Toggle chrome — the `Default` source for
+// [`ToggleRecipe`]. Custom design languages either construct a
+// `RecipeToggleStyle::new(ToggleRecipe { .. })` with different dimensions
+// or, for a different *shape*, provide their own `impl ToggleStyle`.
 pub const TOGGLE_TRACK_WIDTH: f32 = 28.0;
 pub const TOGGLE_TRACK_HEIGHT: f32 = 16.0;
 pub const TOGGLE_THUMB_DIAMETER: f32 = 12.0;
 pub const TOGGLE_THUMB_INSET: f32 = 2.0;
 
-/// Default `ToggleStyle` shipped with Bastyde. Reads its dimensions
-/// from the `TOGGLE_*` constants defined in this module and its colors from
-/// `theme.colors.{accent, surface_sunken, ...}`.
+/// Tunable dimensions for [`RecipeToggleStyle`]. `Default` yields the
+/// IntUI `TOGGLE_*` constants; a theme can override individual fields.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToggleRecipe {
+    pub track_width: f32,
+    pub track_height: f32,
+    pub thumb_diameter: f32,
+    pub thumb_inset: f32,
+}
+
+impl Default for ToggleRecipe {
+    fn default() -> Self {
+        Self {
+            track_width: TOGGLE_TRACK_WIDTH,
+            track_height: TOGGLE_TRACK_HEIGHT,
+            thumb_diameter: TOGGLE_THUMB_DIAMETER,
+            thumb_inset: TOGGLE_THUMB_INSET,
+        }
+    }
+}
+
+/// Default `ToggleStyle` shipped with Bastyde. Reads its dimensions from
+/// a [`ToggleRecipe`] (defaulting to the IntUI `TOGGLE_*` constants) and
+/// its colors from `theme.colors.{accent, surface_sunken, ...}`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeToggleStyle;
+pub struct RecipeToggleStyle {
+    pub recipe: ToggleRecipe,
+}
+
+impl RecipeToggleStyle {
+    /// Construct with custom dimensions.
+    pub fn new(recipe: ToggleRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl ToggleStyle for RecipeToggleStyle {
     fn make_body(&self, cfg: &ToggleStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -87,6 +118,7 @@ impl ToggleStyle for RecipeToggleStyle {
             is_disabled: cfg.is_disabled.clone(),
             focus_origin,
             variant: cfg.variant,
+            recipe: self.recipe,
         })
     }
 }
@@ -99,6 +131,7 @@ struct ToggleBody {
     is_disabled: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     variant: ToggleVariant,
+    recipe: ToggleRecipe,
 }
 
 impl std::fmt::Debug for ToggleBody {
@@ -123,8 +156,8 @@ impl Widget for ToggleBody {
     }
 
     fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        let row_h = TOGGLE_TRACK_HEIGHT.max(24.0);
-        Size::new(TOGGLE_TRACK_WIDTH, row_h).into()
+        let row_h = self.recipe.track_height.max(24.0);
+        Size::new(self.recipe.track_width, row_h).into()
     }
 
     fn place_children(
@@ -138,10 +171,10 @@ impl Widget for ToggleBody {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
-        let track_w = TOGGLE_TRACK_WIDTH;
-        let track_h = TOGGLE_TRACK_HEIGHT;
-        let knob_size = TOGGLE_THUMB_DIAMETER;
-        let knob_inset = TOGGLE_THUMB_INSET;
+        let track_w = self.recipe.track_width;
+        let track_h = self.recipe.track_height;
+        let knob_size = self.recipe.thumb_diameter;
+        let knob_inset = self.recipe.thumb_inset;
         let enabled = !self.is_disabled.get();
 
         // Track is centered in the (possibly larger) hit-area row.

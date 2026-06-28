@@ -136,7 +136,7 @@ impl Widget for Badge {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.badge.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle::default()));
         let root = style.make_body(
             &BadgeStyleConfig {
                 content,

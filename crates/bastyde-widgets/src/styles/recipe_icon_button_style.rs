@@ -38,17 +38,59 @@ pub const ICON_BUTTON_ICON_SIZE_LARGE: f32 = 24.0;
 pub const ICON_BUTTON_ICON_SIZE_HERO: f32 = 32.0;
 pub const ICON_BUTTON_CORNER_RADIUS: f32 = 8.0;
 
+/// Dimension recipe for [`RecipeIconButtonStyle`]. All fields correspond to
+/// the `ICON_BUTTON_*` module constants and can be overridden per call-site
+/// or theme-wide by constructing a custom `IconButtonRecipe`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IconButtonRecipe {
+    pub size_compact: f32,
+    pub size_default: f32,
+    pub size_toolbar: f32,
+    pub size_large: f32,
+    pub size_hero: f32,
+    pub icon_size: f32,
+    pub icon_size_toolbar: f32,
+    pub icon_size_large: f32,
+    pub icon_size_hero: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for IconButtonRecipe {
+    fn default() -> Self {
+        Self {
+            size_compact: ICON_BUTTON_SIZE_COMPACT,
+            size_default: ICON_BUTTON_SIZE_DEFAULT,
+            size_toolbar: ICON_BUTTON_SIZE_TOOLBAR,
+            size_large: ICON_BUTTON_SIZE_LARGE,
+            size_hero: ICON_BUTTON_SIZE_HERO,
+            icon_size: ICON_BUTTON_ICON_SIZE,
+            icon_size_toolbar: ICON_BUTTON_ICON_SIZE_TOOLBAR,
+            icon_size_large: ICON_BUTTON_ICON_SIZE_LARGE,
+            icon_size_hero: ICON_BUTTON_ICON_SIZE_HERO,
+            corner_radius: ICON_BUTTON_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `IconButtonStyle` shipped with Bastyde. Surface roles come
 /// from the active theme's role resolver (so theme-swap repaints for
 /// free).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeIconButtonStyle;
+pub struct RecipeIconButtonStyle {
+    pub recipe: IconButtonRecipe,
+}
+
+impl RecipeIconButtonStyle {
+    pub fn new(recipe: IconButtonRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl IconButtonStyle for RecipeIconButtonStyle {
     fn make_body(&self, cfg: &IconButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let focus_ring_width = ctx.theme().shape.focus_ring_width;
-        let corner_radius = ICON_BUTTON_CORNER_RADIUS;
-        let button_dim = resolve_size(cfg.size);
+        let corner_radius = self.recipe.corner_radius;
+        let button_dim = resolve_size(cfg.size, &self.recipe);
 
         // Background — `Selected` flavor when `is_on == true`, plain
         // flat treatment otherwise. Pressed always wins (the press
@@ -148,12 +190,12 @@ fn bistate_bg_role(
         })
 }
 
-fn resolve_size(size: IconButtonSize) -> f32 {
+fn resolve_size(size: IconButtonSize, recipe: &IconButtonRecipe) -> f32 {
     match size {
-        IconButtonSize::Compact => ICON_BUTTON_SIZE_COMPACT,
-        IconButtonSize::Default => ICON_BUTTON_SIZE_DEFAULT,
-        IconButtonSize::Toolbar => ICON_BUTTON_SIZE_TOOLBAR,
-        IconButtonSize::Large => ICON_BUTTON_SIZE_LARGE,
-        IconButtonSize::Hero => ICON_BUTTON_SIZE_HERO,
+        IconButtonSize::Compact => recipe.size_compact,
+        IconButtonSize::Default => recipe.size_default,
+        IconButtonSize::Toolbar => recipe.size_toolbar,
+        IconButtonSize::Large => recipe.size_large,
+        IconButtonSize::Hero => recipe.size_hero,
     }
 }

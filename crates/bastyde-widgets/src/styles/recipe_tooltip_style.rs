@@ -39,16 +39,52 @@ pub const COMPOSITE_TOOLTIP_MAX_HEIGHT: f32 = 480.0;
 /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
 pub const COMPOSITE_TOOLTIP_SHADOW_DENSITY: f32 = 0.7;
 
+/// Configurable dimensions for [`RecipeTooltipStyle`].
+///
+/// Fields mirror the `TOOLTIP_*` constants defined in this module.
+/// Construct via `Default` (reads the constants) or override individual
+/// fields for a custom look.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TooltipRecipe {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    pub max_width: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_xs.color.a` at paint time.
+    pub shadow_density: f32,
+}
+
+impl Default for TooltipRecipe {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: TOOLTIP_PADDING_HORIZONTAL,
+            padding_vertical: TOOLTIP_PADDING_VERTICAL,
+            corner_radius: TOOLTIP_CORNER_RADIUS,
+            max_width: TOOLTIP_MAX_WIDTH,
+            shadow_density: TOOLTIP_SHADOW_DENSITY,
+        }
+    }
+}
+
 /// Default `TooltipStyle` shipped with Bastyde. Chrome from
 /// `theme.colors.tooltip_bg` + the `xs` shadow tier.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeTooltipStyle;
+pub struct RecipeTooltipStyle {
+    pub recipe: TooltipRecipe,
+}
+
+impl RecipeTooltipStyle {
+    pub fn new(recipe: TooltipRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl TooltipStyle for RecipeTooltipStyle {
     fn make_body(&self, cfg: &TooltipStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let frame = TooltipFrame {
             child_id: None,
             pending_child: Some(PendingChild::Id(cfg.content)),
+            recipe: self.recipe,
         };
         ctx.add(frame)
     }
@@ -56,11 +92,11 @@ impl TooltipStyle for RecipeTooltipStyle {
 
 /// Internal container that paints the tooltip chrome (shadow + dark
 /// background + corner radius) and lays out the content with the
-/// tooltip padding inset. Sizing reads `TOOLTIP_PADDING_*` constants
-/// defined in this module.
+/// tooltip padding inset. Sizing reads fields from [`TooltipRecipe`].
 struct TooltipFrame {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
+    recipe: TooltipRecipe,
 }
 
 impl std::fmt::Debug for TooltipFrame {
@@ -81,8 +117,8 @@ impl Widget for TooltipFrame {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let pad_h = TOOLTIP_PADDING_HORIZONTAL;
-        let pad_v = TOOLTIP_PADDING_VERTICAL;
+        let pad_h = self.recipe.padding_horizontal;
+        let pad_v = self.recipe.padding_vertical;
         let inset_w = pad_h * 2.0;
         let inset_h = pad_v * 2.0;
         if let Some(child_id) = self.child_id {
@@ -104,8 +140,8 @@ impl Widget for TooltipFrame {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        let pad_h = TOOLTIP_PADDING_HORIZONTAL;
-        let pad_v = TOOLTIP_PADDING_VERTICAL;
+        let pad_h = self.recipe.padding_horizontal;
+        let pad_v = self.recipe.padding_vertical;
         for child in children.iter_mut() {
             child.origin = bastyde_canvas::Point::new(bounds.x + pad_h, bounds.y + pad_v);
             child.size = Size::new(
@@ -116,7 +152,7 @@ impl Widget for TooltipFrame {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(TOOLTIP_CORNER_RADIUS);
+        let radius = CornerRadius::uniform(self.recipe.corner_radius);
         crate::tooltip::paint_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
     }

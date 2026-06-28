@@ -71,15 +71,107 @@ pub const PREVIEW_CORNER_RADIUS: f32 = 4.0;
 pub const SPINNER_FIELD_WIDTH: f32 = 56.0;
 pub const HEX_FIELD_WIDTH: f32 = 96.0;
 
+/// Configurable dimension recipe for `RecipeColorPickerStyle`.
+///
+/// All fields default to the module-level `pub const` tokens so existing
+/// callers that use `RecipeColorPickerStyle::default()` are unaffected.
+/// Override individual fields to create a custom-sized picker without
+/// writing a full `ColorPickerStyle` implementation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColorPickerRecipe {
+    // HSV canvas
+    pub canvas_width: f32,
+    pub canvas_height: f32,
+    pub canvas_corner_radius: f32,
+    // 1D strips
+    pub strip_thickness: f32,
+    pub strip_length: f32,
+    pub strip_corner_radius: f32,
+    // HSV-canvas indicator
+    pub indicator_radius: f32,
+    pub indicator_outer_stroke_width: f32,
+    pub indicator_inner_stroke_width: f32,
+    pub indicator_outer_color: Color,
+    pub indicator_inner_color: Color,
+    // Strip thumb
+    pub strip_thumb_width: f32,
+    pub strip_thumb_height: f32,
+    pub strip_thumb_corner_radius: f32,
+    // Layout spacing
+    pub padding: f32,
+    pub gap: f32,
+    // Preset swatches
+    pub swatch_size: f32,
+    pub swatch_spacing: f32,
+    pub swatch_corner_radius: f32,
+    pub swatch_selected_stroke_width: f32,
+    // Checkerboard (alpha visualisation)
+    pub checker_cell: f32,
+    pub checker_color_a: Color,
+    pub checker_color_b: Color,
+    // Current-color preview swatch
+    pub preview_width: f32,
+    pub preview_height: f32,
+    pub preview_corner_radius: f32,
+    // Input fields
+    pub spinner_field_width: f32,
+    pub hex_field_width: f32,
+}
+
+impl Default for ColorPickerRecipe {
+    fn default() -> Self {
+        Self {
+            canvas_width: CANVAS_WIDTH,
+            canvas_height: CANVAS_HEIGHT,
+            canvas_corner_radius: CANVAS_CORNER_RADIUS,
+            strip_thickness: STRIP_THICKNESS,
+            strip_length: STRIP_LENGTH,
+            strip_corner_radius: STRIP_CORNER_RADIUS,
+            indicator_radius: INDICATOR_RADIUS,
+            indicator_outer_stroke_width: INDICATOR_OUTER_STROKE_WIDTH,
+            indicator_inner_stroke_width: INDICATOR_INNER_STROKE_WIDTH,
+            indicator_outer_color: INDICATOR_OUTER_COLOR,
+            indicator_inner_color: INDICATOR_INNER_COLOR,
+            strip_thumb_width: STRIP_THUMB_WIDTH,
+            strip_thumb_height: STRIP_THUMB_HEIGHT,
+            strip_thumb_corner_radius: STRIP_THUMB_CORNER_RADIUS,
+            padding: PADDING,
+            gap: GAP,
+            swatch_size: SWATCH_SIZE,
+            swatch_spacing: SWATCH_SPACING,
+            swatch_corner_radius: SWATCH_CORNER_RADIUS,
+            swatch_selected_stroke_width: SWATCH_SELECTED_STROKE_WIDTH,
+            checker_cell: CHECKER_CELL,
+            checker_color_a: CHECKER_COLOR_A,
+            checker_color_b: CHECKER_COLOR_B,
+            preview_width: PREVIEW_WIDTH,
+            preview_height: PREVIEW_HEIGHT,
+            preview_corner_radius: PREVIEW_CORNER_RADIUS,
+            spinner_field_width: SPINNER_FIELD_WIDTH,
+            hex_field_width: HEX_FIELD_WIDTH,
+        }
+    }
+}
+
 /// Default `ColorPickerStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeColorPickerStyle;
+pub struct RecipeColorPickerStyle {
+    pub recipe: ColorPickerRecipe,
+}
+
+impl RecipeColorPickerStyle {
+    pub fn new(recipe: ColorPickerRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl ColorPickerStyle for RecipeColorPickerStyle {
     fn make_body(&self, cfg: &ColorPickerStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let body = match cfg.layout {
             ColorPickerLayout::Compact => {
-                let mut col = VStack::new().spacing(GAP).add_child(cfg.top_row);
+                let mut col = VStack::new()
+                    .spacing(self.recipe.gap)
+                    .add_child(cfg.top_row);
                 if let Some(hex) = cfg.compact_hex {
                     col = col.add_child(hex);
                 }
@@ -89,7 +181,9 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
                 ctx.add(col)
             }
             ColorPickerLayout::Standard => {
-                let mut col = VStack::new().spacing(GAP).add_child(cfg.top_row);
+                let mut col = VStack::new()
+                    .spacing(self.recipe.gap)
+                    .add_child(cfg.top_row);
                 if let Some(preview) = cfg.preview_row {
                     col = col.add_child(preview);
                 }
@@ -108,7 +202,7 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
                 ctx.add(col)
             }
             ColorPickerLayout::Wide => {
-                let mut side_col = VStack::new().spacing(GAP);
+                let mut side_col = VStack::new().spacing(self.recipe.gap);
                 if let Some(preview) = cfg.preview_row {
                     side_col = side_col.add_child(preview);
                 }
@@ -121,11 +215,13 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
                 let side_col_id = ctx.add(side_col);
                 let main_row_id = ctx.add(
                     HStack::new()
-                        .spacing(GAP)
+                        .spacing(self.recipe.gap)
                         .add_child(cfg.top_row)
                         .add_child(side_col_id),
                 );
-                let mut col = VStack::new().spacing(GAP).add_child(main_row_id);
+                let mut col = VStack::new()
+                    .spacing(self.recipe.gap)
+                    .add_child(main_row_id);
                 if let Some(grid) = cfg.swatches {
                     col = col.add_child(grid);
                 }
@@ -141,7 +237,7 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
         // an overlay without this produces a transparent popup.
         ctx.add(
             Panel::new()
-                .padding(PADDING)
+                .padding(self.recipe.padding)
                 .border_width(1.0)
                 .child_id(body),
         )

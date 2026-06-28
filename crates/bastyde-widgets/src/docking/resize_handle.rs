@@ -154,7 +154,7 @@ impl Widget for DockResizeHandle {
             .style_slots
             .splitter
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitterStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitterStyle::default()));
         let orientation = if self.side.is_horizontal_axis() {
             Orientation::Horizontal
         } else {

@@ -221,7 +221,7 @@ impl Widget for RadioButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
         let cfg = RadioStyleConfig {
             is_selected,
             is_hovered,

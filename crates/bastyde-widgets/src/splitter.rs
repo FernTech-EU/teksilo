@@ -179,7 +179,7 @@ impl Splitter {
         self.style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.splitter.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitterStyle))
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitterStyle::default()))
     }
 
     /// Main-axis extent of `bounds` for this splitter's orientation.

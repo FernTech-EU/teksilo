@@ -738,7 +738,7 @@ impl Widget for Avatar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.avatar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle::default()));
         let root = style.make_body(
             &AvatarStyleConfig {
                 shape: self.shape,

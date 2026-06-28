@@ -815,7 +815,7 @@ impl Widget for SuggestionPanel {
             .style_slots
             .popover
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
         let surface = popover_style.make_body(
             &PopoverStyleConfig {
                 content: padded,

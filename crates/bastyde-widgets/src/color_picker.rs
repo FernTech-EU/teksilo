@@ -759,7 +759,7 @@ fn resolve_color_picker_style(
         .color_picker
         .clone()
         .unwrap_or_else(|| {
-            Rc::new(crate::styles::recipe_color_picker_style::RecipeColorPickerStyle)
+            Rc::new(crate::styles::recipe_color_picker_style::RecipeColorPickerStyle::default())
                 as bastyde_core::styles::SharedColorPickerStyle
         })
 }

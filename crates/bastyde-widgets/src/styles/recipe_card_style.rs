@@ -35,10 +35,39 @@ pub const CARD_BORDER_WIDTH: f32 = 1.0;
 /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
 pub const CARD_SHADOW_DENSITY: f32 = 0.5;
 
+/// Dimension recipe for `RecipeCardStyle`. Mirrors the `pub const` defaults
+/// and allows per-instance overrides without a custom `CardStyle` impl.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardRecipe {
+    pub padding: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+    pub shadow_density: f32,
+}
+
+impl Default for CardRecipe {
+    fn default() -> Self {
+        Self {
+            padding: CARD_PADDING,
+            corner_radius: CARD_CORNER_RADIUS,
+            border_width: CARD_BORDER_WIDTH,
+            shadow_density: CARD_SHADOW_DENSITY,
+        }
+    }
+}
+
 /// Default `CardStyle` shipped with Bastyde. Honours all four
 /// `CardVariant` values via background / shadow / border defaults.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeCardStyle;
+pub struct RecipeCardStyle {
+    pub recipe: CardRecipe,
+}
+
+impl RecipeCardStyle {
+    pub fn new(recipe: CardRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl CardStyle for RecipeCardStyle {
     fn make_body(&self, cfg: &CardStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -50,12 +79,13 @@ impl CardStyle for RecipeCardStyle {
             corner_radius: cfg
                 .corner_radius_override
                 .clone()
-                .unwrap_or(Prop::Static(CARD_CORNER_RADIUS)),
+                .unwrap_or(Prop::Static(self.recipe.corner_radius)),
             padding: cfg
                 .padding_override
                 .clone()
-                .unwrap_or(Prop::Static(CARD_PADDING)),
+                .unwrap_or(Prop::Static(self.recipe.padding)),
             shadow_override: cfg.shadow_override,
+            recipe: self.recipe,
         };
         ctx.add(frame)
     }
@@ -69,6 +99,7 @@ struct CardFrame {
     corner_radius: Prop<f32>,
     padding: Prop<f32>,
     shadow_override: Option<Shadow>,
+    recipe: CardRecipe,
 }
 
 impl std::fmt::Debug for CardFrame {
@@ -151,7 +182,7 @@ impl Widget for CardFrame {
                 cr,
                 &outer,
                 &ctx.theme.shape.shadow_inner_md,
-                CARD_SHADOW_DENSITY,
+                self.recipe.shadow_density,
                 None,
             );
         }
@@ -170,8 +201,13 @@ impl Widget for CardFrame {
         canvas.fill_rounded_rect(bounds, cr, bg);
 
         // Outlined variant draws a 1 dp accent-neutral border.
-        if matches!(self.variant, CardVariant::Outlined) && CARD_BORDER_WIDTH > 0.0 {
-            canvas.stroke_rounded_rect(bounds, cr, ctx.theme.colors.border, CARD_BORDER_WIDTH);
+        if matches!(self.variant, CardVariant::Outlined) && self.recipe.border_width > 0.0 {
+            canvas.stroke_rounded_rect(
+                bounds,
+                cr,
+                ctx.theme.colors.border,
+                self.recipe.border_width,
+            );
         }
     }
 

@@ -38,10 +38,38 @@ pub const SCROLLBAR_THICKNESS_HOVER: f32 = 8.0;
 pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
 pub const SCROLLBAR_CORNER_RADIUS: f32 = 2.0;
 
+/// Configurable dimensions for [`RecipeScrollBarStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollBarRecipe {
+    pub thickness_idle: f32,
+    pub thickness_hover: f32,
+    pub min_thumb_length: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for ScrollBarRecipe {
+    fn default() -> Self {
+        Self {
+            thickness_idle: SCROLLBAR_THICKNESS_IDLE,
+            thickness_hover: SCROLLBAR_THICKNESS_HOVER,
+            min_thumb_length: SCROLLBAR_MIN_THUMB_LENGTH,
+            corner_radius: SCROLLBAR_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `ScrollBarStyle` shipped with Bastyde. Colors come from
 /// `theme.colors.scrollbar_*`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeScrollBarStyle;
+pub struct RecipeScrollBarStyle {
+    pub recipe: ScrollBarRecipe,
+}
+
+impl RecipeScrollBarStyle {
+    pub fn new(recipe: ScrollBarRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl ScrollBarStyle for RecipeScrollBarStyle {
     fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -49,8 +77,8 @@ impl ScrollBarStyle for RecipeScrollBarStyle {
         // The widget's per-instance override (`ScrollBar::thickness`)
         // is already reflected in the bounds we receive, so these
         // values only affect the painters' fallback `layout_response`.
-        let thickness = SCROLLBAR_THICKNESS_HOVER;
-        let resting_thickness = SCROLLBAR_THICKNESS_IDLE;
+        let thickness = self.recipe.thickness_hover;
+        let resting_thickness = self.recipe.thickness_idle;
 
         match cfg.variant {
             ScrollBarVariant::Permanent => ctx.add(FullBarPainter {

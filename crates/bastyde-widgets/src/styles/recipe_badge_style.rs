@@ -28,10 +28,37 @@ pub const BADGE_PADDING_VERTICAL: f32 = 1.0;
 /// shorter side.
 pub const BADGE_CORNER_RADIUS: f32 = 9999.0;
 
+/// Dimension bundle for [`RecipeBadgeStyle`]. All fields are `f32` and
+/// the struct is `Copy`, so it can be passed freely.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BadgeRecipe {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for BadgeRecipe {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: BADGE_PADDING_HORIZONTAL,
+            padding_vertical: BADGE_PADDING_VERTICAL,
+            corner_radius: BADGE_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `BadgeStyle` shipped with Bastyde. Background defaults to
 /// `SurfaceRole::AccentSubtle` when the caller sets no override.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeBadgeStyle;
+pub struct RecipeBadgeStyle {
+    pub recipe: BadgeRecipe,
+}
+
+impl RecipeBadgeStyle {
+    pub fn new(recipe: BadgeRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl BadgeStyle for RecipeBadgeStyle {
     fn make_body(&self, cfg: &BadgeStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -42,10 +69,10 @@ impl BadgeStyle for RecipeBadgeStyle {
         let bg_rect = ctx.add(
             RectWidget::new()
                 .background(bg)
-                .corner_radius(CornerRadius::uniform(BADGE_CORNER_RADIUS)),
+                .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
         let padding_id = ctx.add(
-            Padding::symmetric(BADGE_PADDING_VERTICAL, BADGE_PADDING_HORIZONTAL)
+            Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
                 .child_id(cfg.content),
         );
         ctx.add(ZStack::new().add_child(bg_rect).add_child(padding_id))

@@ -300,7 +300,7 @@ impl Widget for HeaderCell {
             .style_slots
             .table
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle::default()));
         let cell_cfg = TableHeaderCellConfig {
             label: padded,
             sort: self.current_sort.map(style_sort),

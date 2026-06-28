@@ -67,14 +67,62 @@ pub const CALENDAR_HEADER_GAP: f32 = 4.0;
 /// Cell corner radius shared by `MonthsGrid` and `YearsGrid` zoom cells.
 pub const CALENDAR_ZOOM_CELL_RADIUS: f32 = 6.0;
 
+/// Recipe dimensions for [`RecipeCalendarStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CalendarRecipe {
+    pub outer_padding: f32,
+    pub section_gap: f32,
+    pub header_height: f32,
+    pub weekday_row_height: f32,
+    pub cell_size: f32,
+    pub cell_radius: f32,
+    pub cell_gap: f32,
+    pub today_ring_width: f32,
+    pub nav_icon_size: f32,
+    pub week_number_column_width: f32,
+    pub nav_arrow_size: f32,
+    pub nav_arrow_radius: f32,
+    pub header_gap: f32,
+    pub zoom_cell_radius: f32,
+}
+
+impl Default for CalendarRecipe {
+    fn default() -> Self {
+        Self {
+            outer_padding: CALENDAR_OUTER_PADDING,
+            section_gap: CALENDAR_SECTION_GAP,
+            header_height: CALENDAR_HEADER_HEIGHT,
+            weekday_row_height: CALENDAR_WEEKDAY_ROW_HEIGHT,
+            cell_size: CALENDAR_CELL_SIZE,
+            cell_radius: CALENDAR_CELL_RADIUS,
+            cell_gap: CALENDAR_CELL_GAP,
+            today_ring_width: CALENDAR_TODAY_RING_WIDTH,
+            nav_icon_size: CALENDAR_NAV_ICON_SIZE,
+            week_number_column_width: CALENDAR_WEEK_NUMBER_COLUMN_WIDTH,
+            nav_arrow_size: CALENDAR_NAV_ARROW_SIZE,
+            nav_arrow_radius: CALENDAR_NAV_ARROW_RADIUS,
+            header_gap: CALENDAR_HEADER_GAP,
+            zoom_cell_radius: CALENDAR_ZOOM_CELL_RADIUS,
+        }
+    }
+}
+
 /// Default `CalendarStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeCalendarStyle;
+pub struct RecipeCalendarStyle {
+    pub recipe: CalendarRecipe,
+}
+
+impl RecipeCalendarStyle {
+    pub fn new(recipe: CalendarRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl CalendarStyle for RecipeCalendarStyle {
     fn make_day_cell(&self, cfg: &CalendarDayConfig, ctx: &mut BuildContext) -> WidgetId {
-        let radius = CALENDAR_CELL_RADIUS;
-        let today_ring_width = CALENDAR_TODAY_RING_WIDTH;
+        let radius = self.recipe.cell_radius;
+        let today_ring_width = self.recipe.today_ring_width;
 
         // ── Background fill — Selected → Selected, InRange →
         // SelectedInactive, otherwise Transparent.
@@ -176,7 +224,7 @@ impl CalendarStyle for RecipeCalendarStyle {
 
         let bg = RectWidget::new()
             .background(ColorProp::DynamicSurfaceRole(bg_role))
-            .corner_radius(CornerRadius::uniform(CALENDAR_ZOOM_CELL_RADIUS));
+            .corner_radius(CornerRadius::uniform(self.recipe.zoom_cell_radius));
         let bg_id = ctx.add(bg);
 
         let text = TextWidget::new(lit!(cfg.label.clone()))
@@ -200,7 +248,7 @@ impl CalendarStyle for RecipeCalendarStyle {
         // pre-migration layout used the same trick.
         let title_filled = ctx.add(Expand::horizontal().child_id(cfg.title));
 
-        let mut row = HStack::new().spacing(CALENDAR_HEADER_GAP);
+        let mut row = HStack::new().spacing(self.recipe.header_gap);
         if let Some(id) = cfg.prev_double {
             row = row.add_child(id);
         }

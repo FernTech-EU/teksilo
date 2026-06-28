@@ -51,9 +51,44 @@ pub const TAB_CLOSE_BUTTON_SIZE: f32 = 16.0;
 /// Thickness of the drag-reorder drop-indicator line.
 const DROP_INDICATOR_WIDTH: f32 = 2.0;
 
+/// Dimension recipe for [`RecipeTabStyle`].
+///
+/// All fields default to the corresponding `TAB_*` constants so that
+/// [`RecipeTabStyle::default()`] reproduces the built-in IntUI look.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TabRecipe {
+    pub editor_height: f32,
+    pub tool_window_height: f32,
+    pub padding_horizontal: f32,
+    pub underline_active: f32,
+    pub underline_hover: f32,
+    pub close_button_size: f32,
+}
+
+impl Default for TabRecipe {
+    fn default() -> Self {
+        Self {
+            editor_height: TAB_EDITOR_HEIGHT,
+            tool_window_height: TAB_TOOL_WINDOW_HEIGHT,
+            padding_horizontal: TAB_PADDING_HORIZONTAL,
+            underline_active: TAB_UNDERLINE_ACTIVE,
+            underline_hover: TAB_UNDERLINE_HOVER,
+            close_button_size: TAB_CLOSE_BUTTON_SIZE,
+        }
+    }
+}
+
 /// Default `TabStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeTabStyle;
+pub struct RecipeTabStyle {
+    pub recipe: TabRecipe,
+}
+
+impl RecipeTabStyle {
+    pub fn new(recipe: TabRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl TabStyle for RecipeTabStyle {
     fn make_body(&self, cfg: &TabStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -65,6 +100,7 @@ impl TabStyle for RecipeTabStyle {
             is_disabled: cfg.is_disabled.clone(),
             orientation: cfg.orientation,
             indicator_position: cfg.indicator_position,
+            recipe: self.recipe,
         });
 
         // Compose the slots. The widget today bundles everything into
@@ -284,6 +320,7 @@ struct TabBodyPainter {
     is_disabled: Signal<bool>,
     orientation: TabBarOrientation,
     indicator_position: TabIndicatorPosition,
+    recipe: TabRecipe,
 }
 
 impl std::fmt::Debug for TabBodyPainter {
@@ -381,7 +418,7 @@ impl Widget for TabBodyPainter {
         //   - Vertical bar → LEADING edge for OuterEdge (IDE perspective
         //     look) or TRAILING for InnerEdge. Leading/trailing follow the
         //     layout direction.
-        let indicator_thickness = TAB_UNDERLINE_ACTIVE;
+        let indicator_thickness = self.recipe.underline_active;
         if active && !disabled {
             let rtl = matches!(
                 ctx.layout_direction,
@@ -433,6 +470,7 @@ mod tests {
             is_disabled: Signal::new(false),
             orientation,
             indicator_position,
+            recipe: TabRecipe::default(),
         }
     }
 

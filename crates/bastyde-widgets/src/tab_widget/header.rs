@@ -607,7 +607,7 @@ impl Widget for TabHeader {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle::default()));
 
         let cfg = TabStyleConfig {
             label: inner_id,

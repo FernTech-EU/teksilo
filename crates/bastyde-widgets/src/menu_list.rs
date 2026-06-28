@@ -567,7 +567,7 @@ impl Widget for MenuList {
             .style_slots
             .popover
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
         let surface_cfg = PopoverStyleConfig {
             content: visible_cap_id,
             variant: PopoverVariant::Menu,

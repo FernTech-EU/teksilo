@@ -496,7 +496,7 @@ impl Widget for Popover {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.popover.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
         let surface_cfg = bastyde_core::styles::PopoverStyleConfig {
             content: inner_content_id,
             variant: self.surface_variant,

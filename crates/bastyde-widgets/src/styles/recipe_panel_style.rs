@@ -36,12 +36,38 @@ pub const PANEL_PADDING: f32 = 12.0;
 pub const PANEL_CORNER_RADIUS: f32 = 8.0;
 pub const PANEL_BORDER_WIDTH: f32 = 1.0;
 
+/// Tunable dimensions for [`RecipePanelStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelRecipe {
+    pub padding: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+}
+
+impl Default for PanelRecipe {
+    fn default() -> Self {
+        Self {
+            padding: PANEL_PADDING,
+            corner_radius: PANEL_CORNER_RADIUS,
+            border_width: PANEL_BORDER_WIDTH,
+        }
+    }
+}
+
 /// Default `PanelStyle` shipped with Bastyde. Honours all four
 /// `PanelVariant` values via background / border defaults; honours
 /// caller overrides (background, border, corner radius, padding) when
 /// set.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipePanelStyle;
+pub struct RecipePanelStyle {
+    pub recipe: PanelRecipe,
+}
+
+impl RecipePanelStyle {
+    pub fn new(recipe: PanelRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl PanelStyle for RecipePanelStyle {
     fn make_body(&self, cfg: &PanelStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -54,15 +80,15 @@ impl PanelStyle for RecipePanelStyle {
             border_width: cfg
                 .border_width_override
                 .clone()
-                .unwrap_or(Prop::Static(PANEL_BORDER_WIDTH)),
+                .unwrap_or(Prop::Static(self.recipe.border_width)),
             corner_radius: cfg
                 .corner_radius_override
                 .clone()
-                .unwrap_or(Prop::Static(PANEL_CORNER_RADIUS)),
+                .unwrap_or(Prop::Static(self.recipe.corner_radius)),
             padding: cfg
                 .padding_override
                 .clone()
-                .unwrap_or(Prop::Static(PANEL_PADDING)),
+                .unwrap_or(Prop::Static(self.recipe.padding)),
         };
         ctx.add(frame)
     }

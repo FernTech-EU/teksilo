@@ -202,9 +202,59 @@ pub fn paint_border(
     }
 }
 
+/// Dimension recipe for `RecipeAvatarStyle`.
+///
+/// All tunable measurements in one place. The recipe is `Copy` so it
+/// can be stored inside the internal `AvatarChromeFrame` body widget
+/// without any allocation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AvatarRecipe {
+    pub size_small: f32,
+    pub size_medium: f32,
+    pub size_large: f32,
+    pub size_x_large: f32,
+    pub border_default: f32,
+    pub presence_diameter_ratio: f32,
+    pub presence_diameter_min: f32,
+    pub presence_diameter_max: f32,
+    pub presence_outline_width: f32,
+    pub presence_inset: f32,
+    pub font_ratio_1char: f32,
+    pub font_ratio_2char: f32,
+    pub rounded_radius_ratio: f32,
+}
+
+impl Default for AvatarRecipe {
+    fn default() -> Self {
+        Self {
+            size_small: AVATAR_SIZE_SMALL,
+            size_medium: AVATAR_SIZE_MEDIUM,
+            size_large: AVATAR_SIZE_LARGE,
+            size_x_large: AVATAR_SIZE_X_LARGE,
+            border_default: AVATAR_BORDER_DEFAULT,
+            presence_diameter_ratio: AVATAR_PRESENCE_DIAMETER_RATIO,
+            presence_diameter_min: AVATAR_PRESENCE_DIAMETER_MIN,
+            presence_diameter_max: AVATAR_PRESENCE_DIAMETER_MAX,
+            presence_outline_width: AVATAR_PRESENCE_OUTLINE_WIDTH,
+            presence_inset: AVATAR_PRESENCE_INSET,
+            font_ratio_1char: AVATAR_FONT_RATIO_1CHAR,
+            font_ratio_2char: AVATAR_FONT_RATIO_2CHAR,
+            rounded_radius_ratio: AVATAR_ROUNDED_RADIUS_RATIO,
+        }
+    }
+}
+
 /// Default `AvatarStyle` shipped with Bastyde.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeAvatarStyle;
+pub struct RecipeAvatarStyle {
+    pub recipe: AvatarRecipe,
+}
+
+impl RecipeAvatarStyle {
+    pub fn new(recipe: AvatarRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl AvatarStyle for RecipeAvatarStyle {
     fn make_body(&self, cfg: &AvatarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -219,6 +269,7 @@ impl AvatarStyle for RecipeAvatarStyle {
             border_color: cfg.border_color_override.clone(),
             border_width: cfg.border_width_override,
             seed: cfg.seed.clone(),
+            recipe: self.recipe,
         })
     }
 }
@@ -238,6 +289,7 @@ struct AvatarChromeFrame {
     border_color: Option<ColorProp>,
     border_width: Option<f32>,
     seed: String,
+    recipe: AvatarRecipe,
 }
 
 impl std::fmt::Debug for AvatarChromeFrame {
@@ -306,7 +358,7 @@ impl Widget for AvatarChromeFrame {
                 canvas.fill_circle(center, radius, bg);
             }
             AvatarShape::RoundedSquare => {
-                let r = bounds.width.min(bounds.height) * AVATAR_ROUNDED_RADIUS_RATIO;
+                let r = bounds.width.min(bounds.height) * self.recipe.rounded_radius_ratio;
                 canvas.fill_rounded_rect(bounds, CornerRadius::uniform(r), bg);
             }
             AvatarShape::Square => {
@@ -327,7 +379,7 @@ impl Widget for AvatarChromeFrame {
                 canvas,
                 bounds,
                 self.shape,
-                AVATAR_ROUNDED_RADIUS_RATIO,
+                self.recipe.rounded_radius_ratio,
                 width,
                 color,
             );
@@ -339,7 +391,7 @@ impl Widget for AvatarChromeFrame {
                 canvas,
                 bounds,
                 self.shape,
-                AVATAR_ROUNDED_RADIUS_RATIO,
+                self.recipe.rounded_radius_ratio,
                 theme.shape.focus_ring_offset,
                 theme.shape.focus_ring_width,
                 theme.colors.focus_ring,
@@ -350,22 +402,25 @@ impl Widget for AvatarChromeFrame {
         // outline that "punches" it out of the avatar.
         if let Some(presence) = &self.presence {
             let color = presence.color(theme);
-            let dot_diameter = (bounds.width.min(bounds.height) * AVATAR_PRESENCE_DIAMETER_RATIO)
-                .clamp(AVATAR_PRESENCE_DIAMETER_MIN, AVATAR_PRESENCE_DIAMETER_MAX);
+            let dot_diameter =
+                (bounds.width.min(bounds.height) * self.recipe.presence_diameter_ratio).clamp(
+                    self.recipe.presence_diameter_min,
+                    self.recipe.presence_diameter_max,
+                );
             let dot_radius = dot_diameter / 2.0;
             let (xf, yf) = self.presence_corner.offset();
             let cx = if xf < 0.0 {
-                bounds.x + dot_radius + AVATAR_PRESENCE_INSET
+                bounds.x + dot_radius + self.recipe.presence_inset
             } else {
-                bounds.x + bounds.width - dot_radius - AVATAR_PRESENCE_INSET
+                bounds.x + bounds.width - dot_radius - self.recipe.presence_inset
             };
             let cy = if yf < 0.0 {
-                bounds.y + dot_radius + AVATAR_PRESENCE_INSET
+                bounds.y + dot_radius + self.recipe.presence_inset
             } else {
-                bounds.y + bounds.height - dot_radius - AVATAR_PRESENCE_INSET
+                bounds.y + bounds.height - dot_radius - self.recipe.presence_inset
             };
             let center = Point::new(cx, cy);
-            let outline_radius = dot_radius + AVATAR_PRESENCE_OUTLINE_WIDTH;
+            let outline_radius = dot_radius + self.recipe.presence_outline_width;
             canvas.fill_circle(center, outline_radius, theme.colors.surface_main);
             canvas.fill_circle(center, dot_radius, color);
         }

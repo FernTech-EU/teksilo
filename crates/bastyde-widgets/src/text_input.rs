@@ -653,7 +653,7 @@ impl Widget for TextInput {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.text_input.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTextInputStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTextInputStyle::default()));
 
         let cfg = TextInputStyleConfig {
             editor: row_id,

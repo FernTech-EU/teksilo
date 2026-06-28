@@ -184,7 +184,7 @@ impl Widget for Slider {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.slider.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSliderStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSliderStyle::default()));
 
         // Derived `value_normalized` signal — re-renders the body
         // whenever the user-visible value changes.

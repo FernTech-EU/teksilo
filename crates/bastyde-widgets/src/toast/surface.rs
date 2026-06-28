@@ -271,7 +271,7 @@ impl Widget for ToastSurface {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.toast.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeToastStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeToastStyle::default()));
         let root = style.make_body(
             &ToastStyleConfig {
                 severity,

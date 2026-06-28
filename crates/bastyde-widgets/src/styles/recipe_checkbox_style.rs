@@ -32,11 +32,42 @@ pub const CHECKBOX_BOX_HIT_AREA: f32 = 24.0;
 pub const CHECKBOX_LABEL_GAP: f32 = 6.0;
 pub const CHECKBOX_CORNER_RADIUS: f32 = 3.0;
 
+/// Configurable dimensions for [`RecipeCheckboxStyle`].
+///
+/// Fields default to the IntUI `CHECKBOX_*` constants. Override individual
+/// values to tune sizing without replacing the entire style.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CheckboxRecipe {
+    pub box_visual_size: f32,
+    pub box_hit_area: f32,
+    pub label_gap: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for CheckboxRecipe {
+    fn default() -> Self {
+        Self {
+            box_visual_size: CHECKBOX_BOX_VISUAL_SIZE,
+            box_hit_area: CHECKBOX_BOX_HIT_AREA,
+            label_gap: CHECKBOX_LABEL_GAP,
+            corner_radius: CHECKBOX_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `CheckboxStyle` shipped with Bastyde. Colors come from
 /// `theme.colors.{accent, accent_hover, accent_pressed, accent_disabled,
 /// border, border_strong, border_focused, text_on_accent, text_disabled}`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeCheckboxStyle;
+pub struct RecipeCheckboxStyle {
+    pub recipe: CheckboxRecipe,
+}
+
+impl RecipeCheckboxStyle {
+    pub fn new(recipe: CheckboxRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl CheckboxStyle for RecipeCheckboxStyle {
     fn make_body(&self, cfg: &CheckboxStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -62,6 +93,7 @@ impl CheckboxStyle for RecipeCheckboxStyle {
             is_disabled: cfg.is_disabled.clone(),
             focus_origin,
             variant: cfg.variant,
+            recipe: self.recipe,
         })
     }
 }
@@ -73,6 +105,7 @@ struct CheckboxBody {
     is_disabled: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     variant: CheckboxVariant,
+    recipe: CheckboxRecipe,
 }
 
 impl std::fmt::Debug for CheckboxBody {
@@ -100,7 +133,7 @@ impl Widget for CheckboxBody {
     }
 
     fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        Size::new(CHECKBOX_BOX_VISUAL_SIZE, CHECKBOX_BOX_VISUAL_SIZE).into()
+        Size::new(self.recipe.box_visual_size, self.recipe.box_visual_size).into()
     }
 
     fn place_children(
@@ -165,9 +198,9 @@ impl Widget for CheckboxBody {
         // Rounded doubles it for a softer look, Circle uses half-size for
         // a perfect circle.
         let corner = match self.variant {
-            CheckboxVariant::Square => CornerRadius::uniform(CHECKBOX_CORNER_RADIUS),
-            CheckboxVariant::Rounded => CornerRadius::uniform(CHECKBOX_CORNER_RADIUS * 2.0),
-            CheckboxVariant::Circle => CornerRadius::uniform(CHECKBOX_BOX_VISUAL_SIZE / 2.0),
+            CheckboxVariant::Square => CornerRadius::uniform(self.recipe.corner_radius),
+            CheckboxVariant::Rounded => CornerRadius::uniform(self.recipe.corner_radius * 2.0),
+            CheckboxVariant::Circle => CornerRadius::uniform(self.recipe.box_visual_size / 2.0),
         };
 
         canvas.fill_rounded_rect(bounds, corner, bg);
@@ -185,7 +218,7 @@ impl Widget for CheckboxBody {
         } else {
             colors.text_on_accent
         };
-        let glyph_size = CHECKBOX_BOX_VISUAL_SIZE * 0.75;
+        let glyph_size = self.recipe.box_visual_size * 0.75;
         let glyph_rect = Rect::new(
             bounds.x + (bounds.width - glyph_size) / 2.0,
             bounds.y + (bounds.height - glyph_size) / 2.0,

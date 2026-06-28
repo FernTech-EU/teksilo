@@ -31,11 +31,41 @@ pub const RADIO_HIT_AREA: f32 = 24.0;
 pub const RADIO_LABEL_GAP: f32 = 6.0;
 pub const RADIO_INNER_DOT_SIZE: f32 = 7.0;
 
+/// Dimension recipe for `RecipeRadioStyle`. All tuneable sizes are collected
+/// here so an app can pass a customised `RadioRecipe` to `RecipeRadioStyle::new`
+/// without writing a full `RadioStyle` impl.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadioRecipe {
+    pub visual_size: f32,
+    pub hit_area: f32,
+    pub label_gap: f32,
+    pub inner_dot_size: f32,
+}
+
+impl Default for RadioRecipe {
+    fn default() -> Self {
+        Self {
+            visual_size: RADIO_VISUAL_SIZE,
+            hit_area: RADIO_HIT_AREA,
+            label_gap: RADIO_LABEL_GAP,
+            inner_dot_size: RADIO_INNER_DOT_SIZE,
+        }
+    }
+}
+
 /// Default `RadioStyle` shipped with Bastyde. Colors come from
 /// `theme.colors.{accent, accent_hover, accent_pressed, accent_disabled,
 /// border, border_strong, border_focused}`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeRadioStyle;
+pub struct RecipeRadioStyle {
+    pub recipe: RadioRecipe,
+}
+
+impl RecipeRadioStyle {
+    pub fn new(recipe: RadioRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl RadioStyle for RecipeRadioStyle {
     fn make_body(&self, cfg: &RadioStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -61,6 +91,7 @@ impl RadioStyle for RecipeRadioStyle {
             is_disabled: cfg.is_disabled.clone(),
             focus_origin,
             variant: cfg.variant,
+            recipe: self.recipe,
         })
     }
 }
@@ -72,6 +103,7 @@ struct RadioBody {
     is_disabled: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     variant: RadioVariant,
+    recipe: RadioRecipe,
 }
 
 impl std::fmt::Debug for RadioBody {
@@ -100,7 +132,7 @@ impl Widget for RadioBody {
     }
 
     fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        Size::new(RADIO_VISUAL_SIZE, RADIO_VISUAL_SIZE).into()
+        Size::new(self.recipe.visual_size, self.recipe.visual_size).into()
     }
 
     fn place_children(
@@ -142,9 +174,9 @@ impl Widget for RadioBody {
 
         // Variant-specific outer corner shape.
         let outer_corner = match self.variant {
-            RadioVariant::Circle => CornerRadius::uniform(RADIO_VISUAL_SIZE / 2.0),
+            RadioVariant::Circle => CornerRadius::uniform(self.recipe.visual_size / 2.0),
             RadioVariant::Square => CornerRadius::uniform(0.0),
-            RadioVariant::Rounded => CornerRadius::uniform(RADIO_VISUAL_SIZE * 0.25),
+            RadioVariant::Rounded => CornerRadius::uniform(self.recipe.visual_size * 0.25),
         };
 
         // Outer ring background — transparent (the ring is the border).
@@ -168,7 +200,7 @@ impl Widget for RadioBody {
         } else {
             colors.accent
         };
-        let dot_size = RADIO_INNER_DOT_SIZE;
+        let dot_size = self.recipe.inner_dot_size;
         let dot_rect = Rect::new(
             bounds.x + (bounds.width - dot_size) / 2.0,
             bounds.y + (bounds.height - dot_size) / 2.0,

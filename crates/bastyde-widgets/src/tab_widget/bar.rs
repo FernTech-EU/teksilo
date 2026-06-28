@@ -1563,7 +1563,7 @@ impl<T: 'static> Widget for TabBar<T> {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle::default()));
         let chrome_cfg = bastyde_core::styles::TabBarChromeConfig {
             content: root_id,
             orientation: self.orientation.into(),

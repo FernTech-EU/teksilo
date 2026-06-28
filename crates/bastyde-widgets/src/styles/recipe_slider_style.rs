@@ -34,18 +34,45 @@ pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
 pub const SLIDER_THUMB_DIAMETER: f32 = 14.0;
 pub const SLIDER_TICK_SIZE: f32 = 2.0;
 
+/// Dimension data for `RecipeSliderStyle`. All fields are in dp.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SliderRecipe {
+    pub track_height: f32,
+    pub thumb_diameter: f32,
+    pub tick_size: f32,
+}
+
+impl Default for SliderRecipe {
+    fn default() -> Self {
+        Self {
+            track_height: SLIDER_TRACK_HEIGHT,
+            thumb_diameter: SLIDER_THUMB_DIAMETER,
+            tick_size: SLIDER_TICK_SIZE,
+        }
+    }
+}
+
 /// Default `SliderStyle` shipped with Bastyde. Colors come from
 /// `theme.colors.{accent, surface_sunken, ...}`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeSliderStyle;
+pub struct RecipeSliderStyle {
+    pub recipe: SliderRecipe,
+}
+
+impl RecipeSliderStyle {
+    pub fn new(recipe: SliderRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl SliderStyle for RecipeSliderStyle {
     fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
-        SLIDER_THUMB_DIAMETER
+        self.recipe.thumb_diameter
     }
 
     fn make_body(&self, cfg: &SliderStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SliderBody {
+            recipe: self.recipe,
             value_normalized: cfg.value_normalized.clone(),
             is_hovered: cfg.is_hovered.clone(),
             is_dragging: cfg.is_dragging.clone(),
@@ -62,6 +89,7 @@ impl SliderStyle for RecipeSliderStyle {
 /// by `RecipeSliderStyle::make_body`; not exposed publicly because
 /// custom `SliderStyle` impls compose their own body instead.
 struct SliderBody {
+    recipe: SliderRecipe,
     value_normalized: Signal<f32>,
     is_hovered: Signal<bool>,
     is_dragging: Signal<bool>,
@@ -100,7 +128,7 @@ impl Widget for SliderBody {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let cross = (SLIDER_THUMB_DIAMETER + envelope * 2.0).max(MIN_CROSS_SIZE);
+        let cross = (self.recipe.thumb_diameter + envelope * 2.0).max(MIN_CROSS_SIZE);
         match self.orientation {
             SliderOrientation::Horizontal => {
                 let width = proposal.width.unwrap_or(200.0);
@@ -126,8 +154,8 @@ impl Widget for SliderBody {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
-        let track_height = SLIDER_TRACK_HEIGHT;
-        let thumb_diameter = SLIDER_THUMB_DIAMETER;
+        let track_height = self.recipe.track_height;
+        let thumb_diameter = self.recipe.thumb_diameter;
         let thumb_radius = thumb_diameter * 0.5;
         let enabled = !self.is_disabled.get();
         let t = self.value_normalized.get().clamp(0.0, 1.0);
@@ -188,7 +216,7 @@ impl Widget for SliderBody {
             && let Some(n) = self.tick_count
             && n >= 2
         {
-            let tick_size = SLIDER_TICK_SIZE.max(2.0);
+            let tick_size = self.recipe.tick_size.max(2.0);
             let tick_color = if enabled {
                 colors.text_secondary
             } else {

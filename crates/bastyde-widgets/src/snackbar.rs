@@ -143,7 +143,7 @@ impl Widget for SnackbarSurface {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.snackbar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle::default()));
         let root_id = style.make_body(
             &SnackbarStyleConfig {
                 content: content_id,

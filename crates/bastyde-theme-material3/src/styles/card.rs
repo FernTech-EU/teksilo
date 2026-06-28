@@ -29,6 +29,6 @@ impl CardStyle for M3CardStyle {
         if cfg.corner_radius_override.is_none() {
             cfg.corner_radius_override = Some(Prop::Static(M3_CARD_RADIUS));
         }
-        RecipeCardStyle.make_body(&cfg, ctx)
+        RecipeCardStyle::default().make_body(&cfg, ctx)
     }
 }

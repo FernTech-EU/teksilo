@@ -32,19 +32,47 @@ pub const DIALOG_CONTENT_PADDING: f32 = 24.0;
 pub const DIALOG_MIN_WIDTH: f32 = 280.0;
 pub const DIALOG_CORNER_RADIUS: f32 = 8.0;
 
+/// Dimension bundle for [`RecipeDialogStyle`]. All fields have defaults
+/// driven by the module-level `DIALOG_*` consts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DialogRecipe {
+    pub content_padding: f32,
+    pub min_width: f32,
+    pub corner_radius: f32,
+}
+
+impl Default for DialogRecipe {
+    fn default() -> Self {
+        Self {
+            content_padding: DIALOG_CONTENT_PADDING,
+            min_width: DIALOG_MIN_WIDTH,
+            corner_radius: DIALOG_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `DialogStyle` shipped with Bastyde. Panel chrome is the
 /// rounded `surface_main` surface + `border_strong` stroke; the scrim
 /// is a plain `SurfaceRole::Scrim` fill.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeDialogStyle;
+pub struct RecipeDialogStyle {
+    pub recipe: DialogRecipe,
+}
+
+impl RecipeDialogStyle {
+    pub fn new(recipe: DialogRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl DialogStyle for RecipeDialogStyle {
     fn make_panel(&self, cfg: &DialogStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(DialogPanel {
             child_id: None,
             pending_child: Some(PendingChild::Id(cfg.content)),
-            padding: cfg.padding_override.unwrap_or(DIALOG_CONTENT_PADDING),
-            min_width: cfg.min_width_override.unwrap_or(DIALOG_MIN_WIDTH),
+            padding: cfg.padding_override.unwrap_or(self.recipe.content_padding),
+            min_width: cfg.min_width_override.unwrap_or(self.recipe.min_width),
+            recipe: self.recipe,
         })
     }
 
@@ -63,6 +91,7 @@ struct DialogPanel {
     pending_child: Option<PendingChild>,
     padding: f32,
     min_width: f32,
+    recipe: DialogRecipe,
 }
 
 impl std::fmt::Debug for DialogPanel {
@@ -125,7 +154,7 @@ impl Widget for DialogPanel {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(DIALOG_CORNER_RADIUS);
+        let radius = CornerRadius::uniform(self.recipe.corner_radius);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface_main);
         canvas.stroke_rounded_rect(
             bounds,

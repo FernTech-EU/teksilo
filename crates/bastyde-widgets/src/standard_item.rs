@@ -459,7 +459,7 @@ impl StandardListItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
         let cfg = StandardItemStyleConfig {
             content: content_id,
             is_selected,

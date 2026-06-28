@@ -31,10 +31,32 @@ use bastyde_tokens::{CornerRadius, Orientation, SurfaceRole};
 // IntUI design tokens for ProgressBar. The recipe owns its own dimensions.
 pub const PROGRESS_BAR_CORNER_RADIUS: f32 = 2.0;
 
+/// Configurable dimensions for [`RecipeProgressBarStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressBarRecipe {
+    pub corner_radius: f32,
+}
+
+impl Default for ProgressBarRecipe {
+    fn default() -> Self {
+        Self {
+            corner_radius: PROGRESS_BAR_CORNER_RADIUS,
+        }
+    }
+}
+
 /// Default `ProgressBarStyle` shipped with Bastyde. Track is
 /// `SurfaceRole::Sunken`, fill is `SurfaceRole::Accent`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeProgressBarStyle;
+pub struct RecipeProgressBarStyle {
+    pub recipe: ProgressBarRecipe,
+}
+
+impl RecipeProgressBarStyle {
+    pub fn new(recipe: ProgressBarRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl ProgressBarStyle for RecipeProgressBarStyle {
     fn make_body(&self, cfg: &ProgressBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -55,6 +77,7 @@ impl ProgressBarStyle for RecipeProgressBarStyle {
             track,
             fill,
             determinate_value,
+            recipe: self.recipe,
         })
     }
 }
@@ -75,6 +98,7 @@ struct ProgressBarFrame {
     /// `Some` for determinate bars; `None` for indeterminate (the
     /// widget mounts the sweep leaf separately).
     determinate_value: Option<Prop<f32>>,
+    recipe: ProgressBarRecipe,
 }
 
 impl std::fmt::Debug for ProgressBarFrame {
@@ -106,7 +130,7 @@ impl Widget for ProgressBarFrame {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(PROGRESS_BAR_CORNER_RADIUS);
+        let radius = CornerRadius::uniform(self.recipe.corner_radius);
         let track_color = self.track.resolve(ctx.theme, ctx.effective_enabled);
         canvas.fill_rounded_rect(bounds, radius, track_color);
 

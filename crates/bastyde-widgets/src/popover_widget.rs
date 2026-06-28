@@ -420,7 +420,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     .surface_style
                     .clone()
                     .or_else(|| ctx.theme().style_slots.popover.clone())
-                    .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+                    .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
                 let cfg = PopoverStyleConfig {
                     content: inner_content_id,
                     variant,

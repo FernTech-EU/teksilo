@@ -309,7 +309,7 @@ fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
         .style_slots
         .calendar
         .clone()
-        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle) as SharedCalendarStyle)
+        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle::default()) as SharedCalendarStyle)
 }
 
 fn update_range_status(selection: &SelectionBinding, status: &Signal<String>) {

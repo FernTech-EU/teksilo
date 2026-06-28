@@ -32,10 +32,33 @@ pub const SPLITTER_DIVIDER_LINE_THICKNESS: f32 = 1.0;
 /// the handle's linear `hover_progress` 0→1 onto a delayed alpha ramp.
 const HOVER_DWELL_DELAY_FRAC: f32 = 0.75;
 
+/// Configurable dimensions for [`RecipeSplitterStyle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplitterRecipe {
+    /// Thickness of the always-present resting divider line, in dp.
+    pub divider_line_thickness: f32,
+}
+
+impl Default for SplitterRecipe {
+    fn default() -> Self {
+        Self {
+            divider_line_thickness: SPLITTER_DIVIDER_LINE_THICKNESS,
+        }
+    }
+}
+
 /// Default `SplitterStyle` shipped with Bastyde. Colors come from
 /// `theme.colors.{border, focus_ring}`.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct RecipeSplitterStyle;
+pub struct RecipeSplitterStyle {
+    pub recipe: SplitterRecipe,
+}
+
+impl RecipeSplitterStyle {
+    pub fn new(recipe: SplitterRecipe) -> Self {
+        Self { recipe }
+    }
+}
 
 impl SplitterStyle for RecipeSplitterStyle {
     fn make_handle(&self, cfg: &SplitterStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -45,6 +68,7 @@ impl SplitterStyle for RecipeSplitterStyle {
             is_disabled: cfg.is_disabled.clone(),
             focus_origin: cfg.focus_origin.clone(),
             hover_progress: cfg.hover_progress.clone(),
+            recipe: self.recipe,
         })
     }
 }
@@ -56,6 +80,7 @@ struct SplitterHandleBody {
     is_disabled: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     hover_progress: Signal<f32>,
+    recipe: SplitterRecipe,
 }
 
 impl std::fmt::Debug for SplitterHandleBody {
@@ -99,7 +124,7 @@ impl Widget for SplitterHandleBody {
         let colors = &ctx.theme.colors;
         let enabled = !self.is_disabled.get();
 
-        let line_thickness = SPLITTER_DIVIDER_LINE_THICKNESS.max(1.0);
+        let line_thickness = self.recipe.divider_line_thickness.max(1.0);
         let focus_thickness = (line_thickness * 3.0).max(line_thickness + 2.0);
 
         let line_rect = |thickness: f32| match self.orientation {
