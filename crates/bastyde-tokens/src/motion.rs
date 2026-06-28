@@ -6,6 +6,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Easing curve for animations.
+///
+/// The four named curves are cheap closed forms. `CubicBezier` is the
+/// general CSS `cubic-bezier(x1, y1, x2, y2)` curve (control points
+/// `(0,0)`, `(x1,y1)`, `(x2,y2)`, `(1,1)`) — needed to express
+/// design-language motion specs that don't reduce to the named curves
+/// (Material 3 emphasized/standard, Fluent's curves). `x1`/`x2` should
+/// lie in `0..=1`; `y1`/`y2` may overshoot for spring-like motion.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Easing {
     Linear,
@@ -13,11 +20,18 @@ pub enum Easing {
     #[default]
     EaseOut,
     EaseInOut,
+    CubicBezier {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+    },
 }
 
 impl Easing {
     /// Apply the easing curve to a linear progress value `t` in [0, 1].
-    /// Returns the eased value, also in [0, 1].
+    /// Returns the eased value (which may overshoot [0, 1] for a
+    /// `CubicBezier` with `y` control points outside the unit range).
     pub fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -31,8 +45,57 @@ impl Easing {
                     -1.0 + (4.0 - 2.0 * t) * t
                 }
             }
+            Self::CubicBezier { x1, y1, x2, y2 } => cubic_bezier(x1, y1, x2, y2, t),
         }
     }
+}
+
+/// Evaluate a CSS `cubic-bezier(x1, y1, x2, y2)` curve at time `t`.
+///
+/// The curve is parametric in `s`; we solve `X(s) == t` (Newton-Raphson,
+/// bisection fallback) then return `Y(s)`. Control points are `(0,0)`,
+/// `(x1,y1)`, `(x2,y2)`, `(1,1)`.
+fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
+    // Polynomial coefficients for X(s) and Y(s) (P0 = origin, P3 = (1,1)).
+    let cx = 3.0 * x1;
+    let bx = 3.0 * (x2 - x1) - cx;
+    let ax = 1.0 - cx - bx;
+    let cy = 3.0 * y1;
+    let by = 3.0 * (y2 - y1) - cy;
+    let ay = 1.0 - cy - by;
+    let sample_x = |s: f32| ((ax * s + bx) * s + cx) * s;
+    let sample_y = |s: f32| ((ay * s + by) * s + cy) * s;
+    let sample_dx = |s: f32| (3.0 * ax * s + 2.0 * bx) * s + cx;
+
+    // Newton-Raphson from s = t.
+    let mut s = t;
+    for _ in 0..8 {
+        let x = sample_x(s) - t;
+        if x.abs() < 1e-6 {
+            return sample_y(s);
+        }
+        let dx = sample_dx(s);
+        if dx.abs() < 1e-6 {
+            break;
+        }
+        s -= x / dx;
+    }
+    // Bisection fallback (guaranteed to converge on a monotone X).
+    let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+    let mut s = t.clamp(lo, hi);
+    for _ in 0..32 {
+        let x = sample_x(s);
+        if (x - t).abs() < 1e-6 {
+            break;
+        }
+        if t > x {
+            lo = s;
+        } else {
+            hi = s;
+        }
+        s = (lo + hi) * 0.5;
+    }
+    sample_y(s)
 }
 
 /// Linearly interpolate between two f32 values.
@@ -179,5 +242,52 @@ mod tests {
     fn easing_clamps_input() {
         assert!((Easing::Linear.apply(-1.0) - 0.0).abs() < 0.001);
         assert!((Easing::Linear.apply(2.0) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cubic_bezier_linear_identity() {
+        // cubic-bezier(0,0,1,1) is the identity (== linear).
+        let e = Easing::CubicBezier {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+        };
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            assert!((e.apply(t) - t).abs() < 0.01, "linear bezier at {t}");
+        }
+    }
+
+    #[test]
+    fn cubic_bezier_boundaries_and_monotonic() {
+        // Material 3 "standard" curve.
+        let e = Easing::CubicBezier {
+            x1: 0.2,
+            y1: 0.0,
+            x2: 0.0,
+            y2: 1.0,
+        };
+        assert!((e.apply(0.0) - 0.0).abs() < 0.001);
+        assert!((e.apply(1.0) - 1.0).abs() < 0.001);
+        let mut prev = -1.0;
+        for i in 0..=100 {
+            let v = e.apply(i as f32 / 100.0);
+            assert!(v >= prev - 0.01, "bezier not monotonic at {i}");
+            prev = v;
+        }
+    }
+
+    #[test]
+    fn cubic_bezier_ease_out_is_front_loaded() {
+        // CSS "ease-out" (0,0,0.58,1): at the midpoint progress is well
+        // past halfway (decelerating).
+        let e = Easing::CubicBezier {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 0.58,
+            y2: 1.0,
+        };
+        assert!(e.apply(0.5) > 0.6, "ease-out should be front-loaded");
     }
 }

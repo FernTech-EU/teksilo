@@ -30,7 +30,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use bastyde_canvas::Vec2;
+use bastyde_canvas::{Rect, Vec2};
 use bastyde_tokens::{BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
 
 use crate::styles::Theme;
@@ -148,15 +148,27 @@ impl ShapeRecipe {
 
 // ─── FillRecipe ─────────────────────────────────────────────────────────────
 
-/// What the inside of the [`ShapeRecipe`] is filled with. Solid is the
-/// only variant the renderer paints today; gradient variants exist so
-/// recipe data can describe them, but until the renderer grows
-/// `LinearGradient` / `RadialGradient` paint pipelines they fall
-/// through to `None` (transparent) at draw time.
+/// What the inside of the [`ShapeRecipe`] is filled with.
+///
+/// `Solid` and `StateLayer` both resolve to a flat [`Color`] (the latter
+/// by compositing an `overlay` over a `base` at a given alpha — the
+/// Material-3 / Fluent "state layer" model). `LinearGradient` /
+/// `RadialGradient` describe true gradients; the renderer paints them via
+/// the SDF gradient pipeline once a `PaintProp` carries them (see
+/// `resolve_fill_to_paint`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FillRecipe {
     /// Single flat color.
     Solid(RecipeColor),
+    /// `overlay` composited over `base` at `alpha` — a translucent
+    /// "state layer" (M3 hover = 8 %, pressed = 12 % on-color over the
+    /// base fill). Resolves to a flat [`Color`], so it flows through the
+    /// solid paint path with no gradient support required.
+    StateLayer {
+        base: RecipeColor,
+        overlay: RecipeColor,
+        alpha: f32,
+    },
     /// Linear gradient at `angle_deg` (0° = top→bottom, 90° = leading→trailing).
     LinearGradient {
         stops: Vec<GradientStop>,
@@ -183,6 +195,40 @@ pub struct GradientStop {
 impl FillRecipe {
     pub fn solid(color: impl Into<RecipeColor>) -> Self {
         Self::Solid(color.into())
+    }
+
+    /// A translucent state layer: `overlay` composited over `base` at
+    /// `alpha` (clamped to `0.0..=1.0`). Resolves to a flat [`Color`].
+    pub fn state_layer(
+        base: impl Into<RecipeColor>,
+        overlay: impl Into<RecipeColor>,
+        alpha: f32,
+    ) -> Self {
+        Self::StateLayer {
+            base: base.into(),
+            overlay: overlay.into(),
+            alpha: alpha.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Resolve the flat-color variants (`Solid`, `StateLayer`, `None`)
+    /// against `colors`. Gradient variants return `None` here — they are
+    /// resolved to a `Paint` by `resolve_fill_to_paint`, not to a flat
+    /// color. `FillRecipe::None` maps to `Some(Color::TRANSPARENT)`.
+    pub fn resolve_flat(&self, colors: &ColorTokens) -> Option<Color> {
+        match self {
+            FillRecipe::Solid(c) => Some(c.resolve_with(colors)),
+            FillRecipe::StateLayer {
+                base,
+                overlay,
+                alpha,
+            } => Some(
+                base.resolve_with(colors)
+                    .mix(overlay.resolve_with(colors), *alpha),
+            ),
+            FillRecipe::None => Some(Color::TRANSPARENT),
+            FillRecipe::LinearGradient { .. } | FillRecipe::RadialGradient { .. } => None,
+        }
     }
 }
 
@@ -214,12 +260,50 @@ pub enum BorderPosition {
     Outside,
 }
 
+/// Per-side border widths (logical px). When a [`BorderRecipe`] carries
+/// `sides: Some(BorderSides)`, the four widths override the uniform
+/// `BorderRecipe::width` — letting a recipe draw e.g. a bottom-only
+/// underline (Material 3 / Fluent / Adwaita filled fields). `Leading` /
+/// `Trailing` are RTL-resolved by the paint site, not here.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BorderSides {
+    pub top: f32,
+    pub trailing: f32,
+    pub bottom: f32,
+    pub leading: f32,
+}
+
+impl BorderSides {
+    /// All four sides at `w`.
+    pub fn uniform(w: f32) -> Self {
+        Self {
+            top: w,
+            trailing: w,
+            bottom: w,
+            leading: w,
+        }
+    }
+
+    /// Bottom edge only — the underline case.
+    pub fn bottom(w: f32) -> Self {
+        Self {
+            bottom: w,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BorderRecipe {
     pub width: f32,
     pub color: RecipeColor,
     pub style: BorderStyle,
     pub position: BorderPosition,
+    /// Optional per-side widths. `None` = a uniform `width` border on all
+    /// four sides (the common case). `Some(..)` overrides with per-side
+    /// widths (e.g. a bottom-only underline).
+    #[serde(default)]
+    pub sides: Option<BorderSides>,
 }
 
 impl BorderRecipe {
@@ -229,6 +313,7 @@ impl BorderRecipe {
             color: color.into(),
             style: BorderStyle::Solid,
             position: BorderPosition::Inside,
+            sides: None,
         }
     }
 
@@ -236,6 +321,39 @@ impl BorderRecipe {
     pub fn none() -> Self {
         Self::solid(0.0, RecipeColor::Static(Color::TRANSPARENT))
     }
+
+    /// A bottom-only underline of `width` in `color` (M3 / Fluent /
+    /// Adwaita filled-field underline). `position` is `Inside`.
+    pub fn underline(width: f32, color: impl Into<RecipeColor>) -> Self {
+        Self {
+            width,
+            color: color.into(),
+            style: BorderStyle::Solid,
+            position: BorderPosition::Inside,
+            sides: Some(BorderSides::bottom(width)),
+        }
+    }
+}
+
+/// Offset a stroke rect to honour a [`BorderPosition`].
+///
+/// The SDF stroke is centered on the rect edge ([`BorderPosition::Center`]),
+/// so `Inside` shrinks the rect inward by `width / 2` and `Outside`
+/// expands it outward by the same — placing the whole stroke inside or
+/// outside the original `bounds`. Used by recipe paint sites and
+/// `RectWidget` so a focus ring can sit in the gap outside a control.
+pub fn apply_border_position(bounds: Rect, width: f32, position: BorderPosition) -> Rect {
+    let offset = match position {
+        BorderPosition::Inside => width / 2.0,
+        BorderPosition::Center => 0.0,
+        BorderPosition::Outside => -width / 2.0,
+    };
+    Rect::new(
+        bounds.x + offset,
+        bounds.y + offset,
+        bounds.width - offset * 2.0,
+        bounds.height - offset * 2.0,
+    )
 }
 
 // ─── ShadowRecipe ───────────────────────────────────────────────────────────
@@ -395,6 +513,82 @@ mod tests {
     fn fill_recipe_solid_constructor() {
         let f = FillRecipe::solid(SurfaceRole::Accent);
         assert!(matches!(f, FillRecipe::Solid(RecipeColor::Surface(_))));
+    }
+
+    #[test]
+    fn state_layer_composites_overlay_over_base() {
+        let colors = intui::light().colors;
+        // 50 % white over black = mid-grey.
+        let f = FillRecipe::state_layer(
+            RecipeColor::Static(Color::BLACK),
+            RecipeColor::Static(Color::WHITE),
+            0.5,
+        );
+        let c = f.resolve_flat(&colors).unwrap();
+        assert!((c.r() - 0.5).abs() < 1e-6);
+        assert!((c.g() - 0.5).abs() < 1e-6);
+        assert!((c.b() - 0.5).abs() < 1e-6);
+        // alpha 0 → base unchanged.
+        let f0 = FillRecipe::state_layer(Color::BLACK, Color::WHITE, 0.0);
+        assert_eq!(f0.resolve_flat(&colors).unwrap(), Color::BLACK);
+    }
+
+    #[test]
+    fn state_layer_clamps_alpha() {
+        let f = FillRecipe::state_layer(Color::BLACK, Color::WHITE, 5.0);
+        match f {
+            FillRecipe::StateLayer { alpha, .. } => assert_eq!(alpha, 1.0),
+            _ => panic!("expected StateLayer"),
+        }
+    }
+
+    #[test]
+    fn gradient_has_no_flat_color() {
+        let colors = intui::light().colors;
+        let g = FillRecipe::LinearGradient {
+            stops: vec![],
+            angle_deg: 0.0,
+        };
+        assert!(g.resolve_flat(&colors).is_none());
+    }
+
+    #[test]
+    fn underline_is_bottom_only() {
+        let b = BorderRecipe::underline(2.0, BorderRole::Focused);
+        let sides = b.sides.expect("underline sets per-side widths");
+        assert_eq!(sides.bottom, 2.0);
+        assert_eq!(sides.top, 0.0);
+        assert_eq!(sides.leading, 0.0);
+        assert_eq!(sides.trailing, 0.0);
+    }
+
+    #[test]
+    fn solid_border_has_no_per_side() {
+        assert!(
+            BorderRecipe::solid(1.0, BorderRole::Default)
+                .sides
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn border_position_offsets_stroke_rect() {
+        let bounds = Rect::new(0.0, 0.0, 100.0, 40.0);
+        // Inside shrinks by width/2 on each edge.
+        let inside = apply_border_position(bounds, 4.0, BorderPosition::Inside);
+        assert_eq!(
+            (inside.x, inside.y, inside.width, inside.height),
+            (2.0, 2.0, 96.0, 36.0)
+        );
+        // Center is unchanged.
+        let center = apply_border_position(bounds, 4.0, BorderPosition::Center);
+        assert_eq!((center.x, center.width), (0.0, 100.0));
+        // Outside expands.
+        let outside = apply_border_position(bounds, 4.0, BorderPosition::Outside);
+        assert_eq!(
+            (outside.x, outside.y, outside.width, outside.height),
+            (-2.0, -2.0, 104.0, 44.0)
+        );
     }
 
     #[test]

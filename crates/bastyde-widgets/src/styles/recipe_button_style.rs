@@ -194,14 +194,11 @@ fn bind_border(
 }
 
 fn resolve_fill_to_color(fill: &FillRecipe, colors: &bastyde_tokens::ColorTokens) -> Color {
-    match fill {
-        FillRecipe::Solid(c) => c.resolve_with(colors),
-        FillRecipe::None => Color::TRANSPARENT,
-        // Gradient variants render transparent until the renderer
-        // grows non-solid fill support. RecipeButtonStyle ships only
-        // Solid variants, so this branch is unreachable for IntUI.
-        _ => Color::TRANSPARENT,
-    }
+    // Solid / StateLayer / None resolve to a flat color. Gradient
+    // variants have no flat form here and fall back to transparent —
+    // they are painted via the SDF gradient pipeline once a `PaintProp`
+    // carries them (see `resolve_fill_to_paint`).
+    fill.resolve_flat(colors).unwrap_or(Color::TRANSPARENT)
 }
 
 // ─── IntUI per-variant recipe constructors ──────────────────────────

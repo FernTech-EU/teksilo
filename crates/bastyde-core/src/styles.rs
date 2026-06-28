@@ -147,8 +147,8 @@ pub use progress_bar_style::{
 };
 pub use radio_style::{RadioStyle, RadioStyleConfig, RadioVariant, SharedRadioStyle};
 pub use recipe::{
-    BorderPosition, BorderRecipe, BorderStyle, FillRecipe, GradientStop, PerStateRecipe,
-    RecipeColor, ShadowRecipe, ShapeRecipe, WidgetState,
+    BorderPosition, BorderRecipe, BorderSides, BorderStyle, FillRecipe, GradientStop,
+    PerStateRecipe, RecipeColor, ShadowRecipe, ShapeRecipe, WidgetState, apply_border_position,
 };
 pub use rich_text_editor_style::{
     RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,

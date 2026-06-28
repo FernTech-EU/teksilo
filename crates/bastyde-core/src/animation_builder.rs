@@ -163,6 +163,20 @@ impl AnimationSpec {
         self
     }
 
+    /// A CSS `cubic-bezier(x1, y1, x2, y2)` curve — the general easing
+    /// escape hatch for design-language motion specs (Material 3, Fluent)
+    /// that don't reduce to the named curves.
+    pub fn cubic_bezier(mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        self.easing = Easing::CubicBezier { x1, y1, x2, y2 };
+        self
+    }
+
+    /// Material 3 "emphasized" curve — `cubic-bezier(0.2, 0.0, 0.0, 1.0)`.
+    /// The standard M3 enter/exit feel.
+    pub fn m3_emphasized(self) -> Self {
+        self.cubic_bezier(0.2, 0.0, 0.0, 1.0)
+    }
+
     // -- loop / frame interval / quantization ---------------------------------
 
     /// Switch to looping mode. Sets a sub-perceptual epsilon (1/255)
