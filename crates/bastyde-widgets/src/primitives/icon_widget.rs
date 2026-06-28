@@ -3,15 +3,32 @@
 
 //! IconWidget — a vector or raster icon rendered at a configurable size.
 //!
-//! Supports multiple source formats:
-//! - **Path**: Programmatic vector paths (checkmark, chevrons, etc.)
-//! - **SVG**: Parsed from SVG strings via [`SvgIcon`]
-//! - **PNG/WebP**: Raster images via [`RasterIcon`]
-//! - **Animated WebP**: Frame sequences via [`AnimatedIcon`]
+//! Supports multiple source formats: programmatic `Path` (checkmarks,
+//! chevrons, dots), SVG strings, PNG, static WebP, and animated WebP. Icons
+//! default to **tintable** mode — the pixels are treated as an alpha mask
+//! and multiplied by the widget's color property (defaults to
+//! `TextRole::Primary`) so they follow theme switches automatically.
+//! `IconMode::FullColor` preserves original pixel colors and is appropriate
+//! for emoji-style graphics or brand logos.
 //!
-//! Icons can be **tintable** (rendered as alpha masks tinted with the
-//! widget's color — the default) or **full-color** (original colors
-//! preserved). The tintable mode enables theme-aware icon coloring.
+//! For arbitrary-aspect-ratio photos or artwork see
+//! [`ImageWidget`](super::image_widget::ImageWidget).
+//!
+//! ## Accessibility
+//!
+//! Icons are decorative by default — they set no accessibility role and
+//! announce nothing. The parent widget (e.g. `Button`, `IconButton`) is
+//! responsible for the accessible label.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::icon_widget::{IconWidget, IconMode};
+//! # use bastyde_tokens::TextRole;
+//! let _check = IconWidget::checkmark(20.0);
+//!
+//! let _chevron = IconWidget::chevron_down(16.0)
+//!     .color(TextRole::Primary)
+//!     .follow_text_scale(false);
+//! ```
 
 use std::borrow::Cow;
 
@@ -97,7 +114,7 @@ struct SpriteAtlas {
     rows: u32,
 }
 
-/// A leaf widget that renders an icon from various sources.
+/// A leaf widget that renders an icon from a path, SVG string, PNG, or WebP source.
 pub struct IconWidget {
     source: IconSource,
     /// Design size: the coordinate space the path was created in.

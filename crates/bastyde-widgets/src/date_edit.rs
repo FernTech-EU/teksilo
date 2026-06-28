@@ -96,33 +96,33 @@ type OnValueChanged = Rc<dyn Fn(Option<Date>, &mut EventContext)>;
 /// the time half changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WidthPolicy {
-    /// **Default.** The widget claims its natural width, which is
-    /// the mask-derived empty template (`__/__/____` for ISO date,
-    /// `__:__` for 24h time) measured in the theme body font plus
-    /// the surrounding chrome (padding, trailing trigger button).
-    /// The widget reports a fixed footprint that doesn't reflow as
-    /// the user types — Int UI form-density convention.
+    /// **Default.** The widget claims its natural width: the mask-derived
+    /// empty template (`__/__/____` for ISO date, `__:__` for 24h time)
+    /// measured in the theme body font plus surrounding chrome.
+    /// The footprint stays fixed as the user types — Int UI form-density
+    /// convention. This is the [`Default`].
     #[default]
     Default,
-    /// The widget expands to fill the horizontal space its parent
-    /// offers, instead of capping at the natural width. Use inside
-    /// toolbars, inspector panels, or an `Expand::horizontal` column
-    /// that should stretch with the surrounding layout.
+    /// The widget expands to fill the horizontal space its parent offers,
+    /// instead of capping at the natural mask width. Use inside toolbars,
+    /// inspector panels, or an `Expand::horizontal` column that should
+    /// stretch with the surrounding layout.
     Fill,
 }
 
-/// How the date editor reacts to out-of-range input.
+/// How the date editor reacts to out-of-range or partially invalid input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ValidationBehavior {
-    /// **Default.** Out-of-range inputs are clamped to the nearest
-    /// valid value (e.g. `12/50/2026` → `12/31/2026`) and announced
-    /// via `Live::Polite`. Matches macOS Calendar / iOS DatePicker.
+    /// Out-of-range inputs are clamped to the nearest valid value
+    /// (e.g. `12/50/2026` → `12/31/2026`) and announced via `Live::Polite`.
+    /// Matches macOS Calendar and iOS DatePicker. This is the [`Default`].
     #[default]
     AutoCorrect,
-    /// Out-of-range inputs are rejected with an error message and
-    /// the field's text is left as-typed (so the user can fix it).
-    /// The bound value is unchanged. Matches Excel / Material strict
-    /// validation. Use for high-precision contexts.
+    /// Out-of-range inputs are rejected with an inline error message;
+    /// the field's text is left as-typed so the user can correct it.
+    /// The bound value is unchanged until a valid date is committed.
+    /// Matches Excel / Material strict-validation patterns. Use for
+    /// high-precision contexts where silently rounding is unacceptable.
     Reject,
 }
 
@@ -231,11 +231,15 @@ impl DateEdit {
         s
     }
 
+    /// Clamp the selectable range from below. Dates earlier than `d`
+    /// are rejected on commit and are shown as disabled in the calendar popover.
     pub fn min_date(mut self, d: Date) -> Self {
         self.min_date = Some(d);
         self
     }
 
+    /// Clamp the selectable range from above. Dates later than `d`
+    /// are rejected on commit and are shown as disabled in the calendar popover.
     pub fn max_date(mut self, d: Date) -> Self {
         self.max_date = Some(d);
         self
@@ -248,22 +252,30 @@ impl DateEdit {
         self
     }
 
+    /// Text displayed when the bound value is `None`. Defaults to empty
+    /// (no placeholder rendered).
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
 
+    /// Override which weekday heads the calendar's column grid.
+    /// Defaults to the locale's convention if not set.
     pub fn first_day_of_week(mut self, w: Weekday) -> Self {
         self.first_day_of_week = Some(w);
         self
     }
 
+    /// Show or hide the trailing calendar-icon trigger button that opens
+    /// the calendar popover. Default `true`.
     pub fn show_calendar_button(mut self, show: bool) -> Self {
         self.show_calendar_button = show;
         self
     }
 
+    /// Override where the calendar popover appears relative to the field.
+    /// Default is [`OverlayPlacement::BelowPreferred`].
     pub fn calendar_popover_placement(mut self, p: OverlayPlacement) -> Self {
         self.calendar_popover_placement = p;
         self
@@ -276,6 +288,8 @@ impl DateEdit {
         self
     }
 
+    /// Make the field read-only: text is selectable and copyable but
+    /// not editable, and step keys are suppressed.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
@@ -308,12 +322,18 @@ impl DateEdit {
         self.feedback.clone()
     }
 
+    /// Set the accessible label for the field (also shown by any paired
+    /// `FormLayout` label slot). Defaults to the localized "Date" string.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
 
+    /// Register a callback fired on every committed value change with the
+    /// new `Option<Date>` and a live `EventContext`. Fires only on
+    /// user-driven commits (typing + blur, Enter, calendar selection),
+    /// not on external writes to the bound signal.
     pub fn on_value_changed(
         mut self,
         f: impl Fn(Option<Date>, &mut EventContext) + 'static,
@@ -322,6 +342,7 @@ impl DateEdit {
         self
     }
 
+    /// Return a clone of the bound value signal for external observation.
     pub fn value(&self) -> Signal<Option<Date>> {
         self.value.clone()
     }

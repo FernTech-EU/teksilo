@@ -146,6 +146,7 @@ pub struct SearchField {
 }
 
 impl SearchField {
+    /// Create a search field bound to `text`, the reactive query string.
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
@@ -173,12 +174,14 @@ impl SearchField {
         self
     }
 
+    /// Set the placeholder text shown when the query is empty.
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = Some(ls);
         self
     }
 
+    /// Set an accessible label for the field (announced by screen readers, not visually shown).
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -191,6 +194,7 @@ impl SearchField {
         self
     }
 
+    /// Install a callback invoked when the user presses Enter (or activates the search action).
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Rc::new(f));
         self
@@ -205,16 +209,19 @@ impl SearchField {
         self
     }
 
+    /// Cap the number of suggestions shown in the popup (default 8, minimum 1).
     pub fn max_suggestions(mut self, n: usize) -> Self {
         self.max_suggestions = n.max(1);
         self
     }
 
+    /// Minimum number of characters the user must type before suggestions appear (default 1).
     pub fn min_chars(mut self, n: usize) -> Self {
         self.min_chars = n;
         self
     }
 
+    /// Install a callback invoked when the user picks a suggestion (tap, Enter, or Space).
     pub fn on_select(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
         self

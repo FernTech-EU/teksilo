@@ -1,6 +1,30 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! VStack — a vertical layout container that distributes children top-to-bottom.
+//!
+//! Each child is offered the full container width and its intrinsic preferred
+//! height.  Positive slack (container height minus the sum of children heights
+//! minus spacing) is distributed among children that declare a non-zero `flex`
+//! weight (e.g. [`Expand`](crate::primitives::Expand)).  Over-constraint
+//! deficits are absorbed by children with a non-zero `shrink` weight.
+//! Cross-axis (horizontal) alignment defaults to `Leading` and can be
+//! overridden per container with [`VStack::alignment`] or per child via
+//! `WidgetTree::set_alignment`.
+//!
+//! Use `VStack` when children should be stacked vertically with a configurable
+//! gap; use [`HStack`](crate::primitives::HStack) for the horizontal
+//! counterpart.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{VStack, TextWidget};
+//! # use bastyde_i18n::lit;
+//! let _col = VStack::new()
+//!     .spacing(8.0)
+//!     .child(TextWidget::new(lit!("Heading")))
+//!     .child(TextWidget::new(lit!("Body text")));
+//! ```
+
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::signal::Prop;
@@ -22,6 +46,7 @@ pub struct VStack {
 }
 
 impl VStack {
+    /// Create an empty vertical stack with `Leading` alignment and zero spacing.
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
@@ -38,6 +63,8 @@ impl VStack {
         self
     }
 
+    /// Set the cross-axis (horizontal) alignment applied to every child that
+    /// does not have a per-child override set via `WidgetTree::set_alignment`.
     pub fn alignment(mut self, alignment: HAlignment) -> Self {
         self.alignment = alignment;
         self

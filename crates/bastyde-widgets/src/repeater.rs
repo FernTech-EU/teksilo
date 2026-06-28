@@ -1,14 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! A non-virtualized dynamic collection widget.
+//! Repeater — non-virtualized dynamic widget list driven by a `ListModel<T>`.
 //!
-//! `Repeater` creates one child widget per item in a `ListModel<T>`.
-//! When the model changes, the entire child subtree is rebuilt. This is
-//! suitable for small collections (<100 items) where full rebuild is
-//! acceptable (toolbar buttons, chapter lists, tag lists).
+//! `Repeater` creates one child widget per item in a [`ListModel<T>`](bastyde_data::ListModel)
+//! using a caller-supplied factory closure. When the model changes (push, remove,
+//! replace-all), the entire child subtree is rebuilt from scratch. Use this for
+//! small collections (tag pills, chapter entries, toolbar button sets) where the
+//! rebuild cost is negligible — typically fewer than 100 items. For large or
+//! potentially unbounded collections, prefer [`ListView`](crate::ListView) which
+//! virtualizes the item pool and only builds visible rows.
 //!
-//! For large collections, use `ListView` instead (Phase C).
+//! Children are arranged in a vertical `VStack`; override the gap with
+//! [`Repeater::spacing`]. Accessibility: the `Repeater` node is hidden from
+//! AT by default so children surface directly into the parent's AT subtree.
+//! Supply [`Repeater::a11y_role`] + [`Repeater::a11y_label`] when the children
+//! genuinely form a named list, menu, or toolbar.
+//!
+//! ```rust
+//! # use bastyde_widgets::Repeater;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_data::ListModel;
+//! # use bastyde_i18n::lit;
+//! let model: ListModel<u32> = ListModel::from_vec(vec![1, 2, 3]);
+//! let _w = Repeater::new(model, |_i, _item| {
+//!     Box::new(TextWidget::new(lit!("item")))
+//! })
+//! .spacing(4.0);
+//! ```
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -25,33 +44,9 @@ use bastyde_data::ListModel;
 use crate::primitives::VStack;
 use bastyde_i18n::LocalizedString;
 
-/// A non-virtualized dynamic collection that creates one child widget
-/// per item in a `ListModel<T>`.
+/// A non-virtualized dynamic collection that creates one child widget per item in a `ListModel<T>`.
 ///
-/// ```rust
-/// # use bastyde_widgets::Repeater;
-/// # use bastyde_widgets::primitives::TextWidget;
-/// # use bastyde_data::ListModel;
-/// # use bastyde_i18n::lit;
-/// # struct Item { title: String }
-/// # let model: ListModel<Item> = ListModel::from_vec(vec![
-/// #     Item { title: "Alpha".into() },
-/// #     Item { title: "Beta".into() },
-/// # ]);
-/// let _w = Repeater::new(model, |_index, item| {
-///     Box::new(TextWidget::new(lit!(&item.title)))
-/// })
-/// .spacing(8.0);
-/// ```
-///
-/// # Accessibility
-///
-/// By default the Repeater itself is hidden from assistive technology
-/// (`set_hidden()`); its materialized children connect to the parent's
-/// a11y subtree directly. This avoids announcing a semantically-empty
-/// "list" wrapper around content that may be buttons, tags, or any
-/// other shape. Use [`Repeater::a11y_role`] and [`Repeater::a11y_label`]
-/// when the children genuinely form a named list / menu / toolbar.
+/// See the [module-level docs](self) for usage guidance and an example.
 pub struct Repeater<T: 'static> {
     model: ListModel<T>,
     factory: Rc<dyn Fn(usize, &T) -> Box<dyn Widget>>,

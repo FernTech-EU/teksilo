@@ -62,6 +62,8 @@ pub struct CommandLinkButton {
 }
 
 impl CommandLinkButton {
+    /// Create a `CommandLinkButton` with the given title text.
+    /// Chain `.description(...)` and `.icon(...)` to complete the card layout.
     pub fn new(title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
         Self {

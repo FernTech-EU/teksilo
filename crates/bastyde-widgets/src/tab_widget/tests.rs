@@ -30,6 +30,25 @@ impl Widget for FixedLeaf {
     }
 }
 
+/// A focusable leaf that publishes its own `WidgetId` on build, so a
+/// test can assert focus landed on it.
+#[derive(Debug)]
+struct FocusableLeaf {
+    id_out: Rc<Cell<Option<WidgetId>>>,
+}
+
+impl Widget for FocusableLeaf {
+    fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
+        self.id_out.set(Some(ctx.self_id()));
+        ctx.apply_self_handlers(bastyde_core::widget_builder::HandlerSet::new().focusable(true));
+        Vec::new()
+    }
+
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(100.0, 40.0).into()
+    }
+}
+
 #[derive(Debug)]
 struct BuildCountingLeaf {
     build_count: Rc<Cell<usize>>,
@@ -942,6 +961,102 @@ fn static_tab_disabled_skipped_by_arrow_keys() {
         selected_count, 1,
         "exactly one tab should be marked selected after keyboard nav"
     );
+}
+
+/// Both `Enter` and `Space` activate the focused tab AND dive focus into
+/// its content panel — the desktop tab-control convention (Space/Enter
+/// keyboard parity for invocable controls). Parameterized so each key is
+/// asserted identically.
+fn assert_activation_key_dives_into_panel(activation: Key) {
+    let leaf_id: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab(
+                TabInfo::new().title(label("A")),
+                FocusableLeaf {
+                    id_out: leaf_id.clone(),
+                },
+            )
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    // Tab into the strip — focus lands on the selected (index 0) header.
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let header = tree.focused().expect("Tab should focus a tab header");
+    let leaf = leaf_id.get().expect("panel content should have built");
+    assert_ne!(
+        header, leaf,
+        "focus should start on the header, not the panel"
+    );
+
+    // The activation key dives focus into the selected tab's content panel.
+    tree.press_key(activation, Modifiers::NONE);
+    assert_eq!(
+        tree.focused(),
+        Some(leaf),
+        "{activation:?} on a focused tab header should move focus into the panel's first control"
+    );
+
+    // The focus must survive the next build/layout pass — activation sets
+    // the (already-selected) tab, and a rebuild must not yank focus back
+    // to the header.
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert_eq!(
+        tree.focused(),
+        Some(leaf),
+        "focus should remain inside the panel after a rebuild/layout pass"
+    );
+}
+
+#[test]
+fn enter_on_tab_header_moves_focus_into_panel_content() {
+    assert_activation_key_dives_into_panel(Key::Enter);
+}
+
+#[test]
+fn space_on_tab_header_moves_focus_into_panel_content() {
+    assert_activation_key_dives_into_panel(Key::Space);
+}
+
+/// A content-less tab (no focusable descendant, no `focusable_panel`
+/// opt-in) must NOT trap focus on the non-interactive panel — focus stays
+/// on the header for both activation keys.
+fn assert_activation_key_keeps_focus_on_contentless_header(activation: Key) {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let header = tree.focused().expect("Tab should focus a tab header");
+
+    tree.press_key(activation, Modifiers::NONE);
+    assert_eq!(
+        tree.focused(),
+        Some(header),
+        "{activation:?} on a tab with no focusable panel content should leave focus on the header"
+    );
+}
+
+#[test]
+fn enter_on_contentless_tab_keeps_focus_on_header() {
+    assert_activation_key_keeps_focus_on_contentless_header(Key::Enter);
+}
+
+#[test]
+fn space_on_contentless_tab_keeps_focus_on_header() {
+    assert_activation_key_keeps_focus_on_contentless_header(Key::Space);
 }
 
 // ─── TabWidget — dynamic registration + ListModel mutations ─────────

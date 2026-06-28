@@ -114,6 +114,8 @@ use self::step_button::StepButton;
 // ── Enums ──────────────────────────────────────────────────────────
 
 /// Out-of-range behavior when stepping past `min` or `max`.
+///
+/// Set via [`SpinBox::wrap_mode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WrapMode {
     /// Clamp to `min` / `max` (default).
@@ -124,7 +126,9 @@ pub enum WrapMode {
     Wrap,
 }
 
-/// Step-size policy.
+/// Step-size policy for each key/button press.
+///
+/// Set via [`SpinBox::step_type`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StepType {
     /// Always step by `single_step` (default).
@@ -141,7 +145,9 @@ pub enum StepType {
 pub use bastyde_core::styles::ButtonLayout;
 use bastyde_i18n::LocalizedString;
 
-/// When the mouse wheel adjusts the value.
+/// When the mouse wheel is allowed to adjust the value.
+///
+/// Set via [`SpinBox::wheel_mode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WheelMode {
     /// Wheel adjusts only when the field is focused. Default —
@@ -363,16 +369,22 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
+    /// Set the out-of-range behavior when stepping past `min` or `max`
+    /// (default: `Clamp`).
     pub fn wrap_mode(mut self, mode: WrapMode) -> Self {
         self.wrap_mode = mode;
         self
     }
 
+    /// Set the step-size policy (default: `Fixed`). Use
+    /// `StepType::Adaptive` for values that span many orders of magnitude.
     pub fn step_type(mut self, step_type: StepType) -> Self {
         self.step_type = step_type;
         self
     }
 
+    /// Override the step-button layout (default: `Stacked` — stacked
+    /// up/down buttons to the right of the field).
     pub fn button_layout(mut self, layout: ButtonLayout) -> Self {
         self.button_layout = layout;
         self
@@ -393,6 +405,8 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
+    /// Set when the mouse wheel adjusts the value (default: `Focused` —
+    /// only when the inner field holds focus).
     pub fn wheel_mode(mut self, mode: WheelMode) -> Self {
         self.wheel_mode = mode;
         self
@@ -447,12 +461,17 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
+    /// Set the accessible name announced by screen readers as the
+    /// control's label. ARIA requires spin buttons to have a label;
+    /// when none is set here the caller is responsible for labelling
+    /// via a wrapping element or `access_label`.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
 
+    /// Set the placeholder text shown in the field when it is empty.
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = ls;
@@ -466,6 +485,8 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
+    /// Prevent the user from typing in the field while still allowing
+    /// keyboard and button stepping.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self

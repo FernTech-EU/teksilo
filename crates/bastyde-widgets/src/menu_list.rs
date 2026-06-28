@@ -1,10 +1,43 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! MenuList — a vertical container for MenuItem and MenuSeparator widgets.
+//! MenuList — a themed vertical menu container with keyboard navigation.
 //!
-//! Provides a themed surface (background, border, corner radius) and
-//! keyboard navigation (ArrowUp/Down, Enter, Escape).
+//! `MenuList` is the dropdown panel used by `MenuBar`, `MenuContext`, and
+//! popover-style menus. It provides a themed surface (background, rounded
+//! border, drop shadow) and owns the full keyboard navigation stack:
+//! ArrowUp/Down moves focus, Enter activates, Escape bubbles to the
+//! enclosing overlay host, Home and End jump to the first/last enabled item.
+//! Type-ahead search jumps to the next item whose stripped label starts with
+//! the accumulated keystrokes (500 ms reset window by default).
+//!
+//! Items are added with `.item(widget)` (any `impl Widget`, but typically a
+//! `MenuItem`); separators with `.separator()`. Conditional rows use
+//! `.item_when(widget, visible_prop)` — a hidden row collapses to zero height
+//! and is skipped by keyboard navigation. For very long lists (recent files,
+//! etc.) call `.max_visible_items(n)` to cap the panel height and wrap the
+//! content in a `ScrollArea`.
+//!
+//! **Safe-triangle hover gate.** When a submenu item opens its child overlay,
+//! `MenuList` stamps a shared anchor so sibling items can skip their
+//! hover-switch while the cursor travels diagonally toward the submenu.
+//!
+//! ## Accessibility
+//!
+//! `Role::Menu`; each row is `Role::MenuItem` / `Role::MenuItemCheckBox` /
+//! `Role::MenuItemRadio` as declared by the item. Radio items in the same
+//! list auto-group via `push_to_radio_group` so AT announces "2 of 3".
+//!
+//! ```rust
+//! # use bastyde_widgets::{MenuList, MenuItem};
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! let _w = MenuList::new()
+//!     .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
+//!     .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.copy"))))
+//!     .separator()
+//!     .item(MenuItem::new(lit!("Paste")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.paste"))));
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -40,7 +73,7 @@ enum MenuEntry {
     Separator,
 }
 
-/// A separator line within a MenuList.
+/// A 1 dp horizontal divider line between groups of menu items.
 #[derive(Debug)]
 pub struct MenuSeparator;
 
@@ -170,17 +203,9 @@ impl Widget for KeyboardHighlightWrapper {
     }
 }
 
-/// A themed vertical menu container.
+/// A themed vertical dropdown menu panel with keyboard navigation and type-ahead.
 ///
-/// ```rust
-/// # use bastyde_widgets::{MenuList, MenuItem};
-/// # use bastyde_i18n::lit;
-/// # use bastyde_core::Intent;
-/// let _w = MenuList::new()
-///     .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
-///     .separator()
-///     .item(MenuItem::new(lit!("Paste")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.paste"))));
-/// ```
+/// See the module documentation for the full feature description.
 pub struct MenuList {
     entries: Vec<MenuEntry>,
     root_child_id: Option<WidgetId>,
@@ -242,6 +267,8 @@ pub(crate) struct SafeTriangleState {
 pub(crate) type SharedSafeTriangleState = Rc<RefCell<SafeTriangleState>>;
 
 impl MenuList {
+    /// Create an empty menu list with no items, no height cap, and the default
+    /// 500 ms type-ahead reset window.
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),

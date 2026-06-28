@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Slider — a draggable value selector.
+//! Slider — a draggable value selector bound to a `Signal<f32>`.
 //!
-//! The widget itself owns input handling (drag, keyboard, accessibility
-//! actions) and delegates all visual chrome to a [`SliderStyle`] impl.
-//! The IntUI default ([`crate::styles::RecipeSliderStyle`]) ships out
-//! of the box; apps install a different look per-call via
-//! `Slider::style(...)` or theme-wide via `theme.style_slots.slider`.
+//! The widget owns all input handling: pointer drag (click-to-jump and
+//! thumb-drag), keyboard arrows (`ArrowRight`/`ArrowLeft`/`Up`/`Down`,
+//! `Home`, `End`), and `Increment`/`Decrement` accessibility actions.
+//! All visual chrome is delegated to a
+//! [`SliderStyle`] implementation; the
+//! IntUI default ships out of the box and is also the theme-wide slot
+//! override target (`theme.style_slots.slider`).
 //!
-//! No `paint()` method on this widget — the only canvas work happens
-//! inside the active `SliderStyle::make_body` subtree.
+//! ## Accessibility
+//!
+//! Exposes `Role::Slider` with numeric value, min, max, step, and
+//! orientation. Screen readers announce the current value on every
+//! change. The focus ring follows the `:focus-visible` heuristic —
+//! visible after keyboard interaction, invisible after a pointer tap.
+//!
+//! ```rust
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_widgets::Slider;
+//! let volume = Signal::new(0.5_f32);
+//! let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
+//! ```
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -35,7 +48,9 @@ use bastyde_tokens::Orientation;
 pub use bastyde_core::styles::SliderVariant as SliderVariantExport;
 use bastyde_i18n::LocalizedString;
 
-/// A slider that drives a `Signal<f32>` between min and max.
+/// A draggable value selector bound to a `Signal<f32>` in a continuous
+/// or discrete range. Visual chrome is fully delegated to a
+/// [`SliderStyle`] implementation.
 pub struct Slider {
     value: Signal<f32>,
     min: f32,
@@ -60,6 +75,8 @@ pub struct Slider {
 }
 
 impl Slider {
+    /// Create a horizontal slider bound to `value` with the given inclusive
+    /// range. Use [`orientation`](Self::orientation) to switch to vertical.
     pub fn new(value: Signal<f32>, min: f32, max: f32) -> Self {
         Self {
             value,
@@ -80,11 +97,16 @@ impl Slider {
         }
     }
 
+    /// Set the discrete step size for keyboard arrows and accessibility
+    /// Increment/Decrement actions. When unset, defaults to 1 % of the
+    /// range.
     pub fn step(mut self, step: f32) -> Self {
         self.step = Some(step);
         self
     }
 
+    /// Set the slider orientation (`Horizontal` by default). Vertical
+    /// sliders map Up/Down arrow keys to increase/decrease.
     pub fn orientation(mut self, orientation: Orientation) -> Self {
         self.orientation = orientation;
         self

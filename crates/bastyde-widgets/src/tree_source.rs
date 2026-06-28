@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Type-erased data source for `TreeView`.
+//! Type-erased data source adapter for [`TreeView`](crate::TreeView).
 //!
-//! The tree analogue of [`ListSource`](crate::list_source::ListSource): wraps any
-//! [`TreeDataSource`] behind a uniform set of
-//! `Rc<dyn Fn(..)>` closures keyed on the **visible flat index**, so `TreeView`
-//! stays `TreeView<T>` (no `Key` / source type parameter) and works in indices
-//! throughout. Each closure resolves index → the source's `Key` (via `key_at`)
-//! before calling the source's `parent` / `set_expanded` / `can_accept` / … .
+//! Wraps any [`TreeDataSource`] behind a uniform set of `Rc<dyn Fn(..)>` closures
+//! keyed on the **visible flat index**, so `TreeView<T>` requires no extra type
+//! parameter for the source's `Key`. Each closure resolves index → `Key` (via
+//! `key_at`) before forwarding to the source's `parent`, `set_expanded`,
+//! `can_accept`, etc. The `Key` type is fully captured here and never surfaces
+//! in the view.
 //!
-//! Both backings flow through the single [`TreeSource::from_data_source`]
-//! constructor: the built-in `TreeView::new(TreeModel)` path wraps a
-//! `Rc<TreeSlice<T>>` (which itself implements `TreeDataSource` with
-//! `Key = NodeId`), while `TreeView::from_source` wraps an external source with
-//! its own `Key` (e.g. an entity id). The only built-in-vs-external difference —
-//! the `NodeId`-typed `TreeRowContext` handed to the legacy delegate — lives in
-//! `tree_view.rs`'s row-delegate wrapper, not here.
+//! Both built-in and external backings flow through
+//! [`TreeSource::from_data_source`]: the `TreeView::new(TreeModel)` path wraps a
+//! `Rc<TreeSlice<T>>` (which implements `TreeDataSource<Key = NodeId>`), while
+//! `TreeView::from_source` wraps an external `TreeDataSource` with its own `Key`.
+//! The only built-in-vs-external difference — the `NodeId`-typed `TreeRowContext`
+//! handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
 use std::rc::Rc;
 

@@ -4,13 +4,28 @@
 //! SegmentedControl — mutually exclusive segments in a horizontal row.
 //!
 //! Each segment is a real composed widget — a centered icon + label with
-//! a reactive tint — built from a [`Segment`] descriptor. The control's
-//! style leaf paints only the chrome *behind* the segments (rounded
-//! frame, per-segment hover tint, the selected-segment surface + border,
-//! the keyboard focus ring); it draws no text or icons itself. This keeps
-//! labels locale-reactive (they flow through `TextWidget`), makes icons
-//! and per-segment tooltips first-class, and supports per-segment
-//! disabling.
+//! a reactive tint — built from a [`Segment`] descriptor. The control
+//! binds a `Signal<usize>` index: reading or writing the signal selects
+//! the corresponding segment without rebuilding the tree. Per-segment
+//! disabling, optional leading icons, and optional hover tooltips are all
+//! first-class; the chrome (rounded frame, hover tint, selected-segment
+//! surface) is delegated to the active [`SegmentedControlStyle`](bastyde_core::styles::SegmentedControlStyle).
+//!
+//! ## When to use
+//!
+//! - Use a `SegmentedControl` when there are 2–5 mutually exclusive modes
+//!   that fit in a compact horizontal strip (e.g. view mode, time period).
+//! - Prefer a `ComboBox` when there are more than five options or labels
+//!   are long.
+//! - Prefer `RadioButton` when the options need more vertical space or
+//!   detailed descriptions.
+//!
+//! ## Accessibility
+//!
+//! `Role::RadioGroup` on the control, `Role::RadioButton` per segment.
+//! Arrow keys cycle selection, skipping disabled segments; the entire
+//! control is a single tab stop. `Increment`/`Decrement` AT actions
+//! mirror arrow-key behavior for switch-access users.
 //!
 //! ```ignore
 //! SegmentedControl::new(selected)
@@ -18,10 +33,6 @@
 //!     .segment(Segment::new(tr!(grid_view())).icon(|| IconWidget::grid(14.0)).tooltip(tr!(grid_hint())))
 //!     .segment(Segment::new(tr!(columns())).disabled(true))
 //! ```
-//!
-//! - `Role::RadioGroup` on the control, `Role::RadioButton` per segment.
-//! - Arrow keys cycle selection, skipping disabled segments; focus stays
-//!   on the control (single tab stop).
 
 use std::rc::Rc;
 
@@ -57,8 +68,8 @@ const SEGMENT_ICON_WIDTH_ESTIMATE: f32 = 18.0;
 /// without consuming it.
 type IconFactory = Rc<dyn Fn() -> IconWidget>;
 
-/// One segment in a [`SegmentedControl`]: a localized label plus an
-/// optional leading icon, hover tooltip, and disabled flag.
+/// One segment descriptor: a localized label with an optional leading
+/// icon, hover tooltip, and disabled flag.
 #[derive(Clone)]
 pub struct Segment {
     label: LocalizedString,
@@ -261,7 +272,9 @@ impl Widget for SegmentCell {
     }
 }
 
-/// A segmented control with mutually exclusive segments.
+/// A segmented control that binds a `Signal<usize>` index to a row of
+/// mutually exclusive segments. Build the segment list with
+/// [`segment`](Self::segment) or [`segments`](Self::segments).
 pub struct SegmentedControl {
     /// Segment descriptors. Retained (cloned, not consumed, into cells on
     /// each build) so the control is rebuild-safe and so `layout_response`
@@ -289,8 +302,8 @@ pub struct SegmentedControl {
 }
 
 impl SegmentedControl {
-    /// A new, empty segmented control bound to `selected`. Add segments
-    /// with [`segment`](Self::segment) / [`segments`](Self::segments).
+    /// Create an empty segmented control bound to `selected`. Add segments
+    /// with [`segment`](Self::segment) or [`segments`](Self::segments).
     pub fn new(selected: Signal<usize>) -> Self {
         Self {
             segments: Vec::new(),

@@ -786,7 +786,7 @@ interpret it freely.
 | `ArrowRight` / `ArrowDown`| move selection to next enabled tab                       |
 | `Home`                    | jump to first enabled tab                                |
 | `End`                     | jump to last enabled tab                                 |
-| `Enter` / `Space`         | activate the focused tab (sets `selected_id`)            |
+| `Enter` / `Space`         | activate the tab **and move focus into its content panel** (first focusable descendant) |
 | `Ctrl+W`                  | close the focused tab if `closable`                      |
 | `Middle-click`            | close the clicked tab if `closable` (mouse, not keyboard)|
 
@@ -794,6 +794,18 @@ Disabled tabs are **skipped** by all keyboard navigation. Out-of-range
 selection writes are absorbed harmlessly. Focus moves with selection;
 `ScrollArea` scrolls the bar to keep the focused tab visible via the
 existing `ScrollIntoView` event.
+
+`Enter` and `Space` behave identically — both let keyboard / screen-reader
+users dive from the tab strip straight into the panel without hunting for
+the Tab stop. This matches the desktop tab-control convention (Windows /
+JAWS: Space or Enter *invokes* a tab and a well-built control sets focus to
+the start of the panel) and the Spacebar/Enter keyboard-parity guidance for
+invocable controls. The dive lands on the panel's first focusable control; a
+panel that opted into focusability itself (`TabInfo::focusable_panel(true)`)
+with no inner controls receives focus directly; a panel with neither leaves
+focus on the header (it is never trapped on a non-interactive container).
+This is `TabWidget`-only — a standalone `TabBar` has no content panel, so
+`Enter` / `Space` there only activate.
 
 The framework dispatches both ArrowLeft/Up and ArrowRight/Down to the
 "prev/next" handlers regardless of orientation — the same key map works

@@ -1,10 +1,28 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Divider — a themed separator line.
+//! Divider — a themed separator line that visually partitions content.
 //!
-//! A thin line that separates content visually. Horizontal by default.
-//! Color defaults to `theme.colors.border`.
+//! `Divider` renders a single hairline stroke (`DIVIDER_THICKNESS` = 1 dp by
+//! default) using the theme's divider color. It comes in two orientations:
+//! horizontal (the default, spans the proposed width and has a fixed 1 dp
+//! height) and vertical (spans the proposed height, 1 dp wide). Both the
+//! thickness and the color can be overridden per-instance without a custom
+//! style.
+//!
+//! ## Accessibility
+//!
+//! The widget emits `Role::Splitter`, which matches the ARIA separator pattern
+//! and signals a structural boundary to screen readers.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::Divider;
+//! // Horizontal rule between two content sections
+//! let _rule = Divider::new();
+//!
+//! // Vertical rule inside a toolbar
+//! let _vbar = Divider::vertical();
+//! ```
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal, StrokeStyle};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -24,6 +42,7 @@ pub struct Divider {
 }
 
 impl Divider {
+    /// Create a horizontal `Divider` with default theme thickness and color.
     pub fn new() -> Self {
         Self {
             orientation: Orientation::Horizontal,
@@ -32,10 +51,12 @@ impl Divider {
         }
     }
 
+    /// Create a horizontal `Divider` — alias for `Divider::new()`.
     pub fn horizontal() -> Self {
         Self::new()
     }
 
+    /// Create a vertical `Divider` that spans the proposed height.
     pub fn vertical() -> Self {
         Self {
             orientation: Orientation::Vertical,
@@ -43,6 +64,8 @@ impl Divider {
         }
     }
 
+    /// Override the stroke thickness in logical pixels; defaults to
+    /// [`DIVIDER_THICKNESS`] (1 dp).
     pub fn thickness(mut self, thickness: f32) -> Self {
         self.thickness = Some(thickness);
         self

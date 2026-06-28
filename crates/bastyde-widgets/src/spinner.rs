@@ -10,12 +10,13 @@
 //! does not re-run between frames and there's no signal-dirty-mark
 //! cascade.
 //!
-//! ```ignore
-//! ctx.add(
-//!     Spinner::new(24.0)
-//!         .color(TextRole::Secondary)
-//!         .label("Loading"),
-//! );
+//! ```rust
+//! # use bastyde_widgets::Spinner;
+//! # use bastyde_tokens::TextRole;
+//! # use bastyde_i18n::lit;
+//! let _s = Spinner::new(24.0)
+//!     .color(TextRole::Secondary)
+//!     .label(lit!("Loading"));
 //! ```
 //!
 //! Defaults match the typical CSS spinner: a quarter-circle (90°)
@@ -43,8 +44,11 @@ const DEFAULT_PERIOD: Duration = Duration::from_millis(900);
 const DEFAULT_ARC_FRACTION: f32 = 0.25;
 const DEFAULT_STROKE_FRACTION: f32 = 0.12;
 
-/// A circular-arc loading indicator. Decorative; pair with `.label`
-/// for screen readers.
+/// A circular-arc loading indicator driven by a GPU shader quad.
+///
+/// Decorative — pair with [`.label`](Self::label) to give screen readers
+/// context. Honours `prefers-reduced-motion` by falling back to a static
+/// three-quarter arc.
 pub struct Spinner {
     size: f32,
     period: Duration,

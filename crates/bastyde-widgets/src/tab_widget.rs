@@ -711,26 +711,38 @@ impl TabWidget {
         self.idle_text_role = Some(role);
         self
     }
+    /// Minimum scrollable-tab width in logical pixels. Default
+    /// [`DEFAULT_MIN_TAB_WIDTH`].
     pub fn min_tab_width(mut self, dp: f32) -> Self {
         self.min_tab_width = Some(dp);
         self
     }
+    /// Maximum scrollable-tab width in logical pixels. Default
+    /// [`DEFAULT_MAX_TAB_WIDTH`].
     pub fn max_tab_width(mut self, dp: f32) -> Self {
         self.max_tab_width = Some(dp);
         self
     }
+    /// Fixed width for pinned (icon-only) tabs in logical pixels. Default
+    /// [`DEFAULT_PINNED_TAB_WIDTH`].
     pub fn pinned_tab_width(mut self, dp: f32) -> Self {
         self.pinned_tab_width = Some(dp);
         self
     }
+    /// Show or hide the leading/trailing scroll-arrow buttons when tabs overflow.
+    /// Default (unset) uses the style's preference.
     pub fn show_scroll_arrows(mut self, on: bool) -> Self {
         self.show_scroll_arrows = Some(on);
         self
     }
+    /// Show or hide the "show all tabs" overflow dropdown button when tabs
+    /// overflow. Default (unset) uses the style's preference.
     pub fn show_overflow_dropdown(mut self, on: bool) -> Self {
         self.show_overflow_dropdown = Some(on);
         self
     }
+    /// Allow drag-to-reorder of tabs within the bar. Default `false`.
+    /// Setting [`on_reorder`](Self::on_reorder) implies `reorderable(true)`.
     pub fn reorderable(mut self, on: bool) -> Self {
         self.reorderable = on;
         self
@@ -854,10 +866,15 @@ impl TabWidget {
         self
     }
 
+    /// Place a widget on the leading edge of the tab strip (before the first
+    /// tab). Memoized: registered once on first build, reused on rebuilds.
     pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
         self.bar_leading_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
         self
     }
+    /// Place a widget on the trailing edge of the tab strip (after the last
+    /// tab and overflow button). Memoized like
+    /// [`bar_leading_slot`](Self::bar_leading_slot).
     pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self {
         self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
         self

@@ -1,6 +1,34 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Center — a single-child wrapper that centers its child within the available
+//! space.
+//!
+//! On a **bounded axis** (the parent proposes an exact size), `Center` fills
+//! that dimension and places the child in the middle. On an **unbounded axis**
+//! (the parent leaves it open, as a stack does on its main axis), `Center`
+//! shrink-wraps to the child's natural size rather than collapsing to zero —
+//! this prevents the child from overflowing a prior sibling. `Center` always
+//! reports `flex = 0`, so it never claims slack from a stack's distribution
+//! pass; to center content *within leftover space*, wrap it in an `Expand`:
+//! `Expand::horizontal().child(Center::new().child(w))`.
+//!
+//! ## When to use
+//!
+//! - Center a small widget inside a bounded slot (e.g., an icon in a fixed
+//!   square cell).
+//! - Shrink-wrap and center an element inside a layout that provides an exact
+//!   proposal in both axes.
+//!
+//! For claiming *all* remaining stack space and then centering within it, use
+//! [`Expand`](crate::primitives::Expand) wrapping `Center` instead.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{Center, RectWidget};
+//! // Center a rect in the full slot provided by its parent
+//! let _centered = Center::new().child(RectWidget::new());
+//! ```
+
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
@@ -28,6 +56,7 @@ pub struct Center {
 }
 
 impl Center {
+    /// Create a new `Center` with no child attached.
     pub fn new() -> Self {
         Self {
             child_id: None,

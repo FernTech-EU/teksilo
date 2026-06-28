@@ -197,15 +197,19 @@ impl ToastAction {
         self
     }
 
+    /// Resolve the action label to a plain string using the current locale.
     pub fn label(&self) -> String {
         self.label.resolve_now()
     }
+    /// Return the action's rendering style (link vs button variant).
     pub fn style_ref(&self) -> &ToastActionStyle {
         &self.style
     }
+    /// Return `true` when invoking this action also dismisses the toast.
     pub fn closes_toast_flag(&self) -> bool {
         self.closes_toast
     }
+    /// Return the associated `Shortcut` id, if any.
     pub fn shortcut_id_ref(&self) -> Option<&str> {
         self.shortcut_id.as_deref()
     }
@@ -215,9 +219,11 @@ impl ToastAction {
         self.label.clone()
     }
 
+    /// Return the optional tooltip text, if one was set via [`tooltip`](ToastAction::tooltip).
     pub fn tooltip_ref(&self) -> Option<&LocalizedString> {
         self.tooltip.as_ref()
     }
+    /// Clone the invocation callback — cheap because the underlying closure is `Rc`-wrapped.
     pub fn callback(&self) -> ToastActionCallback {
         self.on_invoke.clone()
     }
@@ -429,10 +435,13 @@ impl Toast {
 
     // ----- Actions -----
 
+    /// Append a [`ToastAction`] (link or button) to the toast.
     pub fn action(mut self, action: ToastAction) -> Self {
         self.actions.push(action);
         self
     }
+    /// Shorthand for appending a filled-button primary action — equivalent to
+    /// `.action(ToastAction::primary(label, on_invoke))`.
     pub fn primary_action(
         self,
         label: impl Into<LocalizedString>,
@@ -443,6 +452,8 @@ impl Toast {
 
     // ----- Lifetime -----
 
+    /// Override the auto-dismiss countdown. Pass `Duration::ZERO` for immediate dismissal
+    /// on the next timer tick; call [`persistent`](Toast::persistent) to disable the timer entirely.
     pub fn auto_dismiss_after(mut self, duration: Duration) -> Self {
         self.auto_dismiss_after = Some(duration);
         self
@@ -454,6 +465,8 @@ impl Toast {
         self.auto_dismiss_after = None;
         self
     }
+    /// Set the queue priority. `High` / `Urgent` entries evict the oldest `Normal` entry
+    /// when the slot pool is full; `Urgent` also forces `Live::Assertive` regardless of severity.
     pub fn priority(mut self, priority: ToastPriority) -> Self {
         self.priority = priority;
         self
@@ -488,6 +501,7 @@ impl Toast {
         self.on_dismiss = Some(Rc::new(f));
         self
     }
+    /// Show or hide the trailing close (×) button. Default `true`.
     pub fn show_close_button(mut self, show: bool) -> Self {
         self.show_close_button = show;
         self
@@ -524,6 +538,8 @@ impl Toast {
 
     // ----- Style -----
 
+    /// Override the visual chrome for this toast instance. Takes precedence over the
+    /// theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.
     pub fn style(mut self, style: impl bastyde_core::styles::ToastStyle) -> Self {
         self.style_override = Some(Rc::new(style));
         self

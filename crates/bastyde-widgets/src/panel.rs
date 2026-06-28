@@ -1,18 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Panel — a themed container with background, border, corner radius, and padding.
+//! Panel — a themed single-child container that provides a background, border,
+//! corner radius, and padding.
 //!
-//! Like Qt's QFrame: a single-child wrapper that provides visual framing.
-//! Visual properties come from the theme by default but can be overridden.
+//! The equivalent of Qt's `QFrame`: a visual wrapper whose chrome comes from
+//! the active [`PanelStyle`](bastyde_core::styles::PanelStyle) trait
+//! implementation. The IntUI default (`RecipePanelStyle`) honours four
+//! [`PanelVariant`] presets (Plain /
+//! Sunken / Raised / Highlighted) while still accepting per-call overrides
+//! for background, border colour/width, corner radius, and padding. Apps
+//! requiring a custom surface (frosted glass, brutalist frame) supply their
+//! own `impl PanelStyle` per-call (`.style(...)`) or theme-wide via
+//! `theme.style_slots.panel`.
 //!
-//! Panel composes its chrome via the `PanelStyle` trait protocol.
-//! The default `RecipePanelStyle` honours all four `PanelVariant` values
-//! (Plain / Sunken / Raised / Highlighted) plus per-call manual overrides
-//! (background, border_color, border_width, corner_radius, padding).
-//! Apps that want a different chrome (frosted-glass panel, brutalist
-//! frame) plug their own `impl PanelStyle` per-call (`.style(...)`) or
-//! theme-wide via `theme.style_slots.panel = Some(Rc::new(MyPanel))`.
+//! ## Accessibility
+//!
+//! Emits `Role::Group` by default. Call `.a11y_presentational()` to suppress
+//! the group node when the panel is purely decorative (e.g. a toolbar
+//! background that should not introduce a spurious container in the AT tree).
+//!
+//! ```rust
+//! # use bastyde_widgets::Panel;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _w = Panel::new()
+//!     .padding(12.0)
+//!     .child(TextWidget::new(lit!("Content")));
+//! ```
 
 use std::rc::Rc;
 
@@ -51,6 +66,7 @@ impl std::fmt::Debug for Panel {
 }
 
 impl Panel {
+    /// Construct a panel with default theme values (Plain variant, no manual overrides).
     pub fn new() -> Self {
         Self {
             child_id: None,

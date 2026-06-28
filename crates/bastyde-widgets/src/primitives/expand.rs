@@ -1,6 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Expand — a layout modifier that claims slack space in a stack and
+//! stretches its child to fill the allocated bounds.
+//!
+//! Inside an [`HStack`](crate::primitives::HStack) or
+//! [`VStack`](crate::primitives::VStack), `Expand` participates in the flex
+//! distribution pass by reporting a non-zero `flex` weight (default `1.0`).
+//! The parent stack distributes leftover space proportionally to each child's
+//! flex weight. `Expand::new()` competes on **both axes**;
+//! `Expand::horizontal()` and `Expand::vertical()` restrict competition to
+//! the named axis so they do not accidentally steal slack from orthogonal
+//! siblings. By default the wrapped child is stretched to the full allocated
+//! rectangle; call `.align_child(alignment)` to keep the child at its natural
+//! size and align it within the slot instead.
+//!
+//! The default flex basis is **zero** (CSS `flex-basis: 0`), giving exact
+//! proportional ratios. Call `.respect_intrinsic()` to switch to **auto**
+//! basis where the child's natural size acts as a floor before flex slack is
+//! added.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{HStack, Expand, RectWidget};
+//! // Two panels sharing horizontal space in a 1:2 ratio
+//! let _row = HStack::new()
+//!     .child(Expand::new().flex(1.0).child(RectWidget::new()))
+//!     .child(Expand::new().flex(2.0).child(RectWidget::new()));
+//! ```
+
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,

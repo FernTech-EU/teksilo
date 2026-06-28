@@ -4,12 +4,36 @@
 //! GroupBox — titled cluster of controls in Int UI / Jewel style.
 //!
 //! A bold title (optionally preceded by a checkbox) sits above an indented
-//! content area. No border, no frame — pure composition.
+//! content area. No border, no frame — pure composition. The standard use
+//! is grouping related settings controls on a preferences sheet or
+//! form — the IntelliJ "group" pattern.
 //!
 //! In checkable mode, unchecking disables event dispatch to every descendant
 //! of the content area (via `ctx.enabled_when` with ancestor propagation) AND
 //! paints a translucent surface overlay over the content so it reads as
 //! greyed-out. The title checkbox itself stays interactive.
+//!
+//! ## When to use
+//!
+//! - **GroupBox** — logical cluster with a title; optional enable/disable
+//!   toggle for the whole cluster. Use for settings sections.
+//! - [`GroupHeader`](crate::GroupHeader) — lighter-weight "soft divider +
+//!   caption" without a content slot; use to label regions that are not
+//!   collapsed or disabled as a unit.
+//!
+//! ## Accessibility
+//!
+//! The box node carries `Role::Group` and its `name` is set to the title
+//! string. When checkable and unchecked, `set_disabled()` is set on the
+//! group node so assistive technology announces the cluster as unavailable.
+//!
+//! ```rust
+//! # use bastyde_widgets::GroupBox;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _w = GroupBox::new(lit!("Indentation"))
+//!     .child(TextWidget::new(lit!("Tab width: 4")));
+//! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -24,11 +48,17 @@ use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack}
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
-/// GroupBox design tokens.
+/// Horizontal indent of the content area below the title (dp).
 pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
+/// Vertical gap between the title row and the content area (dp).
 pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
+/// Gap between the checkbox and the adjacent title label in checkable mode (dp).
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 
+/// A titled cluster of controls with optional enable/disable toggle.
+///
+/// See the [module documentation](self) for the checkable-mode details and
+/// the [`GroupHeader`](crate::GroupHeader) sibling.
 pub struct GroupBox {
     title: LocalizedString,
     checked: Option<Signal<bool>>,
@@ -38,6 +68,7 @@ pub struct GroupBox {
 }
 
 impl GroupBox {
+    /// Create a non-checkable group box with the given `title`.
     pub fn new(title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
         Self {

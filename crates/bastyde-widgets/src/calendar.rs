@@ -172,14 +172,14 @@ impl CalendarMode {
     }
 }
 
-/// Whether and how week numbers are displayed in the leading column.
+/// Whether and how week numbers are displayed in the leading column of the day grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeekNumberDisplay {
     /// No week-number column (default).
     #[default]
     None,
-    /// ISO 8601 week number (week 1 is the week containing the first
-    /// Thursday of the year).
+    /// ISO 8601 week number — week 1 is the week containing the first
+    /// Thursday of the year. Adds a narrow column to the left of the day grid.
     Iso8601,
 }
 

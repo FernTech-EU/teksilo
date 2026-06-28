@@ -1,6 +1,42 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Snackbar — a transient, button-triggered floating notification surface.
+//!
+//! A `Snackbar` pairs a trigger (a `Button` by default, or any custom
+//! widget via `.trigger(...)`) with a dormant content surface. Activating
+//! the trigger presents the surface as an `OverlayPlacement::BottomCenter`
+//! overlay and dismisses it automatically after a configurable timeout
+//! (default: 4 s). The surface stays until dismissed when `.persistent()`
+//! is set. Only one snackbar can be shown at a time — presenting a second
+//! one dismisses the first.
+//!
+//! For richer, stackable, severity-aware notifications see the
+//! [`Toast`](crate::toast::Toast) system, which also maintains a
+//! persistent `NotificationArchiveModel`.
+//!
+//! ## Accessibility
+//!
+//! The content surface exposes `Role::Alert` with `Live::Polite` so
+//! screen readers announce the notification without interrupting the user.
+//! Supply `.announcement(...)` to give the alert a descriptive name
+//! instead of the generic "notification" fallback.
+//!
+//! ```ignore
+//! use bastyde_widgets::{Snackbar};
+//! use bastyde_i18n::lit;
+//! use bastyde_widgets::primitives::TextWidget;
+//! use bastyde_tokens::TextRole;
+//!
+//! // In build():
+//! ctx.add(
+//!     Snackbar::new(lit!("Undo"))
+//!         .content(TextWidget::new(lit!("File deleted.")).color(TextRole::TooltipText))
+//!         .announcement(lit!("File deleted."))
+//!         .auto_dismiss_after(std::time::Duration::from_secs(5)),
+//! );
+//! ```
+
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -165,6 +201,12 @@ impl Widget for SnackbarSurface {
     }
 }
 
+/// A button-triggered transient notification surface.
+///
+/// Call `.content(...)` to supply the notification body, then add the
+/// widget to the tree. The trigger label is shown as a `Button` (or a
+/// custom widget via `.trigger(...)`); activating it presents the
+/// content surface at the bottom center of the window.
 pub struct Snackbar {
     label: LocalizedString,
     variant: ButtonVariant,
@@ -183,6 +225,7 @@ pub struct Snackbar {
 }
 
 impl Snackbar {
+    /// Create a snackbar whose default trigger button shows `label`.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {
@@ -223,41 +266,54 @@ impl Snackbar {
         self
     }
 
+    /// Supply the notification body by `WidgetId` (already added to the
+    /// tree). Mutually exclusive with `.content(...)`.
     pub fn content_id(mut self, id: WidgetId) -> Self {
         self.pending_content = Some(PendingChild::Id(id));
         self
     }
 
+    /// Override the default trigger [`ButtonVariant`] (default: `Plain`).
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
         self
     }
 
+    /// Set the initial enabled state of the trigger.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
+    /// Override the overlay dismiss behavior (default: `ClickOutside`).
     pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self {
         self.dismiss = dismiss;
         self
     }
 
+    /// Set the auto-dismiss timeout. The overlay is removed after this
+    /// duration without user interaction (default: 4 s).
     pub fn auto_dismiss_after(mut self, duration: Duration) -> Self {
         self.auto_dismiss_after = Some(duration);
         self
     }
 
+    /// Keep the snackbar visible until explicitly dismissed; disables
+    /// the auto-dismiss timeout.
     pub fn persistent(mut self) -> Self {
         self.auto_dismiss_after = None;
         self
     }
 
+    /// Replace the default `Button` trigger with a custom widget. The
+    /// widget is wired for tap, keyboard (Enter/Space), and AT Click
+    /// activation automatically.
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
         self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
         self
     }
 
+    /// Supply the custom trigger by `WidgetId` (already added to the tree).
     pub fn trigger_id(mut self, id: WidgetId) -> Self {
         self.pending_trigger = Some(PendingChild::Id(id));
         self

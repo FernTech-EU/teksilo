@@ -385,7 +385,7 @@ table.column_resize_policy(ColumnResizePolicy::OnRelease)   // commit on Pointer
 The handler converts window-space pointer coordinates into cell-local
 coordinates using the cell's window origin, captured in
 `place_children`. Without that translation, the resize zone test would
-mis-fire from anywhere in any column past the first one.
+misfire from anywhere in any column past the first one.
 
 ### Column reorder
 

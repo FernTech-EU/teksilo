@@ -46,6 +46,17 @@
 //!   `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
 //! - Each `TextInputField` keeps its own `Role::TextInput` AT node;
 //!   the wrapper's `Role::DateInput` provides the range semantics.
+//!
+//! ```ignore
+//! // Requires ctx.signal() — shown as ignore per convention.
+//! use bastyde_widgets::date_range_edit::DateRangeEdit;
+//! use jiff::civil::Weekday;
+//!
+//! let range = ctx.signal(None);
+//! let _w = DateRangeEdit::new(range.clone())
+//!     .first_day_of_week(Weekday::Monday)
+//!     .on_value_changed(|r, _ctx| println!("{r:?}"));
+//! ```
 
 #[cfg(test)]
 mod tests;
@@ -134,6 +145,7 @@ impl std::fmt::Debug for DateRangeEdit {
 }
 
 impl DateRangeEdit {
+    /// Create a date-range picker bound to `value`.
     pub fn new(value: Signal<Option<DateRange>>) -> Self {
         let initial = value.get();
         let start_part = Signal::new(initial.map(|r| r.start));
@@ -170,31 +182,38 @@ impl DateRangeEdit {
         self
     }
 
+    /// Restrict the selectable start and end dates to those on or after `d`.
     pub fn min_date(mut self, d: Date) -> Self {
         self.min_date = Some(d);
         self
     }
 
+    /// Restrict the selectable start and end dates to those on or before `d`.
     pub fn max_date(mut self, d: Date) -> Self {
         self.max_date = Some(d);
         self
     }
 
+    /// Override the strftime-subset format pattern for both halves
+    /// (e.g. `"%d/%m/%Y"`). Defaults to the locale-derived pattern.
     pub fn format_pattern(mut self, p: impl Into<String>) -> Self {
         self.pattern = Some(p.into());
         self
     }
 
+    /// Placeholder shown in the start half when no date is set.
     pub fn placeholder_start(mut self, text: impl Into<LocalizedString>) -> Self {
         self.placeholder_start = text.into();
         self
     }
 
+    /// Placeholder shown in the end half when no date is set.
     pub fn placeholder_end(mut self, text: impl Into<LocalizedString>) -> Self {
         self.placeholder_end = text.into();
         self
     }
 
+    /// Override which weekday appears in the first column of the calendar popup.
     pub fn first_day_of_week(mut self, w: Weekday) -> Self {
         self.first_day_of_week = Some(w);
         self
@@ -206,17 +225,22 @@ impl DateRangeEdit {
         self
     }
 
+    /// Make both halves read-only; the calendar button is also disabled.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
     }
 
+    /// Accessible label for the wrapper `Role::DateInput` node. When not set,
+    /// falls back to the localized `date-range-edit-name` message.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
 
+    /// How both halves handle invalid or out-of-range text on blur / Enter.
+    /// Defaults to `ValidationBehavior::AutoCorrect`.
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
         self
@@ -233,10 +257,15 @@ impl DateRangeEdit {
         self
     }
 
+    /// Reactive handle on the composed validation feedback (worse of the two
+    /// halves — `Invalid > Corrected > Valid > Pristine`).
     pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback> {
         self.feedback.clone()
     }
 
+    /// Callback invoked whenever the range changes (including when one half
+    /// clears its value). Receives the new `Option<DateRange>` and an
+    /// `EventContext` for dispatching intents or side effects.
     pub fn on_value_changed(
         mut self,
         f: impl Fn(Option<DateRange>, &mut EventContext) + 'static,
@@ -245,6 +274,7 @@ impl DateRangeEdit {
         self
     }
 
+    /// Clone the underlying `Signal<Option<DateRange>>` for external binding.
     pub fn value(&self) -> Signal<Option<DateRange>> {
         self.value.clone()
     }

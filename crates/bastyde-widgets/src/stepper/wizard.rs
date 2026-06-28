@@ -85,6 +85,12 @@ fn present_wizard(spec: &Rc<WizardSpec>, ctx: &mut EventContext) {
 }
 
 /// A button (or custom trigger) that opens a modal [`Stepper`].
+///
+/// `Wizard::new(label)` renders as a `Filled` [`Button`] whose tap opens a
+/// full-screen modal containing a [`Stepper`] built from the same [`Step`]s.
+/// The modal's auto-injected Cancel button and the wrapped Finish both dismiss
+/// it. Override the trigger with [`trigger`](Self::trigger) to use any widget
+/// instead of the default button.
 pub struct Wizard {
     label: LocalizedString,
     variant: ButtonVariant,
@@ -105,6 +111,8 @@ pub struct Wizard {
 }
 
 impl Wizard {
+    /// Create a wizard trigger button with the given label. The label is also
+    /// used as the modal title.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
@@ -126,54 +134,69 @@ impl Wizard {
         }
     }
 
+    /// Append a single [`Step`] to the wizard.
     pub fn step(mut self, step: Step) -> Self {
         self.steps.push(step);
         self
     }
+    /// Append multiple [`Step`]s from an iterator.
     pub fn steps(mut self, steps: impl IntoIterator<Item = Step>) -> Self {
         self.steps.extend(steps);
         self
     }
+    /// Set the visual variant of the trigger button (default `Filled`).
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
         self
     }
+    /// Enable or disable the trigger button. When `false`, tapping or
+    /// pressing the trigger is a no-op.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
+    /// Allow jumping between steps by clicking their indicators (the
+    /// markers become `Role::Tab`). Default: linear.
     pub fn non_linear(mut self, non_linear: bool) -> Self {
         self.non_linear = non_linear;
         self
     }
+    /// Control how the modal is presented (auto, sheet, full-screen, …).
     pub fn presentation(mut self, presentation: ModalPresentation) -> Self {
         self.presentation = presentation;
         self
     }
+    /// Control how the modal is dismissed (manual, click-outside, …).
     pub fn close_behavior(mut self, close_behavior: ModalCloseBehavior) -> Self {
         self.close_behavior = close_behavior;
         self
     }
+    /// Set the preferred modal size in logical pixels. Default 640 × 460.
     pub fn size(mut self, width: u32, height: u32) -> Self {
         self.size = (width, height);
         self
     }
+    /// Override the "Back" button label inside the modal. Default: "Back".
     pub fn back_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.back_label = label.into();
         self
     }
+    /// Override the "Next" button label inside the modal. Default: "Next".
     pub fn next_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.next_label = label.into();
         self
     }
+    /// Override the "Finish" button label inside the modal. Default: "Finish".
     pub fn finish_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.finish_label = label.into();
         self
     }
+    /// Override the "Skip" button label inside the modal. Default: "Skip".
     pub fn skip_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.skip_label = label.into();
         self
     }
+    /// Override the "Cancel" button label inside the modal. Default: "Cancel".
     pub fn cancel_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.cancel_label = label.into();
         self

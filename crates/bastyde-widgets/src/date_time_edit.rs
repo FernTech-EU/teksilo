@@ -48,6 +48,16 @@
 //!   `YYYY-MM-DDTHH:MM:SS` (ISO 8601 datetime).
 //! - Each `TextInputField` keeps its own `Role::TextInput` AT node;
 //!   the wrapper's `Role::DateTimeInput` provides the datetime semantics.
+//!
+//! ```ignore
+//! // Requires ctx.signal() — shown as ignore per convention.
+//! use bastyde_widgets::date_time_edit::{DateTimeEdit, SecondsMode};
+//!
+//! let datetime = ctx.signal(None);
+//! let _w = DateTimeEdit::new(datetime.clone())
+//!     .seconds(SecondsMode::Hidden)
+//!     .on_value_changed(|dt, _ctx| println!("{dt:?}"));
+//! ```
 
 #[cfg(test)]
 mod tests;
@@ -152,6 +162,7 @@ impl std::fmt::Debug for DateTimeEdit {
 }
 
 impl DateTimeEdit {
+    /// Create a datetime picker backed by the optional `value` signal.
     pub fn new(value: Signal<Option<DateTime>>) -> Self {
         let initial = value.get();
         let date_part = Signal::new(initial.map(|dt| dt.date()));
@@ -194,6 +205,9 @@ impl DateTimeEdit {
         self
     }
 
+    /// Create a datetime picker backed by a *required* (non-optional) signal.
+    /// The widget wraps it in an `Option` proxy internally and keeps the two
+    /// in sync via `ctx.effect` — the outer signal is never set to `None`.
     pub fn required(value: Signal<DateTime>) -> Self {
         let proxy: Signal<Option<DateTime>> = Signal::new(Some(value.get()));
         let mut s = Self::new(proxy);
@@ -201,6 +215,8 @@ impl DateTimeEdit {
         s
     }
 
+    /// Override the strftime-subset format pattern for the date half
+    /// (e.g. `"%d/%m/%Y"`). Defaults to the locale-derived pattern.
     pub fn date_format_pattern(mut self, p: impl Into<String>) -> Self {
         self.date_format_pattern = Some(p.into());
         self
@@ -215,31 +231,40 @@ impl DateTimeEdit {
         self
     }
 
+    /// Whether the time half includes a seconds field. Defaults to `SecondsMode::Hidden`.
     pub fn seconds(mut self, mode: SecondsMode) -> Self {
         self.seconds = mode;
         self
     }
 
+    /// Earliest selectable datetime (inclusive). Both the calendar cell and the
+    /// text validator enforce this floor.
     pub fn min(mut self, dt: DateTime) -> Self {
         self.min = Some(dt);
         self
     }
 
+    /// Latest selectable datetime (inclusive). Both the calendar cell and the
+    /// text validator enforce this ceiling.
     pub fn max(mut self, dt: DateTime) -> Self {
         self.max = Some(dt);
         self
     }
 
+    /// Minute increment for Up/Down segment stepping on the minute field.
+    /// Defaults to `1`; values below `1` are clamped to `1`.
     pub fn step_minutes(mut self, n: u32) -> Self {
         self.step_minutes = n.max(1);
         self
     }
 
+    /// Override which weekday appears in the first column of the calendar popup.
     pub fn first_day_of_week(mut self, w: Weekday) -> Self {
         self.first_day_of_week = Some(w);
         self
     }
 
+    /// Show or hide the trailing calendar button. Default `true`.
     pub fn show_calendar_button(mut self, show: bool) -> Self {
         self.show_calendar_button = show;
         self
@@ -253,6 +278,7 @@ impl DateTimeEdit {
         self
     }
 
+    /// Placeholder shown when the datetime is `None`.
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = ls;
@@ -265,11 +291,14 @@ impl DateTimeEdit {
         self
     }
 
+    /// Make both halves read-only; the calendar button is also disabled.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
     }
 
+    /// Accessible label for the wrapper `Role::DateTimeInput` node. When not
+    /// set, falls back to the localized `date-time-edit-name` message.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -301,6 +330,8 @@ impl DateTimeEdit {
         self.feedback.clone()
     }
 
+    /// Callback invoked whenever the datetime changes. Receives the new
+    /// `Option<DateTime>` and an `EventContext` for dispatching intents.
     pub fn on_value_changed(
         mut self,
         f: impl Fn(Option<DateTime>, &mut EventContext) + 'static,
@@ -309,6 +340,7 @@ impl DateTimeEdit {
         self
     }
 
+    /// Clone the underlying `Signal<Option<DateTime>>` for external binding.
     pub fn value(&self) -> Signal<Option<DateTime>> {
         self.value.clone()
     }

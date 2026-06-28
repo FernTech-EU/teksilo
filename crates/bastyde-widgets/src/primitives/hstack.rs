@@ -1,6 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! HStack — a horizontal layout container that distributes children left-to-right.
+//!
+//! Children are given their intrinsic width and the stack's cross-axis height.
+//! Positive slack (leftover space) is distributed among children that carry a
+//! non-zero `flex` weight (e.g. `Spacer`, `Expand`); negative slack (over-constraint)
+//! is absorbed by children with a non-zero `shrink` weight (e.g. a single-line
+//! `TextWidget`). Vertical alignment defaults to `VAlignment::Center` and can be
+//! overridden per-container or per-child.
+//!
+//! For a vertical counterpart see [`VStack`](crate::primitives::VStack).
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{HStack, TextWidget, Spacer};
+//! # use bastyde_i18n::lit;
+//! let _row = HStack::new()
+//!     .spacing(8.0)
+//!     .child(TextWidget::new(lit!("Label")))
+//!     .child(Spacer::new())
+//!     .child(TextWidget::new(lit!("Value")));
+//! ```
+
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::signal::Prop;
@@ -10,9 +31,11 @@ use bastyde_tokens::VAlignment;
 
 use crate::primitives::linear_layout::{self, Axis};
 
-/// Horizontal layout container that distributes children left-to-right
-/// based on their intrinsic sizes. Cross-axis alignment is controlled
-/// by `VAlignment` (default: `Center`).
+/// Horizontal layout container that distributes children left-to-right.
+///
+/// Cross-axis (vertical) alignment defaults to `VAlignment::Center` and may be
+/// overridden globally via [`alignment`](Self::alignment) or per-child via
+/// `WidgetTree::set_alignment`.
 #[derive(Debug)]
 pub struct HStack {
     child_ids: Vec<WidgetId>,
@@ -22,6 +45,7 @@ pub struct HStack {
 }
 
 impl HStack {
+    /// Create an empty `HStack` with no spacing and `VAlignment::Center`.
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
@@ -39,6 +63,7 @@ impl HStack {
         self
     }
 
+    /// Set the vertical alignment for children that are shorter than the stack's height.
     pub fn alignment(mut self, alignment: VAlignment) -> Self {
         self.alignment = alignment;
         self

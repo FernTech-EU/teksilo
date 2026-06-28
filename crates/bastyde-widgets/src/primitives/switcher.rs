@@ -1,6 +1,38 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Switcher — a container that shows exactly one child page at a time.
+//!
+//! `Switcher` is the fundamental tab/wizard/step primitive: it owns N child
+//! pages and exposes only the one whose index matches the `Signal<usize>` it
+//! was constructed with. Switching is a signal write — the framework responds
+//! with a relayout that shows the new page and dormantizes all others (excluded
+//! from focus traversal, accessibility tree, hit-test, and paint).
+//!
+//! **Lazy mount.** Pages added via [`child`](Switcher::child) /
+//! [`children`](Switcher::children) / [`child_boxed`](Switcher::child_boxed)
+//! stay unconstructed until their index is selected for the first time. Once
+//! mounted, the page's subtree persists for the `Switcher`'s lifetime — switching
+//! away then back finds it in the exact state the user left it (focus, scroll
+//! offsets, text-input contents, signal subscriptions). Pages added via
+//! [`child_id`](Switcher::child_id) are pre-mounted by the caller and treated
+//! eagerly.
+//!
+//! The `Switcher` itself reports the maximum natural size across every
+//! currently-mounted page and stretches each placed page to its own bounds —
+//! all pages share the same slot, so the container size never jumps on a switch.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::{Switcher, TextWidget};
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! let page = Signal::new(0_usize);
+//! let _w = Switcher::new(page.clone())
+//!     .child(TextWidget::new(lit!("Step 1")))   // built at startup (index 0 is default)
+//!     .child(TextWidget::new(lit!("Step 2")))   // built on first page.set(1)
+//!     .child(TextWidget::new(lit!("Step 3")));  // built on first page.set(2)
+//! ```
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -69,6 +101,9 @@ pub struct Switcher {
 }
 
 impl Switcher {
+    /// Create a `Switcher` driven by `selected`. The initially selected index
+    /// is `selected.get()` at build time; page 0 is mounted immediately if that
+    /// is the starting value (the most common case).
     pub fn new(selected: Signal<usize>) -> Self {
         Self {
             selected,

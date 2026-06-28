@@ -697,6 +697,7 @@ impl Widget for TabHeader {
         let index = self.index;
         let selected = self.selected.clone();
         let header_ids = self.shared.header_ids.clone();
+        let panel_ids = self.shared.panel_ids.clone();
         let enabled_tabs = self.shared.enabled_tabs.clone();
         let interaction_for_hover = interaction.clone();
         let focused_for_handler = focused.clone();
@@ -724,6 +725,7 @@ impl Widget for TabHeader {
             .on_key({
                 let selected = self.selected.clone();
                 let header_ids = header_ids.clone();
+                let panel_ids = panel_ids.clone();
                 let enabled_tabs = enabled_tabs.clone();
                 let on_close = self.on_close.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
@@ -790,7 +792,25 @@ impl Widget for TabHeader {
                             key: Key::Enter | Key::Space,
                             ..
                         } => {
+                            // Activate the tab AND move focus *into* its content
+                            // panel. Both Enter and Space dive in — the desktop
+                            // tab-control convention screen-reader users
+                            // encounter (Windows/JAWS: Space/Enter "invoke" a
+                            // tab and a well-built control sets focus to the
+                            // start of the panel) and the Spacebar/Enter
+                            // keyboard-parity guidance for invocable controls.
+                            // Activation is idempotent in the
+                            // automatic-activation model (the focused header is
+                            // already the selected one), so the meaningful
+                            // effect is jumping focus to the panel's first
+                            // focusable descendant without hunting for the Tab
+                            // stop. `request_focus_into` is a no-op when the
+                            // panel has no focusable content, so a content-less
+                            // tab keeps focus on its header.
                             selected.set(index);
+                            if let Some(&panel_id) = panel_ids.borrow().get(index) {
+                                ctx.request_focus_into(panel_id);
+                            }
                             EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,

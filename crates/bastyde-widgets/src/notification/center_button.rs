@@ -1,16 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `NotificationCenterButton` — bell icon with unread-count badge,
-//! opening the notification log as a popover.
+//! `NotificationCenterButton` — bell icon with an unread-count badge that
+//! opens a [`NotificationLog`] popover when clicked.
 //!
-//! Composition: `ZStack { popover_icon_button(bell), badge }` where
-//! the popover content is a [`NotificationLog`]. On popover open the
-//! archive is `mark_all_read`-ed so the badge resets — matches the
-//! convention (GitHub, Slack, JetBrains).
+//! Composed as a `ZStack { PopoverIconButton(bell), Badge }`. The badge
+//! shows the current unread count and is hit-transparent so clicks always
+//! reach the bell beneath. On popover close the archive's `mark_all_read`
+//! is called and the badge resets — matching the GitHub / Slack / JetBrains
+//! convention. Most apps mount this in a `StatusBar` or `TitleBar` trailing
+//! slot; all popover behaviour is self-managed with no further wiring.
 //!
-//! Most apps mount this in their `StatusBar` or `TitleBar`. The
-//! button is one widget; the popover behaviour is fully self-managed.
+//! ## Accessibility
+//!
+//! The inner `IconButton` carries the bell `Role::Button` label; the outer
+//! container is `set_hidden` (presentational). The badge count is not
+//! separately announced — the button label and badge label together convey
+//! the state to sighted users; AT users interact through the button itself.
+//!
+//! ```ignore
+//! // Typical setup — archive comes from install_toast_default():
+//! let archive: Rc<NotificationArchiveModel> = ctx.app_state().unwrap();
+//! let bell = NotificationCenterButton::new(archive)
+//!     .on_action_invoked(|_entry, action, ctx| {
+//!         if let Some(name) = &action.intent_name {
+//!             ctx.send_intent(bastyde_core::Intent::new(name));
+//!         }
+//!     });
+//! ```
 
 use bastyde_i18n::lit;
 use std::rc::Rc;

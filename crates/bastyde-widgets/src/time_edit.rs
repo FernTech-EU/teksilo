@@ -27,6 +27,16 @@
 //!   `HH:MM:SS` and `set_label` from `.label()`.
 //! - Underlying TextInputField keeps `Role::TextInput` so AT knows
 //!   it's editable.
+//!
+//! ```ignore
+//! use bastyde_core::signal::Signal;
+//! use bastyde_widgets::time_edit::{TimeEdit, TimeFormat, SecondsMode};
+//!
+//! let value = Signal::new(None);
+//! let _field = TimeEdit::new(value)
+//!     .format(TimeFormat::Hour24)
+//!     .seconds(SecondsMode::Hidden);
+//! ```
 
 #[cfg(test)]
 mod tests;
@@ -55,6 +65,8 @@ use crate::text_input::TextInput;
 use bastyde_i18n::LocalizedString;
 
 /// 12h vs 24h time formatting.
+///
+/// Used with [`TimeEdit::format`] to lock the clock style independently of the locale default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeFormat {
     /// 24-hour clock (default — `%H:%M`).
@@ -64,7 +76,7 @@ pub enum TimeFormat {
     Hour12,
 }
 
-/// Whether the seconds segment is shown.
+/// Whether the seconds segment is shown in [`TimeEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SecondsMode {
     /// Hide the seconds segment (default).
@@ -76,6 +88,10 @@ pub enum SecondsMode {
 
 type OnValueChanged = Rc<dyn Fn(Option<Time>, &mut EventContext)>;
 
+/// Single-line editable time-of-day field.
+///
+/// See the [module documentation](self) for full behaviour, pattern,
+/// and keyboard details.
 pub struct TimeEdit {
     value: Signal<Option<Time>>,
     /// Set by `::required(Signal<Time>)` — wired into `ctx.effect()`
@@ -115,6 +131,7 @@ impl std::fmt::Debug for TimeEdit {
 }
 
 impl TimeEdit {
+    /// Construct bound to `value` (`None` = empty field; `Some(t)` = pre-filled time).
     pub fn new(value: Signal<Option<Time>>) -> Self {
         Self {
             value,
@@ -146,6 +163,8 @@ impl TimeEdit {
         self
     }
 
+    /// Construct with a **required** (non-nullable) `Signal<Time>`. The field
+    /// never shows `None`; the signal and the internal `Option` are kept in sync.
     pub fn required(value: Signal<Time>) -> Self {
         let proxy: Signal<Option<Time>> = Signal::new(Some(value.get()));
         let mut s = Self::new(proxy);
@@ -162,31 +181,38 @@ impl TimeEdit {
         self
     }
 
+    /// Show or hide the seconds segment. Default: [`SecondsMode::Hidden`].
     pub fn seconds(mut self, mode: SecondsMode) -> Self {
         self.seconds = mode;
         self
     }
 
+    /// Override the strftime-subset format pattern (e.g. `"%H:%M:%S"`).
+    /// Bypasses the locale-derived and `format`-derived defaults entirely.
     pub fn format_pattern(mut self, p: impl Into<String>) -> Self {
         self.pattern_override = Some(p.into());
         self
     }
 
+    /// Clamp the accepted value to at or after `t` (inclusive).
     pub fn min_time(mut self, t: Time) -> Self {
         self.min_time = Some(t);
         self
     }
 
+    /// Clamp the accepted value to at or before `t` (inclusive).
     pub fn max_time(mut self, t: Time) -> Self {
         self.max_time = Some(t);
         self
     }
 
+    /// Set the ArrowUp / ArrowDown step in minutes. Default: 1. Must be ≥ 1.
     pub fn step_minutes(mut self, n: u32) -> Self {
         self.step_minutes = n.max(1);
         self
     }
 
+    /// Text shown when the field is empty (value is `None`).
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = ls;
@@ -199,6 +225,7 @@ impl TimeEdit {
         self
     }
 
+    /// Allow display-only mode: text is selectable but not editable.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
@@ -224,12 +251,15 @@ impl TimeEdit {
         self.feedback.clone()
     }
 
+    /// Set the accessible label for the field (announced by screen readers).
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
 
+    /// Callback invoked on every committed value change with the new
+    /// `Option<Time>` and a live `EventContext`.
     pub fn on_value_changed(
         mut self,
         f: impl Fn(Option<Time>, &mut EventContext) + 'static,
@@ -238,6 +268,7 @@ impl TimeEdit {
         self
     }
 
+    /// The bound value signal — the same `Signal` passed to [`Self::new`].
     pub fn value(&self) -> Signal<Option<Time>> {
         self.value.clone()
     }

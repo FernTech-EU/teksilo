@@ -18,7 +18,7 @@ use super::*;
 // **Liveness gate.** Recovery is gated on the `live` flag, not on payload
 // presence. `live` is set true by `outbound_begin` (escalation) and cleared by
 // `outbound_end` (the terminal `DragEnded`, or a source-window close). This is
-// what keeps a leaked / stale payload from mis-claiming a *later* genuine
+// what keeps a leaked / stale payload from misclaiming a *later* genuine
 // external drag from another application: `outbound_take_if_live` only hands
 // the payload back while `live`, and `outbound_restash` is a no-op once the
 // drag has ended — so even a racing re-stash (cross-window drop-on-nothing)
@@ -2524,7 +2524,7 @@ mod tests {
     }
 
     /// Closing the source window mid-OS-drag clears the global stash, so a
-    /// later genuine external drag from another app is NOT mis-recovered as the
+    /// later genuine external drag from another app is NOT misrecovered as the
     /// stale typed payload. (Regression for the CRITICAL stash-leak finding.)
     #[test]
     fn source_window_close_clears_stash_no_hijack() {

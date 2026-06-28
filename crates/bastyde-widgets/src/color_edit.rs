@@ -26,6 +26,18 @@
 //! (via PopoverButton), and tracks the popover open state through
 //! `set_expanded`. The label binds reactively to the hex value so
 //! AT name updates as the picker mutates the bound color.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use bastyde_core::signal::Signal;
+//! use bastyde_tokens::Color;
+//!
+//! let color = ctx.signal(Color::new(0.21, 0.52, 0.89, 1.0));
+//! let _edit = ColorEdit::new(color)
+//!     .alpha_enabled(true)
+//!     .show_chevron(true);
+//! ```
 
 use bastyde_i18n::lit;
 use std::rc::Rc;
@@ -66,7 +78,7 @@ impl ColorBinding {
     }
 }
 
-/// Compact color cell that opens a [`ColorPicker`] in a popover.
+/// Compact color cell that opens a full [`ColorPicker`] in a popover when activated.
 pub struct ColorEdit {
     binding: ColorBinding,
 
@@ -111,10 +123,16 @@ impl std::fmt::Debug for ColorEdit {
 }
 
 impl ColorEdit {
+    /// Bind to a non-nullable color signal. The trigger and the picker
+    /// both read from and write to the same signal.
     pub fn new(value: Signal<Color>) -> Self {
         Self::from_binding(ColorBinding::Required(value))
     }
 
+    /// Bind to a nullable color signal. `None` is treated as transparent
+    /// black for picker math; any user interaction produces a concrete
+    /// `Some(color)`. To clear back to `None`, compose a separate
+    /// Clear button alongside the `ColorEdit`.
     pub fn nullable(value: Signal<Option<Color>>) -> Self {
         let proxy = Signal::new(value.get().unwrap_or(Color::TRANSPARENT));
         Self::from_binding(ColorBinding::Nullable {
@@ -147,71 +165,92 @@ impl ColorEdit {
         }
     }
 
+    /// Enable or disable the alpha channel in the picker and the hex trigger label.
     pub fn alpha_enabled(mut self, enabled: bool) -> Self {
         self.alpha_enabled = enabled;
         self
     }
 
+    /// Provide a static palette of preset swatches shown in the popover.
     pub fn swatches(mut self, s: Vec<Color>) -> Self {
         self.swatches = Some(s);
         self
     }
 
+    /// Bind the preset swatches list to a reactive `Signal<Vec<Color>>`
+    /// so the palette updates without reopening the popover.
     pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self {
         self.swatches_signal = Some(s);
         self
     }
 
+    /// Number of columns in the preset swatch grid. Defaults to 6;
+    /// clamped to at least 1.
     pub fn swatch_columns(mut self, n: usize) -> Self {
         self.swatch_columns = n.max(1);
         self
     }
 
+    /// Select a popover layout variant — [`ColorPickerLayout::Compact`]
+    /// (default, minimal height) or `Standard` / `Wide` for richer controls.
     pub fn picker_layout(mut self, l: ColorPickerLayout) -> Self {
         self.picker_layout = l;
         self
     }
 
+    /// Show or hide the RGB (0–255) component spinners in the popover.
     pub fn show_rgb_spinners(mut self, s: bool) -> Self {
         self.show_rgb_spinners = s;
         self
     }
 
+    /// Show or hide the HSV (hue/saturation/value) component spinners in the popover.
     pub fn show_hsv_spinners(mut self, s: bool) -> Self {
         self.show_hsv_spinners = s;
         self
     }
 
+    /// Show or hide the hex string input in the popover.
     pub fn show_hex_input(mut self, s: bool) -> Self {
         self.show_hex_input = s;
         self
     }
 
+    /// Show or hide the formatted hex value as the trigger button label.
     pub fn show_hex_in_trigger(mut self, s: bool) -> Self {
         self.show_hex_in_trigger = s;
         self
     }
 
+    /// Show or hide the trailing chevron glyph on the trigger button.
     pub fn show_chevron(mut self, s: bool) -> Self {
         self.show_chevron = s;
         self
     }
 
+    /// Override the size of the color swatch thumbnail in the trigger button (logical pixels).
     pub fn trigger_swatch_size(mut self, size: f32) -> Self {
         self.trigger_swatch_size = Some(size.max(0.0));
         self
     }
 
+    /// Override where the popover appears relative to the trigger.
+    /// Default is [`OverlayPlacement::BelowPreferred`].
     pub fn placement(mut self, p: OverlayPlacement) -> Self {
         self.placement = p;
         self
     }
 
+    /// Override how the popover is dismissed. Default is
+    /// `DismissBehavior::EscapeOrClickOutside`.
     pub fn dismiss_behavior(mut self, b: DismissBehavior) -> Self {
         self.dismiss_behavior = b;
         self
     }
 
+    /// Replace the trigger button's visible label with a static localized
+    /// string. When set, the hex value is no longer displayed in the trigger
+    /// (combine with `.show_hex_in_trigger(false)` if needed).
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self

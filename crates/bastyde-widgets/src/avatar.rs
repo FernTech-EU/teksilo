@@ -67,16 +67,15 @@ use bastyde_i18n::LocalizedString;
 
 type ActionFn = Rc<dyn Fn(&mut EventContext)>;
 
-/// Circular (or rounded / square) user avatar.
+/// Circular (or rounded-square / square) user-identity widget showing
+/// either a photo or hash-tinted initials, with an optional presence dot.
 ///
-/// Static + reactive fields share the struct: each "content" knob —
-/// `name`, `image`, `alt`, `label`, `presence` — has a static
-/// constructor / setter *and* a `bind_*` setter that takes a signal.
-/// When a signal is bound, it wins; the corresponding static value
-/// is treated as a fallback. Signal-bound rebuilds run on flip
-/// (`BindingLevel::Rebuild`) so the inner ImageWidget / InitialsLeaf
-/// children are recreated with fresh values — exactly the lifecycle
-/// you want for a "logged-out → logged-in" transition.
+/// Static and reactive content fields coexist: each knob (`name`, `image`,
+/// `alt`, `label`, `presence`) has a static constructor or setter *and* a
+/// `bind_*` counterpart that takes a `Signal`. When a signal is bound it
+/// wins; the static value acts as a fallback. Signal-bound rebuilds fire at
+/// `BindingLevel::Rebuild` so inner children are recreated with fresh values —
+/// the canonical pattern for a "logged-out → logged-in" transition.
 pub struct Avatar {
     /// Initials shown when no image is present. Static fallback;
     /// overridden when `name_signal` is bound. Always non-empty
@@ -163,17 +162,19 @@ struct RawImage {
 // ─── Constructors ──────────────────────────────────────────────────────────
 
 impl Avatar {
-    /// Build an avatar from explicit initials. Uppercases and truncates
-    /// to ≤ 2 chars. Empty input yields `"?"`.
+    /// Create an avatar from an explicit initials string. Uppercases and
+    /// truncates to at most 2 chars; empty input yields `"?"`.
     pub fn with_initials(initials: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = initials.into();
         let raw = ls.resolve_now();
         Self::from_initials(normalize_initials(&raw))
     }
 
-    /// Build an avatar from a name; initials are derived
-    /// (`"Jane Doe" → "JD"`, `"jane.doe@x.com" → "JD"`,
-    /// `"Cher" → "C"`, `"" → "?"`).
+    /// Create an avatar from a display name; initials are derived
+    /// automatically (`"Jane Doe" → "JD"`, `"jane.doe@x.com" → "JD"`,
+    /// `"Cher" → "C"`, `"" → "?"`), and the full name is used as the
+    /// hash seed for the background tint so users with identical initials
+    /// still get distinct colours.
     pub fn with_name(name: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = name.into();
         let raw = ls.resolve_now();
@@ -183,15 +184,16 @@ impl Avatar {
         a
     }
 
-    /// Build an avatar from a decoded raster icon. The pixels are
-    /// centred-cropped to a square and CPU-masked to the configured
-    /// shape at first `build()`.
+    /// Create an avatar from a decoded [`RasterIcon`]. The pixels are
+    /// centre-cropped to a square and CPU-masked to the configured shape
+    /// at the first `build()`. Call [`.alt(...)`](Self::alt) to provide a
+    /// screen-reader name for the image.
     pub fn with_image(icon: &RasterIcon) -> Self {
         Self::from_raw_image(icon.pixels().to_vec(), icon.width(), icon.height())
     }
 
-    /// Build an avatar from raw RGBA pixels. Same convention as
-    /// [`ImageWidget::from_raw`].
+    /// Create an avatar from raw RGBA pixels (`width × height × 4` bytes).
+    /// Same pixel-layout convention as `ImageWidget::from_raw`.
     pub fn from_raw_image(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         let mut a = Self::from_initials("?".to_string());
         a.image_source = Some(RawImage {
@@ -243,11 +245,13 @@ impl Avatar {
 // ─── Builder methods ───────────────────────────────────────────────────────
 
 impl Avatar {
+    /// Set the avatar's discrete size. Default: `AvatarSize::Medium` (32 dp).
     pub fn size(mut self, size: AvatarSize) -> Self {
         self.size = size;
         self
     }
 
+    /// Set the avatar's clip shape. Default: `AvatarShape::Circle`.
     pub fn shape(mut self, shape: AvatarShape) -> Self {
         // No cache to invalidate — masking now lives on the inner
         // `ImageWidget`, which is recreated each `build()` with the
@@ -308,16 +312,23 @@ impl Avatar {
         self
     }
 
+    /// Override the outer ring colour. Accepts a [`Color`], a theme role,
+    /// or a `Signal<Color>`. Has no effect unless [`Self::border`] is also
+    /// set to a positive width.
     pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self {
         self.border_color = Some(color.into());
         self
     }
 
+    /// Show a presence indicator dot. Pass `AvatarPresence::Online`,
+    /// `Offline`, `Away`, or `Busy`.
     pub fn presence(mut self, presence: AvatarPresence) -> Self {
         self.presence = Some(presence);
         self
     }
 
+    /// Choose which corner the presence dot occupies. Default:
+    /// `AvatarCorner::BottomTrailing`.
     pub fn presence_corner(mut self, corner: AvatarCorner) -> Self {
         self.presence_corner = corner;
         self

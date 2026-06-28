@@ -255,6 +255,9 @@ pub struct ToolBox {
 }
 
 impl ToolBox {
+    /// Create a ToolBox driven by `selected` (visible section index). Set the
+    /// signal to `0` to open the first section by default; modify it
+    /// programmatically or share it across windows for synchronized state.
     pub fn new(selected: Signal<usize>) -> Self {
         Self {
             selected,

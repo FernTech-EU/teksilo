@@ -58,10 +58,27 @@ python3 tools/extract_widget_api.py --list                 # List all widget fil
 python3 tools/extract_widget_api.py Button HStack Dialog   # Extract public API + docs for widgets
 python3 tools/extract_widget_api.py --all                  # Every widget
 python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tooling
+python3 tools/extract_widget_api.py --all --md-dir docs/widgets  # Regenerate the mdBook Widget Catalog
 python3 tools/bench_examples.py                          # Run benchmarks with report generation
 ```
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/bastyde-widgets/src/](crates/bastyde-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
+
+## Documentation site (mdBook + rustdoc)
+
+The online docs are a **static site published to Cloudflare Pages** (`bastyde-docs.pages.dev`) by [.github/workflows/docs.yml](.github/workflows/docs.yml): [mdBook](https://rust-lang.github.io/mdBook/) renders the curated guides under [docs/](docs/) plus a generated **Widget Catalog** at the site root, and `cargo doc` renders the deep API reference under `/api/` (each catalog page deep-links to its widget's rustdoc module page). Build it locally with:
+
+```bash
+cargo install mdbook                                                       # once
+cargo doc -p bastyde-widgets --no-deps                                     # the /api reference (build first)
+python3 tools/extract_widget_api.py --all --md-dir docs/widgets --api-dir target/doc  # catalog + patch SUMMARY
+python3 tools/fix_book_links.py docs                                       # ../crates → github.com/ferntech-eu links
+mdbook serve --open                                                        # live preview, or `mdbook build` → ./book
+```
+
+- The generated **Widget Catalog** pages under `docs/widgets/*.md` and the populated `<!-- BEGIN/END GENERATED WIDGETS -->` region of `docs/SUMMARY.md` **are committed** (so the book + its widget sidebar build on any checkout); regenerate with the `--md-dir` command above. Only `book/` (build output) and `docs/widgets/img/` are gitignored.
+- [tools/fix_book_links.py](tools/fix_book_links.py) rewrites the guides' repo-relative source links (`../crates/…`) to absolute `github.com/ferntech-eu/bastyde` URLs and neutralizes rustdoc intra-doc links, so nothing 404s in the rendered book. It mutates the guide `*.md` **in place** (a build step — CI runs it on the runner; after a local preview run `git checkout -- $(git diff --name-only docs/*.md | grep -v SUMMARY)` to drop the guide edits). It is a no-op on the catalog pages (they carry only `../api/` links).
+- Smoke tests: `python3 tools/extract_widget_api.py --test` and `python3 tools/fix_book_links.py --test`. The Cloudflare deploy needs a Pages project named `bastyde-docs` + `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets.
 
 The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `splitter`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`, `drag_and_drop`, `multi_window`, `rich_text_editor`, `rich_text_viewer`, `spin_box`, `tool_box`).
 

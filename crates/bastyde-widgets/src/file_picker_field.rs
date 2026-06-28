@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! FilePickerField — a [`TextInput`] preset
-//! with a trailing **Browse…** button that opens a native file dialog
-//! and writes the chosen path back into the bound text signal.
+//! `FilePickerField` — a text-input preset for path entry with a Browse button.
 //!
-//! Three modes mirror the three single-result file-dialog kinds:
-//! [`FilePickerKind::OpenFile`], [`FilePickerKind::PickFolder`], and
-//! [`FilePickerKind::SaveFile`]. (Multi-file selection doesn't fit the
-//! "one editable line" pattern; use the file-dialog API directly for
-//! that.)
+//! Combines a `TextInput` with a trailing `IconButton` (the folder/browse glyph)
+//! that opens a native file dialog and writes the chosen path back into the bound
+//! `Signal<String>`. The three [`FilePickerKind`] variants map to the three
+//! single-result dialog modes: open a file, pick a folder, or save a file.
+//! Multi-file selection does not fit the "one editable line" pattern; use the
+//! file-dialog API directly for that.
 //!
 //! ```ignore
+//! // Requires ctx.signal() — shown as ignore per convention.
 //! let path = ctx.signal(String::new());
-//! FilePickerField::new(path.clone())
+//! let _f = FilePickerField::new(path.clone())
 //!     .kind(FilePickerKind::OpenFile)
 //!     .add_filter("Images", &["png", "jpg"])
-//!     .placeholder("Choose a file…")
+//!     .placeholder(lit!("Choose a file…"));
 //! ```
 
 use std::path::PathBuf;
@@ -49,7 +49,8 @@ pub enum FilePickerKind {
 
 type FilterEntry = (String, Vec<String>);
 
-/// Convenience wrapper around [`TextInput`] preset for path entry.
+/// A single-line path entry field with a trailing Browse button that invokes the
+/// native file dialog and writes the chosen path back into the bound `Signal<String>`.
 pub struct FilePickerField {
     text: Signal<String>,
     kind: FilePickerKind,
@@ -142,8 +143,8 @@ impl FilePickerField {
         self
     }
 
-    /// Disable / re-enable the field (and the browse button).
-    /// Set the initial enabled state. Forwarded to the arena at build time.
+    /// Set the initial enabled state for the text field and Browse button.
+    /// Forwarded to the arena at build time.
     pub fn enabled(mut self, on: bool) -> Self {
         self.initial_enabled = on;
         self

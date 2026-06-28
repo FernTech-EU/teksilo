@@ -70,7 +70,7 @@ use footer::{FooterStep, StepperFooter};
 use indicator::DEFAULT_CIRCLE_SIZE;
 use indicator_strip::{IndicatorStrip, StepMeta};
 
-/// Indicator-strip orientation.
+/// Indicator-strip orientation for a [`Stepper`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StepperOrientation {
     /// Markers in a row, content below (default).
@@ -80,7 +80,8 @@ pub enum StepperOrientation {
     Vertical,
 }
 
-/// Where the optional chrome slot sits relative to the stepper body.
+/// Where the optional chrome slot (banner / sidebar) sits relative to the
+/// stepper body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChromePosition {
     /// Leading column (left in LTR). Forced to `Top` in vertical orientation.
@@ -92,7 +93,8 @@ pub enum ChromePosition {
 
 type StepperFinish = Rc<dyn Fn(&mut EventContext, &StepperController)>;
 
-/// An embeddable step-flow widget. See the [module docs](self).
+/// An embeddable multi-step flow widget. See the [module docs](self) for the
+/// data-flow pattern and a usage example.
 pub struct Stepper {
     steps: Vec<Step>,
     controller: Option<StepperController>,
@@ -120,6 +122,9 @@ impl Default for Stepper {
 }
 
 impl Stepper {
+    /// Create an empty `Stepper`. Append steps with [`step`](Self::step) or
+    /// [`steps`](Self::steps) and provide a finish callback with
+    /// [`on_finish`](Self::on_finish).
     pub fn new() -> Self {
         Self {
             steps: Vec::new(),
@@ -142,11 +147,13 @@ impl Stepper {
         }
     }
 
+    /// Append a single [`Step`] definition.
     pub fn step(mut self, step: Step) -> Self {
         self.steps.push(step);
         self
     }
 
+    /// Append multiple [`Step`] definitions from an iterator.
     pub fn steps(mut self, steps: impl IntoIterator<Item = Step>) -> Self {
         self.steps.extend(steps);
         self
@@ -159,6 +166,7 @@ impl Stepper {
         self
     }
 
+    /// Set the indicator-strip orientation (horizontal or vertical).
     pub fn orientation(mut self, orientation: StepperOrientation) -> Self {
         self.orientation = orientation;
         self
@@ -190,23 +198,30 @@ impl Stepper {
         self
     }
 
+    /// Choose where the optional chrome widget sits relative to the stepper
+    /// body. Forced to [`ChromePosition::Top`] when
+    /// [`orientation`](Self::orientation) is `Vertical`.
     pub fn chrome_position(mut self, position: ChromePosition) -> Self {
         self.chrome_position = position;
         self
     }
 
+    /// Override the "Back" button label. Default: "Back".
     pub fn back_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.back_label = label.into();
         self
     }
+    /// Override the "Next" button label. Default: "Next".
     pub fn next_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.next_label = label.into();
         self
     }
+    /// Override the "Finish" button label. Default: "Finish".
     pub fn finish_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.finish_label = label.into();
         self
     }
+    /// Override the "Skip" button label. Default: "Skip".
     pub fn skip_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.skip_label = label.into();
         self

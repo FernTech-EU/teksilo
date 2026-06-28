@@ -26,15 +26,27 @@
 //! that opened them. On the side that touches the trigger, drawing a
 //! halo would visually cut the surface off from its anchor. Pass an
 //! [`AttachedSide`] to suppress shadow on that side.
+//!
+//! ```ignore
+//! // Typical usage inside a custom widget's paint() method:
+//! use bastyde_widgets::shadow::{paint_layered_shadow, DENSITY_SURFACE};
+//! paint_layered_shadow(
+//!     canvas, bounds, radius,
+//!     &ctx.theme.shape.shadow_sm,
+//!     &ctx.theme.shape.shadow_inner_sm,
+//!     DENSITY_SURFACE,
+//!     None,
+//! );
+//! ```
 
 use bastyde_canvas::{Canvas, Rect};
 use bastyde_tokens::{Color, CornerRadius, Shadow};
 
-/// Density preset for tooltips.
+/// Inner-rim alpha multiplier for tooltips — full intensity for maximum lift.
 pub const DENSITY_TOOLTIP: f32 = 1.0;
-/// Density preset for cards / popovers / menus.
+/// Inner-rim alpha multiplier for cards, popovers, and menus — moderate lift.
 pub const DENSITY_SURFACE: f32 = 0.5;
-/// Density preset for snackbars / dialogs.
+/// Inner-rim alpha multiplier for snackbars and dialogs — subtle lift.
 pub const DENSITY_DIALOG: f32 = 0.3;
 
 /// Sub-perceptual alpha cutoff: below this no human eye registers the
@@ -49,17 +61,22 @@ const SUB_PERCEPTUAL: f32 = 1.0 / 255.0;
 /// active layout direction before calling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachedSide {
+    /// Suppress the shadow halo on the top edge (e.g. a dropdown opening downward).
     Top,
+    /// Suppress the shadow halo on the bottom edge (e.g. a popover opening upward).
     Bottom,
+    /// Suppress the shadow halo on the left edge.
     Left,
+    /// Suppress the shadow halo on the right edge.
     Right,
 }
 
-/// Paint a layered drop shadow.
+/// Paint a two-layer drop shadow behind a rounded rect.
 ///
 /// The `outer` shadow is drawn unchanged. If `density × inner.color.a()`
 /// is above the sub-perceptual threshold (1/255), the `inner` shadow is
-/// drawn on top with its alpha replaced by that product.
+/// drawn on top with its alpha scaled by `density`. This gives a "lift"
+/// look — a wide soft halo with a sharp close rim.
 ///
 /// When `attached` is `Some(side)`, both shadow draws are clipped so
 /// the penumbra on that side is hidden — matching the visual where
@@ -67,8 +84,18 @@ pub enum AttachedSide {
 /// dropdown under its combo box, etc.).
 ///
 /// If both layers would be sub-perceptual (e.g. theme has zero alphas
-/// or a per-component `shadow_density` of 0), this function returns
-/// without emitting any draw commands.
+/// or `density` of 0), this function returns without emitting any draw
+/// commands.
+///
+/// ```ignore
+/// // In a widget's paint() method:
+/// use bastyde_widgets::shadow::{paint_layered_shadow, AttachedSide, DENSITY_SURFACE};
+/// paint_layered_shadow(
+///     canvas, bounds, radius,
+///     &ctx.theme.shape.shadow_sm, &ctx.theme.shape.shadow_inner_sm,
+///     DENSITY_SURFACE, None,
+/// );
+/// ```
 pub fn paint_layered_shadow(
     canvas: &mut Canvas,
     bounds: Rect,

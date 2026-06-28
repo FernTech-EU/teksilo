@@ -15,6 +15,33 @@
 //! the default fast path), exact per-row callback (`row_height_fn`), and
 //! auto-measured (`auto_row_height` — rows grow to their tallest cell,
 //! height-for-width). See docs/table-view.md "Row heights".
+//!
+//! ```ignore
+//! use bastyde_data::ListModel;
+//! use bastyde_widgets::table_view::{Column, ColumnWidth, TableView};
+//! use bastyde_i18n::lit;
+//!
+//! struct Person { name: String, age: u32 }
+//!
+//! let model: ListModel<Person> = ListModel::new();
+//! let _table = TableView::new(model)
+//!     .add_column(Column::new("name", ColumnWidth::Flex(1.0))
+//!         .label(lit!("Name"))
+//!         .cell(|p: &Person, _cx| Box::new(
+//!             bastyde_widgets::primitives::TextWidget::new(
+//!                 bastyde_i18n::lit!(p.name.clone())
+//!             )
+//!         )))
+//!     .add_column(Column::new("age", ColumnWidth::Fixed(60.0))
+//!         .label(lit!("Age"))
+//!         .cell(|p: &Person, _cx| Box::new(
+//!             bastyde_widgets::primitives::TextWidget::new(
+//!                 bastyde_i18n::lit!(p.age.to_string())
+//!             )
+//!         )))
+//!     .alternating_rows(true)
+//!     .row_height(32.0);
+//! ```
 
 pub mod a11y;
 pub mod body;
@@ -154,9 +181,12 @@ fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
 
 // ── Public widget ──────────────────────────────────────────────────────────
 
-/// Generic, virtualized, accessible table.
+/// Generic, virtualized, accessible table with sortable / filterable / resizable columns.
 ///
-/// See module docs for the feature roadmap.
+/// Construct with [`TableView::new`] (from a [`ListModel<T>`](bastyde_data::ListModel))
+/// or [`TableView::from_source`] (any [`ListDataSource`]), then chain builder methods
+/// to configure columns, row heights, selection, and so on. See module docs for the full
+/// feature list and row-height modes.
 pub struct TableView<T: 'static> {
     // Source erasure (multi-cell read path; DnD + lazy live in `dnd`).
     len_fn: LenFn,
@@ -502,11 +532,13 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Append a single [`Column<T>`] definition to the table.
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
         self
     }
 
+    /// Append multiple [`Column<T>`] definitions from an iterator.
     pub fn columns(mut self, cols: impl IntoIterator<Item = Column<T>>) -> Self {
         self.columns.extend(cols);
         self
@@ -556,26 +588,34 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Override the column header row height in logical pixels. Default: the table style's `HEADER_HEIGHT`.
     pub fn header_height(mut self, height: f32) -> Self {
         self.header_height = Some(height);
         self
     }
 
+    /// Show or hide the column header row. Default: visible.
     pub fn show_header(mut self, visible: bool) -> Self {
         self.show_header = visible;
         self
     }
 
+    /// Set how column widths are redistributed when columns are
+    /// added, resized, or the table's own width changes. See
+    /// [`ColumnResizePolicy`].
     pub fn column_resize_policy(mut self, policy: ColumnResizePolicy) -> Self {
         self.column_resize_policy = policy;
         self
     }
 
+    /// Control how Tab / Shift+Tab navigate between cells. See
+    /// [`TabTraversal`].
     pub fn tab_traversal(mut self, mode: TabTraversal) -> Self {
         self.tab_traversal = mode;
         self
     }
 
+    /// Set which user action opens a cell editor. See [`EditTrigger`].
     pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self {
         self.edit_trigger = trigger;
         self
@@ -624,6 +664,8 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Choose the row-selection granularity (None / Single / Multi).
+    /// See [`TableSelectionMode`].
     pub fn selection_mode(mut self, mode: TableSelectionMode) -> Self {
         self.selection_mode = mode;
         self
@@ -637,26 +679,36 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    /// Install an independent cell-selection model on top of row selection.
+    /// See [`CellSelectionModel`].
     pub fn cell_selection(mut self, sel: CellSelectionModel) -> Self {
         self.cell_selection = Some(sel);
         self
     }
 
+    /// Paint every other row with a tinted background. Default: off.
     pub fn alternating_rows(mut self, enabled: bool) -> Self {
         self.alternating_rows = enabled;
         self
     }
 
+    /// Draw horizontal and/or vertical grid lines between cells.
+    /// See [`GridLines`].
     pub fn grid_lines(mut self, kind: GridLines) -> Self {
         self.grid_lines = kind;
         self
     }
 
+    /// Provide an accessible label for the table (`aria-label`). Required
+    /// when the page hosts more than one table so screen readers can
+    /// distinguish them.
     pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.a11y_label = Some(label.into());
         self
     }
 
+    /// Show or hide the built-in vertical scroll bar. Default: visible. Set to
+    /// `false` when an external scroll bar is wired to [`scroll_y_signal`](Self::scroll_y_signal).
     pub fn show_internal_scrollbars(mut self, show: bool) -> Self {
         self.show_internal_scrollbars = show;
         self
@@ -670,14 +722,17 @@ impl<T: 'static> TableView<T> {
 
     // ── Public reactive signals ────────────────────────────────────────
 
+    /// Current vertical scroll offset in logical pixels.
     pub fn scroll_y_signal(&self) -> &Signal<f32> {
         &self.scroll_y
     }
 
+    /// Maximum vertical scroll offset — `total_content_height − viewport_height`.
     pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
         &self.max_scroll_y
     }
 
+    /// Viewport-to-content height ratio, used by external scroll bar thumbs.
     pub fn viewport_ratio_y_signal(&self) -> &Signal<f32> {
         &self.viewport_ratio_y
     }
@@ -737,6 +792,7 @@ impl<T: 'static> TableView<T> {
         self.focused_cell.set(Some((row, col)));
     }
 
+    /// Remove keyboard focus from any cell (equivalent to pressing Escape).
     pub fn clear_focused_cell(&self) {
         self.focused_cell.set(None);
     }
@@ -766,6 +822,7 @@ impl<T: 'static> TableView<T> {
         }
     }
 
+    /// Close the active cell editor without committing (the field's `on_blur` still fires).
     pub fn end_edit(&self) {
         self.editing_cell.set(None);
     }
@@ -787,6 +844,8 @@ impl<T: 'static> TableView<T> {
         &self.filters_signal
     }
 
+    /// Set or clear the filter text for a single column. An empty `text` removes
+    /// the entry for `col_id` (same as clearing the filter for that column).
     pub fn set_filter(&self, col_id: &str, text: &str) {
         let mut m = self.filters_signal.get();
         if text.is_empty() {
@@ -797,6 +856,7 @@ impl<T: 'static> TableView<T> {
         self.filters_signal.set(m);
     }
 
+    /// Remove all active column filters.
     pub fn clear_filters(&self) {
         self.filters_signal.set(HashMap::new());
     }

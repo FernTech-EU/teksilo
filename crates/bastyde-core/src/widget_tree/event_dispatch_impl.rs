@@ -1674,6 +1674,17 @@ impl WidgetTree {
             let target = self.first_focusable_descendant(id).unwrap_or(id);
             self.focus_ops(target, &mut *ops);
         }
+        if let Some(&id) = ctx.focus_into_requests.last() {
+            // "Focus into" semantics: land on the first focusable descendant
+            // and — unlike `focus_requests` above — do NOT fall back to the
+            // container itself. A region with no focusable content (and not
+            // focusable in its own right) leaves focus untouched rather than
+            // trapping it on a non-interactive node. Drives Enter-on-a-tab →
+            // into the tab panel.
+            if let Some(target) = self.first_focusable_descendant(id) {
+                self.focus_ops(target, &mut *ops);
+            }
+        }
 
         // --- Drag and drop ---
         if let Some((source_widget, payload, preview_widget)) = ctx.drag_start_request {

@@ -1,15 +1,36 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Production-quality Button widget — V2 Widget using Signal-based reactivity.
+//! Button — a labelled, activatable action trigger.
 //!
-//! Addresses all architectural requirements:
-//! - Non-generic (closure-based type erasure)
-//! - Signal-based reactive state
-//! - Theme resolved at paint time (not captured at build time)
-//! - V2 attached handlers (HandlerSet) — no event() override
-//! - Bindings auto-registered via register_bindings (no manual bind_to)
-//! - Minimum touch target size from theme
+//! `Button` is the primary action surface in Bastyde. It renders a text
+//! label (optionally with a leading, trailing, top, or bottom icon), fires
+//! a closure on click / Space / Enter / AT click, and advertises seven
+//! design-language variants via [`ButtonVariant`]. Chrome (fill, border,
+//! focus ring, padding) is delegated to the active [`ButtonStyle`]; the
+//! default `RecipeButtonStyle` implements the Int UI token ladder.
+//!
+//! ## When to use
+//!
+//! - Primary action: `.variant(ButtonVariant::Filled)` — one per context.
+//! - Secondary / cancel: default `ButtonVariant::Plain`.
+//! - Danger: `ButtonVariant::Destructive` (IntUI maps this to Filled).
+//! - Text-only link: `ButtonVariant::Link` / `ButtonVariant::Ghost`.
+//!
+//! ## Accessibility
+//!
+//! Announces as `Role::Button` with the resolved label as its AT name.
+//! Keyboard: Space / Enter activate; the lone-KeyUp guard prevents spurious
+//! re-activation when a shortcut consumes the KeyDown and returns focus here.
+//!
+//! ```rust
+//! # use bastyde_widgets::{Button, ButtonVariant};
+//! # use bastyde_i18n::lit;
+//! # use bastyde_core::Intent;
+//! let _btn = Button::new(lit!("Save"))
+//!     .variant(ButtonVariant::Filled)
+//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
+//! ```
 
 use bastyde_i18n::lit;
 use std::rc::Rc;
@@ -173,7 +194,7 @@ pub(crate) fn build_interaction_handlers(
         .cursor(CursorIcon::Pointer)
 }
 
-/// Internal interaction state.
+/// Where an optional icon is placed relative to the button label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IconLocation {
     /// No icon (default).
@@ -191,21 +212,12 @@ pub enum IconLocation {
     Bottom,
 }
 
-/// A production-quality button widget — non-generic, composition-based.
-///
-/// ```rust
-/// # use bastyde_widgets::{Button, ButtonVariant};
-/// # use bastyde_i18n::lit;
-/// # use bastyde_core::Intent;
-/// let _w = Button::new(lit!("Save"))
-///     .variant(ButtonVariant::Filled)
-///     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
-/// ```
 /// Type-erased activation closure. Stored as `Box<dyn Fn>` so the
 /// same button type works for any handler — typed intent send,
 /// direct side effect, window mutation, etc.
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
+/// A labelled action trigger; use [`Button::new`] and chain builder methods.
 pub struct Button {
     /// Button label as a `Prop<String>`. `new(tr!(...))` stores a
     /// `Prop::Bound` (locale-reactive) when an i18n manager is installed,

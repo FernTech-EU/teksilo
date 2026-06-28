@@ -3,6 +3,25 @@
 
 //! MasonryLayout — a variable-height grid that packs children into the
 //! shortest column (Pinterest-style).
+//!
+//! Each child is measured at the shared column width and placed into
+//! whichever column currently has the lowest accumulated height.
+//! Ties between equal-height columns are broken by column index
+//! (leftmost wins). All columns share the same width; column and item
+//! spacing are independently configurable. RTL layout mirrors the
+//! column order so the first logical child still goes to the leading edge.
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::masonry::MasonryLayout;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! let _grid = MasonryLayout::new(3)
+//!     .column_spacing(8.0)
+//!     .item_spacing(8.0)
+//!     .child(TextWidget::new(lit!("Tall card")))
+//!     .child(TextWidget::new(lit!("Short card")))
+//!     .child(TextWidget::new(lit!("Another card")));
+//! ```
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -61,16 +80,19 @@ impl MasonryLayout {
         self
     }
 
+    /// Add a pre-registered child by ID.
     pub fn add_child(mut self, id: WidgetId) -> Self {
         self.pending.push(PendingChild::Id(id));
         self
     }
 
+    /// Add an inline child widget (deferred insertion).
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    /// Add multiple inline children from an iterator.
     pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
@@ -78,6 +100,7 @@ impl MasonryLayout {
         self
     }
 
+    /// Conditionally add a child. No-op if `None`.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));

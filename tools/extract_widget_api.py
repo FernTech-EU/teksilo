@@ -31,6 +31,13 @@ Usage:
     python tools/extract_widget_api.py --list
     python tools/extract_widget_api.py Button --format json
     python tools/extract_widget_api.py Button -o out.md
+    python tools/extract_widget_api.py --md-dir docs/widgets   # mdBook catalog
+
+`--md-dir DIR` regenerates the mdBook "Widget Catalog": one Markdown page per
+widget (deep-linking to its rustdoc module page), a grouped `index.md`, and an
+in-place patch of the `<!-- BEGIN/END GENERATED WIDGETS -->` region of
+`docs/SUMMARY.md`. The pages are build artifacts (gitignored) — regenerate them
+before `mdbook build`.
 """
 
 from __future__ import annotations
@@ -599,23 +606,31 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
     cleaned = preprocess(raw)
     n = len(raw)
 
-    # --- Module header: //! lines at the very top (possibly after attrs).
+    # --- Module header: the //! block near the top. Every file opens with two
+    # `// SPDX-...` license comments (and occasionally a `#![...]` inner attr)
+    # BEFORE the //! header, so skip those leading lines until the //! block
+    # starts; once it starts, stop at the first non-//! non-blank line.
     header_lines: list[str] = []
+    started = False
     i = 0
     while i < n:
         stripped = raw[i].strip()
         if not stripped:
-            if header_lines:
+            if started:
                 header_lines.append("")
             i += 1
             continue
         m = DOC_INNER.match(raw[i])
         if m:
+            started = True
             header_lines.append(_doc_text(m))
             i += 1
             continue
-        # Stop at first non-//! non-blank line — module header is always the
-        # very first thing in a widget file in this codebase.
+        if not started and (stripped.startswith("//") or stripped.startswith("#![")):
+            # Leading license comment / inner attribute before the header.
+            i += 1
+            continue
+        # Stop at the first real (non-//!) line once we've passed the preamble.
         break
     while header_lines and not header_lines[-1].strip():
         header_lines.pop()
@@ -1042,7 +1057,19 @@ def format_markdown(pf: ParsedFile) -> str:
         out.append(pf.header_doc.rstrip())
         out.append("")
 
-    for it in pf.items:
+    _emit_items_md(pf.items, out)
+
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _emit_items_md(items: list[Item], out: list[str]) -> None:
+    """Render the struct/enum/type/const/fn items of a file as Markdown.
+
+    Shared by `format_markdown` (the `--format md` output) and
+    `format_catalog_markdown` (the mdBook catalog pages) so both render the API
+    surface identically.
+    """
+    for it in items:
         if it.kind == "external":
             # Type defined elsewhere, but has methods in this file.
             out.append(f"## `impl {it.name}`  *(methods defined in this file)*")
@@ -1108,8 +1135,6 @@ def format_markdown(pf: ParsedFile) -> str:
         if it.methods:
             _emit_methods_md(it, out)
 
-    return "\n".join(out).rstrip() + "\n"
-
 
 def _emit_methods_md(it: Item, out: list[str]) -> None:
     out.append("### Methods")
@@ -1121,7 +1146,12 @@ def _emit_methods_md(it: Item, out: list[str]) -> None:
         if m.cfg:
             flags.append(_fmt_cfg(m.cfg))
         flags_str = f"  *({'; '.join(flags)})*" if flags else ""
-        out.append(f"#### `{m.signature.strip()}`{flags_str}")
+        # Collapse multi-line signatures onto one line: a `#### `...`` heading is
+        # an inline-code span, so a wrapped signature (e.g. a long `composite_tooltip(
+        # …, impl Widget + 'static)`) would leave the span unclosed and break the
+        # heading's rendering.
+        sig = " ".join(m.signature.split())
+        out.append(f"#### `{sig}`{flags_str}")
         out.append("")
         if m.doc:
             out.append(m.doc.rstrip())
@@ -1212,6 +1242,422 @@ def format_json(pfs: list[ParsedFile]) -> str:
 
 
 # ----------------------------------------------------------------------------
+# mdBook catalog generator
+#
+# Emits one Markdown page per widget into a book sub-directory (default
+# `docs/widgets/`), a grouped `index.md`, and patches the auto-generated region
+# of `docs/SUMMARY.md`. Each page deep-links to the widget's rustdoc module page
+# so the mdBook "discovery" layer and the rustdoc "API reference" layer compose.
+# ----------------------------------------------------------------------------
+
+
+SUMMARY_BEGIN = "<!-- BEGIN GENERATED WIDGETS -->"
+SUMMARY_END = "<!-- END GENERATED WIDGETS -->"
+
+# Prepended to every generated page so they satisfy the SPDX pre-commit hook
+# (the catalog Markdown is committed). Matches the repo's `.md` header style.
+_MD_SPDX_HEADER = [
+    "<!-- SPDX-License-Identifier: MPL-2.0 -->",
+    "<!-- SPDX-FileCopyrightText: 2026 FernTech -->",
+    "",
+]
+
+# Display order for the catalog index; any directory not listed is appended
+# afterwards, alphabetically, as a "<Dir> (submodule)" group.
+_CATEGORY_ORDER = ["Layout primitives", "Widgets", "Animations"]
+
+
+def _catalog_title(reg: "Registry", pf: ParsedFile) -> str:
+    """Human-facing title for a widget page (its primary widget type name)."""
+    names = reg.widget_display.get(pf.file_path) or []
+    if names:
+        return names[0]
+    return _stem_to_camel(pf.module_name)
+
+
+def _catalog_category(fp: Path) -> str:
+    """Group label derived from a file's location under `bastyde-widgets/src`."""
+    rel = fp.relative_to(WIDGETS_SRC)
+    if len(rel.parts) == 1:
+        return "Widgets"
+    top = rel.parts[0]
+    return {
+        "primitives": "Layout primitives",
+        "animations": "Animations",
+    }.get(top, f"{_stem_to_camel(top)} (submodule)")
+
+
+def _build_slugs(parsed: list[ParsedFile]) -> dict[Path, str]:
+    """Stable, collision-free page slugs. Top-level / primitive widgets keep
+    their clean stem (`button`, `hstack`); a genuine stem collision across
+    directories falls back to the dir-prefixed path (`notification_log`)."""
+    slugs: dict[Path, str] = {}
+    used: set[str] = set()
+    for pf in parsed:
+        slug = pf.module_name
+        if slug in used:
+            rel = pf.file_path.relative_to(WIDGETS_SRC).with_suffix("")
+            slug = "_".join(rel.parts)
+        used.add(slug)
+        slugs[pf.file_path] = slug
+    return slugs
+
+
+def _rustdoc_module_url(api_base: str, fp: Path, api_dir: "Path | None" = None) -> str:
+    """rustdoc module-index URL for a widget file.
+
+    `button.rs` -> `<base>/bastyde_widgets/button/index.html`;
+    `primitives/hstack.rs` -> `<base>/bastyde_widgets/primitives/hstack/index.html`.
+
+    Files directly under a per-widget submodule dir (`tab_widget/`, `title_bar/`,
+    `toast/`, `notification/`, `color_picker/`, `stepper/`) are usually private
+    `mod`s with no rustdoc page of their own, so they link to the public parent
+    module (which re-exports the type). `primitives/` and `animations/`
+    submodules are themselves public, so they keep the direct path.
+    """
+    rel = fp.relative_to(WIDGETS_SRC).with_suffix("")
+    parts = list(rel.parts)
+    if len(parts) >= 2 and parts[0] not in ("primitives", "animations"):
+        parts = parts[:1]
+
+    def url(ps: list[str]) -> str:
+        tail = "/".join(["bastyde_widgets", *ps, "index.html"])
+        return f"{api_base.rstrip('/')}/{tail}"
+
+    # When the built rustdoc tree is available, fall back to the nearest ancestor
+    # module that actually has a page — covers private `mod`s and cfg-gated
+    # modules (e.g. data_views, tree_source, privacy_settings) that rustdoc omits.
+    if api_dir is not None:
+        cand = list(parts)
+        while cand:
+            disk = Path(api_dir) / "bastyde_widgets" / Path(*cand) / "index.html"
+            if disk.exists():
+                return url(cand)
+            cand = cand[:-1]
+        return url([])
+    return url(parts)
+
+
+def _first_sentence(text: str, limit: int = 160) -> str:
+    """First sentence of a module header, for the catalog index brief."""
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("```"):
+            continue
+        # Stop at the first sentence boundary (". " followed by a capital).
+        m = re.search(r"\.(?:\s|$)", s)
+        sentence = s[: m.start()] if m else s
+        sentence = sentence.strip()
+        if len(sentence) > limit:
+            sentence = sentence[: limit - 1].rstrip() + "…"
+        return sentence
+    return ""
+
+
+# Doc text swept from Rust source carries link targets that don't resolve inside
+# the mdBook catalog: rustdoc intra-doc links (`[`X`](crate::..)`, `[`X`](Self::..)`,
+# `[`X`](self)`, bare `[`X`](TreeView)`, and the reference form `[`X`]` + `[`X`]:
+# crate::X`) and repo-relative file links (`[x](../crates/..)`, `[x](locales/..)`).
+# A catalog page is prose plus the single rustdoc-API link we add ourselves, so we
+# KEEP only web URLs, in-page anchors, and our own `../api/...` link, and reduce
+# every other link to plain inline code.
+_INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_REF_DEF_RE = re.compile(r"^(\s*)\[([^\]]+)\]:\s*(\S+).*$")
+
+
+def _as_code(label: str) -> str:
+    label = label.strip()
+    if label.startswith("`") and label.endswith("`"):
+        return label
+    return f"`{label}`"
+
+
+def _catalog_keep_target(target: str) -> bool:
+    """A link target that resolves inside the catalog as-is."""
+    t = target.strip()
+    return (
+        t.startswith("#")
+        or t.startswith("../api/")
+        or t.startswith("mailto:")
+        or "://" in t
+    )
+
+
+def _clean_catalog_links(md: str) -> str:
+    """Reduce non-resolvable links in catalog doc text to plain inline code."""
+    # Pass 1: drop reference DEFINITIONS we can't keep; remember their labels.
+    dropped: set[str] = set()
+    kept: list[str] = []
+    for ln in md.split("\n"):
+        m = _REF_DEF_RE.match(ln)
+        if m and not _catalog_keep_target(m.group(3)):
+            dropped.add(m.group(2).strip())
+            continue
+        kept.append(ln)
+    md = "\n".join(kept)
+
+    # Pass 2: inline links — keep web/anchor/api, strip the rest to code.
+    def repl(m: "re.Match[str]") -> str:
+        if _catalog_keep_target(m.group(2)):
+            return m.group(0)
+        return _as_code(m.group(1))
+
+    md = _INLINE_LINK_RE.sub(repl, md)
+
+    # Pass 3: shortcut / collapsed usages of the dropped labels -> code
+    # (but not `[label](...)` inline or `[label][ref]` full-reference forms).
+    for lbl in dropped:
+        code = _as_code(lbl)
+        md = md.replace(f"[{lbl}][]", code)
+        md = re.sub(re.escape(f"[{lbl}]") + r"(?![\(\[])", code, md)
+    return md
+
+
+def _catalog_abilities(pf: ParsedFile, title: str) -> str:
+    """A scannable inline list of the primary widget's builder methods."""
+    primary = None
+    for it in pf.items:
+        if it.kind in ("struct", "external") and it.name == title and it.methods:
+            primary = it
+            break
+    if primary is None:
+        for it in pf.items:
+            if it.methods:
+                primary = it
+                break
+    if primary is None:
+        return ""
+    names = [
+        f"`{m.name}`"
+        for m in primary.methods
+        if not m.hidden and m.name not in ("new", "default")
+    ]
+    return ", ".join(names)
+
+
+def format_catalog_markdown(
+    pf: ParsedFile,
+    *,
+    title: str,
+    slug: str,
+    api_base: str,
+    img_dir: Path,
+    api_dir: "Path | None" = None,
+) -> str:
+    """Render one widget's mdBook catalog page."""
+    out: list[str] = list(_MD_SPDX_HEADER)
+    out.append(f"# {title}")
+    out.append("")
+
+    if (img_dir / f"{slug}.png").exists():
+        out.append(f"![{title} preview](img/{slug}.png)")
+        out.append("")
+
+    if pf.cfg:
+        out.append(f"> Available under: `{_fmt_cfg(pf.cfg)}`")
+        out.append("")
+
+    if pf.header_doc:
+        out.append(pf.header_doc.rstrip())
+        out.append("")
+
+    abilities = _catalog_abilities(pf, title)
+    if abilities:
+        out.append("## Builder methods at a glance")
+        out.append("")
+        out.append(abilities)
+        out.append("")
+
+    out.append("## API reference")
+    out.append("")
+    out.append(
+        f"📖 [Full rustdoc API for this module]"
+        f"({_rustdoc_module_url(api_base, pf.file_path, api_dir)})"
+    )
+    out.append("")
+    _emit_items_md(pf.items, out)
+
+    # The module header + item docs were swept from rustdoc-style source, so they
+    # carry links that don't resolve in the book — reduce them to plain code.
+    return _clean_catalog_links("\n".join(out).rstrip()) + "\n"
+
+
+def format_catalog_index(
+    reg: "Registry", parsed: list[ParsedFile], slugs: dict[Path, str]
+) -> str:
+    """The catalog landing page: every widget grouped by category, with a brief."""
+    groups: dict[str, list[tuple[str, str, str]]] = {}
+    for pf in parsed:
+        cat = _catalog_category(pf.file_path)
+        title = _catalog_title(reg, pf)
+        brief = _clean_catalog_links(_first_sentence(pf.header_doc))
+        groups.setdefault(cat, []).append((title, slugs[pf.file_path], brief))
+
+    ordered = [c for c in _CATEGORY_ORDER if c in groups]
+    ordered += sorted(c for c in groups if c not in _CATEGORY_ORDER)
+
+    out: list[str] = list(_MD_SPDX_HEADER)
+    out.append("# Widget Catalog")
+    out.append("")
+    out.append(
+        "Every widget shipped by `bastyde-widgets`, grouped by category. Each page "
+        "links to its full rustdoc API reference."
+    )
+    out.append("")
+    for cat in ordered:
+        out.append(f"## {cat}")
+        out.append("")
+        for title, slug, brief in sorted(groups[cat], key=lambda t: t[0].lower()):
+            line = f"- [{title}]({slug}.md)"
+            if brief:
+                line += f" — {brief}"
+            out.append(line)
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _summary_block(
+    reg: "Registry", parsed: list[ParsedFile], slugs: dict[Path, str], md_subdir: str
+) -> str:
+    """The auto-generated `docs/SUMMARY.md` region: an `Overview` link followed by
+    one alphabetically-sorted chapter per widget (flat, so the static
+    `# Widget Catalog` part title in SUMMARY.md groups them)."""
+    lines = [SUMMARY_BEGIN, f"- [Overview]({md_subdir}/index.md)"]
+    for pf in sorted(parsed, key=lambda p: _catalog_title(reg, p).lower()):
+        title = _catalog_title(reg, pf)
+        lines.append(f"- [{title}]({md_subdir}/{slugs[pf.file_path]}.md)")
+    lines.append(SUMMARY_END)
+    return "\n".join(lines)
+
+
+def patch_summary(summary_path: Path, block: str) -> bool:
+    """Replace the marked region of SUMMARY.md with `block`. Returns False if the
+    markers are absent (caller then prints guidance)."""
+    text = summary_path.read_text(encoding="utf-8")
+    if SUMMARY_BEGIN not in text or SUMMARY_END not in text:
+        return False
+    pre = text[: text.index(SUMMARY_BEGIN)]
+    post = text[text.index(SUMMARY_END) + len(SUMMARY_END):]
+    summary_path.write_text(pre + block + post, encoding="utf-8")
+    return True
+
+
+def cmd_md_dir(
+    reg: "Registry", md_dir: str, api_base: str, api_dir: "Path | None" = None
+) -> int:
+    out_dir = Path(md_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    img_dir = out_dir / "img"
+
+    # Only the curated widget set (same files `--list` shows: a non-empty
+    # `widget_display`). Internal helper modules (linear_layout, a11y, keyboard,
+    # …) carry no public widget, so they get no catalog page.
+    target = [fp for fp in reg.files if reg.widget_display.get(fp)]
+    parsed = [
+        parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+        for fp in target
+    ]
+    slugs = _build_slugs(parsed)
+
+    for pf in parsed:
+        slug = slugs[pf.file_path]
+        page = format_catalog_markdown(
+            pf,
+            title=_catalog_title(reg, pf),
+            slug=slug,
+            api_base=api_base,
+            img_dir=img_dir,
+            api_dir=api_dir,
+        )
+        (out_dir / f"{slug}.md").write_text(page, encoding="utf-8")
+    (out_dir / "index.md").write_text(
+        format_catalog_index(reg, parsed, slugs), encoding="utf-8"
+    )
+
+    book_src = REPO_ROOT / "docs"
+    try:
+        md_subdir = out_dir.resolve().relative_to(book_src.resolve()).as_posix()
+    except ValueError:
+        md_subdir = out_dir.name
+    block = _summary_block(reg, parsed, slugs, md_subdir)
+    summary = book_src / "SUMMARY.md"
+    if summary.exists() and patch_summary(summary, block):
+        note = "patched docs/SUMMARY.md"
+    else:
+        note = (
+            f"SUMMARY markers not found — add this region to docs/SUMMARY.md:\n"
+            f"{SUMMARY_BEGIN}\n{SUMMARY_END}"
+        )
+    print(
+        f"Wrote {len(parsed)} catalog pages + index.md to {out_dir} ({note})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def run_self_tests() -> int:
+    """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
+    against the live source tree."""
+    import tempfile
+
+    reg = build_registry()
+    fp = reg.module_to_file["button"]
+    pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+
+    page = format_catalog_markdown(
+        pf, title="Button", slug="button", api_base="../api", img_dir=Path("/nonexistent")
+    )
+    assert page.startswith("<!-- SPDX-License-Identifier"), page[:40]
+    assert "\n# Button\n" in page, page[:80]
+    assert "## API reference" in page, "missing API reference section"
+    assert "Full rustdoc API" in page, "missing rustdoc deep link"
+    assert "bastyde_widgets/button/index.html" in page, "wrong rustdoc url"
+
+    slugs = _build_slugs([pf])
+    idx = format_catalog_index(reg, [pf], slugs)
+    assert "\n# Widget Catalog\n" in idx, idx[:80]
+    assert "[Button](button.md)" in idx, "index missing button link"
+
+    # SUMMARY marker round-trip.
+    with tempfile.TemporaryDirectory() as td:
+        sp = Path(td) / "SUMMARY.md"
+        sp.write_text(
+            f"# Index\n\n{SUMMARY_BEGIN}\nstale\n{SUMMARY_END}\n\n# Tail\n",
+            encoding="utf-8",
+        )
+        block = _summary_block(reg, [pf], slugs, "widgets")
+        assert patch_summary(sp, block), "patch returned False"
+        result = sp.read_text(encoding="utf-8")
+        assert "stale" not in result, "stale content survived"
+        assert "[Overview](widgets/index.md)" in result, "catalog overview missing"
+        assert "[Button](widgets/button.md)" in result, "widget chapter missing"
+        assert "# Index" in result and "# Tail" in result, "surrounding text clobbered"
+
+    # Slug collision fallback.
+    assert _rustdoc_module_url("../api", PRIMITIVES_DIR / "hstack.rs").endswith(
+        "bastyde_widgets/primitives/hstack/index.html"
+    ), "rustdoc url for nested module wrong"
+    # Nested per-widget submodule -> public parent module.
+    assert _rustdoc_module_url("../api", WIDGETS_SRC / "tab_widget" / "bar.rs").endswith(
+        "bastyde_widgets/tab_widget/index.html"
+    ), "rustdoc url for private submodule should fall back to parent"
+
+    # Catalog link cleaning: keep web/anchor/api, strip rustdoc + file links to code.
+    nz = _clean_catalog_links(
+        "[`HStack`](crate::primitives::HStack), [a](Self::alignment), [b](self), "
+        "[c](TreeView), [d](../crates/x.rs), [api](../api/x.html), [web](https://x.io)\n"
+        "see [`Ref`].\n\n[`Ref`]: crate::Ref"
+    )
+    for bad in ("](crate::", "](Self::", "](self)", "](TreeView)", "](../crates/", "[`Ref`]:"):
+        assert bad not in nz, f"{bad} survived: {nz}"
+    assert "`HStack`" in nz and "see `Ref`." in nz, nz
+    assert "](../api/x.html)" in nz and "](https://x.io)" in nz, nz
+
+    print("extract_widget_api.py self-tests passed.", file=sys.stderr)
+    return 0
+
+
+# ----------------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------------
 
@@ -1272,12 +1718,44 @@ def main(argv: list[str]) -> int:
         "-o",
         help="Write output to this file instead of stdout.",
     )
+    parser.add_argument(
+        "--md-dir",
+        metavar="DIR",
+        help="Generate one mdBook catalog page per widget into DIR "
+        "(e.g. docs/widgets), plus index.md, and patch the generated region of "
+        "docs/SUMMARY.md. Ignores positional widget names (always emits all).",
+    )
+    parser.add_argument(
+        "--api-base",
+        default="../api",
+        help="Base URL/path for the rustdoc API links in catalog pages "
+        "(default: ../api, i.e. rustdoc published next to the book).",
+    )
+    parser.add_argument(
+        "--api-dir",
+        metavar="DIR",
+        help="Path to the built rustdoc tree (e.g. target/doc). When given, each "
+        "catalog page's API link falls back to the nearest module that actually "
+        "has a page, so private/cfg-gated modules don't 404.",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help=argparse.SUPPRESS,  # run the catalog-generator smoke tests and exit
+    )
     args = parser.parse_args(argv)
+
+    if args.test:
+        return run_self_tests()
 
     reg = build_registry()
 
     if args.list:
         return cmd_list(reg)
+
+    if args.md_dir:
+        api_dir = Path(args.api_dir) if args.api_dir else None
+        return cmd_md_dir(reg, args.md_dir, args.api_base, api_dir)
 
     if args.all:
         target_files = list(reg.files)

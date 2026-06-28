@@ -1,6 +1,34 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! TextWidget — a leaf widget that renders a localized text string.
+//!
+//! `TextWidget` is the building block for every visible label in the framework.
+//! It delegates measurement and rasterization to the `TextBackend` and supports
+//! three overflow modes: [`TextOverflow::Wrap`] (default — grows vertically),
+//! [`TextOverflow::Ellipsis`] with trailing, middle, or leading truncation, and
+//! a minimal markup subset (`[label](url)`, `*italic*`, `**bold**`) with
+//! per-link click/hover dispatch.
+//!
+//! Text and color accept either static values or reactive `Signal`/`Prop` bindings.
+//! The default color role is [`TextRole::Primary`], resolved against the active
+//! theme at paint time, so theme switches update text color without any explicit
+//! binding or rebuild.
+//!
+//! Single-line / ellipsis text opts into shrink by default: an over-constrained
+//! stack compresses the label down to the ellipsis-glyph width before the label
+//! overflows. Call [`no_shrink`](TextWidget::no_shrink) to restore rigid behavior,
+//! or [`min_shrink_width`](TextWidget::min_shrink_width) to set a custom floor.
+//! Wrap-mode text is height-variable and therefore always rigid; opt it into
+//! compression with [`Shrinkable`](crate::primitives::Shrinkable).
+//!
+//! ```rust
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_i18n::lit;
+//! // Single-line label that truncates with a trailing ellipsis if too narrow:
+//! let _w = TextWidget::new(lit!("Save document")).single_line();
+//! ```
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -15,14 +43,11 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::TextRole;
 
-/// A leaf widget that renders text via the TextBackend.
+/// A leaf widget that renders a localized text string.
 ///
-/// Defaults to [`TextOverflow::Wrap`]: long text wraps onto multiple
-/// lines and the widget grows vertically. Single-line widgets (button
-/// labels, menu items, tab headers, etc.) opt out with
-/// `.overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing))`.
-///
-/// Text and color can be static or bound to reactive state.
+/// See the [module documentation](self) for the full feature description.
+/// Construct with [`TextWidget::new`] and chain builder methods for color,
+/// style, overflow mode, and optional markup/link dispatch.
 /// Closure type for link click/hover dispatch.
 type LinkClickHandler = Rc<dyn Fn(&str, &mut EventContext)>;
 type LinkHoverHandler = Rc<dyn Fn(&str, bool, Rect, &mut EventContext)>;
@@ -164,6 +189,9 @@ impl TextWidget {
         self
     }
 
+    /// Override the text backend used for measurement and rasterization.
+    /// In normal app code the framework provides the backend automatically;
+    /// this method is used by headless tests that inject a `MockTextBackend`.
     pub fn text_backend(mut self, backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>) -> Self {
         self.text_backend = Some(backend);
         self

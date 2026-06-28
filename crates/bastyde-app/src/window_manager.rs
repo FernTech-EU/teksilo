@@ -840,7 +840,7 @@ impl WindowManager {
             // If this window is involved in an in-flight app-originated OS
             // drag, abort it before the tree is dropped — otherwise the
             // app-global typed-payload stash would leak and a later genuine
-            // external drop could be mis-recovered as the stale payload.
+            // external drop could be misrecovered as the stale payload.
             managed.tree.abort_outbound_drag();
             if let Some(sid) = managed.string_id.as_deref() {
                 self.string_to_id.remove(sid);

@@ -1,15 +1,38 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Virtualized hierarchical tree widget.
+//! TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 //!
-//! `TreeView` displays a `TreeModel<T>` as an indented, expandable/collapsible
-//! list. Internally it creates a `TreeSlice` for per-view expand state and
-//! virtualizes rendering like `ListView` (only visible rows have widgets).
-//! Row heights come in three modes: uniform (`item_height`, the default),
+//! Displays a [`TreeModel<T>`](bastyde_data::TreeModel) as an indented tree.
+//! Internally each view owns a [`TreeSlice`] for independent
+//! expand state, so two `TreeView`s on the same model can be open at different
+//! depths simultaneously. Only rows in the visible viewport + a small buffer have
+//! live widgets — rows outside the buffer are dormant, matching `ListView`'s
+//! virtualization model. An external [`TreeDataSource`]
+//! is also accepted via [`TreeView::from_source`] when the data lives outside a
+//! `TreeModel`.
+//!
+//! Row heights come in three modes: uniform (`item_height`, default fast path),
 //! exact per-flat-index callback (`item_height_fn`), and auto-measured
-//! (`auto_item_height`) — expand/collapse keeps measured heights above the
-//! toggle via the slice's `first_changed_index` divergence.
+//! (`auto_item_height` — height-for-width per row, scroll-anchored).
+//!
+//! ## Example
+//!
+//! ```rust
+//! # use bastyde_widgets::TreeView;
+//! # use bastyde_widgets::primitives::{HStack, Padding, TextWidget};
+//! # use bastyde_data::TreeModel;
+//! # use bastyde_i18n::lit;
+//! # struct Item { title: String }
+//! # let tree_model: TreeModel<Item> = TreeModel::new();
+//! let _w = TreeView::new(tree_model, |item, entry, _selected| {
+//!     let indent = entry.depth as f32 * 20.0;
+//!     Box::new(HStack::new()
+//!         .child(Padding::new(0.0, 0.0, 0.0, indent))
+//!         .child(TextWidget::new(lit!(&item.title))))
+//! })
+//! .item_height(28.0);
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -72,6 +95,7 @@ impl<'a, T: 'static> TreeRowContext<'a, T> {
         self.slice.clone()
     }
 
+    /// The `NodeId` of this row in the backing `TreeModel`.
     pub fn node_id(&self) -> bastyde_data::NodeId {
         self.node_id
     }

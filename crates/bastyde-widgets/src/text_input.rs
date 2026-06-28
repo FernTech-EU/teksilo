@@ -56,11 +56,16 @@ pub use bastyde_core::styles::TextInputVariant;
 use bastyde_i18n::LocalizedString;
 
 /// Validation state for the text input field.
+///
+/// Drives the inline feedback strip and border tint of [`TextInput`].
 #[derive(Debug, Clone, Default)]
 pub enum ValidationState {
+    /// No validation message — the field is pristine or valid.
     #[default]
     None,
+    /// The committed value is invalid; `LocalizedString` is shown in red below the field.
     Error(LocalizedString),
+    /// The committed value is suspicious but accepted; `LocalizedString` is shown as a warning.
     Warning(LocalizedString),
     /// Last commit was auto-corrected; the field's value has already
     /// been replaced with the normalized form. The composite renders
@@ -212,6 +217,7 @@ impl TextInput {
     // `TextInputField` forwards to it 1:1 at build time — the
     // `TextInput` composite just owns the framing around the field.
 
+    /// Set the placeholder text shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.placeholder = ls;
@@ -234,16 +240,19 @@ impl TextInput {
         self
     }
 
+    /// Set the field read-only: text is selectable and copyable but not editable.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
     }
 
+    /// Limit the number of Unicode scalar values the field will accept.
     pub fn max_length(mut self, max_length: usize) -> Self {
         self.max_length = Some(max_length);
         self
     }
 
+    /// Show or hide the trailing ✕ button that clears the field text. Default: hidden.
     pub fn show_clear_button(mut self, show: bool) -> Self {
         self.show_clear_button = show;
         self
@@ -356,6 +365,9 @@ impl TextInput {
         self.feedback_signal.clone()
     }
 
+    /// Bind an external [`ValidationState`] signal directly (e.g. when
+    /// validation runs server-side). Use [`bind_validation_feedback`](Self::bind_validation_feedback)
+    /// when wiring a local validator's output.
     pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
         self.validation = validation;
         self
@@ -388,6 +400,8 @@ impl TextInput {
         self
     }
 
+    /// Attach a registry-driven rich tooltip by key. Mutually exclusive with
+    /// `tooltip` and `composite_tooltip` (last call wins).
     pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
@@ -395,6 +409,8 @@ impl TextInput {
         self
     }
 
+    /// Attach an inline rich tooltip from a pre-built [`tooltip::TooltipContent`].
+    /// Mutually exclusive with `tooltip` and `composite_tooltip` (last call wins).
     pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Content(content));
         self.tooltip_text = None;

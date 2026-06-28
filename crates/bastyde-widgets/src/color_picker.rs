@@ -111,6 +111,21 @@ impl ColorBinding {
 }
 
 /// Embeddable HSV+RGB+hex+alpha+swatches color picker.
+///
+/// See the [module docs](self) for layout options, accessibility, and
+/// integration patterns. Use [`ColorEdit`](crate::color_edit::ColorEdit)
+/// to wrap this in a compact trigger + popover pattern.
+///
+/// ```ignore
+/// use bastyde_core::signal::Signal;
+/// use bastyde_tokens::Color;
+/// use bastyde_widgets::color_picker::{ColorPicker, ColorPickerLayout};
+///
+/// let color = ctx.signal(Color::new(0.42, 0.70, 0.35, 1.0));
+/// let _picker = ColorPicker::new(color)
+///     .layout(ColorPickerLayout::Compact)
+///     .alpha_enabled(false);
+/// ```
 pub struct ColorPicker {
     binding: ColorBinding,
     alpha_enabled: bool,
@@ -199,46 +214,59 @@ impl ColorPicker {
         self
     }
 
+    /// Enable or disable the alpha channel (hue-strip alpha strip + `a` spinner + hex digit pair).
     pub fn alpha_enabled(mut self, e: bool) -> Self {
         self.alpha_enabled = e;
         self
     }
 
+    /// Show or hide the 2D HSV gradient canvas. Hidden in headless or
+    /// accessibility-only contexts where the pointer-drag surface is
+    /// not useful.
     pub fn show_hsv_canvas(mut self, s: bool) -> Self {
         self.show_hsv_canvas = s;
         self
     }
 
+    /// Show or hide the vertical hue selection strip.
     pub fn show_hue_strip(mut self, s: bool) -> Self {
         self.show_hue_strip = s;
         self
     }
 
+    /// Show or hide the vertical alpha strip. Defaults to the value of
+    /// `alpha_enabled`; call this to decouple them (e.g. show the strip
+    /// without enabling the alpha spinner).
     pub fn show_alpha_strip(mut self, s: bool) -> Self {
         self.show_alpha_strip = Some(s);
         self
     }
 
+    /// Show or hide the RGB (0–255) component spinners row.
     pub fn show_rgb_spinners(mut self, s: bool) -> Self {
         self.show_rgb_spinners = s;
         self
     }
 
+    /// Show or hide the HSV (hue 0–359°, saturation 0–100%, value 0–100%) spinners row.
     pub fn show_hsv_spinners(mut self, s: bool) -> Self {
         self.show_hsv_spinners = s;
         self
     }
 
+    /// Show or hide the hex string input field.
     pub fn show_hex_input(mut self, s: bool) -> Self {
         self.show_hex_input = s;
         self
     }
 
+    /// Show or hide the current-color preview swatch (Standard / Wide layouts).
     pub fn show_preview(mut self, s: bool) -> Self {
         self.show_preview = s;
         self
     }
 
+    /// Show or hide the preset swatch grid (Standard / Wide layouts only).
     pub fn show_swatches(mut self, s: bool) -> Self {
         self.show_swatches = s;
         self
@@ -278,26 +306,34 @@ impl ColorPicker {
         self
     }
 
+    /// Replace the default 12-color [`DEFAULT_SWATCHES`] with a custom palette.
     pub fn swatches(mut self, s: Vec<Color>) -> Self {
         self.swatches = s;
         self
     }
 
+    /// Bind the preset swatch palette to a reactive `Signal<Vec<Color>>`
+    /// that updates live without rebuilding the picker.
     pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self {
         self.swatches_signal = Some(s);
         self
     }
 
+    /// Number of columns in the preset swatch grid. Defaults to 6;
+    /// clamped to at least 1.
     pub fn swatch_columns(mut self, n: usize) -> Self {
         self.swatch_columns = n.max(1);
         self
     }
 
+    /// Select the overall layout variant. Defaults to [`ColorPickerLayout::Standard`].
     pub fn layout(mut self, l: ColorPickerLayout) -> Self {
         self.layout = l;
         self
     }
 
+    /// Set the accessible group label for the picker root node.
+    /// Defaults to the localized "Color picker" string.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self

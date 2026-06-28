@@ -1,0 +1,228 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
+# ListView
+
+ListView — a virtualized, scrollable list backed by a reactive data model.
+
+`ListView<T>` materializes widget subtrees only for the rows currently
+visible in its viewport (plus a configurable buffer). Scrolling and model
+changes trigger a localized rebuild that touches only the newly-visible
+slice, leaving the rest of the tree untouched. The data source is a
+`ListModel<T>` (in-memory, reactive) or any `ListDataSource<Item = T>`
+(lazy / external). A delegate closure `(index, &T, selected) -> Box<dyn Widget>`
+produces each row widget on demand.
+
+Row heights come in three modes: **uniform** (`item_height`, the 32 dp
+default and fastest path), **exact callback** (`item_height_fn` — pure,
+deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
+height-for-width measurement with scroll anchoring so content above the
+viewport stays put while estimates converge).
+
+## When to use
+
+- Large or dynamically-loaded lists (thousands of rows) — use `ListView`.
+- Small, always-all-visible collections — use `Repeater` instead.
+- Hierarchical data — use `TreeView`.
+- Multi-column tabular data — use `TableView`.
+
+## Accessibility
+
+The widget is `Role::List`; each row is wrapped in `Role::ListItem` with
+`set_selected` state. Full keyboard navigation: arrows, Home, End, PageUp,
+PageDown, Space (select/toggle), Enter (activate), Ctrl+A (select all),
+Shift+Arrow (range), type-ahead (opt-in via `type_ahead_label`).
+
+```rust
+# use bastyde_widgets::ListView;
+# use bastyde_widgets::primitives::TextWidget;
+# use bastyde_data::{ListModel, SelectionMode, SelectionModel};
+# use bastyde_i18n::lit;
+# struct Item { name: String }
+# let model: ListModel<Item> = ListModel::from_vec(vec![Item { name: "Alpha".into() }]);
+# let sel = SelectionModel::new(SelectionMode::Single);
+let _w = ListView::new(model, |_i, item, _selected| {
+    Box::new(TextWidget::new(lit!(&item.name)))
+})
+.item_height(32.0)
+.selection(sel);
+```
+
+## Builder methods at a glance
+
+`from_source`, `from_source_keyed`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+
+## API reference
+
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/list_view/index.html)
+
+## `pub struct ListView`
+
+A virtualized scrollable list backed by a `ListModel<T>` or `ListDataSource`.
+
+See the module-level documentation for the full feature overview.
+
+```rust
+pub struct ListView<T: 'static> { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new( model: ListModel<T>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Create a new ListView backed by a `ListModel<T>`.
+
+The `delegate` closure receives `(index, &item, selected)` and returns
+a boxed widget for that item.
+
+#### `pub fn from_source<S: bastyde_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Create a ListView backed by a custom `ListDataSource`.
+
+Use this for large or external datasets that cannot fit in memory.
+The source must implement `ListDataSource<Item = T>`.
+
+#### `pub fn from_source_keyed<S: bastyde_data::ListDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
+
+Create a ListView backed by a custom `ListDataSource` with **keyed**
+selection. The `KeyedSelectionModel<S::Key>` tracks selection by source
+identity, so it survives reorders, filters, lazy window-slides, and
+stays consistent across two views of the same source. The view stays
+key-less (`ListView<T>`) — the index↔key mapping is captured from the
+concrete source here. Mutually exclusive with
+`selection` (the last one set wins).
+
+#### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
+
+Set the scroll-chaining behavior at the boundary (default
+[`OverscrollBehavior::Chain`]; `Contain`
+disables chaining to an ancestor scrollable).
+
+#### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`
+
+Enable or disable animated wheel scrolling (enabled by default).
+
+#### `pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self`
+
+Duration of the smooth scroll animation (default 150 ms).
+
+#### `pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self`
+
+How the scroll bar is displayed (default `Permanent`). `Overlay`
+and `Thin` float the bar over the content instead of reserving a
+layout column, mirroring `ScrollArea::scroll_bar_style`.
+
+#### `pub fn item_height(mut self, height: f32) -> Self`
+
+Set the fixed height per item (default 32.0) — the uniform fast
+path. Mutually exclusive with `item_height_fn`
+and `auto_item_height`; the last mode
+setter wins.
+
+#### `pub fn item_height_fn(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self`
+
+Per-item heights from a callback. The callback must be pure (same
+index + same data → same height); it is re-swept from the first
+changed index on every model change. No measurement pass runs —
+this is the deterministic variable-height path.
+
+#### `pub fn auto_item_height(mut self, estimated: f32) -> Self`
+
+Auto-measured item heights: each realized row is measured at the
+list's content width (height-for-width), unrealized rows assume
+`estimated`. Scroll anchoring keeps content above the viewport
+stationary as estimates are corrected. `estimated` should be a
+typical row height — a wrong estimate only costs realization
+churn while measurements settle, never incorrect layout.
+
+#### `pub fn spacing(mut self, spacing: f32) -> Self`
+
+Set spacing between items (default 0.0).
+
+#### `pub fn selection(mut self, sel: SelectionModel) -> Self`
+
+Set the index-based selection model (positions). For identity-based
+selection that survives reorder / filter / window-slide, build the view
+with `from_source_keyed` instead.
+
+#### `pub fn reorderable(mut self, enabled: bool) -> Self`
+
+Enable intra-widget drag reordering.
+
+When enabled, rows can be dragged within this ListView to reorder them.
+The move is routed through the source's `accept_drop` — a `ListModel`
+reorders in place, an external source routes the move to its store. The
+hover indicator reflects the source's `can_accept` verdict, so a
+forbidden drop shows no insertion line. Keyboard equivalent:
+Alt+ArrowUp/Down.
+
+#### `pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self`
+
+Set the row-**activation** handler — invoked with the flat row index on a
+click (per `activate_on`) or **Enter** on the
+focused row. Distinct from *selection*: arrow-key navigation and
+**Space** move / toggle the selection but do **not** activate.
+
+#### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
+
+Choose single- vs double-click activation (default
+`ActivateOn::DoubleClick`). Enter activates in
+either mode.
+
+#### `pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self`
+
+Enable **type-ahead** ("type to jump"): with this set, typing a
+printable character while the list has keyboard focus jumps the
+selection to the next row whose label starts with the accumulated
+search term, wrapping around (Qt `keyboardSearch` / macOS &
+Windows type-select). `label(&item)` yields the searchable text for
+a row; matching is ASCII-case-insensitive. A pause longer than the
+`type_ahead_timeout` starts a fresh term.
+
+#### `pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self`
+
+Reset window between keystrokes before the type-ahead search term
+clears (default 500 ms). A zero duration disables type-ahead.
+
+#### `pub fn show_scrollbar(mut self, show: bool) -> Self`
+
+Suppress the internal scroll bar. Use when the caller wants to
+mount its own `ScrollBar` outside the ListView (keeping it alive
+across rebuilds so a thumb drag isn't torn down when the visible
+range shifts past the buffer). The caller is expected to wire
+the external bar up to the signals returned by
+`scroll_y_signal`,
+`max_scroll_y_signal` and
+`viewport_ratio_y_signal`.
+
+#### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
+
+The current vertical scroll offset, in logical pixels. Drives the
+viewport position and the scroll bar thumb. Exposed so external
+logic (e.g. a parent widget implementing custom scroll-into-view)
+can read or drive the scroll directly — prefer
+`scroll_to_index` /
+`ensure_index_visible` when possible.
+
+#### `pub fn max_scroll_y_signal(&self) -> &Signal<f32>`
+
+The maximum scroll offset, `content_height - viewport_height`.
+Updated during layout. Exposed for callers that mount their own
+external scrollbar via `show_scrollbar(false)`.
+
+#### `pub fn viewport_ratio_y_signal(&self) -> &Signal<f32>`
+
+The vertical viewport-to-content ratio (0.0..1.0). Drives the
+thumb size on any external scrollbar.
+
+#### `pub fn scroll_to_index(&self, index: usize)`
+
+Scroll so the given model index is aligned to the top of the
+viewport. Clamped to the valid scroll range. Safe to call before
+the ListView has been laid out — the clamp will kick in on the
+first layout pass.
+
+#### `pub fn ensure_index_visible(&self, index: usize)`
+
+Scroll the minimum distance needed to bring the given model
+index fully into the viewport. No-op if already visible.

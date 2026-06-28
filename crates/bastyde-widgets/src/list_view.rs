@@ -1,19 +1,50 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Virtualized scrollable list widget.
+//! ListView — a virtualized, scrollable list backed by a reactive data model.
 //!
-//! `ListView` creates widget subtrees only for the items currently visible in
-//! the viewport (plus a small buffer). When the user scrolls or the data model
-//! changes, the widget rebuilds to show the new visible range.
+//! `ListView<T>` materializes widget subtrees only for the rows currently
+//! visible in its viewport (plus a configurable buffer). Scrolling and model
+//! changes trigger a localized rebuild that touches only the newly-visible
+//! slice, leaving the rest of the tree untouched. The data source is a
+//! `ListModel<T>` (in-memory, reactive) or any `ListDataSource<Item = T>`
+//! (lazy / external). A delegate closure `(index, &T, selected) -> Box<dyn Widget>`
+//! produces each row widget on demand.
 //!
-//! Row heights come in three modes (see `RowMetrics`): uniform
-//! (`item_height`, the default fast path), exact per-row callback
-//! (`item_height_fn`), and auto-measured (`auto_item_height` —
-//! height-for-width measurement of realized rows with scroll anchoring).
+//! Row heights come in three modes: **uniform** (`item_height`, the 32 dp
+//! default and fastest path), **exact callback** (`item_height_fn` — pure,
+//! deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
+//! height-for-width measurement with scroll anchoring so content above the
+//! viewport stays put while estimates converge).
 //!
-//! For small collections where all items should exist simultaneously, use
-//! `Repeater` instead.
+//! ## When to use
+//!
+//! - Large or dynamically-loaded lists (thousands of rows) — use `ListView`.
+//! - Small, always-all-visible collections — use `Repeater` instead.
+//! - Hierarchical data — use `TreeView`.
+//! - Multi-column tabular data — use `TableView`.
+//!
+//! ## Accessibility
+//!
+//! The widget is `Role::List`; each row is wrapped in `Role::ListItem` with
+//! `set_selected` state. Full keyboard navigation: arrows, Home, End, PageUp,
+//! PageDown, Space (select/toggle), Enter (activate), Ctrl+A (select all),
+//! Shift+Arrow (range), type-ahead (opt-in via `type_ahead_label`).
+//!
+//! ```rust
+//! # use bastyde_widgets::ListView;
+//! # use bastyde_widgets::primitives::TextWidget;
+//! # use bastyde_data::{ListModel, SelectionMode, SelectionModel};
+//! # use bastyde_i18n::lit;
+//! # struct Item { name: String }
+//! # let model: ListModel<Item> = ListModel::from_vec(vec![Item { name: "Alpha".into() }]);
+//! # let sel = SelectionModel::new(SelectionMode::Single);
+//! let _w = ListView::new(model, |_i, item, _selected| {
+//!     Box::new(TextWidget::new(lit!(&item.name)))
+//! })
+//! .item_height(32.0)
+//! .selection(sel);
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -51,24 +82,9 @@ const DEFAULT_ITEM_HEIGHT: f32 = 32.0;
 /// Scrollbar thickness.
 const SCROLLBAR_THICKNESS: f32 = 12.0;
 
-/// A virtualized scrollable list backed by a `ListModel<T>`.
+/// A virtualized scrollable list backed by a [`ListModel<T>`](bastyde_data::ListModel) or `ListDataSource`.
 ///
-/// ```rust
-/// # use bastyde_widgets::ListView;
-/// # use bastyde_widgets::primitives::{HStack, Spacer, TextWidget};
-/// # use bastyde_data::{ListModel, SelectionMode, SelectionModel};
-/// # use bastyde_i18n::lit;
-/// # struct Item { title: String }
-/// # let model: ListModel<Item> = ListModel::from_vec(vec![Item { title: "Alpha".into() }]);
-/// # let selection_model = SelectionModel::new(SelectionMode::Single);
-/// let _w = ListView::new(model, |_index, item, _selected| {
-///     Box::new(HStack::new()
-///         .child(TextWidget::new(lit!(&item.title)))
-///         .child(Spacer::new()))
-/// })
-/// .item_height(28.0)
-/// .selection(selection_model);
-/// ```
+/// See the module-level documentation for the full feature overview.
 pub struct ListView<T: 'static> {
     source: ListSource<T>,
     delegate: Rc<dyn Fn(usize, &T, bool) -> Box<dyn Widget>>,

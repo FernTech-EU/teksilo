@@ -60,10 +60,15 @@ use bastyde_tokens::Easing;
 /// wrapper's slot rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScaleOrigin {
+    /// Scale around the centre of the slot. Default for visual-only mode.
     Center,
+    /// Pin the top-leading corner; content grows/shrinks toward the bottom-trailing.
     TopLeading,
+    /// Pin the top-trailing corner; content grows/shrinks toward the bottom-leading.
     TopTrailing,
+    /// Pin the bottom-leading corner; content grows/shrinks toward the top-trailing.
     BottomLeading,
+    /// Pin the bottom-trailing corner; content grows/shrinks toward the top-leading.
     BottomTrailing,
 }
 
@@ -119,8 +124,8 @@ fn centered_scale(pivot: Point, scale: f32) -> Transform2D {
     }
 }
 
-/// Wraps a child and animates a uniform 2D scale on its subtree
-/// driven by an external `Prop<bool>`.
+/// Wraps a child widget and animates a uniform 2D visual scale on its
+/// subtree when an external `Prop<bool>` toggles between visible and hidden.
 pub struct Scale {
     visible: Prop<bool>,
     reflow: bool,
@@ -151,9 +156,10 @@ pub struct Scale {
 }
 
 impl Scale {
-    /// Build a scale wrapper bound to `visible`. Defaults: visual-only
-    /// (no layout reflow), `Center` origin, `MotionTokens::duration_normal`
-    /// + `easing_standard`.
+    /// Create a scale wrapper bound to `visible`; accepts a static `bool`
+    /// or a reactive `Signal<bool>`. Defaults: visual-only (no layout
+    /// reflow), `Center` origin, `MotionTokens::duration_normal` +
+    /// `easing_standard`.
     pub fn new(visible: impl Into<Prop<bool>>) -> Self {
         Self {
             visible: visible.into(),

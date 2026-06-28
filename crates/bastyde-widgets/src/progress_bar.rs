@@ -3,10 +3,11 @@
 
 //! ProgressBar — a bar showing progress from 0.0 to 1.0.
 //!
-//! Determinate / indeterminate, horizontal / vertical. The stationary
-//! chrome (track + determinate fill) is owned by `ProgressBarStyle`;
-//! the indeterminate sweep stays widget-owned (principle 6 — motion
-//! infrastructure is not chrome). Three paint paths:
+//! Supports determinate (fixed or reactive value), indeterminate (animated
+//! sweep), horizontal, and vertical orientations. The stationary chrome (track
+//! and determinate fill) is delegated to `ProgressBarStyle`; the indeterminate
+//! sweep is widget-owned (motion infrastructure is not chrome). Three paint
+//! paths exist internally:
 //!
 //! - **Horizontal indeterminate** uses the shader-driven animated-quad
 //!   pipeline. `ProgressBar::build` registers an `AnimatedQuadHandle`
@@ -20,6 +21,20 @@
 //!   `Signal<f32>::animate_looping`.
 //! - **Determinate** mounts the recipe frame only; the frame paints
 //!   the track plus a proportional fill rect.
+//!
+//! ```rust
+//! # use bastyde_widgets::ProgressBar;
+//! # use bastyde_core::signal::Signal;
+//! // Static determinate bar at 70 %:
+//! let _bar = ProgressBar::new(0.7).thickness(6.0);
+//!
+//! // Reactive determinate bar:
+//! let progress = Signal::new(0.0_f32);
+//! let _bar = ProgressBar::new(0.0).bind_value(progress);
+//!
+//! // Indeterminate (animated sweep):
+//! let _spinner_bar = ProgressBar::indeterminate();
+//! ```
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -99,11 +114,16 @@ impl ProgressBar {
         self
     }
 
+    /// Set the bar's orientation. Default is `Orientation::Horizontal`.
+    /// Vertical bars use the shader-driven animation path only for horizontal;
+    /// vertical indeterminate bars use the signal-driven path instead.
     pub fn orientation(mut self, orientation: Orientation) -> Self {
         self.orientation = orientation;
         self
     }
 
+    /// Set the bar's narrow dimension in logical pixels. For horizontal bars
+    /// this is the height; for vertical bars this is the width. Default is 4.0.
     pub fn thickness(mut self, thickness: f32) -> Self {
         self.thickness = thickness;
         self

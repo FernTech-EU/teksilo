@@ -54,16 +54,18 @@ use bastyde_tokens::Easing;
 /// instantly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmoothSizeAxes {
+    /// Animate width changes only; height snaps to natural immediately.
     Width,
+    /// Animate height changes only; width snaps to natural immediately.
     Height,
+    /// Animate both width and height changes. Default.
     Both,
 }
 
 const SIZE_CHANGE_EPSILON: f32 = 0.5;
 
-/// Wraps a child and animates the wrapper's reported size toward the
-/// child's current intrinsic size whenever the child's natural size
-/// changes.
+/// Wraps a child widget and animates the wrapper's reported size toward
+/// the child's current natural size whenever that size changes.
 pub struct SmoothSize {
     axes: SmoothSizeAxes,
     duration: Option<Duration>,

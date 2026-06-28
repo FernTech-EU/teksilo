@@ -1,6 +1,32 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! ScrollArea — a clipping viewport that scrolls its content on wheel, touch,
+//! and assistive-technology actions.
+//!
+//! Wrap any widget in `ScrollArea` to make it scrollable. The scroll position
+//! is stored in reactive `Signal<f32>` signals (one per axis), shared with the
+//! built-in [`ScrollBar`] children. Two display
+//! modes cover most use cases: `Overlay` (the default, macOS-style thin-at-rest
+//! indicator that expands on hover) and `Permanent` (a layout-consuming gutter
+//! always on screen). Use [`ScrollBarPolicy`] to control when each axis shows.
+//!
+//! ## Accessibility
+//!
+//! Reports `Role::ScrollView` with per-axis `scroll_y` / `scroll_x` position
+//! and limit fields. Advertises `ScrollUp` / `ScrollDown` / `ScrollLeft` /
+//! `ScrollRight` actions only for the axes that actually overflow, so AT clients
+//! (NVDA, JAWS, VoiceOver) know which directions are reachable.
+//!
+//! ```rust
+//! # use bastyde_widgets::scroll_area::{ScrollArea, ScrollBarMode};
+//! # use bastyde_widgets::primitives::MinSize;
+//! let _w = ScrollArea::new()
+//!     .child(MinSize::new(0.0, 2000.0))
+//!     .scroll_bar_style(ScrollBarMode::Permanent)
+//!     .smooth_scrolling(true);
+//! ```
+
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -19,44 +45,42 @@ use bastyde_tokens::Easing;
 use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
-/// How the scroll bar is displayed.
+/// How the scroll bar is presented relative to the viewport content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollBarMode {
-    /// Scroll bar overlays the content (macOS-style). A thin passive
-    /// indicator is painted during scrolling; the full interactive ScrollBar
-    /// is shown as an overlay on pointer proximity.
+    /// Scroll bar overlays the content (macOS-style): a thin passive indicator
+    /// is painted while scrolling; the full interactive track expands on pointer
+    /// proximity. Does not reduce the viewport width.
     #[default]
     Overlay,
-    /// Scroll bar is a permanent layout sibling of the viewport, reducing
-    /// the content area by the scroll bar's width. Always visible and
-    /// interactive.
+    /// Scroll bar is a permanent layout sibling of the viewport, reserving its
+    /// full thickness and always remaining interactive — the classic Windows/Linux
+    /// gutter style.
     Permanent,
-    /// Floats over the content like `Overlay`, but only the thin resting
-    /// indicator is painted — never the full track + thumb. A passive
-    /// scroll-position display for minimal UIs; drag / track-click /
-    /// keyboard interaction still works against the full slot bounds.
+    /// Floats over the content like `Overlay` but only ever shows the thin resting
+    /// indicator, never the full track. A passive scroll-position display for
+    /// minimal UIs; drag, track-click, and keyboard still work against the full
+    /// slot bounds.
     Thin,
 }
 
-/// Controls when a scroll bar is shown for a given axis.
+/// Controls when the scroll bar appears for a given axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollBarPolicy {
-    /// Show the scroll bar only when content exceeds the viewport (default).
+    /// Show the scroll bar only when content exceeds the viewport size (default).
     #[default]
     AsNeeded,
-    /// Always show the scroll bar, even when content fits.
+    /// Always show the scroll bar, even when content fits without scrolling.
     AlwaysOn,
-    /// Never show the scroll bar. Content is still scrollable via wheel/touch.
+    /// Never show the scroll bar; content is still scrollable via wheel and touch.
     AlwaysOff,
 }
 
-/// A scroll area that clips its content to a viewport and handles
-/// scroll events. The scroll offset is stored as `Signal<f32>` per axis,
-/// shared with the ScrollBar widget via the reactive binding system.
+/// A clipping viewport that makes any child widget scrollable.
 ///
-/// Supports two display modes via `ScrollBarMode`:
-/// - **Overlay** (default): thin indicator painted during scrolling
-/// - **Permanent**: ScrollBar is a layout child alongside the viewport
+/// The scroll offset per axis is stored in a reactive `Signal<f32>`, shared
+/// with the built-in `ScrollBar` children. See [`ScrollBarMode`] for display
+/// options and [`ScrollBarPolicy`] for per-axis visibility control.
 pub struct ScrollArea {
     content_child: Option<Box<dyn Widget>>,
     content_child_id: Option<WidgetId>,
@@ -136,6 +160,7 @@ impl std::fmt::Debug for ScrollArea {
 }
 
 impl ScrollArea {
+    /// Create a new `ScrollArea` with overlay scroll bars, smooth scrolling, and no content yet.
     pub fn new() -> Self {
         Self {
             content_child: None,
@@ -163,6 +188,7 @@ impl ScrollArea {
         }
     }
 
+    /// Set the scrollable content widget.
     pub fn child(mut self, child: impl Widget + 'static) -> Self {
         self.content_child = Some(Box::new(child));
         self.content_child_id = None;
@@ -176,6 +202,7 @@ impl ScrollArea {
         sa
     }
 
+    /// Set the scroll bar display mode (`Overlay`, `Permanent`, or `Thin`).
     pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
         self.scroll_bar_style = style;
         self
@@ -193,11 +220,13 @@ impl ScrollArea {
         self
     }
 
+    /// Set the pixels-per-line used when translating line-based wheel events.
     pub fn line_height(mut self, lh: f32) -> Self {
         self.line_height = lh;
         self
     }
 
+    /// Set the scroll bar thickness in logical pixels (applies to both axes).
     pub fn scroll_bar_thickness(mut self, thickness: f32) -> Self {
         self.scroll_bar_thickness = thickness;
         self

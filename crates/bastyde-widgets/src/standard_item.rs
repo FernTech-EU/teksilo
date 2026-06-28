@@ -98,8 +98,10 @@ enum CheckboxKind {
 // StandardListItem
 // ---------------------------------------------------------------------------
 
-/// Default visual for a row in a `ListView` (or any place that wants
-/// the canonical icon + label + trailing layout).
+/// Canonical single-line or two-line row layout for use in a `ListView`.
+///
+/// See the [module-level documentation](self) for the full slot layout and
+/// wiring rules.
 pub struct StandardListItem {
     label: LocalizedString,
     subtitle: Option<LocalizedString>,
@@ -124,6 +126,7 @@ pub struct StandardListItem {
 }
 
 impl StandardListItem {
+    /// Create a list item with the given primary label.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {
@@ -154,6 +157,7 @@ impl StandardListItem {
         self
     }
 
+    /// Set an optional secondary line below the primary label.
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.subtitle = Some(ls);
@@ -167,6 +171,7 @@ impl StandardListItem {
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`leading_slot`](Self::leading_slot).
     pub fn leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.leading_slot = Some(widget);
         self
@@ -181,6 +186,7 @@ impl StandardListItem {
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`center_slot`](Self::center_slot).
     pub fn center_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.center_slot = Some(widget);
         self
@@ -193,6 +199,7 @@ impl StandardListItem {
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`trailing_slot`](Self::trailing_slot).
     pub fn trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.trailing_slot = Some(widget);
         self
@@ -204,6 +211,7 @@ impl StandardListItem {
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`subtitle_leading_slot`](Self::subtitle_leading_slot).
     pub fn subtitle_leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.subtitle_leading_slot = Some(widget);
         self
@@ -215,6 +223,7 @@ impl StandardListItem {
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`subtitle_trailing_slot`](Self::subtitle_trailing_slot).
     pub fn subtitle_trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.subtitle_trailing_slot = Some(widget);
         self
@@ -235,21 +244,25 @@ impl StandardListItem {
         self
     }
 
+    /// Set the initial selection state (static value).
     pub fn selected(mut self, b: bool) -> Self {
         self.selected = Signal::new(b);
         self
     }
 
+    /// Bind the selection state to a reactive `Signal<bool>`.
     pub fn bind_selected(mut self, s: Signal<bool>) -> Self {
         self.selected = s;
         self
     }
 
+    /// Set the initial enabled state (static value).
     pub fn enabled(mut self, b: bool) -> Self {
         self.enabled = Signal::new(b);
         self
     }
 
+    /// Bind the enabled state to a reactive `Signal<bool>`.
     pub fn bind_enabled(mut self, s: Signal<bool>) -> Self {
         self.enabled = s;
         self
@@ -559,10 +572,11 @@ impl Widget for StandardListItem {
 // StandardTreeItem
 // ---------------------------------------------------------------------------
 
-/// Default visual for a row in a `TreeView`: `StandardListItem` plus
-/// a depth-driven indent column and an interactive chevron column
-/// (always reserved, even for leaves, so labels at the same depth
-/// align).
+/// Canonical row layout for a `TreeView` — [`StandardListItem`] plus
+/// a depth-driven indent column and an always-reserved chevron column.
+///
+/// See the [module-level documentation](self) for the canonical `TreeView`
+/// wiring pattern and wiring rules.
 pub struct StandardTreeItem {
     inner: StandardListItem,
     depth: usize,
@@ -572,6 +586,7 @@ pub struct StandardTreeItem {
 }
 
 impl StandardTreeItem {
+    /// Create a tree item with the given primary label.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             inner: StandardListItem::new(label),
@@ -584,91 +599,121 @@ impl StandardTreeItem {
 
     // Forward all StandardListItem builders ----------------------------------
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`subtitle`](StandardListItem::subtitle).
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         self.inner = self.inner.subtitle(text);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`leading_slot`](StandardListItem::leading_slot).
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.leading_slot(widget);
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`leading_slot`](Self::leading_slot).
     pub fn leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.inner = self.inner.leading_slot_boxed(widget);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`center_slot`](StandardListItem::center_slot).
     pub fn center_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.center_slot(widget);
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`center_slot`](Self::center_slot).
     pub fn center_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.inner = self.inner.center_slot_boxed(widget);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`trailing_slot`](StandardListItem::trailing_slot).
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.trailing_slot(widget);
         self
     }
 
+    /// `Box<dyn Widget>` variant of [`trailing_slot`](Self::trailing_slot).
     pub fn trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.inner = self.inner.trailing_slot_boxed(widget);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`subtitle_leading_slot`](StandardListItem::subtitle_leading_slot).
     pub fn subtitle_leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.subtitle_leading_slot(widget);
         self
     }
 
+    /// `Box<dyn Widget>` variant of
+    /// [`subtitle_leading_slot`](Self::subtitle_leading_slot).
     pub fn subtitle_leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.inner = self.inner.subtitle_leading_slot_boxed(widget);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`subtitle_trailing_slot`](StandardListItem::subtitle_trailing_slot).
     pub fn subtitle_trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.subtitle_trailing_slot(widget);
         self
     }
 
+    /// `Box<dyn Widget>` variant of
+    /// [`subtitle_trailing_slot`](Self::subtitle_trailing_slot).
     pub fn subtitle_trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self {
         self.inner = self.inner.subtitle_trailing_slot_boxed(widget);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`checkbox`](StandardListItem::checkbox).
     pub fn checkbox(mut self, checked: Signal<bool>) -> Self {
         self.inner = self.inner.checkbox(checked);
         self
     }
 
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`tristate_checkbox`](StandardListItem::tristate_checkbox).
     pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self {
         self.inner = self.inner.tristate_checkbox(state);
         self
     }
 
+    /// Set the initial selection state (static value).
     pub fn selected(mut self, b: bool) -> Self {
         self.inner = self.inner.selected(b);
         self
     }
 
+    /// Bind the selection state to a reactive `Signal<bool>`.
     pub fn bind_selected(mut self, s: Signal<bool>) -> Self {
         self.inner = self.inner.bind_selected(s);
         self
     }
 
+    /// Set the initial enabled state (static value).
     pub fn enabled(mut self, b: bool) -> Self {
         self.inner = self.inner.enabled(b);
         self
     }
 
+    /// Bind the enabled state to a reactive `Signal<bool>`.
     pub fn bind_enabled(mut self, s: Signal<bool>) -> Self {
         self.inner = self.inner.bind_enabled(s);
         self
     }
 
+    /// Override the label's text style. Forwarded to the inner
+    /// [`StandardListItem`] — see its
+    /// [`label_style`](StandardListItem::label_style).
     pub fn label_style(
         mut self,
         style: impl Into<bastyde_core::color_prop::TextStyleProp>,
@@ -677,6 +722,9 @@ impl StandardTreeItem {
         self
     }
 
+    /// Override the subtitle's text style. Forwarded to the inner
+    /// [`StandardListItem`] — see its
+    /// [`subtitle_style`](StandardListItem::subtitle_style).
     pub fn subtitle_style(
         mut self,
         style: impl Into<bastyde_core::color_prop::TextStyleProp>,
@@ -710,21 +758,27 @@ impl StandardTreeItem {
 
     // Tree-specific ---------------------------------------------------------
 
+    /// Set the indent depth (0 = root level). Each level adds one
+    /// `STANDARD_ITEM_TREE_INDENT_STEP` of leading whitespace.
     pub fn depth(mut self, depth: usize) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Declare whether the node has children, which determines whether the
+    /// chevron column is interactive or decorative-only.
     pub fn has_children(mut self, has: bool) -> Self {
         self.has_children = has;
         self
     }
 
+    /// Set the initial expanded state (static value).
     pub fn is_expanded(mut self, b: bool) -> Self {
         self.is_expanded = Signal::new(b);
         self
     }
 
+    /// Bind the expanded state to a reactive `Signal<bool>`.
     pub fn bind_is_expanded(mut self, s: Signal<bool>) -> Self {
         self.is_expanded = s;
         self

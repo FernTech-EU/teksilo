@@ -26,6 +26,22 @@
 //! give each one an accessible name via
 //! [`.access_label(tr!(tab_list_name()))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
 //! so screen readers can distinguish them (ARIA APG recommendation).
+//!
+//! ```ignore
+//! use bastyde_widgets::tab_widget::{TabBar, TabDelegate, TabId};
+//! use bastyde_data::ListModel;
+//! use bastyde_core::signal::Signal;
+//!
+//! #[derive(Clone)]
+//! struct Tab { id: TabId, title: String }
+//!
+//! let model: ListModel<Tab> = ListModel::new();
+//! let selected: Signal<Option<TabId>> = Signal::new(None);
+//! let delegate = TabDelegate::new(|_i, t: &Tab| bastyde_i18n::lit!(t.title.clone()));
+//! let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
+//!     .reorderable(true)
+//!     .tab_dividers();
+//! ```
 
 use bastyde_i18n::lit;
 use std::cell::RefCell;

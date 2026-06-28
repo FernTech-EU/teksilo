@@ -60,14 +60,18 @@ use bastyde_core::widget_id::WidgetId;
 /// the resolution happens in `place_children` via the layout context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlideEdge {
+    /// Slide from the leading edge (left in LTR, right in RTL). Suits drawers and side panels.
     Leading,
+    /// Slide from the trailing edge (right in LTR, left in RTL).
     Trailing,
+    /// Slide from the top edge. Suits drop-down banners or navigation bars.
     Top,
+    /// Slide from the bottom edge. Suits snackbars and bottom sheets.
     Bottom,
 }
 
-/// Wraps a child and animates a translate offset in/out from one edge
-/// when `visible` flips.
+/// Wraps a child widget and translates it in or out from one edge of
+/// its slot whenever `visible` flips.
 pub struct Slide {
     visible: Prop<bool>,
     edge: SlideEdge,
@@ -82,8 +86,9 @@ pub struct Slide {
 }
 
 impl Slide {
-    /// Build a slide wrapper bound to `visible`. Defaults to sliding
-    /// from the bottom — change with `.from(...)`.
+    /// Create a slide wrapper bound to `visible`; accepts a static `bool`
+    /// or a reactive `Signal<bool>`. Defaults to [`SlideEdge::Bottom`] —
+    /// override with [`.from(...)`](Self::from).
     pub fn new(visible: impl Into<Prop<bool>>) -> Self {
         Self {
             visible: visible.into(),

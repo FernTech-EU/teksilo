@@ -1,14 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Accordion — a collapsible section with clickable header.
+//! Accordion — a collapsible section with a clickable header that shows or hides
+//! its content when activated.
 //!
-//! Default (non-fill) mode animates the disclosure with the `Collapse` widget
-//! (vertical) or `visible_when` dormancy (horizontal). Fill mode — used by
-//! `DockingLayout` panes — has no internal animation: the header + a `FillBody`
-//! fill the slot the enclosing Splitter pane gives, and the *Splitter pane*
-//! animates the collapse by folding to the header. V2 attached handlers — no
-//! event() override.
+//! In the default vertical mode a horizontally-spanning header row sits above the
+//! content; clicking or pressing Space/Enter toggles visibility with an animated
+//! height disclosure (via [`Collapse`]).
+//! A horizontal mode flips the header into a narrow vertical strip with a rotated
+//! label — used by top/bottom sides of a `DockingLayout`. Fill mode (`.fill(true)`)
+//! is designed for fixed-size slots such as Splitter panes: the content fills all
+//! available space and collapse animation is driven externally by the enclosing
+//! pane rather than by an internal height tween.
+//!
+//! ## Accessibility
+//!
+//! The header is announced as `Role::Button` with `aria-expanded` reflecting the
+//! current state, and `aria-controls` pointing at the content region
+//! (`Role::Region`). Space/Enter toggle the disclosure; AT "click" actions are
+//! also handled. The focus ring appears only on keyboard focus (not on pointer
+//! clicks), matching the IntUI convention.
+//!
+//! ```rust
+//! # use bastyde_widgets::accordion::Accordion;
+//! # use bastyde_core::signal::Signal;
+//! # use bastyde_i18n::lit;
+//! let expanded = Signal::new(false);
+//! let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
+//! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -95,13 +114,15 @@ impl Widget for AccordionRegion {
 // Accordion widget
 // ---------------------------------------------------------------------------
 
-/// Accordion design tokens. Accordion is a group-4 composite
-/// with no dedicated `Recipe*Style`, so its layout numbers live
-/// alongside the widget that reads them.
+/// Height of the accordion header row in pixels (vertical mode).
 pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;
+/// Horizontal padding inside the accordion header on the leading and trailing edges.
 pub const ACCORDION_HEADER_PADDING_HORIZONTAL: f32 = 8.0;
+/// Size of the chevron disclosure indicator icon in pixels.
 pub const ACCORDION_INDICATOR_SIZE: f32 = 12.0;
+/// Gap between the disclosure indicator and the title label.
 pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
+/// Corner radius of the keyboard-focus ring painted on the accordion header.
 pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 
 /// Orientation of an [`Accordion`]: how its header sits relative to its
@@ -118,9 +139,12 @@ pub enum AccordionOrientation {
     Horizontal,
 }
 
-/// A collapsible section with a clickable header that toggles content visibility.
+/// A collapsible section widget whose header button shows or hides attached content.
 ///
-/// Content must be pre-registered via `content_id(id)`.
+/// Supply the title and a `Signal<bool>` for the expanded state, then attach
+/// content via [`.content(w)`](Accordion::content) or
+/// [`.content_id(id)`](Accordion::content_id). The signal can be toggled externally
+/// (e.g. from a "collapse all" button) and the disclosure animation will follow.
 pub struct Accordion {
     /// Header title. Kept as a `LocalizedString` (not eagerly resolved)
     /// so a `tr!(...)` / `tr_widget!(...)` source re-renders on locale
@@ -163,6 +187,10 @@ pub struct Accordion {
 }
 
 impl Accordion {
+    /// Create a new accordion with the given `title` and an external `expanded` signal.
+    ///
+    /// The accordion starts collapsed or expanded according to the initial value of
+    /// `expanded`. Toggling the signal later drives the disclosure animation.
     pub fn new(title: impl Into<LocalizedString>, expanded: Signal<bool>) -> Self {
         Self {
             title: title.into(),

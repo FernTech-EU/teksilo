@@ -394,7 +394,7 @@ fn parse_view_box(svg_el: &XmlElement) -> Result<Rect, SvgParseError> {
 /// are stripped and the number kept (SVG's user unit is px-equivalent).
 /// Percentages and font-relative units (`%`/`em`/`ex`/`rem`) can't be
 /// resolved without a viewport / font, so they return `None` (the caller
-/// falls back) rather than mis-parsing — e.g. `width="100%"` with no
+/// falls back) rather than misparsing — e.g. `width="100%"` with no
 /// viewBox degrades to the viewBox error instead of a confusing one.
 fn parse_length(s: &str) -> Option<f32> {
     let s = s.trim();
