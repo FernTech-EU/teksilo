@@ -47,6 +47,11 @@ pub enum TextRole {
     Warning,
     /// Success message text.
     Success,
+    /// Text/icon painted on top of an error surface (e.g. a destructive
+    /// button's label).
+    OnError,
+    /// Text painted on top of an error-container surface.
+    OnErrorContainer,
     /// Inline hyperlink (idle).
     Link,
     /// Inline hyperlink on hover.
@@ -77,6 +82,8 @@ impl TextRole {
             TextRole::Error => colors.text_error,
             TextRole::Warning => colors.text_warning,
             TextRole::Success => colors.text_success,
+            TextRole::OnError => colors.text_on_error,
+            TextRole::OnErrorContainer => colors.text_on_error_container,
             TextRole::Link => colors.text_link,
             TextRole::LinkHover => colors.text_link_hover,
             TextRole::LinkVisited => colors.text_link_visited,
@@ -100,6 +107,8 @@ impl TextRole {
             "Error",
             "Warning",
             "Success",
+            "OnError",
+            "OnErrorContainer",
             "Link",
             "LinkHover",
             "LinkVisited",
@@ -155,6 +164,15 @@ pub enum SurfaceRole {
     StatusWarning,
     /// Status error background.
     StatusError,
+    /// Error-container surface (softened error tint — error banners,
+    /// invalid-field backgrounds). Pairs with `TextRole::OnErrorContainer`.
+    ErrorContainer,
+    /// Neutral container surface — a subtly distinguished panel/card level.
+    Container,
+    /// Raised container surface — one elevation step above `Container`.
+    ContainerRaised,
+    /// Sunken container surface — recessed below `Container`.
+    ContainerSunken,
     /// Tooltip body background (dark).
     TooltipBg,
     /// Editor pane background.
@@ -194,6 +212,10 @@ impl SurfaceRole {
             SurfaceRole::StatusSuccess => colors.status_success_bg,
             SurfaceRole::StatusWarning => colors.status_warning_bg,
             SurfaceRole::StatusError => colors.status_error_bg,
+            SurfaceRole::ErrorContainer => colors.surface_error_container,
+            SurfaceRole::Container => colors.surface_container,
+            SurfaceRole::ContainerRaised => colors.surface_container_raised,
+            SurfaceRole::ContainerSunken => colors.surface_container_sunken,
             SurfaceRole::TooltipBg => colors.tooltip_bg,
             SurfaceRole::EditorBg => colors.editor_bg,
             SurfaceRole::EditorCaret => colors.editor_caret,
@@ -225,6 +247,10 @@ impl SurfaceRole {
             "StatusSuccess",
             "StatusWarning",
             "StatusError",
+            "ErrorContainer",
+            "Container",
+            "ContainerRaised",
+            "ContainerSunken",
             "TooltipBg",
             "EditorBg",
             "EditorCaret",

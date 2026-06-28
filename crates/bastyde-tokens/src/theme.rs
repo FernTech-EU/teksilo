@@ -120,6 +120,28 @@ pub struct ColorTokens {
     pub focus_ring_error: Color,
     pub scrim: Color,
 
+    // ── Cross-design-language roles ───────────────────────────────────────────
+    // Universal slots every design language (Material 3, Fluent, macOS,
+    // GTK4/Adwaita) needs but IntUI's flat role model didn't carry. Design-
+    // language-specific colors (M3 secondary/tertiary triads, the full tonal
+    // ladder, inverse colors) stay in per-theme extensions, not here.
+    /// Text/icon painted on top of an error surface (white on the error fill).
+    pub text_on_error: Color,
+    /// Text painted on top of the (pale) error-container surface.
+    pub text_on_error_container: Color,
+    /// A softened error-tinted container surface (error banners, invalid
+    /// field backgrounds). Pairs with `text_on_error_container`.
+    pub surface_error_container: Color,
+    /// Neutral container surface — a subtly distinguished panel/card level
+    /// between `surface_main` and `surface_raised`.
+    pub surface_container: Color,
+    /// Raised container surface — elevated card/panel (one step above
+    /// `surface_container`).
+    pub surface_container_raised: Color,
+    /// Sunken container surface — recessed below `surface_container`
+    /// (headerbars, inset wells).
+    pub surface_container_sunken: Color,
+
     // ── Charts ──────────────────────────────────────────────────────────────
     /// Series-color palette used by `bastyde-charts` BarChart / LineChart /
     /// PieChart when an individual series carries no explicit color.
@@ -233,6 +255,16 @@ impl ColorTokens {
             focus_ring: Color::from_hex("#0FB5CC"),
             focus_ring_error: Color::from_hex("#DB3B4B"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.32),
+
+            // Cross-design-language roles (neutral IntUI defaults, often
+            // aliasing the nearest existing slot — IntUI has no real
+            // elevation ladder).
+            text_on_error: Color::from_hex("#FFFFFF"),
+            text_on_error_container: Color::from_hex("#8B1C26"),
+            surface_error_container: Color::from_hex("#FFE2E3"),
+            surface_container: Color::from_hex("#F3F4F6"),
+            surface_container_raised: Color::from_hex("#FFFFFF"),
+            surface_container_sunken: Color::from_hex("#EBECF0"),
 
             // Chart palette — Okabe-Ito (light: 8th color is black).
             chart_palette: okabe_ito_palette(false),
@@ -352,6 +384,14 @@ impl ColorTokens {
             focus_ring: Color::from_hex("#19BDD4"),
             focus_ring_error: Color::from_hex("#E55765"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.64),
+
+            // Cross-design-language roles (neutral IntUI dark defaults).
+            text_on_error: Color::from_hex("#FFFFFF"),
+            text_on_error_container: Color::from_hex("#FFB3B9"),
+            surface_error_container: Color::from_hex("#7E353C"),
+            surface_container: Color::from_hex("#26282E"),
+            surface_container_raised: Color::from_hex("#3C3F41"),
+            surface_container_sunken: Color::from_hex("#1E1F22"),
 
             // Chart palette — Okabe-Ito (dark: 8th color is white).
             chart_palette: okabe_ito_palette(true),

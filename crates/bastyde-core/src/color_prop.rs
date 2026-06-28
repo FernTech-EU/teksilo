@@ -62,15 +62,16 @@ impl ColorProp {
     /// Static and Bound variants ignore both the theme and `enabled`; role
     /// variants resolve against the theme.
     ///
-    /// When `enabled == false`, `TextRole` variants substitute
-    /// [`TextRole::Disabled`] before resolving. This is the single hook
-    /// that makes every role-derived text/icon color in a disabled subtree
-    /// dim automatically — leaves like `IconWidget` and `TextWidget` pass
-    /// `ctx.effective_enabled` through verbatim, and the substitution
-    /// happens here. `SurfaceRole` / `BorderRole` are NOT substituted today
-    /// (the bastyde-tokens preset has no generic `Disabled` surface/border
-    /// token, only `AccentDisabled`); when those tokens land, add two more
-    /// substitution arms here and every consumer auto-dims.
+    /// When `enabled == false`, role variants substitute their disabled
+    /// counterpart before resolving — the single hook that makes every
+    /// role-derived color in a disabled subtree dim automatically (leaves
+    /// like `IconWidget` / `TextWidget` / `RectWidget` pass
+    /// `ctx.effective_enabled` through verbatim). `TextRole` →
+    /// [`TextRole::Disabled`]; the accent `SurfaceRole` / `BorderRole`
+    /// family → their `AccentDisabled` counterpart (the only generic
+    /// "disabled surface/border" tokens the preset carries). Non-accent
+    /// surface/border roles pass through unchanged (a disabled panel keeps
+    /// its surface; only interactive accent chrome dims).
     pub fn resolve(&self, theme: &Theme, enabled: bool) -> Color {
         match self {
             ColorProp::Static(c) => *c,
@@ -79,14 +80,18 @@ impl ColorProp {
                 let role = if enabled { *role } else { TextRole::Disabled };
                 role.resolve(&theme.colors)
             }
-            ColorProp::SurfaceRole(role) => role.resolve(&theme.colors),
-            ColorProp::BorderRole(role) => role.resolve(&theme.colors),
+            ColorProp::SurfaceRole(role) => disabled_surface(*role, enabled).resolve(&theme.colors),
+            ColorProp::BorderRole(role) => disabled_border(*role, enabled).resolve(&theme.colors),
             ColorProp::DynamicTextRole(s) => {
                 let role = if enabled { s.get() } else { TextRole::Disabled };
                 role.resolve(&theme.colors)
             }
-            ColorProp::DynamicSurfaceRole(s) => s.get().resolve(&theme.colors),
-            ColorProp::DynamicBorderRole(s) => s.get().resolve(&theme.colors),
+            ColorProp::DynamicSurfaceRole(s) => {
+                disabled_surface(s.get(), enabled).resolve(&theme.colors)
+            }
+            ColorProp::DynamicBorderRole(s) => {
+                disabled_border(s.get(), enabled).resolve(&theme.colors)
+            }
         }
     }
 
@@ -117,6 +122,33 @@ impl ColorProp {
                 | ColorProp::DynamicSurfaceRole(_)
                 | ColorProp::DynamicBorderRole(_)
         )
+    }
+}
+
+/// Substitute the disabled counterpart of an accent surface role when the
+/// subtree is disabled. Non-accent roles pass through (a disabled panel
+/// keeps its surface).
+fn disabled_surface(role: SurfaceRole, enabled: bool) -> SurfaceRole {
+    if enabled {
+        return role;
+    }
+    match role {
+        SurfaceRole::Accent | SurfaceRole::AccentHover | SurfaceRole::AccentPressed => {
+            SurfaceRole::AccentDisabled
+        }
+        other => other,
+    }
+}
+
+/// Substitute the disabled counterpart of an accent border role when the
+/// subtree is disabled.
+fn disabled_border(role: BorderRole, enabled: bool) -> BorderRole {
+    if enabled {
+        return role;
+    }
+    match role {
+        BorderRole::Accent => BorderRole::AccentDisabled,
+        other => other,
     }
 }
 
@@ -235,5 +267,57 @@ impl From<TextStyle> for TextStyleProp {
 impl From<TextStyleRole> for TextStyleProp {
     fn from(r: TextStyleRole) -> Self {
         TextStyleProp::Role(r)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presets::intui;
+
+    #[test]
+    fn accent_surface_dims_when_disabled() {
+        let theme = intui::light();
+        let prop = ColorProp::SurfaceRole(SurfaceRole::Accent);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.accent);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.accent_disabled);
+    }
+
+    #[test]
+    fn accent_border_dims_when_disabled() {
+        let theme = intui::light();
+        let prop = ColorProp::BorderRole(BorderRole::Accent);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.accent);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.accent_disabled);
+    }
+
+    #[test]
+    fn non_accent_surface_unchanged_when_disabled() {
+        let theme = intui::light();
+        let prop = ColorProp::SurfaceRole(SurfaceRole::Main);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.surface_main);
+    }
+
+    #[test]
+    fn new_cross_language_roles_resolve() {
+        let c = &intui::light().colors;
+        assert_eq!(TextRole::OnError.resolve(c), c.text_on_error);
+        assert_eq!(
+            TextRole::OnErrorContainer.resolve(c),
+            c.text_on_error_container
+        );
+        assert_eq!(
+            SurfaceRole::ErrorContainer.resolve(c),
+            c.surface_error_container
+        );
+        assert_eq!(SurfaceRole::Container.resolve(c), c.surface_container);
+        assert_eq!(
+            SurfaceRole::ContainerRaised.resolve(c),
+            c.surface_container_raised
+        );
+        assert_eq!(
+            SurfaceRole::ContainerSunken.resolve(c),
+            c.surface_container_sunken
+        );
     }
 }
