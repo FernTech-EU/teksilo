@@ -86,6 +86,12 @@ pub struct EventContext<'ops> {
     pub(crate) synthetic_clicks: Vec<crate::widget_id::WidgetId>,
     /// Focus requests — transfer focus to a specific widget (e.g., overlay content on open).
     pub(crate) focus_requests: Vec<crate::widget_id::WidgetId>,
+    /// Focus-into requests — move focus to the *first focusable descendant* of
+    /// the given widget, with no fallback to the widget itself when the subtree
+    /// has none. The "dive into this region's content" intent (Enter on a tab
+    /// header → into the tab panel), distinct from `focus_requests` which
+    /// focuses the container itself as a last resort.
+    pub(crate) focus_into_requests: Vec<crate::widget_id::WidgetId>,
     /// Drag start request: (source_widget_id, payload, optional_preview_widget).
     pub(crate) drag_start_request: Option<(
         crate::widget_id::WidgetId,
@@ -263,6 +269,7 @@ impl<'ops> EventContext<'ops> {
             repaint_requests: Vec::new(),
             synthetic_clicks: Vec::new(),
             focus_requests: Vec::new(),
+            focus_into_requests: Vec::new(),
             drag_start_request: None,
             cancel_drag: false,
             drag_is_external: false,
@@ -946,6 +953,21 @@ impl<'ops> EventContext<'ops> {
     /// content (menus, dialogs) that should receive keyboard events.
     pub fn request_focus(&mut self, id: crate::widget_id::WidgetId) {
         self.focus_requests.push(id);
+    }
+
+    /// Move focus **into** the content of `id`: focus its first focusable
+    /// descendant in tab order. Unlike [`request_focus`](Self::request_focus),
+    /// this does **not** fall back to focusing `id` itself when the subtree has
+    /// no focusable descendant — it is a no-op in that case, so an empty region
+    /// never traps focus on a non-interactive container.
+    ///
+    /// Use this for "dive into this region" gestures, e.g. pressing Enter on a
+    /// focused tab header to move focus into the tab's content panel. A panel
+    /// with focusable content lands on its first control; a panel that opted
+    /// into focusability itself (no inner controls) lands on the panel; a bare
+    /// panel with neither leaves focus where it was.
+    pub fn request_focus_into(&mut self, id: crate::widget_id::WidgetId) {
+        self.focus_into_requests.push(id);
     }
 
     /// Cancel a pending delayed overlay by its content widget ID.
