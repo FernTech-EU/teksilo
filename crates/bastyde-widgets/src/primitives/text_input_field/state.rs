@@ -92,6 +92,10 @@ pub(crate) struct TextInputState {
     pub drag_state: DragState,
     pub needs_full_layout: bool,
     pub content_dirty: bool,
+    /// Last applied global text-scale factor (`ctx.text_scale`). Tracked so the
+    /// engine's logical `font_scale` is only re-set (and a relayout forced) when
+    /// the accessibility scale actually changes.
+    pub last_text_scale: f32,
     /// Empty image cache kept to satisfy paint_frame's API. TextInput
     /// never has inline images.
     pub image_cache: ImageCache,
@@ -257,6 +261,7 @@ impl TextInputState {
             drag_state: DragState::Idle,
             needs_full_layout: true,
             content_dirty: true,
+            last_text_scale: 1.0,
             image_cache: ImageCache::new(),
             max_length,
             read_only,
@@ -319,6 +324,32 @@ impl TextInputState {
     /// shown. The real `document` is never mutated: masking is
     /// display-only, so caret / selection / hit-test (all char-indexed)
     /// stay aligned because one echo char is emitted per source char.
+    /// Apply the global accessibility text scale to the shaping engine(s).
+    ///
+    /// `scale` is `ctx.text_scale` (combined user×OS factor). When it changes,
+    /// the main engine's logical `font_scale` is updated so the value text grows
+    /// (advances + line height + content height), a full relayout is forced, and
+    /// the suffix engine is re-laid out at the new scale so its width stays
+    /// correct. Cheap no-op when the scale is unchanged.
+    pub fn apply_font_scale(&mut self, scale: f32) {
+        if (self.last_text_scale - scale).abs() <= f32::EPSILON {
+            return;
+        }
+        self.last_text_scale = scale;
+        self.engine.set_font_scale(scale);
+        self.needs_full_layout = true;
+        if !self.suffix.is_empty()
+            && let Some(engine) = self.suffix_engine.as_mut()
+        {
+            engine.set_font_scale(scale);
+            let doc = TextDocument::new();
+            let _ = doc.set_plain_text(&self.suffix);
+            let flow = doc.snapshot_flow();
+            engine.layout_full(&flow);
+            self.suffix_width = engine.max_content_width();
+        }
+    }
+
     pub fn layout_full_masked(&mut self) {
         let masked = self.should_mask();
         let echo = if masked && self.echo_mode != EchoMode::NoEcho {

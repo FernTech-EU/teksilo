@@ -239,6 +239,23 @@ impl<'a> BuildContext<'a> {
         self.tree.theme_signal().clone()
     }
 
+    /// Current combined text-scale factor (`user × OS`, `1.0` = 100 %). One-shot
+    /// read for build-time sizing; for a value that updates without a rebuild,
+    /// bind [`text_scale_signal`](Self::text_scale_signal) instead.
+    pub fn text_scale(&self) -> f32 {
+        self.tree.effective_text_scale()
+    }
+
+    /// Reactive handle on the combined text-scale factor. Fires when the user
+    /// scale, theme, or OS text-scale preference changes. Build implementations
+    /// that derive a build-time dimension from the scale (e.g. `Calendar`'s
+    /// fixed cell sizes) bind this — typically at `Rebuild` level so the change
+    /// recomputes the constants — since a scale change relayouts but does not
+    /// rebuild on its own.
+    pub fn text_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.tree.text_scale_signal()
+    }
+
     /// Reactive handle on the current locale. Fires observers when
     /// `tree.set_locale(...)` is called.
     pub fn locale_signal(&self) -> crate::signal::Signal<Option<String>> {

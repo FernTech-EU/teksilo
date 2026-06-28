@@ -1129,7 +1129,7 @@ impl Widget for TextInputField {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
         // Default unwrap is the cached natural width (mask-aware when
         // a mask is set; 200 dp fallback otherwise). Composing widgets
@@ -1137,8 +1137,17 @@ impl Widget for TextInputField {
         // that; the natural width is what surfaces in unconstrained
         // intrinsic queries (ZStack measurement with `unspecified()`,
         // etc.) so the chain reports a sensible content size.
-        let w = proposal.width.unwrap_or(self.natural_width).max(0.0);
-        let h = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(0.0);
+        //
+        // The cached `natural_width` / `text_height` are 1.0-scale baselines;
+        // multiply by `ctx.text_scale` so the field box grows with the global
+        // accessibility text scale (the engine grows the glyphs to match — see
+        // `paint`). A caller-supplied width constraint is honored as-is.
+        let scale = ctx.text_scale;
+        let w = proposal
+            .width
+            .unwrap_or(self.natural_width * scale)
+            .max(0.0);
+        let h = (self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT) * scale).max(0.0);
         Size::new(w, h).into()
     }
 
@@ -1161,6 +1170,10 @@ impl Widget for TextInputField {
         let mut st = state.borrow_mut();
 
         st.viewport_origin = Point::new(bounds.x, bounds.y);
+        // Grow the shaped text with the global accessibility scale. Must run
+        // before the relayout block below so the larger glyphs are shaped this
+        // frame; no-op when the scale is unchanged.
+        st.apply_font_scale(ctx.text_scale);
         let viewport_changed = (st.viewport_width - bounds.width).abs() > 0.5;
         if viewport_changed {
             st.viewport_width = bounds.width;

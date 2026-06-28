@@ -19,6 +19,13 @@ pub struct PaintContext<'a> {
     /// it to densify its own raster content. NOT the HiDPI device scale
     /// — that lives on the renderer/text-service.
     pub scale_factor: f32,
+    /// Combined user×OS text-scale factor (`1.0` = 100 %) — the *logical*
+    /// accessibility magnification, distinct from the raster `scale_factor`
+    /// above. Widgets that paint text via `Theme.typography` already scale
+    /// through the effective theme; this is for paint paths that size text
+    /// from another source (e.g. a scene `TextItem` that opts in). `1.0` when
+    /// no scale is active.
+    pub text_scale: f32,
     /// Active layout direction. Used by widgets that have to resolve
     /// Leading/Trailing semantics into geometric Left/Right at paint
     /// time (e.g. attached-side shadow suppression on a popover that

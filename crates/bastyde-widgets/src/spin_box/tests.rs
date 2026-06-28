@@ -47,6 +47,24 @@ fn constructs_and_lays_out() {
     assert!(bounds.height > 0.0);
 }
 
+/// Regression: the value text grows with the global text scale, so the
+/// SpinBox's width cap must grow too — otherwise the scaled digits clip.
+#[test]
+fn width_grows_with_text_scale() {
+    let value = Signal::new(50);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(value, 0, 100).width_chars(3).suffix(" %"));
+    tree.layout(SizeProposal::unspecified());
+    let w1 = tree.bounds(id).width;
+    tree.set_user_text_scale(2.0);
+    tree.layout(SizeProposal::unspecified());
+    let w2 = tree.bounds(id).width;
+    assert!(
+        w2 > w1 * 1.4,
+        "spinbox width should grow with the text scale: {w1} -> {w2}"
+    );
+}
+
 // ── Keyboard stepping ──────────────────────────────────────────────
 
 #[test]

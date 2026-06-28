@@ -10,6 +10,9 @@ struct A11yPaintPrefs {
     high_contrast: bool,
     reduced_motion: bool,
     large_text: bool,
+    /// Combined user×OS text-scale factor (the logical accessibility
+    /// magnification). Surfaced to widgets via `PaintContext::text_scale`.
+    text_scale: f32,
 }
 
 impl WidgetTree {
@@ -118,6 +121,7 @@ impl WidgetTree {
             high_contrast: self.prefers_high_contrast,
             reduced_motion: self.prefers_reduced_motion,
             large_text: self.text_scale_factor > 1.0,
+            text_scale: self.effective_text_scale,
         };
 
         let overlay_skip: std::collections::HashSet<WidgetId> = self
@@ -400,6 +404,7 @@ fn paint_widget_cached(
         let ctx = PaintContext {
             theme: &resolved_theme,
             scale_factor: this_raster_scale,
+            text_scale: a11y_prefs.text_scale,
             layout_direction,
             effective_enabled: this_effective_enabled,
             prefers_high_contrast: a11y_prefs.high_contrast,
@@ -536,6 +541,7 @@ fn paint_widget_cached(
             let ctx = PaintContext {
                 theme: &resolved_theme,
                 scale_factor: this_raster_scale,
+                text_scale: a11y_prefs.text_scale,
                 layout_direction,
                 effective_enabled: this_effective_enabled,
                 prefers_high_contrast: a11y_prefs.high_contrast,
@@ -575,6 +581,7 @@ fn paint_widget_cached(
             let ctx = PaintContext {
                 theme: &resolved_theme,
                 scale_factor: this_raster_scale,
+                text_scale: a11y_prefs.text_scale,
                 layout_direction,
                 effective_enabled: this_effective_enabled,
                 prefers_high_contrast: a11y_prefs.high_contrast,

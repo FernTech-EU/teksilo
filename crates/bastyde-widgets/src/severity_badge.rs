@@ -133,12 +133,14 @@ impl Widget for SeverityBadge {
         let disc = ctx.add(
             IconWidget::from_svg(kind.disc_svg())
                 .icon_size(self.size)
+                .follow_text_scale(true)
                 .mode(IconMode::Tintable)
                 .color(disc_color),
         );
         let symbol = ctx.add(
             IconWidget::from_svg(kind.symbol_svg())
                 .icon_size(self.size)
+                .follow_text_scale(true)
                 .mode(IconMode::Tintable)
                 .color(symbol_color),
         );

@@ -335,6 +335,7 @@ impl WidgetTree {
                 &base_theme,
                 self.layout_direction,
                 self.device_scale_factor,
+                self.effective_text_scale,
                 self.text_backend.as_ref(),
                 Some(extras),
             );
@@ -365,6 +366,7 @@ impl WidgetTree {
                     theme: &resolved_theme,
                     layout_direction: self.layout_direction,
                     scale_factor: self.device_scale_factor,
+                    text_scale: self.effective_text_scale,
                     text_backend: self.text_backend.as_ref(),
                     arena: Some(&self.arena),
                     extras: Some(extras),
@@ -427,6 +429,7 @@ impl WidgetTree {
                 &base_theme,
                 self.layout_direction,
                 self.device_scale_factor,
+                self.effective_text_scale,
                 self.text_backend.as_ref(),
                 Some(extras),
             );
@@ -484,6 +487,7 @@ fn layout_widget_recursive(
     base_theme: &crate::styles::Theme,
     layout_direction: crate::environment::LayoutDirection,
     scale_factor: f32,
+    text_scale: f32,
     text_backend: Option<&std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>>,
     extras: Option<crate::widget::LayoutExtras<'_>>,
 ) {
@@ -498,6 +502,7 @@ fn layout_widget_recursive(
             theme: &resolved_theme,
             layout_direction,
             scale_factor,
+            text_scale,
             text_backend,
             arena: Some(arena),
             extras,
@@ -545,6 +550,7 @@ fn layout_widget_recursive(
                 theme: &resolved_theme,
                 layout_direction,
                 scale_factor,
+                text_scale,
                 text_backend,
                 arena: Some(arena),
                 extras,
@@ -576,6 +582,7 @@ fn layout_widget_recursive(
                     base_theme,
                     layout_direction,
                     scale_factor,
+                    text_scale,
                     text_backend,
                     extras,
                 );

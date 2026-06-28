@@ -120,6 +120,16 @@ pub(crate) struct EditorState {
     /// scroll event triggered a Full or Block render.
     pub last_text_color: Option<[f32; 4]>,
 
+    /// Whether this editor follows the global accessibility text scale
+    /// (`ctx.text_scale`). `true` by default; set `false` via
+    /// [`RichTextEditor::follow_text_scale`] for documents whose font sizes are
+    /// content (e.g. a WYSIWYG editor) that should not inflate with the UI
+    /// accessibility setting.
+    pub follow_text_scale: bool,
+    /// Last `font_scale` pushed to the engine. Tracked so the paint pass only
+    /// re-sets it (and forces a relayout) when the effective scale changes.
+    pub last_font_scale: f32,
+
     /// Last caret colour applied to the typesetter. The paint pass syncs
     /// the engine's cursor colour with the active theme's `editor_caret`
     /// role each frame so light / dark theme swaps reach the blinking
@@ -444,6 +454,8 @@ impl EditorState {
             wrap_mode,
             show_highlights: true,
             last_text_color: None,
+            follow_text_scale: true,
+            last_font_scale: 1.0,
             last_cursor_color: None,
             last_selection_color: None,
             text_color_prop: None,

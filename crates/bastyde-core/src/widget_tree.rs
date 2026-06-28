@@ -76,6 +76,18 @@ pub struct WidgetTree {
     /// changes; the layout and paint walkers read this instead of `theme` so
     /// all text grows uniformly. Equal to `theme` when the combined factor is 1.
     effective_theme: Theme,
+    /// The combined `user_text_scale * text_scale_factor`, cached so the
+    /// layout/paint context construction sites don't recompute it. The single
+    /// scalar published to widgets that size from a source *other* than
+    /// `Theme.typography` (icons, the rich-text engine, calendar constants,
+    /// scene text). Written alongside `effective_theme` in
+    /// `recompute_effective_theme`.
+    effective_text_scale: f32,
+    /// Reactive mirror of `effective_text_scale`, for build-time binders that
+    /// must react to a scale change without a rebuild path of their own (e.g.
+    /// `Calendar` binds this at `Rebuild` level). Fired by
+    /// `recompute_effective_theme`.
+    text_scale_signal: crate::signal::Signal<f32>,
     text_backend: Option<Rc<RefCell<dyn bastyde_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     /// Reactive mirror of `focused`. Same pattern as `hovered_signal`
@@ -427,6 +439,8 @@ impl WidgetTree {
             theme_signal: crate::signal::Signal::new(initial_theme.clone()),
             user_text_scale: 1.0,
             effective_theme: initial_theme,
+            effective_text_scale: 1.0,
+            text_scale_signal: crate::signal::Signal::new(1.0),
             text_backend: None,
             focused: None,
             focused_signal: crate::signal::Signal::new(None),
@@ -1326,6 +1340,25 @@ impl WidgetTree {
             t.typography = t.typography.scaled(combined);
             t
         };
+        // Single source: every downstream consumer (the layout/paint context
+        // `text_scale` field, the reactive `text_scale_signal`) reads from here.
+        self.effective_text_scale = combined;
+        self.text_scale_signal.set(combined);
+    }
+
+    /// The combined effective text scale (`user_text_scale * OS text_scale_factor`).
+    /// Read by the layout/paint walkers to populate `ctx.text_scale` for widgets
+    /// that size from a source other than `Theme.typography`.
+    pub fn effective_text_scale(&self) -> f32 {
+        self.effective_text_scale
+    }
+
+    /// Reactive handle on [`Self::effective_text_scale`]. Build-time binders that
+    /// must react to a scale change without their own rebuild path bind this
+    /// (e.g. `Calendar` binds it at `Rebuild` level so its fixed cell constants
+    /// recompute). Fires on `set_user_text_scale` / theme / OS-pref change.
+    pub fn text_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.text_scale_signal.clone()
     }
 
     /// Set the user-controlled global text-scale factor (`1.0` = 100 %).
@@ -2958,6 +2991,22 @@ mod text_scale_tests {
             tree.theme.typography.body.size
         );
         assert_eq!(tree.user_text_scale(), 1.0);
+    }
+
+    #[test]
+    fn effective_text_scale_and_signal_track_the_combined_factor() {
+        let mut tree = WidgetTree::new();
+        assert_eq!(tree.effective_text_scale(), 1.0);
+        assert_eq!(tree.text_scale_signal().get(), 1.0);
+
+        tree.set_user_text_scale(1.5);
+        assert!((tree.effective_text_scale() - 1.5).abs() < 0.001);
+        assert!((tree.text_scale_signal().get() - 1.5).abs() < 0.001);
+
+        // OS preference multiplies in.
+        tree.set_accessibility_preferences(false, false, 2.0);
+        assert!((tree.effective_text_scale() - 3.0).abs() < 0.01);
+        assert!((tree.text_scale_signal().get() - 3.0).abs() < 0.01);
     }
 
     #[test]

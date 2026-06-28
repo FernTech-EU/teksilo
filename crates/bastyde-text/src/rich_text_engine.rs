@@ -143,6 +143,21 @@ impl RichTextEngine {
         self.flow.zoom()
     }
 
+    /// Set the logical font-scale factor (`1.0` = none). Unlike
+    /// [`set_zoom`](Self::set_zoom) (a display transform that leaves font
+    /// metrics untouched), this multiplies the resolved logical font size
+    /// *before* shaping, so the text genuinely grows and re-wraps — the
+    /// per-engine mechanism behind an app-wide "grow all text" accessibility
+    /// setting. Takes effect on the next `layout_full`.
+    pub fn set_font_scale(&mut self, font_scale: f32) {
+        self.flow.set_font_scale(font_scale);
+    }
+
+    /// Current logical font-scale factor.
+    pub fn font_scale(&self) -> f32 {
+        self.flow.font_scale()
+    }
+
     /// Current HiDPI display scale factor, read from the shared
     /// bridge. Exposed for diagnostics only — widgets never need
     /// to consume this value; the service handles the pre-scale
@@ -450,6 +465,28 @@ mod tests {
             glyph_count > 0,
             "layout should produce glyph quads ({} glyphs)",
             glyph_count
+        );
+    }
+
+    #[test]
+    fn font_scale_forwards_and_grows_content_height() {
+        let layout_at = |font_scale: f32| {
+            let mut engine = RichTextEngine::private_default();
+            engine.set_viewport(400.0, 300.0);
+            engine.set_wrap_mode(WrapMode::Word);
+            engine.set_font_scale(font_scale);
+            assert_eq!(engine.font_scale(), font_scale);
+            let doc = TextDocument::new();
+            doc.set_plain_text("Hello, world!\nSecond line.").unwrap();
+            let flow = doc.snapshot_flow();
+            engine.layout_full(&flow);
+            engine.content_height()
+        };
+        let h1 = layout_at(1.0);
+        let h2 = layout_at(2.0);
+        assert!(
+            (h2 - h1 * 2.0).abs() < h1 * 0.1,
+            "2x font scale should ~double content height: {h1} vs {h2}"
         );
     }
 

@@ -52,6 +52,12 @@ pub struct TextItem {
     label: Option<LocalizedString>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
+    /// When `true`, the font size grows with the global accessibility text
+    /// scale (`ctx.text_scale`). Off by default: a scene has its own pan/zoom,
+    /// so most scene text should stay at its authored size. Opt in via
+    /// [`follow_text_scale`](Self::follow_text_scale) for labels that should
+    /// track the app-wide "grow all text" setting.
+    follow_text_scale: bool,
 }
 
 impl TextItem {
@@ -68,6 +74,7 @@ impl TextItem {
             label: None,
             flags: ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
+            follow_text_scale: false,
         }
     }
 
@@ -83,6 +90,7 @@ impl TextItem {
             label: None,
             flags: ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
+            follow_text_scale: false,
         }
     }
 
@@ -95,6 +103,14 @@ impl TextItem {
     /// Override the foreground color.
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Opt this text into the global accessibility text scale, so it grows with
+    /// the app-wide "grow all text" setting. Off by default — the scene's own
+    /// pan/zoom usually governs scene text size.
+    pub fn follow_text_scale(mut self, follow: bool) -> Self {
+        self.follow_text_scale = follow;
         self
     }
 
@@ -117,9 +133,12 @@ impl SceneItem for TextItem {
         self.local_bounds = bounds;
     }
 
-    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext) {
         let text = self.text.current();
-        let style = bastyde_tokens::TextStyle::default();
+        let mut style = bastyde_tokens::TextStyle::default();
+        if self.follow_text_scale {
+            style.size *= ctx.text_scale;
+        }
         if canvas.text_backend().is_some() {
             canvas.draw_paragraph(&text, self.local_bounds, &style, self.color, None);
         } else {
@@ -170,5 +189,13 @@ mod tests {
     fn text_item_label_falls_back_to_text() {
         let item = TextItem::new(lit!("Hello"), Rect::new(0.0, 0.0, 100.0, 30.0));
         assert_eq!(SceneItem::label(&item).as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn follow_text_scale_defaults_off_and_opts_in() {
+        let item = TextItem::new(lit!("Hi"), Rect::new(0.0, 0.0, 100.0, 30.0));
+        assert!(!item.follow_text_scale);
+        let opted = item.follow_text_scale(true);
+        assert!(opted.follow_text_scale);
     }
 }

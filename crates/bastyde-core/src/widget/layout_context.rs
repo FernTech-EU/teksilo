@@ -32,6 +32,13 @@ pub struct LayoutContext<'a> {
     /// toolkits — WebKitGTK on X11 — ignores fractional scaling and needs
     /// device pixels). 1.0 in headless / test contexts.
     pub scale_factor: f32,
+    /// Combined user×OS text-scale factor (`1.0` = 100 %). Distinct from
+    /// `scale_factor` (HiDPI device pixels): this is the *logical* accessibility
+    /// magnification. Widgets that size text from `Theme.typography` already
+    /// scale via the effective theme and should ignore this; it exists for
+    /// widgets that size from another source (`IconWidget`, the rich-text engine
+    /// default size, scene text) and need the raw factor. `1.0` in test contexts.
+    pub text_scale: f32,
     /// Text backend for accurate text measurement during layout.
     pub text_backend: Option<&'a std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>>,
     /// Arena reference for querying child widget sizes.
@@ -60,6 +67,7 @@ impl<'a> LayoutContext<'a> {
             theme,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
             scale_factor: 1.0,
+            text_scale: 1.0,
             text_backend: None,
             arena: None,
             extras: None,

@@ -50,6 +50,11 @@ directory.
 - [accessibility-overrides.md](accessibility-overrides.md) — builder-level
   `.access_*` modifiers (label, description, subtree merge/exclude, custom
   actions, shortcut binding) for the cases widget-emitted a11y misses.
+- [text-scale.md](text-scale.md) — the global "grow all text" accessibility
+  setting: the `TextScaleControl` widget, persistence + startup restore, the
+  `effective_theme` blanket mechanism, `ctx.text_scale` / `text_scale_signal`,
+  the per-engine `font_scale` for editable text, and the `follow_text_scale`
+  opt-in/opt-out surfaces (icons, `RichTextEditor`, scene text).
 
 ## `bati!` DSL & formatting
 

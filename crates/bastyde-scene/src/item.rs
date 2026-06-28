@@ -68,16 +68,31 @@ pub struct SceneItemPaintContext {
     /// can use this to skip work outside the dirty region. `None`
     /// means "full repaint".
     pub dirty_scene_rect: Option<Rect>,
+    /// Global accessibility text-scale factor (`1.0` = 100 %), forwarded from
+    /// the widget `PaintContext`. Lightweight text items that opt in (see
+    /// `TextItem::follow_text_scale`) multiply their font size by this so they
+    /// grow with the app-wide "grow all text" setting. Off-by-default because
+    /// the scene already has its own pan/zoom.
+    pub text_scale: f32,
 }
 
 impl SceneItemPaintContext {
     /// Construct a paint context with the given view transform and
-    /// optional dirty region.
+    /// optional dirty region. `text_scale` defaults to `1.0`; use
+    /// [`with_text_scale`](Self::with_text_scale) to carry the accessibility
+    /// scale from the widget paint pass.
     pub fn new(view_transform: Transform2D, dirty_scene_rect: Option<Rect>) -> Self {
         Self {
             view_transform,
             dirty_scene_rect,
+            text_scale: 1.0,
         }
+    }
+
+    /// Set the global accessibility text-scale factor carried to opted-in items.
+    pub fn with_text_scale(mut self, text_scale: f32) -> Self {
+        self.text_scale = text_scale;
+        self
     }
 }
 

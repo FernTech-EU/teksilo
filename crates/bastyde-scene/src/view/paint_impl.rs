@@ -16,6 +16,7 @@ impl SceneView {
         canvas: &mut bastyde_canvas::Canvas,
         bounds: Rect,
         band: crate::scene::SceneLayer,
+        text_scale: f32,
     ) {
         // Glyph-epoch gate: cached item frames bake glyph atlas UVs, and
         // this cache lives outside the widget arena, so the framework's
@@ -41,7 +42,8 @@ impl SceneView {
 
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
-        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
+        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region))
+            .with_text_scale(text_scale);
         let drag_target = self.drag_target.get();
         let mut visible_ids = self.scene().items_in_rect(region);
         // Z-order within the band: higher z paints last (on top); equal-z
@@ -211,7 +213,12 @@ impl SceneView {
         // into children, so these render under the cards. The Over band and
         // the marquee / foreground / debug overlays paint in `post_paint`
         // (after the children) so they sit on top.
-        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Under);
+        self.paint_band(
+            canvas,
+            bounds,
+            crate::scene::SceneLayer::Under,
+            ctx.text_scale,
+        );
     }
 
     pub(super) fn wants_post_paint_impl(&self) -> bool {
@@ -240,7 +247,12 @@ impl SceneView {
 
         // Over band: lightweight items explicitly raised above the cards
         // (highlighted connectors, selection halos, annotations).
-        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Over);
+        self.paint_band(
+            canvas,
+            bounds,
+            crate::scene::SceneLayer::Over,
+            ctx.text_scale,
+        );
 
         // Marquee overlay — semi-transparent fill plus a single-pixel
         // stroke. The marquee state is in screen coords (set by the on_drag

@@ -277,11 +277,14 @@ impl NavArrow {
 
 impl Widget for NavArrow {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Grow the nav arrows with the global text scale (the enclosing Calendar
+        // rebuilds on a scale change, so a build-time read is sufficient).
+        let scale = ctx.text_scale();
         let icon = match self.kind {
-            ArrowKind::Left => chevron_left_icon(12.0),
-            ArrowKind::Right => IconWidget::chevron_right(12.0),
-            ArrowKind::LeftDouble => double_chevron_left_icon(12.0),
-            ArrowKind::RightDouble => double_chevron_right_icon(12.0),
+            ArrowKind::Left => chevron_left_icon(12.0 * scale),
+            ArrowKind::Right => IconWidget::chevron_right(12.0 * scale),
+            ArrowKind::LeftDouble => double_chevron_left_icon(12.0 * scale),
+            ArrowKind::RightDouble => double_chevron_right_icon(12.0 * scale),
         };
         let icon_id = ctx.add(icon);
         let centered = ctx.add(Center::new().child_id(icon_id));
@@ -304,13 +307,13 @@ impl Widget for NavArrow {
             .background(SurfaceRole::Transparent)
             .border_color(border_role)
             .border_width(border_width)
-            .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS));
+            .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS * scale));
         let bg_id = ctx.add(bg);
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
         let sized = ctx.add(
             FixedSize::new()
-                .bind_width(CALENDAR_NAV_ARROW_SIZE)
-                .bind_height(CALENDAR_NAV_ARROW_SIZE)
+                .bind_width(CALENDAR_NAV_ARROW_SIZE * scale)
+                .bind_height(CALENDAR_NAV_ARROW_SIZE * scale)
                 .child_id(z),
         );
 

@@ -425,6 +425,18 @@ impl RichTextEditor {
         self
     }
 
+    /// Whether this editor's text grows with the global accessibility text
+    /// scale (`ctx.text_scale`). Defaults to `true` — like every other text
+    /// surface, the editor magnifies when the user raises the app-wide text
+    /// size. Pass `false` for an editor whose font sizes are **document
+    /// content** (a WYSIWYG / print-layout editor) that must stay at its true
+    /// point size regardless of the reader's UI accessibility setting. The
+    /// programmatic zoom (`set_zoom`) is unaffected either way.
+    pub fn follow_text_scale(self, follow: bool) -> Self {
+        self.state.borrow_mut().follow_text_scale = follow;
+        self
+    }
+
     /// Replace the built-in right-click context menu with a
     /// user-provided factory. Same shape as the framework's
     /// [`bastyde_core::widget_builder::ContextMenuFactory`]: the
@@ -1828,7 +1840,7 @@ impl Widget for RichTextEditorBody {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
         let w = proposal.width.unwrap_or(200.0).max(0.0);
 
@@ -1844,7 +1856,17 @@ impl Widget for RichTextEditorBody {
         // hard cap — we ignore the proposal's height and let the
         // vertical scroll bar take over past `max_lines`.
         let st = self.state.borrow();
-        let line_h = st.engine.default_line_height();
+        // `default_line_height()` is the *unscaled* line height (its standalone
+        // shaper path uses font_scale = 1.0), but `content_height()` carries the
+        // engine's font_scale. Scale the per-line bound to match, or a
+        // text-scaled editor would clip at `max_lines` / under-size at
+        // `min_lines`.
+        let line_scale = if st.follow_text_scale {
+            ctx.text_scale
+        } else {
+            1.0
+        };
+        let line_h = st.engine.default_line_height() * line_scale;
         let content_h = st.engine.content_height();
         drop(st);
 
@@ -1964,6 +1986,24 @@ impl Widget for RichTextEditorBody {
         // like `TextWidget` does internally. No widget-side plumbing
         // — this is a render-pipeline concern, invisible to the
         // widget author.
+
+        // Global accessibility text scale: grow the document's logical font
+        // size unless the editor opted out (`follow_text_scale(false)`). Like
+        // the code-block colours above this is baked at `layout_full`, so a
+        // change forces a relayout + render this frame.
+        {
+            let target = if st.follow_text_scale {
+                ctx.text_scale
+            } else {
+                1.0
+            };
+            if (st.last_font_scale - target).abs() > f32::EPSILON {
+                st.last_font_scale = target;
+                st.engine.set_font_scale(target);
+                st.needs_full_layout = true;
+                st.pending_full_render = true;
+            }
+        }
 
         // `RichTextEditorBody` is a leaf, so the framework never calls
         // `place_children` on it. Sync the viewport from paint bounds,

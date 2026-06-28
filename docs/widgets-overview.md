@@ -272,6 +272,7 @@ Pre-built UI for common app-level concerns.
 
 - [ShortcutSettings](../crates/bastyde-widgets/src/shortcut_settings.rs) — full keyboard-shortcut rebind UI (Rebind / Reset / conflict auto-unbind / key capture). See [shortcut-intent-action.md](shortcut-intent-action.md).
 - [PrivacySettings](../crates/bastyde-widgets/src/privacy_settings.rs) **(`telemetry` feature)** — consent toggles for telemetry adapters; ties into the [telemetry.md](telemetry.md) consent gate.
+- [TextScaleControl](../crates/bastyde-widgets/src/text_scale_control.rs) — a specialized `SpinBox` (80 %–200 %) for the global "grow all text" accessibility setting; binds the persisted `TEXT_SCALE_KEY`, applies app-wide on edit. See [text-scale.md](text-scale.md).
 
 ---
 
@@ -284,6 +285,7 @@ Pre-built UI for common app-level concerns.
 - Theming and role-based color resolution: [reactive-theme.md](reactive-theme.md)
 - Drag and drop integration: [drag-and-drop.md](drag-and-drop.md)
 - Settings persistence (`SettingsStore`, `SettingsFile<T>`, `MruList<T>`): [settings.md](settings.md)
+- Global text-scale accessibility setting (`TextScaleControl`, `ctx.text_scale`, `follow_text_scale`): [text-scale.md](text-scale.md)
 - i18n (`tr!`, `tr_signal!`, locale-aware formatting): [i18n.md](i18n.md)
 - Shortcuts / intents / actions: [shortcut-intent-action.md](shortcut-intent-action.md)
 - Multi-window orchestration: [multi-window.md](multi-window.md)

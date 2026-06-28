@@ -111,6 +111,13 @@ pub struct IconWidget {
     color: ColorProp,
     /// Rendering mode.
     mode: IconMode,
+    /// When `true`, the reported size is multiplied by the global accessibility
+    /// text scale (`ctx.text_scale`) so the icon grows alongside adjacent text.
+    /// Off by default — most icons (toolbar glyphs, chevrons) have fixed
+    /// footprints that must not inflate. Opt in via
+    /// [`follow_text_scale`](Self::follow_text_scale); used by `SeverityBadge`
+    /// so status glyphs track the text they sit beside.
+    follow_text_scale: bool,
 }
 
 // Auto-generate unique names from data pointer for embedded resources.
@@ -138,6 +145,7 @@ impl IconWidget {
             display_size: size,
             color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
+            follow_text_scale: false,
         }
     }
 
@@ -243,6 +251,7 @@ impl IconWidget {
             display_size: vb_size,
             color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
+            follow_text_scale: false,
         }
     }
 
@@ -265,6 +274,7 @@ impl IconWidget {
                     display_size: size,
                     color: ColorProp::TextRole(TextRole::Primary),
                     mode,
+                    follow_text_scale: false,
                 }
             }
             Err(e) => {
@@ -301,6 +311,7 @@ impl IconWidget {
                 display_size: size,
                 color: ColorProp::TextRole(TextRole::Primary),
                 mode,
+                follow_text_scale: false,
             };
         }
         // Fall back to static
@@ -318,6 +329,7 @@ impl IconWidget {
                     display_size: size,
                     color: ColorProp::TextRole(TextRole::Primary),
                     mode,
+                    follow_text_scale: false,
                 }
             }
             Err(e) => {
@@ -344,6 +356,7 @@ impl IconWidget {
             display_size: size,
             color: ColorProp::TextRole(TextRole::Primary),
             mode,
+            follow_text_scale: false,
         }
     }
 
@@ -370,6 +383,7 @@ impl IconWidget {
             display_size: size,
             color: ColorProp::TextRole(TextRole::Primary),
             mode,
+            follow_text_scale: false,
         }
     }
 
@@ -432,6 +446,16 @@ impl IconWidget {
     /// coordinate space — SVG paths scale correctly.
     pub fn icon_size(mut self, size: f32) -> Self {
         self.display_size = size;
+        self
+    }
+
+    /// Make this icon grow with the global accessibility text scale
+    /// (`ctx.text_scale`). Off by default. Enable for icons that sit inline
+    /// with text and should scale together — e.g. status glyphs in a
+    /// `SeverityBadge`. The reported (and rendered) size becomes
+    /// `display_size × text_scale`.
+    pub fn follow_text_scale(mut self, follow: bool) -> Self {
+        self.follow_text_scale = follow;
         self
     }
 
@@ -647,9 +671,16 @@ impl Widget for IconWidget {
     fn layout_response(
         &self,
         _proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        Size::new(self.display_size, self.display_size).into()
+        // Paint fills `bounds`, so growing the reported size here is the only
+        // change needed to scale the rendered glyph with the text scale.
+        let size = if self.follow_text_scale {
+            self.display_size * ctx.text_scale
+        } else {
+            self.display_size
+        };
+        Size::new(size, size).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -848,6 +879,26 @@ mod tests {
         let b = tree.bounds(icon);
         assert!((b.width - 16.0).abs() < 0.01);
         assert!((b.height - 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn follow_text_scale_grows_with_user_scale() {
+        // Opt-in icon doubles at 200% text scale; a default icon stays put.
+        let mut tree = WidgetTree::new();
+        let scaled = tree.add(IconWidget::checkmark(20.0).follow_text_scale(true));
+        let fixed = tree.add(IconWidget::checkmark(20.0));
+        tree.set_user_text_scale(2.0);
+        tree.layout(SizeProposal::unspecified());
+        let bs = tree.bounds(scaled);
+        let bf = tree.bounds(fixed);
+        assert!(
+            (bs.width - 40.0).abs() < 0.01,
+            "opted-in icon should double: {bs:?}"
+        );
+        assert!(
+            (bf.width - 20.0).abs() < 0.01,
+            "default icon must not scale: {bf:?}"
+        );
     }
 
     #[test]

@@ -1152,10 +1152,16 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // can then extend 1 dp outside the visual bounds
         // (Int UI focus thickening) without being chopped off
         // against the shape quad.
+        // `pixel_cap` / `min_width` are measured at 1.0 scale in `build()`. The
+        // inner field grows its text by `ctx.text_scale`, so the cap must grow
+        // too or the scaled digits clip against an un-grown width cap.
+        let scale = ctx.text_scale;
+        let pixel_cap = self.pixel_cap.map(|c| c * scale);
+        let min_width = self.min_width * scale;
         let effective_proposal = SizeProposal {
-            width: match (proposal.width, self.pixel_cap) {
-                (Some(w), Some(cap)) => Some(w.min(cap).max(self.min_width)),
-                (None, Some(cap)) => Some(cap.max(self.min_width)),
+            width: match (proposal.width, pixel_cap) {
+                (Some(w), Some(cap)) => Some(w.min(cap).max(min_width)),
+                (None, Some(cap)) => Some(cap.max(min_width)),
                 (w, None) => w,
             },
             height: proposal.height,
