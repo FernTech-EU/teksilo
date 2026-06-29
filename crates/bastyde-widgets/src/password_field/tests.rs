@@ -254,3 +254,21 @@ fn focused_secure_field_is_a_password_ime_surface() {
         "a focused secure field declares a Password IME surface"
     );
 }
+
+// ── Tooltip ───────────────────────────────────────────────────────────
+
+#[test]
+fn tooltip_appears_on_hover() {
+    let pw = Signal::new(String::new());
+    let mut t = tree();
+    let id = t.add(PasswordField::new(pw).tooltip(lit!("Tip")));
+    t.layout(SizeProposal::exact(300.0, 200.0));
+    t.pointer_move(t.bounds(id).center());
+    t.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        t.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(t.find_by_label("Tip").is_some());
+}

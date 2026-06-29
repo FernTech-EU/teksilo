@@ -307,6 +307,9 @@ pub struct Popover {
     pending_trigger: Option<PendingChild>,
     show_caret: bool,
     caret_size: f32,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     /// Visual variant of the popover surface. Default `Default`.
     /// Distinct from the trigger-button's `ButtonVariant` (which lives
     /// in `self.variant` for legacy reasons; we'd rename it to
@@ -353,6 +356,9 @@ impl Popover {
             initial_focus_slot: None,
             root_child_id: None,
             content_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -445,6 +451,42 @@ impl Popover {
     /// (same pattern as `ComboBox`'s search-input slot).
     pub fn focus_on_show(mut self, slot: Rc<Cell<Option<WidgetId>>>) -> Self {
         self.initial_focus_slot = Some(slot);
+        self
+    }
+
+    /// Attach a plain-text tooltip to the trigger button. Clears any
+    /// previously set rich or composite tooltip on this `Popover`.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by a registry key. Clears any
+    /// previously set plain or composite tooltip on this `Popover`.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from an inline [`crate::tooltip::TooltipContent`]
+    /// value. Clears any previously set plain or composite tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip (arbitrary widget body) to the trigger
+    /// button. Clears any previously set plain or rich tooltip.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -722,6 +764,21 @@ impl Widget for Popover {
         };
 
         self.root_child_id = Some(root_id);
+
+        // Attach tooltip to the trigger root (not the overlay content).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
+
         // Return BOTH the trigger root AND the dormant popover content
         // as children so the framework links `content_id` under
         // `Popover` in the arena. Without this, the content survives as
@@ -947,5 +1004,24 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(Popover::new(lit!("Show popover")));
         tree.layout(SizeProposal::exact(480.0, 320.0));
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            Popover::new(lit!("Show popover"))
+                .content(FixedLeaf(140.0, 60.0))
+                .tooltip(lit!("Tip")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

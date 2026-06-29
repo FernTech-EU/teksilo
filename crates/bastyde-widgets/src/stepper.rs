@@ -113,6 +113,9 @@ pub struct Stepper {
     cancel_action: Option<StepperFinish>,
     finish_action: Option<StepperFinish>,
     root_child_id: Option<WidgetId>,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl Default for Stepper {
@@ -144,6 +147,9 @@ impl Stepper {
             cancel_action: None,
             finish_action: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -257,6 +263,42 @@ impl Stepper {
         action: impl Fn(&mut EventContext, &StepperController) + 'static,
     ) -> Self {
         self.finish_action = Some(Rc::new(action));
+        self
+    }
+
+    /// Attach a plain single-line tooltip to this stepper. Clears any
+    /// previously set rich or composite tooltip.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip identified by a registry key. Clears any
+    /// previously set plain or composite tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip with inline content. Clears any previously set
+    /// plain or composite tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip (arbitrary widget body). Clears any
+    /// previously set plain or rich tooltip.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -409,6 +451,20 @@ impl Widget for Stepper {
         };
 
         self.root_child_id = Some(root);
+
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tooltip_id, delay);
+        }
+
         vec![root]
     }
 

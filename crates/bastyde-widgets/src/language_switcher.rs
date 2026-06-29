@@ -68,6 +68,13 @@ pub struct LanguageSwitcher {
     /// The inner ComboBox's value signal. Owned here so the locale-sync
     /// effect can keep it aligned with the active locale.
     selected: Signal<Option<LocaleChoice>>,
+    /// Optional plain tooltip text, forwarded to the inner [`ComboBox`].
+    /// Mutually exclusive with the rich / composite variants.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source, forwarded to the inner [`ComboBox`].
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body, forwarded to the inner [`ComboBox`].
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -95,6 +102,9 @@ impl LanguageSwitcher {
             label: None,
             locales_override: None,
             selected: Signal::new(None),
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             root_child_id: None,
         }
     }
@@ -117,6 +127,46 @@ impl LanguageSwitcher {
     /// the offered set.
     pub fn locales(mut self, locales: Vec<LanguageIdentifier>) -> Self {
         self.locales_override = Some(locales);
+        self
+    }
+
+    /// Attach a plain tooltip, forwarded to the inner [`ComboBox`].
+    /// Mutually exclusive with the rich / composite variants — last
+    /// call wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide registry,
+    /// forwarded to the inner [`ComboBox`]. Overrides any previously
+    /// set tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent), forwarded to
+    /// the inner [`ComboBox`]. Overrides any previously set tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip hosting an arbitrary widget tree,
+    /// forwarded to the inner [`ComboBox`]. Overrides any previously
+    /// set tooltip.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -155,7 +205,7 @@ impl Widget for LanguageSwitcher {
 
         let label = self.label.clone().unwrap_or_else(|| lit!("Language"));
 
-        let combo = ComboBox::from_items(
+        let mut combo = ComboBox::from_items(
             choices.clone(),
             self.selected.clone(),
             |c: &LocaleChoice| LocalizedString::literal(c.display.clone()),
@@ -168,6 +218,21 @@ impl Widget for LanguageSwitcher {
         // full window-manager fan-out (redraw-all + RTL layout direction)
         // only happens on this context-bearing path.
         .on_select(|c: &LocaleChoice, ctx| ctx.set_locale(c.tag.clone()));
+
+        // Forward any configured tooltip onto the inner ComboBox. The
+        // three setters are mutually exclusive, so exactly one branch
+        // runs (last-call-wins, mirroring the ComboBox surface).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            combo = combo.composite_tooltip_boxed(content);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            combo = match source {
+                crate::tooltip::RichTooltipSource::Key(k) => combo.rich_tooltip(k),
+                crate::tooltip::RichTooltipSource::Content(c) => combo.rich_tooltip_content(c),
+            };
+        } else if let Some(text) = self.tooltip_text.clone() {
+            combo = combo.tooltip(text);
+        }
+
         let combo_id = ctx.add(combo);
         self.root_child_id = Some(combo_id);
 
@@ -262,5 +327,24 @@ mod tests {
         let id = tree.add(LanguageSwitcher::new());
         tree.layout(SizeProposal::exact(300.0, 50.0));
         assert!(tree.bounds(id).width >= 0.0);
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = light_tree();
+        let id = tree.add(
+            LanguageSwitcher::new()
+                .locales(langs(&["en-US", "fr-FR"]))
+                .tooltip(LocalizedString::literal("Tip")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

@@ -120,7 +120,22 @@ type IconFactory = Rc<dyn Fn() -> IconWidget>;
 pub struct ToolbarAction {
     label: LocalizedString,
     icon: Option<IconFactory>,
+    /// Plain-text tooltip shown after a hover delay.
+    /// Mutually exclusive with `rich_tooltip_source` — every tooltip
+    /// setter clears the other so last-call wins.
     tooltip: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    /// Mutually exclusive with `tooltip` — every tooltip setter clears
+    /// the other so last-call wins. Boxed because the inline
+    /// `TooltipContent` payload is large and rarely set, and
+    /// `ToolbarAction` is embedded by value in `ToolbarItemKind` /
+    /// `OverflowMenuForm` (keeps those enums compact).
+    rich_tooltip_source: Option<Box<crate::tooltip::RichTooltipSource>>,
+    /// Optional composite tooltip body, stored as a factory because
+    /// `ToolbarAction` is `Clone` and `Box<dyn Widget>` is not — the
+    /// factory (`Rc`, which is `Clone`) is invoked once per `make_button`
+    /// to produce a fresh body. Mutually exclusive with the other two.
+    composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
     enabled: bool,
     on_activate: Rc<dyn Fn(&mut EventContext)>,
     toggle: Option<Signal<bool>>,
@@ -135,6 +150,8 @@ impl ToolbarAction {
             label: label.into(),
             icon: None,
             tooltip: None,
+            rich_tooltip_source: None,
+            composite_tooltip_factory: None,
             enabled: true,
             on_activate: Rc::new(|_| {}),
             toggle: None,
@@ -150,9 +167,57 @@ impl ToolbarAction {
         self
     }
 
-    /// Tooltip / accessible-name supplement (also the AT name in `IconOnly`).
+    /// Plain-text tooltip shown after a hover delay (also the AT name
+    /// supplement in `IconOnly` mode). Overrides any previously set rich
+    /// tooltip — every setter clears the other so last-call wins.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry.
+    /// The `key` is looked up via
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) at build
+    /// time; the resolved body text supports inline markup
+    /// (`[label](url)`, `*italic*`, `**bold**`) and the entry's
+    /// shortcut / "more" fields are rendered automatically.
+    ///
+    /// Overrides any previously set plain `.tooltip(...)` — every setter
+    /// clears the other so last-call wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source =
+            Some(Box::new(crate::tooltip::RichTooltipSource::Key(key.into())));
+        self.tooltip = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) — for
+    /// one-off tooltips that aren't worth registering in the central
+    /// catalog. Overrides any previously set plain `.tooltip(...)`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(Box::new(crate::tooltip::RichTooltipSource::Content(
+            content,
+        )));
+        self.tooltip = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is built by `factory` — an
+    /// arbitrary widget tree (tabbed sections, charts, conditional rows).
+    /// Because `ToolbarAction` is `Clone`, the body is supplied as a
+    /// factory closure (not a `Box<dyn Widget>` instance, which is not
+    /// `Clone`); the closure is invoked to produce a fresh body for the
+    /// inline button. Overrides any previously set tooltip — every setter
+    /// clears the others so last-call wins.
+    pub fn composite_tooltip(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.composite_tooltip_factory = Some(Rc::new(factory));
+        self.tooltip = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -201,7 +266,19 @@ impl ToolbarAction {
                 btn = btn.icon(f(), loc);
             }
         }
-        if let Some(ref tip) = self.tooltip {
+        // Forward tooltip (mutually-exclusive setters; at most one branch runs).
+        if let Some(ref factory) = self.composite_tooltip_factory {
+            btn = btn.composite_tooltip_boxed(factory());
+        } else if let Some(ref source) = self.rich_tooltip_source {
+            match (**source).clone() {
+                crate::tooltip::RichTooltipSource::Key(key) => {
+                    btn = btn.rich_tooltip(key);
+                }
+                crate::tooltip::RichTooltipSource::Content(content) => {
+                    btn = btn.rich_tooltip_content(content);
+                }
+            }
+        } else if let Some(ref tip) = self.tooltip {
             btn = btn.tooltip(tip.clone());
         }
         let act = self.on_activate.clone();

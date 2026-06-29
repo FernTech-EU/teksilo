@@ -465,6 +465,20 @@ impl Button {
         self
     }
 
+    /// Boxed variant of [`composite_tooltip`](Self::composite_tooltip).
+    /// Used by `Clone` value types (e.g. `ToolbarAction`) that store a
+    /// composite-body factory `Rc<dyn Fn() -> Box<dyn Widget>>` and forward
+    /// the produced box through at build time.
+    pub(crate) fn composite_tooltip_boxed(
+        mut self,
+        content: Box<dyn bastyde_core::widget::Widget>,
+    ) -> Self {
+        self.composite_tooltip_content = Some(content);
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+
     /// Set the initial enabled state. Disabled buttons ignore input
     /// and dim their content (the framework's
     /// `PaintContext::effective_enabled` propagates through to the

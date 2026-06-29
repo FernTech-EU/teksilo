@@ -96,12 +96,15 @@ pub struct ToolBoxItem {
     label: LocalizedString,
     leading: Option<Box<dyn Widget>>,
     trailing: Option<Box<dyn Widget>>,
-    /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip`
-    /// (the last tooltip setter called wins). Kept as a `LocalizedString`
-    /// so a `tr!(...)` source stays locale-reactive.
+    /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip` and
+    /// `composite_tooltip_content` (the last tooltip setter called wins).
+    /// Kept as a `LocalizedString` so a `tr!(...)` source stays locale-reactive.
     tooltip_text: Option<LocalizedString>,
     /// Rich (registry-key or inline `TooltipContent`) tooltip.
     rich_tooltip: Option<RichTooltipSource>,
+    /// Composite (arbitrary widget body) tooltip. Mutually exclusive with the
+    /// plain and rich variants — the last setter called wins.
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     content: PendingChild,
     /// Initial-enabled hint. Forwarded into the arena via
     /// `ctx.enabled_when(header_id, false)` at build time when `false`.
@@ -131,6 +134,7 @@ impl ToolBoxItem {
             trailing: None,
             tooltip_text: None,
             rich_tooltip: None,
+            composite_tooltip_content: None,
             content: PendingChild::Deferred(Box::new(content)),
             initial_enabled: true,
         }
@@ -145,6 +149,7 @@ impl ToolBoxItem {
             trailing: None,
             tooltip_text: None,
             rich_tooltip: None,
+            composite_tooltip_content: None,
             content: PendingChild::Id(content_id),
             initial_enabled: true,
         }
@@ -176,28 +181,45 @@ impl ToolBoxItem {
     /// Attach a plain-text tooltip shown after a hover delay on the header
     /// row. The text may come from `tr!(...)` (translated, locale-reactive)
     /// or `lit!(...)`. Mirrors `.tooltip(...)` on Button / IconButton /
-    /// MenuItem. Overrides any previously set rich tooltip.
+    /// MenuItem. Clears any previously set rich or composite tooltip (the
+    /// last tooltip setter called wins).
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip = None;
+        self.composite_tooltip_content = None;
         self
     }
 
     /// Attach a rich tooltip resolved from the app-wide
     /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) by key.
-    /// Overrides any previously set plain `.tooltip(...)` text.
+    /// Clears any previously set plain or composite tooltip (the last
+    /// tooltip setter called wins).
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip = Some(RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
         self
     }
 
     /// Attach a rich tooltip driven by inline [`TooltipContent`] — for
-    /// one-offs that don't belong in the registry. Overrides any
-    /// previously set plain `.tooltip(...)` text.
+    /// one-offs that don't belong in the registry. Clears any previously
+    /// set plain or composite tooltip (the last tooltip setter called wins).
     pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self {
         self.rich_tooltip = Some(RichTooltipSource::Content(content));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — an arbitrary `impl Widget` body shown
+    /// in a larger, scrollable overlay after a longer hover delay. Use for
+    /// rich on-demand previews: charts, property tables, image thumbnails.
+    /// Clears any previously set plain or rich tooltip (the last tooltip
+    /// setter called wins).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip = None;
         self
     }
 
@@ -431,6 +453,7 @@ struct ToolBoxHeader {
     pending_trailing: Option<Box<dyn Widget>>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip: Option<RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     orientation: ToolBoxOrientation,
     /// When set, clicking the active header collapses it (see
     /// [`ToolBox::collapsible`]).
@@ -463,6 +486,7 @@ impl ToolBoxHeader {
         pending_trailing: Option<Box<dyn Widget>>,
         tooltip_text: Option<LocalizedString>,
         rich_tooltip: Option<RichTooltipSource>,
+        composite_tooltip_content: Option<Box<dyn Widget>>,
         orientation: ToolBoxOrientation,
         collapsible: bool,
         on_header_drag: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
@@ -479,6 +503,7 @@ impl ToolBoxHeader {
             pending_trailing,
             tooltip_text,
             rich_tooltip,
+            composite_tooltip_content,
             orientation,
             collapsible,
             on_header_drag,
@@ -702,10 +727,13 @@ impl Widget for ToolBoxHeader {
         };
         self.root_child_id = Some(root_id);
 
-        // Attach tooltip if configured. Plain and rich are mutually
-        // exclusive (last setter wins); rich takes precedence if both
-        // were somehow set.
-        if let Some(source) = self.rich_tooltip.take() {
+        // Attach tooltip if configured. The three variants are mutually
+        // exclusive (last setter on `ToolBoxItem` wins); composite takes
+        // precedence over rich which takes precedence over plain.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip.take() {
             let delay = ctx.theme().motion.tooltip_delay;
             attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.take() {
@@ -1245,6 +1273,7 @@ impl Widget for ToolBox {
                 item.trailing,
                 item.tooltip_text,
                 item.rich_tooltip,
+                item.composite_tooltip_content,
                 orientation,
                 self.collapsible,
                 self.header_drag.clone(),
@@ -1950,5 +1979,25 @@ mod tests {
             t.bounds(panel_id(&t, tb, 0)).height > 0.0,
             "non-collapsible active section stays open"
         );
+    }
+
+    // ─── tooltip ───────────────────────────────────────────────────────
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let selected = Signal::new(0_usize);
+        let mut t = tree();
+        let tb = t.add(ToolBox::new(selected.clone()).add(
+            ToolBoxItem::new(lit!("A"), TextWidget::new(lit!("content"))).tooltip(lit!("Tip")),
+        ));
+        t.layout(SizeProposal::exact(300.0, 200.0));
+        t.pointer_move(t.bounds(header_id(&t, tb, 0)).center());
+        t.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            t.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(t.find_by_label("Tip").is_some());
     }
 }

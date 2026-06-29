@@ -593,3 +593,30 @@ fn pinned_custom_widget_stays_inline_under_pressure() {
     tree.layout(SizeProposal::exact(110.0, 50.0));
     assert!(overflowing.get(), "actions should overflow in a tight bar");
 }
+
+#[test]
+fn tooltip_appears_on_hover() {
+    // A ToolbarAction with a plain tooltip forwards it to the inline Button.
+    // Hovering the button and waiting out the delay should show one overlay.
+    let tb = Toolbar::new().action(
+        ToolbarAction::new(lit!("Save"))
+            .tooltip(lit!("Tip"))
+            .on_activate(|_| {}),
+    );
+    let mut tree = themed_tree();
+    let id = tree.add(tb);
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    // The tooltip is attached to the inline Button, which is the first focusable
+    // descendant of the toolbar.
+    let btn = tree
+        .first_focusable_descendant(id)
+        .expect("toolbar action should be focusable");
+    tree.pointer_move(tree.bounds(btn).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear after hovering the toolbar action"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
+}

@@ -74,7 +74,16 @@ type IconFactory = Rc<dyn Fn() -> IconWidget>;
 pub struct Segment {
     label: LocalizedString,
     icon: Option<IconFactory>,
+    /// Plain-text hover tooltip — mutually exclusive with
+    /// `rich_tooltip_source` and `composite_tooltip_factory`.
     tooltip: Option<LocalizedString>,
+    /// Rich-tooltip source — mutually exclusive with `tooltip` and
+    /// `composite_tooltip_factory`. `RichTooltipSource` is `Clone`.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Composite-tooltip factory — mutually exclusive with `tooltip` and
+    /// `rich_tooltip_source`. Stored as an `Rc<dyn Fn>` (not `Box<dyn
+    /// Widget>`) so the `Segment: Clone` derive stays intact.
+    composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
     disabled: bool,
 }
 
@@ -86,6 +95,8 @@ impl Segment {
             label: label.into(),
             icon: None,
             tooltip: None,
+            rich_tooltip_source: None,
+            composite_tooltip_factory: None,
             disabled: false,
         }
     }
@@ -99,8 +110,56 @@ impl Segment {
     }
 
     /// Hover tooltip — most useful for icon-only segments.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — last call wins.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Rich hover tooltip resolved from the app-wide registry by key.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — last call wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Rich hover tooltip driven by an inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) entry
+    /// (no registry key needed).
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip) /
+    /// [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — last call wins.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip = None;
+        self.composite_tooltip_factory = None;
+        self
+    }
+
+    /// Composite hover tooltip built by a factory closure at attach time.
+    ///
+    /// The factory is called once per `build()` to produce the tooltip
+    /// body widget. It is stored as an `Rc<dyn Fn>` so that `Segment`
+    /// remains `Clone`.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip) /
+    /// [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) — last call wins.
+    pub fn composite_tooltip(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.composite_tooltip_factory = Some(Rc::new(factory));
+        self.tooltip = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -138,6 +197,8 @@ struct SegmentCell {
     label: LocalizedString,
     icon: Option<IconFactory>,
     tooltip: Option<LocalizedString>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
     label_style: Option<bastyde_core::color_prop::TextStyleProp>,
     seg_disabled: bool,
     index: usize,
@@ -207,7 +268,15 @@ impl Widget for SegmentCell {
         self.content_id = Some(content_id);
 
         // Optional hover tooltip (icon-only segments especially).
-        if let Some(tt) = &self.tooltip {
+        // Composite > rich > plain, mutually exclusive — last setter wins.
+        if let Some(factory) = &self.composite_tooltip_factory {
+            let content = factory();
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
+        } else if let Some(tt) = &self.tooltip {
             let tip = ctx.add(crate::tooltip::TooltipWidget::new(tt.clone()));
             let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(self_id, tip, delay);
@@ -494,6 +563,8 @@ impl Widget for SegmentedControl {
                 label: self.segments[index].label.clone(),
                 icon: self.segments[index].icon.clone(),
                 tooltip: self.segments[index].tooltip.clone(),
+                rich_tooltip_source: self.segments[index].rich_tooltip_source.clone(),
+                composite_tooltip_factory: self.segments[index].composite_tooltip_factory.clone(),
                 label_style: self.label_style.clone(),
                 seg_disabled: self.segments[index].disabled,
                 index,
@@ -837,6 +908,32 @@ mod tests {
         assert!(
             info.actions()
                 .contains(&bastyde_core::accesskit::Action::Increment)
+        );
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        // Segment 1 carries a plain-text tooltip; hover over it should
+        // show one overlay after the delay elapses.
+        let sc = tree.add(SegmentedControl::new(selected).segments([
+            Segment::new(lit!("A")),
+            Segment::new(lit!("B")).tooltip(lit!("Tip")),
+            Segment::new(lit!("C")),
+        ]));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        // children: [chrome, seg0, seg1, seg2]; hover over seg1 center.
+        let sc_children = tree.children(sc);
+        // sc_children[0] = chrome, [1] = seg0, [2] = seg1, [3] = seg2
+        assert_eq!(sc_children.len(), 4);
+        let seg1_bounds = tree.bounds(sc_children[2]);
+        tree.pointer_move(seg1_bounds.center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover over the tooltipped segment"
         );
     }
 }

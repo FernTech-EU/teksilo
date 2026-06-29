@@ -70,6 +70,18 @@ pub struct TextScaleControl {
     /// Optional visible label rendered to the leading side of the spinbox.
     label: Option<LocalizedString>,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay.
+    /// Mutually exclusive with `rich_tooltip_source` and
+    /// `composite_tooltip_content` — every tooltip setter clears the other two.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`
+    /// — every tooltip setter clears the other two so last-call wins.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body. Hosts an arbitrary widget inside the
+    /// tooltip overlay. Mutually exclusive with `tooltip_text` and
+    /// `rich_tooltip_source` per the last-call-wins contract.
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl TextScaleControl {
@@ -84,6 +96,9 @@ impl TextScaleControl {
             percent_signal: Signal::new(percent),
             label: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -91,6 +106,51 @@ impl TextScaleControl {
     /// (e.g. `tr!(text_size())`). Also used as the control's accessible name.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Attach a plain tooltip that appears after a hover delay.
+    ///
+    /// Clears any previously set rich or composite tooltip (last-call wins).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry.
+    ///
+    /// `key` is looked up in the
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) at build time.
+    /// Clears any previously set plain or composite tooltip (last-call wins).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent).
+    ///
+    /// Clears any previously set plain or composite tooltip (last-call wins).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip that hosts an arbitrary widget body.
+    ///
+    /// The `content` widget is rendered inside the tooltip overlay after the
+    /// heavy hover delay. Clears any previously set plain or rich tooltip
+    /// (last-call wins).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -147,6 +207,22 @@ impl Widget for TextScaleControl {
         };
 
         self.root_child_id = Some(root);
+
+        // Attach whichever tooltip variant was set, anchored on this widget's
+        // own root (not forwarded to the inner SpinBox).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tooltip_id, delay);
+        }
+
         vec![root]
     }
 
@@ -187,6 +263,7 @@ impl Widget for TextScaleControl {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn factor_percent_roundtrip() {
@@ -225,5 +302,20 @@ mod tests {
         // Simulate a settings load / cross-window fan-in.
         factor.set(1.6);
         assert_eq!(percent.get(), 160);
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(TextScaleControl::new(Signal::new(1.0_f32)).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

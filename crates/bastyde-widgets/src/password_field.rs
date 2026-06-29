@@ -295,7 +295,23 @@ impl PasswordField {
         self
     }
 
+    /// Plain single-line tooltip shown on hover.
+    ///
+    /// Mutually exclusive with [`rich_tooltip_key`](Self::rich_tooltip_key),
+    /// [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — calling any of them
+    /// clears the others.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
     /// Registry-keyed rich tooltip.
+    ///
+    /// Mutually exclusive with the other tooltip setters.
     pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
@@ -303,7 +319,23 @@ impl PasswordField {
         self
     }
 
+    /// Inline rich tooltip (canonical name: accepts a
+    /// [`TooltipContent`](tooltip::TooltipContent) directly without a
+    /// registry key).
+    ///
+    /// Mutually exclusive with the other tooltip setters.
+    pub fn rich_tooltip_content(mut self, content: tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
     /// Inline rich tooltip.
+    ///
+    /// Mutually exclusive with the other tooltip setters.
+    /// Prefer [`rich_tooltip_content`](Self::rich_tooltip_content) for the
+    /// canonical API.
     pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Content(content));
         self.tooltip_text = None;
@@ -312,6 +344,8 @@ impl PasswordField {
     }
 
     /// Composite (arbitrary-widget) tooltip.
+    ///
+    /// Mutually exclusive with the other tooltip setters.
     pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;

@@ -457,3 +457,20 @@ fn a11y_strip_name_is_locale_reactive() {
     assert_eq!(strip_name(&mut t), "Étapes");
     clear();
 }
+
+// ── tooltip ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn tooltip_appears_on_hover() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(Stepper::new().steps(three_steps()).tooltip(lit!("Tip")));
+    tree.layout(SizeProposal::exact(720.0, 520.0));
+    tree.pointer_move(tree.bounds(id).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
+}
