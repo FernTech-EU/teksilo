@@ -19,7 +19,7 @@ pub use rich_text_engine::{RichTextEngine, WrapMode};
 pub use text_typeset::{
     CharacterGeometry, CursorAffinity, CursorDisplay, DecorationKind as TypesetterDecorationKind,
     DecorationRect, FontFaceId, GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult,
-    ImageQuad, RenderFrame,
+    ImageQuad, RenderFrame, TextFontService,
 };
 
 pub use text_document;

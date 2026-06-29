@@ -27,6 +27,7 @@ const TRACK_W: f32 = 52.0;
 const TRACK_H: f32 = 32.0;
 const THUMB_OFF: f32 = 16.0;
 const THUMB_ON: f32 = 24.0;
+const THUMB_PRESSED: f32 = 28.0;
 const TRACK_OUTLINE_W: f32 = 2.0;
 
 /// Material 3 switch `ToggleStyle`.
@@ -37,7 +38,8 @@ impl ToggleStyle for M3ToggleStyle {
     fn make_body(&self, cfg: &ToggleStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let initial = if cfg.is_on.get() { 1.0 } else { 0.0 };
         let knob_position = ctx.animated_signal(initial);
-        let knob_anim = ctx.animate().fast().standard();
+        // M3 emphasized easing for the knob slide.
+        let knob_anim = ctx.animate().fast().m3_emphasized();
         {
             let knob_position = knob_position.clone();
             let knob_anim = knob_anim.clone();
@@ -64,6 +66,7 @@ impl ToggleStyle for M3ToggleStyle {
         ctx.add(M3SwitchBody {
             knob_position,
             is_disabled: cfg.is_disabled.clone(),
+            is_pressed: cfg.is_pressed.clone(),
             focus_origin,
         })
     }
@@ -72,6 +75,7 @@ impl ToggleStyle for M3ToggleStyle {
 struct M3SwitchBody {
     knob_position: Signal<f32>,
     is_disabled: Signal<bool>,
+    is_pressed: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
 }
 
@@ -121,6 +125,8 @@ impl Widget for M3SwitchBody {
         self.knob_position
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.is_disabled
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.is_pressed
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.focus_origin
             .bind_to(id, registry, BindingLevel::RepaintOnly);
@@ -188,8 +194,13 @@ impl Widget for M3SwitchBody {
             );
         }
 
-        // Thumb: grows 16 → 24 dp and slides as it turns on.
-        let d = lerp(THUMB_OFF, THUMB_ON, t);
+        // Thumb: grows 16 → 24 dp as it turns on, and to 28 dp while
+        // pressed (the M3 switch press feedback). Slides with `t`.
+        let d = if enabled && self.is_pressed.get() {
+            THUMB_PRESSED
+        } else {
+            lerp(THUMB_OFF, THUMB_ON, t)
+        };
         let center_off = track_x + TRACK_H / 2.0;
         let center_on = track_x + TRACK_W - TRACK_H / 2.0;
         let center_x = lerp(center_off, center_on, t);

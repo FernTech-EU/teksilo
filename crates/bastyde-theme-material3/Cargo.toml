@@ -10,6 +10,13 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+# Off by default. When enabled, embeds the Roboto Flex font (Apache-2.0,
+# ~1.7 MB) and switches the M3 typography family to "Roboto"; exposes
+# `material3::font_registrar()`. Default builds keep the metric-compatible
+# bundled Inter and pay none of the binary size.
+bundled-fonts = ["dep:bastyde-text"]
+
 [dependencies]
 bastyde-core = { workspace = true }
 bastyde-tokens = { workspace = true }
@@ -18,3 +25,5 @@ bastyde-tokens = { workspace = true }
 # bastyde-widgets does NOT depend on the theme crates, so this is acyclic.
 bastyde-canvas = { workspace = true }
 bastyde-widgets = { workspace = true }
+# Only pulled in under `bundled-fonts` (for the FontRegistrar types).
+bastyde-text = { workspace = true, optional = true }

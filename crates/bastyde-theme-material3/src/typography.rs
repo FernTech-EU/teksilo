@@ -17,6 +17,22 @@ use bastyde_tokens::{FontWeight, TypographyTokens};
 pub fn m3_typography() -> TypographyTokens {
     let mut t = TypographyTokens::default();
 
+    // Under `bundled-fonts`, switch the (non-mono) text family to the
+    // embedded Roboto; otherwise keep the bundled Inter (Roboto-metric-
+    // compatible). See `crate::font_registrar`.
+    #[cfg(feature = "bundled-fonts")]
+    {
+        for style in [
+            &mut t.body,
+            &mut t.body_bold,
+            &mut t.small,
+            &mut t.small_bold,
+            &mut t.tiny,
+        ] {
+            style.family = "Roboto".to_string();
+        }
+    }
+
     // Body Medium — 14 sp / 400 / 0.25 tracking.
     t.body.size = 14.0;
     t.body.weight = FontWeight::REGULAR;

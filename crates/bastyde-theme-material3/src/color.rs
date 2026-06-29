@@ -34,7 +34,9 @@ pub fn m3_light_colors() -> ColorTokens {
     let secondary_container = Color::from_hex("#E8DEF8");
     let tertiary = Color::from_hex("#7D5260");
     let error = Color::from_hex("#B3261E");
+    let on_error = Color::from_hex("#FFFFFF");
     let error_container = Color::from_hex("#F9DEDC");
+    let on_error_container = Color::from_hex("#410E0B");
     let surface = Color::from_hex("#FEF7FF");
     let on_surface = Color::from_hex("#1D1B20");
     let on_surface_variant = Color::from_hex("#49454F");
@@ -58,7 +60,9 @@ pub fn m3_light_colors() -> ColorTokens {
             secondary_container,
             tertiary,
             error,
+            on_error,
             error_container,
+            on_error_container,
             surface,
             on_surface,
             on_surface_variant,
@@ -87,7 +91,9 @@ pub fn m3_dark_colors() -> ColorTokens {
     let secondary_container = Color::from_hex("#4A4458");
     let tertiary = Color::from_hex("#EFB8C8");
     let error = Color::from_hex("#F2B8B5");
+    let on_error = Color::from_hex("#601410");
     let error_container = Color::from_hex("#8C1D18");
+    let on_error_container = Color::from_hex("#F9DEDC");
     let surface = Color::from_hex("#141218");
     let on_surface = Color::from_hex("#E6E0E9");
     let on_surface_variant = Color::from_hex("#CAC4D0");
@@ -111,7 +117,9 @@ pub fn m3_dark_colors() -> ColorTokens {
             secondary_container,
             tertiary,
             error,
+            on_error,
             error_container,
+            on_error_container,
             surface,
             on_surface,
             on_surface_variant,
@@ -139,7 +147,9 @@ struct M3Roles {
     secondary_container: Color,
     tertiary: Color,
     error: Color,
+    on_error: Color,
     error_container: Color,
+    on_error_container: Color,
     surface: Color,
     on_surface: Color,
     on_surface_variant: Color,
@@ -195,6 +205,14 @@ fn apply_m3_roles(c: &mut ColorTokens, m: M3Roles, link_hover: Color) {
     c.border_error = m.error;
     c.divider = m.outline_variant;
     c.divider_strong = m.outline;
+
+    // ── Cross-language container / on-error roles (now first-class in core) ──
+    c.text_on_error = m.on_error;
+    c.text_on_error_container = m.on_error_container;
+    c.surface_error_container = m.error_container;
+    c.surface_container = m.surface_container;
+    c.surface_container_raised = m.surface_container_high;
+    c.surface_container_sunken = m.surface_container_low;
 
     // ── Status — only error has an M3 role; info/success/warning keep IntUI ──
     c.status_error_fg = m.error;

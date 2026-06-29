@@ -93,6 +93,49 @@ fn apply_material3_overrides(theme: &mut Theme, appearance: ThemeAppearance) {
     theme.style_slots.card = Some(Rc::new(styles::card::M3CardStyle));
 }
 
+#[cfg(feature = "bundled-fonts")]
+mod bundled_fonts {
+    use bastyde_text::{FontFaceId, FontRegistrar, TextFontService};
+
+    /// The bundled Roboto Flex variable font (Apache-2.0, ~1.7 MB). Only
+    /// compiled under the `bundled-fonts` feature.
+    const ROBOTO: &[u8] = include_bytes!("../fonts/Roboto.ttf");
+
+    /// Registers the bundled Roboto under the family name "Roboto" for the
+    /// weights M3 uses (400 / 500) and as the default font. The two
+    /// `register_font_as` calls force the family name so the M3
+    /// typography (which uses "Roboto" under this feature) resolves
+    /// regardless of the file's internal name-table family.
+    pub struct RobotoRegistrar;
+
+    impl FontRegistrar for RobotoRegistrar {
+        fn register_on_service(&self, service: &mut TextFontService) -> Option<FontFaceId> {
+            let regular = service.register_font_as(ROBOTO, "Roboto", 400, false);
+            service.register_font_as(ROBOTO, "Roboto", 500, false);
+            service.set_default_font(regular, 14.0);
+            Some(regular)
+        }
+    }
+}
+
+/// A [`FontRegistrar`](bastyde_text::FontRegistrar) that embeds Roboto and
+/// registers it under the "Roboto" family. Pass it to the app builder so
+/// the M3 typography (which uses "Roboto" under this feature) resolves
+/// instead of falling back to the bundled default:
+///
+/// ```ignore
+/// BastydeAppBuilder::new()
+///     .theme(material3::light())
+///     .register_fonts(material3::font_registrar())
+///     .run();
+/// ```
+///
+/// Available only under the `bundled-fonts` Cargo feature.
+#[cfg(feature = "bundled-fonts")]
+pub fn font_registrar() -> impl bastyde_text::FontRegistrar {
+    bundled_fonts::RobotoRegistrar
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +162,39 @@ mod tests {
     #[test]
     fn light_and_dark_have_distinct_surfaces() {
         assert_ne!(light().colors.surface_main, dark().colors.surface_main);
+    }
+
+    #[test]
+    fn on_error_and_containers_use_m3_values() {
+        // The new core cross-language roles carry M3 values now.
+        let l = light().colors;
+        assert_eq!(l.text_on_error, Color::from_hex("#FFFFFF"));
+        assert_eq!(l.surface_error_container, Color::from_hex("#F9DEDC"));
+        assert_eq!(l.surface_container, Color::from_hex("#F3EDF7"));
+        let d = dark().colors;
+        assert_eq!(d.text_on_error, Color::from_hex("#601410"));
+    }
+
+    #[test]
+    fn destructive_button_label_is_on_error() {
+        use bastyde_core::styles::ButtonVariant;
+        use bastyde_tokens::TextRole;
+        let style = styles::button::m3_button_style();
+        assert_eq!(
+            style.label_roles.get(&ButtonVariant::Destructive),
+            Some(&TextRole::OnError),
+        );
+    }
+
+    #[test]
+    fn filled_button_hover_is_a_state_layer() {
+        use bastyde_core::styles::{ButtonVariant, FillRecipe};
+        let style = styles::button::m3_button_style();
+        let filled = &style.recipes[&ButtonVariant::Filled];
+        assert!(matches!(
+            filled.fill.hover,
+            Some(FillRecipe::StateLayer { .. })
+        ));
     }
 
     #[test]

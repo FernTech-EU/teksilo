@@ -15,11 +15,12 @@
 //! | `Ghost` / `Link` | Text |
 //! | `Destructive` | Filled (error) |
 //!
-//! Hover/pressed/disabled use the M3-mapped `accent_*` surface roles (so
-//! they stay theme-reactive); the error fill reuses `TextRole::Error`
-//! (which carries the M3 error color in both schemes). Outlined/text/
-//! plain labels are redirected to the accent color via
-//! [`RecipeButtonStyle::label_roles`].
+//! The filled button's hover/pressed use exact M3 state layers
+//! ([`FillRecipe::state_layer`] — an 8 % / 12 % on-primary overlay over
+//! the primary fill); the error fill reuses `TextRole::Error` (which
+//! carries the M3 error color in both schemes). Outlined/text/plain
+//! labels are redirected to the accent color, and the Destructive label
+//! to `TextRole::OnError`, via [`RecipeButtonStyle::label_roles`].
 
 use std::collections::HashMap;
 
@@ -52,23 +53,16 @@ pub fn m3_button_style() -> RecipeButtonStyle {
     recipes.insert(ButtonVariant::Ghost, text());
     recipes.insert(ButtonVariant::Link, text());
 
-    // Outlined / text / default buttons read in the accent color (M3).
-    // Filled & Destructive keep OnAccent, Tinted keeps Primary (good
-    // contrast on the tonal container), Link keeps Link — all via the
-    // Button's built-in mapping, so they are left unset here.
-    //
-    // Deviation: M3 specs `on_error` for the Destructive label, but there
-    // is no `TextRole::OnError` (no on-error field in `ColorTokens`), so it
-    // falls back to `OnAccent` (`on_primary`). In light mode both are
-    // `#FFFFFF`, so this is exact; in dark mode the label is the dark
-    // `on_primary` purple instead of the dark `on_error` red — a hue
-    // nuance on a still-readable (AAA-contrast) dark-on-pink label. A
-    // first-class `TextRole::OnError` would close the gap (see the
-    // framework-gaps notes).
+    // Outlined / text / default buttons read in the accent color (M3);
+    // Destructive reads in `OnError` (the M3 on-error color, now a
+    // first-class role). Filled keeps OnAccent, Tinted keeps Primary
+    // (good contrast on the tonal container), Link keeps Link — all via
+    // the Button's built-in mapping, so they are left unset here.
     let mut label_roles = HashMap::new();
     label_roles.insert(ButtonVariant::Plain, TextRole::Accent);
     label_roles.insert(ButtonVariant::Outlined, TextRole::Accent);
     label_roles.insert(ButtonVariant::Ghost, TextRole::Accent);
+    label_roles.insert(ButtonVariant::Destructive, TextRole::OnError);
 
     RecipeButtonStyle {
         recipes,
@@ -82,8 +76,18 @@ fn filled() -> ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
             idle: FillRecipe::solid(SurfaceRole::Accent),
-            hover: Some(FillRecipe::solid(SurfaceRole::AccentHover)),
-            pressed: Some(FillRecipe::solid(SurfaceRole::AccentPressed)),
+            // Exact M3 state layers: an 8 % / 12 % on-primary overlay
+            // composited over the primary fill at paint time.
+            hover: Some(FillRecipe::state_layer(
+                SurfaceRole::Accent,
+                TextRole::OnAccent,
+                0.08,
+            )),
+            pressed: Some(FillRecipe::state_layer(
+                SurfaceRole::Accent,
+                TextRole::OnAccent,
+                0.12,
+            )),
             focused: None,
             disabled: Some(FillRecipe::solid(SurfaceRole::AccentDisabled)),
         },
