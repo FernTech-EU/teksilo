@@ -2246,6 +2246,8 @@ pub struct BastydeAppBuilder {
     theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
+    #[cfg(feature = "text")]
+    font_registrars: Vec<Box<dyn bastyde_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
@@ -2297,6 +2299,8 @@ impl BastydeAppBuilder {
             theme_mode: ThemeMode::Manual,
             #[cfg(feature = "text")]
             typesetter: None,
+            #[cfg(feature = "text")]
+            font_registrars: Vec::new(),
             app_event_handler: None,
             on_ready: Vec::new(),
             initial_window: None,
@@ -2581,6 +2585,25 @@ impl BastydeAppBuilder {
         self
     }
 
+    /// Register additional fonts (e.g. a theme's font family) into the
+    /// shared typesetter at startup, *before* any text is shaped — so a
+    /// theme that sets `typography.body.family = "Roboto"` resolves
+    /// correctly instead of silently falling back to the bundled Inter.
+    ///
+    /// A theme preset typically exposes a `FontRegistrar` the app passes
+    /// here:
+    /// ```ignore
+    /// BastydeAppBuilder::new()
+    ///     .theme(material3::light())
+    ///     .register_fonts(material3::font_registrar())
+    ///     .run();
+    /// ```
+    #[cfg(feature = "text")]
+    pub fn register_fonts(mut self, registrar: impl bastyde_text::FontRegistrar + 'static) -> Self {
+        self.font_registrars.push(Box::new(registrar));
+        self
+    }
+
     /// Register a handler for `AppEvent`s received from background threads.
     pub fn on_app_event(mut self, handler: impl FnMut(&AppEvent) + 'static) -> Self {
         self.app_event_handler = Some(Box::new(handler));
@@ -2753,6 +2776,12 @@ impl BastydeAppBuilder {
                 .typesetter
                 .take()
                 .unwrap_or_else(SharedTypesetter::new_with_default_font);
+            // Install app/theme fonts before any text is shaped, so a
+            // theme's `typography.*.family` resolves instead of falling
+            // back to the bundled default.
+            for registrar in &self.font_registrars {
+                ts.apply_font_registrar(registrar.as_ref());
+            }
             tree = tree.with_text_backend(ts.as_text_backend());
             // Auto-register so rich-text widgets can reach the shared
             // typesetter via `ctx.app_state::<SharedTypesetter>()` in
@@ -2905,6 +2934,12 @@ impl BastydeAppBuilder {
         let typesetter = self
             .typesetter
             .unwrap_or_else(SharedTypesetter::new_with_default_font);
+
+        #[cfg(feature = "text")]
+        // Install app/theme fonts before any text is shaped.
+        for registrar in &self.font_registrars {
+            typesetter.apply_font_registrar(registrar.as_ref());
+        }
 
         #[cfg(feature = "text")]
         {
