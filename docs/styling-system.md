@@ -159,6 +159,9 @@ pub enum ShapeRecipe {
 
 pub enum FillRecipe {
     Solid(RecipeColor),
+    // overlay composited over base at `alpha` → flat color. The M3 /
+    // Fluent "state layer" (hover = 8 %, pressed = 12 % on-color).
+    StateLayer { base: RecipeColor, overlay: RecipeColor, alpha: f32 },
     LinearGradient { stops: Vec<GradientStop>, angle_deg: f32 },
     RadialGradient { stops: Vec<GradientStop>, center: (f32, f32), radius: f32 },
     None,
@@ -167,9 +170,12 @@ pub enum FillRecipe {
 pub struct BorderRecipe {
     pub width: f32,
     pub color: RecipeColor,
-    pub style: BorderStyle,         // Solid | Dashed { dash, gap } | Dotted
-    pub position: BorderPosition,   // Inside | Center | Outside
+    pub style: BorderStyle,           // Solid | Dashed { dash, gap } | Dotted
+    pub position: BorderPosition,     // Inside | Center | Outside (now honoured)
+    pub sides: Option<BorderSides>,   // None = uniform; Some = per-side widths
 }
+// BorderSides { top, trailing, bottom, leading: f32 } — e.g.
+// BorderRecipe::underline(w, color) for an M3/Fluent filled-field underline.
 
 pub struct ShadowRecipe {
     pub offset: Vec2,
@@ -203,16 +209,31 @@ closures, fully Serde-serialisable, theme-file-friendly.
 recipe stays plain data (serializes cleanly for inspector JSON Export
 and TOML image-theme manifests).
 
-As of this branch every themable widget holds its recipe-equivalent
-data inside its `Recipe*Style` default. The IntUI dimension constants
-that used to live in `bastyde-tokens::components` per-widget structs were
-deleted and folded directly into the matching
-`bastyde-widgets/src/styles/recipe_*_style.rs` module as `pub const`
-blocks — the recipe *is* the dimension data now, with no parallel
-store. `ButtonRecipe` is the one standalone Tier-2 struct surfaced so
-far; a future commit will surface `ToggleRecipe`, `CardRecipe`, etc.
-so apps can construct custom-dimensioned `RecipeFooStyle::new(recipe)`
-without writing a new Tier-3 impl.
+**Gradients are rendered.** `FillRecipe::LinearGradient` /
+`RadialGradient` paint through the SDF gradient pipeline (via
+`PaintProp`, the gradient-or-solid fill prop `RectWidget` accepts).
+Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so
+existing fills are unchanged.
+
+**Configurable dimensions per widget.** Every themable widget now
+surfaces a public `FooRecipe` dimension struct, and its
+`RecipeFooStyle` carries `recipe: FooRecipe` with a
+`RecipeFooStyle::new(recipe)` constructor. `Default` fills the recipe
+from the IntUI `pub const` dimension block (kept as the default source),
+so a theme can tweak *just the dimensions* without writing a new Tier-3
+impl:
+
+```rust
+let toggle = RecipeToggleStyle::new(ToggleRecipe {
+    track_width: 52.0, track_height: 32.0, thumb_diameter: 24.0, thumb_inset: 4.0,
+});
+theme.style_slots.toggle = Some(Rc::new(toggle));
+```
+
+The four multi-method widgets (Tab, Dialog, Table, Calendar) expose a
+flat recipe each (`TabRecipe`, `DialogRecipe`, `TableRecipe`,
+`CalendarRecipe`). A handful with no tunable dimensions (SpinBox,
+SplitButton, GridView, ListContainer, RichTextEditor) stay unit structs.
 
 ## Tier 3 — Style protocols
 
@@ -421,9 +442,23 @@ Migrated widgets read entirely from `theme.style_slots.*` plus their
 widgets (toolbar, status bar, accordion, …) lives directly in their
 `Recipe*Style` modules as `pub const` blocks.
 
+The **`bastyde-theme-material3`** sibling preset is now a real Material 3
+theme (baseline `#6750A4` scheme, M3 shape/typography, pill 40 dp
+buttons with state-layer hover, the M3 switch, 12 dp cards) and the
+proving ground for the recipe-vocabulary additions above. Its optional
+`bundled-fonts` feature embeds Roboto. The framework primitives it
+needed — `FillRecipe::StateLayer`, per-side `BorderRecipe` +
+`BorderPosition`, gradient `PaintProp`, the configurable `FooRecipe`
+sweep, the cross-design-language color roles
+(`TextRole::OnError`, `SurfaceRole::{ErrorContainer, Container,
+ContainerRaised, ContainerSunken}`), `Easing::CubicBezier`,
+`ToggleStyleConfig::is_pressed`, and `BastydeAppBuilder::register_fonts`
+— are all in place, so the `-macos` / `-fluent` / GTK4-Adwaita presets
+can follow the same path.
+
 Still ahead on the styling roadmap: image-backed styles, the
-`ImageTheme` TOML manifest loader, and the sibling preset
-crates `bastyde-theme-material3` / `-macos` / `-fluent`.
+`ImageTheme` TOML manifest loader, and the `-macos` / `-fluent` /
+GTK4-Adwaita sibling preset crates.
 
 ### Multi-method styles
 

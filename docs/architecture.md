@@ -336,7 +336,7 @@ The Canvas delegates text rendering to the shared `Typesetter` instance from tex
 
 ### 16.5 Paint Types
 
-Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2).
+Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, `ConicGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2). Widgets carry a fill as a `PaintProp` (a flat `ColorProp` or a gradient, in `bastyde-core`); `RectWidget` resolves it to a `Paint` at paint time (gradient endpoints are rect-local, computed from the widget's size). Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so the common case is unchanged.
 
 ---
 

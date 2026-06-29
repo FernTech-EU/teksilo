@@ -168,17 +168,21 @@ All defined in [`crates/bastyde-tokens/src/roles.rs`](../crates/bastyde-tokens/s
 ### `TextRole`
 Foreground text color.
 
-`Primary` (default), `Secondary`, `Disabled`, `OnAccent`, `Accent`, `Error`, `Warning`, `Success`, `Link`, `LinkHover`, `TooltipText`, `TooltipShortcut`, `EditorFg`, `EditorGutterFg`.
+`Primary` (default), `Secondary`, `Disabled`, `OnAccent`, `Accent`, `Error`, `Warning`, `Success`, `OnError`, `OnErrorContainer`, `Link`, `LinkHover`, `LinkVisited`, `TooltipText`, `TooltipShortcut`, `EditorFg`, `EditorGutterFg`.
 
 ### `SurfaceRole`
 Filled-area color (panel backgrounds, button fills, selection highlights).
 
-`Main` (default), `Content`, `Raised`, `Sunken`, `Hover`, `Pressed`, `Selected`, `SelectedInactive`, `Accent`, `AccentHover`, `AccentPressed`, `AccentDisabled`, `AccentSubtle`, `StatusInfo`, `StatusSuccess`, `StatusWarning`, `StatusError`, `TooltipBg`, `EditorBg`, `EditorCaret`, `EditorCurrentLineBg`, `EditorSelectionBg`, `Scrim`, **`Transparent`** (paints nothing — the "no surface" slot in interaction chains).
+`Main` (default), `Content`, `Raised`, `Sunken`, `Hover`, `Pressed`, `Selected`, `SelectedInactive`, `AltRow`, `Accent`, `AccentHover`, `AccentPressed`, `AccentDisabled`, `AccentSubtle`, `StatusInfo`, `StatusSuccess`, `StatusWarning`, `StatusError`, `ErrorContainer`, `Container`, `ContainerRaised`, `ContainerSunken`, `TooltipBg`, `EditorBg`, `EditorCaret`, `EditorCurrentLineBg`, `EditorSelectionBg`, `Scrim`, **`Transparent`** (paints nothing — the "no surface" slot in interaction chains).
+
+The `OnError`/`*Container` roles are the cross-design-language slots shared by Material 3 / Fluent / macOS / GTK4-Adwaita; design-language-specific colors (M3 secondary/tertiary triads, full tonal ladder) live in per-theme extensions instead.
 
 ### `BorderRole`
 Stroke color.
 
-`Default` (default), `Strong`, `Focused`, `Error`, `Warning`, `Divider`, `DividerStrong`, `TooltipBorder`, **`Transparent`**.
+`Default` (default), `Strong`, `Focused`, `Error`, `Warning`, `Divider`, `DividerStrong`, `TooltipBorder`, `Accent`, `AccentDisabled`, **`Transparent`**.
+
+**Disabled auto-dim.** When a leaf resolves a role-based `ColorProp` in a disabled subtree (`enabled == false`), `TextRole` substitutes `Disabled` and the accent `SurfaceRole`/`BorderRole` family (`Accent`/`AccentHover`/`AccentPressed`, `BorderRole::Accent`) substitutes its `AccentDisabled` counterpart — so role-driven accent chrome dims without per-widget handling. Non-accent surfaces/borders pass through.
 
 ### `TextStyleRole`
 Typography role.

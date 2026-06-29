@@ -39,7 +39,13 @@ A signal created with `Signal::new(0.0_f32)` does **not** support animation — 
 Easing curves and standard durations are design tokens, not ad-hoc magic numbers. They live in [crates/bastyde-tokens/src/motion.rs](../crates/bastyde-tokens/src/motion.rs):
 
 ```rust
-pub enum Easing { Linear, EaseIn, EaseOut, EaseInOut }
+pub enum Easing {
+    Linear, EaseIn, EaseOut, EaseInOut,
+    // General CSS cubic-bezier(x1,y1,x2,y2) — for design-language motion
+    // specs that don't reduce to the named curves (M3 emphasized, Fluent).
+    // Build via `ctx.animate().cubic_bezier(x1,y1,x2,y2)` / `.m3_emphasized()`.
+    CubicBezier { x1: f32, y1: f32, x2: f32, y2: f32 },
+}
 
 pub struct MotionTokens {
     pub duration_instant: Duration,             //   0 ms — most state changes
@@ -293,7 +299,7 @@ Headless tests that never call `render()` have `paint_epoch == 0`; the scheduler
 - Create the signal with `BuildContext::animated_signal(value)` inside `build()`. That handles scheduler registration and widget-lifetime cancellation.
 - Respect `ctx.prefers_reduced_motion()` before starting a looping animation; `to_or_snap` already does it for one-shots.
 - Durations come from `MotionTokens` (`duration_fast` / `_normal` / `_slow` / `_collapse` / `_indeterminate_sweep`), not from literal constants in widget code. Literal constants are acceptable for one-off durations a designer doesn't plan to retune (icon sprite frame intervals, for example).
-- Easing curves come from `Easing`. `EaseInOut` for symmetric transitions (toggle thumbs), `EaseOut` / `easing_standard` for appearance (snackbar slide-in, dialog fade), `Linear` for loops and indeterminate work.
+- Easing curves come from `Easing`. `EaseInOut` for symmetric transitions (toggle thumbs), `EaseOut` / `easing_standard` for appearance (snackbar slide-in, dialog fade), `Linear` for loops and indeterminate work. `Easing::CubicBezier { x1, y1, x2, y2 }` (via `ctx.animate().cubic_bezier(...)` or the `.m3_emphasized()` preset) is the general escape hatch for a design language's own motion curve.
 - For common shapes — fade an overlay, collapse a section, show a spinner — reach for `Fade` / `Collapse` / `Spinner` / `OverlayRequest::with_fade` (§5.6) before hand-rolling a signal-driven path.
 - Don't animate colors, hovers, presses, focus states, or anything instant in Int UI's vocabulary — those are reactive theme work, not scheduler work.
 
