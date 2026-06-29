@@ -621,12 +621,47 @@ impl WidgetTree {
         }
     }
 
+    /// Whether a pointer hover over `widget_id` should count as a hover
+    /// of `anchor_id` for tooltip purposes.
+    ///
+    /// `widget_id` must be a descendant-or-self of `anchor_id`, AND no
+    /// active-overlay boundary may separate them. The second clause is
+    /// what stops a tooltip leaking onto overlay content that merely
+    /// *remains* an arena child of its anchor: a `ComboBox`'s dropdown
+    /// panel, a `PopoverButton`'s popover, a menu — all are kept under
+    /// their trigger in the arena (for hit-test / a11y / teardown) but
+    /// are shown as overlays. Hovering one of their rows is a hover of
+    /// the *overlay*, not of the anchor's own chrome, so the anchor's
+    /// (or any ancestor's) tooltip must not fire.
+    ///
+    /// Concretely: if the hovered widget lives inside an active overlay
+    /// whose content subtree does **not** contain the anchor, the hover
+    /// is on the overlay and we return `false`. A tooltip attached to a
+    /// widget *inside* the overlay (e.g. a dropdown row's own tooltip)
+    /// still fires, because that anchor is itself within the overlay's
+    /// content subtree.
+    fn tooltip_hover_targets_anchor(&self, widget_id: WidgetId, anchor_id: WidgetId) -> bool {
+        if !self.is_descendant_of(widget_id, anchor_id) {
+            return false;
+        }
+        if let Some(overlay_id) = self.overlay_ancestor_for_widget(widget_id)
+            && let Some(content_id) = self
+                .overlay_manager
+                .overlay(overlay_id)
+                .map(|o| o.content_id)
+            && !self.is_descendant_of(anchor_id, content_id)
+        {
+            return false;
+        }
+        true
+    }
+
     pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
         let matching: Vec<usize> = self
             .tooltips
             .iter()
             .enumerate()
-            .filter(|(_, entry)| self.is_descendant_of(widget_id, entry.anchor_id))
+            .filter(|(_, entry)| self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id))
             .map(|(index, _)| index)
             .collect();
         let now = self.sim_clock;
@@ -1278,6 +1313,101 @@ mod tests {
 
         assert_eq!(tree.active_overlays().len(), 1);
         assert!(tree.find_by_label("Tip").is_some());
+    }
+
+    #[test]
+    fn tooltip_suppressed_when_hovering_anchor_owned_overlay_content() {
+        // Regression: a tooltip attached to an anchor (a ComboBox, a
+        // PopoverButton, a menu trigger, …) must not re-trigger while
+        // the pointer is over content the anchor opened as an overlay.
+        // Those overlays keep their content as an arena child of the
+        // anchor (for hit-test / a11y / teardown), so a plain
+        // descendant walk would treat hovering a dropdown row as
+        // hovering the anchor's own chrome.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        // Overlay content + a row inside it, both arena children of the
+        // anchor — exactly the ComboBox dropdown shape.
+        let panel = tree.add_child(anchor, FillWidget::new());
+        let row = tree.add_child(panel, FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let delay = std::time::Duration::from_millis(100);
+        tree.attach_tooltip(anchor, tip, delay);
+
+        // Sanity: hovering the anchor's own chrome starts the timer and
+        // the tooltip appears.
+        tree.tooltip_pointer_enter(anchor);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear when hovering the anchor itself"
+        );
+        let mut noop = crate::window::NoopWindowOps;
+        tree.tooltip_pointer_leave(anchor, &mut noop);
+        assert!(tree.active_overlays().is_empty());
+
+        // Open the panel as an overlay anchored to the anchor.
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: panel,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Hovering a row inside the overlay must NOT start the anchor's
+        // tooltip: the hover lands on overlay content, not anchor chrome.
+        tree.tooltip_pointer_enter(row);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "anchor tooltip must not leak onto its own overlay's rows"
+        );
+    }
+
+    #[test]
+    fn tooltip_inside_overlay_still_fires() {
+        // The overlay gate must not over-reach: a tooltip whose anchor
+        // is *itself* inside the overlay (a dropdown row with its own
+        // tooltip) still fires when that row is hovered.
+        let mut tree = WidgetTree::new();
+        let host = tree.add(FillWidget::new());
+        let panel = tree.add_child(host, FillWidget::new());
+        let row = tree.add_child(panel, FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Row tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let delay = std::time::Duration::from_millis(100);
+        // Anchor is the row, which lives inside the overlay's content.
+        tree.attach_tooltip(row, tip, delay);
+
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: panel,
+            anchor: host,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.tooltip_pointer_enter(row);
+        tree.advance_time(delay + std::time::Duration::from_millis(50));
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "a row's own tooltip should still fire inside an overlay"
+        );
     }
 
     #[test]

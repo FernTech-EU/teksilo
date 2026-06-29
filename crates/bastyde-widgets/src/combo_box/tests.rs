@@ -560,6 +560,62 @@ fn dropdown_items_have_nonzero_bounds_when_open() {
 }
 
 #[test]
+fn tooltip_does_not_leak_onto_open_dropdown_rows() {
+    // Regression: a tooltip attached to the ComboBox (or any ancestor)
+    // must not re-trigger while the pointer is over the open dropdown's
+    // option rows. The dropdown panel is an arena child of the combo
+    // box (returned by `children()`), so a naive descendant walk in
+    // `tooltip_pointer_enter` treated hovering a row as hovering the
+    // anchor. The overlay-boundary gate in the tooltip machinery fixes
+    // this for combo boxes, popovers, and menus alike.
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    // Tooltip content is any dormant widget in the tree.
+    let tip = tree.add(TextWidget::new(lit!("Pick a fruit")));
+    tree.layout(SizeProposal::exact(300.0, 400.0));
+
+    let delay = std::time::Duration::from_millis(200);
+    tree.attach_tooltip(cb, tip, delay);
+
+    // Sanity: hovering the closed trigger DOES show the tooltip.
+    tree.pointer_move(tree.bounds(cb).center());
+    tree.advance_time(delay + std::time::Duration::from_millis(50));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear when hovering the closed combo trigger"
+    );
+
+    // Move the pointer away to dismiss the tooltip, then open the
+    // dropdown.
+    tree.pointer_move(bastyde_canvas::Point::new(1000.0, 1000.0));
+    assert!(tree.active_overlays().is_empty());
+
+    tree.click(cb);
+    tree.layout(SizeProposal::exact(300.0, 400.0));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "only the dropdown overlay should be open"
+    );
+
+    // Hover a dropdown row and wait past the delay: the tooltip must
+    // NOT appear — there should still be exactly one overlay (the
+    // dropdown).
+    let row = tree
+        .find_by_label("Banana")
+        .expect("dropdown should contain Banana");
+    tree.pointer_move(tree.bounds(row).center());
+    tree.advance_time(delay + std::time::Duration::from_millis(50));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip must not leak onto the open dropdown's option rows"
+    );
+}
+
+#[test]
 fn many_items_scroll_without_overflow_past_overlay() {
     // More items than max_visible_items (default 8): the dropdown
     // must cap at roughly max_visible * item_height, not grow to

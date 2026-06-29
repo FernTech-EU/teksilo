@@ -78,12 +78,12 @@ pub struct ThemeSwitcher {
     /// The inner ComboBox's value signal. Owned here so the theme-sync effect
     /// can keep it aligned with the active theme.
     selected: Signal<Option<ThemeChoice>>,
-    /// Optional plain single-line tooltip. Mutually exclusive with the rich /
-    /// composite slots (the last tooltip setter called wins).
+    /// Optional plain tooltip text, forwarded to the inner [`ComboBox`].
+    /// Mutually exclusive with the rich / composite variants.
     tooltip_text: Option<LocalizedString>,
-    /// Optional rich tooltip source — registry key or inline content.
+    /// Optional rich tooltip source, forwarded to the inner [`ComboBox`].
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
-    /// Optional composite tooltip body — a CK3-style arbitrary widget tree.
+    /// Optional composite tooltip body, forwarded to the inner [`ComboBox`].
     composite_tooltip_content: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
@@ -167,13 +167,9 @@ impl ThemeSwitcher {
         self
     }
 
-    /// Attach a plain single-line tooltip shown after a hover delay.
-    ///
-    /// The three tooltip setters are mutually exclusive — `tooltip` /
-    /// [`rich_tooltip`](Self::rich_tooltip) /
-    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
-    /// [`composite_tooltip`](Self::composite_tooltip) — and the last one
-    /// called wins (each clears the others).
+    /// Attach a plain tooltip, forwarded to the inner [`ComboBox`].
+    /// Mutually exclusive with the rich / composite variants — last
+    /// call wins.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
@@ -181,9 +177,9 @@ impl ThemeSwitcher {
         self
     }
 
-    /// Attach a rich tooltip resolved from the app-wide tooltip registry
-    /// (inline markup, a shortcut chip, a "more" disclosure). See
-    /// [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    /// Attach a rich tooltip resolved from the app-wide registry,
+    /// forwarded to the inner [`ComboBox`]. Overrides any previously
+    /// set tooltip.
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
@@ -191,9 +187,9 @@ impl ThemeSwitcher {
         self
     }
 
-    /// Attach a rich tooltip driven by an inline
-    /// [`TooltipContent`](crate::tooltip::TooltipContent) rather than a
-    /// registry key.
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent), forwarded to
+    /// the inner [`ComboBox`]. Overrides any previously set tooltip.
     pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
         self.tooltip_text = None;
@@ -201,13 +197,9 @@ impl ThemeSwitcher {
         self
     }
 
-    /// Attach a composite tooltip — the third tier, hosting an arbitrary
-    /// widget tree (headings, formatted paragraphs, controls). Handy for
-    /// explaining a non-obvious behaviour: e.g. that switching theme
-    /// *family* at runtime only re-tints colours, while widget chrome
-    /// (Material 3's pill buttons, switch, card radii) is chosen when the UI
-    /// is built. See
-    /// [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    /// Attach a composite tooltip hosting an arbitrary widget tree,
+    /// forwarded to the inner [`ComboBox`]. Overrides any previously
+    /// set tooltip.
     pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
@@ -291,7 +283,7 @@ impl Widget for ThemeSwitcher {
             .unwrap_or_else(|| tr_widget!(theme_switcher_label()));
 
         let on_select_actions = actions.clone();
-        let combo =
+        let mut combo =
             ComboBox::from_items(choices.clone(), self.selected.clone(), |c: &ThemeChoice| {
                 // Default entries re-derive their label from the id so the
                 // visible item text follows a locale change; custom themes use
@@ -312,6 +304,21 @@ impl Widget for ThemeSwitcher {
                     }
                 }
             });
+
+        // Forward any configured tooltip onto the inner ComboBox. The
+        // three setters are mutually exclusive, so exactly one branch
+        // runs (last-call-wins, mirroring the ComboBox surface).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            combo = combo.composite_tooltip_boxed(content);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            combo = match source {
+                crate::tooltip::RichTooltipSource::Key(k) => combo.rich_tooltip(k),
+                crate::tooltip::RichTooltipSource::Content(c) => combo.rich_tooltip_content(c),
+            };
+        } else if let Some(text) = self.tooltip_text.clone() {
+            combo = combo.tooltip(text);
+        }
+
         let combo_id = ctx.add(combo);
         self.root_child_id = Some(combo_id);
 

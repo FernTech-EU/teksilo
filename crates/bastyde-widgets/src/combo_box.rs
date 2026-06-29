@@ -134,6 +134,19 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// Per-call override for the selected-value text color. `None` ⇒
     /// enabled-derived (`Primary` / `Disabled`); setting this replaces it.
     text_role_override: Option<bastyde_core::color_prop::ColorProp>,
+    /// Optional plain tooltip text shown after a hover delay.
+    /// Mutually exclusive with `rich_tooltip_source` and
+    /// `composite_tooltip_content` — every tooltip setter clears the
+    /// other two so last-call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    /// Mutually exclusive with `tooltip_text` and
+    /// `composite_tooltip_content` per the last-call-wins matrix.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body. Hosts an arbitrary widget tree
+    /// (charts, grids, conditional rows). Mutually exclusive with
+    /// `tooltip_text` and `rich_tooltip_source`.
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     // Build state — four mutable signals replace the legacy
     // `ComboBoxState` enum. `is_open` survives until the dropdown
     // dismisses (overlay callback resets it); `is_focused` /
@@ -192,6 +205,9 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             style_override: None,
             label_style: None,
             text_role_override: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             is_open: Signal::new(false),
             is_hovered: Signal::new(false),
             is_focused: Signal::new(false),
@@ -369,6 +385,65 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// (`Primary` / `Disabled`); setting this replaces that cascade.
     pub fn text_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
         self.text_role_override = Some(color.into());
+        self
+    }
+
+    /// Attach a plain tooltip that appears after a hover delay. The
+    /// tooltip is anchored to the trigger only — with the framework's
+    /// overlay-boundary gate it does not re-trigger while the pointer
+    /// is over the open dropdown's option rows.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — last call wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry.
+    /// The `key` is looked up via
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) at build
+    /// time; the resolved body supports inline markup, a shortcut chip,
+    /// and a "more" disclosure. Overrides any previously set tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) — for one-off
+    /// tooltips that aren't worth registering centrally. Overrides any
+    /// previously set tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree (tabbed sections, charts, conditional rows). Promotes
+    /// to a focusable `Role::Dialog` after the standard dwell. Overrides
+    /// any plain or rich tooltip previously set.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Boxed variant of [`composite_tooltip`](Self::composite_tooltip).
+    /// Used by wrapper widgets (e.g. `ThemeSwitcher`) that store a
+    /// `Box<dyn Widget>` and forward it through.
+    pub(crate) fn composite_tooltip_boxed(mut self, content: Box<dyn Widget>) -> Self {
+        self.composite_tooltip_content = Some(content);
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -565,6 +640,25 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
+
+        // Attach a tooltip if configured. The three setters
+        // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are mutually
+        // exclusive — every setter clears the other two, so exactly one
+        // branch runs. The anchor is the trigger chrome (`root_id`); the
+        // framework's overlay-boundary gate keeps the tooltip from
+        // leaking onto the open dropdown's rows.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         // Pre-create the dropdown panel (dormant until opened). On
         // rebuild, first tear down the previous panel subtree — it was
