@@ -57,6 +57,7 @@ pub struct Toggle {
     style: Option<SharedToggleStyle>,
     hovered: Signal<bool>,
     focused: Signal<bool>,
+    pressed: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     body_id: Option<WidgetId>,
 }
@@ -73,6 +74,7 @@ impl Toggle {
             style: None,
             hovered: Signal::new(false),
             focused: Signal::new(false),
+            pressed: Signal::new(false),
             focus_origin: Signal::new(None),
             body_id: None,
         }
@@ -142,6 +144,7 @@ impl Widget for Toggle {
         let cfg = ToggleStyleConfig {
             is_on: self.on.clone(),
             is_hovered: self.hovered.clone(),
+            is_pressed: self.pressed.clone(),
             is_focused: self.focused.clone(),
             // `:focus-visible` — input modality, so the recipe shows the
             // focus ring only during keyboard navigation, not on a click.
@@ -178,6 +181,7 @@ impl Widget for Toggle {
         let on = self.on.clone();
         let hovered = self.hovered.clone();
         let focused = self.focused.clone();
+        let pressed = self.pressed.clone();
         let focus_origin = self.focus_origin.clone();
 
         let toggle = {
@@ -204,6 +208,25 @@ impl Widget for Toggle {
             let hovered = hovered.clone();
             handlers = handlers.on_hover(move |entered, _ctx| {
                 hovered.set(entered);
+            });
+        }
+        {
+            // Pointer-pressed signal (PointerDown→true, Up/Leave→false).
+            // IntUI ignores it; design languages with press feedback
+            // (the Material 3 switch's thumb-grow) read `is_pressed`.
+            // Returns `Ignored` so the tap gesture still recognises.
+            let pressed = pressed.clone();
+            handlers = handlers.on_pointer_event(move |event, _ctx| {
+                use bastyde_core::event::{PointerButton, WidgetEvent};
+                match event {
+                    WidgetEvent::PointerDown {
+                        button: PointerButton::Primary,
+                        ..
+                    } => pressed.set(true),
+                    WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave => pressed.set(false),
+                    _ => {}
+                }
+                bastyde_core::event::EventResponse::Ignored
             });
         }
         {
@@ -343,6 +366,39 @@ mod tests {
             frame_has_ring(&tree.render(), ring),
             "focus ring shows under keyboard modality",
         );
+    }
+
+    #[test]
+    fn is_pressed_tracks_pointer_down_and_up() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_core::styles::{ToggleStyle, ToggleStyleConfig};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        // A style that captures the cfg's is_pressed signal so the test can
+        // observe it (IntUI ignores is_pressed, so it isn't visible in paint).
+        struct CaptureStyle(Rc<RefCell<Option<Signal<bool>>>>);
+        impl ToggleStyle for CaptureStyle {
+            fn make_body(&self, cfg: &ToggleStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                *self.0.borrow_mut() = Some(cfg.is_pressed.clone());
+                ctx.add(crate::primitives::RectWidget::new())
+            }
+        }
+
+        let captured: Rc<RefCell<Option<Signal<bool>>>> = Rc::new(RefCell::new(None));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let t = tree.add(Toggle::new(Signal::new(false)).style(CaptureStyle(captured.clone())));
+        tree.layout(SizeProposal::exact(120.0, 60.0));
+
+        let pressed = captured.borrow().clone().expect("is_pressed captured");
+        assert!(!pressed.get(), "not pressed initially");
+
+        let b = tree.bounds(t);
+        let center = bastyde_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+        tree.pointer_down_button(center, PointerButton::Primary);
+        assert!(pressed.get(), "pressed after PointerDown");
+        tree.pointer_up_button(center, PointerButton::Primary);
+        assert!(!pressed.get(), "released after PointerUp");
     }
 
     /// Whether the focus-ring *stroke* (ring color + non-zero stroke width) is

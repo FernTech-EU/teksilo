@@ -36,6 +36,9 @@ pub struct ToggleStyleConfig {
     /// [`Signal::animate_to`](crate::signal::Signal).
     pub is_on: Signal<bool>,
     pub is_hovered: Signal<bool>,
+    /// Pointer-pressed (down). IntUI ignores it; design languages with
+    /// press feedback (e.g. the Material 3 switch thumb-grow) read it.
+    pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     /// Input-modality "focus-visible": `true` after keyboard input. The focus
     /// ring shows only when this and `is_focused` are both true, so a pointer
