@@ -146,11 +146,49 @@ The three setters are mutually exclusive — every setter clears the other two.
 | `.rich_tooltip(key)` / `.rich_tooltip_content(c)` | rich source | plain text, composite body |
 | `.composite_tooltip(w)` | composite body | plain text, rich source |
 
-This is preserved across all widgets that expose multiple tooltip flavors:
-`Button`, `Link`, `MenuItem`, `TextInput`, `IconButton`, `Checkbox`,
-`RadioButton`, `SplitButton` (separate `.tooltip(...)` and
-`.chevron_tooltip(...)` matrices), and `TabInfo` / `TabDelegate` for tab
-strips.
+This is preserved across every widget that exposes the tooltip flavors —
+which is now essentially every interactive control:
+
+- **Buttons:** `Button`, `IconButton`, `CommandLinkButton`, `SplitButton`
+  (separate `.tooltip(...)` and `.chevron_tooltip(...)` matrices),
+  `PopoverWidget` / `Popover`, `NotificationCenterButton`.
+- **Inputs:** `TextInput`, `PasswordField`, `SearchField`, `SpinBox`,
+  `TextScaleControl`, `ComboBox`, `HexColorInput`, `FilePickerField`,
+  `DateEdit` / `TimeEdit` / `DateTimeEdit` / `DateRangeEdit`,
+  `ColorEdit` / `ColorPicker` / `ColorSwatch`.
+- **Selection controls:** `Checkbox`, `RadioButton`, `Toggle`, `Slider`,
+  `SegmentedControl` (per-`Segment`).
+- **Misc controls & rows:** `Avatar`, `Badge`, `Breadcrumb`, `Stepper`,
+  `StandardListItem` / `StandardTreeItem`, `ToolBox`, `Link`, `MenuItem`.
+- **Presets that forward to an inner control:** `ThemeSwitcher`,
+  `LanguageSwitcher` (both forward onto their inner `ComboBox`).
+- **Data / command delegates:** `TabInfo` / `TabDelegate` for tab strips,
+  `ToolbarAction` for `Toolbar` commands.
+
+**`Clone` value types** (`Segment` via `SegmentedControl`, `ToolbarAction`)
+are stored by value in a `Vec` and cloned, so they cannot hold a
+`Box<dyn Widget>` (which is not `Clone`). Their `.composite_tooltip(...)`
+therefore takes a **factory closure** — `impl Fn() -> Box<dyn Widget>`
+(stored as an `Rc`, invoked once per build to produce a fresh body) —
+rather than an `impl Widget` instance. The plain and rich setters are
+unaffected (`LocalizedString` and `RichTooltipSource` are both `Clone`).
+
+**Not applicable:** `Toast` is a presentable *request builder*, not a
+`Widget` — it has no `build()` or visible root of its own. Its tooltip is
+stored as data and rendered by `toast/surface.rs`; the multi-flavor
+setters don't apply to it.
+
+### Tooltips and a control's own overlay
+
+A control that opens an overlay (the `ComboBox` dropdown, a `Popover`, a
+date picker's calendar) keeps that overlay's content as an *arena child*
+of the trigger. A tooltip on the trigger (or any ancestor) is suppressed
+while the pointer is over that overlay's content: `tooltip_pointer_enter`
+only fires when the hovered widget is within the anchor's scope **and** no
+active-overlay boundary separates them (`WidgetTree::tooltip_hover_targets_anchor`).
+So opening a dropdown and hovering its rows never re-triggers the combo's
+tooltip — while a tooltip attached to a widget *inside* the overlay (e.g. a
+dropdown row's own tooltip) still fires.
 
 ---
 
@@ -499,21 +537,29 @@ single-line width and the chip / indicator would overflow.
 
 ## Builder API surface (per-widget)
 
-Every visible interactive widget exposes one or both of these patterns. The
-last setter wins — calling `.tooltip(...)` after `.rich_tooltip(...)` clears
-the rich source, and vice versa.
+The canonical surface is the **same four methods on every widget** listed
+under [Supported widgets](#last-call-wins-setter-matrix) above:
 
-| Widget | Plain | Rich (key) | Rich (inline) |
-|--------|-------|------------|---------------|
-| [`Button`](../crates/bastyde-widgets/src/button.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`Link`](../crates/bastyde-widgets/src/link.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`MenuItem`](../crates/bastyde-widgets/src/menu_item.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`Checkbox`](../crates/bastyde-widgets/src/checkbox.rs) | `tooltip(text)` | — | — |
-| [`RadioButton`](../crates/bastyde-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
-| [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
-| [`IconButton`](../crates/bastyde-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
-| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip(lit!(text))` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
-| [`ToolBox`](../crates/bastyde-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
+```rust
+.tooltip(text)                  // plain — impl Into<LocalizedString>
+.rich_tooltip(key)              // rich — registry key, impl Into<String>
+.rich_tooltip_content(content)  // rich — inline TooltipContent
+.composite_tooltip(widget)      // composite — impl Widget + 'static
+```
+
+The last setter wins — calling `.tooltip(...)` after `.rich_tooltip(...)`
+clears the rich source, and vice versa.
+
+Exceptions and extras worth knowing:
+
+| Widget(s) | Difference |
+|-----------|------------|
+| [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | Mirrors all four onto its chevron with a parallel `chevron_tooltip` / `chevron_rich_tooltip` / `chevron_rich_tooltip_content` / `chevron_composite_tooltip` matrix. |
+| [`SegmentedControl`](../crates/bastyde-widgets/src/segmented_control.rs) (per-`Segment`), [`ToolbarAction`](../crates/bastyde-widgets/src/toolbar.rs) | `Clone` value types: `.composite_tooltip(...)` takes a **factory** `impl Fn() -> Box<dyn Widget>` (not an `impl Widget` instance), since `Box<dyn Widget>` isn't `Clone`. |
+| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs), [`PasswordField`](../crates/bastyde-widgets/src/password_field.rs) | Also keep a legacy `rich_tooltip_key(key)` alias predating the canonical `rich_tooltip(key)`; prefer the canonical name. |
+| [`TabDelegate`](../crates/bastyde-widgets/src/tab_widget/delegate.rs) | Closure-driven per-tab delegate — `rich_tooltip_key` / `rich_tooltip_content_with` / `composite_tooltip_with` take `Fn(&T) -> …` closures rather than fixed values. |
+| [`ThemeSwitcher`](../crates/bastyde-widgets/src/theme_switcher.rs), [`LanguageSwitcher`](../crates/bastyde-widgets/src/language_switcher.rs) | Thin `ComboBox` presets; the four setters **forward** onto the inner `ComboBox`. |
+| [`Toast`](../crates/bastyde-widgets/src/toast.rs) | Not applicable — a request builder, not a `Widget`; tooltip is data rendered by `toast/surface.rs`. |
 
 `tooltip_literal` is a permanent `#[doc(hidden)]` shim that wraps a raw
 `String` in `LocalizedString::literal` — same grep marker as
