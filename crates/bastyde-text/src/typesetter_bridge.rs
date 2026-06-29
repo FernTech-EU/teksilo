@@ -249,18 +249,44 @@ impl TypesetterBridge {
         self.service.register_font(data)
     }
 
-    /// Register Inter as the primary default, then register every
-    /// feature-gated script-specific fallback font. The
-    /// feature-gated registrations discard their `FontFaceId`
-    /// because fallback eligibility only requires that a font be in
-    /// the registry — text-typeset's `find_fallback_font` iterates
-    /// every registered font and picks the first one whose charmap
-    /// covers a `.notdef` glyph's codepoint.
+    /// Register Inter as the primary default and JetBrains Mono as the
+    /// monospace face (the two families the default theme's typography
+    /// tokens name), then register every feature-gated script-specific
+    /// fallback font. The feature-gated registrations discard their
+    /// `FontFaceId` because fallback eligibility only requires that a
+    /// font be in the registry — text-typeset's `find_fallback_font`
+    /// iterates every registered font and picks the first one whose
+    /// charmap covers a `.notdef` glyph's codepoint.
     fn register_default_font(&mut self) {
+        // Inter is the default/UI family. Register the upright variable
+        // face as the default, then the italic variable face so italic
+        // UI text shapes from real italic outlines instead of falling
+        // back to the upright (an italic request would otherwise miss).
         let inter_data = include_bytes!("../fonts/InterVariable.ttf");
         let face_id = self.service.register_font(inter_data);
         self.service.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);
+        let inter_italic = include_bytes!("../fonts/InterVariable-Italic.ttf");
+        let _ = self.service.register_font(inter_italic);
+
+        // The bundled Inter faces report their family name as "Inter
+        // Variable" (name id 1; they have no typographic-family name
+        // id 16), but the default theme's typography tokens request the
+        // family "Inter". Alias the requested name to the registered one
+        // so the explicit request resolves to the bundled faces instead
+        // of silently falling through to the default font.
+        self.service.set_generic_family("Inter", "Inter Variable");
+
+        // JetBrains Mono is the monospace family the theme's `mono`
+        // typography token names. Without it, code/mono text would fall
+        // back to the proportional default font. Register both the
+        // upright and italic variable faces (both under the family name
+        // "JetBrains Mono"), so the theme's request — upright or italic —
+        // resolves directly.
+        let mono_data = include_bytes!("../fonts/JetBrainsMono.ttf");
+        let _ = self.service.register_font(mono_data);
+        let mono_italic = include_bytes!("../fonts/JetBrainsMono-Italic.ttf");
+        let _ = self.service.register_font(mono_italic);
 
         #[cfg(feature = "fonts-arabic")]
         {
