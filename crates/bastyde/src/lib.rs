@@ -30,6 +30,20 @@ pub use bastyde_macros::IntentKind;
 /// `serde_derive`.
 pub use bastyde_resources::res;
 
+/// Application developer guide — the curated, source-verified reference for
+/// building apps with Bastyde: entry point, the unified [`Widget`](core::Widget)
+/// trait, the layout model, `Signal`/`Prop` reactivity, attached event handlers,
+/// Actions/Intents/Shortcuts, theming, settings, i18n, the widget catalog, and
+/// headless testing. Rendered on docs.rs from `app_guide.md`. The same guide
+/// backs the `bastyde-app` Claude Code skill.
+pub mod app_guide {
+    // The guide is hand-authored Markdown with type notation like `Signal<T>` in
+    // prose and repo-relative links; suppress rustdoc lints for the included page
+    // so the crate's `-D warnings` doc build stays green.
+    #![allow(rustdoc::all)]
+    #![doc = include_str!("app_guide.md")]
+}
+
 #[cfg(feature = "widgets")]
 pub use bastyde_widgets as widgets;
 
