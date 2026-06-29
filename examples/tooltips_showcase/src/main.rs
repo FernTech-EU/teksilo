@@ -118,11 +118,21 @@ fn rich_column() -> impl Widget {
 /// Build the body of a "province info" composite tooltip — a stat
 /// grid with each row carrying its own rich tooltip cascading into
 /// the registry.
+///
+/// Composite tooltips paint the dark / inverse `tooltip_bg` chip, so raw
+/// text in the body MUST use the tooltip text roles — `TextRole::TooltipText`
+/// (full contrast) / `TooltipShortcut` (de-emphasised) — not the default
+/// `TextRole::Primary`, which is normal on-surface and would be unreadable on
+/// the chip. (Buttons / ProgressBars carry their own chrome and are fine.)
 fn province_composite_body() -> impl Widget {
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new(lit!("Iberia")).style(TextStyleRole::BodyBold))
-        .child(TextWidget::new(lit!("Province overview")))
+        .child(
+            TextWidget::new(lit!("Iberia"))
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::TooltipText),
+        )
+        .child(TextWidget::new(lit!("Province overview")).color(TextRole::TooltipShortcut))
         .child(ProgressBar::new(0.65))
         .child(
             HStack::new()
@@ -142,16 +152,21 @@ fn tabbed_composite_body() -> impl Widget {
             TabInfo::new().title(lit!("Stats")),
             VStack::new()
                 .spacing(4.0)
-                .child(TextWidget::new(lit!("Population: 12,400")))
-                .child(TextWidget::new(lit!("Garrison: 320"))),
+                .child(TextWidget::new(lit!("Population: 12,400")).color(TextRole::TooltipText))
+                .child(TextWidget::new(lit!("Garrison: 320")).color(TextRole::TooltipText)),
         )
         .static_tab(
             TabInfo::new().title(lit!("History")),
-            TextWidget::new(lit!("Founded 1247 • 3 sieges • 1 plague")),
+            TextWidget::new(lit!("Founded 1247 • 3 sieges • 1 plague"))
+                .color(TextRole::TooltipShortcut),
         );
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new(lit!("Tabbed details")).style(TextStyleRole::BodyBold))
+        .child(
+            TextWidget::new(lit!("Tabbed details"))
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::TooltipText),
+        )
         .child(body)
 }
 
@@ -160,8 +175,12 @@ fn tabbed_composite_body() -> impl Widget {
 fn interactive_composite_body() -> impl Widget {
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new(lit!("Treasury report")).style(TextStyleRole::BodyBold))
-        .child(TextWidget::new(lit!("This quarter: +423 coins")))
+        .child(
+            TextWidget::new(lit!("Treasury report"))
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::TooltipText),
+        )
+        .child(TextWidget::new(lit!("This quarter: +423 coins")).color(TextRole::TooltipText))
         .child(ProgressBar::new(0.42))
         .child(Button::new(lit!("Open ledger")).on_activate_fn(|_ctx| {
             println!("Open ledger pressed from inside a composite tooltip!");
