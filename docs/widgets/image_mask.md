@@ -15,7 +15,7 @@ masks are typically used at (≤96 logical pixels).
 
 Used directly by `ImageWidget::mask` and
 by `Avatar`. Other widgets that want a non-rectangular image silhouette
-can call [`apply_alpha_mask`] and [`center_crop_square`] directly.
+can call `apply_alpha_mask` and `center_crop_square` directly.
 
 ```rust
 # use bastyde_widgets::primitives::image_mask::{ImageMaskShape, apply_alpha_mask};
@@ -67,7 +67,7 @@ preserved; only alpha is modulated by the coverage value, so a
 pre-multiplied source remains pre-multiplied (the alpha-channel-only
 transformation matches `RasterIcon::to_alpha_mask`).
 
-The `shape` accepts the public [`ImageMaskShape`] surface; the
+The `shape` accepts the public `ImageMaskShape` surface; the
 `RoundedSquare` radius is interpreted as a **fraction** of
 `min(width, height)`, clamped to `0.0..=0.5`. `None` is a no-op.
 

@@ -5,19 +5,19 @@
 
 Rich text editor and viewer widget.
 
-Two construction presets share the same implementation: [`RichTextEditor::editor`]
+Two construction presets share the same implementation: `RichTextEditor::editor`
 provides a full editing surface (blinking caret, keyboard commands, clipboard,
-undo/redo, `Role::MultilineTextInput`) and [`RichTextEditor::read_only`] is a
+undo/redo, `Role::MultilineTextInput`) and `RichTextEditor::read_only` is a
 view-only surface (hidden caret, mutations rejected, `Role::Document`). Both
-bind to an external [`TextDocument`]
+bind to an external `TextDocument`
 via `on_change` subscriptions, so any number of editors and viewers can share
 one document and observe each other's edits live.
 
 The widget owns a per-widget `RichTextEngine` (typesetter), and drives its own
 scroll bars independently of `ScrollArea` to avoid the wrap/scrollbar circular
-measurement dependency. Use [`RichTextEditor::min_lines`] /
-[`RichTextEditor::max_lines`] to switch from greedy sizing to intrinsic
-(messenger-composer) sizing. A detachable [`EditorHandle`] lets toolbars and
+measurement dependency. Use `RichTextEditor::min_lines` /
+`RichTextEditor::max_lines` to switch from greedy sizing to intrinsic
+(messenger-composer) sizing. A detachable `EditorHandle` lets toolbars and
 palette panels issue formatting commands from closures that cannot borrow the
 editor directly.
 
@@ -40,7 +40,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## `pub enum ScrollPolicy`
 
-Scroll bar visibility policy for [`RichTextEditor`], applied independently per axis.
+Scroll bar visibility policy for `RichTextEditor`, applied independently per axis.
 
 ```rust
 pub enum ScrollPolicy { /* variants */ }
@@ -54,8 +54,8 @@ pub enum ScrollPolicy { /* variants */ }
 
 ## `pub struct RichTextEditor`
 
-The main rich text widget. Construct via [`RichTextEditor::read_only`]
-(view/select only) or [`RichTextEditor::editor`] (full editing).
+The main rich text widget. Construct via `RichTextEditor::read_only`
+(view/select only) or `RichTextEditor::editor` (full editing).
 
 ```rust
 pub struct RichTextEditor { /* fields */ }
@@ -149,7 +149,7 @@ widget is mounted.
 
 Override the editor background fill. Accepts a `Color`, a theme role
 (`SurfaceRole::Content`, …), or a `Signal`. Threaded into the active
-[`RichTextEditorStyle`]'s `make_body`, so the common case ("give the
+`RichTextEditorStyle`'s `make_body`, so the common case ("give the
 editor a surface") needs no custom style. `None` uses the style's
 default surface.
 
@@ -396,7 +396,7 @@ Select the paragraph / block under the widget's caret.
 #### `pub fn set_caret_position(&self, position: usize)`
 
 Move the caret to an absolute character position. Collapses any
-existing selection (passes [`MoveMode::MoveAnchor`]). Resets
+existing selection (passes `MoveMode::MoveAnchor`). Resets
 `CursorAffinity` to `Downstream` — programmatic placement
 can't know whether the caller wanted the upstream side of a
 wrap boundary, so we default to the same placement that
@@ -449,7 +449,7 @@ Toggle strikethrough; see `toggle_bold`.
 
 #### `pub fn apply_block_format(&self, fmt: BlockFormat)`
 
-Set an arbitrary [`BlockFormat`] on the caret's current block.
+Set an arbitrary `BlockFormat` on the caret's current block.
 The higher-level helpers `set_alignment`
 and `set_heading_level` go through
 this method. Exposed so apps that need less common fields
@@ -459,7 +459,7 @@ caret continuity.
 
 #### `pub fn apply_text_format(&self, fmt: TextFormat)`
 
-Set an arbitrary [`TextFormat`] on the current selection.
+Set an arbitrary `TextFormat` on the current selection.
 Public counterpart of the private `apply_char_format` helper,
 for apps that need fields beyond the dedicated
 `set_bold` / `set_italic` / … setters (e.g. `letter_spacing`,
@@ -483,7 +483,7 @@ Choose a specific style with `create_list`.
 
 #### `pub fn create_list(&self, style: ListStyle)`
 
-Create a list with an explicit [`ListStyle`]. Exposed for
+Create a list with an explicit `ListStyle`. Exposed for
 applications that want e.g. lowercase Roman numerals or circle
 bullets.
 
@@ -622,7 +622,7 @@ The document-wide default language (ISO 639-1 code). Defaults to
 #### `pub fn handle(&self) -> EditorHandle`
 
 Cheap clone-able handle for external toolbars / palettes — see
-[`EditorHandle`]. The handle shares the editor's internal
+`EditorHandle`. The handle shares the editor's internal
 state (same `Rc<RefCell<…>>`), so mutations through the handle
 are immediately observable through the editor's reactive
 signals (and vice versa).
@@ -701,16 +701,16 @@ active `EventContext`.
 
 ## `pub struct EditorHandle`
 
-A clone-able, `'static` handle to a [`RichTextEditor`]'s shared
+A clone-able, `'static` handle to a `RichTextEditor`'s shared
 state.
 
 Use this when a toolbar, palette, command panel, or other external
 widget needs to invoke editor commands from `on_activate_fn` /
 `ctx.effect` closures that outlive the borrow of `&editor`.
-[`RichTextEditor`] itself is move-only (the optional
+`RichTextEditor` itself is move-only (the optional
 `custom_context_menu` factory holds a `Box<dyn Fn>`, which prevents
 `Clone`), so a closure cannot just capture `editor.clone()`.
-Obtain a handle via [`RichTextEditor::handle()`] and clone it into
+Obtain a handle via `RichTextEditor::handle()` and clone it into
 each closure that needs to issue commands.
 
 `EditorHandle` mirrors the toolbar-relevant subset of the editor's
@@ -754,7 +754,7 @@ Read the current character format at the caret. When a selection
 is active, reads from `selection_start()` rather than
 `position()` so toolbar bistate stays stable across selection
 extension (same rule as
-[`RichTextEditor::caret_char_format`]).
+`RichTextEditor::caret_char_format`).
 
 #### `pub fn set_bold(&self, enabled: bool)`
 
@@ -774,7 +774,7 @@ Apply strikethrough to the current selection.
 
 #### `pub fn apply_text_format(&self, fmt: TextFormat)`
 
-Apply an arbitrary [`TextFormat`] (escape hatch for fields not
+Apply an arbitrary `TextFormat` (escape hatch for fields not
 covered by the dedicated setters: `letter_spacing`,
 `foreground_color`, …).
 
@@ -812,7 +812,7 @@ Whether strikethrough.
 
 #### `pub fn apply_block_format(&self, fmt: BlockFormat)`
 
-Apply an arbitrary [`BlockFormat`] to the caret's block.
+Apply an arbitrary `BlockFormat` to the caret's block.
 
 #### `pub fn set_alignment(&self, alignment: Alignment)`
 
@@ -839,7 +839,7 @@ numbering, `false` uses bullet discs.
 #### `pub fn create_list(&self, style: ListStyle)`
 
 Wrap the caret's block in a list with an explicit
-[`ListStyle`].
+`ListStyle`.
 
 #### `pub fn indent(&self)`
 
@@ -926,7 +926,7 @@ is empty.
 
 Bumps on every format-only document event (bold / italic /
 heading / alignment / list-style changes). See
-[`RichTextEditor::format_version`].
+`RichTextEditor::format_version`.
 
 #### `pub fn cursor_position_signal(&self) -> Signal<usize>`
 

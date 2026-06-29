@@ -77,8 +77,8 @@ jobs:
         # Built BEFORE the catalog so --api-dir can verify each deep-link.
         run: cargo doc -p bastyde-widgets -p bastyde-data -p bastyde-settings -p bastyde-scene --no-deps
 
-      - name: Generate the Widget Catalog pages
-        run: python3 tools/extract_widget_api.py --all --md-dir docs/widgets --api-dir target/doc
+      - name: Generate the catalog pages (widgets + data + settings + scene)
+        run: python3 tools/extract_widget_api.py --catalog-all --api-dir target/doc
 
       - name: Fix internal doc links for the book
         # Rewrite the guides' repo-relative source links (../crates/…) to

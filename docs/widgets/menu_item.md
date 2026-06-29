@@ -77,7 +77,7 @@ own chrome.
 #### `pub fn label_localized(&self) -> LocalizedString`
 
 Like `label` but returns the unresolved
-[`LocalizedString`], so embedders can mirror the label *reactively*
+`LocalizedString`, so embedders can mirror the label *reactively*
 (re-resolving on a locale switch) instead of freezing a snapshot.
 
 #### `pub fn action(&self) -> Option<Rc<dyn Fn(&mut EventContext)>>`

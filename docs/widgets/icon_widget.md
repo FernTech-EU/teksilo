@@ -110,7 +110,7 @@ If parsing fails, logs the error in debug mode and produces an empty icon.
 
 #### `pub fn from_svg_icon(icon: &SvgIcon) -> Self`
 
-Create an icon from a pre-parsed [`SvgIcon`]. Display size
+Create an icon from a pre-parsed `SvgIcon`. Display size
 defaults to the SVG's viewBox; use `icon_size`
 to override. Scaling is deferred to paint time.
 
@@ -128,12 +128,12 @@ If decoding fails, logs the error in debug mode and produces an empty icon.
 
 #### `pub fn from_raster(icon: &RasterIcon, size: f32) -> Self`
 
-Create an icon from a pre-decoded [`RasterIcon`].
+Create an icon from a pre-decoded `RasterIcon`.
 Accepts a reference — pixel data is copied internally.
 
 #### `pub fn from_animated(icon: &AnimatedIcon, size: f32) -> Self`
 
-Create an icon from a pre-decoded [`AnimatedIcon`].
+Create an icon from a pre-decoded `AnimatedIcon`.
 Accepts a reference — frame data is copied internally.
 
 #### `pub fn mode(mut self, mode: IconMode) -> Self`
@@ -146,7 +146,7 @@ Re-computes cached pixel data for raster/animated icons.
 Set the tint. Accepts any `impl Into<ColorProp>`:
 
 - A raw `Color` — a frozen literal.
-- A [`TextRole`] / `SurfaceRole` / `BorderRole` — resolved against
+- A `TextRole` / `SurfaceRole` / `BorderRole` — resolved against
   the theme at paint time (reactive across theme switches).
 - A `Signal<Color>` — reactive state (usually interaction-driven).
 

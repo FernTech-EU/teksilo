@@ -9,7 +9,7 @@ A single-line editable date field. The underlying surface is a
 `TextInputField` displaying the formatted date; commit on Enter or
 blur parses the input against the active pattern, clamps to
 `[min_date, max_date]`, and writes the result back. A trailing
-calendar-icon button opens a [`Calendar`]
+calendar-icon button opens a `Calendar`
 popover anchored below the field for graphical date selection.
 
 # Behaviour
@@ -77,7 +77,7 @@ pub enum WidthPolicy { /* variants */ }
 
 ### Variants
 
-- **`Default`** — **Default.** The widget claims its natural width: the mask-derived empty template (`__/__/____` for ISO date, `__:__` for 24h time) measured in the theme body font plus surrounding chrome. The footprint stays fixed as the user types — Int UI form-density convention. This is the [`Default`].
+- **`Default`** — **Default.** The widget claims its natural width: the mask-derived empty template (`__/__/____` for ISO date, `__:__` for 24h time) measured in the theme body font plus surrounding chrome. The footprint stays fixed as the user types — Int UI form-density convention. This is the `Default`.
 - **`Fill`** — The widget expands to fill the horizontal space its parent offers, instead of capping at the natural mask width. Use inside toolbars, inspector panels, or an `Expand::horizontal` column that should stretch with the surrounding layout.
 
 ## `pub enum ValidationBehavior`
@@ -90,7 +90,7 @@ pub enum ValidationBehavior { /* variants */ }
 
 ### Variants
 
-- **`AutoCorrect`** — Out-of-range inputs are clamped to the nearest valid value (e.g. `12/50/2026` → `12/31/2026`) and announced via `Live::Polite`. Matches macOS Calendar and iOS DatePicker. This is the [`Default`].
+- **`AutoCorrect`** — Out-of-range inputs are clamped to the nearest valid value (e.g. `12/50/2026` → `12/31/2026`) and announced via `Live::Polite`. Matches macOS Calendar and iOS DatePicker. This is the `Default`.
 - **`Reject`** — Out-of-range inputs are rejected with an inline error message; the field's text is left as-typed so the user can correct it. The bound value is unchanged until a valid date is committed. Matches Excel / Material strict-validation patterns. Use for high-precision contexts where silently rounding is unacceptable.
 
 ## `pub struct DateEdit`
@@ -153,7 +153,7 @@ the calendar popover. Default `true`.
 #### `pub fn calendar_popover_placement(mut self, p: OverlayPlacement) -> Self`
 
 Override where the calendar popover appears relative to the field.
-Default is [`OverlayPlacement::BelowPreferred`].
+Default is `OverlayPlacement::BelowPreferred`.
 
 #### `pub fn enabled(mut self, enabled: bool) -> Self`
 
@@ -168,15 +168,15 @@ not editable, and step keys are suppressed.
 #### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self`
 
 How parse failures are surfaced. Default
-[`ValidationBehavior::AutoCorrect`] (clamp + announce); switch
-to [`ValidationBehavior::Reject`] for strict-validation form
+`ValidationBehavior::AutoCorrect` (clamp + announce); switch
+to `ValidationBehavior::Reject` for strict-validation form
 contexts.
 
 #### `pub fn width_policy(mut self, policy: WidthPolicy) -> Self`
 
 How the widget claims horizontal space. Default
-[`WidthPolicy::Default`] — the field sizes to its natural
-mask-derived width. Switch to [`WidthPolicy::Fill`] to make
+`WidthPolicy::Default` — the field sizes to its natural
+mask-derived width. Switch to `WidthPolicy::Fill` to make
 the field stretch to fill the parent's offered width
 (toolbar / inspector pattern).
 

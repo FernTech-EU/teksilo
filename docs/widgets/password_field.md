@@ -7,7 +7,7 @@
 toggle, masking, Caps Lock warning, and clipboard protection.
 
 A thin, ergonomic preset over a secure
-[`TextInputField`] composed
+`TextInputField` composed
 `SpinBox`-style: the field + an embedded reveal button live inside
 one bordered frame with a unified focus halo. Masking happens at the
 text-engine layer (one echo glyph per source `char`), so the
@@ -51,9 +51,9 @@ pub enum RevealMode { /* variants */ }
 
 ### Variants
 
-- **`Toggle`** — A click (or Space / Enter while focused) flips between masked and revealed. Backed by [`IconButton::visibility_toggle`]; fully keyboard- and screen-reader-accessible. (Default.)
+- **`Toggle`** — A click (or Space / Enter while focused) flips between masked and revealed. Backed by `IconButton::visibility_toggle`; fully keyboard- and screen-reader-accessible. (Default.)
 - **`Hold`** — Press-and-hold to reveal, release to re-mask (WinUI "Peek"). Pointer-oriented; prefer `Toggle` for keyboard accessibility.
-- **`None`** — No reveal button — the field is always masked per its [`EchoMode`].
+- **`None`** — No reveal button — the field is always masked per its `EchoMode`.
 
 ## `pub struct PasswordField`
 
@@ -127,11 +127,11 @@ Override the masking glyph (default `'•'`).
 
 #### `pub fn echo_mode(mut self, mode: EchoMode) -> Self`
 
-Set the [`EchoMode`] (default [`EchoMode::Masked`]).
+Set the `EchoMode` (default `EchoMode::Masked`).
 
 #### `pub fn reveal_mode(mut self, mode: RevealMode) -> Self`
 
-Set the [`RevealMode`] (default [`RevealMode::Toggle`]).
+Set the `RevealMode` (default `RevealMode::Toggle`).
 
 #### `pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self`
 
@@ -153,7 +153,7 @@ live region.
 #### `pub fn at_reveal_policy(mut self, policy: AtRevealPolicy) -> Self`
 
 How a *revealed* field reports to assistive tech (default
-[`AtRevealPolicy::SwapRole`]).
+`AtRevealPolicy::SwapRole`).
 
 #### `pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self`
 

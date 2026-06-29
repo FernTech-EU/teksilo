@@ -12,7 +12,7 @@ a status landmark. It is **not** a live region by default — use
 surface transient messages worth reading aloud (e.g. "Saved"), not for bars
 showing continuous data like cursor position or zoom level that would flood
 the screen reader. Visual chrome (background, border, corner radius) is
-delegated to an inner [`Panel`].
+delegated to an inner `Panel`.
 
 ```rust
 # use bastyde_widgets::StatusBar;
@@ -55,7 +55,7 @@ pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
 
 A status bar for displaying information at the bottom of a window.
 
-Visual chrome is delegated to an inner [`Panel`]. By default the bar
+Visual chrome is delegated to an inner `Panel`. By default the bar
 uses the `SurfaceRole::Sunken` surface with **square corners** (a bar
 spanning the window edge shouldn't be rounded); override the surface
 with `background`, the corners with
@@ -92,7 +92,7 @@ Add a pre-registered child widget by ID.
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the background surface. Accepts `Color`, a
-[`SurfaceRole`], or a `Signal<Color>`.
+`SurfaceRole`, or a `Signal<Color>`.
 Default (unset) is `SurfaceRole::Sunken`.
 
 #### `pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self`

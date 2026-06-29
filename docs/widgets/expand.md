@@ -48,7 +48,7 @@ distribution: it returns a `LayoutResponse` with `flex` (default `1.0`),
 so the parent stack hands it a share of the leftover space proportional
 to flex. Default basis is **zero** — the wrapped child's natural size
 does NOT count in the rigid pool, which gives clean ratio layouts. Call
-[`Expand::respect_intrinsic`] to switch to **auto** basis (CSS
+`Expand::respect_intrinsic` to switch to **auto** basis (CSS
 flex-basis: auto), where the child's natural size acts as a floor and
 flex adds slack on top.
 

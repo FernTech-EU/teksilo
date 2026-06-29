@@ -27,11 +27,11 @@ is bumped, the host rebuilds, the surface widgets are destroyed.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/toast/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/toast/host/index.html)
 
 ## `pub struct ToastInstallOptions`
 
-Configuration for the installed [`ToastHost`]. Passed to
+Configuration for the installed `ToastHost`. Passed to
 `install_toast` in the `bastyde` umbrella crate.
 
 ```rust

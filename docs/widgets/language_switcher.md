@@ -5,7 +5,7 @@
 
 LanguageSwitcher — a drop-in UI-language picker for settings screens.
 
-A thin [`ComboBox`] preset that lists the application's supported
+A thin `ComboBox` preset that lists the application's supported
 locales and switches the active locale on selection. Each entry is
 shown as its **endonym** — the language's own name — followed by the
 BCP-47 tag, e.g. `français (fr-FR)`, `Deutsch (de-DE)`,
@@ -31,7 +31,7 @@ VStack::new()
 ```
 
 Endonyms come from ICU4X CLDR data via
-[`bastyde_i18n::language_endonym`]; an unknown tag falls back to the
+`bastyde_i18n::language_endonym`; an unknown tag falls back to the
 raw BCP-47 tag. When no `I18nManager` is configured the switcher
 renders an empty, placeholder ComboBox.
 
@@ -45,7 +45,7 @@ renders an empty, placeholder ComboBox.
 
 ## `pub struct LanguageSwitcher`
 
-A UI-language picker built on [`ComboBox`]. See the module docs.
+A UI-language picker built on `ComboBox`. See the module docs.
 
 ```rust
 pub struct LanguageSwitcher { /* fields */ }

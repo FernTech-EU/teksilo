@@ -5,10 +5,10 @@
 
 N-pane split container with draggable, collapsible dividers.
 
-`Splitter` arranges `N ≥ 2` panes along one axis (per [`Orientation`])
+`Splitter` arranges `N ≥ 2` panes along one axis (per `Orientation`)
 with `N − 1` grabbable handles between them — the Qt `QSplitter`
 model. All layout state (per-pane size / min / max / stretch /
-collapsed) lives in a shared, cloneable [`SplitterModel`]; the app
+collapsed) lives in a shared, cloneable `SplitterModel`; the app
 holds a clone to read, mutate, persist, and import/export, while the
 widget renders it and reacts to the model's `version` signal.
 
@@ -17,7 +17,7 @@ drag, keyboard resize, `Role::Splitter` accessibility, per-pane content
 clipping, RTL-correct horizontal layout. New: N panes, per-pane
 stretch (container-resize policy), animated collapse with four triggers
 (programmatic / double-click / drag-past-min snap / keyboard), a Tier-3
-[`SplitterStyle`], and serializable import/export. Intended as the
+`SplitterStyle`, and serializable import/export. Intended as the
 building block for a future `DockingLayout`.
 
 ```ignore
@@ -42,7 +42,7 @@ Splitter::new(model.clone())
 
 ## `pub struct Splitter`
 
-An N-pane resizable split container driven by a [`SplitterModel`].
+An N-pane resizable split container driven by a `SplitterModel`.
 
 See the `module-level documentation` for a usage overview and
 constructor patterns.
@@ -80,7 +80,7 @@ AT-transparent (their content represents itself).
 
 #### `pub fn style(mut self, style: impl SplitterStyle) -> Self`
 
-Override the active [`SplitterStyle`] for this instance only.
+Override the active `SplitterStyle` for this instance only.
 
 #### `pub fn enabled(mut self, enabled: bool) -> Self`
 

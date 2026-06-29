@@ -4,17 +4,17 @@
 # NotificationEntry
 
 Persistent notification archive — the storage and data-model layer
-backing [`NotificationLog`], [`NotificationCenterButton`], and
-[`NotificationLogDialog`].
+backing `NotificationLog`, `NotificationCenterButton`, and
+`NotificationLogDialog`.
 
 Every toast presented through the toast registry is mirrored into a
-[`NotificationArchiveModel`] when archiving is enabled via
+`NotificationArchiveModel` when archiving is enabled via
 `ToastInstallOptions::archive`. The model is a
 `ListModel<NotificationEntry>` plus an
 unread-count signal — shaped for one-line binding to the notification
 UI family. Two storage variants are available: an in-memory session-only
-ring buffer ([`NotificationArchive::InMemory`]) and a file-backed
-persistent store ([`NotificationArchive::Persistent`]) that survives app
+ring buffer (`NotificationArchive::InMemory`) and a file-backed
+persistent store (`NotificationArchive::Persistent`) that survives app
 restarts. Action callbacks attached via raw closures are lost on
 archival; actions that should remain re-invokable from the log carry an
 `intent_name` that the log replays through `ctx.send_intent(...)`.
@@ -23,7 +23,7 @@ archival; actions that should remain re-invokable from the log carry an
 
 - Pair with `BastydeAppBuilder::install_toast_default()` to get the full
   bell-button + log + persistence stack for free.
-- Construct [`NotificationArchiveModel::in_memory`] directly in tests or
+- Construct `NotificationArchiveModel::in_memory` directly in tests or
   custom toast setups.
 
 ```ignore
@@ -38,7 +38,7 @@ let log = NotificationLog::new(archive.clone());
 
 ## `pub struct NotificationEntry`
 
-A single archived notification entry rendered by [`NotificationLog`] and
+A single archived notification entry rendered by `NotificationLog` and
 persisted under `NotificationArchive::Persistent`. Carries plain owned
 fields only — no closures, no `Rc<dyn Fn>` — so it is `Serialize`-friendly.
 
@@ -76,7 +76,7 @@ pub enum ArchivedActionStyle { /* variants */ }
 ## `pub struct ArchivedAction`
 
 A single action stored alongside an archived notification entry. Only
-re-invokable from [`NotificationLog`] when `intent_name` is set — actions
+re-invokable from `NotificationLog` when `intent_name` is set — actions
 whose live closure has torn down render as inert descriptive labels.
 
 ```rust

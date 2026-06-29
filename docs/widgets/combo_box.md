@@ -9,10 +9,10 @@ Generic over the item type `T: Clone + PartialEq + 'static`. Selection is
 value-based: the bound `Signal<Option<T>>` survives reorder and insertion
 of the backing model. Items come from one of four input paths:
 
-- [`ComboBox::new`] — static list of localizable strings (the 90% case).
-- [`ComboBox::from_items`] — static list of typed values.
-- [`ComboBox::from_model`] — reactive [`ListModel<T>`].
-- [`ComboBox::from_source`] — external [`ListDataSource<Item = T>`].
+- `ComboBox::new` — static list of localizable strings (the 90% case).
+- `ComboBox::from_items` — static list of typed values.
+- `ComboBox::from_model` — reactive `ListModel<T>`.
+- `ComboBox::from_source` — external `ListDataSource<Item = T>`.
 
 The dropdown panel is pre-created during `build()` and kept dormant until
 opened via click, Enter, Space, or ArrowDown/ArrowUp.
@@ -75,18 +75,18 @@ e.g. `vec![tr!(apple()).resolve_now(), ...]`.
 
 Static list of typed items. `item_label` is the display extractor —
 it's required at construction so the compiler enforces it rather
-than a runtime check. For `T = String`, use [`ComboBox::new`] which
+than a runtime check. For `T = String`, use `ComboBox::new` which
 defaults to the identity label.
 
 #### `pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self where F: Fn(&T) -> LocalizedString + 'static,`
 
-Backed by a reactive [`ListModel<T>`]. Inserts, removes, and reorders
+Backed by a reactive `ListModel<T>`. Inserts, removes, and reorders
 propagate into the dropdown automatically. If the currently-selected
 value disappears from the model, `selected` becomes `None`.
 
 #### `pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self where S: ListDataSource<Item = T> + 'static, F: Fn(&T) -> LocalizedString + 'static,`
 
-Backed by a custom [`ListDataSource`] — for external or paged data.
+Backed by a custom `ListDataSource` — for external or paged data.
 
 #### `pub fn item_label(mut self, f: impl Fn(&T) -> LocalizedString + 'static) -> Self`
 
@@ -124,7 +124,7 @@ duplication, and reserve visible widgets for presentation only.
 Register a callback fired when the user commits a selection — by
 tapping a dropdown row or picking one with the keyboard (arrows /
 type-ahead / Home / End). The callback receives the chosen value
-and a live [`EventContext`], so it can run context-bearing actions
+and a live `EventContext`, so it can run context-bearing actions
 that observing the bound `selected` signal cannot — e.g.
 `ctx.set_locale(...)`, navigation, or opening another overlay.
 
@@ -166,15 +166,15 @@ time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 
 Pick a Tier-1 design-language variant
-([`ComboBoxVariant::Outlined`] / `Filled` / `Underline` / `Plain`).
-The active [`ComboBoxStyle`] decides what to do with the hint —
+(`ComboBoxVariant::Outlined` / `Filled` / `Underline` / `Plain`).
+The active `ComboBoxStyle` decides what to do with the hint —
 IntUI's default impl honours `Outlined` (default) and `Plain`;
 a custom impl (Material 3, macOS, etc.) might paint differently.
 
 #### `pub fn style(mut self, style: impl ComboBoxStyle) -> Self`
 
-Override the active [`ComboBoxStyle`] for this widget instance
-only. The default IntUI chrome ([`crate::styles::RecipeComboBoxStyle`])
+Override the active `ComboBoxStyle` for this widget instance
+only. The default IntUI chrome (`crate::styles::RecipeComboBoxStyle`)
 reads its tokens from `theme.components.combo_box`; custom impls
 can paint anything they want around the selected-label slot.
 

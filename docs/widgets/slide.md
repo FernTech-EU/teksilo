@@ -86,7 +86,7 @@ pub struct Slide { /* fields */ }
 #### `pub fn new(visible: impl Into<Prop<bool>>) -> Self`
 
 Create a slide wrapper bound to `visible`; accepts a static `bool`
-or a reactive `Signal<bool>`. Defaults to [`SlideEdge::Bottom`] —
+or a reactive `Signal<bool>`. Defaults to `SlideEdge::Bottom` —
 override with `.from(...)`.
 
 #### `pub fn from(mut self, edge: SlideEdge) -> Self`

@@ -28,7 +28,7 @@ Layout (with `thickness = t`):
 ```
 
 `t` defaults to 6 logical pixels but is configurable via
-[`WindowFrame::thickness`]. With a small thickness the frame is
+`WindowFrame::thickness`. With a small thickness the frame is
 visually undetectable; the cursor only changes (and the resize
 gesture only triggers) when the pointer is within `t` pixels of the
 window boundary.

@@ -52,7 +52,7 @@ let _field = TimeEdit::new(value)
 
 12h vs 24h time formatting.
 
-Used with [`TimeEdit::format`] to lock the clock style independently of the locale default.
+Used with `TimeEdit::format` to lock the clock style independently of the locale default.
 
 ```rust
 pub enum TimeFormat { /* variants */ }
@@ -65,7 +65,7 @@ pub enum TimeFormat { /* variants */ }
 
 ## `pub enum SecondsMode`
 
-Whether the seconds segment is shown in [`TimeEdit`].
+Whether the seconds segment is shown in `TimeEdit`.
 
 ```rust
 pub enum SecondsMode { /* variants */ }
@@ -111,7 +111,7 @@ en-CA / en-AU / en-NZ / en-PH / en-IN / en-PK; 24h elsewhere).
 
 #### `pub fn seconds(mut self, mode: SecondsMode) -> Self`
 
-Show or hide the seconds segment. Default: [`SecondsMode::Hidden`].
+Show or hide the seconds segment. Default: `SecondsMode::Hidden`.
 
 #### `pub fn format_pattern(mut self, p: impl Into<String>) -> Self`
 
@@ -145,7 +145,7 @@ Allow display-only mode: text is selectable but not editable.
 #### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self`
 
 How parse failures are surfaced. See
-[`ValidationBehavior`].
+`ValidationBehavior`.
 
 #### `pub fn width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self`
 
@@ -168,4 +168,4 @@ Callback invoked on every committed value change with the new
 
 #### `pub fn value(&self) -> Signal<Option<Time>>`
 
-The bound value signal — the same `Signal` passed to [`Self::new`].
+The bound value signal — the same `Signal` passed to `Self::new`.

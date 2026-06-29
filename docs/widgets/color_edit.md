@@ -4,10 +4,10 @@
 # ColorEdit
 
 `ColorEdit` — compact field-style color picker trigger that opens
-a popover containing a [`ColorPicker`].
+a popover containing a `ColorPicker`.
 
 Direct analog of `DateEdit`. The
-trigger is a [`Button`] with a reactive [`ColorSwatch`] in its
+trigger is a `Button` with a reactive `ColorSwatch` in its
 leading slot, the current hex as the label, and an optional
 chevron in its trailing slot. Click, Enter, Space, or Alt+Down
 opens the popover; Escape or click-outside closes it. The inner
@@ -51,7 +51,7 @@ let _edit = ColorEdit::new(color)
 
 ## `pub struct ColorEdit`
 
-Compact color cell that opens a full [`ColorPicker`] in a popover when activated.
+Compact color cell that opens a full `ColorPicker` in a popover when activated.
 
 ```rust
 pub struct ColorEdit { /* fields */ }
@@ -91,7 +91,7 @@ clamped to at least 1.
 
 #### `pub fn picker_layout(mut self, l: ColorPickerLayout) -> Self`
 
-Select a popover layout variant — [`ColorPickerLayout::Compact`]
+Select a popover layout variant — `ColorPickerLayout::Compact`
 (default, minimal height) or `Standard` / `Wide` for richer controls.
 
 #### `pub fn show_rgb_spinners(mut self, s: bool) -> Self`
@@ -121,7 +121,7 @@ Override the size of the color swatch thumbnail in the trigger button (logical p
 #### `pub fn placement(mut self, p: OverlayPlacement) -> Self`
 
 Override where the popover appears relative to the trigger.
-Default is [`OverlayPlacement::BelowPreferred`].
+Default is `OverlayPlacement::BelowPreferred`.
 
 #### `pub fn dismiss_behavior(mut self, b: DismissBehavior) -> Self`
 

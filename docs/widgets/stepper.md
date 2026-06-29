@@ -3,22 +3,22 @@
 
 # Stepper
 
-[`Stepper`] — a modern, embeddable step-flow widget (Material/Ant/Flutter
-"stepper"), and [`Wizard`], a thin modal launcher built on it.
+`Stepper` — a modern, embeddable step-flow widget (Material/Ant/Flutter
+"stepper"), and `Wizard`, a thin modal launcher built on it.
 
 A stepper shows a **visible step-indicator strip** above (or beside) a
-content area driven by a [`Switcher`], with a
+content area driven by a `Switcher`, with a
 footer of Back / Skip / Help / Next / Finish controls. It supports linear
 and **non-linear** (clickable) navigation, optional + skippable steps, per
 step validation gating, a generic chrome slot, and a
-[`StepperController`] handle for programmatic reset / jump / introspection.
+`StepperController` handle for programmatic reset / jump / introspection.
 
 # Data flow
 
 The application owns its form state as `Signal`s. A step's content factory
-captures clones of those signals (write side); [`Step::complete_when`]
+captures clones of those signals (write side); `Step::complete_when`
 derives the Next gate from the same signals; and
-[`Stepper::on_finish`] reads them back — plus the [`StepperController`] for
+`Stepper::on_finish` reads them back — plus the `StepperController` for
 per-step introspection (`visited` / `skipped`) — to branch on the choices
 made. There is no `QVariant` field registry: plain shared signals are the
 cross-step channel.
@@ -50,7 +50,7 @@ Stepper::new()
 
 ## `pub enum StepperOrientation`
 
-Indicator-strip orientation for a [`Stepper`].
+Indicator-strip orientation for a `Stepper`.
 
 ```rust
 pub enum StepperOrientation { /* variants */ }
@@ -94,11 +94,11 @@ Create an empty `Stepper`. Append steps with `step` or
 
 #### `pub fn step(mut self, step: Step) -> Self`
 
-Append a single [`Step`] definition.
+Append a single `Step` definition.
 
 #### `pub fn steps(mut self, steps: impl IntoIterator<Item = Step>) -> Self`
 
-Append multiple [`Step`] definitions from an iterator.
+Append multiple `Step` definitions from an iterator.
 
 #### `pub fn controller(mut self, controller: StepperController) -> Self`
 
@@ -130,7 +130,7 @@ QWizard's watermark pixmap.
 #### `pub fn chrome_position(mut self, position: ChromePosition) -> Self`
 
 Choose where the optional chrome widget sits relative to the stepper
-body. Forced to [`ChromePosition::Top`] when
+body. Forced to `ChromePosition::Top` when
 `orientation` is `Vertical`.
 
 #### `pub fn back_label(mut self, label: impl Into<LocalizedString>) -> Self`

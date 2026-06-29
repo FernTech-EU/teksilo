@@ -5,7 +5,7 @@
 
 Grid — a 2D layout container with explicit row and column tracks.
 
-Columns and rows are declared as [`TrackSize`] slices supporting three
+Columns and rows are declared as `TrackSize` slices supporting three
 sizing modes: `Fixed(px)` (exact logical pixels), `Auto` (sized to the
 largest child in that track), and `Fractional(fr)` (share of the remaining
 space after fixed and auto tracks are allocated — the CSS `fr` unit).
@@ -40,7 +40,7 @@ let _grid = Grid::new()
 
 ## `pub enum TrackSize`
 
-Sizing mode for a single row or column track in a [`Grid`].
+Sizing mode for a single row or column track in a `Grid`.
 
 ```rust
 pub enum TrackSize { /* variants */ }

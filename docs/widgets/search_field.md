@@ -3,7 +3,7 @@
 
 # SearchField
 
-SearchField — a [`TextInput`] preset
+SearchField — a `TextInput` preset
 configured for search workflows: leading magnifier glyph, default-on
 clear-X, and an optional anchored suggestions popover with keyboard
 navigation and the ARIA combobox-with-listbox accessibility pattern.
@@ -100,7 +100,7 @@ Install a callback invoked when the user presses Enter (or activates the search 
 
 Provider that returns suggestions for the current query string.
 When set, the popup appears below the field as soon as the
-user types at least [`Self::min_chars`] characters and the
+user types at least `Self::min_chars` characters and the
 provider returns a non-empty list.
 
 #### `pub fn max_suggestions(mut self, n: usize) -> Self`

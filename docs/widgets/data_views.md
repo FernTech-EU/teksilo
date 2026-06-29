@@ -10,15 +10,15 @@ Centralizes the vocabulary the four data views (`ListView` / `TreeView` /
 `TableView` / `TreeTableView`) share, so DnD validation (`can_accept`) and
 the lazy placeholder are wired one way everywhere:
 
-- [`RowDrag`] — the non-generic intra-app drag payload a row emits. The
+- `RowDrag` — the non-generic intra-app drag payload a row emits. The
   receiving source distinguishes its OWN reorder (matching `source_view_id`)
   from a foreign drop, and translates `source_index` → its own key via
   `key_at`, so the source's `Key` type never leaks into the view.
-- [`DropIndicator`] — what `paint` renders; `allowed == false` is the
+- `DropIndicator` — what `paint` renders; `allowed == false` is the
   pre-commit forbidden affordance.
-- [`flat_insertion_target`] — maps a flat insertion index to the
+- `flat_insertion_target` — maps a flat insertion index to the
   `(target, position)` pair `can_accept` / `accept_drop` expect.
-- [`default_placeholder`] — the skeleton for a `Loading` row.
+- `default_placeholder` — the skeleton for a `Loading` row.
 
 ## API reference
 
@@ -41,4 +41,4 @@ pub enum ActivateOn { /* variants */ }
 ### Variants
 
 - **`SingleClick`** — One primary click activates the row (KDE / web / Scrivener convention). Selection and activation happen on the same click.
-- **`DoubleClick`** — A double primary click activates the row; the first click only selects it (Finder / Explorer / Qt and GTK default). This is the [`Default`].
+- **`DoubleClick`** — A double primary click activates the row; the first click only selects it (Finder / Explorer / Qt and GTK default). This is the `Default`.

@@ -7,7 +7,7 @@
 
 Uses the same per-slot uniform-buffer pipeline as
 `ProgressBar::indeterminate` (an
-[`AnimatedQuadKind`] variant), so per-frame cost is one
+`AnimatedQuadKind` variant), so per-frame cost is one
 `queue.write_buffer(64 B) + draw_indexed` — the widget's `paint()`
 does not re-run between frames and there's no signal-dirty-mark
 cascade.

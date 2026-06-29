@@ -6,12 +6,12 @@
 TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 
 Displays a `TreeModel<T>` as an indented tree.
-Internally each view owns a [`TreeSlice`] for independent
+Internally each view owns a `TreeSlice` for independent
 expand state, so two `TreeView`s on the same model can be open at different
 depths simultaneously. Only rows in the visible viewport + a small buffer have
 live widgets — rows outside the buffer are dormant, matching `ListView`'s
-virtualization model. An external [`TreeDataSource`]
-is also accepted via [`TreeView::from_source`] when the data lives outside a
+virtualization model. An external `TreeDataSource`
+is also accepted via `TreeView::from_source` when the data lives outside a
 `TreeModel`.
 
 Row heights come in three modes: uniform (`item_height`, default fast path),
@@ -51,7 +51,7 @@ reference to the slice handle and the row's `NodeId` so the
 delegate can wire chevron toggles and other tree-aware behavior
 without manually cloning state outside the closure.
 
-Created internally by [`TreeView::new_with_context`]. Not
+Created internally by `TreeView::new_with_context`. Not
 constructed directly by user code.
 
 ```rust
@@ -93,7 +93,7 @@ boxed widget. The `FlatEntry` provides `depth`, `has_children`, and
 #### `pub fn new_with_context( model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Like `new`, but the delegate also receives a
-[`TreeRowContext`] from which `.toggle_callback()` can be
+`TreeRowContext` from which `.toggle_callback()` can be
 pulled in a single line — eliminating the need to manually
 clone the slice handle outside the closure.
 
@@ -115,10 +115,10 @@ let _w = TreeView::new_with_context(model, |item, entry, selected, ctx| {
 
 #### `pub fn from_source<S: TreeDataSource<Item = T>>( source: S, delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static, ) -> Self`
 
-Create a TreeView backed by any [`TreeDataSource`] — an external source of
+Create a TreeView backed by any `TreeDataSource` — an external source of
 truth (e.g. an entity store) carrying its own `Key`, so it needs no
 `TreeModel` mirror. The delegate receives `(&item, &TreeRow, selected)`;
-[`TreeRow`] exposes `depth` / `has_children` / `is_expanded` and a one-call
+`TreeRow` exposes `depth` / `has_children` / `is_expanded` and a one-call
 chevron `toggle_callback()`. Drop validation + lazy windowing route
 through the source's `can_accept` / `accept_drop` / `row_state`.
 
@@ -135,7 +135,7 @@ collapsed-but-present node keeps its selection.
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Set the scroll-chaining behavior at the boundary (default
-[`OverscrollBehavior::Chain`]; `Contain`
+`OverscrollBehavior::Chain`; `Contain`
 disables chaining to an ancestor scrollable).
 
 #### `pub fn item_height(mut self, height: f32) -> Self`

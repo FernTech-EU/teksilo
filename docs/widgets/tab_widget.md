@@ -7,13 +7,13 @@ Tabbed-container widgets.
 
 Two public entry points:
 
-- [`TabBar<T>`] — a header strip driven by a `ListModel<T>` /
+- `TabBar<T>` — a header strip driven by a `ListModel<T>` /
   `ListDataSource` and a
-  [`TabDelegate<T>`]. Use it stand-alone when you want only the
+  `TabDelegate<T>`. Use it stand-alone when you want only the
   tab strip (e.g., a document tab strip whose content lives in a
   different panel or window).
 
-- [`TabWidget`] — the all-in-one composition: bar above, content
+- `TabWidget` — the all-in-one composition: bar above, content
   `Switcher` below, sharing one selection signal. Two
   construction flavors:
     - `static_tab(info, content)` —
@@ -26,13 +26,13 @@ Two public entry points:
       reorder).
 
 Static tabs always render first, in declaration order; dynamic
-tabs follow. Selection is by stable [`TabId`] — drag-reorder and
+tabs follow. Selection is by stable `TabId` — drag-reorder and
 model mutations never silently send the active selection to a
 different tab.
 
 ## Accessibility
 
-Both [`TabWidget`] and [`TabBar`] emit `Role::TabList` on the bar
+Both `TabWidget` and `TabBar` emit `Role::TabList` on the bar
 and `Role::Tab` on each header. ARIA APG ([tabs
 pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/))
 recommends providing an accessible name for the tab list
@@ -63,7 +63,7 @@ opted in via `TabInfo::focusable_panel(true)`.
 ## `pub type StaticContentFactory`
 
 Closure that builds a static tab's content widget. Called once
-per static tab — on the [`TabWidget`]'s first build that includes
+per static tab — on the `TabWidget`'s first build that includes
 it. The resulting pane is then memoized: rebuilds caused by
 adjacent dynamic-model mutations reuse the same pane WidgetId, so
 internal state (focus, scroll, animation progress, …) survives.
@@ -74,7 +74,7 @@ pub type StaticContentFactory = Rc<dyn Fn(&TabHandle) -> Box<dyn Widget>>;
 
 ## `pub struct TabWidget`
 
-All-in-one tabbed container. Builds a [`TabBar`] above a
+All-in-one tabbed container. Builds a `TabBar` above a
 `Switcher` of content panes, sharing one selection signal.
 
 ```rust
@@ -92,9 +92,9 @@ tab and the framework activates it.
 #### `pub fn bar_visibility(mut self, visibility: TabBarVisibility) -> Self`
 
 Set the tab-strip visibility policy (default
-[`TabBarVisibility::Always`]). Use [`TabBarVisibility::WhenMultiple`]
+`TabBarVisibility::Always`). Use `TabBarVisibility::WhenMultiple`
 to hide the strip while a single tab is present, or
-[`TabBarVisibility::Never`] when an external selector (e.g. a
+`TabBarVisibility::Never` when an external selector (e.g. a
 docking activity rail) drives selection.
 
 #### `pub fn tab_bar_height(mut self, dp: f32) -> Self`
@@ -132,7 +132,7 @@ Replace the internal orientation signal with an external one
 
 Add a static tab — fixed for the widget's lifetime, with a
 pre-built content widget. The content is registered in the
-arena on the [`TabWidget`]'s first build and **memoized** —
+arena on the `TabWidget`'s first build and **memoized** —
 subsequent rebuilds (caused by adjacent dynamic-model
 mutations) reuse the same pane WidgetId, preserving any
 internal state the content owns.
@@ -169,7 +169,7 @@ first build and the pane id is memoized thereafter.
 
 #### `pub fn static_tab_with_id( mut self, id: TabId, info: TabInfo, content: impl Widget + 'static, ) -> Self`
 
-Add a static tab with a caller-provided [`TabId`] — useful
+Add a static tab with a caller-provided `TabId` — useful
 when external code (an app-event handler, a session-restore
 path, a deep link) needs to flip selection to this tab by id.
 The pane is memoized like `static_tab`.
@@ -195,7 +195,7 @@ dynamic-tab subtree; static tabs are unaffected.
 
 Set the per-tab sizing strategy as a static value. Internally
 stores it as a `Signal<TabSizing>` so the widget can be
-retrofitted to reactive control via [`Self::sizing_signal`]
+retrofitted to reactive control via `Self::sizing_signal`
 without breaking existing call sites.
 
 #### `pub fn sizing_signal(mut self, signal: Signal<TabSizing>) -> Self`
@@ -210,8 +210,8 @@ preserved.
 #### `pub fn tab_display(mut self, mode: TabDisplayMode) -> Self`
 
 Choose what every tab shows — icon, label, or both
-([`TabDisplayMode`]). Static value; stored as a `Signal` so it can be
-retrofitted to [`Self::tab_display_signal`].
+(`TabDisplayMode`). Static value; stored as a `Signal` so it can be
+retrofitted to `Self::tab_display_signal`.
 
 #### `pub fn tab_display_signal(mut self, signal: Signal<TabDisplayMode>) -> Self`
 
@@ -268,33 +268,33 @@ puts it below the label (horizontal) / trailing edge (vertical).
 #### `pub fn selected_text_role(mut self, role: bastyde_tokens::TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
-on the **selected** tab. Default: [`bastyde_tokens::TextRole::Primary`]
+on the **selected** tab. Default: `bastyde_tokens::TextRole::Primary`
 — the Int UI editor-strip convention. Override to e.g.
-[`bastyde_tokens::TextRole::Accent`] when the strip sits over a
+`bastyde_tokens::TextRole::Accent` when the strip sits over a
 tinted surface.
 
 #### `pub fn idle_text_role(mut self, role: bastyde_tokens::TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
 on **idle** tabs (not selected, not disabled). Default:
-[`bastyde_tokens::TextRole::Secondary`]. Disabled tabs always read
-as [`bastyde_tokens::TextRole::Disabled`] regardless of this
+`bastyde_tokens::TextRole::Secondary`. Disabled tabs always read
+as `bastyde_tokens::TextRole::Disabled` regardless of this
 setting.
 
 #### `pub fn min_tab_width(mut self, dp: f32) -> Self`
 
 Minimum scrollable-tab width in logical pixels. Default
-[`DEFAULT_MIN_TAB_WIDTH`].
+`DEFAULT_MIN_TAB_WIDTH`.
 
 #### `pub fn max_tab_width(mut self, dp: f32) -> Self`
 
 Maximum scrollable-tab width in logical pixels. Default
-[`DEFAULT_MAX_TAB_WIDTH`].
+`DEFAULT_MAX_TAB_WIDTH`.
 
 #### `pub fn pinned_tab_width(mut self, dp: f32) -> Self`
 
 Fixed width for pinned (icon-only) tabs in logical pixels. Default
-[`DEFAULT_PINNED_TAB_WIDTH`].
+`DEFAULT_PINNED_TAB_WIDTH`.
 
 #### `pub fn show_scroll_arrows(mut self, on: bool) -> Self`
 
@@ -313,9 +313,9 @@ Setting `on_reorder` implies `reorderable(true)`.
 
 #### `pub fn on_close(mut self, f: impl Fn(TabId, &mut EventContext) + 'static) -> Self`
 
-Install a close-tab handler. Receives the [`TabId`] of the
+Install a close-tab handler. Receives the `TabId` of the
 closed tab (not its index — indices are presentation-only)
-and the firing [`EventContext`]. The latter lets the handler
+and the firing `EventContext`. The latter lets the handler
 open a confirmation dialog
 (`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
 intent, or otherwise route the close request before mutating
@@ -330,7 +330,7 @@ If unset, the default behavior is to remove the tab from
 
 Install a reorder handler. Receives `(moved_tab_id,
 destination_index, ctx)` in the unified static-then-dynamic
-ordering. The firing [`EventContext`] lets the handler
+ordering. The firing `EventContext` lets the handler
 confirm or dispatch the reorder via a dialog / intent
 before mutating the model. If unset, the default behavior
 is to reorder within the dynamic region of
@@ -341,7 +341,7 @@ is to reorder within the dynamic region of
 
 Install a pin-toggle handler — receives `(tab_id,
 new_pinned_flag, ctx)` when the user drags a tab across the
-pinned ↔ unpinned boundary. The firing [`EventContext`]
+pinned ↔ unpinned boundary. The firing `EventContext`
 lets the handler confirm or dispatch the transition via a
 dialog / intent. Apps decide whether to actually mutate the
 tab's `info.pinned`.
@@ -354,7 +354,7 @@ this widget's **dynamic** tabs can be dragged out to any other
 accepting `TabWidget`, and it accepts tabs dragged in from one,
 painting an insertion-line indicator between its tabs.
 
-The dragged [`TabHandle`] moves intact — its `Rc<dyn Any>`
+The dragged `TabHandle` moves intact — its `Rc<dyn Any>`
 payload (the heavy per-tab state) is preserved, not rebuilt —
 so the receiving widget must register a content factory for the
 tab's `kind` via `dynamic_tab`.
@@ -384,7 +384,7 @@ If unset, the default inserts the handle into
 
 Override the source-side behaviour after one of this widget's
 tabs has been accepted by another `TabWidget`. Receives the
-transferred [`TabId`]; the app removes it from its own model.
+transferred `TabId`; the app removes it from its own model.
 Implies `accept_external_tabs(true)`.
 
 If unset, the default removes the tab from
@@ -396,7 +396,7 @@ Accept **non-tab** drops onto the tab bar — an in-app foreign
 drag (e.g. a file dragged from a `TreeView`, carrying app data)
 or an OS file/text/URL drop. The bar shows an insertion-line
 indicator while such a payload hovers; on drop, `f` runs with
-the raw [`DragPayload`], the insertion index *within the dynamic
+the raw `DragPayload`, the insertion index *within the dynamic
 region*, and the firing context. Inspect the payload
 (`get_typed::<T>()` / `files()` / `text()` / `uris()`) and, e.g.,
 push a new `TabHandle` into your `dynamic_model`;
@@ -430,7 +430,7 @@ Element-valued variant of
 
 ## `pub enum TabBarVisibility`
 
-Controls whether a [`TabWidget`]'s tab strip is shown.
+Controls whether a `TabWidget`'s tab strip is shown.
 
 The default is `Always` — fully
 back-compatible with the historical behaviour. `WhenMultiple` hides the strip while a single tab

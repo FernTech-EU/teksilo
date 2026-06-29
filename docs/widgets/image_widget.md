@@ -28,7 +28,7 @@ Two independent concerns, mirroring Qt's `QLabel`/`QPixmap`, SwiftUI's
      preserving aspect ratio; `resizable(false)` locks it to the raw
      pixel dimensions (SwiftUI's default non-`.resizable()` image).
 2. **Content fit** — how the image pixels map into that box, via
-   [`ImageFit`] (`Contain` / `Cover` / `Fill` / `ScaleDown` / `None`,
+   `ImageFit` (`Contain` / `Cover` / `Fill` / `ScaleDown` / `None`,
    the CSS `object-fit` set) plus
    `alignment` (the CSS `object-position`
    equivalent) for where slack/overflow lands. Modes that overflow the
@@ -91,7 +91,7 @@ pub struct ImageWidget { /* fields */ }
 
 #### `pub fn new(icon: &RasterIcon) -> Self`
 
-Create from a decoded [`RasterIcon`] (e.g., from `res!()`).
+Create from a decoded `RasterIcon` (e.g., from `res!()`).
 
 #### `pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self`
 
@@ -126,13 +126,13 @@ source doesn't shadow the masked one in the texture atlas.
 #### `pub fn fit(mut self, fit: ImageFit) -> Self`
 
 Set the content-fit mode — how the image pixels map into the box.
-See [`ImageFit`].
+See `ImageFit`.
 
 #### `pub fn alignment(mut self, alignment: Alignment) -> Self`
 
 Set where the fitted image sits within the box when the active fit
 leaves slack or crops (the CSS `object-position` analogue). Defaults
-to [`Alignment::CENTER`]. Leading/Trailing resolve against the
+to `Alignment::CENTER`. Leading/Trailing resolve against the
 active layout direction (RTL-aware).
 
 #### `pub fn width(mut self, w: f32) -> Self`

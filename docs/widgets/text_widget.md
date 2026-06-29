@@ -7,13 +7,13 @@ TextWidget — a leaf widget that renders a localized text string.
 
 `TextWidget` is the building block for every visible label in the framework.
 It delegates measurement and rasterization to the `TextBackend` and supports
-three overflow modes: [`TextOverflow::Wrap`] (default — grows vertically),
-[`TextOverflow::Ellipsis`] with trailing, middle, or leading truncation, and
+three overflow modes: `TextOverflow::Wrap` (default — grows vertically),
+`TextOverflow::Ellipsis` with trailing, middle, or leading truncation, and
 a minimal markup subset (``label``, `*italic*`, `**bold**`) with
 per-link click/hover dispatch.
 
 Text and color accept either static values or reactive `Signal`/`Prop` bindings.
-The default color role is [`TextRole::Primary`], resolved against the active
+The default color role is `TextRole::Primary`, resolved against the active
 theme at paint time, so theme switches update text color without any explicit
 binding or rebuild.
 
@@ -59,11 +59,11 @@ non-translated strings.
 Set the text color. Accepts any `impl Into<ColorProp>`:
 
 - A raw `Color` — a frozen literal.
-- A [`TextRole`] — resolved against the theme at paint time
+- A `TextRole` — resolved against the theme at paint time
   (reactive across theme switches).
 - A `Signal<Color>` — reactive state (typically interaction-driven).
 
-The default role is [`TextRole::Primary`], so `.color(...)` is only
+The default role is `TextRole::Primary`, so `.color(...)` is only
 needed when a label wants a non-default theme role (Secondary,
 Error, Accent, ...) or a custom color.
 
@@ -77,7 +77,7 @@ theme typography changes take effect without a rebuild.
 #### `pub fn overflow(mut self, overflow: TextOverflow) -> Self`
 
 Set how the widget handles text that doesn't fit in the proposed
-width. Default is [`TextOverflow::Wrap`].
+width. Default is `TextOverflow::Wrap`.
 
 #### `pub fn single_line(self) -> Self`
 
@@ -100,7 +100,7 @@ overflows (rather than truncating) when its stack is over-constrained.
 #### `pub fn max_lines(mut self, n: usize) -> Self`
 
 Cap the paragraph at `n` lines when wrapping. Only meaningful
-in [`TextOverflow::Wrap`] mode — ignored for ellipsis modes.
+in `TextOverflow::Wrap` mode — ignored for ellipsis modes.
 Lines beyond the cap are silently dropped.
 
 #### `pub fn text_backend(mut self, backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>) -> Self`

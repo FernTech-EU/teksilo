@@ -58,7 +58,7 @@ let _w = MenuBar::new()
 
 ## `pub enum CollapsePolicy`
 
-Controls when a collapsible [`MenuBar`] switches from the full inline bar
+Controls when a collapsible `MenuBar` switches from the full inline bar
 to the hamburger `IconButton` representation.
 
 ```rust
@@ -108,12 +108,12 @@ renders there regardless).
 
 Enable the optional **hamburger** representation. When there
 isn't room for the full inline bar, it collapses to a single
-hamburger (☰) [`IconButton`]; activating it (click, `Alt`+
+hamburger (☰) `IconButton`; activating it (click, `Alt`+
 mnemonic, `F10`, or bare-`Alt`-tap) reveals the full bar as a
 floating overlay over content. Clicking outside the bar or
 pressing `Escape` hides it again.
 
-Uses [`CollapsePolicy::Responsive`]. Observe the collapsed state
+Uses `CollapsePolicy::Responsive`. Observe the collapsed state
 via `is_collapsed`, or bind your own signal
 with `collapsible_bound`.
 
@@ -127,16 +127,16 @@ decision writes this signal.
 #### `pub fn collapse_policy(mut self, policy: CollapsePolicy) -> Self`
 
 Set the collapse policy (and enable collapsible mode).
-[`CollapsePolicy::Always`] forces the hamburger regardless of
+`CollapsePolicy::Always` forces the hamburger regardless of
 available width — i.e. **collapsed by default**.
 
 #### `pub fn hamburger_size(mut self, size: IconButtonSize) -> Self`
 
 Set the size variant of the collapsed-mode hamburger
-[`IconButton`]. Mirrors [`IconButton::size`] — pick
-[`IconButtonSize::Toolbar`], [`IconButtonSize::Large`],
-[`IconButtonSize::Hero`], etc. so the hamburger matches the
-surrounding chrome. Defaults to [`IconButtonSize::Default`].
+`IconButton`. Mirrors `IconButton::size` — pick
+`IconButtonSize::Toolbar`, `IconButtonSize::Large`,
+`IconButtonSize::Hero`, etc. so the hamburger matches the
+surrounding chrome. Defaults to `IconButtonSize::Default`.
 
 #### `pub fn is_collapsed(&self) -> Signal<bool>`
 

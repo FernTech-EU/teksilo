@@ -10,7 +10,7 @@ can host menus, tools, and the standard window controls (minimize /
 maximize / close). The platform plumbing — beginning a window drag,
 returning the right `WM_NCHITTEST` codes on Windows, repositioning the
 macOS traffic lights — lives behind the
-[`PlatformTitleBarHost`] trait in
+`PlatformTitleBarHost` trait in
 `bastyde-platform`. The widget itself is platform-agnostic.
 
 Construct a `TitleBar` from inside the root-builder closure, fetching
@@ -41,7 +41,7 @@ the host from the widget tree:
 
 Type alias for the user-supplied close action that overrides
 `host.close()` (which on Wayland is currently a no-op due to winit 0.30
-lacking `Window::request_close`). Set via [`TitleBar::close_action`].
+lacking `Window::request_close`). Set via `TitleBar::close_action`.
 
 ```rust
 pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
@@ -62,7 +62,7 @@ macOS. The drag region is a `Spacer`-style flex
 child that absorbs all leftover horizontal space and forwards
 pointer / drag / double-tap gestures to the platform host. The window
 controls (minimize / maximize / close) are rendered only when the host
-advertises [`PlatformTitleBarHost::renders_custom_controls`] — i.e. on
+advertises `PlatformTitleBarHost::renders_custom_controls` — i.e. on
 Windows and Wayland but not on macOS.
 
 ```rust
@@ -98,7 +98,7 @@ retints live across `ctx.set_theme(...)` switches.
 Draw a 1px-or-thicker bottom border separating the title bar from
 the body.
 
-Color accepts the same range as [`Self::background`]; pair with
+Color accepts the same range as `Self::background`; pair with
 `BorderRole::Default` for a theme-tracking divider.
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`

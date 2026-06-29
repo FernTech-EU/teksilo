@@ -3,7 +3,7 @@
 
 # Widget Catalog
 
-Every widget shipped by `bastyde-widgets`, grouped by category. Each page links to its full rustdoc API reference.
+Every public widget in `bastyde-widgets`, grouped by category. Each page links to its full rustdoc API reference.
 
 ## Layout primitives
 
@@ -54,12 +54,12 @@ Every widget shipped by `bastyde-widgets`, grouped by category. Each page links 
 - [ScrollBar](scroll_bar.md) — ScrollBar — pointer and keyboard affordance for a `ScrollArea`
 - [Splitter](splitter.md) — N-pane split container with draggable, collapsible dividers
 - [StatusBar](status_bar.md) — StatusBar — a horizontal chrome bar at the bottom of a window for status
-- [Stepper](stepper.md) — [`Stepper`] — a modern, embeddable step-flow widget (Material/Ant/Flutter
+- [Stepper](stepper.md) — `Stepper` — a modern, embeddable step-flow widget (Material/Ant/Flutter
 - [TabWidget](tab_widget.md) — Tabbed-container widgets
 - [TitleBar](title_bar.md) — Custom window title bar widget
 - [Toolbar](toolbar.md) — `Toolbar` — a command bar with automatic **overflow**
 - [ToolBox](tool_box.md) — ToolBox — a vertical stack of collapsible sections, exactly one expanded
-- [Wizard](wizard.md) — [`Wizard`] — a thin modal launcher around [`Stepper`]
+- [Wizard](wizard.md) — `Wizard` — a thin modal launcher around `Stepper`
 
 ## Buttons
 
@@ -89,7 +89,7 @@ Every widget shipped by `bastyde-widgets`, grouped by category. Each page links 
 - [InputDialog](input_dialog.md) — InputDialog — a `QInputDialog`-style modal that prompts the user for
 - [PasswordField](password_field.md) — `PasswordField` — secure single-line text entry with a reveal
 - [RichTextEditor](rich_text.md) — Rich text editor and viewer widget
-- [SearchField](search_field.md) — SearchField — a [`TextInput`] preset
+- [SearchField](search_field.md) — SearchField — a `TextInput` preset
 - [SpinBox](spin_box.md) — `SpinBox` — numeric input with increment/decrement buttons
 - [TextInput](text_input.md) — `TextInput` — styled single-line text field composite
 
@@ -156,7 +156,7 @@ Every widget shipped by `bastyde-widgets`, grouped by category. Each page links 
 - [LanguageSwitcher](language_switcher.md) — LanguageSwitcher — a drop-in UI-language picker for settings screens
 - [PrivacySettings](privacy_settings.md) — PrivacySettings — a user-facing panel for telemetry consent management
 - [ShortcutSettings](shortcut_settings.md) — ShortcutSettings — user-facing widget for browsing and rebinding
-- [TextScaleControl](text_scale_control.md) — [`TextScaleControl`] — the settings control that grows all text in the app
+- [TextScaleControl](text_scale_control.md) — `TextScaleControl` — the settings control that grows all text in the app
 - [ThemeSwitcher](theme_switcher.md) — ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars
 
 ## ColorPicker (submodule)

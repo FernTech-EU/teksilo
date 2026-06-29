@@ -5,9 +5,9 @@
 
 `SpinBox` — numeric input with increment/decrement buttons.
 
-A generic composite over [`SpinValue`]
+A generic composite over `SpinValue`
 (integer and floating-point primitives), pairing the
-[`TextInputField`] editing
+`TextInputField` editing
 primitive with a stacked pair of up/down step buttons. Semantics
 are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
 `NumberBox`, GTK's `GtkSpinButton`, and the W3C ARIA
@@ -22,7 +22,7 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   per-character input filter). The value is *committed* on
   `Enter` or on focus loss —
   at commit time the text is parsed, clamped into `[min, max]`
-  (or wrapped, per [`WrapMode`]), and reformatted. Invalid input
+  (or wrapped, per `WrapMode`), and reformatted. Invalid input
   reverts to the last known good value.
 - **Keyboard**:
   - `Up` / `Down` → ±`single_step`
@@ -41,7 +41,7 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   set, the field shows that string instead of the formatted
   number — Qt's "Auto" / "None" / "Unlimited" affordance.
 - **Adaptive step**: with
-  [`StepType::Adaptive`], the effective step
+  `StepType::Adaptive`, the effective step
   tracks the decimal magnitude of the current value (Qt's
   `AdaptiveDecimalStepType`). Useful for values that span many
   orders of magnitude in the same control.
@@ -99,7 +99,7 @@ ctx.add(
 
 Out-of-range behavior when stepping past `min` or `max`.
 
-Set via [`SpinBox::wrap_mode`].
+Set via `SpinBox::wrap_mode`.
 
 ```rust
 pub enum WrapMode { /* variants */ }
@@ -114,7 +114,7 @@ pub enum WrapMode { /* variants */ }
 
 Step-size policy for each key/button press.
 
-Set via [`SpinBox::step_type`].
+Set via `SpinBox::step_type`.
 
 ```rust
 pub enum StepType { /* variants */ }
@@ -129,7 +129,7 @@ pub enum StepType { /* variants */ }
 
 When the mouse wheel is allowed to adjust the value.
 
-Set via [`SpinBox::wheel_mode`].
+Set via `SpinBox::wheel_mode`.
 
 ```rust
 pub enum WheelMode { /* variants */ }
@@ -164,7 +164,7 @@ pub enum WidthPolicy { /* variants */ }
 ## `pub struct SpinBox`
 
 Numeric input with step buttons. Generic over
-[`SpinValue`] — pre-implemented for `i32`, `i64`, `u32`, `u64`,
+`SpinValue` — pre-implemented for `i32`, `i64`, `u32`, `u64`,
 `usize`, `f32`, and `f64`.
 
 ```rust

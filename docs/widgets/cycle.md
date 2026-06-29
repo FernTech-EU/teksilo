@@ -16,7 +16,7 @@ ctx.add(
 );
 ```
 
-Internally a [`Switcher`] whose
+Internally a `Switcher` whose
 `Signal<usize>` index is incremented by a per-frame effect.
 Children share a `ZStack` slot — at any given moment only the
 selected child is visible (others are dormant).

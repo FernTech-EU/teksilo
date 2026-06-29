@@ -84,7 +84,7 @@ search.
 #### `pub fn attached_side(mut self, side: crate::shadow::AttachedSide) -> Self`
 
 Suppress drop-shadow drawing on the side that visually merges
-with the menu's trigger. See [`crate::shadow::AttachedSide`]
+with the menu's trigger. See `crate::shadow::AttachedSide`
 for the available edges.
 
 #### `pub fn item(mut self, widget: impl Widget + 'static) -> Self`

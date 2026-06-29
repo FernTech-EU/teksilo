@@ -10,7 +10,7 @@ to build a 6-px resize frame around a borderless window on Wayland.
 This is the frame complement to [`crate::title_bar::DragRegion`]: drag
 moves the window, resize strips drag the window edges. On platforms
 that don't expose `Window::drag_resize_window` (notably winit's macOS
-backend), [`PlatformTitleBarHost::begin_resize`] returns
+backend), `PlatformTitleBarHost::begin_resize` returns
 `PlatformError::Unsupported` and the strip becomes a silent no-op —
 macOS handles edge resize via its own native chrome.
 

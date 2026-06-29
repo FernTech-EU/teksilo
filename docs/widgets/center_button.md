@@ -4,7 +4,7 @@
 # NotificationCenterButton
 
 `NotificationCenterButton` — bell icon with an unread-count badge that
-opens a [`NotificationLog`] popover when clicked.
+opens a `NotificationLog` popover when clicked.
 
 Composed as a `ZStack { PopoverIconButton(bell), Badge }`. The badge
 shows the current unread count and is hit-transparent so clicks always
@@ -37,12 +37,12 @@ let bell = NotificationCenterButton::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/center_button/index.html)
 
 ## `pub struct NotificationCenterButton`
 
 Bell-icon trigger + unread-count badge + popover that contains a
-[`NotificationLog`]. On popover open the archive's `mark_all_read`
+`NotificationLog`. On popover open the archive's `mark_all_read`
 runs (the user is presumed to have seen the toasts now).
 
 ```rust
@@ -82,6 +82,6 @@ viewport bottom edge.
 #### `pub fn on_action_invoked( mut self, f: impl Fn(&NotificationEntry, &ArchivedAction, &mut EventContext) + 'static, ) -> Self`
 
 Threaded into the embedded `NotificationLog` —
-see [`NotificationLog::on_action_invoked`] for the contract.
+see `NotificationLog::on_action_invoked` for the contract.
 Wire this to dispatch archived actions; without it the
 action buttons in the log are inert.

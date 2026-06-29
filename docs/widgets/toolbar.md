@@ -9,19 +9,19 @@ Excess actions collapse into a trailing chevron (`⌄`) that opens a popover
 menu, mirroring Qt's `QToolBar` extension button, macOS `NSToolbar`'s
 overflow menu, and WinUI `CommandBar`. Synthesized API:
 
-- **Actions** ([`ToolbarAction`]) — a command with a label, optional icon,
+- **Actions** (`ToolbarAction`) — a command with a label, optional icon,
   tooltip, enabled state, optional toggle (checkable), an **overflow
   priority** (NSToolbar: lowest priority collapses first), and an
   **`always_overflow`** flag (WinUI secondary commands). Each action has a
   toolbar form (a `Button`) and a menu form (a `MenuItem`), so it renders
   correctly whether inline or in the overflow menu.
-- **Pinned widgets** ([`ToolbarItem::custom`]) — arbitrary widgets (a search
+- **Pinned widgets** (`ToolbarItem::custom`) — arbitrary widgets (a search
   field, a `SegmentedControl`) that never collapse.
 - **Collapsible widgets** — an arbitrary widget that *does* overflow, by
   supplying an overflow representation (NSToolbar `menuFormRepresentation` /
-  Qt `QWidgetAction`): a **menu row** ([`ToolbarAction`]) via
+  Qt `QWidgetAction`): a **menu row** (`ToolbarAction`) via
   `ToolbarItem::custom(w).overflow_as(action)`
-  (or [`ToolbarOverflow`] + [`ToolbarItem::collapsible`]; an icon-only
+  (or `ToolbarOverflow` + `ToolbarItem::collapsible`; an icon-only
   control reuses its icon as the menu glyph), or a **live embedded widget**
   via `ToolbarItem::custom(w).overflow_widget(f)`
   (the factory rebuilds the control — e.g. a `ComboBox` bound to the same
@@ -36,8 +36,8 @@ Overflow is computed every layout pass from each item's intrinsic size
 `LayoutContext::measure_intrinsic`),
 so items reappear correctly as the bar widens — no stale-width glitches.
 
-The chevron's drop-down is a real [`MenuList`] whose rows are gated by
-[`MenuList::item_when`],
+The chevron's drop-down is a real `MenuList` whose rows are gated by
+`MenuList::item_when`,
 so it sizes compactly to the currently-collapsed rows, carries standard
 menu chrome, takes focus when opened, and supports arrow / `Home` / `End` /
 `Enter` keyboard navigation (skipping the hidden rows).
@@ -158,7 +158,7 @@ Always live in the overflow menu, never inline (WinUI secondary command).
 
 ## `pub struct ToolbarItem`
 
-One slot in a [`Toolbar`].
+One slot in a `Toolbar`.
 
 ```rust
 pub struct ToolbarItem { /* fields */ }
@@ -182,16 +182,16 @@ A pinned arbitrary widget by pre-registered id.
 #### `pub fn collapsible(widget: impl Widget + ToolbarOverflow + 'static) -> Self`
 
 A collapsible widget that supplies its own menu form via
-[`ToolbarOverflow`]. When the bar is too narrow, the widget is hidden
+`ToolbarOverflow`. When the bar is too narrow, the widget is hidden
 and its `toolbar_menu_form()` appears in the overflow menu.
 
 #### `pub fn overflow_as(mut self, menu_form: ToolbarAction) -> Self`
 
 Make a `custom` widget collapsible with an explicit menu
-**row** — the [`ToolbarAction`] shown when it overflows (NSToolbar
+**row** — the `ToolbarAction` shown when it overflows (NSToolbar
 `menuFormRepresentation`). Best for controls whose menu form is a
 single command; an icon-only inline control reuses its icon here as the
-menu item's leading glyph (set it via [`ToolbarAction::icon`]).
+menu item's leading glyph (set it via `ToolbarAction::icon`).
 
 #### `pub fn overflow_widget(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
@@ -249,17 +249,17 @@ Add a pinned inline child by pre-registered id (sugar for
 
 #### `pub fn orientation(mut self, orientation: ToolbarOrientation) -> Self`
 
-Set the layout axis (default [`ToolbarOrientation::Horizontal`]).
+Set the layout axis (default `ToolbarOrientation::Horizontal`).
 
 #### `pub fn display_mode(mut self, mode: ToolbarDisplayMode) -> Self`
 
 Set how inline actions render their label and icon (default
-[`ToolbarDisplayMode::IconAndText`]).
+`ToolbarDisplayMode::IconAndText`).
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
 Gap between consecutive toolbar items in logical pixels (default
-[`TOOLBAR_SPACING`]).
+`TOOLBAR_SPACING`).
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 

@@ -5,7 +5,7 @@
 
 ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars.
 
-A thin [`ComboBox`] preset that switches the application theme. By default
+A thin `ComboBox` preset that switches the application theme. By default
 it offers three entries — **Light**, **Dark**, and **System** — where
 *System* follows the native OS theme live: it adopts the OS's actual colours
 (GNOME / KDE / Cinnamon on Linux) and tracks OS light/dark changes at
@@ -16,7 +16,7 @@ Zero-config: drop `ThemeSwitcher::new()` into a settings panel or toolbar and
 it
 
 - shows the active theme as the current selection (matched by the theme's
-  stable [`ThemeId`]),
+  stable `ThemeId`),
 - switches the app theme on selection via `EventContext::set_theme` (fixed
   themes) or `EventContext::follow_system_theme` (System),
 - and stays in sync if the theme changes elsewhere (a menu, the inspector,
@@ -45,7 +45,7 @@ app-supplied set (e.g. the `bastyde-theme-{fluent,macos,material3}` presets);
 
 ## `pub struct ThemeSwitcher`
 
-A drop-in app-theme picker built on [`ComboBox`]. See the module docs.
+A drop-in app-theme picker built on `ComboBox`. See the module docs.
 
 ```rust
 pub struct ThemeSwitcher { /* fields */ }

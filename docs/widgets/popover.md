@@ -6,7 +6,7 @@
 `Popover` — a button that opens a floating panel anchored to itself.
 
 `Popover` is the legacy one-type-does-everything disclosure widget: it
-pairs a labelled [`Button`] trigger (or any custom trigger supplied via
+pairs a labelled `Button` trigger (or any custom trigger supplied via
 `.trigger(...)`) with a themed popover surface and the full overlay
 wiring (dormant pre-build, `activate` on open, `show_overlay`, dismiss
 callback). For the more ergonomic generic form that works with both
@@ -73,11 +73,11 @@ Set the popover body widget (required). Built as a dormant subtree during
 
 #### `pub fn content_id(mut self, id: WidgetId) -> Self`
 
-Set the popover body by pre-registered [`WidgetId`].
+Set the popover body by pre-registered `WidgetId`.
 
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
-Set the [`ButtonVariant`] used for the built-in text trigger. Default `Plain`.
+Set the `ButtonVariant` used for the built-in text trigger. Default `Plain`.
 
 #### `pub fn enabled(mut self, enabled: bool) -> Self`
 
@@ -85,13 +85,13 @@ Enable or disable the trigger button. Default `true`.
 
 #### `pub fn placement(mut self, placement: OverlayPlacement) -> Self`
 
-Set the [`OverlayPlacement`] of the popover surface. Default
-[`OverlayPlacement::BelowPreferred`].
+Set the `OverlayPlacement` of the popover surface. Default
+`OverlayPlacement::BelowPreferred`.
 
 #### `pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self`
 
 Override the dismiss gesture. Default
-[`DismissBehavior::EscapeOrClickOutside`].
+`DismissBehavior::EscapeOrClickOutside`.
 
 #### `pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self`
 
@@ -101,7 +101,7 @@ AT-click open the panel) via an internal `OverlayTrigger`.
 
 #### `pub fn trigger_id(mut self, id: WidgetId) -> Self`
 
-Set a custom trigger by pre-registered [`WidgetId`].
+Set a custom trigger by pre-registered `WidgetId`.
 
 #### `pub fn caret(mut self, show_caret: bool) -> Self`
 

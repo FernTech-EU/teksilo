@@ -8,7 +8,7 @@
 Sibling of `TableView` for tree-shaped data. Each row carries
 a depth level; one designated column (the *tree column*, defaulting to the first)
 shows a twist (chevron) and an indent gutter that toggles the row's children.
-Backed by a [`SortFilterTreeModel<T>`] so sort, filter, and expand state compose
+Backed by a `SortFilterTreeModel<T>` so sort, filter, and expand state compose
 without extra bookkeeping. Shares the header, column, keyboard, and selection
 modules with `TableView`.
 
@@ -62,7 +62,7 @@ need sort/filter. Internally builds an identity
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Set the scroll-chaining behavior at the boundary (default
-[`OverscrollBehavior::Chain`]; `Contain`
+`OverscrollBehavior::Chain`; `Contain`
 disables chaining to an ancestor scrollable).
 
 #### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`

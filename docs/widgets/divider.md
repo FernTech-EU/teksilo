@@ -60,7 +60,7 @@ Create a vertical `Divider` that spans the proposed height.
 #### `pub fn thickness(mut self, thickness: f32) -> Self`
 
 Override the stroke thickness in logical pixels; defaults to
-[`DIVIDER_THICKNESS`] (1 dp).
+`DIVIDER_THICKNESS` (1 dp).
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 

@@ -11,7 +11,7 @@ minus spacing) is distributed among children that declare a non-zero `flex`
 weight (e.g. `Expand`).  Over-constraint
 deficits are absorbed by children with a non-zero `shrink` weight.
 Cross-axis (horizontal) alignment defaults to `Leading` and can be
-overridden per container with [`VStack::alignment`] or per child via
+overridden per container with `VStack::alignment` or per child via
 `WidgetTree::set_alignment`.
 
 Use `VStack` when children should be stacked vertically with a configurable

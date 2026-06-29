@@ -8,8 +8,8 @@ Button — a labelled, activatable action trigger.
 `Button` is the primary action surface in Bastyde. It renders a text
 label (optionally with a leading, trailing, top, or bottom icon), fires
 a closure on click / Space / Enter / AT click, and advertises seven
-design-language variants via [`ButtonVariant`]. Chrome (fill, border,
-focus ring, padding) is delegated to the active [`ButtonStyle`]; the
+design-language variants via `ButtonVariant`. Chrome (fill, border,
+focus ring, padding) is delegated to the active `ButtonStyle`; the
 default `RecipeButtonStyle` implements the Int UI token ladder.
 
 ## When to use
@@ -77,7 +77,7 @@ pub enum IconLocation { /* variants */ }
 
 ## `pub struct Button`
 
-A labelled action trigger; use [`Button::new`] and chain builder methods.
+A labelled action trigger; use `Button::new` and chain builder methods.
 
 ```rust
 pub struct Button { /* fields */ }
@@ -118,13 +118,13 @@ enabled state without the caller having to seed it.
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
 Set the Tier-1 design-language variant. The active
-[`ButtonStyle`] decides whether to honour or remap it (the IntUI
+`ButtonStyle` decides whether to honour or remap it (the IntUI
 default `RecipeButtonStyle` collapses Destructive → Filled,
 Tinted/Outlined → Plain, Link → Ghost).
 
 #### `pub fn style(mut self, style: impl ButtonStyle) -> Self`
 
-Override the active [`ButtonStyle`] for this widget instance
+Override the active `ButtonStyle` for this widget instance
 only. Useful for one-off custom-painted buttons (glassmorphism
 CTA, Material-3 ripple, etc.) without forking the Button.
 
@@ -213,7 +213,7 @@ Override the label's text style (font, size, weight). By default the
 label uses the inner `TextWidget`'s default style; pass a
 `TextStyleRole` (e.g. `TextStyleRole::BodyBold`), a `TextStyle`, or a
 `Signal` of either to change it — e.g. to make the label bold.
-Orthogonal to [`Button::text_role`], which only sets the color.
+Orthogonal to `Button::text_role`, which only sets the color.
 
 #### `pub fn icon(mut self, icon: IconWidget, location: IconLocation) -> Self`
 

@@ -19,10 +19,10 @@ A `Toast` is built with one of the four severity constructors
 configured via builder methods, and presented with
 `ctx.show_toast(toast)` (see
 `toast::ext::EventContextToastExt`)
-or `toast.present(ctx)`. A [`ToastHost`]
+or `toast.present(ctx)`. A `ToastHost`
 installed via `BastydeAppBuilder.install_toast(opts)` from the `bastyde`
 umbrella accepts the request, picks a free slot from its pool, and
-mounts a [`ToastSurface`] at the
+mounts a `ToastSurface` at the
 configured viewport corner using the
 `OverlayPlacement::ViewportCorner`
 variant.
@@ -73,7 +73,7 @@ pub enum ToastDismissCause { /* variants */ }
 
 ## `pub enum ToastActionStyle`
 
-How a [`ToastAction`] should be rendered inside the toast surface.
+How a `ToastAction` should be rendered inside the toast surface.
 
 ```rust
 pub enum ToastActionStyle { /* variants */ }
@@ -86,7 +86,7 @@ pub enum ToastActionStyle { /* variants */ }
 
 ## `pub type ToastActionCallback`
 
-Type-erased callback for a [`ToastAction`]. `Fn` (not `FnMut`) so
+Type-erased callback for a `ToastAction`. `Fn` (not `FnMut`) so
 the same callback can be wrapped in an `Rc` and dispatched from
 multiple paths (tap, keyboard, AT custom action).
 
@@ -96,7 +96,7 @@ pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 
 ## `pub struct ToastAction`
 
-One actionable element inside a [`Toast`] — a button or hyperlink
+One actionable element inside a `Toast` — a button or hyperlink
 the user can click to drive a domain action.
 
 ```rust
@@ -170,7 +170,7 @@ Clone the invocation callback — cheap because the underlying closure is `Rc`-w
 
 ## `pub struct ToastHandle`
 
-Returned by [`Toast::present`] (and `ctx.show_toast(toast)`). Cheap
+Returned by `Toast::present` (and `ctx.show_toast(toast)`). Cheap
 to clone (`Rc<Inner>`). Lets app code dismiss the toast
 programmatically or check whether it is still alive.
 
@@ -200,7 +200,7 @@ Always `false` for overflow-dropped toasts.
 #### `pub fn dismiss(&self, ctx: &mut EventContext)`
 
 Programmatically dismiss the toast with cause
-[`ToastDismissCause::Programmatic`]. No-op if the toast is
+`ToastDismissCause::Programmatic`. No-op if the toast is
 already dismissed (timer, user, host shutdown).
 
 ## `pub type ToastDismissCallback`
@@ -217,7 +217,7 @@ Toast — a present-able request (NOT a `Widget`). Construct with one
 of the severity-named constructors, configure via builder methods,
 then call `.present(ctx)` or `ctx.show_toast(self)`. Internally the
 builder is consumed and its data is moved into a slot on the
-installed [`ToastHost`].
+installed `ToastHost`.
 
 See the module docs for the full conceptual overview.
 
@@ -248,7 +248,7 @@ Error-severity toast. Defaults to `Live::Assertive`.
 Loading-style toast — Info severity with a
 `Spinner` as the leading widget.
 Persistent by default; the app calls
-[`ToastHandle::dismiss`] (typically from the operation's
+`ToastHandle::dismiss` (typically from the operation's
 completion callback) or replaces it with a success/error toast.
 
 #### `pub fn body(mut self, text: impl Into<LocalizedString>) -> Self`
@@ -263,7 +263,7 @@ toast remains object-safe.
 
 #### `pub fn action(mut self, action: ToastAction) -> Self`
 
-Append a [`ToastAction`] (link or button) to the toast.
+Append a `ToastAction` (link or button) to the toast.
 
 #### `pub fn primary_action( self, label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 
@@ -279,7 +279,7 @@ on the next timer tick; call `persistent` to disable the timer entirely.
 
 Disable auto-dismiss — the toast persists until the user
 clicks the close X, invokes a `closes_toast` action, or the
-app calls [`ToastHandle::dismiss`].
+app calls `ToastHandle::dismiss`.
 
 #### `pub fn priority(mut self, priority: ToastPriority) -> Self`
 
@@ -335,8 +335,8 @@ theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.
 #### `pub fn present(self, ctx: &mut EventContext) -> ToastHandle`
 
 Submit the toast through the installed
-[`ToastHost`]. Equivalent to
-`ctx.show_toast(self)`. Returns a [`ToastHandle`] for
+`ToastHost`. Equivalent to
+`ctx.show_toast(self)`. Returns a `ToastHandle` for
 programmatic control. If `install_toast` was not called the
 returned handle is in the "dropped" state (`is_alive` returns
 `false`) and a one-shot stderr warning fires explaining the omission.
