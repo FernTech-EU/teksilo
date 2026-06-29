@@ -78,6 +78,13 @@ pub struct ThemeSwitcher {
     /// The inner ComboBox's value signal. Owned here so the theme-sync effect
     /// can keep it aligned with the active theme.
     selected: Signal<Option<ThemeChoice>>,
+    /// Optional plain single-line tooltip. Mutually exclusive with the rich /
+    /// composite slots (the last tooltip setter called wins).
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source — registry key or inline content.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body — a CK3-style arbitrary widget tree.
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -118,6 +125,9 @@ impl ThemeSwitcher {
             themes_override: None,
             include_system: true,
             selected: Signal::new(None),
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             root_child_id: None,
         }
     }
@@ -154,6 +164,54 @@ impl ThemeSwitcher {
     /// Whether to offer the "System" (follow-OS) entry. Default `true`.
     pub fn system(mut self, include: bool) -> Self {
         self.include_system = include;
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// The three tooltip setters are mutually exclusive — `tooltip` /
+    /// [`rich_tooltip`](Self::rich_tooltip) /
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) /
+    /// [`composite_tooltip`](Self::composite_tooltip) — and the last one
+    /// called wins (each clears the others).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry
+    /// (inline markup, a shortcut chip, a "more" disclosure). See
+    /// [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by an inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) rather than a
+    /// registry key.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — the third tier, hosting an arbitrary
+    /// widget tree (headings, formatted paragraphs, controls). Handy for
+    /// explaining a non-obvious behaviour: e.g. that switching theme
+    /// *family* at runtime only re-tints colours, while widget chrome
+    /// (Material 3's pill buttons, switch, card radii) is chosen when the UI
+    /// is built. See
+    /// [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -270,6 +328,22 @@ impl Widget for ThemeSwitcher {
             });
         }
 
+        // Tooltip — three mutually-exclusive setters; setters clear the others
+        // so at most one branch runs. Anchored on the inner ComboBox (the
+        // visible control) so it shows on hover, independent of the dropdown.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, combo_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, combo_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(combo_id, tooltip_id, delay);
+        }
+
         vec![combo_id]
     }
 
@@ -365,6 +439,30 @@ mod tests {
             "selecting Dark must queue a theme switch"
         );
         assert_eq!(pending.unwrap().id.as_str(), "intui.dark");
+    }
+
+    #[test]
+    fn tooltip_appears_after_hover_delay() {
+        use bastyde_canvas::MockTextBackend;
+        use std::cell::RefCell;
+        use std::time::Duration;
+
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let id = tree.add(ThemeSwitcher::new().tooltip(bastyde_i18n::lit!("Pick the app theme")));
+        tree.layout(SizeProposal::exact(240.0, 40.0));
+
+        assert!(tree.active_overlays().is_empty());
+        tree.pointer_move(tree.bounds(id).center());
+        // Not instant — the tooltip waits for the hover delay.
+        assert!(tree.active_overlays().is_empty());
+        tree.advance_time(Duration::from_secs(2));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "ThemeSwitcher tooltip should appear after the hover delay"
+        );
     }
 
     #[test]
