@@ -35,6 +35,7 @@ use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
@@ -92,6 +93,10 @@ pub struct ScrollArea {
     line_height: f32,
     /// Thickness of the scroll bar (for permanent mode layout).
     scroll_bar_thickness: f32,
+    /// Optional thumb tint forwarded to the built-in scroll bars. `None`
+    /// (default) paints from the theme's `scrollbar_thumb*` tokens. See
+    /// [`Self::scroll_bar_thumb_color`].
+    scroll_bar_thumb_color: Option<ColorProp>,
     /// When true, content smaller than the viewport is stretched to fill it.
     widget_resizable: bool,
     /// Whether line-based scroll events animate smoothly to their target.
@@ -170,6 +175,7 @@ impl ScrollArea {
             horizontal_policy: ScrollBarPolicy::default(),
             line_height: 20.0,
             scroll_bar_thickness: 12.0,
+            scroll_bar_thumb_color: None,
             widget_resizable: false,
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
@@ -205,6 +211,19 @@ impl ScrollArea {
     /// Set the scroll bar display mode (`Overlay`, `Permanent`, or `Thin`).
     pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
         self.scroll_bar_style = style;
+        self
+    }
+
+    /// Tint the built-in scroll bars' thumb with an explicit colour instead of
+    /// the theme's `scrollbar_thumb*` tokens. Accepts anything
+    /// `impl Into<ColorProp>` — a `Color`, a theme role, or a `Signal` —
+    /// resolved against the live theme at paint, so roles/signals stay
+    /// reactive. Forwarded to both scroll bars via
+    /// [`ScrollBar::thumb_color`](crate::scroll_bar::ScrollBar::thumb_color).
+    /// Use when the area sits on a surface the surface-relative tokens don't
+    /// suit — e.g. a tooltip's inverse chip (`TextRole::TooltipText`).
+    pub fn scroll_bar_thumb_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.scroll_bar_thumb_color = Some(color.into());
         self
     }
 
@@ -344,7 +363,7 @@ impl Widget for ScrollArea {
         let thickness = self.scroll_bar_thickness; // full thickness for all modes
 
         // Create vertical scrollbar
-        let v_scrollbar = ScrollBar::new(
+        let mut v_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Vertical,
             self.scroll_y.clone(),
             self.max_scroll_y.clone(),
@@ -352,11 +371,14 @@ impl Widget for ScrollArea {
         )
         .thickness(thickness)
         .visual(visual);
+        if let Some(tint) = &self.scroll_bar_thumb_color {
+            v_scrollbar = v_scrollbar.thumb_color(tint.clone());
+        }
         let v_id = ctx.add(v_scrollbar);
         ids.push(v_id);
 
         // Create horizontal scrollbar
-        let h_scrollbar = ScrollBar::new(
+        let mut h_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Horizontal,
             self.scroll_x.clone(),
             self.max_scroll_x.clone(),
@@ -364,6 +386,9 @@ impl Widget for ScrollArea {
         )
         .thickness(thickness)
         .visual(visual);
+        if let Some(tint) = &self.scroll_bar_thumb_color {
+            h_scrollbar = h_scrollbar.thumb_color(tint.clone());
+        }
         let h_id = ctx.add(h_scrollbar);
         ids.push(h_id);
 

@@ -41,6 +41,7 @@ use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, PointerButton, WidgetEvent};
 use bastyde_core::gesture::DragPhase;
 use bastyde_core::signal::Signal;
@@ -99,6 +100,11 @@ pub struct ScrollBar {
     variant: ScrollBarVariant,
     /// Per-call style override.
     style_override: Option<SharedScrollBarStyle>,
+    /// Optional thumb tint. `None` → the style paints from the theme's
+    /// `scrollbar_thumb*` tokens; `Some` → tint from this `ColorProp`
+    /// (resolved at paint, so a role / `Signal` stays reactive). See
+    /// [`Self::thumb_color`].
+    thumb_color: Option<ColorProp>,
 }
 
 impl std::fmt::Debug for ScrollBar {
@@ -142,6 +148,7 @@ impl ScrollBar {
             step_size: 40.0,
             variant: ScrollBarVariant::default(),
             style_override: None,
+            thumb_color: None,
         }
     }
 
@@ -180,6 +187,19 @@ impl ScrollBar {
     /// Override the active [`ScrollBarStyle`] for this widget instance only.
     pub fn style(mut self, style: impl ScrollBarStyle) -> Self {
         self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Tint the thumb with an explicit colour instead of the theme's
+    /// `scrollbar_thumb*` tokens. Accepts anything `impl Into<ColorProp>` —
+    /// a `Color`, a theme role (`TextRole`/`SurfaceRole`/…), or a `Signal`;
+    /// resolved against the live theme at paint, so roles and signals stay
+    /// reactive. The active [`ScrollBarStyle`] derives the idle/hover/pressed
+    /// states from this tint. Use when the bar sits on a surface the
+    /// surface-relative tokens don't suit — a tooltip's inverse chip, a
+    /// branded panel. Mirrors [`Button::text_role`](crate::button::Button::text_role).
+    pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.thumb_color = Some(color.into());
         self
     }
 
@@ -264,6 +284,7 @@ impl Widget for ScrollBar {
             orientation: self.orientation,
             variant: self.variant,
             min_thumb_length: self.min_thumb_length,
+            thumb_color: self.thumb_color.clone(),
         };
         let body_id = style.make_body(&cfg, ctx);
         self.body_id = Some(body_id);
@@ -555,6 +576,42 @@ mod tests {
     use super::*;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::widget_tree::WidgetTree;
+
+    // A `thumb_color` override must reach the `ScrollBarStyleConfig` the active
+    // style sees, so a custom style (or the recipe) can tint the thumb. Mirrors
+    // how `Button::text_role` flows into `ButtonStyleConfig`.
+    #[test]
+    fn thumb_color_override_threads_into_style_config() {
+        use bastyde_core::build_context::BuildContext;
+        use bastyde_core::styles::{ScrollBarStyle, ScrollBarStyleConfig};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct RecordingStyle(Rc<Cell<bool>>);
+        impl ScrollBarStyle for RecordingStyle {
+            fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                self.0.set(cfg.thumb_color.is_some());
+                ctx.add(crate::primitives::Spacer::new())
+            }
+        }
+
+        let saw_override = Rc::new(Cell::new(false));
+        let mut tree = WidgetTree::new();
+        let bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.5),
+        )
+        .style(RecordingStyle(saw_override.clone()))
+        .thumb_color(bastyde_tokens::TextRole::TooltipText);
+        tree.add(bar);
+        tree.layout(SizeProposal::exact(20.0, 200.0));
+        assert!(
+            saw_override.get(),
+            "ScrollBar::thumb_color must thread into ScrollBarStyleConfig::thumb_color"
+        );
+    }
 
     fn make_scrollbar() -> (ScrollBar, Signal<f32>, Signal<f32>, Signal<f32>) {
         let position = Signal::new(0.0_f32);

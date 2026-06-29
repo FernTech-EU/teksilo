@@ -57,6 +57,15 @@ pub struct ScrollBarStyleConfig {
     /// `bastyde_widgets::styles::recipe_scroll_bar_style` constants by
     /// default; apps override per-instance via `ScrollBar::min_thumb_length(...)`.
     pub min_thumb_length: f32,
+    /// Optional thumb tint override (`ScrollBar::thumb_color` /
+    /// `ScrollArea::scroll_bar_thumb_color`). `None` (the default) means the
+    /// style paints from the theme's `scrollbar_thumb*` tokens. When set, the
+    /// style tints the thumb from this `ColorProp` instead — resolved against
+    /// the live theme at paint, so a role (e.g. `TextRole::TooltipText`) or a
+    /// `Signal` stays reactive. Lets chrome on a non-standard surface — a
+    /// tooltip's inverse chip, a branded panel — give the thumb a contrasting
+    /// colour the surface-relative tokens can't. Mirrors `Button::text_role`.
+    pub thumb_color: Option<crate::color_prop::ColorProp>,
 }
 
 pub trait ScrollBarStyle: 'static {
