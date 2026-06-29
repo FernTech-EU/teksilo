@@ -34,7 +34,7 @@ repository = "https://github.com/ferntech-eu/bastyde"
 
 [workspace.dependencies]
 # Shared dependency versions
-accesskit = "0.24.0"
+accesskit = "0.24.1"
 tiny-skia = "0.12.0"
 wgpu = "29.0.3"
 winit = "0.30"
@@ -71,8 +71,8 @@ bytemuck = { version = "1", features = ["derive"] }
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves
 # the user's local "today" from the OS.
 jiff = "0.2"
-text-document = { path = "../text-document/crates/public_api", version = "1.6.3" }
-text-typeset = { path = "../text-typeset", version = "1.5.0" }
+text-document = { path = "../text-document/crates/public_api", version = "1.7.0" }
+text-typeset = { path = "../text-typeset", version = "1.6.0" }
 
 # Internal crates
 bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.6.2" }
