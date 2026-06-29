@@ -45,6 +45,12 @@ pub(crate) struct EditorState {
     /// at 0; observers see a strictly increasing count as async
     /// `set_html` / `set_markdown` imports complete.
     pub document_loaded_count: Signal<u64>,
+    /// Optional user callback fired once per drain batch that contained a
+    /// genuine **content edit** ([`DocumentEvent::ContentsChanged`]) and was
+    /// not a programmatic load/reset. Set via
+    /// [`RichTextEditor::on_change`](super::RichTextEditor::on_change); runs on
+    /// the UI thread, so it may touch `Signal`s (e.g. flip a dirty flag).
+    pub on_change: Option<Rc<dyn Fn()>>,
     pub has_selection: Signal<bool>,
     pub caret_visible: Signal<bool>,
     pub cursor_position: Signal<usize>,
@@ -431,6 +437,7 @@ impl EditorState {
             document_version: Signal::new(0),
             format_version: Signal::new(0),
             document_loaded_count: Signal::new(0),
+            on_change: None,
             has_selection: Signal::new(false),
             caret_visible,
             cursor_position: Signal::new(0),
@@ -538,6 +545,11 @@ impl EditorState {
         let mut a11y_snapshot_dirty = false;
         let mut saw_format_change = false;
         let mut document_loaded_pulses = 0_u64;
+        // Track genuine user edits vs programmatic loads/resets, so the
+        // user `on_change` callback fires only when the *content* was edited
+        // (not when `set_djot`/`set_markdown` repopulates the document).
+        let mut saw_content_change = false;
+        let mut saw_reset_or_load = false;
         for event in drained {
             had_events = true;
             match event {
@@ -548,6 +560,7 @@ impl EditorState {
                 } => {
                     self.pending_text_changed = true;
                     a11y_snapshot_dirty = true;
+                    saw_content_change = true;
                     if blocks_affected <= 1 && !self.needs_full_layout {
                         single_pos = Some(position);
                     } else {
@@ -587,6 +600,7 @@ impl EditorState {
                 | DocumentEvent::BlockCountChanged(_) => {
                     self.pending_text_changed = true;
                     a11y_snapshot_dirty = true;
+                    saw_reset_or_load = true;
                     self.needs_full_layout = true;
                     single_pos = None;
                 }
@@ -624,12 +638,21 @@ impl EditorState {
                     .get()
                     .wrapping_add(document_loaded_pulses),
             );
+            saw_reset_or_load = true;
         }
 
         if had_events {
             self.content_dirty = true;
             self.document_version
                 .set(self.document_version.get().wrapping_add(1));
+        }
+
+        // Fire the user edit callback only for genuine content edits — not for
+        // a programmatic load/reset (`set_djot`/`set_markdown` repopulate).
+        if saw_content_change && !saw_reset_or_load
+            && let Some(cb) = self.on_change.clone()
+        {
+            cb();
         }
 
         // Drop the cached flow snapshot and synthetic-id lookup

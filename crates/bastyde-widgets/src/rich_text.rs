@@ -500,6 +500,20 @@ impl RichTextEditor {
         self
     }
 
+    /// Install a callback fired once per batch of genuine **user content
+    /// edits** (typing, paste, cut, delete) — and *not* on a programmatic
+    /// `set_djot` / `set_markdown` / `set_html` load or a document reset. The
+    /// callback runs on the UI thread during the editor's frame drain, so it
+    /// may touch `Signal`s directly — e.g. flip a "dirty" flag or kick a
+    /// debounced autosave. Replaces any prior change callback on this editor.
+    ///
+    /// For a reactive change *token* (which also bumps on loads/format-only
+    /// changes), observe [`document_version`](Self::document_version) instead.
+    pub fn on_change(self, f: impl Fn() + 'static) -> Self {
+        self.state.borrow_mut().on_change = Some(Rc::new(f));
+        self
+    }
+
     // --- Observable signals ---------------------------------------------
 
     /// Reactive counter that bumps on every document change (content edits,
