@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Global text scale (accessibility "grow all text")
 
 A single app-wide setting that magnifies **all** text for low-vision users —
