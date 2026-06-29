@@ -35,7 +35,7 @@ use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
-use bastyde_tokens::CornerRadius;
+use bastyde_tokens::{CornerRadius, TextRole};
 
 use crate::primitives::{Grid, Padding, Spacer, TrackSize, VStack};
 use crate::scroll_area::{ScrollArea, ScrollBarPolicy};
@@ -158,7 +158,6 @@ impl CompositeTooltipWidget {
 
 impl Widget for CompositeTooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
         use crate::styles::recipe_tooltip_style as tt;
         let self_id = ctx.self_id();
 
@@ -192,7 +191,11 @@ impl Widget for CompositeTooltipWidget {
         let scrolled = ctx.add(
             ScrollArea::from_id(body_id)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
-                .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff),
+                .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
+                // The chip is the dark / inverse `tooltip_bg`; tint the thumb
+                // from `tooltip_text` so it contrasts (the surface-relative
+                // `scrollbar_thumb` token would be dark-on-dark / light-on-light).
+                .scroll_bar_thumb_color(TextRole::TooltipText),
         );
 
         let padded = ctx.add(
@@ -206,7 +209,7 @@ impl Widget for CompositeTooltipWidget {
         let indicator = ctx.add(DwellIndicator::new(
             self.dwell_step.clone(),
             self.sticky.clone(),
-            theme.colors.tooltip_text,
+            TextRole::TooltipText,
         ));
 
         // Footer: 1fr Spacer + Auto indicator — keeps the dwell pin

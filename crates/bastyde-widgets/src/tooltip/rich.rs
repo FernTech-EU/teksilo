@@ -378,7 +378,7 @@ impl Widget for RichTooltipWidget {
             let indicator = ctx.add(DwellIndicator::new(
                 self.dwell_step.clone(),
                 self.sticky.clone(),
-                theme.colors.tooltip_text,
+                TextRole::TooltipText,
             ));
             // Footer row uses a Grid (Fractional + Auto columns) so the
             // accordion column receives an explicit width proposal during

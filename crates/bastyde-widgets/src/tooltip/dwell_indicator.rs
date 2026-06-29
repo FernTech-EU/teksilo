@@ -23,10 +23,10 @@ use bastyde_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::Color;
 
 const DWELL_INDICATOR_SIZE: f32 = 14.0;
 
@@ -35,7 +35,11 @@ const DWELL_INDICATOR_SIZE: f32 = 14.0;
 pub(crate) struct DwellIndicator {
     step: Signal<u32>,
     sticky: Signal<bool>,
-    color: Color,
+    /// Tint, resolved against the live theme at paint so a role
+    /// (`TextRole::TooltipText`) tracks a runtime theme swap — the chip
+    /// background is painted live too, so a captured `Color` would desync
+    /// (e.g. light-on-light after an IntUI → Material 3 dark switch).
+    color: ColorProp,
 }
 
 impl std::fmt::Debug for DwellIndicator {
@@ -48,11 +52,15 @@ impl std::fmt::Debug for DwellIndicator {
 }
 
 impl DwellIndicator {
-    pub(crate) fn new(step: Signal<u32>, sticky: Signal<bool>, color: Color) -> Self {
+    pub(crate) fn new(
+        step: Signal<u32>,
+        sticky: Signal<bool>,
+        color: impl Into<ColorProp>,
+    ) -> Self {
         Self {
             step,
             sticky,
-            color,
+            color: color.into(),
         }
     }
 }
@@ -79,13 +87,13 @@ impl Widget for DwellIndicator {
         Size::new(DWELL_INDICATOR_SIZE, DWELL_INDICATOR_SIZE).into()
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let center = Point::new(
             bounds.x + bounds.width / 2.0,
             bounds.y + bounds.height / 2.0,
         );
         let radius = (bounds.width.min(bounds.height) / 2.0) - 1.0;
-        let color = self.color;
+        let color = self.color.resolve(ctx.theme, true);
         let sticky = self.sticky.get();
 
         if sticky {
