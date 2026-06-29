@@ -5,7 +5,7 @@
 
 MessageBox — QMessageBox-style alert dialog.
 
-A higher-level surface built on top of [`ModalContainer`]
+A higher-level surface built on top of `ModalContainer`
 for the classic "tell the user something and ask for a response"
 pattern: unsaved-changes prompts, error surfaces, confirmation
 dialogs, and informational notices. Mirrors QMessageBox (Qt),
@@ -40,7 +40,7 @@ fn on_close(ctx: &mut EventContext) {
 
 ## Severity
 
-[`MessageBoxSeverity`] controls the icon drawn beside the title and
+`MessageBoxSeverity` controls the icon drawn beside the title and
 its tint:
 
 - `Information` — info glyph, `status_info_fg` tint.
@@ -53,7 +53,7 @@ its tint:
 Severity is conveyed through the icon + title + text. Per Bastyde's
 Int UI baseline, buttons are **never** colored as "destructive":
 destructive intent lives in the dialog's severity and wording, not
-in the button. See [`crate::button`] for details.
+in the button. See `crate::button` for details.
 
 ## Default & escape buttons
 
@@ -68,7 +68,7 @@ in the button. See [`crate::button`] for details.
 
 ## Result reporting
 
-[`MessageBox::on_result`] takes `impl Fn(MessageBoxResult,
+`MessageBox::on_result` takes `impl Fn(MessageBoxResult,
 &mut EventContext) + 'static`. The callback fires exactly once — on
 button activation or Escape dismissal — then the modal is closed by
 the framework.
@@ -112,7 +112,7 @@ Semantic role of a message-box button. Used for fallback escape
 resolution (`Reject` wins when no explicit escape button is set).
 Bastyde deliberately does **not** render `Destructive` buttons with
 a red fill — the dialog's severity icon and wording carry that
-signal. See [`crate::button`] for the framework-level rationale.
+signal. See `crate::button` for the framework-level rationale.
 
 ```rust
 pub enum ButtonRole { /* variants */ }
@@ -128,7 +128,7 @@ pub enum ButtonRole { /* variants */ }
 ## `pub enum StandardButton`
 
 The Qt-modeled catalog of standard buttons. Each variant resolves
-to a localized label, a semantic [`ButtonRole`], and a stable
+to a localized label, a semantic `ButtonRole`, and a stable
 intent-name string used internally for shortcut/action routing.
 
 ```rust
@@ -180,7 +180,7 @@ catalog via `tr_widget!` so apps can override per-locale.
 
 A single button placement inside a MessageBox, including an optional
 per-instance label override. Callers usually build these via
-[`From<StandardButton>`] (`StandardButton::Ok.into()`), or
+`From<StandardButton>` (`StandardButton::Ok.into()`), or
 construct them manually when `Custom` is needed.
 
 ```rust
@@ -200,8 +200,8 @@ Override the default translated label.
 ## `pub enum MessageBoxButtons`
 
 Pre-built button bundles covering the common MessageBox shapes.
-Custom combinations go through [`MessageBox::add_button`] or
-[`MessageBoxButtons::Custom`].
+Custom combinations go through `MessageBox::add_button` or
+`MessageBoxButtons::Custom`.
 
 ```rust
 pub enum MessageBoxButtons { /* variants */ }
@@ -219,7 +219,7 @@ pub enum MessageBoxButtons { /* variants */ }
 
 ## `pub struct MessageBoxResult`
 
-Report passed to [`MessageBox::on_result`] when the dialog closes.
+Report passed to `MessageBox::on_result` when the dialog closes.
 
 ```rust
 pub struct MessageBoxResult { /* fields */ }
@@ -230,10 +230,10 @@ pub struct MessageBoxResult { /* fields */ }
 A modal alert dialog that displays a severity icon, title, body text, and
 one or more buttons.
 
-Constructed via severity-named constructors ([`MessageBox::information`],
-[`MessageBox::warning`], [`MessageBox::critical`], [`MessageBox::question`],
-[`MessageBox::plain`]), configured fluently, and presented with
-[`MessageBox::present`]. See the module documentation for the full guide.
+Constructed via severity-named constructors (`MessageBox::information`,
+`MessageBox::warning`, `MessageBox::critical`, `MessageBox::question`,
+`MessageBox::plain`), configured fluently, and presented with
+`MessageBox::present`. See the module documentation for the full guide.
 
 ```rust
 pub struct MessageBox { /* fields */ }
@@ -278,7 +278,7 @@ Secondary, explanatory text rendered below the primary text in
 
 #### `pub fn detailed_text(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Detailed text hidden behind a "Show details" [`Accordion`] —
+Detailed text hidden behind a "Show details" `Accordion` —
 for technical diagnostics (stack traces, error codes). Matches
 Qt's `setDetailedText`.
 
@@ -286,14 +286,14 @@ Qt's `setDetailedText`.
 
 Apply a preset button bundle. Implicitly sets default and
 escape buttons for the preset (both can be overridden via
-[`MessageBox::default_button`] and
-[`MessageBox::escape_button`]).
+`MessageBox::default_button` and
+`MessageBox::escape_button`).
 
 #### `pub fn add_button(mut self, button: impl Into<MessageBoxButton>) -> Self`
 
 Append a single button. Use to augment a preset (rare) or to
 build a bespoke button row without going through
-[`MessageBoxButtons::Custom`].
+`MessageBoxButtons::Custom`.
 
 #### `pub fn default_button(mut self, which: StandardButton) -> Self`
 
@@ -310,13 +310,13 @@ allowed). Must refer to one of the configured buttons.
 
 Attach a "Don't show again"-style checkbox below the body.
 Internally creates a `Signal<bool>` initialized to `false` and
-reports its state in [`MessageBoxResult::checkbox_checked`].
+reports its state in `MessageBoxResult::checkbox_checked`.
 For external observation, use
-[`MessageBox::show_again_checkbox_state`] instead.
+`MessageBox::show_again_checkbox_state` instead.
 
 #### `pub fn show_again_checkbox_state(mut self, signal: Signal<bool>) -> Self`
 
-Like [`MessageBox::show_again_checkbox`], but with a
+Like `MessageBox::show_again_checkbox`, but with a
 caller-owned `Signal<bool>` so the checkbox state survives the
 dialog lifetime (useful for "remember my choice" persistence).
 

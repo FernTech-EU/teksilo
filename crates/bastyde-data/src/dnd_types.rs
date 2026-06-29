@@ -12,6 +12,26 @@
 //! the view merely renders the source's verdict and routes the commit. This is
 //! what lets an external source of truth (e.g. a Qleany entity store) drive a
 //! view without the view ever mutating a mirror model.
+//!
+//! ## Key types
+//!
+//! - [`ItemKey`] — blanket identity trait for any `Clone + Eq + Hash + Debug + 'static` type.
+//! - [`RowState`] — whether a lazy row's data is resident (`Ready`) or still loading (`Loading`).
+//! - [`DragEligibility`] — per-row drag gate returned by `ListDataSource::drag`.
+//! - [`DropPosition`] — where a drop lands relative to the target row.
+//! - [`DragSource`] — who is dragging: the same view (intra-view reorder) or a foreign view/OS drop.
+//! - [`DropQuery`] / [`DropResponse`] — hover-time can-I-drop? query and verdict.
+//! - [`DropCommit`] — the committed drop handed to `accept_drop`.
+//!
+//! ```ignore
+//! // Example: implementing can_accept for a custom ListDataSource
+//! fn can_accept(&self, query: &bastyde_data::DropQuery<'_, usize>) -> bastyde_data::DropResponse {
+//!     match &query.source {
+//!         bastyde_data::DragSource::SameView { .. } => bastyde_data::DropResponse::Accept,
+//!         bastyde_data::DragSource::Foreign { .. } => bastyde_data::DropResponse::Reject,
+//!     }
+//! }
+//! ```
 
 use bastyde_core::DragPayload;
 

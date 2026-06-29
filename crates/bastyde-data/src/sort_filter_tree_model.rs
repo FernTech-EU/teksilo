@@ -30,6 +30,35 @@
 //! nodes. Apps that want identity-based selection should observe
 //! `version_signal()` and rewrite the selection from `NodeId`s after each
 //! bump.
+//!
+//! ```rust
+//! # use bastyde_data::{TreeModel, SortFilterTreeModel, SortDirection, TreeFilterMode};
+//! let tree: TreeModel<&'static str> = TreeModel::new();
+//! let src  = tree.insert_root(0, "src");
+//! let docs = tree.insert_root(1, "docs");
+//! tree.insert_child(src, 0, "main.rs");
+//! tree.insert_child(docs, 0, "readme.md");
+//!
+//! let proxy = SortFilterTreeModel::new(tree)
+//!     .filter_mode(TreeFilterMode::KeepAncestors)
+//!     .with_comparator("name", |a: &&str, b: &&str| a.cmp(b))
+//!     .with_predicate("name", |text| {
+//!         let needle = text.to_string();
+//!         Box::new(move |row: &&str| row.contains(&needle))
+//!     });
+//!
+//! // Only roots visible initially (collapsed).
+//! assert_eq!(proxy.visible_count(), 2);
+//!
+//! proxy.set_filter("name", ".rs");
+//! // KeepAncestors: src (parent of main.rs) stays visible even though it
+//! // doesn't match itself.
+//! assert!(proxy.visible_count() >= 1);
+//! proxy.clear_filters();
+//!
+//! proxy.expand(src);
+//! assert_eq!(proxy.visible_count(), 3); // src + main.rs + docs
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -249,10 +278,12 @@ impl<T: 'static> SortFilterTreeModel<T> {
 
     // ── Slice-shaped read API ─────────────────────────────────────────────
 
+    /// Number of currently visible (non-filtered, non-collapsed) nodes in the flat list.
     pub fn visible_count(&self) -> usize {
         self.inner.borrow().flattened.len()
     }
 
+    /// Call `f` with the item and [`FlatEntry`] metadata at `flat_index`, returning `f`'s result.
     pub fn with_entry<R>(
         &self,
         flat_index: usize,
@@ -267,6 +298,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         tree.with_item(node_id, |item| f(item, &entry))
     }
 
+    /// Return the [`NodeId`] of the node at `flat_index`, or `None` if the index is out of range.
     pub fn visible_node_id(&self, flat_index: usize) -> Option<NodeId> {
         self.inner
             .borrow()
@@ -275,10 +307,12 @@ impl<T: 'static> SortFilterTreeModel<T> {
             .map(|e| e.node_id)
     }
 
+    /// Return a clone of the [`FlatEntry`] at `flat_index`, or `None` if out of range.
     pub fn entry_at(&self, flat_index: usize) -> Option<FlatEntry> {
         self.inner.borrow().flattened.get(flat_index).cloned()
     }
 
+    /// Return the flat index of `node` in the current visible list, or `None` if it is not visible.
     pub fn flat_index_of(&self, node: NodeId) -> Option<usize> {
         self.inner
             .borrow()
@@ -287,10 +321,12 @@ impl<T: 'static> SortFilterTreeModel<T> {
             .position(|e| e.node_id == node)
     }
 
+    /// Whether `node` is currently expanded in this projection.
     pub fn is_expanded(&self, node: NodeId) -> bool {
         self.inner.borrow().expanded.contains(&node)
     }
 
+    /// Expand `node`, revealing its children in the flat list. Rebuilds and bumps the version signal.
     pub fn expand(&self, node: NodeId) {
         let inserted = self.inner.borrow_mut().expanded.insert(node);
         if inserted {
@@ -298,6 +334,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         }
     }
 
+    /// Collapse `node`, hiding its children. Rebuilds and bumps the version signal.
     pub fn collapse(&self, node: NodeId) {
         let removed = self.inner.borrow_mut().expanded.remove(&node);
         if removed {
@@ -305,6 +342,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         }
     }
 
+    /// Toggle the expanded state of `node`. Always rebuilds and bumps the version signal.
     pub fn toggle(&self, node: NodeId) {
         {
             let mut g = self.inner.borrow_mut();
@@ -317,6 +355,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         rebuild_and_bump(&self.inner);
     }
 
+    /// Expand every node that has children, making the full tree visible.
     pub fn expand_all(&self) {
         let nodes_with_children: Vec<NodeId> = {
             let g = self.inner.borrow();
@@ -331,6 +370,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         rebuild_and_bump(&self.inner);
     }
 
+    /// Collapse every node, leaving only roots visible.
     pub fn collapse_all(&self) {
         self.inner.borrow_mut().expanded.clear();
         rebuild_and_bump(&self.inner);
@@ -356,7 +396,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
         self.inner.borrow().last_divergence
     }
 
-    /// Underlying tree handle (for direct mutation).
+    /// Return the underlying [`TreeModel`] handle for direct mutation outside the projection.
     pub fn tree(&self) -> TreeModel<T> {
         self.inner.borrow().tree.clone()
     }

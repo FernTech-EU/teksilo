@@ -9,7 +9,7 @@ PrivacySettings — a user-facing panel for telemetry consent management.
 
 Embeddable in any container — typically a `Dialog` for first-run consent
 or a dedicated tab in the app's settings UI.  Reads from
-[`OpenedTelemetry`] and writes to [`ConsentStore`]; the UI rebuilds
+`OpenedTelemetry` and writes to `ConsentStore`; the UI rebuilds
 whenever the consent state signal changes.  When no telemetry is registered
 in `app_state` the widget renders a graceful placeholder so apps without
 analytics pay nothing.
@@ -24,7 +24,7 @@ analytics pay nothing.
    `privacy-*` namespace. Apps install the framework bundle via
    `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
 2. **Per-scope toggles** — one per
-   [`ConsentScope`] field, intersected
+   `ConsentScope` field, intersected
    with `reporter.supported_scopes()` so toggles for
    unsupported scopes are hidden, not just disabled. Toggles work
    from `Unknown` (auto-transition to `Granted` with the toggled
@@ -41,7 +41,7 @@ analytics pay nothing.
 7. **Footer** — Withdraw consent (equal prominence to Accept,
    GDPR Art. 7(3)).
 
-When no [`OpenedTelemetry`] is registered in `app_state`, the
+When no `OpenedTelemetry` is registered in `app_state`, the
 widget renders a "Telemetry not configured" placeholder. Apps that
 ship without analytics pay nothing.
 
@@ -64,7 +64,7 @@ let panel = PrivacySettings::new()
 ## `pub struct PrivacySettings`
 
 Settings widget for telemetry consent. Construct with
-[`PrivacySettings::new`] and embed in any container.
+`PrivacySettings::new` and embed in any container.
 
 ```rust
 pub struct PrivacySettings { /* fields */ }

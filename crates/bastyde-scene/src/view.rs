@@ -4,6 +4,14 @@
 //! [`SceneView`] — the viewport widget that hosts a [`Scene`] and
 //! places its items at scene coordinates.
 //!
+//! `SceneView` is the bridge between the model layer ([`Scene`] /
+//! [`SceneModel`]) and the render/event pipeline. It
+//! manages a pan/zoom/rotation camera, materialises heavyweight widgets
+//! for delegated items, dispatches pointer events to lightweight item
+//! handlers, and feeds synthetic AT nodes to AccessKit for every visible
+//! lightweight item. Multiple `SceneView`s can share one `SceneModel` and
+//! reconcile independently on every mutation.
+//!
 //! ## Composition
 //!
 //! - **Placement.** `place_children` plants each materialised
@@ -46,6 +54,33 @@
 //! - **Drag-to-move** for items carrying `IS_DRAGGABLE`; **marquee**
 //!   selection on the empty viewport surface (or under
 //!   [`DragMode::ScrollHandDrag`](crate::DragMode), pan-on-drag).
+//!
+//! ## Example
+//!
+//! ```rust
+//! # use bastyde_scene::{Scene, SceneModel, SceneView, SceneSelectionMode, RectItem};
+//! # use bastyde_canvas::{Point, Rect};
+//! # use bastyde_tokens::Color;
+//! // Build a shared model and add a lightweight rect item.
+//! let model = SceneModel::new();
+//! let local_bounds = Rect::new(0.0, 0.0, 120.0, 80.0);
+//! let item_id = model.add_item(
+//!     RectItem::new(local_bounds).fill(Color::from_rgb(0.2, 0.5, 0.8)),
+//!     Point::new(50.0, 50.0), // local_pos in scene coords
+//! );
+//!
+//! // Create viewports backed by that model; each has its own camera.
+//! let _view_a = SceneView::with_model(model.clone())
+//!     .selection_mode(SceneSelectionMode::Single)
+//!     .default_size(800.0, 600.0)
+//!     .initial_zoom(1.5);
+//!
+//! let _view_b = SceneView::with_model(model.clone())
+//!     .interactive(false); // axis-chrome / overview pane
+//!
+//! // Both views see the item; the model remembers its local_pos.
+//! assert!(model.local_pos(item_id).is_some());
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -425,12 +460,26 @@ impl DebugOverlay {
 /// that receives the current focus and returns the next id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusDirection {
+    /// Advance to the next item — corresponds to the Tab key.
     Forward,
+    /// Retreat to the previous item — corresponds to Shift+Tab.
     Backward,
 }
 
-/// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
-/// coordinates.
+/// A pannable/zoomable viewport that renders a [`Scene`]'s items at scene
+/// coordinates and routes user input (scroll, pinch, drag, keyboard) back into
+/// the camera signals.
+///
+/// Construct with [`SceneView::new`] (single-view sugar: wraps a [`Scene`] in a
+/// fresh [`SceneModel`]) or [`SceneView::with_model`] (multi-view: several
+/// viewports share one [`SceneModel`] and each reconcile independently on every
+/// mutation). Install a heavyweight builder for delegated items via
+/// [`delegate_typed`](Self::delegate_typed). Add to a [`WidgetTree`](bastyde_core::widget_tree::WidgetTree)
+/// like any other widget; gestures and camera animations are wired automatically
+/// during [`build`](bastyde_core::widget::Widget::build).
+///
+/// See the [module-level documentation](crate) for the full composition model
+/// and `docs/bastyde-scene.md` for an end-to-end guide.
 pub struct SceneView {
     /// Shared, cloneable handle to the scene this view renders. Multiple
     /// `SceneView`s can hold clones of one [`SceneModel`] and reconcile

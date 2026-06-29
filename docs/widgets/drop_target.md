@@ -13,7 +13,7 @@ bounds and is always visible; the widget adds a reactive highlight border +
 tint while a drag hovers and, if a hint slot is set, fades in a centered
 popup card ("Drop your image here").
 
-It reacts to **both** internal drags (typed [`DragPayload`]) and external
+It reacts to **both** internal drags (typed `DragPayload`) and external
 (OS) drops (files / text / URIs), through the framework's normal drag
 pipeline (`on_drag_hover` / `on_drag_leave` / `on_drop`).
 
@@ -37,9 +37,9 @@ DropTarget::new()
 
 # Styling
 
-The highlight overlay + popup chrome is a Tier-3 [`DropTargetStyle`]; the
+The highlight overlay + popup chrome is a Tier-3 `DropTargetStyle`; the
 default `RecipeDropTargetStyle`
-tracks the interaction state. Override per-call with [`DropTarget::style`] or
+tracks the interaction state. Override per-call with `DropTarget::style` or
 theme-wide via `theme.style_slots.drop_target`.
 
 # Accessibility
@@ -89,7 +89,7 @@ pub struct DropTarget { /* fields */ }
 
 #### `pub fn new() -> Self`
 
-A drop target with no child yet — call [`Self::child`] (required).
+A drop target with no child yet — call `Self::child` (required).
 
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -137,7 +137,7 @@ advertised.
 #### `pub fn accept_typed<T: 'static>(mut self) -> Self`
 
 Accept internal drags whose payload carries a value of type `T`.
-Ergonomic companion to [`Self::on_drop_typed`].
+Ergonomic companion to `Self::on_drop_typed`.
 
 #### `pub fn accept_when(mut self, f: impl Fn(&DragPayload) -> bool + 'static) -> Self`
 
@@ -151,7 +151,7 @@ custom visuals off this signal.
 
 #### `pub fn bind_drag_state(mut self, signal: Signal<DropTargetDragState>) -> Self`
 
-Full three-state version of [`Self::bind_is_targeted`].
+Full three-state version of `Self::bind_is_targeted`.
 
 #### `pub fn on_drop( mut self, f: impl FnMut(DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
@@ -161,7 +161,7 @@ when the accept filter passes.
 #### `pub fn on_drop_typed<T: 'static>( mut self, mut f: impl FnMut(T, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Ergonomic typed drop: implicitly sets `accept_typed::<T>()` and extracts
-the typed value before invoking `f`. Last-call-wins with [`Self::on_drop`].
+the typed value before invoking `f`. Last-call-wins with `Self::on_drop`.
 
 #### `pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self`
 

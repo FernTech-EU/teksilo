@@ -5,7 +5,7 @@
 
 `HexColorInput` — single-line `#RRGGBB[AA]` color editor.
 
-A specialization of [`TextInput`] that wires an input mask, a
+A specialization of `TextInput` that wires an input mask, a
 hex-digit character filter, and a strict commit-time validator on top
 of the standard text-editing surface. Bound to a `Signal<Color>`
 (required) or `Signal<Option<Color>>` (nullable). External writes to
@@ -24,8 +24,8 @@ code isn't clobbered by a sibling widget tweaking the value.
   `TextInputField` mask grammar (`h` = hex digit slot, `\\` literal
   escape).
 - **Validation**: commits on Enter / Tab-out / blur.  Returns
-  [`ValidationOutcome::Valid`] / [`ValidationOutcome::Corrected`] /
-  [`ValidationOutcome::Invalid`] which the inner field maps to a
+  `ValidationOutcome::Valid` / `ValidationOutcome::Corrected` /
+  `ValidationOutcome::Invalid` which the inner field maps to a
   visible inline strip via the standard
   `bind_validation_feedback` bridge.
 - **Nullable**: empty (after trim) commits `None`; non-empty

@@ -3,10 +3,10 @@
 
 # Wizard
 
-[`Wizard`] — a thin modal launcher around [`Stepper`].
+`Wizard` — a thin modal launcher around `Stepper`.
 
 Renders as a button (or a custom `.trigger(...)` widget) that opens a modal
-containing a `Stepper` built from the same [`Step`]s. The modal's Cancel and
+containing a `Stepper` built from the same `Step`s. The modal's Cancel and
 a wrapped Finish both dismiss it.
 
 ## Builder methods at a glance
@@ -19,10 +19,10 @@ a wrapped Finish both dismiss it.
 
 ## `pub struct Wizard`
 
-A button (or custom trigger) that opens a modal [`Stepper`].
+A button (or custom trigger) that opens a modal `Stepper`.
 
-`Wizard::new(label)` renders as a `Filled` [`Button`] whose tap opens a
-full-screen modal containing a [`Stepper`] built from the same [`Step`]s.
+`Wizard::new(label)` renders as a `Filled` `Button` whose tap opens a
+full-screen modal containing a `Stepper` built from the same `Step`s.
 The modal's auto-injected Cancel button and the wrapped Finish both dismiss
 it. Override the trigger with `trigger` to use any widget
 instead of the default button.
@@ -40,11 +40,11 @@ used as the modal title.
 
 #### `pub fn step(mut self, step: Step) -> Self`
 
-Append a single [`Step`] to the wizard.
+Append a single `Step` to the wizard.
 
 #### `pub fn steps(mut self, steps: impl IntoIterator<Item = Step>) -> Self`
 
-Append multiple [`Step`]s from an iterator.
+Append multiple `Step`s from an iterator.
 
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 

@@ -3,13 +3,13 @@
 
 # TextScaleControl
 
-[`TextScaleControl`] — the settings control that grows all text in the app.
+`TextScaleControl` — the settings control that grows all text in the app.
 
 Drop this into a preferences/settings window to let low-vision users scale
 every piece of text uniformly (the framework multiplies the active theme's
 typography by the chosen factor — see
 `WidgetTree::set_user_text_scale`).
-It is a thin specialization of [`SpinBox`] that displays a percent
+It is a thin specialization of `SpinBox` that displays a percent
 (80 %–200 %, step 10 %) and, on each edit, both **persists** the value and
 **applies it app-wide** — so the developer only has to place the widget.
 
@@ -41,10 +41,10 @@ key and seeds every window, so the chosen size is restored automatically.
 
 ## `pub struct TextScaleControl`
 
-A specialized [`SpinBox`] for the global user text-scale setting.
+A specialized `SpinBox` for the global user text-scale setting.
 
 See the `module docs` for the persistence + app-wide application
-contract. Construct with [`TextScaleControl::new`], optionally attach a
+contract. Construct with `TextScaleControl::new`, optionally attach a
 visible `label`, and place it in a settings view.
 
 ```rust

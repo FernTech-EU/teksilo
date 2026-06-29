@@ -23,9 +23,9 @@ Two drivers:
   rolls the width back into its anchor before going dormant.
 
 The reveal edge is chosen with `reveal_from`:
-[`UnrollFrom::Leading`] (default) keeps the leading edge pinned and
+`UnrollFrom::Leading` (default) keeps the leading edge pinned and
 grows trailing-ward — the "slide out from a button on the left"
-shape; [`UnrollFrom::Trailing`] mirrors it.
+shape; `UnrollFrom::Trailing` mirrors it.
 
 Honors `prefers-reduced-motion`: the self-animated driver snaps to
 its end value instead of tweening (the external driver's owner is
@@ -97,7 +97,7 @@ Pre-registered child by `WidgetId`.
 #### `pub fn reveal_from(mut self, from: UnrollFrom) -> Self`
 
 Set the edge that stays anchored as the child unrolls. Defaults
-to [`UnrollFrom::Leading`].
+to `UnrollFrom::Leading`.
 
 #### `pub fn progress_signal(&self) -> Option<Signal<f32>>`
 

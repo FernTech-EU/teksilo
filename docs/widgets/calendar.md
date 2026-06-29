@@ -13,8 +13,8 @@ Used standalone for event apps and scheduling, and embedded in
 
 # Selection modes
 
-- [`Calendar::single`] — pick one day. Bound to `Signal<Option<Date>>`.
-- [`Calendar::range`] — pick a start + end day. Bound to
+- `Calendar::single` — pick one day. Bound to `Signal<Option<Date>>`.
+- `Calendar::range` — pick a start + end day. Bound to
   `Signal<Option<DateRange>>`. Click first day → click second day to
   commit. Escape mid-selection cancels the in-progress anchor.
 
@@ -80,7 +80,7 @@ ctx.add(
 ## `pub struct DateRange`
 
 Inclusive range of two dates, with `start <= end` enforced at
-construction. Used by [`Calendar::range`].
+construction. Used by `Calendar::range`.
 
 ```rust
 pub struct DateRange { /* fields */ }
@@ -102,7 +102,7 @@ invariant `start <= end` always holds.
 What the calendar body is showing — drives the WPF/Avalonia
 "header-zoom" UX where clicking the title cycles to a coarser
 grid, letting the user reach any year in 2-3 clicks instead of
-many chevron presses. Default [`CalendarMode::Days`].
+many chevron presses. Default `CalendarMode::Days`.
 
 ```rust
 pub enum CalendarMode { /* variants */ }
@@ -111,8 +111,8 @@ pub enum CalendarMode { /* variants */ }
 ### Variants
 
 - **`Days`** — 6×7 day grid for the visible month. Title shows "May 2026". Header chevrons step by ±1 month and ±1 year.
-- **`Months`** — 4×3 grid of months. Title shows "2026". Header chevrons step by ±1 year. Picking a cell zooms back into [`Self::Days`].
-- **`Years`** — 4×3 grid of years (current decade). Title shows "2020 — 2029". Header chevrons step by ±10 years (one decade). Picking a cell zooms back into [`Self::Months`].
+- **`Months`** — 4×3 grid of months. Title shows "2026". Header chevrons step by ±1 year. Picking a cell zooms back into `Self::Days`.
+- **`Years`** — 4×3 grid of years (current decade). Title shows "2020 — 2029". Header chevrons step by ±10 years (one decade). Picking a cell zooms back into `Self::Months`.
 
 ### Methods
 

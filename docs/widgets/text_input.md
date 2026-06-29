@@ -5,7 +5,7 @@
 
 `TextInput` — styled single-line text field composite.
 
-Wraps the [`TextInputField`]
+Wraps the `TextInputField`
 editing primitive in a bordered, padded frame with placeholder
 overlay, validation, optional clear button, and leading/trailing
 slots. All actual text editing is delegated to the field: every
@@ -13,7 +13,7 @@ configuration method here has a direct counterpart on the
 primitive.
 
 Most applications want `TextInput`. Choose
-[`TextInputField`] directly
+`TextInputField` directly
 when you're building a composite of your own that already
 supplies its frame — `SpinBox` is the canonical in-tree example.
 
@@ -40,7 +40,7 @@ TextInput::new(search.clone())
 
 Validation state for the text input field.
 
-Drives the inline feedback strip and border tint of [`TextInput`].
+Drives the inline feedback strip and border tint of `TextInput`.
 
 ```rust
 pub enum ValidationState { /* variants */ }
@@ -72,14 +72,14 @@ Construct a new text input bound to `text`.
 #### `pub fn variant(mut self, variant: TextInputVariant) -> Self`
 
 Pick a Tier-1 design-language variant
-([`TextInputVariant::Outlined`] / `Filled` / `Underline` / `Bare`).
-The IntUI default ([`crate::styles::RecipeTextInputStyle`]) honours
+(`TextInputVariant::Outlined` / `Filled` / `Underline` / `Bare`).
+The IntUI default (`crate::styles::RecipeTextInputStyle`) honours
 `Outlined`, `Filled`, and `Bare`; `Underline` falls back to
 `Outlined` until per-side stroke recipes land.
 
 #### `pub fn style(mut self, style: impl TextInputStyle) -> Self`
 
-Override the active [`TextInputStyle`] for this widget instance
+Override the active `TextInputStyle` for this widget instance
 only. The widget keeps responsibility for caret blinking, IME
 composition, the placeholder layering, the leading / trailing
 slots and the validation strip — the style only paints the
@@ -150,22 +150,22 @@ Forwarded to `TextInputField`.
 #### `pub fn input_mask(mut self, mask: impl Into<String>) -> Self`
 
 Install an input mask (Qt grammar). Forwarded 1:1 to
-[`TextInputField::input_mask`]. Composing widgets like
+`TextInputField::input_mask`. Composing widgets like
 `DateEdit` use this to project the date format pattern
 onto the editing surface.
 
 #### `pub fn validator( mut self, f: impl Fn(&str) -> crate::primitives::text_input_field::ValidationOutcome + 'static, ) -> Self`
 
 Install a commit-time validator. Forwarded 1:1 to
-[`TextInputField::validator`]. Pair with
-[`Self::validation_feedback_signal`] (or
-[`Self::bind_validation_feedback`]) to surface the outcome
+`TextInputField::validator`. Pair with
+`Self::validation_feedback_signal` (or
+`Self::bind_validation_feedback`) to surface the outcome
 in the inline strip.
 
 #### `pub fn caret_position(&self) -> Signal<usize>`
 
 Reactive caret position. Mirrors the inner field's
-[`TextInputField::caret_position`] after `build`. Capture
+`TextInputField::caret_position` after `build`. Capture
 before `ctx.add(text_input)` — used by composing widgets
 (`DateEdit` segment-stepping) that need to know which
 segment Up/Down should step.
@@ -173,7 +173,7 @@ segment Up/Down should step.
 #### `pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)>`
 
 Programmatic caret setter. Mirrors the inner field's
-[`TextInputField::caret_setter`]. Returns a closure that
+`TextInputField::caret_setter`. Returns a closure that
 is a no-op until `build` runs; afterwards it walks the
 inner field's state and moves the document cursor. Capture
 before `ctx.add(text_input)`.
@@ -181,14 +181,14 @@ before `ctx.add(text_input)`.
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
 Reactive published validation feedback. Mirrors the inner
-field's [`TextInputField::validation_feedback_signal`]
+field's `TextInputField::validation_feedback_signal`
 after `build`. Composing widgets observe this to compose
 feedback across multiple fields (range editor's
 worse-of-two ladder, etc.).
 
 #### `pub fn validation(mut self, validation: Signal<ValidationState>) -> Self`
 
-Bind an external [`ValidationState`] signal directly (e.g. when
+Bind an external `ValidationState` signal directly (e.g. when
 validation runs server-side). Use `bind_validation_feedback`
 when wiring a local validator's output.
 
@@ -215,7 +215,7 @@ Attach a registry-driven rich tooltip by key. Mutually exclusive with
 
 #### `pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self`
 
-Attach an inline rich tooltip from a pre-built [`tooltip::TooltipContent`].
+Attach an inline rich tooltip from a pre-built `tooltip::TooltipContent`.
 Mutually exclusive with `tooltip` and `composite_tooltip` (last call wins).
 
 #### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`

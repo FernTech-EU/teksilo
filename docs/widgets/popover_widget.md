@@ -4,13 +4,13 @@
 # PopoverWidget
 
 `PopoverWidget<T>` — a generic trigger that opens a popover when
-activated, plus the [`PopoverButton`] / [`PopoverIconButton`] aliases.
+activated, plus the `PopoverButton` / `PopoverIconButton` aliases.
 
 Wraps a caller-built trigger (`T: PopoverTrigger`) with overlay
 wiring: owns a `popover_open: Signal<bool>` toggled on activate /
 dismiss, sets `has_popup` and `expanded_when` on the inner trigger so
 AT announces the disclosure state, pre-builds the popover content as a
-dormant subtree, and shows / hides it via [`OverlayRequest`]. The
+dormant subtree, and shows / hides it via `OverlayRequest`. The
 `set_dormant` + `activate` + `show_overlay` sequence and the
 dismiss-callback shape match `DateEdit`
 so behavior across the disclosure family stays consistent.
@@ -57,7 +57,7 @@ everything else is shared by the generic.
 
 A trigger paired with a popover surface. See the module docs for the
 contract on which trigger properties get overridden during `build()`.
-Use the [`PopoverButton`] / [`PopoverIconButton`] aliases for the
+Use the `PopoverButton` / `PopoverIconButton` aliases for the
 concrete trigger types.
 
 ```rust
@@ -69,7 +69,7 @@ pub struct PopoverWidget<T: PopoverTrigger> { /* fields */ }
 #### `pub fn new(trigger: T) -> Self`
 
 Wrap a pre-configured trigger. The popover content is set
-separately via [`Self::content`] (required).
+separately via `Self::content` (required).
 
 #### `pub fn content(mut self, content: impl Widget + 'static) -> Self`
 
@@ -81,30 +81,30 @@ when the trigger fires. Required.
 #### `pub fn placement(mut self, p: OverlayPlacement) -> Self`
 
 Override the popover's placement relative to the trigger.
-Default: [`OverlayPlacement::BelowPreferred`].
+Default: `OverlayPlacement::BelowPreferred`.
 
 #### `pub fn dismiss_behavior(mut self, b: DismissBehavior) -> Self`
 
 Override the dismiss behavior. Default:
-[`DismissBehavior::EscapeOrClickOutside`].
+`DismissBehavior::EscapeOrClickOutside`.
 
 #### `pub fn fade_duration(mut self, d: Duration) -> Self`
 
 Animate the overlay in / out over the given duration. Default:
-no fade. See [`OverlayRequest::with_fade`] for the mechanism.
+no fade. See `OverlayRequest::with_fade` for the mechanism.
 
 #### `pub fn has_popup_kind(mut self, k: HasPopup) -> Self`
 
 Override the `has_popup` kind announced by AT. Defaults to the
-trigger type's [`PopoverTrigger::default_has_popup`].
+trigger type's `PopoverTrigger::default_has_popup`.
 
 #### `pub fn show_disclosure_caret(mut self, on: bool) -> Self`
 
 Whether to paint the disclosure triangle in the trigger's
 bottom-right corner. Defaults to the trigger type's
-[`PopoverTrigger::default_show_caret`]. The caret is
+`PopoverTrigger::default_show_caret`. The caret is
 suppressed automatically when
-[`PopoverTrigger::suppress_caret`] returns `true` (e.g.
+`PopoverTrigger::suppress_caret` returns `true` (e.g.
 `IconButton` at `Compact`) regardless of this flag. AT-hidden —
 the popup is announced via `set_has_popup` + `set_expanded`.
 
@@ -112,7 +112,7 @@ the popup is announced via `set_has_popup` + `set_expanded`.
 
 Notification fired on the rising edge of the popover (after the
 overlay show request is dispatched). No `EventContext` — observe
-[`Self::open_signal`] from your `build()` if you need
+`Self::open_signal` from your `build()` if you need
 frame / dispatch context.
 
 #### `pub fn on_close(mut self, f: impl Fn() + 'static) -> Self`
@@ -129,10 +129,10 @@ notification-only (no ctx).
 
 #### `pub fn surface(mut self, variant: PopoverVariant) -> Self`
 
-Choose which themed [`PopoverVariant`] surface wraps the content.
-Default is [`PopoverVariant::Default`] (elevated panel with
+Choose which themed `PopoverVariant` surface wraps the content.
+Default is `PopoverVariant::Default` (elevated panel with
 padding + shadow). The surface is resolved from the active
-[`PopoverStyle`] (`theme.style_slots.popover`), so it themes
+`PopoverStyle` (`theme.style_slots.popover`), so it themes
 app-wide.
 
 #### `pub fn bare(mut self) -> Self`
@@ -146,7 +146,7 @@ double-chromed.
 
 #### `pub fn surface_style(mut self, style: impl PopoverStyle) -> Self`
 
-Per-call [`PopoverStyle`] override for the surface (highest
+Per-call `PopoverStyle` override for the surface (highest
 precedence over the theme slot and the built-in default). Mirrors
 `Popover::style`. No effect under
 `bare`.
@@ -160,7 +160,7 @@ variant (which is presentational).
 
 ## `pub type PopoverButton`
 
-A [`Button`] that opens a popover when activated. Alias for
+A `Button` that opens a popover when activated. Alias for
 `PopoverWidget<Button>` — `HasPopup::Dialog`, no caret by default.
 
 ```rust
@@ -169,7 +169,7 @@ pub type PopoverButton = PopoverWidget<Button>;
 
 ## `pub type PopoverIconButton`
 
-An [`IconButton`] that opens a popover when activated. Alias for
+An `IconButton` that opens a popover when activated. Alias for
 `PopoverWidget<IconButton>` — `HasPopup::Menu`, corner caret on by
 default (skipped at `Compact`).
 

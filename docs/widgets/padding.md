@@ -22,8 +22,8 @@ are forwarded through the padding so a flexible or shrinkable child inside a
 - Applying asymmetric insets (e.g. extra leading inset for a list item).
 - Reacting to a `Signal`-driven spacing token.
 
-Use [`Padding::uniform`] when all four sides are equal, and
-[`Padding::symmetric`] when horizontal and vertical insets differ.
+Use `Padding::uniform` when all four sides are equal, and
+`Padding::symmetric` when horizontal and vertical insets differ.
 
 ```rust
 # use bastyde_widgets::primitives::{Padding, TextWidget};
@@ -46,8 +46,8 @@ let _w = Padding::uniform(12.0)
 A layout container that adds padding (insets) around a single child.
 
 See the `module documentation` for the full feature description and
-an example. Construct with [`Padding::new`], [`Padding::uniform`], or
-[`Padding::symmetric`]; attach a child with `.child(widget)` or
+an example. Construct with `Padding::new`, `Padding::uniform`, or
+`Padding::symmetric`; attach a child with `.child(widget)` or
 `.child_id(id)`.
 
 ```rust

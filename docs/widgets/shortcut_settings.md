@@ -20,9 +20,9 @@ and secondary keystrokes independently rebindable. Supports:
   bound elsewhere silently unbinds the conflicting shortcut so
   there's always exactly one binding per chord.
 - **Escape** during capture cancels without committing.
-- **Platform-aware keystroke labels** via [`format_keystroke`].
+- **Platform-aware keystroke labels** via `format_keystroke`.
 
-The widget owns the currently-armed [`CaptureHandle`]; dropping
+The widget owns the currently-armed `CaptureHandle`; dropping
 the widget cancels the capture, so navigating away mid-rebind
 cannot leak a stray rebind onto the next keystroke pressed
 somewhere else in the app.
@@ -50,7 +50,7 @@ ctx.add(
 
 Describes a rebind that collides with an existing binding.
 
-Passed to the [`ShortcutSettings::on_conflict`] callback so the app
+Passed to the `ShortcutSettings::on_conflict` callback so the app
 can surface a toast ("Save lost its Ctrl+S binding"); also used
 internally to drive the optional inline confirm prompt.
 

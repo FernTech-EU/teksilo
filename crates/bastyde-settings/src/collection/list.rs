@@ -4,11 +4,38 @@
 //! [`PersistedListModel<T>`] — bridge between a reactive
 //! [`ListModel<T>`](bastyde_data::ListModel) and a [`SettingsFile`].
 //!
-//! Construction loads the file, seeds the in-memory model from the
-//! `items` field, and registers a `observe_changes` observer that
-//! re-serializes the whole list on every mutation. The observer
-//! captures the file via `Rc` clone — both ends are `Rc<RefCell<>>`-
-//! shaped so cloning is cheap.
+//! Construction loads the file at `path`, seeds the in-memory model from
+//! its `items` field, and installs an `observe_changes` callback that
+//! re-serializes the whole list on every mutation. The observer captures
+//! the file handle via `Rc` clone — both ends are `Rc<RefCell<>>`-shaped
+//! so cloning is cheap and share-by-handle semantics apply.
+//!
+//! ## When to use
+//!
+//! Use this bridge for flat ordered collections (pinned items, palette
+//! entries, saved searches) whose total size stays well below ~1 k items.
+//! Each mutation re-serializes the full list; the debounce window
+//! coalesces rapid bursts so this work is paid at most once per window.
+//! For larger or rapidly-mutating lists prefer SQLite.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_settings::collection::list::PersistedListModel;
+//! use bastyde_settings::migration::Migrator;
+//! use serde::{Deserialize, Serialize};
+//! use std::time::Duration;
+//!
+//! #[derive(Serialize, Deserialize, Clone)]
+//! struct Tag { name: String }
+//!
+//! let path = std::env::temp_dir().join("tags.toml");
+//! let plm: PersistedListModel<Tag> =
+//!     PersistedListModel::open(path, Duration::ZERO, Migrator::new())
+//!         .expect("open failed");
+//! plm.model().push(Tag { name: "rust".into() });
+//! plm.flush_now().expect("flush");
+//! ```
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,12 +48,15 @@ use serde::{Deserialize, Serialize};
 use crate::file::{SettingsFile, SettingsFileError};
 use crate::migration::{Migrator, Versioned};
 
-/// On-disk shape: a versioned wrapper around `Vec<T>`. Apps construct
-/// migrations against this type, not against the bare collection.
+/// On-disk shape for a persisted list: a versioned wrapper around
+/// `Vec<T>`. Apps write migrations against this type, not the bare `Vec`.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ListFile<T> {
+    /// Schema version, matched against [`Versioned::CURRENT_VERSION`] on
+    /// load to run any registered migrations before deserialization.
     #[serde(default = "default_version")]
     pub version: u32,
+    /// The ordered list of items as stored on disk.
     #[serde(default = "Vec::new")]
     pub items: Vec<T>,
 }
@@ -109,18 +139,20 @@ where
         })
     }
 
-    /// The reactive list. Bind to `Repeater` / `ListView` directly via
-    /// `model.clone()`.
+    /// The underlying reactive list handle. Clone it to share with
+    /// `Repeater` / `ListView` widgets; mutations flow back through the
+    /// observer and schedule a debounced disk flush automatically.
     pub fn model(&self) -> &ListModel<T> {
         &self.model
     }
 
-    /// Force any pending payload to disk synchronously.
+    /// Flush any pending serialized payload to disk immediately,
+    /// bypassing the debounce window.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
         self.file.flush_now()
     }
 
-    /// The path being written to.
+    /// The absolute path of the TOML file being written to.
     pub fn path(&self) -> &std::path::Path {
         self.file.path()
     }

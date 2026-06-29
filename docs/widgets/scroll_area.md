@@ -8,10 +8,10 @@ and assistive-technology actions.
 
 Wrap any widget in `ScrollArea` to make it scrollable. The scroll position
 is stored in reactive `Signal<f32>` signals (one per axis), shared with the
-built-in [`ScrollBar`] children. Two display
+built-in `ScrollBar` children. Two display
 modes cover most use cases: `Overlay` (the default, macOS-style thin-at-rest
 indicator that expands on hover) and `Permanent` (a layout-consuming gutter
-always on screen). Use [`ScrollBarPolicy`] to control when each axis shows.
+always on screen). Use `ScrollBarPolicy` to control when each axis shows.
 
 ## Accessibility
 
@@ -70,8 +70,8 @@ pub enum ScrollBarPolicy { /* variants */ }
 A clipping viewport that makes any child widget scrollable.
 
 The scroll offset per axis is stored in a reactive `Signal<f32>`, shared
-with the built-in `ScrollBar` children. See [`ScrollBarMode`] for display
-options and [`ScrollBarPolicy`] for per-axis visibility control.
+with the built-in `ScrollBar` children. See `ScrollBarMode` for display
+options and `ScrollBarPolicy` for per-axis visibility control.
 
 ```rust
 pub struct ScrollArea { /* fields */ }
@@ -137,8 +137,8 @@ dimensions. If not set, falls back to cached content size or 300×200.
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Set the scroll-chaining behavior at the boundary. Default
-[`OverscrollBehavior::Chain`] (a boundary scroll bubbles to an ancestor
-scrollable); [`OverscrollBehavior::Contain`] absorbs it instead.
+`OverscrollBehavior::Chain` (a boundary scroll bubbles to an ancestor
+scrollable); `OverscrollBehavior::Contain` absorbs it instead.
 
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 

@@ -9,7 +9,7 @@ The widget owns all input handling: pointer drag (click-to-jump and
 thumb-drag), keyboard arrows (`ArrowRight`/`ArrowLeft`/`Up`/`Down`,
 `Home`, `End`), and `Increment`/`Decrement` accessibility actions.
 All visual chrome is delegated to a
-[`SliderStyle`] implementation; the
+`SliderStyle` implementation; the
 IntUI default ships out of the box and is also the theme-wide slot
 override target (`theme.style_slots.slider`).
 
@@ -39,7 +39,7 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 
 A draggable value selector bound to a `Signal<f32>` in a continuous
 or discrete range. Visual chrome is fully delegated to a
-[`SliderStyle`] implementation.
+`SliderStyle` implementation.
 
 ```rust
 pub struct Slider { /* fields */ }
@@ -71,8 +71,8 @@ time. Use `ctx.enabled_when(slider_id, signal)` for reactivity.
 #### `pub fn variant(mut self, variant: SliderVariant) -> Self`
 
 Pick a Tier-1 design-language variant
-([`SliderVariant::Continuous`] / `Discrete` / `Range`). The
-active [`SliderStyle`] decides what to do with the hint —
+(`SliderVariant::Continuous` / `Discrete` / `Range`). The
+active `SliderStyle` decides what to do with the hint —
 IntUI's default impl paints ticks for `Discrete` and ignores
 `Range` (the widget itself doesn't yet wire dual-thumb
 behaviour).
@@ -85,7 +85,7 @@ track (or to the leading side for vertical orientation).
 
 #### `pub fn style(mut self, style: impl SliderStyle) -> Self`
 
-Override the active [`SliderStyle`] for this widget instance
+Override the active `SliderStyle` for this widget instance
 only.
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`

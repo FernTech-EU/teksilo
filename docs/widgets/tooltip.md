@@ -7,17 +7,17 @@ Tooltip system — hover-triggered overlays with configurable delay.
 
 Three tiers, increasing in expressive power:
 
-- [`TooltipWidget`] — single line of localized text in a themed
+- `TooltipWidget` — single line of localized text in a themed
   rounded rect. Attached via the per-widget `.tooltip(...)` setter.
-- [`RichTooltipWidget`] — `TooltipContent`-driven (body + optional
+- `RichTooltipWidget` — `TooltipContent`-driven (body + optional
   long-form "more" disclosure + shortcut chip), inline-markup body
   so ``label`` cascade links resolve against
-  [`TooltipRegistry`]. Attached via `.rich_tooltip(key)` /
+  `TooltipRegistry`. Attached via `.rich_tooltip(key)` /
   `.rich_tooltip_content(content)`. On dwell it flips its AT role
   to `Role::Dialog` and advertises a `Focus` action — keyboard
   focus is not auto-transferred; the user Tabs in (the correct
   non-modal-panel a11y pattern).
-- [`composite::CompositeTooltipWidget`] — hosts an arbitrary
+- `composite::CompositeTooltipWidget` — hosts an arbitrary
   `impl Widget + 'static` body inside the same chrome with a
   larger surface budget. Crusader Kings 3-style: tabbed sections,
   charts, progress bars, conditional rows. Attached via
@@ -54,7 +54,7 @@ A tooltip content widget — a themed rounded rect with text.
 Composes a `TextWidget` with `Small` typography in `tooltip_text` color,
 then delegates the chrome (shadow, dark background, corner radius,
 padding) to the active `TooltipStyle` (default
-[`crate::styles::RecipeTooltipStyle`]). Apps install per-call
+`crate::styles::RecipeTooltipStyle`). Apps install per-call
 (`TooltipWidget::new(...).style(impl TooltipStyle)`) or theme-wide
 via `theme.style_slots.tooltip = Some(Rc::new(MyTooltip))`.
 

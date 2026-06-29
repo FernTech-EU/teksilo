@@ -9,7 +9,7 @@ corner radius, and padding.
 The equivalent of Qt's `QFrame`: a visual wrapper whose chrome comes from
 the active `PanelStyle` trait
 implementation. The IntUI default (`RecipePanelStyle`) honours four
-[`PanelVariant`] presets (Plain /
+`PanelVariant` presets (Plain /
 Sunken / Raised / Highlighted) while still accepting per-call overrides
 for background, border colour/width, corner radius, and padding. Apps
 requiring a custom surface (frosted glass, brutalist frame) supply their

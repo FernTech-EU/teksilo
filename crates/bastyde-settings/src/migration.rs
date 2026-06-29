@@ -65,17 +65,18 @@ pub trait Versioned {
 /// Errors surfaced by [`Migrator::run`].
 #[derive(Debug, thiserror::Error)]
 pub enum MigrationError {
-    /// The on-disk version is newer than this build can read. Refuse
-    /// to deserialize rather than risk silent corruption.
+    /// The on-disk version number exceeds `T::CURRENT_VERSION`; the
+    /// file was written by a newer build and cannot be read safely.
     #[error("settings file is version {on_disk}, but this build only reads up to {current}")]
     NewerThanCurrent { on_disk: u32, current: u32 },
-    /// No migration step is registered for the on-disk version.
+    /// The chain is missing a step for the encountered version, making
+    /// it impossible to reach `T::CURRENT_VERSION`.
     #[error("no migration step registered for settings version {0}")]
     NoStepFor(u32),
-    /// A migration step itself returned an error.
+    /// A migration step closure returned `Err(message)`.
     #[error("migration step {from} -> {} failed: {message}", from + 1)]
     Step { from: u32, message: String },
-    /// The post-migration value did not deserialize as the target type.
+    /// The migrated `toml::Value` did not deserialize as `T`.
     #[error("post-migration deserialization: {0}")]
     Deserialize(#[source] toml::de::Error),
 }
@@ -98,6 +99,11 @@ pub struct Migrator<T: Versioned + DeserializeOwned> {
 }
 
 impl<T: Versioned + DeserializeOwned> Migrator<T> {
+    /// Create an empty migrator with no steps registered.
+    ///
+    /// If `T::CURRENT_VERSION` is 1 (the initial schema) or the file
+    /// is already at the current version, no steps are needed and
+    /// `run` will succeed immediately.
     pub fn new() -> Self {
         Self {
             steps: Vec::new(),

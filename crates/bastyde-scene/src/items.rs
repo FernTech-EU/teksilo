@@ -46,9 +46,16 @@ pub use text::TextItem;
 /// label + indicator dot reads as one card" patterns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccessSubtreeMode {
+    /// Descendants emit their own AT nodes normally. Default.
     #[default]
     Inherit,
+    /// Descendants are pruned from the AT tree; the parent item
+    /// emits as a single AT node with no children.
     Exclude,
+    /// Descendants' label / description / actions are folded into
+    /// the parent AT node; descendants are then pruned. The subtree
+    /// reads as one AT element — useful for "card with icon + label
+    /// + badge = one selectable card" patterns.
     Merge,
 }
 

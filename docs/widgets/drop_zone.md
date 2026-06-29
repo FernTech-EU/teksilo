@@ -28,9 +28,9 @@ keeps the zone fully usable.
 
 # Styling
 
-The bordered, tinted chrome is a Tier-3 [`DropZoneStyle`]; the default
+The bordered, tinted chrome is a Tier-3 `DropZoneStyle`; the default
 `RecipeDropZoneStyle` tracks the
-interaction state. Override per-call with [`DropZone::style`] or theme-wide
+interaction state. Override per-call with `DropZone::style` or theme-wide
 via `theme.style_slots.drop_zone`.
 
 # Accessibility
@@ -100,7 +100,7 @@ An icon widget shown above the prompt (any widget — typically an
 
 #### `pub fn style(mut self, style: impl DropZoneStyle) -> Self`
 
-Override the Tier-3 [`DropZoneStyle`] for this instance only.
+Override the Tier-3 `DropZoneStyle` for this instance only.
 
 #### `pub fn on_files_dropped( mut self, f: impl FnMut(Vec<PathBuf>, &mut EventContext) + 'static, ) -> Self`
 

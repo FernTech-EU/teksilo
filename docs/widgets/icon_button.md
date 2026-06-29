@@ -53,11 +53,11 @@ let _w = IconButton::visibility_toggle(visible);    // password-field eye toggle
 
 Two distinct toggle modes:
 
-- [`IconButton::toggle`] — surface-tint bistate: clicking flips the
+- `IconButton::toggle` — surface-tint bistate: clicking flips the
   bound `Signal<bool>`; while `true`, the background reads as
   `SurfaceRole::Selected` ("on"). Same icon throughout. The
   pin-this-row / select-this-tool pattern.
-- [`IconButton::toggle_with_icon`] — surface-tint **and** icon-swap
+- `IconButton::toggle_with_icon` — surface-tint **and** icon-swap
   bistate: same surface flip plus the icon glyph swaps to a second
   icon. The visibility-toggle pattern (eye ↔ eye-off).
 
@@ -326,12 +326,12 @@ it to decide whether to mask or show the text.
 
 Icon factory set for predefined built-in buttons.
 
-Each field is a function pointer that creates an [`IconWidget`].
+Each field is a function pointer that creates an `IconWidget`.
 The default implementation uses SVG icons embedded in bastyde-widgets.
 
 # Overriding
 
-Call [`BuiltInIcons::set_global`] at app startup (before creating any
+Call `BuiltInIcons::set_global` at app startup (before creating any
 built-in buttons) to replace the default icon set:
 
 ```rust
@@ -360,7 +360,7 @@ Return the default icon set (SVGs embedded in bastyde-widgets).
 
 Set the global icon set. Call at app startup before creating any
 built-in buttons. Can only be set **once**: the global is a
-process-wide [`OnceLock`], so the first set wins and any later
+process-wide `OnceLock`, so the first set wins and any later
 call is ignored (and warns). It is also locked in the first time
 `global()` reads it, so set it before any built-in
 button is created. Use `defaults()` with struct

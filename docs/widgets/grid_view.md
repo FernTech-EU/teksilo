@@ -13,7 +13,7 @@ single / multi selection with 2D keyboard navigation, and is fully
 accessible (`Role::Grid` → `Role::GridCell`).
 
 The layout is pluggable via `GridLayoutStrategy`;
-the stock [`UniformGrid`] gives fixed tile size /
+the stock `UniformGrid` gives fixed tile size /
 fixed column count / adaptive min-width grids. (Variable-row-height and
 waterfall strategies, plus marquee selection, drag-reorder, sections and
 sticky headers, are layered on in later phases.)
@@ -62,7 +62,7 @@ pub struct GridView<T: 'static> { /* fields */ }
 #### `pub fn new( model: ListModel<T>, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by a `ListModel<T>`. The `delegate` builds the
-widget for each tile from a [`TileContext`].
+widget for each tile from a `TileContext`.
 
 #### `pub fn from_source<S: bastyde_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
@@ -74,11 +74,11 @@ Set the tile sizing / column-count policy.
 
 #### `pub fn tile_size(mut self, width: f32, height: f32) -> Self`
 
-Sugar for [`GridSizing::Fixed`] — every tile is exactly `width` × `height`.
+Sugar for `GridSizing::Fixed` — every tile is exactly `width` × `height`.
 
 #### `pub fn column_count(mut self, count: usize, tile_height: f32) -> Self`
 
-Sugar for [`GridSizing::FixedColumnCount`] — exactly `count` columns.
+Sugar for `GridSizing::FixedColumnCount` — exactly `count` columns.
 
 #### `pub fn variable_row_heights(mut self, estimated: f32) -> Self`
 

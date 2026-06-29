@@ -63,9 +63,9 @@ pub enum ToolBoxOrientation { /* variants */ }
 
 ## `pub struct ToolBoxItem`
 
-One section of a [`ToolBox`]. Construct with [`ToolBoxItem::new`] and pass
-to [`ToolBox::add`], or use the convenience [`ToolBox::item`] /
-[`ToolBox::item_id`] builders directly when leading / trailing slots
+One section of a `ToolBox`. Construct with `ToolBoxItem::new` and pass
+to `ToolBox::add`, or use the convenience `ToolBox::item` /
+`ToolBox::item_id` builders directly when leading / trailing slots
 and tooltip are not needed.
 
 Layout of the header row:
@@ -127,7 +127,7 @@ Overrides any previously set plain `.tooltip(...)` text.
 
 #### `pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self`
 
-Attach a rich tooltip driven by inline [`TooltipContent`] — for
+Attach a rich tooltip driven by inline `TooltipContent` — for
 one-offs that don't belong in the registry. Overrides any
 previously set plain `.tooltip(...)` text.
 
@@ -198,7 +198,7 @@ programmatically or share it across windows for synchronized state.
 #### `pub fn orientation(mut self, orientation: ToolBoxOrientation) -> Self`
 
 Set the section arrangement orientation (default
-[`ToolBoxOrientation::Vertical`]).
+`ToolBoxOrientation::Vertical`).
 
 #### `pub fn fill(mut self, fill: bool) -> Self`
 
@@ -228,7 +228,7 @@ is what makes a **single-section** ToolBox a plain collapsible panel
 
 #### `pub fn horizontal(mut self) -> Self`
 
-Shorthand for [`ToolBox::orientation`]`(`[`ToolBoxOrientation::Horizontal`]`)`.
+Shorthand for `ToolBox::orientation``(``ToolBoxOrientation::Horizontal``)`.
 
 #### `pub fn on_header_drag(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self`
 
@@ -240,7 +240,7 @@ header still selects it — the gesture arena tells a tap from a drag.
 #### `pub fn item(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self`
 
 Append an item with an inline content widget. Convenience wrapper
-around [`ToolBox::add`] that skips the [`ToolBoxItem`] builder for
+around `ToolBox::add` that skips the `ToolBoxItem` builder for
 the common label-plus-content case.
 
 #### `pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self`
@@ -249,7 +249,7 @@ Append an item whose content is a pre-registered widget id.
 
 #### `pub fn add(mut self, item: ToolBoxItem) -> Self`
 
-Append a fully-built [`ToolBoxItem`] — required when an icon,
+Append a fully-built `ToolBoxItem` — required when an icon,
 tooltip, or disabled flag is needed.
 
 #### `pub fn items<I>(mut self, items: I) -> Self where I: IntoIterator<Item = ToolBoxItem>,`

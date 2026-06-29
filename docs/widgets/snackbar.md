@@ -93,7 +93,7 @@ tree). Mutually exclusive with `.content(...)`.
 
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
-Override the default trigger [`ButtonVariant`] (default: `Plain`).
+Override the default trigger `ButtonVariant` (default: `Plain`).
 
 #### `pub fn enabled(mut self, enabled: bool) -> Self`
 

@@ -25,9 +25,9 @@ Features:
   Ctrl+X/C/V, Ctrl+A, Ctrl+Z/Y), IME commit, and pointer caret
   positioning and drag-select.
 - Optional per-character input filter
-  ([`TextInputField::char_filter`]), max-length cap
-  ([`TextInputField::max_length`]), and read-only mode
-  ([`TextInputField::read_only`]).
+  (`TextInputField::char_filter`), max-length cap
+  (`TextInputField::max_length`), and read-only mode
+  (`TextInputField::read_only`).
 - Commit hooks: Enter fires
   `on_submit_fn` and focus loss
   fires `on_blur_fn`.
@@ -63,7 +63,7 @@ ctx.add(
 
 ## `pub enum EchoMode`
 
-How a secure ([`TextInputField::secure`]) field echoes typed
+How a secure (`TextInputField::secure`) field echoes typed
 characters. Mirrors Qt's `QLineEdit::EchoMode`.
 
 ```rust
@@ -220,7 +220,7 @@ positions. Default: the theme's
 #### `pub fn validator(mut self, f: impl Fn(&str) -> ValidationOutcome + 'static) -> Self`
 
 Install a validator. The closure runs on every commit (Enter,
-Tab-out, focus loss) and returns a [`ValidationOutcome`] that
+Tab-out, focus loss) and returns a `ValidationOutcome` that
 drives `validation_feedback_signal`.
 
 **Does not run per-keystroke** — that's `char_filter`'s
@@ -230,7 +230,7 @@ produces caret-jump bugs and is explicitly out of scope.
 #### `pub fn secure(mut self, echo_mode: EchoMode) -> Self`
 
 Turn this into a secure (password) field with the given
-[`EchoMode`]. Masking happens at the text-engine layer (one echo
+`EchoMode`. Masking happens at the text-engine layer (one echo
 glyph per source `char`), so the plaintext never reaches the
 shaper or glyph atlas while masked, and caret / selection /
 hit-test stay correct. Also defaults `allow_copy` to `false` and
@@ -246,14 +246,14 @@ source `char`.
 #### `pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self`
 
 Bind the reveal toggle. When the signal is `true` the field
-shows plaintext regardless of [`EchoMode`]; when `false` it
+shows plaintext regardless of `EchoMode`; when `false` it
 masks. Shared with the eye `IconButton::visibility_toggle`.
 
 
 #### `pub fn at_reveal_policy(mut self, policy: AtRevealPolicy) -> Self`
 
 How a *revealed* secure field reports to assistive tech. Default
-[`AtRevealPolicy::SwapRole`].
+`AtRevealPolicy::SwapRole`.
 
 #### `pub fn allow_copy(mut self, allow: bool) -> Self`
 
@@ -263,7 +263,7 @@ Permit (or forbid) copy / cut. Plain fields default `true`;
 
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
-Reactive handle on the published [`ValidationFeedback`] state.
+Reactive handle on the published `ValidationFeedback` state.
 Composites bind to this to render the inline feedback strip
 below the field. Always present; reads `Pristine` until the
 first commit (or forever if no validator is installed).

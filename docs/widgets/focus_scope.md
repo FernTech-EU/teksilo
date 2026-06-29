@@ -9,7 +9,7 @@ boundary** for Tab / Shift+Tab focus cycling.
 Descendants' `tab_index` values are scoped to the nearest enclosing
 `FocusScope`: two sibling scopes that both number their children `1, 2, 3`
 never interleave — each scope is an independent, ordered unit within its
-parent. The [`TraversalScopePolicy`] controls what Tab does at the scope's
+parent. The `TraversalScopePolicy` controls what Tab does at the scope's
 ends:
 
 - `Continue` — Tab flows *out* of the

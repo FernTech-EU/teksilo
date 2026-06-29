@@ -48,12 +48,12 @@ let _w = Switcher::new(page.clone())
 A container that shows exactly one child at a time, driven by a
 `Signal<usize>` index.
 
-**Lazy mount.** A page added via [`Self::child`] / [`Self::child_boxed`]
-/ [`Self::children`] stays unconstructed until its index is first
+**Lazy mount.** A page added via `Self::child` / `Self::child_boxed`
+/ `Self::children` stays unconstructed until its index is first
 selected. Once mounted, the page's subtree persists for the
 Switcher's lifetime — switching away then back finds it in the
 state the user left it (focus, scroll, text-input contents, …).
-Pages added via [`Self::child_id`] are pre-mounted by the caller
+Pages added via `Self::child_id` are pre-mounted by the caller
 and treated eagerly: no lazy benefit, no semantic change.
 
 The Switcher itself reports the maximum natural size across every
@@ -95,7 +95,7 @@ The buffer reflects the **currently-mounted** set, not every
 declared page. With lazy mount, a page added via `child(...)`
 only appears in the buffer once it has been selected for the
 first time. Callers that need every id up front should pass
-pre-mounted ids via [`Self::child_id`] instead — those are
+pre-mounted ids via `Self::child_id` instead — those are
 eagerly recorded.
 
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
@@ -106,7 +106,7 @@ and kept alive across selection changes.
 
 #### `pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self`
 
-Add a pre-boxed child page (lazy, same as [`Self::child`]).
+Add a pre-boxed child page (lazy, same as `Self::child`).
 
 #### `pub fn child_id(mut self, id: WidgetId) -> Self`
 
@@ -117,4 +117,4 @@ the caller has already paid the construction cost.
 #### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 
 Add multiple child pages from an iterator (lazy, same as
-[`Self::child`]).
+`Self::child`).

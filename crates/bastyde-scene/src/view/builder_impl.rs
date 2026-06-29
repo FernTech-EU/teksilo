@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Builder and configuration methods for [`SceneView`].
+//!
+//! Covers construction (`new` / `with_model`), delegate wiring, selection,
+//! camera seeding (`initial_pan` / `initial_zoom` / `bind_view_state`),
+//! zoom/pan-bound overrides, drag mode, background/foreground paint hooks,
+//! magnetism, debug overlays, accessibility tuning (`a11y_mode`,
+//! `a11y_off_screen_mode`, `a11y_bounds_space`, `nested_a11y`), focus-order
+//! callbacks, reactive signal accessors, and the `with_scroll_bars` adaptor.
+
 use super::*;
 
 impl SceneView {

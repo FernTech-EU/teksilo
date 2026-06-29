@@ -6,7 +6,7 @@
 `TableView<T>` — generic, virtualized, accessible tabular widget.
 
 Built atop the `ListModel<T>` /
-[`ListDataSource`] data layer in
+`ListDataSource` data layer in
 `bastyde-data` and the `bastyde-tokens` `TableStyle`. Mirrors Qt's
 `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 The core skeleton: single body pane, row-virtualized with alternating
@@ -57,8 +57,8 @@ let _table = TableView::new(model)
 
 Generic, virtualized, accessible table with sortable / filterable / resizable columns.
 
-Construct with [`TableView::new`] (from a `ListModel<T>`)
-or [`TableView::from_source`] (any [`ListDataSource`]), then chain builder methods
+Construct with `TableView::new` (from a `ListModel<T>`)
+or `TableView::from_source` (any `ListDataSource`), then chain builder methods
 to configure columns, row heights, selection, and so on. See module docs for the full
 feature list and row-height modes.
 
@@ -94,7 +94,7 @@ to `from_source(..)` plus an identity-based replacement for
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Set the scroll-chaining behavior at the boundary (default
-[`OverscrollBehavior::Chain`]; `Contain`
+`OverscrollBehavior::Chain`; `Contain`
 disables chaining to an ancestor scrollable).
 
 #### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`
@@ -112,7 +112,7 @@ around (Qt `keyboardSearch` / macOS & Windows type-select).
 ASCII-case-insensitive. A pause longer than the
 `type_ahead_timeout` starts a fresh term.
 
-On an editable column whose [`EditTrigger`] is type-to-edit, typing
+On an editable column whose `EditTrigger` is type-to-edit, typing
 starts an edit instead — type-ahead applies on non-editable columns
 (or when no type-to-edit trigger is configured).
 
@@ -133,11 +133,11 @@ layout column for it, mirroring `ScrollArea::scroll_bar_style`.
 
 #### `pub fn add_column(mut self, col: Column<T>) -> Self`
 
-Append a single [`Column<T>`] definition to the table.
+Append a single `Column<T>` definition to the table.
 
 #### `pub fn columns(mut self, cols: impl IntoIterator<Item = Column<T>>) -> Self`
 
-Append multiple [`Column<T>`] definitions from an iterator.
+Append multiple `Column<T>` definitions from an iterator.
 
 #### `pub fn row_height(mut self, height: f32) -> Self`
 
@@ -177,16 +177,16 @@ Show or hide the column header row. Default: visible.
 
 Set how column widths are redistributed when columns are
 added, resized, or the table's own width changes. See
-[`ColumnResizePolicy`].
+`ColumnResizePolicy`.
 
 #### `pub fn tab_traversal(mut self, mode: TabTraversal) -> Self`
 
 Control how Tab / Shift+Tab navigate between cells. See
-[`TabTraversal`].
+`TabTraversal`.
 
 #### `pub fn edit_trigger(mut self, trigger: EditTrigger) -> Self`
 
-Set which user action opens a cell editor. See [`EditTrigger`].
+Set which user action opens a cell editor. See `EditTrigger`.
 
 #### `pub fn on_cell_edit_request( mut self, f: impl Fn(usize, &str, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
 
@@ -220,7 +220,7 @@ either mode.
 #### `pub fn selection_mode(mut self, mode: TableSelectionMode) -> Self`
 
 Choose the row-selection granularity (None / Single / Multi).
-See [`TableSelectionMode`].
+See `TableSelectionMode`.
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
@@ -231,7 +231,7 @@ with `from_source_keyed` instead.
 #### `pub fn cell_selection(mut self, sel: CellSelectionModel) -> Self`
 
 Install an independent cell-selection model on top of row selection.
-See [`CellSelectionModel`].
+See `CellSelectionModel`.
 
 #### `pub fn alternating_rows(mut self, enabled: bool) -> Self`
 
@@ -240,7 +240,7 @@ Paint every other row with a tinted background. Default: off.
 #### `pub fn grid_lines(mut self, kind: GridLines) -> Self`
 
 Draw horizontal and/or vertical grid lines between cells.
-See [`GridLines`].
+See `GridLines`.
 
 #### `pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self`
 

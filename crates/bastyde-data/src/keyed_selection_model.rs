@@ -1,20 +1,42 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Identity-based selection for collection widgets.
+//! `KeyedSelectionModel<K>` — identity-based selection for collection widgets.
 //!
-//! [`KeyedSelectionModel<K>`] stores selection as a set of source-defined
-//! **keys** rather than visible **indices**. This is what
+//! [`KeyedSelectionModel<K>`](KeyedSelectionModel) stores selection as a set of
+//! source-defined **keys** rather than visible **indices**. This is what
 //! [`SelectionModel`](crate::SelectionModel) cannot do: survive lazy
 //! window-slides and external reorders, and stay consistent across two views of
 //! the same source that scroll/sort/filter independently (selection is a set of
 //! identities, not positions). It coexists with the index-based
-//! `SelectionModel` — views opt into one or the other.
+//! [`SelectionModel`](crate::SelectionModel) — views opt into one or the other.
 //!
 //! Shift+click range extension is index-ordered by nature, so `extend_to` takes
 //! the current visible key order from the caller (the projection) at click
 //! time; the anchor is stored as a *key* so it survives scrolling out of the
-//! resident window.
+//! resident window. The selection is exposed as a reactive
+//! `Signal<HashSet<K>>` via `selection_signal()`.
+//!
+//! ## When to use
+//!
+//! Use [`KeyedSelectionModel`] when rows are identified by a stable domain key
+//! (entity id, file path, UUID) that survives reorders, sorts, and lazy-loading
+//! evictions. Use [`SelectionModel`](crate::SelectionModel) when rows are
+//! identified by their current visible index (simple in-memory lists).
+//!
+//! ```rust
+//! # use bastyde_data::KeyedSelectionModel;
+//! # use bastyde_data::SelectionMode;
+//! let sel: KeyedSelectionModel<u64> = KeyedSelectionModel::new(SelectionMode::Multi);
+//! sel.select(10);
+//! sel.toggle(20);
+//! sel.toggle(30);
+//! assert_eq!(sel.count(), 3);
+//! sel.toggle(10); // deselect
+//! assert!(!sel.is_selected(&10));
+//! sel.clear();
+//! assert_eq!(sel.count(), 0);
+//! ```
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -25,10 +47,13 @@ use bastyde_core::signal::Signal;
 use crate::dnd_types::ItemKey;
 use crate::selection_model::SelectionMode;
 
-/// Manages selection state keyed by source identity.
+/// Selection state keyed by source-defined identity rather than visible index.
 ///
-/// The selection is exposed as a `Signal<HashSet<K>>` so widgets observe it
-/// reactively. The anchor for Shift+click is a `K` (shared across clones).
+/// The selection set is exposed as a `Signal<HashSet<K>>` (via
+/// [`selection_signal`](KeyedSelectionModel::selection_signal)) so widgets
+/// observe it reactively without polling. Cloning the model shares the same
+/// selection and anchor across all handles. The Shift+click anchor is stored as
+/// a `K` so it survives lazy-window evictions and visible-order changes.
 pub struct KeyedSelectionModel<K: ItemKey> {
     mode: SelectionMode,
     selection: Signal<HashSet<K>>,
@@ -192,8 +217,8 @@ impl<K: ItemKey> Clone for KeyedSelectionModel<K> {
 }
 
 impl<K: ItemKey> KeyedSelectionModel<K> {
-    /// Register this model with the debug inspector under `name`. No-op in
-    /// release builds.
+    /// Register this model with the debug inspector under `name`; no-op in
+    /// release builds (`!cfg(debug_assertions)`). Returns `self` for chaining.
     pub fn debug_named(self, _name: impl Into<String>) -> Self {
         #[cfg(debug_assertions)]
         {

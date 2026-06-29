@@ -166,12 +166,15 @@ impl SceneModel {
     // Geometry mutation
     // -----------------------------------------------------------------
 
+    /// Move `id` to `local_pos` in its parent's coordinate space; notifies all views.
     pub fn set_local_pos(&self, id: ItemId, local_pos: Point) {
         self.0.borrow_mut().set_local_pos(id, local_pos);
     }
+    /// Replace the local bounding rect of `id`; notifies all views.
     pub fn set_local_bounds(&self, id: ItemId, local_bounds: Rect) {
         self.0.borrow_mut().set_local_bounds(id, local_bounds);
     }
+    /// Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
     pub fn set_transform(&self, id: ItemId, transform: Transform2D) {
         self.0.borrow_mut().set_transform(id, transform);
     }
@@ -180,15 +183,19 @@ impl SceneModel {
     // Flags / visibility / opacity mutation
     // -----------------------------------------------------------------
 
+    /// Replace the complete [`ItemFlags`] bitset for `id`; notifies all views.
     pub fn set_flags(&self, id: ItemId, flags: ItemFlags) {
         self.0.borrow_mut().set_flags(id, flags);
     }
+    /// Set or clear a single [`ItemFlags`] bit on `id`; notifies all views.
     pub fn set_flag(&self, id: ItemId, flag: ItemFlags, on: bool) {
         self.0.borrow_mut().set_flag(id, flag, on);
     }
+    /// Show or hide `id` (also hides its descendants); notifies all views.
     pub fn set_visible(&self, id: ItemId, visible: bool) {
         self.0.borrow_mut().set_visible(id, visible);
     }
+    /// Set the paint opacity of `id` (0.0 = transparent, 1.0 = opaque); notifies all views.
     pub fn set_opacity(&self, id: ItemId, opacity: f32) {
         self.0.borrow_mut().set_opacity(id, opacity);
     }
@@ -197,18 +204,23 @@ impl SceneModel {
     // Z-order / layer / parenting mutation
     // -----------------------------------------------------------------
 
+    /// Set the z-order of `id` within its layer; higher values paint on top.
     pub fn set_z(&self, id: ItemId, z: f32) {
         self.0.borrow_mut().set_z(id, z);
     }
+    /// Give `id` the highest z-value in its layer so it paints on top of all siblings.
     pub fn bring_to_front(&self, id: ItemId) {
         self.0.borrow_mut().bring_to_front(id);
     }
+    /// Give `id` the lowest z-value in its layer so it paints beneath all siblings.
     pub fn send_to_back(&self, id: ItemId) {
         self.0.borrow_mut().send_to_back(id);
     }
+    /// Move `id` to a different [`SceneLayer`] (background, default, foreground); notifies all views.
     pub fn set_layer(&self, id: ItemId, layer: SceneLayer) {
         self.0.borrow_mut().set_layer(id, layer);
     }
+    /// Re-parent `child` under `parent` (or under the scene root when `None`); notifies all views.
     pub fn set_item_parent(&self, child: ItemId, parent: Option<ItemId>) {
         self.0.borrow_mut().set_item_parent(child, parent);
     }
@@ -231,6 +243,7 @@ impl SceneModel {
     // Handlers
     // -----------------------------------------------------------------
 
+    /// Replace the [`SceneItemHandlerSet`] of `id`, or clear it with `None`.
     pub fn set_item_handlers(&self, id: ItemId, handlers: Option<SceneItemHandlerSet>) {
         self.0.borrow_mut().set_item_handlers(id, handlers);
     }
@@ -320,18 +333,23 @@ impl SceneModel {
     // Scene extent / interaction constraints
     // -----------------------------------------------------------------
 
+    /// Set the logical extent of the scene (used for scroll-bar sizing); `None` = unbounded.
     pub fn set_scene_rect(&self, rect: Option<Rect>) {
         self.0.borrow_mut().set_scene_rect(rect);
     }
+    /// Restrict panning to horizontal, vertical, or both axes; updates [`pan_axes_signal`](Self::pan_axes_signal).
     pub fn pan_axes(&self, axes: PanAxes) {
         self.0.borrow_mut().pan_axes(axes);
     }
+    /// Enable or disable pinch/scroll zoom; updates [`zoomable_signal`](Self::zoomable_signal).
     pub fn zoomable(&self, on: bool) {
         self.0.borrow_mut().zoomable(on);
     }
+    /// Clamp the camera pan to `bounds` (scene coordinates); `None` = no limit; updates [`pan_bounds_signal`](Self::pan_bounds_signal).
     pub fn set_pan_bounds(&self, bounds: Option<Rect>) {
         self.0.borrow_mut().set_pan_bounds(bounds);
     }
+    /// Restrict the zoom factor to `range`; `None` = no limit; updates [`zoom_range_signal`](Self::zoom_range_signal).
     pub fn set_zoom_range(&self, range: Option<std::ops::RangeInclusive<f32>>) {
         self.0.borrow_mut().set_zoom_range(range);
     }
@@ -340,24 +358,31 @@ impl SceneModel {
     // Accessibility structure mutation
     // -----------------------------------------------------------------
 
+    /// Register a logical AT group (landmark / rotor category container); returns its stable [`A11yGroupId`].
     pub fn add_a11y_group(&self, builder: A11yGroupBuilder) -> A11yGroupId {
         self.0.borrow_mut().add_a11y_group(builder)
     }
+    /// Remove a previously registered AT group; triggers an `a11y_change_signal` bump.
     pub fn remove_a11y_group(&self, id: A11yGroupId) {
         self.0.borrow_mut().remove_a11y_group(id);
     }
+    /// Re-parent `child` in the AT tree, overriding the default visual parent; `None` re-attaches under the scene root.
     pub fn set_a11y_parent(&self, child: A11yNode, parent: Option<A11yNode>) {
         self.0.borrow_mut().set_a11y_parent(child, parent);
     }
+    /// Declare a cross-node AT relationship (controls, describes, labels) from `from` to `to`.
     pub fn add_a11y_relation(&self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
         self.0.borrow_mut().add_a11y_relation(from, kind, to);
     }
+    /// Mark `node` as a live region (`Polite` or `Assertive`) so assistive tech announces changes to it.
     pub fn set_a11y_live(&self, node: A11yNode, live: accesskit::Live) {
         self.0.borrow_mut().set_a11y_live(node, live);
     }
+    /// Assign a landmark `role` to `node` (e.g. `Role::Region`, `Role::Main`) for rotor navigation.
     pub fn set_a11y_landmark(&self, node: A11yNode, role: accesskit::Role) {
         self.0.borrow_mut().set_a11y_landmark(node, role);
     }
+    /// Register `node` under the given rotor [`A11yCategory`] slices so it appears in category-filtered navigation.
     pub fn set_a11y_categories(&self, node: A11yNode, categories: &[A11yCategory]) {
         self.0.borrow_mut().set_a11y_categories(node, categories);
     }
@@ -376,24 +401,31 @@ impl SceneModel {
     // Reactive signals + version
     // -----------------------------------------------------------------
 
+    /// Reactive signal fired on every structural scene change; all views observe this to reconcile.
     pub fn item_change_signal(&self) -> Signal<ItemChange> {
         self.0.borrow().item_change_signal()
     }
+    /// Reactive monotonic counter bumped on every AT-structure change; views re-walk accessibility on any increment.
     pub fn a11y_change_signal(&self) -> Signal<u64> {
         self.0.borrow().a11y_change_signal()
     }
+    /// Monotonic counter incremented on every mutation; useful for cache invalidation without observing a signal.
     pub fn mutation_version(&self) -> u64 {
         self.0.borrow().mutation_version()
     }
+    /// Reactive current [`PanAxes`] restriction; updated by [`pan_axes`](Self::pan_axes).
     pub fn pan_axes_signal(&self) -> Signal<PanAxes> {
         self.0.borrow().pan_axes_signal()
     }
+    /// Reactive camera-pan clamp bounds; updated by [`set_pan_bounds`](Self::set_pan_bounds).
     pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>> {
         self.0.borrow().pan_bounds_signal()
     }
+    /// Reactive zoom-factor clamp range; updated by [`set_zoom_range`](Self::set_zoom_range).
     pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>> {
         self.0.borrow().zoom_range_signal()
     }
+    /// Reactive zoom-enabled flag; updated by [`zoomable`](Self::zoomable).
     pub fn zoomable_signal(&self) -> Signal<bool> {
         self.0.borrow().zoomable_signal()
     }
@@ -402,84 +434,111 @@ impl SceneModel {
     // Value queries
     // -----------------------------------------------------------------
 
+    /// Total number of items in the scene (lightweight + heavyweight).
     pub fn len(&self) -> usize {
         self.0.borrow().len()
     }
+    /// Returns `true` when the scene contains no items.
     pub fn is_empty(&self) -> bool {
         self.0.borrow().is_empty()
     }
+    /// All [`ItemId`]s currently in the scene, in insertion order.
     pub fn ids(&self) -> Vec<ItemId> {
         self.0.borrow().ids()
     }
+    /// The local position of `id` in its parent's coordinate space; `None` if `id` is unknown.
     pub fn local_pos(&self, id: ItemId) -> Option<Point> {
         self.0.borrow().local_pos(id)
     }
+    /// The local bounding rect of `id`; `None` if `id` is unknown.
     pub fn local_bounds(&self, id: ItemId) -> Option<Rect> {
         self.0.borrow().local_bounds(id)
     }
+    /// The additional local-to-parent transform of `id` (beyond position); `None` if none is set.
     pub fn transform(&self, id: ItemId) -> Option<Transform2D> {
         self.0.borrow().transform(id)
     }
+    /// The full local-to-scene transform for `id` (parent chain composed); identity if `id` is unknown.
     pub fn scene_transform(&self, id: ItemId) -> Transform2D {
         self.0.borrow().scene_transform(id)
     }
+    /// The origin of `id` mapped into scene coordinates; `None` if `id` is unknown.
     pub fn scene_pos(&self, id: ItemId) -> Option<Point> {
         self.0.borrow().scene_pos(id)
     }
+    /// The bounding rect of `id` in scene coordinates (local bounds transformed by the parent chain); `None` if unknown.
     pub fn scene_rect(&self, id: ItemId) -> Option<Rect> {
         self.0.borrow().scene_rect(id)
     }
+    /// The [`ItemFlags`] bitset of `id`; `None` if `id` is unknown.
     pub fn flags(&self, id: ItemId) -> Option<ItemFlags> {
         self.0.borrow().flags(id)
     }
+    /// Returns `true` if `id` and all of its ancestors are visible.
     pub fn is_effectively_visible(&self, id: ItemId) -> bool {
         self.0.borrow().is_effectively_visible(id)
     }
+    /// The own opacity of `id` (ignoring ancestors); `None` if `id` is unknown.
     pub fn opacity(&self, id: ItemId) -> Option<f32> {
         self.0.borrow().opacity(id)
     }
+    /// Accumulated opacity for `id` (own × each ancestor's opacity).
     pub fn effective_opacity(&self, id: ItemId) -> f32 {
         self.0.borrow().effective_opacity(id)
     }
+    /// The z-order value of `id` within its layer; `None` if `id` is unknown.
     pub fn z(&self, id: ItemId) -> Option<f32> {
         self.0.borrow().z(id)
     }
+    /// The [`SceneLayer`] of `id`; `None` if `id` is unknown.
     pub fn layer(&self, id: ItemId) -> Option<SceneLayer> {
         self.0.borrow().layer(id)
     }
+    /// The direct parent of `id`, or `None` if it is a root item (or unknown).
     pub fn parent_of(&self, id: ItemId) -> Option<ItemId> {
         self.0.borrow().parent_of(id)
     }
+    /// Returns `true` if `id` is anywhere in `ancestor`'s subtree.
     pub fn is_descendant_of(&self, id: ItemId, ancestor: ItemId) -> bool {
         self.0.borrow().is_descendant_of(id, ancestor)
     }
+    /// The logical extent set via [`set_scene_rect`](Self::set_scene_rect); `None` = unbounded.
     pub fn scene_rect_extent(&self) -> Option<Rect> {
         self.0.borrow().scene_rect_extent()
     }
+    /// The current pan-axis restriction without subscribing to its signal.
     pub fn current_pan_axes(&self) -> PanAxes {
         self.0.borrow().current_pan_axes()
     }
+    /// Returns `true` if zoom is currently enabled (snapshot; use [`zoomable_signal`](Self::zoomable_signal) for reactivity).
     pub fn is_zoomable(&self) -> bool {
         self.0.borrow().is_zoomable()
     }
+    /// Current pan-clamp bounds without subscribing to its signal.
     pub fn current_pan_bounds(&self) -> Option<Rect> {
         self.0.borrow().current_pan_bounds()
     }
+    /// Current zoom-factor clamp range without subscribing to its signal.
     pub fn current_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>> {
         self.0.borrow().current_zoom_range()
     }
+    /// All items whose bounding rects overlap `scene_rect` (spatial-index query).
     pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId> {
         self.0.borrow().items_in_rect(scene_rect)
     }
+    /// The topmost item under `scene_pt` using exact-shape hit-testing; `None` if no item is hit.
     pub fn item_at(&self, scene_pt: Point) -> Option<ItemId> {
         self.0.borrow().item_at(scene_pt)
     }
+    /// All items under `scene_pt` (exact-shape hit-test), ordered front-to-back.
     pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId> {
         self.0.borrow().items_at(scene_pt)
     }
+    /// All items whose bounding rects intersect `id`'s bounding rect.
     pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId> {
         self.0.borrow().colliding_items(id)
     }
+    /// The AT-tree parent of `child` as set by [`set_a11y_parent`](Self::set_a11y_parent); `None` = visual default.
     pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode> {
         self.0.borrow().a11y_parent_of(child)
     }

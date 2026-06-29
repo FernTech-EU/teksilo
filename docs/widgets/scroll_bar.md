@@ -8,7 +8,7 @@ ScrollBar — pointer and keyboard affordance for a `ScrollArea`.
 `ScrollBar` reads and writes a shared `Signal<f32>` scroll position and a
 `Signal<f32>` viewport/content ratio, both supplied by its owning `ScrollArea`.
 Interaction (thumb drag, track click, keyboard Up/Down/Home/End, hover) is
-handled here; all painting is delegated to the active [`ScrollBarStyle`] impl so
+handled here; all painting is delegated to the active `ScrollBarStyle` impl so
 the look is fully theme-overridable.
 
 Most applications do not need to construct a `ScrollBar` directly — `ScrollArea`
@@ -81,7 +81,7 @@ Set the scroll step for keyboard navigation.
 
 #### `pub fn visual(mut self, variant: ScrollBarVariant) -> Self`
 
-Set the visual variant. The active [`ScrollBarStyle`] picks how
+Set the visual variant. The active `ScrollBarStyle` picks how
 to paint each variant; the IntUI default ships Permanent /
 Overlay / Thin out of the box.
 
@@ -91,4 +91,4 @@ Alias for `visual` using the new variant naming.
 
 #### `pub fn style(mut self, style: impl ScrollBarStyle) -> Self`
 
-Override the active [`ScrollBarStyle`] for this widget instance only.
+Override the active `ScrollBarStyle` for this widget instance only.

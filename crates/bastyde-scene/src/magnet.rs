@@ -29,6 +29,45 @@
 //! scene only for default feedback (which end is the source) and for
 //! ordering the keyboard connect flow. It is advisory: the predicate is
 //! always authoritative on whether two magnets may connect.
+//!
+//! ## Example — two items connected by a typed magnet pair
+//!
+//! ```rust
+//! use bastyde_scene::{Scene, RectItem, Magnet, MagnetRole, MagnetRef, MagnetVerdict};
+//! use bastyde_canvas::{Point, Rect, Vec2};
+//!
+//! // A predicate that accepts Source → Target pairs on different items.
+//! fn source_to_target(a: &MagnetRef, b: &MagnetRef) -> MagnetVerdict {
+//!     if a.item == b.item { return MagnetVerdict::Reject; }
+//!     match (a.role, b.role) {
+//!         (MagnetRole::Source, MagnetRole::Target)
+//!         | (MagnetRole::Target, MagnetRole::Source) => MagnetVerdict::accept(),
+//!         _ => MagnetVerdict::Reject,
+//!     }
+//! }
+//!
+//! let mut scene = Scene::new();
+//!
+//! // Dragged item with a Source magnet at its local origin.
+//! let dragged = scene.add_item(
+//!     RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+//!     Point::ZERO,
+//! );
+//! scene.add_magnet(dragged, Magnet::new(Point::ZERO).role(MagnetRole::Source));
+//!
+//! // Target item 100 px to the right with a Target magnet at its local origin.
+//! let target = scene.add_item(
+//!     RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+//!     Point::new(100.0, 0.0),
+//! );
+//! scene.add_magnet(target, Magnet::new(Point::ZERO).role(MagnetRole::Target));
+//!
+//! // The dragged item is 5 px away from snapping; capture radius 20 px.
+//! if let Some(snap) = scene.compute_item_snap(dragged, Vec2::new(95.0, 0.0), 20.0, &source_to_target) {
+//!     // snap_vector carries the dragged item exactly onto the target magnet.
+//!     assert!((snap.snap_vector.x - 5.0).abs() < 1e-3);
+//! }
+//! ```
 
 use std::any::Any;
 use std::rc::Rc;

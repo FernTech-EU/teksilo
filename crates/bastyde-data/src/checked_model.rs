@@ -1,17 +1,38 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Per-row checkbox state for collection widgets.
+//! `CheckedModel` — per-row checkbox state for flat collection widgets.
 //!
-//! Parallels [`crate::SelectionModel`]. Selection (which row is the
-//! cursor on) and checked-ness (which rows are *marked*) are
-//! orthogonal axes — Outlook / Files-app convention.
+//! Tracks which rows in a list view are marked (checked), independently of
+//! which row is selected. Selection (cursor position) and checked-ness
+//! (persistent marks) are orthogonal axes — the Outlook / Files-app
+//! convention where you can check many items and then act on them all.
 //!
-//! Issues a writable `Signal<bool>` per index. Repeated calls with
-//! the same index return the same signal handle. The Checkbox widget
-//! writes to the signal on click; the model observes each per-index
-//! signal and keeps a central `Signal<BTreeSet<usize>>` in sync for
-//! consumers that want "all checked indices, reactively."
+//! The model issues one writable `Signal<bool>` per row index via
+//! [`CheckedModel::signal_for`]; repeated calls for the same index return the
+//! same cached handle. A `Checkbox` widget writes to that signal on click;
+//! the model observes every per-index signal and keeps a central
+//! `Signal<BTreeSet<usize>>` in sync so consumers can react to the complete
+//! checked set without subscribing to each row individually.
+//!
+//! `CheckedModel` is a share-by-clone handle (`Rc<RefCell<…>>` internally);
+//! cloning produces a second handle to the same state. When rows are inserted,
+//! removed, or reordered, call the corresponding `adjust_for_*` method so that
+//! checked state follows the moved items rather than sticking to stale indices.
+//!
+//! For hierarchical lists with descendant→ancestor tristate aggregation, see
+//! [`crate::TreeCheckedModel`] instead.
+//!
+//! ```rust
+//! # use bastyde_data::CheckedModel;
+//! let model = CheckedModel::new();
+//! model.check(1);
+//! model.check(3);
+//! assert!(model.is_checked(1));
+//! assert_eq!(model.checked_count(), 2);
+//! model.toggle(1);
+//! assert!(!model.is_checked(1));
+//! ```
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -26,7 +47,7 @@ struct Inner {
     observers: HashMap<usize, ObserverHandle>,
 }
 
-/// Tracks which indices in a list are checked.
+/// Per-row checkbox state for a flat list, with a reactive aggregate checked-set.
 pub struct CheckedModel {
     /// Aggregate set, derived from per-index signals via observers.
     /// Read-only externally; the model updates it whenever a per-index
@@ -36,6 +57,7 @@ pub struct CheckedModel {
 }
 
 impl CheckedModel {
+    /// Creates a new, empty `CheckedModel` with no rows checked.
     pub fn new() -> Self {
         Self {
             checked: Signal::new(BTreeSet::new()),
@@ -163,6 +185,7 @@ impl CheckedModel {
         self.rekey(|i| Some(crate::map_index_after_move(i, from, to, count)));
     }
 
+    /// Returns `true` if the row at `index` is currently checked.
     pub fn is_checked(&self, index: usize) -> bool {
         self.inner
             .borrow()
@@ -172,14 +195,17 @@ impl CheckedModel {
             .unwrap_or(false)
     }
 
+    /// Returns a sorted `Vec` of every currently checked row index.
     pub fn checked_indices(&self) -> Vec<usize> {
         self.checked.get().into_iter().collect()
     }
 
+    /// Returns the number of currently checked rows.
     pub fn checked_count(&self) -> usize {
         self.checked.get().len()
     }
 
+    /// Marks the row at `index` as checked; notifies observers if the state changed.
     pub fn check(&self, index: usize) {
         let sig = self.signal_for(index);
         if !sig.get() {
@@ -187,6 +213,7 @@ impl CheckedModel {
         }
     }
 
+    /// Marks the row at `index` as unchecked; notifies observers if the state changed.
     pub fn uncheck(&self, index: usize) {
         let sig = self.signal_for(index);
         if sig.get() {
@@ -194,17 +221,20 @@ impl CheckedModel {
         }
     }
 
+    /// Flips the checked state of the row at `index`; notifies observers.
     pub fn toggle(&self, index: usize) {
         let sig = self.signal_for(index);
         sig.set(!sig.get());
     }
 
+    /// Checks every row in `0..count`; notifies observers for each row that was unchecked.
     pub fn check_all(&self, count: usize) {
         for i in 0..count {
             self.check(i);
         }
     }
 
+    /// Unchecks every currently checked row; notifies observers for each change.
     pub fn clear(&self) {
         // Snapshot keys to avoid borrow-during-iteration when set()
         // recurses into the observer.

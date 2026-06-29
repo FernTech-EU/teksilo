@@ -34,6 +34,19 @@
 //! has 3 writers; a richer app might have 5–10. Each idle ~99% of the
 //! time. One shared worker is leaner and has identical semantics from
 //! the caller's point of view.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_settings::flush::DebouncedWriter;
+//! use std::time::Duration;
+//!
+//! // Duration::ZERO: every schedule() lands on the worker's next tick.
+//! let writer = DebouncedWriter::new(path.clone(), Duration::ZERO);
+//! writer.schedule("key = \"value\"\n".into());
+//! writer.flush_now().unwrap();   // blocks until the write completes
+//! // Drop also flushes any pending payload synchronously.
+//! ```
 
 use std::collections::HashMap;
 use std::fs;
@@ -50,11 +63,11 @@ use tempfile::NamedTempFile;
 /// Errors surfaced by [`DebouncedWriter::flush_now`].
 #[derive(Debug, thiserror::Error)]
 pub enum FlushError {
-    /// The shared I/O thread panicked or has already shut down. The
-    /// writer cannot make progress.
+    /// The shared I/O worker thread has panicked or shut down; writes
+    /// can no longer be delivered.
     #[error("settings I/O thread disconnected")]
     Disconnected,
-    /// The atomic write failed.
+    /// The atomic write (temp-file + rename) failed at the OS level.
     #[error("settings flush failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -205,9 +218,10 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
 // Atomic write
 // ---------------------------------------------------------------------------
 
-/// Atomic write: write to a temp file in the same directory, fsync,
-/// rename. Same-directory rename is atomic on every supported
-/// filesystem we target.
+/// Write `contents` to `path` atomically: create a temp file in the
+/// same directory, write + `sync_all`, then rename over the target.
+/// Same-directory rename is atomic on every supported POSIX filesystem
+/// and on NTFS (Windows).  Parent directories are created if absent.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
     let dir = path.parent().ok_or_else(|| {
         io::Error::new(
@@ -282,12 +296,14 @@ impl DebouncedWriter {
         }
     }
 
-    /// The destination path.
+    /// The destination path this writer flushes to.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// The configured debounce delay.
+    /// The debounce window configured at construction; `Duration::ZERO`
+    /// means every scheduled payload is written on the worker's next
+    /// iteration (useful in tests).
     pub fn delay(&self) -> Duration {
         self.delay
     }

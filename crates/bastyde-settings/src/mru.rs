@@ -4,13 +4,30 @@
 //! Most-recently-used list — a generic, persisted reactive collection
 //! with dedupe, pinning, and LRU-style cap eviction.
 //!
-//! Apps define their own item type implementing [`MruEntry`]: a small
-//! trait that exposes a dedupe key, an optional pin flag, and an
-//! optional touch hook. The framework's job is the dedupe-on-add,
-//! pin-aware cap, and persistence; the app keeps the schema.
+//! Apps define their own item type by implementing [`MruEntry`]: a small
+//! trait that exposes a dedupe key, an optional pin flag, and an optional
+//! touch hook. The framework handles dedupe-on-add, pin-aware cap eviction,
+//! and debounced disk persistence; the app owns the item schema and
+//! semantics (e.g. updating a `last_opened` timestamp in `touch`).
 //!
-//! ```
+//! ## When to use
+//!
+//! Use [`MruList`] for any "recently opened / recently used" feature:
+//! recent files, recent projects, recently visited locations, recently used
+//! palette entries, etc. The backing [`ListModel<T>`] is the same reactive
+//! handle you bind to a [`ListView`](bastyde_data::ListModel) or iterate in
+//! a menu — no separate notification plumbing is required.
+//!
+//! ## Persistence
+//!
+//! [`MruList::open`] reads `<config_dir>/<name>.toml` on first access and
+//! writes it back (atomically, via a temp-and-rename) after every mutation,
+//! subject to the debounce window. Pass [`Duration::ZERO`] in tests to flush
+//! synchronously, or call [`MruList::flush_now`] explicitly.
+//!
+//! ```ignore
 //! use std::path::{Path, PathBuf};
+//! use std::time::Duration;
 //! use bastyde_settings::{AppPaths, MruEntry, MruList};
 //! use serde::{Serialize, Deserialize};
 //!
@@ -27,12 +44,23 @@
 //!     fn key(&self) -> &Path { &self.path }
 //!     fn is_pinned(&self) -> bool { self.pinned }
 //!     fn set_pinned(&mut self, p: bool) { self.pinned = p; }
-//!     fn touch(&mut self) { /* update last_opened */ }
+//!     fn touch(&mut self) { self.last_opened += 1; }
 //! }
 //!
-//! # let tmp = tempfile::tempdir().unwrap();
-//! # let paths = AppPaths::for_testing(tmp.path());
-//! let recents: MruList<RecentProject> = MruList::open(&paths, "recents", 10).unwrap();
+//! // In tests: AppPaths::for_testing(tmp.path()) + Duration::ZERO.
+//! // In production: AppPaths::new(qualifier, org, app).
+//! let tmp = tempfile::tempdir().unwrap();
+//! let paths = AppPaths::for_testing(tmp.path());
+//! let recents: MruList<RecentProject> =
+//!     MruList::open_with_delay(&paths, "recents", 10, Duration::ZERO).unwrap();
+//!
+//! recents.add(RecentProject {
+//!     path: "/projects/foo".into(),
+//!     display_name: "Foo".into(),
+//!     last_opened: 0,
+//!     pinned: false,
+//! });
+//! assert_eq!(recents.model().len(), 1);
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -80,7 +108,7 @@ pub trait MruEntry: Clone + Serialize + DeserializeOwned + 'static {
 /// A persisted MRU list backed by [`PersistedListModel<T>`].
 ///
 /// Cheap to clone (`Rc`-shared internally). The reactive
-/// `ListModel<T>` returned by [`model()`](Self::model) is the same
+/// [`ListModel<T>`](bastyde_data::ListModel) returned by [`model()`](Self::model) is the same
 /// handle the persistence bridge observes; mutating it through any
 /// clone fires both the on-screen UI updates and the debounced
 /// disk flush.
@@ -99,12 +127,19 @@ impl<T: MruEntry> Clone for MruList<T> {
 }
 
 impl<T: MruEntry> MruList<T> {
-    /// Open at `<paths.config_dir()>/<name>.toml`, default debounce.
+    /// Open at `<paths.config_dir()>/<name>.toml` with the default debounce window.
+    ///
+    /// Creates the file (and any missing parent directories) if it does not
+    /// yet exist. Use [`open_with_delay`](Self::open_with_delay) to override
+    /// the debounce in tests.
     pub fn open(paths: &AppPaths, name: &str, max_items: usize) -> Result<Self, SettingsFileError> {
         Self::open_with_delay(paths, name, max_items, DEFAULT_DEBOUNCE)
     }
 
-    /// Open with a custom debounce window.
+    /// Open at `<paths.config_dir()>/<name>.toml` with a custom debounce window.
+    ///
+    /// Pass [`Duration::ZERO`](std::time::Duration::ZERO) in tests to flush
+    /// every mutation synchronously.
     pub fn open_with_delay(
         paths: &AppPaths,
         name: &str,
@@ -114,7 +149,10 @@ impl<T: MruEntry> MruList<T> {
         Self::open_at(paths.config_file(name), max_items, delay)
     }
 
-    /// Open at an explicit path.
+    /// Open at an explicit path with the given debounce window.
+    ///
+    /// Lower-level alternative to [`open`](Self::open) when the caller
+    /// already has a resolved [`PathBuf`] (e.g. from a custom directory layout).
     pub fn open_at(
         path: PathBuf,
         max_items: usize,
@@ -127,13 +165,19 @@ impl<T: MruEntry> MruList<T> {
         })
     }
 
-    /// The reactive list. Bind to widgets via clones of this handle.
+    /// The underlying reactive list; bind to UI widgets via clones of this handle.
+    ///
+    /// This is the same [`ListModel<T>`](bastyde_data::ListModel) the
+    /// persistence bridge observes — any mutation schedules a debounced
+    /// disk flush automatically.
     pub fn model(&self) -> &ListModel<T> {
         self.persisted.model()
     }
 
-    /// Maximum number of unpinned entries. Pinned entries don't count
-    /// toward the cap.
+    /// Returns the maximum number of unpinned entries kept in the list.
+    ///
+    /// Pinned entries do not count toward this cap and are never evicted
+    /// automatically.
     pub fn max_items(&self) -> usize {
         self.max_items
     }
@@ -171,15 +215,18 @@ impl<T: MruEntry> MruList<T> {
         self.cap_to_max();
     }
 
-    /// Remove the entry whose key matches.
+    /// Remove the entry whose key matches, then schedule a debounced flush.
+    ///
+    /// No-op when no entry with that key is present.
     pub fn remove(&self, key: &T::Key) {
         if let Some(idx) = self.find_index(key) {
             self.persisted.model().remove(idx);
         }
     }
 
-    /// Mark the entry whose key matches as freshly used (calls
-    /// [`MruEntry::touch`] on a clone). No-op when no entry matches.
+    /// Mark the entry whose key matches as freshly used by calling
+    /// [`MruEntry::touch`] on a clone of it, then write it back and
+    /// schedule a debounced flush. No-op when no entry matches.
     pub fn touch(&self, key: &T::Key) {
         if let Some(idx) = self.find_index(key) {
             let model = self.persisted.model();
@@ -192,7 +239,8 @@ impl<T: MruEntry> MruList<T> {
         }
     }
 
-    /// Flip the pin flag of the entry whose key matches.
+    /// Flip the pin flag of the entry whose key matches, then schedule a
+    /// debounced flush. No-op when no entry matches.
     pub fn toggle_pin(&self, key: &T::Key) {
         if let Some(idx) = self.find_index(key) {
             let model = self.persisted.model();
@@ -205,17 +253,20 @@ impl<T: MruEntry> MruList<T> {
         }
     }
 
-    /// Drop every entry, pinned or not.
+    /// Drop every entry (pinned or not) and schedule a debounced flush.
     pub fn clear(&self) {
         self.persisted.model().clear();
     }
 
-    /// Synchronously flush.
+    /// Write the list to disk synchronously, bypassing the debounce window.
+    ///
+    /// Useful at app shutdown or at the end of a test to guarantee the
+    /// file reflects the in-memory state before the process exits.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
         self.persisted.flush_now()
     }
 
-    /// The path being written to.
+    /// The TOML file path this list reads from and writes to.
     pub fn path(&self) -> &Path {
         self.persisted.path()
     }

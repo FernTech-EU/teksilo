@@ -14,9 +14,9 @@ potentially unbounded collections, prefer `ListView` which
 virtualizes the item pool and only builds visible rows.
 
 Children are arranged in a vertical `VStack`; override the gap with
-[`Repeater::spacing`]. Accessibility: the `Repeater` node is hidden from
+`Repeater::spacing`. Accessibility: the `Repeater` node is hidden from
 AT by default so children surface directly into the parent's AT subtree.
-Supply [`Repeater::a11y_role`] + [`Repeater::a11y_label`] when the children
+Supply `Repeater::a11y_role` + `Repeater::a11y_label` when the children
 genuinely form a named list, menu, or toolbar.
 
 ```rust

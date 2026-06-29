@@ -6,11 +6,11 @@
 Canonical row layout for `ListView` / `TreeView` delegates.
 
 Two widgets:
-- [`StandardListItem`] — primary line `[checkbox?] [leading_slot?]
+- `StandardListItem` — primary line `[checkbox?] [leading_slot?]
   [center_slot?] [label] [Spacer] [trailing_slot?]` with optional
   subtitle line `[subtitle_leading_slot?] [subtitle] [Spacer]
   [subtitle_trailing_slot?]`.
-- [`StandardTreeItem`] — same plus depth-driven indent + chevron
+- `StandardTreeItem` — same plus depth-driven indent + chevron
   column (always reserved, even for leaves, so labels at the same
   depth align).
 
@@ -197,7 +197,7 @@ Override the subtitle's text color. Default (unset) is
 
 ## `pub struct StandardTreeItem`
 
-Canonical row layout for a `TreeView` — [`StandardListItem`] plus
+Canonical row layout for a `TreeView` — `StandardListItem` plus
 a depth-driven indent column and an always-reserved chevron column.
 
 See the `module-level documentation` for the canonical `TreeView`
@@ -215,12 +215,12 @@ Create a tree item with the given primary label.
 
 #### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `subtitle`.
 
 #### `pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `leading_slot`.
 
 #### `pub fn leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self`
@@ -229,7 +229,7 @@ Forwarded to the inner [`StandardListItem`] — see its
 
 #### `pub fn center_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `center_slot`.
 
 #### `pub fn center_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self`
@@ -238,7 +238,7 @@ Forwarded to the inner [`StandardListItem`] — see its
 
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `trailing_slot`.
 
 #### `pub fn trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self`
@@ -247,7 +247,7 @@ Forwarded to the inner [`StandardListItem`] — see its
 
 #### `pub fn subtitle_leading_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `subtitle_leading_slot`.
 
 #### `pub fn subtitle_leading_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self`
@@ -257,7 +257,7 @@ Forwarded to the inner [`StandardListItem`] — see its
 
 #### `pub fn subtitle_trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `subtitle_trailing_slot`.
 
 #### `pub fn subtitle_trailing_slot_boxed(mut self, widget: Box<dyn Widget>) -> Self`
@@ -267,12 +267,12 @@ Forwarded to the inner [`StandardListItem`] — see its
 
 #### `pub fn checkbox(mut self, checked: Signal<bool>) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `checkbox`.
 
 #### `pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self`
 
-Forwarded to the inner [`StandardListItem`] — see its
+Forwarded to the inner `StandardListItem` — see its
 `tristate_checkbox`.
 
 #### `pub fn selected(mut self, b: bool) -> Self`
@@ -294,29 +294,29 @@ Bind the enabled state to a reactive `Signal<bool>`.
 #### `pub fn label_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the label's text style. Forwarded to the inner
-[`StandardListItem`] — see its
+`StandardListItem` — see its
 `label_style`.
 
 #### `pub fn subtitle_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
 
 Override the subtitle's text style. Forwarded to the inner
-[`StandardListItem`] — see its
+`StandardListItem` — see its
 `subtitle_style`.
 
 #### `pub fn label_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
 
 Override the label's text color. Forwarded to the inner
-[`StandardListItem`] — see its `label_color(...)`.
+`StandardListItem` — see its `label_color(...)`.
 
 #### `pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
 
 Override the subtitle's text color. Forwarded to the inner
-[`StandardListItem`] — see its `subtitle_color(...)`.
+`StandardListItem` — see its `subtitle_color(...)`.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::StandardItemStyle) -> Self`
 
 Per-call style override for the row chrome. Forwarded to the
-inner [`StandardListItem`] — see its `style(...)` for the
+inner `StandardListItem` — see its `style(...)` for the
 precedence rules (per-call > theme.style_slots.standard_item >
 `RecipeStandardItemStyle`).
 
@@ -349,7 +349,7 @@ Click handler for the chevron. Wired only when `has_children`
 is true. Typical use: `.on_toggle(ctx.toggle_callback())` from
 a `TreeRowContext` (see `TreeView::new_with_context`).
 
-The callback receives the firing [`EventContext`] so apps can
+The callback receives the firing `EventContext` so apps can
 dispatch an intent (e.g. lazy-load children on expand), open
 a dialog, or otherwise route the toggle through the framework
 before mutating model state.

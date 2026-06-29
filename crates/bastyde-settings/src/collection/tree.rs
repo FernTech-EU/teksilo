@@ -24,6 +24,26 @@
 //! A future revision could exploit `TreeChange` payloads for
 //! incremental serialization, but the bookkeeping is non-trivial and
 //! the simple form is correct.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_settings::collection::tree::PersistedTreeModel;
+//! use bastyde_settings::migration::Migrator;
+//! use serde::{Deserialize, Serialize};
+//! use std::time::Duration;
+//!
+//! #[derive(Serialize, Deserialize, Clone)]
+//! struct Category { name: String }
+//!
+//! let path = std::env::temp_dir().join("categories.toml");
+//! let ptm: PersistedTreeModel<Category> =
+//!     PersistedTreeModel::open(path, Duration::ZERO, Migrator::new())
+//!         .expect("open failed");
+//! let root = ptm.model().insert_root(0, Category { name: "Rust".into() });
+//! ptm.model().insert_child(root, 0, Category { name: "async".into() });
+//! ptm.flush_now().expect("flush");
+//! ```
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -36,18 +56,25 @@ use serde::{Deserialize, Serialize};
 use crate::file::{SettingsFile, SettingsFileError};
 use crate::migration::{Migrator, Versioned};
 
-/// Recursive on-disk shape for a [`TreeModel`] node.
+/// Recursive on-disk representation of a single [`TreeModel`] node and
+/// its subtree.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PersistedTreeNode<T> {
+    /// The item value stored at this node.
     pub value: T,
+    /// Ordered child nodes, serialized recursively.
     #[serde(default = "Vec::new")]
     pub children: Vec<PersistedTreeNode<T>>,
 }
 
+/// On-disk shape for a persisted tree: a versioned wrapper around the
+/// list of root nodes. Apps write migrations against this type.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TreeFile<T> {
+    /// Schema version used to select migrations before deserialization.
     #[serde(default = "default_version")]
     pub version: u32,
+    /// Top-level roots of the tree; each carries its subtree recursively.
     #[serde(default = "Vec::new")]
     pub roots: Vec<PersistedTreeNode<T>>,
 }
@@ -120,14 +147,20 @@ where
         })
     }
 
+    /// The underlying reactive tree handle. Clone it to share with
+    /// `TreeView` widgets; mutations flow through the observer and schedule
+    /// a debounced disk flush automatically.
     pub fn model(&self) -> &TreeModel<T> {
         &self.model
     }
 
+    /// Flush any pending serialized payload to disk immediately,
+    /// bypassing the debounce window.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
         self.file.flush_now()
     }
 
+    /// The absolute path of the TOML file being written to.
     pub fn path(&self) -> &std::path::Path {
         self.file.path()
     }

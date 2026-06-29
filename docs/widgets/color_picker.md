@@ -14,13 +14,13 @@ representations stay in lockstep.
 
 # Layouts
 
-- [`ColorPickerLayout::Compact`] — HSV canvas + hue strip + hex
+- `ColorPickerLayout::Compact` — HSV canvas + hue strip + hex
   input. Minimal vertical footprint, suitable for popovers.
-- [`ColorPickerLayout::Standard`] (default) — HSV canvas + hue
+- `ColorPickerLayout::Standard` (default) — HSV canvas + hue
   strip + alpha strip (when enabled), with RGB spinners, hex
   input, and preset swatches stacked beneath. The everything-on
   layout for inspector panes and settings dialogs.
-- [`ColorPickerLayout::Wide`] — HSV canvas with strips on the
+- `ColorPickerLayout::Wide` — HSV canvas with strips on the
   right, spinners stacked vertically alongside the swatch grid.
   For wide property pages.
 
@@ -44,7 +44,7 @@ swatch grid each carry their own appropriate role and value.
 ## `pub const DEFAULT_SWATCHES`
 
 Default 12-color preset palette (Int UI–flavored). Apps can use
-this verbatim or pass their own via [`ColorPicker::swatches`].
+this verbatim or pass their own via `ColorPicker::swatches`.
 
 ```rust
 pub const DEFAULT_SWATCHES: `Color;
@@ -139,8 +139,8 @@ Default `false` for embedded use (the bound signal is the
 commit channel — there is no "uncommitted" state). Wrappers
 that present the picker as a popover (e.g. `ColorEdit`)
 flip this to `true` so the user has explicit accept / dismiss
-affordances; the buttons fire [`Self::on_done`] /
-[`Self::on_cancel`] respectively.
+affordances; the buttons fire `Self::on_done` /
+`Self::on_cancel` respectively.
 
 #### `pub fn on_done(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -162,7 +162,7 @@ Only meaningful when `show_footer(true)`.
 
 #### `pub fn swatches(mut self, s: Vec<Color>) -> Self`
 
-Replace the default 12-color [`DEFAULT_SWATCHES`] with a custom palette.
+Replace the default 12-color `DEFAULT_SWATCHES` with a custom palette.
 
 #### `pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self`
 
@@ -176,7 +176,7 @@ clamped to at least 1.
 
 #### `pub fn layout(mut self, l: ColorPickerLayout) -> Self`
 
-Select the overall layout variant. Defaults to [`ColorPickerLayout::Standard`].
+Select the overall layout variant. Defaults to `ColorPickerLayout::Standard`.
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 

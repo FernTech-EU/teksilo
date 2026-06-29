@@ -55,11 +55,20 @@ pub trait FontRegistrar {
 }
 
 /// The default registrar embeds InterVariable (the same font
-/// bastyde-text already bundles) and returns its face id as the
-/// default. Used when a `RichTextEditor` is built without an
-/// explicit `font_registrar()`.
+/// bastyde-text already bundles) as the default face and JetBrains
+/// Mono as the monospace face, returning Inter's face id as the
+/// default. Used when a `RichTextEditor` is built without an explicit
+/// `font_registrar()`. Mirrors [`TypesetterBridge::new_with_default_font`]
+/// so a standalone engine resolves the default theme's "Inter" and
+/// "JetBrains Mono" typography families the same way the shared
+/// app-wide service does.
+///
+/// [`TypesetterBridge::new_with_default_font`]: crate::TypesetterBridge::new_with_default_font
 pub struct EmbeddedInterRegistrar {
     data: &'static [u8],
+    data_italic: &'static [u8],
+    mono_data: &'static [u8],
+    mono_data_italic: &'static [u8],
     default_size_px: f32,
 }
 
@@ -67,6 +76,9 @@ impl EmbeddedInterRegistrar {
     pub const fn new() -> Self {
         Self {
             data: include_bytes!("../fonts/InterVariable.ttf"),
+            data_italic: include_bytes!("../fonts/InterVariable-Italic.ttf"),
+            mono_data: include_bytes!("../fonts/JetBrainsMono.ttf"),
+            mono_data_italic: include_bytes!("../fonts/JetBrainsMono-Italic.ttf"),
             default_size_px: 14.0,
         }
     }
@@ -74,6 +86,9 @@ impl EmbeddedInterRegistrar {
     pub const fn with_size(size_px: f32) -> Self {
         Self {
             data: include_bytes!("../fonts/InterVariable.ttf"),
+            data_italic: include_bytes!("../fonts/InterVariable-Italic.ttf"),
+            mono_data: include_bytes!("../fonts/JetBrainsMono.ttf"),
+            mono_data_italic: include_bytes!("../fonts/JetBrainsMono-Italic.ttf"),
             default_size_px: size_px,
         }
     }
@@ -89,6 +104,15 @@ impl FontRegistrar for EmbeddedInterRegistrar {
     fn register_on_service(&self, service: &mut TextFontService) -> Option<FontFaceId> {
         let face = service.register_font(self.data);
         service.set_default_font(face, self.default_size_px);
+        let _ = service.register_font(self.data_italic);
+        // `InterVariable.ttf` registers under family "Inter Variable"; the
+        // default theme requests "Inter". Alias so the request resolves to
+        // the bundled face (see `TypesetterBridge::register_default_font`).
+        service.set_generic_family("Inter", "Inter Variable");
+        // Register the monospace faces (upright + italic) for the theme's
+        // `mono` typography token.
+        let _ = service.register_font(self.mono_data);
+        let _ = service.register_font(self.mono_data_italic);
         Some(face)
     }
 }

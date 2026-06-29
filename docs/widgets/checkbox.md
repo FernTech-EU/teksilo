@@ -8,9 +8,9 @@ Checkbox — a two-state or tristate checkbox with an optional label.
 `Checkbox` renders a square (or rounded-square / circle) toggle box
 alongside an optional label and caption. Two modes are supported:
 
-- **Two-state** ([`Checkbox::new`]): toggles a `Signal<bool>` between
+- **Two-state** (`Checkbox::new`): toggles a `Signal<bool>` between
   `true` (checked) and `false` (unchecked) on click or Space.
-- **Tristate** ([`Checkbox::tristate`]): cycles a `Signal<CheckState>`
+- **Tristate** (`Checkbox::tristate`): cycles a `Signal<CheckState>`
   between `Checked` and `Unchecked` on user interaction; the
   `Indeterminate` state is set only by external sources such as
   `TreeCheckedModel` aggregation — clicking from `Indeterminate` goes
@@ -18,7 +18,7 @@ alongside an optional label and caption. Two modes are supported:
 
 Chrome (box shape, fill, focus ring) is driven by the active
 `CheckboxStyle`; three visual variants are available via
-[`CheckboxVariant`].
+`CheckboxVariant`.
 
 ## Accessibility
 

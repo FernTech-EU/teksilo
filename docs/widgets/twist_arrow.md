@@ -46,6 +46,6 @@ determines the glyph direction (down = expanded, right/left = collapsed).
 
 #### `pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
-Install a tap handler. Receives the firing [`EventContext`]
+Install a tap handler. Receives the firing `EventContext`
 so consumers can dispatch intents (e.g. lazy-load children on
 expand) or open dialogs from the chevron toggle.

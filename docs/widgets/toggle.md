@@ -6,10 +6,10 @@
 Toggle — an animated on/off switch bound to a `Signal<bool>`.
 
 Renders as a sliding-knob switch (IntUI default) or one of the alternate
-[`ToggleVariant`] shapes. All visual chrome is delegated to a [`ToggleStyle`]
+`ToggleVariant` shapes. All visual chrome is delegated to a `ToggleStyle`
 impl; the widget itself owns only event handling (tap, Space, AccessKit
 `Click`). The IntUI recipe
-([`crate::styles::RecipeToggleStyle`]) ships out of the box; apps install a
+(`crate::styles::RecipeToggleStyle`) ships out of the box; apps install a
 custom look per-call with `.style(impl ToggleStyle)` or theme-wide via
 `theme.style_slots.toggle = Some(Rc::new(…))`.
 
@@ -66,13 +66,13 @@ enable/disable is supported via `ctx.enabled_when(id, signal)`.
 #### `pub fn variant(mut self, variant: ToggleVariant) -> Self`
 
 Pick a Tier-1 design-language variant
-([`ToggleVariant::Switch`] / `Pill` / `Square` / `Inset`). The
-active [`ToggleStyle`] decides what to do with the hint —
+(`ToggleVariant::Switch` / `Pill` / `Square` / `Inset`). The
+active `ToggleStyle` decides what to do with the hint —
 IntUI's default impl honours all four; a custom impl might
 ignore the variant entirely.
 
 #### `pub fn style(mut self, style: impl ToggleStyle) -> Self`
 
-Override the active [`ToggleStyle`] for this widget instance
+Override the active `ToggleStyle` for this widget instance
 only. Useful for one-off custom-painted toggles in a single
 view.

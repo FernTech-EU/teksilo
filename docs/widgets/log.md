@@ -5,8 +5,8 @@
 
 `NotificationLog` — a scrollable, day-bucketed list of archived notifications.
 
-Renders a [`NotificationArchiveModel`] as a scrollable column of
-[`StandardListItem`] rows grouped under section headers (Today /
+Renders a `NotificationArchiveModel` as a scrollable column of
+`StandardListItem` rows grouped under section headers (Today /
 Yesterday / This week / Earlier), computed against the user's local
 timezone on every archive mutation. An optional toolbar row provides
 mark-all-read and clear buttons. Unread rows show the title in
@@ -38,7 +38,7 @@ let log = NotificationLog::new(archive)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/notification/log/index.html)
 
 ## `pub struct NotificationLog`
 
@@ -48,7 +48,7 @@ Configurable archive log. Shipped chrome:
 - day-bucket section headers (Today / Yesterday / This week /
   Earlier) above the rows for each bucket — computed against the
   user's local timezone, recomputed on every archive mutation;
-- [`StandardListItem`] rows with unread-as-bold differentiation.
+- `StandardListItem` rows with unread-as-bold differentiation.
 
 A SearchField filter and a severity-chip filter can be composed by
 apps using the existing widget toolkit.

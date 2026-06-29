@@ -117,7 +117,7 @@ struct AxisMetrics {
 /// Construct directly from a configured view, or via the
 /// [`SceneView::with_scroll_bars`] convenience method:
 ///
-/// ```no_run
+/// ```rust
 /// # use bastyde_scene::{Scene, SceneView, SceneScrollView, ScrollBarMode};
 /// let scrollable = SceneView::new(Scene::new())
 ///     .with_scroll_bars()

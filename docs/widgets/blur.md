@@ -7,7 +7,7 @@
 to its child subtree, driven by a `Prop<f32>` radius (in logical
 pixels).
 
-Built on [`BuildContext::set_blur`], a per-node paint scope parallel
+Built on `BuildContext::set_blur`, a per-node paint scope parallel
 to `set_opacity` and `set_transform`. The framework's render walker
 emits `BeginBlurredSubtree { bounds, radius }` before this widget's
 paint and `EndBlurredSubtree` afterwards; the renderer redirects

@@ -1,12 +1,42 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Per-view flattened projection of a `TreeModel`.
+//! `TreeSlice` — per-view flattened projection of a [`TreeModel`].
 //!
-//! `TreeSlice` owns expand/collapse state independently — two `TreeView`
-//! widgets sharing the same `TreeModel` get independent expand states.
-//! It maintains a flat list of currently-visible nodes with depth information,
-//! and exposes a version `Signal<u64>` for consumers to bind to.
+//! `TreeSlice<T>` wraps a `TreeModel<T>` and maintains an independent
+//! expand/collapse set so two `TreeView` widgets sharing the same model have
+//! independent visible rows — dual-pane file managers, overview/detail splits,
+//! and search results panels are each one `TreeSlice::new(model.clone())`. The
+//! slice re-flattens automatically whenever the underlying model emits a
+//! [`TreeChange`], and bumps a [`version_signal`](TreeSlice::version_signal)
+//! `Signal<u64>` that views bind at `BindingLevel::Rebuild`.
+//!
+//! A lightweight [`TreeSliceHandle`] (created via [`TreeSlice::handle`]) shares
+//! all `Rc`-based internals and is usable in closures without keeping the
+//! tree-change observer alive.
+//!
+//! `TreeSlice` implements [`TreeDataSource`] and is the
+//! built-in source for `TreeView` / `TreeTableView`.
+//!
+//! ## Example
+//!
+//! ```rust
+//! # use bastyde_data::{TreeModel, TreeSlice};
+//! let tree = TreeModel::new();
+//! let root = tree.insert_root(0, "root");
+//! let child = tree.insert_child(root, 0, "child");
+//!
+//! let slice1 = TreeSlice::new(tree.clone());
+//! let slice2 = TreeSlice::new(tree.clone());
+//!
+//! slice1.expand(root);
+//! assert_eq!(slice1.visible_count(), 2); // root + child visible
+//! assert_eq!(slice2.visible_count(), 1); // still collapsed in slice2
+//!
+//! // Inserting into the model notifies both slices.
+//! tree.insert_child(root, 1, "child2");
+//! assert_eq!(slice1.visible_count(), 3); // child2 also visible in the expanded slice
+//! ```
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -22,13 +52,12 @@ use crate::tree_data_source::{
     FlatEntry, TreeDataSource, tree_apply_reorder, tree_is_desc_or_self,
 };
 
-/// Per-view flattened projection of a `TreeModel<T>`.
+/// Per-view flattened projection of a [`TreeModel<T>`](crate::TreeModel).
 ///
-/// Owns expand/collapse state and maintains a flat list of currently-visible
-/// nodes. Observes `TreeChange` from the underlying model and re-flattens
-/// as needed.
-///
-/// Created via `TreeSlice::new()`.
+/// Owns an independent expand/collapse set and re-flattens automatically on
+/// every [`TreeChange`] from the underlying model. Two slices
+/// over the same model have completely independent expand state. See the
+/// [module documentation](self) for the full picture.
 pub struct TreeSlice<T: 'static> {
     tree: TreeModel<T>,
     expanded: Rc<RefCell<HashSet<NodeId>>>,
@@ -342,8 +371,12 @@ impl<T: 'static> std::fmt::Debug for TreeSlice<T> {
     }
 }
 
-/// Lightweight handle to a `TreeSlice`'s shared state, usable in closures.
-/// Created via `TreeSlice::handle()`. Shares all Rc-based internals.
+/// Lightweight handle to a [`TreeSlice`]'s shared state, usable in closures.
+///
+/// Created via [`TreeSlice::handle`]. Shares all `Rc`-based internals with its
+/// parent `TreeSlice` but does **not** keep the tree-change observer alive —
+/// the `TreeSlice` that owns the observer must outlive all handles that rely on
+/// automatic re-flattening on model changes.
 pub struct TreeSliceHandle<T: 'static> {
     tree: TreeModel<T>,
     expanded: Rc<RefCell<HashSet<NodeId>>>,
@@ -354,18 +387,23 @@ pub struct TreeSliceHandle<T: 'static> {
 }
 
 impl<T: 'static> TreeSliceHandle<T> {
+    /// Number of currently-visible (flattened) rows.
     pub fn visible_count(&self) -> usize {
         self.flattened.borrow().len()
     }
 
+    /// Get the [`FlatEntry`] at `flat_index` (cloned), or `None` if out of bounds.
     pub fn entry_at(&self, flat_index: usize) -> Option<FlatEntry> {
         self.flattened.borrow().get(flat_index).cloned()
     }
 
+    /// Get the [`NodeId`] at `flat_index`, or `None` if out of bounds.
     pub fn visible_node_id(&self, flat_index: usize) -> Option<NodeId> {
         self.flattened.borrow().get(flat_index).map(|e| e.node_id)
     }
 
+    /// Expand `node` (make its children visible) and bump the version signal.
+    /// No-op if already expanded.
     pub fn expand(&self, node: NodeId) {
         let inserted = self.expanded.borrow_mut().insert(node);
         if inserted {
@@ -373,6 +411,8 @@ impl<T: 'static> TreeSliceHandle<T> {
         }
     }
 
+    /// Collapse `node` (hide its children) and bump the version signal.
+    /// No-op if already collapsed.
     pub fn collapse(&self, node: NodeId) {
         let removed = self.expanded.borrow_mut().remove(&node);
         if removed {
@@ -380,10 +420,12 @@ impl<T: 'static> TreeSliceHandle<T> {
         }
     }
 
+    /// Returns `true` if `node` is currently expanded.
     pub fn is_expanded(&self, node: NodeId) -> bool {
         self.expanded.borrow().contains(&node)
     }
 
+    /// Toggle `node`'s expand/collapse state and bump the version signal.
     pub fn toggle_expand(&self, node: NodeId) {
         {
             let mut exp = self.expanded.borrow_mut();
@@ -396,6 +438,7 @@ impl<T: 'static> TreeSliceHandle<T> {
         self.reflatten_and_notify();
     }
 
+    /// Access the underlying [`TreeModel`].
     pub fn tree(&self) -> &TreeModel<T> {
         &self.tree
     }

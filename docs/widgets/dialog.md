@@ -5,10 +5,10 @@
 
 Modal dialogs — a trigger button that presents a centered modal panel.
 
-Three cooperating types cover the common dialog use-case. [`Dialog`] is the
+Three cooperating types cover the common dialog use-case. `Dialog` is the
 high-level entry point: a `Button` (or custom trigger) that, on activation,
-presents a `ModalContainer` above a full-viewport dimming [`ModalScrim`].
-[`DialogContent`] is the convenience body layout — a `VStack` with an
+presents a `ModalContainer` above a full-viewport dimming `ModalScrim`.
+`DialogContent` is the convenience body layout — a `VStack` with an
 optional title, supporting text, scrollable body slot, and a footer slot
 separated by a `Divider`.
 
@@ -56,7 +56,7 @@ Rounded panel chrome that wraps a modal dialog's content widget.
 
 All visual dimensions (padding, corner radius, min-width, shadow) are owned
 by the active `DialogStyle`; per-instance
-overrides are available via [`Self::padding`] and [`Self::min_width`].
+overrides are available via `Self::padding` and `Self::min_width`.
 
 ```rust
 pub struct ModalContainer { /* fields */ }
@@ -89,14 +89,14 @@ visible title string.
 
 ## `pub struct ModalScrim`
 
-Full-viewport dimming scrim painted behind a [`ModalContainer`].
+Full-viewport dimming scrim painted behind a `ModalContainer`.
 
 Mounted by the modal-presentation pipeline (bastyde-app) as a separate
 `OverlayPlacement::FullViewport` overlay pushed BEFORE the centered
 modal overlay so it z-orders below the panel. The chrome itself is
 delegated to the active `DialogStyle::make_scrim`; clicking the
 scrim dismisses the linked modal when the modal's
-[`ModalCloseBehavior`] permits click-outside dismissal.
+`ModalCloseBehavior` permits click-outside dismissal.
 
 The dismissal cascade is wired via
 `OverlayManager::set_parent_overlay` AFTER both overlays are
@@ -113,8 +113,8 @@ pub struct ModalScrim { /* fields */ }
 
 #### `pub fn new() -> Self`
 
-Build a new scrim; wire it with [`Self::dismiss_target`] and
-[`Self::click_to_dismiss`] after construction.
+Build a new scrim; wire it with `Self::dismiss_target` and
+`Self::click_to_dismiss` after construction.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::DialogStyle) -> Self`
 
@@ -130,7 +130,7 @@ in-tree modal pipeline in `bastyde-app`).
 #### `pub fn click_to_dismiss(mut self, enabled: bool) -> Self`
 
 Enable click-to-dismiss on the scrim. Should mirror whether the
-modal's [`ModalCloseBehavior`] permits click-outside dismissal.
+modal's `ModalCloseBehavior` permits click-outside dismissal.
 
 ## `pub struct DialogContent`
 

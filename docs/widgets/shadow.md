@@ -5,7 +5,7 @@
 
 Layered drop-shadow helper for elevated surfaces.
 
-Composes two [`Shadow`]s underneath a rounded rect:
+Composes two `Shadow`s underneath a rounded rect:
 - `outer` — the wide soft halo (typically `theme.shape.shadow_*`).
 - `inner` — the sharp short-blur rim that gives the surface a clearly
   "lifted" edge instead of a vague glow (typically the matching
@@ -27,7 +27,7 @@ Common density presets:
 Popovers, menus and combo-box dropdowns sit *attached* to the widget
 that opened them. On the side that touches the trigger, drawing a
 halo would visually cut the surface off from its anchor. Pass an
-[`AttachedSide`] to suppress shadow on that side.
+`AttachedSide` to suppress shadow on that side.
 
 ```ignore
 // Typical usage inside a custom widget's paint() method:

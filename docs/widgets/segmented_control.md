@@ -6,7 +6,7 @@
 SegmentedControl — mutually exclusive segments in a horizontal row.
 
 Each segment is a real composed widget — a centered icon + label with
-a reactive tint — built from a [`Segment`] descriptor. The control
+a reactive tint — built from a `Segment` descriptor. The control
 binds a `Signal<usize>` index: reading or writing the signal selects
 the corresponding segment without rebuilding the tree. Per-segment
 disabling, optional leading icons, and optional hover tooltips are all
@@ -94,7 +94,7 @@ with `segment` or `segments`.
 
 #### `pub fn segment(mut self, segment: impl Into<Segment>) -> Self`
 
-Append one segment. Accepts a [`Segment`] or, via
+Append one segment. Accepts a `Segment` or, via
 `From<LocalizedString>`, a bare `tr!(...)` / `lit!(...)` label.
 
 #### `pub fn segments(mut self, segments: impl IntoIterator<Item = impl Into<Segment>>) -> Self`

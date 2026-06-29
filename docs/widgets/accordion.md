@@ -8,7 +8,7 @@ its content when activated.
 
 In the default vertical mode a horizontally-spanning header row sits above the
 content; clicking or pressing Space/Enter toggles visibility with an animated
-height disclosure (via [`Collapse`]).
+height disclosure (via `Collapse`).
 A horizontal mode flips the header into a narrow vertical strip with a rotated
 label — used by top/bottom sides of a `DockingLayout`. Fill mode (`.fill(true)`)
 is designed for fixed-size slots such as Splitter panes: the content fills all
@@ -120,11 +120,11 @@ The accordion starts collapsed or expanded according to the initial value of
 
 #### `pub fn orientation(mut self, orientation: AccordionOrientation) -> Self`
 
-Set the header orientation (default [`AccordionOrientation::Vertical`]).
+Set the header orientation (default `AccordionOrientation::Vertical`).
 
 #### `pub fn horizontal(mut self) -> Self`
 
-Shorthand for [`Accordion::orientation`]`(`[`AccordionOrientation::Horizontal`]`)`.
+Shorthand for `Accordion::orientation``(``AccordionOrientation::Horizontal``)`.
 
 #### `pub fn fill(mut self, fill: bool) -> Self`
 
@@ -144,7 +144,7 @@ Tap-to-toggle is unaffected — the gesture arena tells a tap from a drag.
 #### `pub fn title_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the header foreground color used for the title text and
-chevron icon. Defaults to [`TextRole::Primary`]. Accepts a literal
+chevron icon. Defaults to `TextRole::Primary`. Accepts a literal
 `Color`, a `TextRole`/`SurfaceRole`, or a `Signal<Color>`.
 
 #### `pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self`
@@ -153,7 +153,7 @@ Override the header title's text style. Use this to make the
 disclosure label smaller (e.g. inside a tooltip) or to match a
 non-body typography role. Accepts a static
 `TextStyle` or a
-[`TextStyleRole`].
+`TextStyleRole`.
 
 #### `pub fn content_id(mut self, id: WidgetId) -> Self`
 

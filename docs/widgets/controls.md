@@ -5,14 +5,14 @@
 
 The minimize / maximize / close button cluster on the trailing edge of
 a `TitleBar`. Rendered only when
-[`PlatformTitleBarHost::renders_custom_controls`] is `true`
+`PlatformTitleBarHost::renders_custom_controls` is `true`
 (Windows + Wayland; never on macOS).
 
 These are deliberately NOT built on top of the regular `Button` widget:
 `Button` carries a 72 dp minimum width, themed padding, focus ring and
 border, none of which are appropriate for a flush-fitting Win11-style
 window control. Instead, each control is a small composing widget
-[`ControlButton`] built from primitives (FixedSize + ZStack +
+`ControlButton` built from primitives (FixedSize + ZStack +
 RectWidget + Center + TextWidget) so we inherit centering, theming and
 reactive hover for free.
 
@@ -26,8 +26,8 @@ glyph swap once the host can update it from `WindowEvent::Resized`.
 
 ## `pub struct WindowControlsLayout`
 
-Layout snapshot that [`WindowControls`] exports to its parent `TitleBar`
-so the `after_paint` aggregator can read the per-button [`WidgetId`]s.
+Layout snapshot that `WindowControls` exports to its parent `TitleBar`
+so the `after_paint` aggregator can read the per-button `WidgetId`s.
 Populated during `WindowControls::build`.
 
 The maximize slot is the **Switcher** that wraps the two glyph
@@ -44,7 +44,7 @@ pub struct WindowControlsLayout { /* fields */ }
 
 ## `pub type ControlAction`
 
-Action invoked when a [`ControlButton`] is tapped.
+Action invoked when a `ControlButton` is tapped.
 
 ```rust
 pub type ControlAction = Rc<dyn Fn(&mut EventContext)>;
@@ -87,7 +87,7 @@ Register the callback invoked when the user taps this button.
 ## `pub struct WindowControls`
 
 The minimize / maximize / close cluster, laid out as an HStack of
-[`ControlButton`]s. Each cell forwards taps to the supplied host.
+`ControlButton`s. Each cell forwards taps to the supplied host.
 
 ```rust
 pub struct WindowControls { /* fields */ }

@@ -14,7 +14,7 @@ width.  Each line's height is the tallest child on that line.  Use
 
 `Wrap` is the right choice for chip rows, badge lists, and any collection
 whose items vary in width and should reflow as the container resizes.  For
-a fixed grid use [`crate::primitives::Grid`] instead.
+a fixed grid use `crate::primitives::Grid` instead.
 
 ```rust
 # use bastyde_widgets::primitives::{Wrap, TextWidget};

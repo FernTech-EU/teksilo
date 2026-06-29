@@ -73,8 +73,11 @@ pub trait SettingsExt {
         })
     }
 
+    /// Returns the K/V settings store, or `None` if not registered.
     fn try_settings(&self) -> Option<&SettingsStore>;
+    /// Returns the window-state service, or `None` if not registered.
     fn try_window_state(&self) -> Option<&WindowStateService>;
+    /// Returns the MRU list for `T`, or `None` if no `MruList<T>` was registered.
     fn try_mru<T: MruEntry>(&self) -> Option<&MruList<T>>;
 }
 

@@ -11,7 +11,7 @@ double taps toggle maximize, and right-clicks open the system window
 menu (Wayland only). On Windows the drag rect is published into
 `HitRegions::drag` so the wndproc subclass returns `HTCAPTION` for
 the same area — but the actual publish happens from
-[`crate::title_bar::TitleBar::after_paint`], which aggregates this
+`crate::title_bar::TitleBar::after_paint`, which aggregates this
 drag region and the three control buttons into one snapshot per
 frame. This widget no longer publishes from `paint()`.
 

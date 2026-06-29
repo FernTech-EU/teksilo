@@ -38,6 +38,31 @@
 //! though it now points at different underlying rows. Apps that want
 //! identity-based selection should observe their model directly and rewrite
 //! the selection from source identifiers on each rebuild.
+//!
+//! ```rust
+//! # use bastyde_data::{ListModel, SortFilterListModel, SortDirection};
+//! # use bastyde_data::ListDataSource; // brings `len()` into scope
+//! #[derive(Clone, Debug)]
+//! struct Person { name: String, age: u32 }
+//!
+//! let model: ListModel<Person> = ListModel::new();
+//! model.push(Person { name: "Carol".into(), age: 30 });
+//! model.push(Person { name: "Alice".into(), age: 25 });
+//! model.push(Person { name: "Bob".into(), age: 28 });
+//!
+//! let proxy = SortFilterListModel::new(model)
+//!     .with_comparator("name", |a: &Person, b| a.name.cmp(&b.name))
+//!     .with_predicate("name", |text| {
+//!         let t = text.to_lowercase();
+//!         Box::new(move |p: &Person| p.name.to_lowercase().contains(&t))
+//!     });
+//!
+//! proxy.set_sort(Some("name"), SortDirection::Ascending);
+//! assert_eq!(proxy.len(), 3); // Alice, Bob, Carol
+//!
+//! proxy.set_filter("name", "a");
+//! assert_eq!(proxy.len(), 2); // Alice, Carol
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -51,10 +76,12 @@ use crate::data_change::DataChange;
 use crate::list_data_source::ListDataSource;
 use crate::list_model::ListModel;
 
-/// Sort direction emitted by `TableView` / `TreeTableView` headers.
+/// Sort direction emitted by `TableView` / `TreeTableView` headers and consumed by sort projections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
+    /// Sort from smallest to largest (A → Z, 0 → 9).
     Ascending,
+    /// Sort from largest to smallest (Z → A, 9 → 0).
     Descending,
 }
 

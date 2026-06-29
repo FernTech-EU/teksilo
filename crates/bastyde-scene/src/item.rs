@@ -20,6 +20,33 @@
 //! scene-coord point into local coords before calling
 //! [`SceneItem::shape_contains`]; paint pushes the scene transform
 //! onto the canvas before calling [`SceneItem::paint`].
+//!
+//! ## When to use
+//!
+//! Implement [`SceneItem`] when you need a lightweight, paint-only
+//! decoration or connector that isn't interactive enough to warrant a
+//! full widget (no keyboard focus, no complex event handling). For
+//! anything that needs focus, animations, drag-and-drop, or AT by
+//! default, prefer the heavyweight tier (`Scene::add_widget`).
+//!
+//! ## Custom item example
+//!
+//! ```ignore
+//! use bastyde_scene::{SceneItem, SceneItemPaintContext};
+//! use bastyde_canvas::{Canvas, Point, Rect};
+//! use bastyde_tokens::Color;
+//!
+//! #[derive(Debug)]
+//! struct DotItem { bounds: Rect }
+//!
+//! impl SceneItem for DotItem {
+//!     fn local_bounds(&self) -> Rect { self.bounds }
+//!     fn set_local_bounds(&mut self, b: Rect) { self.bounds = b; }
+//!     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+//!         canvas.fill_rect(self.bounds, Color::RED);
+//!     }
+//! }
+//! ```
 
 use accesskit::Role;
 use bastyde_canvas::{Canvas, Point, Rect, Transform2D};

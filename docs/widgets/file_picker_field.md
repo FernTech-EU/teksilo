@@ -7,7 +7,7 @@
 
 Combines a `TextInput` with a trailing `IconButton` (the folder/browse glyph)
 that opens a native file dialog and writes the chosen path back into the bound
-`Signal<String>`. The three [`FilePickerKind`] variants map to the three
+`Signal<String>`. The three `FilePickerKind` variants map to the three
 single-result dialog modes: open a file, pick a folder, or save a file.
 Multi-file selection does not fit the "one editable line" pattern; use the
 file-dialog API directly for that.
@@ -73,7 +73,7 @@ Directory the dialog opens in. If not set, the OS default is used.
 
 #### `pub fn default_file_name(mut self, name: impl Into<String>) -> Self`
 
-Pre-filled file name for the [`FilePickerKind::SaveFile`] dialog.
+Pre-filled file name for the `FilePickerKind::SaveFile` dialog.
 No-op for `OpenFile` / `PickFolder`.
 
 #### `pub fn add_filter(mut self, label: impl Into<String>, extensions: &[&str]) -> Self`
@@ -83,7 +83,7 @@ Repeat to add multiple rows.
 
 #### `pub fn on_pick(mut self, f: impl Fn(&FileDialogResult, &mut EventContext) + 'static) -> Self`
 
-Hook invoked with the raw [`FileDialogResult`] after the dialog
+Hook invoked with the raw `FileDialogResult` after the dialog
 closes — useful when the caller needs to react to cancellation
 or backend errors. The bound text signal is already updated by
 the time this fires (on success).

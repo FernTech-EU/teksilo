@@ -7,7 +7,7 @@
 entire subtree when an external `Prop<bool>` toggles. Drives a
 `progress: Signal<f32>` ∈ [0, 1] (0 = invisible, 1 = at rest) and
 applies it as a centered (or origin-pivoted) scale transform via
-[`BuildContext::set_transform`] — the renderer's transform stack
+`BuildContext::set_transform` — the renderer's transform stack
 composes it onto the subtree.
 
 ```ignore

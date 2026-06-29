@@ -52,11 +52,53 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-WIDGETS_SRC = REPO_ROOT / "crates" / "bastyde-widgets" / "src"
+
+
+@dataclass(frozen=True)
+class CrateSpec:
+    """A crate the catalog generator can document.
+
+    `is_widget` selects the widget-specific behaviour (impl-Widget entry filter +
+    widgets-overview.md categories); other crates surface their re-exported public
+    types and group by directory.
+    """
+
+    crate: str  # cargo package name, e.g. "bastyde-widgets"
+    rustdoc: str  # rustdoc crate dir, e.g. "bastyde_widgets"
+    md_subdir: str  # output dir under docs/, e.g. "widgets"
+    title: str  # SUMMARY part / index title, e.g. "Widget Catalog"
+    group: str  # top-level group label in the index for non-widget crates
+    is_widget: bool
+
+    @property
+    def src(self) -> Path:
+        return REPO_ROOT / "crates" / self.crate / "src"
+
+    @property
+    def marker_begin(self) -> str:
+        return f"<!-- BEGIN GENERATED {self.md_subdir.upper()} -->"
+
+    @property
+    def marker_end(self) -> str:
+        return f"<!-- END GENERATED {self.md_subdir.upper()} -->"
+
+
+CRATE_SPECS: dict[str, CrateSpec] = {
+    "widgets": CrateSpec("bastyde-widgets", "bastyde_widgets", "widgets", "Widget Catalog", "Widgets", True),
+    "data": CrateSpec("bastyde-data", "bastyde_data", "data-collections", "Data Collections", "Models", False),
+    "settings": CrateSpec("bastyde-settings", "bastyde_settings", "settings", "Settings", "Stores & services", False),
+    "scene": CrateSpec("bastyde-scene", "bastyde_scene", "scene", "Scene", "Scene", False),
+}
+
+# The active crate, set by `main()` from `--crate` (default: widgets).
+SPEC: CrateSpec = CRATE_SPECS["widgets"]
+
+# Back-compat aliases for the widget crate (used by widget-only helpers).
+WIDGETS_SRC = CRATE_SPECS["widgets"].src
 PRIMITIVES_DIR = WIDGETS_SRC / "primitives"
 ANIMATIONS_DIR = WIDGETS_SRC / "animations"
 
-# Aggregator files we never treat as "a widget".
+# Aggregator files we never treat as a catalog entry.
 SKIP_FILES = {"lib.rs", "primitives.rs", "animations.rs", "layout_integration_tests.rs", "mod.rs"}
 
 
@@ -884,20 +926,26 @@ def _pick_widget_names(
     widget_impls: set[str],
     exported: set[str],
     nested: bool,
+    is_widget: bool = True,
 ) -> list[str]:
-    """Choose which names to surface for a file in `--list`.
+    """Choose which names to surface for a file in `--list` / the catalog.
 
-    A genuine public widget is a pub type that both `impl Widget` and is
-    re-exported from the crate root. Among those, prefer the one matching the
-    file stem (so `dialog.rs` shows only `Dialog`, not its three helper structs).
+    For non-widget crates a catalog entry is simply a file's re-exported public
+    type(s), preferring the one matching the file stem; a file with no re-exported
+    type gets no page (this drops impl-split modules like `view/gestures_impl.rs`
+    and internal helpers).
 
-    For nested submodule files there is no fallback: a file that contributes no
-    re-exported widget is hidden entirely (this is what keeps internal helpers
-    like `HeaderCell` / `DayCell` / `TabBarChrome` out of the list). Top-level
-    files keep the original lenient fallback so no conventional one-widget-per-
-    file module ever disappears.
+    For the widget crate a genuine widget is a pub type that both `impl Widget`
+    and is re-exported. Nested submodule files have no fallback (keeps helpers
+    like `HeaderCell` out); top-level files keep the lenient historical fallback.
     """
     camel = _stem_to_camel(stem)
+    if not is_widget:
+        candidates = [n for n in pub_names if n in exported]
+        if camel in candidates:
+            return [camel]
+        return candidates
+
     candidates = [n for n in pub_names if n in widget_impls and n in exported]
     if camel in candidates:
         return [camel]
@@ -947,70 +995,68 @@ def _collect_cfgs_from_aggregator(aggregator: Path, base: Path) -> dict[Path, li
 
 
 def build_registry() -> Registry:
-    if not WIDGETS_SRC.exists():
-        raise SystemExit(f"bastyde-widgets src not found at {WIDGETS_SRC}")
+    src = SPEC.src
+    if not src.exists():
+        raise SystemExit(f"{SPEC.crate} src not found at {src}")
 
-    # Recursive discovery so widgets defined in submodule directories
-    # (notification/, tab_widget/, …) are found too. Shallow paths sort first so
-    # the conventional top-level file wins any name/module collision.
+    # Recursive discovery so types defined in submodule directories are found
+    # too. Shallow paths sort first so the conventional top-level file wins any
+    # name/module collision.
     files = sorted(
         (
             p
-            for p in WIDGETS_SRC.rglob("*.rs")
+            for p in src.rglob("*.rs")
             if p.name not in SKIP_FILES and not _is_test_file(p)
         ),
-        key=lambda p: (len(p.relative_to(WIDGETS_SRC).parts), str(p)),
+        key=lambda p: (len(p.relative_to(src).parts), str(p)),
     )
 
     cfg_by_file: dict[Path, list[str]] = {}
-    cfg_by_file.update(
-        _collect_cfgs_from_aggregator(WIDGETS_SRC / "lib.rs", WIDGETS_SRC)
-    )
-    cfg_by_file.update(
-        _collect_cfgs_from_aggregator(
-            WIDGETS_SRC / "primitives.rs", PRIMITIVES_DIR
+    cfg_by_file.update(_collect_cfgs_from_aggregator(src / "lib.rs", src))
+    if SPEC.is_widget:
+        cfg_by_file.update(
+            _collect_cfgs_from_aggregator(src / "primitives.rs", src / "primitives")
         )
-    )
-    cfg_by_file.update(
-        _collect_cfgs_from_aggregator(
-            WIDGETS_SRC / "animations.rs", ANIMATIONS_DIR
+        cfg_by_file.update(
+            _collect_cfgs_from_aggregator(src / "animations.rs", src / "animations")
         )
-    )
 
     # Nested files inherit the cfg of their top-level ancestor module
     # (e.g. color_picker/swatch.rs inherits color_picker.rs's rich-text gate).
     for fp in files:
-        rel = fp.relative_to(WIDGETS_SRC)
+        rel = fp.relative_to(src)
         if len(rel.parts) > 1 and fp.resolve() not in cfg_by_file:
-            ancestor = (WIDGETS_SRC / f"{rel.parts[0]}.rs").resolve()
+            ancestor = (src / f"{rel.parts[0]}.rs").resolve()
             inherited = cfg_by_file.get(ancestor)
             if inherited:
                 cfg_by_file[fp.resolve()] = list(inherited)
 
-    exported = _parse_public_exports(WIDGETS_SRC / "lib.rs")
+    exported = _parse_public_exports(src / "lib.rs")
 
     type_to_file: dict[str, Path] = {}
     module_to_file: dict[str, Path] = {}
     type_display: dict[Path, list[str]] = {}
     widget_display: dict[Path, list[str]] = {}
-    type_re = re.compile(r"^\s*pub\s+(?:struct|enum|type)\s+([A-Za-z_]\w*)", re.MULTILINE)
+    type_re = re.compile(r"^\s*pub\s+(?:struct|enum|type|trait)\s+([A-Za-z_]\w*)", re.MULTILINE)
 
     for fp in files:
         module_to_file.setdefault(fp.stem.lower(), fp)
         text = fp.read_text(encoding="utf-8")
         names = [m.group(1) for m in type_re.finditer(text)]
         type_display[fp] = names
-        widget_impls = {m.group(1) for m in WIDGET_IMPL_RE.finditer(text)}
-        # `primitives/` and `animations/` are flat one-widget-per-file
-        # collections, like the top-level dir, so they keep the lenient
-        # fallback. Per-widget submodule dirs (notification/, table_view/, …)
-        # use strict re-export filtering to drop internal helpers.
-        rel_parts = fp.relative_to(WIDGETS_SRC).parts
+        widget_impls = (
+            {m.group(1) for m in WIDGET_IMPL_RE.finditer(text)} if SPEC.is_widget else set()
+        )
+        # `primitives/` and `animations/` are flat one-type-per-file collections,
+        # like the top-level dir, so they keep the lenient fallback. Per-widget
+        # submodule dirs use strict re-export filtering to drop internal helpers.
+        rel_parts = fp.relative_to(src).parts
         lenient = len(rel_parts) == 1 or (
             len(rel_parts) == 2 and rel_parts[0] in ("primitives", "animations")
         )
         widget_display[fp] = _pick_widget_names(
-            fp.stem, names, widget_impls, exported, nested=not lenient
+            fp.stem, names, widget_impls, exported, nested=not lenient,
+            is_widget=SPEC.is_widget,
         )
         for name in names:
             type_to_file.setdefault(name.lower(), fp)
@@ -1262,9 +1308,38 @@ _MD_SPDX_HEADER = [
     "",
 ]
 
-# Display order for the catalog index; any directory not listed is appended
-# afterwards, alphabetically, as a "<Dir> (submodule)" group.
-_CATEGORY_ORDER = ["Layout primitives", "Widgets", "Animations"]
+_OVERVIEW = REPO_ROOT / "docs" / "widgets-overview.md"
+_OV_SECTION_RE = re.compile(r"^#{2,3}\s+(.+?)(?:\s+[—-].*)?$")
+_OV_LINK_RE = re.compile(r"\]\([^)]*crates/bastyde-widgets/src/([^)\s]+?\.rs)[^)]*\)")
+
+
+def _overview_category_map() -> "tuple[dict[str, str], list[str]]":
+    """Parse docs/widgets-overview.md into {src-relative-path -> section} plus the
+    section order. This is the single source of truth for catalog grouping, so the
+    catalog index matches the hand-maintained overview (data-collection views land
+    under "Data-driven widgets", buttons under "Buttons", etc.)."""
+    mapping: dict[str, str] = {}
+    order: list[str] = []
+    if not _OVERVIEW.exists():
+        return mapping, order
+    cur: str | None = None
+    for ln in _OVERVIEW.read_text(encoding="utf-8").splitlines():
+        s = ln.strip()
+        if s.startswith("#"):
+            m = _OV_SECTION_RE.match(s)
+            if m:
+                name = m.group(1).strip()
+                if name.lower() in ("cross-references", "styling status"):
+                    cur = None
+                else:
+                    cur = name
+                    if cur not in order:
+                        order.append(cur)
+            continue
+        if cur and s.startswith("- "):
+            for lm in _OV_LINK_RE.finditer(ln):
+                mapping[lm.group(1)] = cur
+    return mapping, order
 
 
 def _catalog_title(reg: "Registry", pf: ParsedFile) -> str:
@@ -1275,66 +1350,74 @@ def _catalog_title(reg: "Registry", pf: ParsedFile) -> str:
     return _stem_to_camel(pf.module_name)
 
 
-def _catalog_category(fp: Path) -> str:
-    """Group label derived from a file's location under `bastyde-widgets/src`."""
-    rel = fp.relative_to(WIDGETS_SRC)
+def _catalog_category(fp: Path, overview: "dict[str, str] | None" = None) -> str:
+    """Group label for a catalog file. The widget crate prefers the section it
+    appears under in widgets-overview.md; other crates group by directory."""
+    rel = fp.relative_to(SPEC.src)
+    if SPEC.is_widget:
+        if overview:
+            hit = overview.get(rel.as_posix())
+            if hit:
+                return hit
+        if len(rel.parts) == 1:
+            return "Other"  # top-level file not in the overview
+        top = rel.parts[0]
+        return {
+            "primitives": "Layout primitives",
+            "animations": "Animations",
+        }.get(top, f"{_stem_to_camel(top)} (submodule)")
+    # Non-widget crate: top-level files share one group; submodules group by dir.
     if len(rel.parts) == 1:
-        return "Widgets"
-    top = rel.parts[0]
-    return {
-        "primitives": "Layout primitives",
-        "animations": "Animations",
-    }.get(top, f"{_stem_to_camel(top)} (submodule)")
+        return SPEC.group
+    return _stem_to_camel(rel.parts[0])
 
 
 def _build_slugs(parsed: list[ParsedFile]) -> dict[Path, str]:
-    """Stable, collision-free page slugs. Top-level / primitive widgets keep
-    their clean stem (`button`, `hstack`); a genuine stem collision across
-    directories falls back to the dir-prefixed path (`notification_log`)."""
+    """Stable, collision-free page slugs. Top-level files keep their clean stem
+    (`button`, `list_model`); a genuine stem collision across directories falls
+    back to the dir-prefixed path (`notification_log`)."""
     slugs: dict[Path, str] = {}
-    used: set[str] = set()
+    used: set[str] = {"index"}  # reserved for the catalog landing page
     for pf in parsed:
         slug = pf.module_name
         if slug in used:
-            rel = pf.file_path.relative_to(WIDGETS_SRC).with_suffix("")
+            rel = pf.file_path.relative_to(SPEC.src).with_suffix("")
             slug = "_".join(rel.parts)
+        while slug in used:  # still collides (e.g. a top-level index.rs)
+            slug = f"{slug}_"
         used.add(slug)
         slugs[pf.file_path] = slug
     return slugs
 
 
 def _rustdoc_module_url(api_base: str, fp: Path, api_dir: "Path | None" = None) -> str:
-    """rustdoc module-index URL for a widget file.
+    """rustdoc module-index URL for a catalog file, e.g.
+    `button.rs` -> `<base>/bastyde_widgets/button/index.html`.
 
-    `button.rs` -> `<base>/bastyde_widgets/button/index.html`;
-    `primitives/hstack.rs` -> `<base>/bastyde_widgets/primitives/hstack/index.html`.
-
-    Files directly under a per-widget submodule dir (`tab_widget/`, `title_bar/`,
-    `toast/`, `notification/`, `color_picker/`, `stepper/`) are usually private
-    `mod`s with no rustdoc page of their own, so they link to the public parent
-    module (which re-exports the type). `primitives/` and `animations/`
-    submodules are themselves public, so they keep the direct path.
+    With a built rustdoc tree (`api_dir`) the URL falls back to the nearest
+    ancestor module that actually has a page — covering private `mod`s and
+    cfg-gated modules that rustdoc omits. Without it, nested files (other than the
+    widget crate's public `primitives/` & `animations/`) link to their top-level
+    module as a best-effort guess.
     """
-    rel = fp.relative_to(WIDGETS_SRC).with_suffix("")
+    rel = fp.relative_to(SPEC.src).with_suffix("")
     parts = list(rel.parts)
-    if len(parts) >= 2 and parts[0] not in ("primitives", "animations"):
-        parts = parts[:1]
 
     def url(ps: list[str]) -> str:
-        tail = "/".join(["bastyde_widgets", *ps, "index.html"])
+        tail = "/".join([SPEC.rustdoc, *ps, "index.html"])
         return f"{api_base.rstrip('/')}/{tail}"
 
-    # When the built rustdoc tree is available, fall back to the nearest ancestor
-    # module that actually has a page — covers private `mod`s and cfg-gated
-    # modules (e.g. data_views, tree_source, privacy_settings) that rustdoc omits.
     if api_dir is not None:
         cand = list(parts)
         while cand:
-            disk = Path(api_dir) / "bastyde_widgets" / Path(*cand) / "index.html"
+            disk = Path(api_dir) / SPEC.rustdoc / Path(*cand) / "index.html"
             if disk.exists():
                 return url(cand)
             cand = cand[:-1]
         return url([])
+
+    if len(parts) >= 2 and not (SPEC.is_widget and parts[0] in ("primitives", "animations")):
+        parts = parts[:1]
     return url(parts)
 
 
@@ -1410,6 +1493,10 @@ def _clean_catalog_links(md: str) -> str:
         code = _as_code(lbl)
         md = md.replace(f"[{lbl}][]", code)
         md = re.sub(re.escape(f"[{lbl}]") + r"(?![\(\[])", code, md)
+    # Pass 4: any remaining rustdoc shortcut link `[`X`]` (a backticked label with
+    # no inline target and no reference definition) -> plain code, so the brackets
+    # don't leak into the rendered book.
+    md = re.sub(r"\[(`[^`\]]+`)\](?![\(\[:])", r"\1", md)
     return md
 
 
@@ -1486,21 +1573,25 @@ def format_catalog_index(
     reg: "Registry", parsed: list[ParsedFile], slugs: dict[Path, str]
 ) -> str:
     """The catalog landing page: every widget grouped by category, with a brief."""
+    overview, ov_order = _overview_category_map()
     groups: dict[str, list[tuple[str, str, str]]] = {}
     for pf in parsed:
-        cat = _catalog_category(pf.file_path)
+        cat = _catalog_category(pf.file_path, overview)
         title = _catalog_title(reg, pf)
         brief = _clean_catalog_links(_first_sentence(pf.header_doc))
         groups.setdefault(cat, []).append((title, slugs[pf.file_path], brief))
 
-    ordered = [c for c in _CATEGORY_ORDER if c in groups]
-    ordered += sorted(c for c in groups if c not in _CATEGORY_ORDER)
+    # Order by the overview's section order, then any remaining groups (submodule
+    # helpers, uncategorised) alphabetically.
+    ordered = [c for c in ov_order if c in groups]
+    ordered += sorted(c for c in groups if c not in ordered)
 
     out: list[str] = list(_MD_SPDX_HEADER)
-    out.append("# Widget Catalog")
+    out.append(f"# {SPEC.title}")
     out.append("")
+    noun = "widget" if SPEC.is_widget else "type"
     out.append(
-        "Every widget shipped by `bastyde-widgets`, grouped by category. Each page "
+        f"Every public {noun} in `{SPEC.crate}`, grouped by category. Each page "
         "links to its full rustdoc API reference."
     )
     out.append("")
@@ -1519,25 +1610,25 @@ def format_catalog_index(
 def _summary_block(
     reg: "Registry", parsed: list[ParsedFile], slugs: dict[Path, str], md_subdir: str
 ) -> str:
-    """The auto-generated `docs/SUMMARY.md` region: an `Overview` link followed by
-    one alphabetically-sorted chapter per widget (flat, so the static
-    `# Widget Catalog` part title in SUMMARY.md groups them)."""
-    lines = [SUMMARY_BEGIN, f"- [Overview]({md_subdir}/index.md)"]
+    """The auto-generated `docs/SUMMARY.md` region for the active crate: an
+    `Overview` link followed by one alphabetically-sorted chapter per type (flat,
+    so the static `# <title>` part header in SUMMARY.md groups them)."""
+    lines = [SPEC.marker_begin, f"- [Overview]({md_subdir}/index.md)"]
     for pf in sorted(parsed, key=lambda p: _catalog_title(reg, p).lower()):
         title = _catalog_title(reg, pf)
         lines.append(f"- [{title}]({md_subdir}/{slugs[pf.file_path]}.md)")
-    lines.append(SUMMARY_END)
+    lines.append(SPEC.marker_end)
     return "\n".join(lines)
 
 
-def patch_summary(summary_path: Path, block: str) -> bool:
-    """Replace the marked region of SUMMARY.md with `block`. Returns False if the
-    markers are absent (caller then prints guidance)."""
+def patch_summary(summary_path: Path, block: str, begin: str, end: str) -> bool:
+    """Replace the `begin`..`end` marked region of SUMMARY.md with `block`.
+    Returns False if the markers are absent (caller then prints guidance)."""
     text = summary_path.read_text(encoding="utf-8")
-    if SUMMARY_BEGIN not in text or SUMMARY_END not in text:
+    if begin not in text or end not in text:
         return False
-    pre = text[: text.index(SUMMARY_BEGIN)]
-    post = text[text.index(SUMMARY_END) + len(SUMMARY_END):]
+    pre = text[: text.index(begin)]
+    post = text[text.index(end) + len(end):]
     summary_path.write_text(pre + block + post, encoding="utf-8")
     return True
 
@@ -1549,9 +1640,9 @@ def cmd_md_dir(
     out_dir.mkdir(parents=True, exist_ok=True)
     img_dir = out_dir / "img"
 
-    # Only the curated widget set (same files `--list` shows: a non-empty
-    # `widget_display`). Internal helper modules (linear_layout, a11y, keyboard,
-    # …) carry no public widget, so they get no catalog page.
+    # Only the curated set (same files `--list` shows: a non-empty `widget_display`
+    # — i.e. files carrying a public widget / re-exported type). Internal helpers
+    # and impl-split modules carry none, so they get no catalog page.
     target = [fp for fp in reg.files if reg.widget_display.get(fp)]
     parsed = [
         parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
@@ -1581,12 +1672,12 @@ def cmd_md_dir(
         md_subdir = out_dir.name
     block = _summary_block(reg, parsed, slugs, md_subdir)
     summary = book_src / "SUMMARY.md"
-    if summary.exists() and patch_summary(summary, block):
+    if summary.exists() and patch_summary(summary, block, SPEC.marker_begin, SPEC.marker_end):
         note = "patched docs/SUMMARY.md"
     else:
         note = (
             f"SUMMARY markers not found — add this region to docs/SUMMARY.md:\n"
-            f"{SUMMARY_BEGIN}\n{SUMMARY_END}"
+            f"{SPEC.marker_begin}\n{SPEC.marker_end}"
         )
     print(
         f"Wrote {len(parsed)} catalog pages + index.md to {out_dir} ({note})",
@@ -1626,7 +1717,7 @@ def run_self_tests() -> int:
             encoding="utf-8",
         )
         block = _summary_block(reg, [pf], slugs, "widgets")
-        assert patch_summary(sp, block), "patch returned False"
+        assert patch_summary(sp, block, SUMMARY_BEGIN, SUMMARY_END), "patch returned False"
         result = sp.read_text(encoding="utf-8")
         assert "stale" not in result, "stale content survived"
         assert "[Overview](widgets/index.md)" in result, "catalog overview missing"
@@ -1653,6 +1744,26 @@ def run_self_tests() -> int:
     assert "`HStack`" in nz and "see `Ref`." in nz, nz
     assert "](../api/x.html)" in nz and "](https://x.io)" in nz, nz
 
+    # Non-widget crate generalization (bastyde-data): re-exported types become
+    # catalog entries, rustdoc links target the crate's own rustdoc dir.
+    global SPEC
+    _prev = SPEC
+    try:
+        SPEC = CRATE_SPECS["data"]
+        dreg = build_registry()
+        dfp = dreg.module_to_file["list_model"]
+        assert dreg.widget_display.get(dfp), "list_model.rs should be a catalog entry"
+        dpf = parse_file(dfp, dfp.stem, dreg.cfg_by_file.get(dfp.resolve(), []))
+        dpage = format_catalog_markdown(
+            dpf, title="ListModel", slug="list_model", api_base="../api",
+            img_dir=Path("/nonexistent"),
+        )
+        assert "bastyde_data/list_model/index.html" in dpage, dpage[:400]
+        didx = format_catalog_index(dreg, [dpf], _build_slugs([dpf]))
+        assert "\n# Data Collections\n" in didx, didx[:80]
+    finally:
+        SPEC = _prev
+
     print("extract_widget_api.py self-tests passed.", file=sys.stderr)
     return 0
 
@@ -1674,10 +1785,10 @@ def cmd_list(reg: Registry) -> int:
         rows.append((fp.stem, f"  {', '.join(names)}  ({rel}){cfg_s}"))
 
     if not rows:
-        print("No widget files found.", file=sys.stderr)
+        print("No catalog files found.", file=sys.stderr)
         return 1
 
-    print(f"{len(rows)} widget files under {WIDGETS_SRC.relative_to(REPO_ROOT)}:\n")
+    print(f"{len(rows)} files under {SPEC.src.relative_to(REPO_ROOT)}:\n")
     for stem, body in sorted(rows):
         print(f"{stem}:")
         print(body)
@@ -1739,6 +1850,18 @@ def main(argv: list[str]) -> int:
         "has a page, so private/cfg-gated modules don't 404.",
     )
     parser.add_argument(
+        "--crate",
+        choices=list(CRATE_SPECS),
+        default="widgets",
+        help="Which crate to extract / catalog (default: widgets).",
+    )
+    parser.add_argument(
+        "--catalog-all",
+        action="store_true",
+        help="Generate the mdBook catalog for ALL crates into their default "
+        "docs/<dir> and patch each SUMMARY region.",
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help=argparse.SUPPRESS,  # run the catalog-generator smoke tests and exit
@@ -1748,14 +1871,33 @@ def main(argv: list[str]) -> int:
     if args.test:
         return run_self_tests()
 
+    global SPEC
+
+    def _api_dir() -> "Path | None":
+        # Auto-use the built rustdoc tree if present, so a plain run still
+        # resolves deep-links for private / cfg-gated modules instead of 404ing.
+        if args.api_dir:
+            return Path(args.api_dir)
+        _doc = REPO_ROOT / "target" / "doc"
+        return _doc if (_doc / SPEC.rustdoc).exists() else None
+
+    if args.catalog_all:
+        rc = 0
+        for key, spec in CRATE_SPECS.items():
+            SPEC = spec
+            reg = build_registry()
+            out = REPO_ROOT / "docs" / spec.md_subdir
+            rc |= cmd_md_dir(reg, str(out), args.api_base, _api_dir())
+        return rc
+
+    SPEC = CRATE_SPECS[args.crate]
     reg = build_registry()
 
     if args.list:
         return cmd_list(reg)
 
     if args.md_dir:
-        api_dir = Path(args.api_dir) if args.api_dir else None
-        return cmd_md_dir(reg, args.md_dir, args.api_base, api_dir)
+        return cmd_md_dir(reg, args.md_dir, args.api_base, _api_dir())
 
     if args.all:
         target_files = list(reg.files)

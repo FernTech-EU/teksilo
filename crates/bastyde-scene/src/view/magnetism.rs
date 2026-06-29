@@ -1,15 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! View-side magnetism internals: the in-flight port-drag state and the
-//! built-in feedback renderer.
+//! View-side magnetism internals: the in-flight port-drag state, the
+//! keyboard connect-mode dispatcher, and the built-in feedback renderer.
 //!
-//! The public magnetism types ([`MagnetismConfig`],
-//! [`MagnetFeedback`], …) and the snap mechanism
-//! live in [`crate::magnet`] / [`crate::scene`]. This module holds only
-//! the per-view runtime state the [`SceneView`] drag /
-//! paint / keyboard code threads around, plus the default renderer used
-//! when the consumer installs no custom [`MagnetismConfig::feedback`].
+//! The public magnetism types ([`MagnetismConfig`], [`MagnetFeedback`], …)
+//! and the snap-math live in [`crate::magnet`] / [`crate::scene`]. This
+//! module holds only the per-view runtime state that the [`SceneView`]
+//! drag / paint / keyboard code threads around.
+//!
+//! Three concrete responsibilities live here:
+//!
+//! - **[`PortDragState`]** — ephemeral data for an in-flight port-drag
+//!   (the user grabbed a magnet handle and is pulling a wire whose free
+//!   end snaps to nearby accepting magnets).
+//! - **`handle_connect_key`** — keyboard connect-mode dispatcher: the
+//!   configure-key toggles the mode, arrow keys move a virtual focus
+//!   through eligible magnets, Enter/Space forms the connection, and Esc
+//!   cancels or exits.
+//! - **`render_default_feedback`** — the built-in painter drawn when the
+//!   consumer does not supply a [`MagnetismConfig::feedback`] closure:
+//!   constant-pixel-size marker dots coloured by [`crate::MagnetVisualState`]
+//!   plus a bezier connector wire for any forming connection.
 
 use std::any::Any;
 use std::cell::Cell;

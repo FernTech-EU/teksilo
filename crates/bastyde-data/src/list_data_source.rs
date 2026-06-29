@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Read-and-command interface for a flat collection behind a `ListView` /
+//! `ListDataSource` — read-and-command interface for a flat collection behind a `ListView` /
 //! `TableView`.
 //!
 //! `ListDataSource` is the flat-list peer of
 //! [`TreeDataSource`](crate::TreeDataSource): a positional read API plus the
 //! capability protocol (identity, DnD validation, lazy loading). It is the
-//! input every flat data view reads through. The built-in `ListModel<T>` and
-//! `SortFilterListModel<T>` implement it; an external/huge source (a paged
-//! database cursor, a 1M-row windowed feed) implements it directly and owns its
+//! input every flat data view reads through. The built-in [`ListModel<T>`](crate::ListModel) and
+//! [`SortFilterListModel<T>`](crate::SortFilterListModel) implement it; an external/huge source
+//! (a paged database cursor, a 1M-row windowed feed) implements it directly and owns its
 //! own paging behind `row_state`/`request_window`/`fetch_more`.
 //!
 //! Not object-safe (associated types + generic `with_item`); `ListView`
@@ -17,6 +17,24 @@
 //! closure bundle. The DnD and lazy methods default to inert / fully-resident,
 //! so a read-only in-memory source implements only `len` + `with_item` +
 //! `observe_changes`.
+//!
+//! ## When to use
+//!
+//! Prefer [`ListModel<T>`](crate::ListModel) when your data fits in memory and you want
+//! automatic `DataChange` notifications with no extra work. Implement `ListDataSource`
+//! directly when the source is external, huge, or requires lazy window-based loading —
+//! the view calls `request_window` each build pass and `fetch_more` near the end.
+//!
+//! ```rust
+//! # use bastyde_data::{ListModel, ListDataSource};
+//! // ListModel<T> implements ListDataSource — pass it directly to any flat view.
+//! let model = ListModel::from_vec(vec!["alpha", "beta", "gamma"]);
+//! // Access via the ListDataSource interface:
+//! let _len = model.len();
+//! let _first = model.with_item(0, |s| *s);
+//! assert_eq!(_len, 3);
+//! assert_eq!(_first, Some("alpha"));
+//! ```
 
 use std::ops::Range;
 
@@ -25,7 +43,14 @@ use bastyde_core::ObserverHandle;
 use crate::data_change::DataChange;
 use crate::dnd_types::{DragEligibility, DropCommit, DropQuery, DropResponse, ItemKey, RowState};
 
-/// A data source for a flat collection.
+/// A data source for a flat collection viewed by `ListView`, `TableView`, and `GridView`.
+///
+/// The trait separates the read interface (`len`, `with_item`) from the capability
+/// protocol: identity (`key_at`/`index_of`), drag-and-drop validation
+/// (`drag`/`can_accept`/`accept_drop`/`on_drag_out`), and lazy loading
+/// (`row_state`/`request_window`/`can_fetch_more`/`fetch_more`). All capability
+/// methods have inert defaults, so a minimal implementation only needs `len`,
+/// `with_item`, and `observe_changes`.
 pub trait ListDataSource: 'static {
     /// The item type exposed by this data source.
     type Item: 'static;
@@ -59,7 +84,8 @@ pub trait ListDataSource: 'static {
         None
     }
 
-    /// Register an observer for change notifications.
+    /// Register an observer that is called on every mutation; dropping the
+    /// returned [`ObserverHandle`] unregisters the callback automatically.
     fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle;
 
     /// First index whose content may differ after the change just delivered —

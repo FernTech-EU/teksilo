@@ -8,7 +8,7 @@
 `Signal<bool>` toggles.
 
 Drives an `opacity: Signal<f32>` ∈ [0, 1] and applies it to its
-own subtree via [`BuildContext::set_opacity`]. The framework's
+own subtree via `BuildContext::set_opacity`. The framework's
 render walker emits `SetOpacity(value)` before this widget's
 paint and `RestoreOpacity` afterwards, so the multiplier composes
 correctly with ancestor opacity scopes via the canvas's stacked

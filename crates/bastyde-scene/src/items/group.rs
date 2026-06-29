@@ -7,6 +7,33 @@
 //! inline label. Without any chrome it's a logical-only container
 //! that announces itself to AT but draws nothing — the lightweight
 //! analogue of an `A11yGroup`.
+//!
+//! ## When to use
+//!
+//! Use [`GroupItem`] when you need to:
+//! - Draw a visible boundary box around a cluster of related items
+//!   (e.g. a lane in a Kanban board, an "Act 1" region on a corkboard).
+//! - Provide a named AT group that screen readers announce without
+//!   any visible chrome — call [`GroupItem::label`] but omit `fill`
+//!   and `stroke`, leaving `is_visual()` false.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_scene::{Scene, GroupItem};
+//! use bastyde_canvas::{Point, Rect};
+//! use bastyde_tokens::Color;
+//! use bastyde_i18n::lit;
+//!
+//! let mut scene = Scene::new();
+//! // A visible "Act 1" box with a rounded border.
+//! let group = GroupItem::new(Rect::new(0.0, 0.0, 400.0, 600.0))
+//!     .label(lit!("Act 1"))
+//!     .show_label(true)
+//!     .stroke(Color::new(0.6, 0.6, 0.6, 1.0), 1.5)
+//!     .corner_radius(8.0);
+//! let _id = scene.add_item(group, Point::new(20.0, 20.0));
+//! ```
 
 use accesskit::Role;
 use bastyde_canvas::{Canvas, Point, Rect, StrokeStyle};

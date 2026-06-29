@@ -87,8 +87,12 @@ type SceneTapHandler = Rc<dyn Fn(&SceneTapEvent, &mut EventContext)>;
 ///   wired (the drag pipeline honours `IS_DRAGGABLE` for drag-to-move).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DragMode {
+    /// Empty-space drag is a no-op; useful for read-only embedded diagrams.
     NoDrag,
+    /// Left-click-drag pans the viewport; item-level drag handlers are bypassed.
     ScrollHandDrag,
+    /// Empty-space drag draws a selection marquee; item drag dispatches to the
+    /// item's drag handler (respecting `IS_DRAGGABLE`). This is the default.
     #[default]
     RubberBand,
 }

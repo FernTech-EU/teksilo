@@ -1,8 +1,47 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Concrete reactive list. Owns items as `Vec<T>` behind `Rc<RefCell<>>`.
-//! Mutations emit `DataChange` automatically. Cloneable for shared access.
+//! `ListModel<T>` — concrete reactive list backed by a `Vec<T>`.
+//!
+//! `ListModel<T>` stores items in a heap-allocated `Vec<T>` behind
+//! `Rc<RefCell<…>>`. Cloning a handle shares the same underlying data — there
+//! is no deep copy. Every mutation method (`push`, `insert`, `remove`, `set`,
+//! `move_item`, `replace_all`, `clear`) drops the internal borrow before
+//! notifying observers, so observer callbacks may safely call read methods
+//! (`len`, `with_item`) without a re-entrant borrow.
+//!
+//! `ListModel<T>` implements [`ListDataSource`] directly, so it can be handed
+//! to any `ListView` / `TableView` without adaption. For lists too large to
+//! hold in memory, implement [`ListDataSource`] directly on your own type
+//! (paged database cursor, windowed feed, etc.).
+//!
+//! ## When to use
+//!
+//! Use `ListModel<T>` when the full list fits in memory and you want automatic
+//! change notifications with no extra setup. Use a custom [`ListDataSource`]
+//! when the source is external, huge, or lazy-loaded.
+//!
+//! ## Notifications
+//!
+//! Observers registered via [`ListModel::observe_changes`] receive a
+//! [`DataChange`] describing the minimal change: `ItemsInserted`,
+//! `ItemsRemoved`, `ItemUpdated`, `ItemsMoved`, or `Reset`. The
+//! [`ObserverHandle`] returned is RAII — dropping
+//! it unregisters the callback immediately.
+//!
+//! ```rust
+//! # use bastyde_data::ListModel;
+//! let model: ListModel<&str> = ListModel::new();
+//! model.push("alpha");
+//! model.push("beta");
+//! model.push("gamma");
+//! assert_eq!(model.len(), 3);
+//! let second = model.with_item(1, |s| *s);
+//! assert_eq!(second, Some("beta"));
+//! model.set(0, "ALPHA");
+//! model.remove(2);
+//! assert_eq!(model.len(), 2);
+//! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;

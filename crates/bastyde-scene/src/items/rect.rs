@@ -2,6 +2,41 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! [`RectItem`] — filled / stroked rectangle in local item coords.
+//!
+//! `RectItem` is the simplest and cheapest lightweight scene item: a rectangle
+//! in local item coordinates with an optional fill and/or stroke. It uses the
+//! default AABB hit-test (exact for a rectangle) and has zero arena overhead.
+//!
+//! Like all lightweight items, `RectItem` is constructed with its geometry
+//! relative to a local origin (`Rect::new(0.0, 0.0, w, h)`) and placed in
+//! the scene by `Scene::add_item(item, scene_pos)`, where `scene_pos` becomes
+//! the item's anchor in scene coordinates.
+//!
+//! ## When to use
+//!
+//! Use `RectItem` for background tiles, card backgrounds, selection highlights,
+//! grid cells, or any rectangular decoration in the lightweight tier. For
+//! arbitrary shapes, use [`PathItem`](crate::PathItem); for interactive content needing focus
+//! or event handlers, embed a full widget with `Scene::add_widget`.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_scene::{SceneModel, RectItem};
+//! use bastyde_canvas::{Point, Rect};
+//! use bastyde_tokens::Color;
+//! use bastyde_i18n::lit;
+//!
+//! let model = SceneModel::new();
+//!
+//! let item = RectItem::new(Rect::new(0.0, 0.0, 120.0, 80.0))
+//!     .fill(Color::new(0.9, 0.95, 1.0, 1.0))
+//!     .stroke_cosmetic(Color::new(0.6, 0.7, 0.85, 1.0), 1.0)
+//!     .label(lit!("Card background"))
+//!     .draggable(true);
+//!
+//! model.add_item(item, Point::new(40.0, 40.0));
+//! ```
 
 use accesskit::Role;
 use bastyde_canvas::{Canvas, Rect, StrokeStyle};

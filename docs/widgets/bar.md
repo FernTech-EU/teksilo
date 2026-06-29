@@ -14,7 +14,7 @@ with edge auto-scroll, and a leading icon-only pinned-tab strip are
 all supported. Multi-line (multi-row) wrapping is the one layout
 mode not yet implemented.
 
-The data source is consumed via the `pub(crate)` [`ListSource`]
+The data source is consumed via the `pub(crate)` `ListSource`
 abstraction so callers can pass either a `ListModel<T>` (clonable,
 mutable) or any external `ListDataSource<Item = T>` (a database
 cursor, a virtual list, …) without TabBar having to carry a generic
@@ -23,8 +23,8 @@ source parameter.
 ## Accessibility
 
 The bar emits `Role::TabList` with an `aria-orientation`
-reflecting whether it was built with [`TabBar::horizontal`] or
-[`TabBar::vertical`]. When a page hosts more than one tab list,
+reflecting whether it was built with `TabBar::horizontal` or
+`TabBar::vertical`. When a page hosts more than one tab list,
 give each one an accessible name via
 `.access_label(tr!(tab_list_name()))`
 so screen readers can distinguish them (ARIA APG recommendation).
@@ -127,7 +127,7 @@ pub struct TabBarDragData<T: 'static> { /* fields */ }
 A reactive header strip that pulls its tab list from a data source
 and writes the active tab into a shared `Signal<Option<TabId>>`.
 
-Selection is **id-based**: the bar holds a stable [`TabId`] per
+Selection is **id-based**: the bar holds a stable `TabId` per
 item (extracted via the `id_of` closure passed to the constructor)
 and the public `selected_id` signal is the source of truth across
 reorders / removals / locale changes. Internal index-based work
@@ -143,44 +143,44 @@ pub struct TabBar<T: 'static> { /* fields */ }
 
 #### `pub fn horizontal( model: ListModel<T>, delegate: TabDelegate<T>, selected_id: Signal<Option<TabId>>, id_of: impl Fn(usize, &T) -> TabId + 'static, ) -> Self`
 
-Construct a horizontal tab bar from a [`ListModel<T>`].
-Default sizing is [`TabSizing::Shared`].
+Construct a horizontal tab bar from a `ListModel<T>`.
+Default sizing is `TabSizing::Shared`.
 
 `selected_id` is the id-based selection signal — written by
 the bar on click / keyboard / drag-drop and observable by
-callers. `id_of(index, &item)` extracts the stable [`TabId`]
+callers. `id_of(index, &item)` extracts the stable `TabId`
 from each model item.
 
 #### `pub fn horizontal_from_source<S: ListDataSource<Item = T>>( source: S, delegate: TabDelegate<T>, selected_id: Signal<Option<TabId>>, id_of: impl Fn(usize, &T) -> TabId + 'static, ) -> Self`
 
-Construct a horizontal tab bar from any [`ListDataSource`].
-Default sizing is [`TabSizing::Shared`].
+Construct a horizontal tab bar from any `ListDataSource`.
+Default sizing is `TabSizing::Shared`.
 
 #### `pub fn vertical( model: ListModel<T>, delegate: TabDelegate<T>, selected_id: Signal<Option<TabId>>, id_of: impl Fn(usize, &T) -> TabId + 'static, ) -> Self`
 
-Construct a vertical tab bar from a [`ListModel<T>`]. Tabs
+Construct a vertical tab bar from a `ListModel<T>`. Tabs
 stack top-to-bottom as horizontal pills (icon + label + close
 button arranged left-to-right within each pill). Default
-sizing is [`TabSizing::Shared`] — uniform pill heights.
+sizing is `TabSizing::Shared` — uniform pill heights.
 
 #### `pub fn vertical_from_source<S: ListDataSource<Item = T>>( source: S, delegate: TabDelegate<T>, selected_id: Signal<Option<TabId>>, id_of: impl Fn(usize, &T) -> TabId + 'static, ) -> Self`
 
-Construct a vertical tab bar from any [`ListDataSource`].
+Construct a vertical tab bar from any `ListDataSource`.
 
 #### `pub fn tab_sizing(mut self, mode: TabSizing) -> Self`
 
-Override the per-tab sizing strategy. See [`TabSizing`].
+Override the per-tab sizing strategy. See `TabSizing`.
 
 #### `pub fn tab_display(mut self, mode: TabDisplayMode) -> Self`
 
 Choose what every tab shows — icon, label, or both. See
-[`TabDisplayMode`]. Default [`TabDisplayMode::Auto`] (render each tab as
+`TabDisplayMode`. Default `TabDisplayMode::Auto` (render each tab as
 its `TabInfo` declares).
 
 #### `pub fn min_tab_width(mut self, dp: f32) -> Self`
 
 Minimum width (in dp) any unpinned tab will be drawn at.
-Default: [`DEFAULT_MIN_TAB_WIDTH`].
+Default: `DEFAULT_MIN_TAB_WIDTH`.
 
 In **horizontal** orientation this clamps the **per-tab** width.
 In **vertical** orientation every tab is forced to the bar's
@@ -200,7 +200,7 @@ keeps the style's `editor_tab_height`. Use for a compact bar.
 
 Maximum width (in dp) any unpinned tab will be drawn at — long
 labels truncate with an ellipsis at this width.
-Default: [`DEFAULT_MAX_TAB_WIDTH`].
+Default: `DEFAULT_MAX_TAB_WIDTH`.
 
 In **horizontal** orientation this clamps the **per-tab** width.
 In **vertical** orientation it caps the whole sidebar's width —
@@ -210,12 +210,12 @@ adapt-to-content rule.
 #### `pub fn tab_spacing(mut self, dp: f32) -> Self`
 
 Override the spacing (in dp) between adjacent tab headers in
-the row. Default: [`DEFAULT_TAB_SPACING`].
+the row. Default: `DEFAULT_TAB_SPACING`.
 
 #### `pub fn pinned_tab_width(mut self, dp: f32) -> Self`
 
 Width (in dp) of an icon-only pinned tab.
-Default: [`DEFAULT_PINNED_TAB_WIDTH`].
+Default: `DEFAULT_PINNED_TAB_WIDTH`.
 
 #### `pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
 
@@ -256,7 +256,7 @@ strips). Off by default. See `tab_divider_color`.
 #### `pub fn tab_divider_color( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
 
 Like `tab_dividers`, but with an explicit
-colour. Accepts any `Color`, [`BorderRole`],
+colour. Accepts any `Color`, `BorderRole`,
 or `Signal<Color>`. Implies `tab_dividers()`.
 
 #### `pub fn active_indicator( mut self, position: bastyde_core::styles::TabIndicatorPosition, ) -> Self`
@@ -272,16 +272,16 @@ Honoured by the default `RecipeTabStyle`; a custom
 #### `pub fn selected_text_role(mut self, role: TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
-on the **selected** tab. Default: [`TextRole::Primary`] — the
+on the **selected** tab. Default: `TextRole::Primary` — the
 Int UI editor-strip convention. Override to e.g.
-[`TextRole::Accent`] when the strip sits over a tinted surface.
+`TextRole::Accent` when the strip sits over a tinted surface.
 
 #### `pub fn idle_text_role(mut self, role: TextRole) -> Self`
 
 Set the text role used for the label (and matching icon tint)
 on **idle** tabs (not selected, not disabled). Default:
-[`TextRole::Secondary`]. Disabled tabs always read as
-[`TextRole::Disabled`] regardless of this setting.
+`TextRole::Secondary`. Disabled tabs always read as
+`TextRole::Disabled` regardless of this setting.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::TabStyle) -> Self`
 
@@ -298,7 +298,7 @@ built-in `RecipeTabStyle` default.
 Install a pin-toggle handler called whenever the user crosses
 a pinned tab over the unpinned region or vice-versa during a
 drag. Receives `(model_index, new_pinned_flag, ctx)`. The
-firing [`EventContext`] lets the handler confirm the
+firing `EventContext` lets the handler confirm the
 transition via a dialog or route it through an intent before
 mutating the item; apps decide whether to actually flip the
 pinned state.
@@ -355,14 +355,14 @@ of orientation. Default: on.
 Install a close-tab handler called whenever the user clicks a
 closable tab's close button, middle-clicks the tab header, or
 presses `Delete` on a focused tab. The handler receives the
-firing [`EventContext`] so it can open a confirmation dialog
+firing `EventContext` so it can open a confirmation dialog
 (`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
 intent, or otherwise route the close request through the
 framework. To veto the close, do nothing in the handler; to
 confirm-then-close, run the confirmation flow and only mutate
 the underlying model on accept.
 
-If unset and the bar is backed by a [`ListModel<T>`], the
+If unset and the bar is backed by a `ListModel<T>`, the
 default behavior is to remove the item at the given index
 from the model (no confirmation, no ctx needed for that path).
 
@@ -381,7 +381,7 @@ Default: off.
 Install a reorder handler called whenever the user drag-drops
 a tab to a new position. Receives `(from, to, ctx)` —
 `from`/`to` are model indices and `ctx` is the firing
-[`EventContext`] so the handler can open a confirmation
+`EventContext` so the handler can open a confirmation
 dialog or dispatch an intent before persisting the move.
 Implies `reorderable(true)`.
 
@@ -415,7 +415,7 @@ context. The app inserts the item into its own model. Implies
 
 Install the source-side callback fired after one of this bar's
 tabs has been accepted by a *different* bar. Receives the
-transferred tab's [`TabId`]; the app removes it from its own
+transferred tab's `TabId`; the app removes it from its own
 model. Not fired for intra-bar reorders (those go through
 `on_reorder`) or rejected / cancelled
 drags. Implies `accept_external_tabs(true)`.
@@ -426,7 +426,7 @@ Accept **non-tab** drops onto the bar — an in-app foreign drag
 (e.g. a file dragged from a `TreeView`, carrying app data) or an
 OS file/text/URL drop. The bar paints the same insertion-line
 indicator while such a payload hovers, and on drop calls `f`
-with the raw [`DragPayload`], the model insertion index, and the
+with the raw `DragPayload`, the model insertion index, and the
 firing context. Return `true` if accepted — the app inspects the
 payload (`get_typed::<T>()` / `files()` / `text()` / `uris()`)
 and mints whatever it needs (e.g. opens a tab).

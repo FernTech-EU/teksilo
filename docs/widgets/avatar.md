@@ -79,7 +79,7 @@ still get distinct colours.
 
 #### `pub fn with_image(icon: &RasterIcon) -> Self`
 
-Create an avatar from a decoded [`RasterIcon`]. The pixels are
+Create an avatar from a decoded `RasterIcon`. The pixels are
 centre-cropped to a square and CPU-masked to the configured shape
 at the first `build()`. Call `.alt(...)` to provide a
 screen-reader name for the image.
@@ -117,7 +117,7 @@ layout shift.
 
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
-Override the auto hash-derived background. Accepts a [`Color`],
+Override the auto hash-derived background. Accepts a `Color`,
 a role, or a `Signal<Color>`.
 
 #### `pub fn foreground(mut self, color: impl Into<ColorProp>) -> Self`
@@ -136,13 +136,13 @@ from the theme's chart palette. Defaults to the resolved name
 #### `pub fn border(mut self, width: f32) -> Self`
 
 Outer ring thickness. A non-zero value enables the ring (drawn
-in `BorderRole::Default` unless [`Self::border_color`] overrides
+in `BorderRole::Default` unless `Self::border_color` overrides
 it). `0.0` disables the ring.
 
 #### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self`
 
-Override the outer ring colour. Accepts a [`Color`], a theme role,
-or a `Signal<Color>`. Has no effect unless [`Self::border`] is also
+Override the outer ring colour. Accepts a `Color`, a theme role,
+or a `Signal<Color>`. Has no effect unless `Self::border` is also
 set to a positive width.
 
 #### `pub fn presence(mut self, presence: AvatarPresence) -> Self`
@@ -216,7 +216,7 @@ Avatar::with_initials(lit!("?"))        // logged-out fallback
 
 Bind the image source. `None` ⇒ initials fallback. Each
 non-`None` value is masked to the configured `AvatarShape` by
-the inner [`ImageWidget`]. Bound at `BindingLevel::Rebuild`.
+the inner `ImageWidget`. Bound at `BindingLevel::Rebuild`.
 
 #### `pub fn bind_alt(mut self, signal: Signal<Option<String>>) -> Self`
 

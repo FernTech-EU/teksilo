@@ -46,7 +46,7 @@ Create a section header with the given `label`.
 
 Override the label's text style (font, size, weight, …). Accepts a
 static `TextStyle` or a
-[`TextStyleRole`].
+`TextStyleRole`.
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 

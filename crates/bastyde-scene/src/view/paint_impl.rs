@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Paint implementation for [`SceneView`].
+//!
+//! Implements the three painting entry points called by the framework walker:
+//! `paint_impl` (the `Under`-band lightweight items and the app background
+//! closure, rendered before heavyweight children), `wants_post_paint_impl`
+//! (guard that avoids an empty foreground pass), and `post_paint_impl` (the
+//! `Over`-band items, selection marquee, app foreground hook, magnetism
+//! feedback, and debug overlays, all rendered after heavyweight children).
+//! The shared `paint_band` helper handles z-sorting, item-coordinate GPU
+//! caching, `IGNORES_TRANSFORMATIONS` pinning, per-item opacity composition,
+//! and glyph-epoch eviction recovery.
+
 use super::*;
 
 impl SceneView {

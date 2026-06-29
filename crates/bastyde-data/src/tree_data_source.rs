@@ -1,17 +1,49 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Read-and-command interface for hierarchical data behind a `TreeView` /
-//! `TreeTableView`.
+//! `TreeDataSource` — read-and-command interface for hierarchical data behind a
+//! `TreeView` / `TreeTableView`.
 //!
 //! `TreeDataSource` is to trees what [`ListDataSource`](crate::ListDataSource)
 //! is to flat lists: a projected, per-view, flattened read API plus the
-//! capability protocol (identity, DnD validation, lazy loading). The built-in
-//! [`TreeSlice`](crate::TreeSlice) and
+//! capability protocol for identity, DnD validation, and lazy loading.
+//! The built-in [`TreeSlice`](crate::TreeSlice) and
 //! [`SortFilterTreeModel`](crate::SortFilterTreeModel) implement it over an
-//! in-memory `TreeModel`; an external source of truth (e.g. a Qleany entity
-//! store) implements it directly with its own `Key` type and so never needs to
-//! mirror itself into a `TreeModel`.
+//! in-memory [`TreeModel`]; an external source of truth
+//! (e.g. a Qleany entity store) implements it directly with its own `Key` type
+//! and so never needs to mirror itself into a `TreeModel`.
+//!
+//! ## When to use
+//!
+//! Implement `TreeDataSource` directly when your data already lives outside an
+//! in-memory tree (a database, a virtual filesystem, a remote store) and you
+//! do not want to mirror it into a `TreeModel`. Use [`TreeSlice`](crate::TreeSlice)
+//! when you have a `TreeModel<T>` and want per-view expand state.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_data::{TreeDataSource, FlatEntry, NodeId};
+//! use bastyde_data::dnd_types::{DragEligibility, DropQuery, DropResponse, DropCommit, RowState};
+//! use bastyde_core::signal::Signal;
+//!
+//! struct MySource { version: Signal<u64> }
+//!
+//! impl TreeDataSource for MySource {
+//!     type Item = String;
+//!     type Key = NodeId;
+//!
+//!     fn visible_count(&self) -> usize { 0 }
+//!     fn with_entry<R>(&self, _i: usize, _f: impl FnOnce(&String, &FlatEntry<NodeId>) -> R) -> Option<R> { None }
+//!     fn key_at(&self, _i: usize) -> Option<NodeId> { None }
+//!     fn flat_index_of(&self, _k: &NodeId) -> Option<usize> { None }
+//!     fn parent(&self, _k: &NodeId) -> Option<NodeId> { None }
+//!     fn child_keys(&self, _k: &NodeId) -> Vec<NodeId> { vec![] }
+//!     fn version_signal(&self) -> Signal<u64> { self.version.clone() }
+//!     fn is_expanded(&self, _k: &NodeId) -> bool { false }
+//!     fn set_expanded(&self, _k: &NodeId, _expanded: bool) {}
+//! }
+//! ```
 
 use bastyde_core::signal::Signal;
 

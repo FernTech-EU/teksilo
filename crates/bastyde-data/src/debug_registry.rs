@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Debug-only registry of named data models for the Bastyde inspector.
+//! `debug_registry` — opt-in registry of named data models for the Bastyde inspector.
 //!
-//! The registry is a thread-local `Vec<(String, Weak<dyn ModelDebug>)>`.
-//! Models opt in by calling `.debug_named("name")` (a debug-only
-//! builder method on `ListModel<T>`, `TreeModel<T>`, and
-//! `SelectionModel`). The model itself owns the strong adapter `Rc`, so
-//! the registration drops automatically when the last model handle is
-//! freed — `snapshot()` prunes dead `Weak` entries on every call.
+//! Provides the infrastructure for the inspector's *Models* tab: models register
+//! themselves under a human-readable name, and the inspector calls [`snapshot`] to
+//! obtain a live list of every registered model without keeping them alive past
+//! their natural lifetime.
 //!
-//! This entire module compiles to nothing in release builds.
+//! The registry is a thread-local `Vec` of `Weak<dyn ModelDebug>` entries.
+//! Models opt in via the debug-only `.debug_named("name")` builder method on
+//! [`crate::ListModel`], [`crate::TreeModel`], and [`crate::SelectionModel`];
+//! that method creates a strong `Rc<dyn ModelDebug>` adapter and stores it
+//! inside the model's own `Rc<RefCell<Inner>>`, while registering a `Weak`
+//! clone here. When the last model handle is dropped the `Weak` becomes dead,
+//! and the next call to [`snapshot`] prunes it automatically.
+//!
+//! This entire module is compiled only when `debug_assertions` are enabled
+//! and contributes zero overhead to release builds.
 
 #![cfg(debug_assertions)]
 

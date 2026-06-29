@@ -5,6 +5,7 @@
 
 **Companion to:** [architecture.md](architecture.md)
 **Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
+**API reference:** the full rustdoc for every type lives at [`/api/bastyde_data/`](api/bastyde_data/index.html).
 
 ---
 

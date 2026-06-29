@@ -2,6 +2,32 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! [`ImageItem`] — a raster image at a local-coord rectangle.
+//!
+//! `ImageItem` renders a raster image registered in the Canvas image registry
+//! at a caller-specified rectangle in local item coordinates. The image
+//! reference is a string key into that registry, not a path — apps pre-load
+//! images and then name them here.
+//!
+//! ## When to use
+//!
+//! Use `ImageItem` when you need a static or swappable raster graphic in
+//! the lightweight tier (no arena overhead). For interactive images that need
+//! focus, drag-and-drop, or rich accessibility, embed a full `ImageWidget`
+//! as a heavyweight scene widget instead.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_scene::{SceneModel, ImageItem};
+//! use bastyde_canvas::Rect;
+//! use bastyde_i18n::lit;
+//!
+//! let model = SceneModel::new();
+//! let item = ImageItem::new(Rect::new(0.0, 0.0, 64.0, 64.0), "avatar")
+//!     .label(lit!("User avatar"))
+//!     .draggable(true);
+//! model.add_item(item, bastyde_canvas::Point::new(100.0, 50.0));
+//! ```
 
 use accesskit::Role;
 use bastyde_canvas::{Canvas, Rect};
@@ -12,8 +38,11 @@ use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 use bastyde_i18n::LocalizedString;
 
-/// A raster image in a local-coord rectangle. The image is referenced
-/// by name (the Canvas image registry).
+/// A raster image in a local-coord rectangle.
+///
+/// The image is referenced by a string key into the Canvas image registry.
+/// Place the item in the scene via `Scene::add_item`; the key must resolve
+/// to a registered image at paint time.
 #[derive(Debug)]
 pub struct ImageItem {
     local_bounds: Rect,

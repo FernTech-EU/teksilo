@@ -24,6 +24,21 @@
 //! bundle. Apps construct an [`MruList<T>`](crate::MruList) for each
 //! such collection and register it themselves via
 //! `BastydeAppBuilder::app_state(handle)`.
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use bastyde_settings::{AppPaths, SettingsBundle};
+//! use std::time::Duration;
+//!
+//! let paths = AppPaths::for_testing(std::env::temp_dir());
+//! let opened = SettingsBundle::new()
+//!     .with_window_state(true)
+//!     .with_debounce(Duration::ZERO)
+//!     .open(&paths)
+//!     .expect("bundle open failed");
+//! // opened.store and opened.window_state are now ready to register.
+//! ```
 
 use std::time::Duration;
 
@@ -35,8 +50,10 @@ use crate::window_state::WindowStateService;
 /// Errors surfaced by [`SettingsBundle::open`].
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsBundleError {
+    /// The K/V store could not be opened or flushed.
     #[error("settings bundle: {0}")]
     Store(#[from] SettingsStoreError),
+    /// A settings file (e.g. the window-state file) could not be opened or flushed.
     #[error("settings bundle: {0}")]
     File(#[from] SettingsFileError),
 }
@@ -91,10 +108,12 @@ impl SettingsBundle {
         self
     }
 
+    /// The filename stem (without `.toml`) used for the K/V store.
     pub fn store_name(&self) -> &str {
         &self.store_name
     }
 
+    /// The debounce window applied to all services in this bundle.
     pub fn debounce(&self) -> Duration {
         self.debounce
     }

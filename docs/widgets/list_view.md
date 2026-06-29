@@ -95,7 +95,7 @@ concrete source here. Mutually exclusive with
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Set the scroll-chaining behavior at the boundary (default
-[`OverscrollBehavior::Chain`]; `Contain`
+`OverscrollBehavior::Chain`; `Contain`
 disables chaining to an ancestor scrollable).
 
 #### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`

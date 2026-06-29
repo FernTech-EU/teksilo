@@ -5,7 +5,7 @@
 
 Type-erased data source adapter for `TreeView`.
 
-Wraps any [`TreeDataSource`] behind a uniform set of `Rc<dyn Fn(..)>` closures
+Wraps any `TreeDataSource` behind a uniform set of `Rc<dyn Fn(..)>` closures
 keyed on the **visible flat index**, so `TreeView<T>` requires no extra type
 parameter for the source's `Key`. Each closure resolves index → `Key` (via
 `key_at`) before forwarding to the source's `parent`, `set_expanded`,

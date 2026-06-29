@@ -5,7 +5,7 @@
 
 InputDialog — a `QInputDialog`-style modal that prompts the user for
 a single string. Built on the same `present_modal` infrastructure as
-`MessageBox`, with a [`TextInput`]
+`MessageBox`, with a `TextInput`
 body between the prompt and the Ok / Cancel buttons.
 
 Use `MessageBox` when the dialog
