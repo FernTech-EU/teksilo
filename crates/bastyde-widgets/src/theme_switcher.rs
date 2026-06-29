@@ -335,22 +335,6 @@ impl Widget for ThemeSwitcher {
             });
         }
 
-        // Tooltip — three mutually-exclusive setters; setters clear the others
-        // so at most one branch runs. Anchored on the inner ComboBox (the
-        // visible control) so it shows on hover, independent of the dropdown.
-        if let Some(content) = self.composite_tooltip_content.take() {
-            let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, combo_id, content, delay);
-        } else if let Some(source) = self.rich_tooltip_source.clone() {
-            let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, combo_id, source, delay);
-        } else if let Some(text) = self.tooltip_text.clone() {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
-            let tooltip_id = ctx.add(tooltip_widget);
-            let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(combo_id, tooltip_id, delay);
-        }
-
         vec![combo_id]
     }
 
@@ -416,6 +400,28 @@ mod tests {
         let id = tree.add(ThemeSwitcher::new());
         tree.layout(SizeProposal::exact(240.0, 40.0));
         assert!(tree.bounds(id).width > 0.0);
+    }
+
+    #[test]
+    fn tooltip_forwards_to_inner_combo() {
+        // A `.tooltip(..)` on the switcher must reach the inner ComboBox
+        // and appear on hover.
+        let mut tree = light_tree();
+        let id =
+            tree.add(ThemeSwitcher::new().tooltip(LocalizedString::literal("Application theme")));
+        tree.layout(SizeProposal::exact(240.0, 40.0));
+
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "ThemeSwitcher tooltip should appear on hover"
+        );
+        assert!(
+            tree.find_by_label("Application theme").is_some(),
+            "the forwarded tooltip content should be present"
+        );
     }
 
     // The key handler lives on the inner ComboBox; focus it directly.

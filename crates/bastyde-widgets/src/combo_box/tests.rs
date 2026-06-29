@@ -616,6 +616,56 @@ fn tooltip_does_not_leak_onto_open_dropdown_rows() {
 }
 
 #[test]
+fn tooltip_builder_shows_on_trigger_and_does_not_leak() {
+    // The `.tooltip(..)` builder anchors on the trigger chrome: it
+    // appears when hovering the closed combo, and (thanks to the
+    // framework's overlay-boundary gate) does NOT re-trigger over the
+    // open dropdown's option rows.
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).tooltip(lit!("Pick a fruit")));
+    tree.layout(SizeProposal::exact(300.0, 400.0));
+
+    // Hover the closed trigger → the tooltip appears after the theme
+    // delay (advance generously past any reasonable delay).
+    tree.pointer_move(tree.bounds(cb).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear when hovering the closed trigger"
+    );
+    assert!(
+        tree.find_by_label("Pick a fruit").is_some(),
+        "the tooltip content should be present"
+    );
+
+    // Move away to dismiss, then open the dropdown.
+    tree.pointer_move(bastyde_canvas::Point::new(1500.0, 1500.0));
+    assert!(tree.active_overlays().is_empty());
+
+    tree.click(cb);
+    tree.layout(SizeProposal::exact(300.0, 400.0));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "only the dropdown overlay should be open"
+    );
+
+    // Hover a row and wait: no tooltip overlay should appear.
+    let row = tree
+        .find_by_label("Cherry")
+        .expect("dropdown should contain Cherry");
+    tree.pointer_move(tree.bounds(row).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "the .tooltip() builder must not leak onto open dropdown rows"
+    );
+}
+
+#[test]
 fn many_items_scroll_without_overflow_past_overlay() {
     // More items than max_visible_items (default 8): the dropdown
     // must cap at roughly max_visible * item_height, not grow to
