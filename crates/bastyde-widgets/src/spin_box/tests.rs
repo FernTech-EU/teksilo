@@ -470,3 +470,21 @@ fn reactive_suffix_survives_value_transitions() {
     let info = tree.accessibility_node(id);
     assert_eq!(info.role(), bastyde_core::accesskit::Role::SpinButton);
 }
+
+// ── Tooltip ───────────────────────────────────────────────────────
+
+#[test]
+fn tooltip_appears_on_hover() {
+    let value = Signal::new(0_i32);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(value, 0, 100).tooltip(lit!("Tip")));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tree.pointer_move(tree.bounds(id).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
+}

@@ -380,3 +380,20 @@ fn color_edit_cancel_restores_value_to_open_time_snapshot() {
         "cancel should restore the value the bound signal had at popover-open time",
     );
 }
+
+#[test]
+fn tooltip_appears_on_hover() {
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id =
+        tree.add(ColorPicker::new(value).tooltip(bastyde_i18n::LocalizedString::literal("Tip")));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.pointer_move(tree.bounds(id).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
+}

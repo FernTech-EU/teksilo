@@ -60,6 +60,14 @@ pub struct Toggle {
     pressed: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
     body_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl Toggle {
@@ -77,6 +85,9 @@ impl Toggle {
             pressed: Signal::new(false),
             focus_origin: Signal::new(None),
             body_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -110,6 +121,53 @@ impl Toggle {
     /// view.
     pub fn style(mut self, style: impl ToggleStyle) -> Self {
         self.style = Some(Rc::new(style));
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter
+    /// called wins and clears the others.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up by registry `key`.
+    ///
+    /// Mutually exclusive with the other tooltip setters — the last
+    /// setter called wins and clears the others.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from an inline [`crate::tooltip::TooltipContent`]
+    /// value rather than a registry key.
+    ///
+    /// Mutually exclusive with the other tooltip setters — the last
+    /// setter called wins and clears the others.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    ///
+    /// Mutually exclusive with the other tooltip setters — the last
+    /// setter called wins and clears the others.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -175,6 +233,20 @@ impl Widget for Toggle {
             body_id
         };
         self.body_id = Some(root);
+
+        // Attach tooltip (at most one tier fires; each setter cleared the others).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tooltip_id, delay);
+        }
 
         // Wire up the toggle's interactive behaviour. The body owns
         // paint; the wrapper owns input handling.
@@ -524,5 +596,24 @@ mod tests {
             info.actions()
                 .contains(&bastyde_core::accesskit::Action::Click)
         );
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            Toggle::new(Signal::new(false))
+                .label(lit!("Wi-Fi"))
+                .tooltip(lit!("Tip")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

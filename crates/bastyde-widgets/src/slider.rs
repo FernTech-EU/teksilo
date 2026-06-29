@@ -72,6 +72,14 @@ pub struct Slider {
     focused: Signal<bool>,
     cached_bounds: Rc<Cell<Rect>>,
     body_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl Slider {
@@ -94,6 +102,9 @@ impl Slider {
             focused: Signal::new(false),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
             body_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -151,6 +162,48 @@ impl Slider {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter
+    /// wins and clears the others.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by a registry key. The registry
+    /// entry supplies title, body markup, optional shortcut chip and
+    /// cascade links. Mutually exclusive with the other tooltip setters.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from an inline [`TooltipContent`](crate::tooltip::TooltipContent)
+    /// value, bypassing the registry lookup. Mutually exclusive with the
+    /// other tooltip setters.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    /// Uses the heavier `tooltip_delay_heavy` delay. Mutually exclusive
+    /// with the other tooltip setters.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -385,6 +438,21 @@ impl Widget for Slider {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // Tooltip attachment — at most one branch fires (the setters are
+        // mutually exclusive). Anchor on `body_id`, the primary visible root.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, body_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, body_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(body_id, tooltip_id, delay);
+        }
 
         vec![body_id]
     }

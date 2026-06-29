@@ -166,6 +166,14 @@ pub struct DateEdit {
     /// Whether the calendar popover is currently open. Drives
     /// `set_expanded` on the trigger.
     popover_open: Signal<bool>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
     // Build state
     /// Per-call DateEditStyle override. Higher precedence than the
     /// theme-wide `style_slots.date_edit` slot.
@@ -207,6 +215,9 @@ impl DateEdit {
             text_signal: Signal::new(String::new()),
             focused: Signal::new(false),
             popover_open: Signal::new(false),
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             style_override: None,
             root_child_id: None,
             calendar_id: None,
@@ -345,6 +356,47 @@ impl DateEdit {
     /// Return a clone of the bound value signal for external observation.
     pub fn value(&self) -> Signal<Option<Date>> {
         self.value.clone()
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    /// Mutually exclusive with [`Self::rich_tooltip`],
+    /// [`Self::rich_tooltip_content`], and [`Self::composite_tooltip`] —
+    /// this call clears those slots.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up by registry key. Mutually exclusive
+    /// with [`Self::tooltip`], [`Self::rich_tooltip_content`], and
+    /// [`Self::composite_tooltip`] — this call clears those slots.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from inline content. Mutually exclusive with
+    /// [`Self::tooltip`], [`Self::rich_tooltip`], and
+    /// [`Self::composite_tooltip`] — this call clears those slots.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    /// Mutually exclusive with [`Self::tooltip`], [`Self::rich_tooltip`],
+    /// and [`Self::rich_tooltip_content`] — this call clears those slots.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
     }
 }
 
@@ -745,6 +797,21 @@ impl Widget for DateEdit {
         let cfg = bastyde_core::styles::DateEditStyleConfig { body: body_id };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
+
+        // ── Tooltip attachment ─────────────────────────────────
+        // Anchored on the visible trigger root (not the calendar overlay).
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         // ── Segment-stepping helper — captured by the on_key_preview
         // self handler below. Reads live caret position, looks up the

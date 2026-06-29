@@ -169,6 +169,25 @@ fn date_edit_default_validation_behavior_is_auto_correct() {
 }
 
 #[test]
+fn tooltip_appears_on_hover() {
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value).tooltip(LocalizedString::literal("Tip".to_string())));
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    tree.pointer_move(tree.bounds(id).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
+}
+
+#[test]
 fn date_edit_validation_feedback_signal_starts_pristine() {
     use crate::primitives::text_input_field::ValidationFeedback;
     let value = Signal::new(Some(Date::constant(2026, 5, 2)));

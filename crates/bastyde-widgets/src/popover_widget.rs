@@ -236,6 +236,15 @@ pub struct PopoverWidget<T: PopoverTrigger> {
 
     content_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
+
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 /// A [`Button`] that opens a popover when activated. Alias for
@@ -279,6 +288,9 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
             surface_name: String::new(),
             content_id: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -391,6 +403,51 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
     /// variant (which is presentational).
     pub fn surface_name(mut self, name: impl Into<String>) -> Self {
         self.surface_name = name.into();
+        self
+    }
+
+    /// Show a plain single-line tooltip on the trigger after a hover delay.
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — each setter clears
+    /// the other three so the last call wins. The tooltip anchors on the
+    /// trigger, not on the popover content.
+    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a rich tooltip (looked up by registry key) on the trigger after
+    /// a hover delay. Mutually exclusive with the other tooltip setters —
+    /// the last call wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show an inline rich tooltip (pre-built [`TooltipContent`]) on the
+    /// trigger after a hover delay. Mutually exclusive with the other tooltip
+    /// setters — the last call wins.
+    ///
+    /// [`TooltipContent`]: crate::tooltip::TooltipContent
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a composite tooltip (arbitrary widget tree) on the trigger after
+    /// a longer hover delay. Mutually exclusive with the other tooltip setters
+    /// — the last call wins.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -541,6 +598,18 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().add_child(trigger_id).add_child(caret_id));
             self.root_child_id = Some(root_id);
+            if let Some(content) = self.composite_tooltip_content.take() {
+                let delay = ctx.theme().motion.tooltip_delay_heavy;
+                crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+            } else if let Some(source) = self.rich_tooltip_source.clone() {
+                let delay = ctx.theme().motion.tooltip_delay;
+                crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+            } else if let Some(text) = self.tooltip_text.clone() {
+                let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+                let tooltip_id = ctx.add(tooltip_widget);
+                let delay = ctx.theme().motion.tooltip_delay;
+                ctx.attach_tooltip(root_id, tooltip_id, delay);
+            }
             // Return BOTH the trigger root AND the dormant content as
             // children so the framework links content_id under this
             // widget in the arena. Without this, content_id stays an
@@ -557,6 +626,18 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .with_on_activate(activate);
         let trigger_id = ctx.add(trigger);
         self.root_child_id = Some(trigger_id);
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, trigger_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, trigger_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(trigger_id, tooltip_id, delay);
+        }
         // See the disclosure-caret branch for the content-linking rationale.
         vec![trigger_id, content_id]
     }
@@ -864,5 +945,24 @@ mod tests {
         let _ = tree
             .first_focusable_descendant(id)
             .expect("focusable IconButton must be present at Compact");
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = light_tree();
+        let id = tree.add(
+            PopoverButton::new(Button::new(lit!("Open")))
+                .content(dummy_content())
+                .tooltip(lit!("Tip")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 80.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

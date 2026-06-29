@@ -119,6 +119,14 @@ pub struct TimeEdit {
     feedback: Signal<ValidationFeedback>,
     style_override: Option<bastyde_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl std::fmt::Debug for TimeEdit {
@@ -154,6 +162,9 @@ impl TimeEdit {
             feedback: Signal::new(ValidationFeedback::Pristine),
             style_override: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -265,6 +276,42 @@ impl TimeEdit {
         f: impl Fn(Option<Time>, &mut EventContext) + 'static,
     ) -> Self {
         self.on_value_changed = Some(Rc::new(f));
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay. Clears
+    /// any previously set rich or composite tooltip (last call wins).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip identified by a registry key. Clears any
+    /// previously set plain or composite tooltip (last call wins).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach an inline rich tooltip from a [`crate::tooltip::TooltipContent`]
+    /// value. Clears any previously set plain or composite tooltip (last call wins).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    /// Clears any previously set plain or rich tooltip (last call wins).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -541,6 +588,20 @@ impl Widget for TimeEdit {
         let cfg = bastyde_core::styles::DateEditStyleConfig { body: body_id };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
+
+        // ── Tooltip attachment ────────────────────────────────
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         // ── Segment-stepping helper ───────────────────────────
         let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {

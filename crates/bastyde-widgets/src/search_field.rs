@@ -143,6 +143,14 @@ pub struct SearchField {
     overlay_open: RefCell<Option<Signal<bool>>>,
     /// Per-call style override.
     style_override: Option<bastyde_core::styles::SharedSearchFieldStyle>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl SearchField {
@@ -165,6 +173,9 @@ impl SearchField {
             panel_content_id: None,
             overlay_open: RefCell::new(None),
             style_override: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -224,6 +235,49 @@ impl SearchField {
     /// Install a callback invoked when the user picks a suggestion (tap, Enter, or Space).
     pub fn on_select(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
+        self
+    }
+
+    /// Show a plain one-line tooltip after a hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — calling this
+    /// clears the other slots (last call wins).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a registry-driven rich tooltip keyed by `key`.
+    ///
+    /// Mutually exclusive with the other tooltip setters — last call wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show an inline rich tooltip with the given [`TooltipContent`](crate::tooltip::TooltipContent).
+    ///
+    /// Mutually exclusive with the other tooltip setters — last call wins.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a composite tooltip whose body is an arbitrary widget tree.
+    ///
+    /// Mutually exclusive with the other tooltip setters — last call wins.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -453,6 +507,20 @@ impl Widget for SearchField {
         let cfg = bastyde_core::styles::SearchFieldStyleConfig { body: body_id };
         let visible_root = style.make_body(&cfg, ctx);
         self.root_child_id = Some(visible_root);
+
+        // ── Tooltip ────────────────────────────────────────────────
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, visible_root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, visible_root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(visible_root, tooltip_id, delay);
+        }
 
         // ── Handlers ───────────────────────────────────────────────
         //
@@ -1017,6 +1085,22 @@ mod tests {
         });
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::SearchInput);
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let q = Signal::new(String::new());
+        let id = tree.add(SearchField::new(q.clone()).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 
     #[test]

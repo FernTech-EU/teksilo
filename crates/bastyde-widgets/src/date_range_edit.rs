@@ -136,6 +136,14 @@ pub struct DateRangeEdit {
     on_value_changed: Option<OnRangeChanged>,
     style_override: Option<bastyde_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl std::fmt::Debug for DateRangeEdit {
@@ -173,6 +181,9 @@ impl DateRangeEdit {
             on_value_changed: None,
             style_override: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -254,6 +265,46 @@ impl DateRangeEdit {
     /// space the parent offers.
     pub fn end_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
         self.end_width_policy = policy;
+        self
+    }
+
+    /// Show a plain single-line tooltip on hover. Mutually exclusive with the
+    /// rich / composite tooltip slots — this setter clears the other two so the
+    /// last call wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a rich tooltip sourced from the registry by `key`. Mutually
+    /// exclusive with the plain / composite tooltip slots — this setter clears
+    /// the other two so the last call wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a rich tooltip from an inline `TooltipContent` value. Mutually
+    /// exclusive with the plain / registry-key tooltip slots — this setter
+    /// clears the other two so the last call wins.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Show a composite tooltip whose body is an arbitrary widget tree. Mutually
+    /// exclusive with the plain / rich tooltip slots — this setter clears the
+    /// other two so the last call wins.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -545,6 +596,20 @@ impl Widget for DateRangeEdit {
         };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
+
+        // ── Tooltip attachment ─────────────────────────────────
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         // ── Self handlers: focus_within drives the frame border ─
         let handlers = HandlerSet::new().focus_within(self.focused.clone());

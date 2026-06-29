@@ -123,6 +123,14 @@ pub struct StandardListItem {
     interaction: Signal<InteractionState>,
     style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl StandardListItem {
@@ -147,6 +155,9 @@ impl StandardListItem {
             interaction: Signal::new(InteractionState::Idle),
             style_override: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -300,6 +311,59 @@ impl StandardListItem {
     /// `TextRole::Secondary`.
     pub fn subtitle_color(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
         self.subtitle_color = Some(color.into());
+        self
+    }
+
+    /// Attach a plain tooltip shown after the standard hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called
+    /// wins and clears the other slots.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up from the global tooltip registry by key.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called
+    /// wins and clears the other slots.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from an inline [`TooltipContent`](crate::tooltip::TooltipContent)
+    /// value (no registry lookup required).
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called
+    /// wins and clears the other slots.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) — the last setter
+    /// called wins and clears the other slots.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -504,6 +568,21 @@ impl Widget for StandardListItem {
         let content_id = self.build_content(ctx);
         let root_id = self.build_with_background(ctx, content_id);
         self.root_child_id = Some(root_id);
+
+        // Attach tooltip — mutually exclusive slots, composite wins.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
+
         vec![root_id]
     }
 
@@ -756,6 +835,39 @@ impl StandardTreeItem {
         self
     }
 
+    /// Attach a plain tooltip shown after the standard hover delay.
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`tooltip`](StandardListItem::tooltip).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.inner = self.inner.tooltip(text);
+        self
+    }
+
+    /// Attach a rich tooltip looked up from the global tooltip registry by key.
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`rich_tooltip`](StandardListItem::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.inner = self.inner.rich_tooltip(key);
+        self
+    }
+
+    /// Attach a rich tooltip from an inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) value.
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`rich_tooltip_content`](StandardListItem::rich_tooltip_content).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.inner = self.inner.rich_tooltip_content(content);
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`composite_tooltip`](StandardListItem::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.inner = self.inner.composite_tooltip(content);
+        self
+    }
+
     // Tree-specific ---------------------------------------------------------
 
     /// Set the indent depth (0 = root level). Each level adds one
@@ -876,6 +988,21 @@ impl Widget for StandardTreeItem {
         let root_id = self.inner.build_with_background(ctx, outer_row_id);
 
         self.inner.root_child_id = Some(root_id);
+
+        // Attach tooltip — forwarded from the inner item's tooltip slots.
+        if let Some(content) = self.inner.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.inner.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.inner.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
+
         vec![root_id]
     }
 
@@ -1275,5 +1402,35 @@ mod tests {
         let id = tree.add(StandardTreeItem::new(lit!("x")).from_entry(&entry));
         tree.layout(SizeProposal::exact(400.0, 100.0));
         assert!(tree.bounds(id).width > 0.0);
+    }
+
+    #[test]
+    fn list_item_tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let id = tree.add(StandardListItem::new(lit!("Row")).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
+    }
+
+    #[test]
+    fn tree_item_tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let id = tree.add(StandardTreeItem::new(lit!("Node")).tooltip(lit!("TreeTip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("TreeTip").is_some());
     }
 }

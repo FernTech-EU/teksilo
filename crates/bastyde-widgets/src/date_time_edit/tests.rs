@@ -5,6 +5,7 @@ use super::*;
 use crate::common::datetime::{Date, DateTime, Time};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 fn light_tree() -> WidgetTree {
     WidgetTree::new().with_theme(bastyde_core::presets::intui::light())
@@ -129,4 +130,23 @@ fn date_time_edit_halves_compose_back() {
     value.set(Some(make_dt()));
     assert_eq!(date_part.get(), Some(Date::constant(2026, 5, 2)));
     assert_eq!(time_part.get(), Some(Time::new(14, 35, 7, 0).unwrap()));
+}
+
+#[test]
+fn tooltip_appears_on_hover() {
+    let mut tree = light_tree();
+    let value = Signal::new(Some(make_dt()));
+    let id = tree.add(DateTimeEdit::new(value).tooltip(lit!("Tip")));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    tree.pointer_move(tree.bounds(id).center());
+    tree.advance_time(std::time::Duration::from_secs(1));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip should appear on hover"
+    );
+    assert!(tree.find_by_label("Tip").is_some());
 }

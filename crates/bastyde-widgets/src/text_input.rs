@@ -418,6 +418,17 @@ impl TextInput {
         self
     }
 
+    /// Attach an inline rich tooltip from a pre-built [`tooltip::TooltipContent`].
+    /// Canonical alias for [`Self::rich_tooltip`] — matches the name used by
+    /// `Button`, `ComboBox`, and other widgets. Mutually exclusive with
+    /// `tooltip` and `composite_tooltip` (last call wins).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
     pub fn composite_tooltip(

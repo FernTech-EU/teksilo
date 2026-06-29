@@ -64,6 +64,14 @@ pub struct ColorSwatch {
     initial_enabled: bool,
     on_activate: Option<ActivateFn>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl ColorSwatch {
@@ -80,6 +88,9 @@ impl ColorSwatch {
             initial_enabled: true,
             on_activate: None,
             focus_origin: Rc::new(Cell::new(None)),
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -121,6 +132,50 @@ impl ColorSwatch {
     /// the `Action::Click` accessibility action.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_activate = Some(Rc::new(f));
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// Mutually exclusive with [`Self::rich_tooltip`], [`Self::rich_tooltip_content`],
+    /// and [`Self::composite_tooltip`] — this call clears the other slots.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up from the tooltip registry by key.
+    ///
+    /// Mutually exclusive with [`Self::tooltip`], [`Self::rich_tooltip_content`],
+    /// and [`Self::composite_tooltip`] — this call clears the other slots.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip with inline content (no registry lookup required).
+    ///
+    /// Mutually exclusive with [`Self::tooltip`], [`Self::rich_tooltip`],
+    /// and [`Self::composite_tooltip`] — this call clears the other slots.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    ///
+    /// Mutually exclusive with [`Self::tooltip`], [`Self::rich_tooltip`],
+    /// and [`Self::rich_tooltip_content`] — this call clears the other slots.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -190,6 +245,20 @@ impl Widget for ColorSwatch {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // Tooltip attachment — mutually exclusive slots, last setter wins.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(self_id, tooltip_id, delay);
+        }
 
         // Reactive: when `color` is bound to a Signal, re-paint and
         // refresh the AT color value whenever it changes. Static

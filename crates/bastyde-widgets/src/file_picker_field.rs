@@ -64,6 +64,14 @@ pub struct FilePickerField {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl FilePickerField {
@@ -82,6 +90,9 @@ impl FilePickerField {
             label: None,
             initial_enabled: true,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -147,6 +158,42 @@ impl FilePickerField {
     /// Forwarded to the arena at build time.
     pub fn enabled(mut self, on: bool) -> Self {
         self.initial_enabled = on;
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after the hover delay.
+    /// Clears any previously set rich or composite tooltip (last call wins).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip by registry key.
+    /// Clears any previously set plain or composite tooltip (last call wins).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from inline [`crate::tooltip::TooltipContent`].
+    /// Clears any previously set plain or composite tooltip (last call wins).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    /// Clears any previously set plain or rich tooltip (last call wins).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -248,7 +295,22 @@ impl Widget for FilePickerField {
         if let Some(label) = self.label.clone() {
             input = input.label(label);
         }
-        self.root_child_id = Some(ctx.add(input));
+        let root_id = ctx.add(input);
+        self.root_child_id = Some(root_id);
+
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
+
         self.children()
     }
 
@@ -321,5 +383,24 @@ mod tests {
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
         assert!(b.height > 0.0);
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let path = Signal::new(String::new());
+        let id = tree.add(FilePickerField::new(path).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: Some(200.0),
+        });
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }

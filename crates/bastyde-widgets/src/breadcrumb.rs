@@ -93,6 +93,14 @@ pub struct BreadcrumbItem {
     label: LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl std::fmt::Debug for BreadcrumbItem {
@@ -112,6 +120,9 @@ impl BreadcrumbItem {
             label: ls,
             action: None,
             current: false,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -124,12 +135,51 @@ impl BreadcrumbItem {
             label: ls,
             action: None,
             current: true,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
     /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Rc::new(f));
+        self
+    }
+
+    /// Attach a plain single-line tooltip to this breadcrumb segment, shown
+    /// after a hover delay. Clears any previously set rich or composite tooltip.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to this breadcrumb segment, looked up by registry
+    /// key. Clears any previously set plain or composite tooltip.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to this breadcrumb segment from inline content.
+    /// Clears any previously set plain or composite tooltip.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip (arbitrary widget tree) to this breadcrumb
+    /// segment. Clears any previously set plain or rich tooltip.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }

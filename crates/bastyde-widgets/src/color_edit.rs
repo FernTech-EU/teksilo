@@ -108,6 +108,16 @@ pub struct ColorEdit {
     on_open: Option<OnVoid>,
     on_close: Option<OnVoid>,
 
+    // Tooltip slots (mutually exclusive; last setter wins).
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
+
     // Internal state.
     root_child_id: Option<WidgetId>,
 }
@@ -161,6 +171,9 @@ impl ColorEdit {
             initial_enabled: true,
             on_open: None,
             on_close: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             root_child_id: None,
         }
     }
@@ -280,6 +293,58 @@ impl ColorEdit {
     /// `Fn(&mut EventContext)`.
     pub fn on_close(mut self, f: impl Fn() + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — calling this
+    /// clears the other slots (last setter wins).
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip identified by a registry key.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — calling this
+    /// clears the other slots (last setter wins).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from an inline [`TooltipContent`](crate::tooltip::TooltipContent) value.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — calling this
+    /// clears the other slots (last setter wins).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget tree.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) — calling
+    /// this clears the other slots (last setter wins).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -453,6 +518,21 @@ impl Widget for ColorEdit {
 
         let pb_id = ctx.add(pb);
         self.root_child_id = Some(pb_id);
+
+        // Tooltip attachment — anchored on the trigger (pb_id), not the popover content.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, pb_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, pb_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(pb_id, tooltip_id, delay);
+        }
+
         vec![pb_id]
     }
 

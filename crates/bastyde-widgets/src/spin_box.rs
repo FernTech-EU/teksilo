@@ -265,6 +265,16 @@ pub struct SpinBox<T: SpinValue> {
     style_override: Option<bastyde_core::styles::SharedSpinBoxStyle>,
     root_child_id: Option<WidgetId>,
     field_id: Option<WidgetId>,
+
+    // ── Tooltip slots (mutually exclusive; last setter wins) ─────────
+    /// Optional plain tooltip text shown after a hover delay. Mutually
+    /// exclusive with the rich / composite slots — every setter clears
+    /// the other two so the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl<T: SpinValue> std::fmt::Debug for SpinBox<T> {
@@ -318,6 +328,9 @@ impl<T: SpinValue> SpinBox<T> {
             style_override: None,
             root_child_id: None,
             field_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -518,6 +531,67 @@ impl<T: SpinValue> SpinBox<T> {
     /// intent).
     pub fn on_value_changed(mut self, f: impl Fn(T, &mut EventContext) + 'static) -> Self {
         self.on_value_changed = Some(Rc::new(f));
+        self
+    }
+
+    // ── Tooltip builder methods ─────────────────────────────────────
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — each setter
+    /// clears the other two so the last call wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip looked up by registry key.
+    ///
+    /// The key must match a [`TooltipContent`](crate::tooltip::TooltipContent)
+    /// registered in the application's tooltip registry. Mutually
+    /// exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip with inline content (no registry key
+    /// required). Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`composite_tooltip`](Self::composite_tooltip).
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip whose body is an arbitrary widget
+    /// tree. Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Like [`composite_tooltip`](Self::composite_tooltip) but accepts
+    /// an already-boxed widget body. Used by wrapper widgets that
+    /// forward a boxed composite body.
+    pub(crate) fn composite_tooltip_boxed(mut self, content: Box<dyn Widget>) -> Self {
+        self.composite_tooltip_content = Some(content);
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -1157,6 +1231,20 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         );
 
         ctx.apply_self_handlers(handlers);
+
+        // ── Tooltip attachment ─────────────────────────────────────
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         vec![root_id]
     }

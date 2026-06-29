@@ -54,6 +54,14 @@ pub struct Badge {
     /// Per-call override for the pill chrome.
     style_override: Option<SharedBadgeStyle>,
     root_child_id: Option<WidgetId>,
+    /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
+    /// with the rich / composite slots — every setter clears the other two so
+    /// the last call wins.
+    tooltip_text: Option<LocalizedString>,
+    /// Optional rich tooltip source (registry key or inline content).
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (arbitrary widget tree).
+    composite_tooltip_content: Option<Box<dyn Widget>>,
 }
 
 impl Badge {
@@ -66,6 +74,9 @@ impl Badge {
             text_style: None,
             style_override: None,
             root_child_id: None,
+            tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
         }
     }
 
@@ -96,6 +107,54 @@ impl Badge {
     /// (unset) is `TextStyleRole::Tiny`.
     pub fn text_style(mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>) -> Self {
         self.text_style = Some(style.into());
+        self
+    }
+
+    /// Attach a plain single-line tooltip shown after a hover delay.
+    ///
+    /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called wins.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip identified by a registry key.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called wins.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip from inline [`TooltipContent`](crate::tooltip::TooltipContent).
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`composite_tooltip`](Self::composite_tooltip) — the last setter called wins.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip with an arbitrary widget tree body.
+    ///
+    /// Mutually exclusive with [`tooltip`](Self::tooltip),
+    /// [`rich_tooltip`](Self::rich_tooltip), and
+    /// [`rich_tooltip_content`](Self::rich_tooltip_content) — the last setter called wins.
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 }
@@ -145,6 +204,20 @@ impl Widget for Badge {
             ctx,
         );
         self.root_child_id = Some(root);
+
+        if let Some(content) = self.composite_tooltip_content.take() {
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root, content, delay);
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root, tooltip_id, delay);
+        }
+
         vec![root]
     }
 
@@ -209,5 +282,20 @@ mod tests {
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Label);
         assert_eq!(info.name(), Some("3"));
+    }
+
+    #[test]
+    fn tooltip_appears_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(Badge::new(lit!("New")).tooltip(lit!("Tip")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.pointer_move(tree.bounds(id).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip should appear on hover"
+        );
+        assert!(tree.find_by_label("Tip").is_some());
     }
 }
