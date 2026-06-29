@@ -24,9 +24,9 @@ use bastyde::core::shortcut::{KeyStroke, Shortcut};
 use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, ScrollArea,
-    Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextScaleControl, TextWidget, TitleBar,
-    Toggle, VStack, WindowFrame, keystroke_format::format_keystroke,
+    Button, ButtonVariant, Expand, HStack, MaxSize, MenuBar, MenuItem, MenuList, Padding,
+    ScrollArea, Spacer, StatusBar, Switcher, TabId, TabInfo, TabWidget, TextScaleControl,
+    TextWidget, TitleBar, Toggle, VStack, WindowFrame, keystroke_format::format_keystroke,
 };
 use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
 
@@ -94,7 +94,13 @@ fn main() {
                 .with_default_mode(TelemetryMode::Anonymous)
                 .with_data_processor_name("FernTech"),
         )
-        .theme(bastyde::presets::intui::light())
+        .theme(
+            options
+                .theme
+                .as_deref()
+                .and_then(theme_from_name)
+                .unwrap_or_else(bastyde::presets::intui::light),
+        )
         .i18n(i18n)
         .install_native_menu()
         .initial_window(
@@ -149,7 +155,10 @@ fn main() {
                             tree.add(Expand::vertical().respect_intrinsic().child_id(catalog));
 
                         // Invisible: persists + restores the chosen theme.
-                        let theme_persist = tree.add(ThemePersistenceSlot);
+                        // `--theme` forces the startup theme and skips restore.
+                        let theme_persist = tree.add(ThemePersistenceSlot {
+                            skip_restore: opts.theme.is_some(),
+                        });
                         let inner = tree.add(
                             VStack::new()
                                 .spacing(0.0)
@@ -171,6 +180,58 @@ fn main() {
                 }),
         )
         .run();
+}
+
+/// Composite-tooltip body for the title-bar `ThemeSwitcher`. Spells out the
+/// one non-obvious thing about runtime theme switching: colours retint live,
+/// but widget *chrome* (shapes) is resolved at build time — so a live IntUI ↔
+/// Material 3 family switch keeps the current shapes. Points the user at the
+/// `--theme` startup flag to see a preset's true chrome. (Demonstrates the new
+/// `ThemeSwitcher::composite_tooltip` setter.)
+fn theme_switch_caveat() -> impl Widget + 'static {
+    // The tooltip surface is the dark / inverse `tooltip_bg` chip (M3
+    // `inverseSurface`), so the body MUST use the tooltip text roles —
+    // `TooltipText` (full contrast) / `TooltipShortcut` (de-emphasised) —
+    // not normal on-surface roles (`Primary`/`Secondary`/`Accent`), which
+    // would be dark-on-dark (or light-on-light) and unreadable. These two
+    // roles resolve to the theme's `tooltip_text` / `tooltip_shortcut`, so
+    // they track the chip across IntUI and Material 3, light and dark.
+    MaxSize::width(360.0).child(
+        VStack::new()
+            .spacing(6.0)
+            .child(
+                TextWidget::new(lit!("About switching theme at runtime"))
+                    .style(TextStyleRole::BodyBold)
+                    .color(TextRole::TooltipText),
+            )
+            .child(
+                TextWidget::new(lit!(
+                    "Colours retint instantly — IntUI Light ↔ Dark is fully live \
+                     and preserves your focus, scroll position and text."
+                ))
+                .style(TextStyleRole::Small)
+                .color(TextRole::TooltipShortcut),
+            )
+            .child(
+                TextWidget::new(lit!(
+                    "Widget shapes (Material 3's pill buttons, switch, card radii) \
+                     are chosen when the UI is built. Switching theme family \
+                     (IntUI ↔ Material 3) here changes only the colours — the \
+                     shapes stay until the UI is rebuilt."
+                ))
+                .style(TextStyleRole::Small)
+                .color(TextRole::TooltipShortcut),
+            )
+            .child(
+                TextWidget::new(lit!(
+                    "To see a preset's true chrome, start the catalog with \
+                     --theme material3-dark (or material3-light / intui-light / \
+                     intui-dark)."
+                ))
+                .style(TextStyleRole::Small)
+                .color(TextRole::TooltipText),
+            ),
+    )
 }
 
 /// Build the custom title bar. Uses role-driven background/border so
@@ -223,19 +284,24 @@ fn build_title_bar(
     // is reachable), so the chosen size persists and restores on restart.
     let scale_ctrl = TextScaleSlot::default();
 
-    // Theme switcher — IntUI Light/Dark plus the Material 3 preset, with
-    // the OS-follow "System" entry kept on. Selecting a Material 3 entry
-    // restyles the whole catalog live (pill buttons, M3 switch, purple
-    // accent), which is the quickest way to eyeball the preset.
-    let theme_switcher = bastyde::widgets::ThemeSwitcher::new().themes([
-        (lit!("IntUI Light"), bastyde::presets::intui::light()),
-        (lit!("IntUI Dark"), bastyde::presets::intui::dark()),
-        (
-            lit!("Material 3 Light"),
-            bastyde::prelude::material3::light(),
-        ),
-        (lit!("Material 3 Dark"), bastyde::prelude::material3::dark()),
-    ]);
+    // Theme switcher — IntUI Light/Dark plus the Material 3 preset, with the
+    // OS-follow "System" entry kept on. Selecting an entry re-tints the catalog
+    // live (colours, focus/scroll preserved). It does NOT change widget *chrome*
+    // at runtime: shapes (M3 pills, switch, card radii) are chosen when the UI
+    // is built, so a live IntUI ↔ Material 3 family switch keeps the current
+    // shapes — start with `--theme material3-dark` to see a preset's true
+    // chrome. The composite tooltip below spells this out for the user.
+    let theme_switcher = bastyde::widgets::ThemeSwitcher::new()
+        .themes([
+            (lit!("IntUI Light"), bastyde::presets::intui::light()),
+            (lit!("IntUI Dark"), bastyde::presets::intui::dark()),
+            (
+                lit!("Material 3 Light"),
+                bastyde::prelude::material3::light(),
+            ),
+            (lit!("Material 3 Dark"), bastyde::prelude::material3::dark()),
+        ])
+        .composite_tooltip(theme_switch_caveat());
 
     let trailing = HStack::new()
         .spacing(4.0)
@@ -306,9 +372,29 @@ impl Widget for TextScaleSlot {
 /// `TextScaleSlot` (which does the same for the text-scale preference); the
 /// binding lives in `build()` where `ctx.settings()` is reachable.
 #[derive(Debug, Default)]
-struct ThemePersistenceSlot;
+struct ThemePersistenceSlot {
+    /// When a `--theme` flag forced the startup theme, skip the restore so
+    /// the forced theme (set on the builder) wins; changes still persist.
+    skip_restore: bool,
+}
 
 const THEME_PREF_KEY: &str = "ui.theme";
+
+/// Resolve a `--theme NAME` value to a concrete `Theme`.
+fn theme_from_name(name: &str) -> Option<bastyde::core::Theme> {
+    use bastyde::prelude::material3;
+    use bastyde::presets::intui;
+    match name {
+        "intui-light" => Some(intui::light()),
+        "intui-dark" => Some(intui::dark()),
+        "material3-light" | "m3-light" => Some(material3::light()),
+        "material3-dark" | "m3-dark" => Some(material3::dark()),
+        other => {
+            eprintln!("--theme: unknown theme `{other}` — using the default");
+            None
+        }
+    }
+}
 
 impl Widget for ThemePersistenceSlot {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -329,8 +415,9 @@ impl Widget for ThemePersistenceSlot {
 
         // Restore the saved theme once, after mount (an `EventContext` — needed
         // for set_theme / follow_system_theme — is only reachable post-mount).
+        // Skipped when `--theme` forced the startup theme.
         let saved = pref.get();
-        if !saved.is_empty() {
+        if !self.skip_restore && !saved.is_empty() {
             ctx.run_after_mount(move |ectx| match saved.as_str() {
                 "system" => ectx.follow_system_theme(),
                 "intui.dark" => ectx.set_theme(bastyde::presets::intui::dark()),

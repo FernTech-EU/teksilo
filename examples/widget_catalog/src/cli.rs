@@ -21,6 +21,10 @@ pub struct CliOptions {
     pub cycle: Option<Duration>,
     /// `false` → start in classic builder view; `true` → start in `bati!` view.
     pub bati_mode: bool,
+    /// Force the startup theme, overriding the persisted selection. One of
+    /// `intui-light` / `intui-dark` / `material3-light` / `material3-dark`
+    /// (aliases `m3-light` / `m3-dark`). `None` → restore the saved theme.
+    pub theme: Option<String>,
 }
 
 /// Parse command-line args. On `--help`, prints usage and exits 0.
@@ -90,6 +94,16 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                     other => eprintln!("--mode: expected `classic` or `bati`, got `{other}`"),
                 }
             }
+            "--theme" => {
+                let Some(value) = iter.next() else {
+                    eprintln!(
+                        "--theme expects one of: intui-light, intui-dark, \
+                         material3-light, material3-dark"
+                    );
+                    continue;
+                };
+                opts.theme = Some(value.to_ascii_lowercase());
+            }
             other if other.starts_with("--") => {
                 eprintln!("widget-catalog: ignoring unknown flag `{other}`");
             }
@@ -124,6 +138,9 @@ fn print_help(tab_names: &[&str]) {
            --cycle-ms <MS>      Like --cycle, but MS is mandatory. Script-friendly\n  \
                                 (no silent fall-back to the default interval).\n  \
            --mode <classic|bati>  Initial view mode (default `classic`).\n  \
+           --theme <NAME>       Force the startup theme, overriding the saved one.\n  \
+                                intui-light | intui-dark | material3-light | material3-dark\n  \
+                                (aliases m3-light / m3-dark).\n  \
            --help, -h           Show this help and exit.\n\
          \n\
          TABS:\n  \
