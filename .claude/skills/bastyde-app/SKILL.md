@@ -76,10 +76,37 @@ a bug, debug layout, or let an agent exercise the running app.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides the **snapshot → find node → act → settle
-→ assert** loop. Notable tools: `snapshot_tree` / `find_node` / `assert_node` (semantics),
-`invoke_action` / `inject_*` / `type_text` (drive), `layout_tree` / `inspect_node` (full
-widget geometry + parameters — what the debug inspector shows), `screenshot`. Full
-reference: `docs/automation-mcp.md` in the framework repo.
+→ assert** loop. The full tool set (~26), by job:
+
+- **Observe:** `snapshot_tree` / `find_node` / `read_node` — semantics: role, label, value,
+  toggled/expanded/**selected**, **`bounds {x,y,width,height}`** (widget size lives here),
+  and the `actions` a node supports. `assert_node` (a failed assert returns `isError`).
+  `inspect_node` (one widget's full record + `Debug` repr / constructor params). `layout_tree`
+  — the **full** widget tree incl. layout primitives the AT tree prunes (`Padding`/`Expand`/
+  `FixedSize`), each with its **bounds** (position + size = a widget's full **geometry**);
+  the tool for size / overlap / off-screen / clipping questions the semantic tree can't
+  answer. `screenshot {node?}`.
+- **Drive:** `invoke_action {node, action}` — **`action` is REQUIRED** (`click` / `focus` /
+  `expand` / `collapse` / `set_value` / `increment` / `decrement` / `show_context_menu`);
+  omitting it errors and changes nothing. Plus shortcuts `set_value` / `focus_node` / `scroll`
+  / **`drag_node {to_node | to_x,to_y}`** (drag-and-drop), and raw input `inject_pointer` /
+  `inject_key` / `type_text` / `type_ime`.
+- **Timing (determinism — prefer over `sleep`):** mutating tools auto-settle, but for timed UI
+  (tooltips, debounced reactivity, animations) drive the **simulated** clock: `settle.clock_millis`
+  on any mutating call, `advance_clock {millis}`, `settle`, or poll with `wait_for_condition`
+  (`node_exists` / `node_value` / `node_gone` / `at_version_at_least`).
+- **A11y extras:** `get_overlays` (open menus/popovers/dialogs), `list_live_regions` +
+  `pull_announcements {since_seq}` (toast/status text a screen reader speaks — the way to assert
+  a **toast** fired), `get_shortcuts`, `list_windows` (multi-window; **every tool** takes an
+  optional `window_id`).
+
+Error results carry a stable `code` — branch on it, not just `isError`: `NOT_FOUND` /
+`BAD_ARGUMENT` / `UNKNOWN_NAME` are real mistakes; `GPU_UNAVAILABLE` (screenshot, no GPU) /
+`SETTLE_TIMEOUT` (poll/animation budget) are benign/environmental. Node ids are stable for a
+widget's **lifetime** (across relayout / theme / locale), but a **structural rebuild** (data-model
+change, `Switcher` swap, `Rebuild`-level binding) allocates a new id — **re-`find_node` after the
+tree structure changes**, never reuse a cached id. Full reference: `docs/automation-mcp.md` in the
+framework repo.
 
 ## High-leverage gotchas (verified against 0.7 source — re-verify via step 2 if newer)
 
