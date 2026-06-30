@@ -1566,7 +1566,7 @@ mod tests {
     /// theme's `text_primary`, never a stale constructor-default theme.
     ///
     /// Historical bug: a light-launched app rendered the "File" / "Edit"
-    /// trigger labels in the *dark* theme's grey `text_primary` (#BDBFC5),
+    /// trigger labels in the *dark* theme's grey `text_primary` (#DFE1E5),
     /// invisible on a light bar, while the dropdowns rendered fine. Cause:
     /// the trigger colour is a `theme_signal.map(...)` derived signal, and
     /// `WidgetTree::with_theme` updated the cached `Theme` (seen by
