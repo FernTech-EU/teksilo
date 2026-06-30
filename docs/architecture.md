@@ -479,7 +479,7 @@ fn button_click_fires_action() {
     );
     let button = tree.add_child(
         root,
-        Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)),
+        Button::new(lit!("Save")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)),
     );
     tree.layout(SizeProposal::exact(200.0, 40.0));
     tree.click(button);

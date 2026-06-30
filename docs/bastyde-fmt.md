@@ -110,9 +110,9 @@ bati!(ctx =>
     VStack {
         spacing: 12.0
         // user-added section header
-        Button("Save")
+        Button(lit!("Save"))
 
-        Button("Cancel")
+        Button(lit!("Cancel"))
     }
 )
 
@@ -121,9 +121,9 @@ bati!(ctx =>
     VStack {
         spacing: 12.0
         // user-added section header
-        Button("Save")
+        Button(lit!("Save"))
 
-        Button("Cancel")
+        Button(lit!("Cancel"))
     }
 )
 ```
@@ -137,7 +137,7 @@ right indent level before the next body item.
 
 Multiple consecutive blank lines collapse to a single blank line.
 
-Comments **inside** Rust expressions (e.g. `Button(/* note */ "ok")`)
+Comments **inside** Rust expressions (e.g. `Button(/* note */ lit!("ok"))`)
 are preserved automatically because expression values are sliced
 verbatim from source — they ride along with the rest of the slice.
 

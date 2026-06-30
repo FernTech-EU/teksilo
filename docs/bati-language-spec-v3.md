@@ -26,6 +26,13 @@ Em-dashes and middle dots in quoted source strings are preserved verbatim. The "
 
 ---
 
+> **Labels in these examples.** For brevity the examples below pass bare string literals
+> (`Button("Save")`). With the default `i18n` feature a widget label is a `LocalizedString`
+> and there is no `From<&str>`, so in a real app wrap it: `Button(lit!("Save"))` (untranslated)
+> or `Button(tr!(save()))` (translated). `bati!` passes whatever is inside `(…)` verbatim, so
+> the wrapping just goes inside the parens. The fake widgets used to demonstrate macro
+> mechanics (`Probe`, `Tag`, `Marker`, …) take a plain `&str` and need no wrapping.
+
 ## 1. Design Principles
 
 The `bati!` macro is a thin syntactic transform. It is not a new runtime, not a new type system, and not a new reactivity model. Every `bati!` block desugars to a sequence of builder calls against Bastyde API. There is no hidden allocation, no intermediate virtual tree, no diff step. The macro's only job is to remove syntactic noise from code that already expresses a widget tree.

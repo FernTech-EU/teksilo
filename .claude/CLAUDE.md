@@ -808,7 +808,7 @@ pub trait ButtonStyle: 'static {
 
 Three precedence levels (highest wins):
 
-1. **Per-call:** `Button::new("X").style(MyGlow)` — instance override.
+1. **Per-call:** `Button::new(lit!("X")).style(MyGlow)` — instance override.
 2. **Theme-wide:** `theme.style_slots.button = Some(Rc::new(MyGlow))` — applies to every Button using the active theme.
 3. **Default:** `RecipeButtonStyle::default()` shipped in `bastyde-widgets/src/styles/` reading IntUI tokens.
 
@@ -952,25 +952,25 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 ```rust
 // Inline children (most common) — .child() accepts impl Widget + 'static
 VStack::new().spacing(10.0)
-    .child(TextWidget::new("Hello").style(TextStyleRole::BodyBold))
-    .child(Button::new("Click").on_activate_fn(|ctx| ctx.send_intent(MyIntent::DoThing)))
+    .child(TextWidget::new(lit!("Hello")).style(TextStyleRole::BodyBold))
+    .child(Button::new(lit!("Click")).on_activate_fn(|ctx| ctx.send_intent(MyIntent::DoThing)))
 
 // Pre-registered children (when you need the ID) — .add_child() takes WidgetId
-let label_id = ctx.add(TextWidget::new("Status").bind_text(status_signal));
+let label_id = ctx.add(TextWidget::new(lit!("Status")).bind_text(status_signal));
 HStack::new().add_child(label_id)
 
 // Iterator children
-VStack::new().children(items.iter().map(|item| TextWidget::new(item.name.clone())))
+VStack::new().children(items.iter().map(|item| TextWidget::new(lit!(item.name.clone()))))
 
 // Conditional children
-container.child_opt(show_extra.then(|| TextWidget::new("Extra")))
+container.child_opt(show_extra.then(|| TextWidget::new(lit!("Extra"))))
 
 // Switcher — shows one child at a time, driven by Signal<usize>
 let selected = ctx.signal(0_usize);
 ctx.add(Switcher::new(selected.clone())
-    .child(TextWidget::new("Page 0"))
-    .child(TextWidget::new("Page 1"))
-    .child(TextWidget::new("Page 2")))
+    .child(TextWidget::new(lit!("Page 0")))
+    .child(TextWidget::new(lit!("Page 1")))
+    .child(TextWidget::new(lit!("Page 2"))))
 
 // Composing widget — build() creates child subtree, &mut self
 #[derive(Debug)]
@@ -982,7 +982,7 @@ impl Widget for MyWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // No theme snapshot needed — roles resolve at paint/layout time.
         let root = ctx.add(VStack::new()
-            .child(TextWidget::new("Hello").style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("Hello")).style(TextStyleRole::BodyBold))
         );
         self.root_child_id = Some(root);
         vec![root]
@@ -1030,10 +1030,10 @@ fn build(ctx: &mut BuildContext) -> WidgetId {
         VStack {
             spacing: 12.0
             TextWidget::new(lit!("Title")) { style: t.body_bold.clone() }
-            open_btn = Button("Open") {
+            open_btn = Button(lit!("Open")) {
                 on_activate: Cmd::Open
             }
-            TextWidget("Status") { linked_to: open_btn }
+            TextWidget(lit!("Status")) { linked_to: open_btn }
         }
     )
 }

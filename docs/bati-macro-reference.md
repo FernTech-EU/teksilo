@@ -12,6 +12,13 @@ hand.
 This document is the user-facing reference. For the design rationale and
 full grammar, see [bati-language-spec-v3.md](bati-language-spec-v3.md).
 
+> **Labels in these examples.** For brevity the examples below pass bare string literals
+> (`Button("Save")`). With the default `i18n` feature a widget label is a `LocalizedString`
+> and there is no `From<&str>`, so in a real app wrap it: `Button(lit!("Save"))` (untranslated)
+> or `Button(tr!(save()))` (translated). `bati!` passes whatever is inside `(…)` verbatim, so
+> the wrapping just goes inside the parens. The fake widgets used to demonstrate macro
+> mechanics (`Probe`, `Tag`, `Marker`, …) take a plain `&str` and need no wrapping.
+
 ---
 
 ## Importing

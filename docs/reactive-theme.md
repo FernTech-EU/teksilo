@@ -32,19 +32,19 @@ The rules:
 use bastyde::prelude::*;  // re-exports Color, Role enums, ColorProp, TextStyleProp
 
 // Plain text — default role is TextRole::Primary.
-TextWidget::new("Hello")
+TextWidget::new(lit!("Hello"))
 
 // Role-based color: resolved against current theme, reactive.
-TextWidget::new("Error!").color(TextRole::Error)
+TextWidget::new(lit!("Error!")).color(TextRole::Error)
 
 // Role-based typography: same story, but the text style role.
-TextWidget::new("Section").style(TextStyleRole::BodyBold)
+TextWidget::new(lit!("Section")).style(TextStyleRole::BodyBold)
 
 // Static color: frozen literal.
-TextWidget::new("Custom").color(Color::from_hex("#FF00FF"))
+TextWidget::new(lit!("Custom")).color(Color::from_hex("#FF00FF"))
 
 // Reactive signal (usually interaction state): repaints on signal change.
-TextWidget::new("").bind_text(status).color(hover_color_signal)
+TextWidget::new(lit!("")).bind_text(status).color(hover_color_signal)
 
 // Panel with role-based surface and border.
 Panel::new()
@@ -235,7 +235,7 @@ pub enum TextStyleProp {
 }
 ```
 
-`TextWidget::style(...)` and the other style-accepting builders take `impl Into<TextStyleProp>`. Default is `TextStyleRole::Body`, so a bare `TextWidget::new("x")` follows the theme typography.
+`TextWidget::style(...)` and the other style-accepting builders take `impl Into<TextStyleProp>`. Default is `TextStyleRole::Body`, so a bare `TextWidget::new(lit!("x"))` follows the theme typography.
 
 Resolved at paint/layout via `prop.resolve(&ctx.theme.typography)`. Changing `Theme::typography` on a running tree updates every `TextWidget` that uses a role; widgets that passed a raw `TextStyle` stay frozen (that's the user intent — custom fonts stay custom).
 
@@ -315,16 +315,16 @@ Pass a static `f32`, a `Signal<f32>`, or a `Prop<f32>`; the builder registers a 
 
 ```rust
 // "I want a normal label": zero color code.
-TextWidget::new("Status")
+TextWidget::new(lit!("Status"))
 
 // "I want an error-colored label": one role.
-TextWidget::new(msg).color(TextRole::Error)
+TextWidget::new(lit!(msg)).color(TextRole::Error)
 
 // "I want a raised panel": one role.
 Panel::new().background(SurfaceRole::Raised).child(...)
 
 // "I want a Bold Heading": one style role.
-TextWidget::new("Settings").style(TextStyleRole::BodyBold)
+TextWidget::new(lit!("Settings")).style(TextStyleRole::BodyBold)
 ```
 
 **Good (custom / reactive):**

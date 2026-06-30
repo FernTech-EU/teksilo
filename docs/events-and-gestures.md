@@ -151,7 +151,7 @@ Each of the four recognizers defaults to [`ButtonMask::PRIMARY`] — left-click 
 To opt a handler into a wider button set, call the matching `accept_*_buttons(...)` knob:
 
 ```rust
-Button::new("Action")
+Button::new(lit!("Action"))
     .accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY)
     .on_tap(|event, ctx| match event.button {
         PointerButton::Primary   => primary_action(ctx),
@@ -421,7 +421,7 @@ Events are synthesizable from tests without a real platform:
 
 ```rust
 let mut tree = WidgetTree::new();
-let btn_id = tree.add(Button::new("OK").on_activate_fn(|ctx| {
+let btn_id = tree.add(Button::new(lit!("OK")).on_activate_fn(|ctx| {
     ctx.send_intent(AppIntent::Confirm);
 }));
 tree.layout(SizeProposal::exact(200.0, 100.0));

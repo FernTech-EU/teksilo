@@ -132,7 +132,7 @@ decomposes into named slots (e.g. `TabStyle::make_body` +
 `make_bar`). See [Multi-method styles](#multi-method-styles) below
 for the full list.
 
-Set per-call: `Button::new("Save").variant(ButtonVariant::Outlined)`.
+Set per-call: `Button::new(lit!("Save")).variant(ButtonVariant::Outlined)`.
 Set per-app via a custom Tier-3 style that *defaults* a variant for
 unspecified callers.
 
@@ -314,7 +314,7 @@ impl ButtonStyle for MaterialFilledButton {
 }
 ```
 
-Install per-call: `Button::new("Save").style(MaterialFilledButton)`.
+Install per-call: `Button::new(lit!("Save")).style(MaterialFilledButton)`.
 Install theme-wide:
 
 ```rust
