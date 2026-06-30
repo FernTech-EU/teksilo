@@ -641,7 +641,9 @@ accessibility layer needed.
 
 Canonical loop:
 1. Find a node id. `snapshot_tree {max_depth?}` returns the tree; each node has \
-a stable `id` (an AccessKit id that survives rebuilds), plus role, label, \
+an `id` (an AccessKit id, stable for the widget's lifetime — across relayout / \
+theme / locale, but a structural rebuild that recreates the widget yields a \
+new id, so re-find after the tree's structure changes), plus role, label, \
 value, toggled/expanded/selected, bounds, and the `actions` it supports. \
 `find_node {role?, label?}` returns the first match's id directly.
 2. Act on it. `invoke_action {node, action}` where action is one of click, \
@@ -653,6 +655,11 @@ or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 value?/flag?}` where kind is role_equals, label_equals, label_contains, \
 value_equals, toggled, expanded, selected, disabled, exists, or focused. A \
 FAILED assert_node comes back as a tool error (isError=true).
+
+Error results carry a stable `code` (in the text body and in structured_content) \
+— branch on it, not just on isError: NOT_FOUND / BAD_ARGUMENT / UNKNOWN_NAME are \
+real mistakes, while GPU_UNAVAILABLE (no GPU for a screenshot) and SETTLE_TIMEOUT \
+(a poll/animation hit its budget) are benign/environmental.
 
 Timing: mutating tools auto-settle (run animations + layout, then re-sync the \
 tree). For timed UI (tooltips, debounced reactivity) pass `settle.clock_millis` \
@@ -681,15 +688,23 @@ impl ServerHandler for AutomationServer {
 // ---------------------------------------------------------------------------
 
 /// Convert a host reply to an MCP tool result: JSON text for replies (with
-/// `is_error` set on toolkit errors), an image block for screenshots.
+/// `is_error` set on toolkit errors), an image block for screenshots. The
+/// payload is also mirrored into `structured_content` so a client can branch
+/// on the result (e.g. tell a benign `GPU_UNAVAILABLE` / `SETTLE_TIMEOUT` from
+/// a real `NOT_FOUND`) by reading the stable `code` field, without parsing the
+/// text block.
 pub fn to_result(reply: HostReply) -> CallToolResult {
     match reply {
         HostReply::Reply(AutomationReply::Ok { data }) => {
-            CallToolResult::success(vec![Content::text(data.to_string())])
+            let mut result = CallToolResult::success(vec![Content::text(data.to_string())]);
+            result.structured_content = Some(data);
+            result
         }
         HostReply::Reply(AutomationReply::Err { code, message }) => {
-            let body = serde_json::json!({ "code": code, "message": message }).to_string();
-            CallToolResult::error(vec![Content::text(body)])
+            let body = serde_json::json!({ "code": code, "message": message });
+            let mut result = CallToolResult::error(vec![Content::text(body.to_string())]);
+            result.structured_content = Some(body);
+            result
         }
         HostReply::Image { png, warnings } => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);

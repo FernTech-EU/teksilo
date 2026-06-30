@@ -199,6 +199,12 @@ async fn assert_node_failure_is_tool_error() {
         "failed assertion must be a tool error: {}",
         text_of(&fail)
     );
+    // The result is also machine-readable via structured_content.
+    let sc = fail
+        .structured_content
+        .as_ref()
+        .expect("structured_content present");
+    assert_eq!(sc["passed"], serde_json::json!(false));
 
     let pass = server
         .assert_node(Parameters(AssertParams {

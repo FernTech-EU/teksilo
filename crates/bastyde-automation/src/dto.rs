@@ -11,10 +11,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Stable node identity exposed to an automation client: the raw
-/// `accesskit::NodeId` value (which Bastyde derives deterministically from a
-/// `WidgetId`, so it survives rebuilds — unlike a fragile OS handle).
-/// Synthetic widget-emitted children (e.g. rich-text runs) have bit 63 set.
+/// Node identity exposed to an automation client: the raw `accesskit::NodeId`
+/// value (which Bastyde derives deterministically from a `WidgetId`). It is
+/// stable for the **lifetime of the widget instance** — surviving relayout,
+/// repaint, theme, and locale changes (which mutate widgets in place) — but a
+/// *structural rebuild* that destroys and recreates the widget (a data-model
+/// change, a `Switcher` swap, a `Rebuild`-level binding) allocates a new
+/// `WidgetId` and therefore a new id. So caching an id pays off across
+/// in-place changes, but re-find (by role/label) after the tree's structure
+/// may have changed. Synthetic widget-emitted children (e.g. rich-text runs)
+/// have bit 63 set.
 pub type NodeRef = u64;
 
 /// One semantic node as the accessibility tree exposes it. Built straight

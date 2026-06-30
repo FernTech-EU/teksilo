@@ -14,10 +14,11 @@ AI agent (or any MCP client) can **observe** (semantic tree + screenshots) and
 This is the capability an agent can't get otherwise: the `TreeUpdate` lives
 inside private platform state with no external channel except the OS AT layer;
 the AT-action channel is OS-AT-only; headless operation needs no display
-server; and `WidgetId`-stable node identity beats fragile OS handles. It
-**complements** (does not replace) a real screen-reader OS smoke test — use it
-for deterministic CI / agent test-authoring, and (debug-only) against a live
-running app.
+server; and a `WidgetId`-derived node id (stable across *in-place* changes —
+see the tool surface) is steadier to cache than a fragile OS handle. It
+**complements** (does not replace) a real screen-reader OS smoke test — the
+live `--connect` mode (debug builds) drives your actual app, while the headless
+mode is the toolkit's CI harness / a build-your-own-harness kit (see below).
 
 ## Two modes
 
@@ -34,12 +35,24 @@ Both speak MCP over **stdio**.
 bastyde-automation-mcp --headless
 ```
 
-A dedicated `std::thread` owns a `HeadlessApp` (a small demo UI: a heading,
-two buttons, a text field, a checkbox). The async rmcp handlers marshal `Send`
-DTOs to that thread and await a reply; the `!Send` `WidgetTree` never leaves
-it. Screenshots render offscreen on the tree thread via `pollster::block_on`
+A dedicated `std::thread` owns a `HeadlessApp` and the async rmcp handlers
+marshal `Send` DTOs to it; the `!Send` `WidgetTree` never leaves that thread.
+Screenshots render offscreen on the tree thread via `pollster::block_on`
 (reusing `bastyde_render::test_support::create_test_renderer` — the same
 offscreen path the widget previewer's PNG export uses).
+
+**What the stock binary drives.** `bastyde-automation-mcp --headless` builds a
+small *built-in demo* (a heading, two buttons, a text field, a checkbox) — it
+is the toolkit's own conformance harness and a worked reference, **not** your
+app. To headlessly automate *your* app there are two paths:
+
+- **Build a tiny harness** with the GUI-free `bastyde-automation` crate: own
+  your app's `WidgetTree` on one thread (or reuse a headless test tree) and
+  call `bastyde_automation::execute(&mut tree, &mut ops, &op, &settle)` per
+  request. `execute` works against any `WidgetTree`, so this is ~a screenful of
+  glue — but it is a kit, not a turnkey "point it at my app" binary.
+- **Use the live `--connect` mode** below — the turnkey "drive my real app"
+  path today (needs a display and a running debug build).
 
 ### Live (connect)
 
@@ -96,7 +109,13 @@ The server binary builds from `cargo build -p bastyde-automation-mcp`.
 Mutating tools accept an optional `settle` argument (see the settle model
 below); query tools don't. Node ids come from `snapshot_tree` / `find_node`
 and are the raw AccessKit `NodeId` values — derived deterministically from the
-widget id, so they survive rebuilds.
+widget id. An id is stable for the **lifetime of the widget instance** (across
+relayout, repaint, theme, and locale changes, which mutate widgets in place),
+but a *structural rebuild* that destroys and recreates the widget — a
+data-model change, a `Switcher` swap, a `Rebuild`-level binding — allocates a
+new id. So caching an id is the payoff over an OS handle for *in-place*
+changes; after a structural change, re-`find_node` (by role/label, which
+carries the usual label fragility) rather than reuse a possibly-stale id.
 
 **Query** — `snapshot_tree`, `read_node`, `find_node`, `assert_node`,
 `list_windows`
@@ -177,14 +196,38 @@ in scope.
 
 The live bridge is defence-in-depth:
 
-- **Feature- and debug-gated.** It exists only with the `automation` feature
-  **and** `debug_assertions`. A shipped release binary contains none of it.
-- **Unix-domain socket only** (never TCP), mode `0600`, PID-unique path under
-  `$XDG_RUNTIME_DIR`, removed on startup and on bridge-thread exit.
-- **Single connection at a time**, single in-flight request.
+- **Feature- and debug-gated.** Every item that binds the socket, generates the
+  token, or spawns the bridge thread is `#[cfg(debug_assertions)]`; a release
+  build's `install_automation_bridge_in_debug()` is the identity. A shipped
+  release binary contains no socket, token, or bridge.
+- **Unix-domain socket only** (never TCP), in a `0700` per-process directory
+  under `$XDG_RUNTIME_DIR` with a `0600` socket (so it isn't world-connectable
+  even during the bind→chmod window), removed on startup and on bridge-thread
+  exit.
+- **Single connection at a time**, single in-flight request, with a 10 s
+  read-timeout on the token handshake and a 16 MiB cap on a request frame.
 - **Per-process UUID token**: the client must send the token (printed to
   stderr, or pinned via `BASTYDE_AUTOMATION_TOKEN`) as the first line, or the
   connection is rejected.
+- **Bounded main-thread settle.** Because the live settle runs on the winit
+  main thread, the bridge clamps `max_anim_frames ≤ 120` and
+  `settle_timeout_ms ≤ 2000` so no op (including a long `wait_for_condition`)
+  can freeze the UI for more than ~2 s. Headless keeps the caller's values (no
+  UI to freeze).
+
+The threat model is a *trusted local user with a non-shared `$XDG_RUNTIME_DIR`*
+— the same-uid socket plus the per-process token. The token is printed to
+stderr, so anyone who can read the app's stderr (or `/proc/<pid>/environ` when
+it's pinned) can drive the UI; this is a dev-tool stance, kept out of
+production by the debug gate above. **Regression guard:** the debug-only banner
+string only exists in the gated `install`, so a release binary with the feature
+on must not contain it — a CI canary:
+
+```sh
+cargo build --release -p widget-catalog          # has the bridge wired + feature
+! grep -qa "bastyde-automation: bridge socket" target/release/widget-catalog \
+  || { echo "BRIDGE LEAKED INTO RELEASE"; exit 1; }
+```
 
 Headless mode has no socket at all.
 

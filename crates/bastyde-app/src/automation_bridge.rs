@@ -93,6 +93,23 @@ fn socket_path() -> String {
     format!("{}/sock", socket_dir())
 }
 
+/// Clamp a settle for the LIVE bridge. The settle runs synchronously on the
+/// winit main thread, so an unbounded `settle_timeout_ms` / `max_anim_frames`
+/// (e.g. a `wait_for_condition` with a 30 s timeout) would freeze the running
+/// app's UI for that long. Cap both so the worst-case main-thread hitch is
+/// ~2 s; a longer wait should poll from the client or use the headless server
+/// (which has no UI to freeze and keeps the caller's values).
+#[cfg(debug_assertions)]
+pub(crate) fn clamp_live_settle(settle: &SettleSpec) -> SettleSpec {
+    const MAX_ANIM_FRAMES: u32 = 120;
+    const MAX_TIMEOUT_MS: u64 = 2000;
+    SettleSpec {
+        max_anim_frames: settle.max_anim_frames.min(MAX_ANIM_FRAMES),
+        settle_timeout_ms: settle.settle_timeout_ms.min(MAX_TIMEOUT_MS),
+        ..*settle
+    }
+}
+
 #[cfg(debug_assertions)]
 fn install(builder: BastydeAppBuilder) -> BastydeAppBuilder {
     // A pinned `BASTYDE_AUTOMATION_TOKEN` lets a test / harness know the token
@@ -276,4 +293,30 @@ fn encode_png(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
         writer.write_image_data(rgba).expect("png data");
     }
     buf
+}
+
+#[cfg(all(debug_assertions, test))]
+mod tests {
+    use super::clamp_live_settle;
+    use bastyde_automation::dto::SettleSpec;
+
+    #[test]
+    fn live_settle_is_clamped() {
+        // A long wait/settle must be capped so it can't freeze the main-thread UI.
+        let capped = clamp_live_settle(&SettleSpec {
+            clock_millis: 25,
+            max_anim_frames: 10_000,
+            layout_after: true,
+            settle_timeout_ms: 30_000,
+        });
+        assert_eq!(capped.max_anim_frames, 120);
+        assert_eq!(capped.settle_timeout_ms, 2000);
+        assert_eq!(capped.clock_millis, 25, "non-bound fields pass through");
+
+        // Values already under the cap are untouched.
+        let d = SettleSpec::default();
+        let small = clamp_live_settle(&d);
+        assert_eq!(small.settle_timeout_ms, d.settle_timeout_ms);
+        assert_eq!(small.max_anim_frames, d.max_anim_frames);
+    }
 }

@@ -954,6 +954,9 @@ impl BastydeAppHandler {
             reply_tx,
             ..
         } = payload;
+        // Clamp the settle: this runs on the winit main thread, so an
+        // unbounded wait/settle would freeze the live UI (see Risk 1).
+        let settle = crate::automation_bridge::clamp_live_settle(&settle);
         self.run_in_window(winit_id, event_loop, move |tree, ops| {
             let reply = bastyde_automation::execute(tree, ops, &op, &settle);
             let _ = reply_tx.send(reply);
@@ -1008,7 +1011,8 @@ impl BastydeAppHandler {
                 current_handle,
                 current_arc,
             );
-            let _ = bastyde_automation::run_settle(&mut current.tree, &mut ops, &payload.settle);
+            let settle = crate::automation_bridge::clamp_live_settle(&payload.settle);
+            let _ = bastyde_automation::run_settle(&mut current.tree, &mut ops, &settle);
         }
 
         // Optional crop rect in physical pixels (logical bounds × scale).
