@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 bastyde = { workspace = true, features = [
+    "automation",
     "system-emoji",
     "telemetry",
     "theme-material3",

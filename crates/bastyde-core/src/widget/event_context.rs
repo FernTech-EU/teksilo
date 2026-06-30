@@ -180,8 +180,16 @@ pub struct EventContext<'ops> {
     pub(crate) pending_shortcut_mutations: Vec<ShortcutMutation>,
     /// Requests that the app-level event loop close the window this
     /// tree belongs to. Drained after dispatch via
-    /// `WidgetTree::take_close_window_request`.
+    /// `WidgetTree::take_close_window_request`. Routed through the
+    /// window's close guard (if any) — see
+    /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested).
     pub(crate) close_window_requested: bool,
+    /// Like [`close_window_requested`](Self::close_window_requested), but
+    /// **bypasses** the window's close guard. Set by
+    /// [`close_window_forced`](Self::close_window_forced). Drained after
+    /// dispatch via `WidgetTree::take_force_close_request`. The escape
+    /// hatch a confirmation dialog uses once the user confirms.
+    pub(crate) force_close_requested: bool,
     /// Set by [`request_accessibility_update`](EventContext::request_accessibility_update);
     /// drained in `collect_from_ctx` to set `WidgetTree::a11y_dirty`, forcing the
     /// next `sync_accessibility` to re-walk the AccessKit tree. The general lever for a
@@ -285,6 +293,7 @@ impl<'ops> EventContext<'ops> {
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
             close_window_requested: false,
+            force_close_requested: false,
             request_a11y_update: false,
             window_ops: None,
             current_window: None,
@@ -525,8 +534,30 @@ impl<'ops> EventContext<'ops> {
     /// Request that the application close the window this tree
     /// belongs to. Drained by the app event loop after the handler
     /// returns. Typical use: title-bar close button handlers.
+    ///
+    /// This is a *guarded* close: if the window declared a close guard
+    /// via
+    /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
+    /// or [`can_close`](crate::window::WindowConfig::can_close), that
+    /// guard runs first and may veto the close. To skip the guard (e.g.
+    /// from the confirmation dialog the guard itself opened), use
+    /// [`close_window_forced`](Self::close_window_forced).
     pub fn close_window(&mut self) {
         self.close_window_requested = true;
+    }
+
+    /// Request that the application close this tree's window
+    /// **unconditionally**, bypassing any close guard declared via
+    /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
+    /// / [`can_close`](crate::window::WindowConfig::can_close).
+    ///
+    /// This is the second half of the veto-then-reissue pattern: the
+    /// guard returns [`CloseResponse::Veto`](crate::window::CloseResponse::Veto)
+    /// and opens a confirmation dialog; the dialog's "close anyway"
+    /// button calls `close_window_forced` so the window actually closes
+    /// without re-triggering the guard.
+    pub fn close_window_forced(&mut self) {
+        self.force_close_requested = true;
     }
 
     // -------------------- Multi-window API --------------------
@@ -1221,6 +1252,67 @@ mod multi_window_tests {
             ops.close_calls.borrow().as_slice(),
             &[BastydeWindowId::new(9)]
         );
+    }
+
+    #[test]
+    fn close_window_sets_guarded_flag_only() {
+        let mut ctx = EventContext::new();
+        ctx.close_window();
+        assert!(
+            ctx.close_window_requested,
+            "close_window must raise the guarded-close flag"
+        );
+        assert!(
+            !ctx.force_close_requested,
+            "close_window must NOT raise the forced-close flag"
+        );
+    }
+
+    #[test]
+    fn close_window_forced_sets_force_flag_only() {
+        let mut ctx = EventContext::new();
+        ctx.close_window_forced();
+        assert!(
+            ctx.force_close_requested,
+            "close_window_forced must raise the forced-close flag"
+        );
+        assert!(
+            !ctx.close_window_requested,
+            "close_window_forced must NOT raise the guarded-close flag"
+        );
+    }
+
+    /// End-to-end: a handler calling `close_window_forced` during
+    /// dispatch must transfer the flag onto the `WidgetTree` (the
+    /// `collect_from_ctx` teardown), where the app loop drains it via
+    /// `take_force_close_request` — separately from the guarded
+    /// `take_close_window_request` flag.
+    #[test]
+    fn forced_close_flag_propagates_to_tree_and_drains_independently() {
+        use crate::test_widgets::FillWidget;
+        use crate::widget_tree::WidgetTree;
+
+        // `run_with_event_context` only runs the `collect_from_ctx`
+        // teardown (which transfers ctx flags onto the tree) when the
+        // tree has a root to anchor on, so give it one.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| ctx.close_window_forced());
+        assert!(
+            tree.take_force_close_request(),
+            "forced-close flag must reach the tree"
+        );
+        assert!(
+            !tree.take_close_window_request(),
+            "a forced close must not also raise the guarded flag"
+        );
+
+        // And the guarded path stays on its own channel.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| ctx.close_window());
+        assert!(tree.take_close_window_request());
+        assert!(!tree.take_force_close_request());
     }
 
     #[test]

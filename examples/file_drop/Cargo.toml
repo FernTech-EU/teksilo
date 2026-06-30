@@ -14,4 +14,5 @@ name = "file-drop"
 path = "src/main.rs"
 
 [dependencies]
-bastyde = { workspace = true, features = ["file-dialog"] }
+bastyde = { workspace = true, features = [
+    "automation","file-dialog"] }

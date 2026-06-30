@@ -3,12 +3,16 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 pub mod app;
+#[cfg(feature = "automation")]
+pub mod automation_bridge;
 pub mod default_post_root;
 pub mod window_config;
 pub mod window_manager;
 pub(crate) mod window_persist;
 
 pub use app::{AppEventProxy, BastydeAppBuilder, HeadlessApp, SyntheticImeInject, ThemeMode};
+#[cfg(feature = "automation")]
+pub use automation_bridge::BastydeAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
 pub use window_config::{BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
 pub use window_manager::WindowManager;

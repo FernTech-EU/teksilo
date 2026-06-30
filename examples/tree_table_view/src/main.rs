@@ -128,6 +128,7 @@ fn main() {
     let selection = SelectionModel::new(SelectionMode::Multi);
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
         .initial_window(

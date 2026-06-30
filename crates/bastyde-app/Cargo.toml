@@ -38,6 +38,23 @@ telemetry = ["dep:bastyde-telemetry", "dep:uuid", "bastyde-widgets/telemetry"]
 # Pulls in `bastyde-webview` for the payload + registry types. Off by
 # default; the umbrella `bastyde/web-view` feature turns it on.
 web-view = ["dep:bastyde-webview"]
+# Debug-only in-process automation bridge. Lets `bastyde-automation-mcp
+# --connect <sock>` drive a *live* running app over a Unix-domain socket.
+# The active machinery (socket / token / bridge thread) is additionally gated
+# on `debug_assertions`, so a release build with this feature on never opens a
+# socket and `install_automation_bridge_in_debug()` is a no-op. NOTE: the
+# guarantee is *behavioral* — the `bastyde-automation` toolkit (executor +
+# serde_json) is still linked, dead-code-eliminated only under fat LTO (the
+# `release` default); a non-LTO profile such as `profiling` retains those
+# symbols even though no bridge runs. Pulls in the GUI-free toolkit plus the
+# wire-encoding deps.
+automation = [
+    "dep:bastyde-automation",
+    "dep:base64",
+    "dep:png",
+    "dep:serde_json",
+    "dep:uuid",
+]
 
 [dependencies]
 bastyde-core = { workspace = true }
@@ -57,10 +74,16 @@ bastyde-settings = { workspace = true }
 bastyde-webview = { workspace = true, optional = true }
 bastyde-telemetry = { workspace = true, optional = true }
 bastyde-text = { workspace = true, optional = true }
+# GUI-free automation toolkit + wire-encoding deps for the debug-only
+# `automation` bridge. All optional, off by default.
+bastyde-automation = { workspace = true, optional = true }
+base64 = { version = "0.22", optional = true }
+png = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 winit = { workspace = true }
 pollster = "0.4"
-# Only used by the telemetry session-id generator; pulled in with the
-# `telemetry` feature.
+# Used by the telemetry session-id generator AND the automation bridge's
+# per-process token; pulled in with the `telemetry` or `automation` feature.
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]

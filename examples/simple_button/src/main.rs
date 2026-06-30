@@ -10,6 +10,7 @@ use bastyde::widgets::{Button, ButtonVariant};
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .theme(bastyde::presets::intui::light())
         .install_inspector_in_debug()
         .initial_window(

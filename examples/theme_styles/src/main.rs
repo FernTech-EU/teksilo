@@ -95,6 +95,7 @@ fn main() {
     theme.style_slots.button = Some(Rc::new(GlowButton));
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .theme(theme)
         .install_inspector_in_debug()
         .initial_window(

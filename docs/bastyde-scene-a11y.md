@@ -446,4 +446,5 @@ let view = SceneView::new(scene)
   (the `Scene::add_a11y_*` / `set_a11y_*` API), and the AT walker in
   [`crates/bastyde-scene/src/view.rs`](../crates/bastyde-scene/src/view.rs).
 - Widget-tier override surface: [`docs/accessibility-overrides.md`](accessibility-overrides.md).
+- Agent/CI automation over this AT surface: [`docs/automation-mcp.md`](automation-mcp.md).
 - AccessKit reference: <https://accesskit.dev>.

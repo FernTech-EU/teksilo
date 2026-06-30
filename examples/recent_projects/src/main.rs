@@ -402,6 +402,7 @@ fn main() {
         MruList::open(&paths, "recent_projects", 8).expect("open recent_projects.toml");
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
         .app_paths(paths)

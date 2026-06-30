@@ -340,8 +340,14 @@ pub struct WidgetTree {
     pub(crate) last_frame_time: Option<std::time::Instant>,
     /// Set by [`EventContext::close_window`] during dispatch; drained
     /// by the application event loop after each event via
-    /// [`WidgetTree::take_close_window_request`].
+    /// [`WidgetTree::take_close_window_request`]. A *guarded* close
+    /// request — the app routes it through the window's close guard.
     pub(crate) close_window_requested: bool,
+    /// Set by [`EventContext::close_window_forced`] during dispatch;
+    /// drained via [`WidgetTree::take_force_close_request`]. An
+    /// *unconditional* close request that bypasses the window's close
+    /// guard.
+    pub(crate) force_close_requested: bool,
     /// Raised by [`EventContext::set_locale`] during dispatch; drained by
     /// the application event loop (see
     /// `WindowManager::drain_pending_locale_requests`) so the switch can be
@@ -370,6 +376,27 @@ pub struct WidgetTree {
     /// routed through `WindowManager::set_text_scale`, fanning the new factor
     /// out to *every* window. Mirrors `pending_theme_request`.
     pub(crate) pending_text_scale_request: Option<f32>,
+    /// Monotonic version counter bumped after every *real* accessibility
+    /// rebuild in [`Self::sync_accessibility`] (cache hits don't bump).
+    /// Mirror of [`crate::shortcut::ShortcutRegistry::version`]: an
+    /// automation / test harness can poll it to know whether the AT tree
+    /// changed without diffing the whole `TreeUpdate`.
+    at_version: crate::signal::Signal<u64>,
+    /// Ring buffer of captured live-region announcements (see
+    /// [`crate::accessibility::Announcement`]). Filled by a `&mut self`
+    /// post-pass in `sync_accessibility` that diffs `Live::{Polite,
+    /// Assertive}` nodes against `automation_last_text`. Capped at
+    /// [`AUTOMATION_ANNOUNCE_CAP`]; drained by
+    /// [`Self::announcements_since`].
+    automation_announcements: std::collections::VecDeque<crate::accessibility::Announcement>,
+    /// Monotonic sequence number for the next announcement (starts at 0;
+    /// the first announcement is assigned `1`).
+    automation_announce_seq: u64,
+    /// Last announced text per live-region node, so a re-sync only emits a
+    /// new announcement when the text actually changes. Pruned each pass
+    /// to the set of currently-present live nodes, so a node that
+    /// disappears and reappears with the same text re-announces.
+    automation_last_text: std::collections::HashMap<accesskit::NodeId, String>,
     /// The `WindowState` for this tree's hosting window. Populated
     /// by the app-level window manager when the tree is registered;
     /// `None` for standalone trees. Cloned into every `EventContext`
@@ -377,6 +404,11 @@ pub struct WidgetTree {
     /// signals via `ctx.window()`.
     pub(crate) window_state: Option<crate::window::WindowState>,
 }
+
+/// Maximum number of live-region [`crate::accessibility::Announcement`]s
+/// the [`WidgetTree`] retains. The oldest is evicted when the buffer is
+/// full; `announcements_since` only ever returns the retained tail.
+const AUTOMATION_ANNOUNCE_CAP: usize = 256;
 
 /// A tooltip attachment managed by the WidgetTree.
 struct TooltipEntry {
@@ -498,10 +530,15 @@ impl WidgetTree {
             pending_mount_actions: Vec::new(),
             last_frame_time: None,
             close_window_requested: false,
+            force_close_requested: false,
             pending_locale_request: None,
             pending_theme_request: None,
             pending_follow_system_request: false,
             pending_text_scale_request: None,
+            at_version: crate::signal::Signal::new(0),
+            automation_announcements: std::collections::VecDeque::new(),
+            automation_announce_seq: 0,
+            automation_last_text: std::collections::HashMap::new(),
             window_state: None,
         }
     }
@@ -2111,9 +2148,17 @@ impl WidgetTree {
     // --- Window-close request (drained by the app loop) ---
 
     /// Drain the "close this window" flag set by
-    /// [`EventContext::close_window`] during dispatch.
+    /// [`EventContext::close_window`] during dispatch. A *guarded* close
+    /// — the app routes it through the window's close guard.
     pub fn take_close_window_request(&mut self) -> bool {
         std::mem::replace(&mut self.close_window_requested, false)
+    }
+
+    /// Drain the "close this window, no questions asked" flag set by
+    /// [`EventContext::close_window_forced`] during dispatch. An
+    /// *unconditional* close that bypasses the window's close guard.
+    pub fn take_force_close_request(&mut self) -> bool {
+        std::mem::replace(&mut self.force_close_requested, false)
     }
 
     /// Drain the pending locale switch raised by

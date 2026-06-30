@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "automation_bridge_smoke"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish = false
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "automation_bridge_smoke"
+path = "src/main.rs"
+
+[dependencies]
+bastyde = { workspace = true, features = ["automation"] }
+serde_json = { workspace = true }

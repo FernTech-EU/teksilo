@@ -74,6 +74,30 @@ pub enum SyntheticKind {
     SceneMagnet = 7,
 }
 
+/// A captured live-region announcement — the text a screen reader would
+/// have spoken when a `Live::{Polite,Assertive}` node's value (or label)
+/// changed.
+///
+/// Bastyde has no OS accessibility layer in headless mode, and even with
+/// one there is no in-process way to observe what the platform *spoke*.
+/// [`crate::WidgetTree::sync_accessibility`] therefore diffs the live
+/// nodes of each freshly-built `TreeUpdate` and records the changes into
+/// a ring buffer that an automation / test harness drains via
+/// [`crate::WidgetTree::announcements_since`]. This is a faithful,
+/// in-process model of the live-region stream, not a replacement for an
+/// OS screen-reader smoke test.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Announcement {
+    /// Monotonic sequence number, starting at 1. `announcements_since(n)`
+    /// returns every announcement whose `seq > n`.
+    pub seq: u64,
+    /// The announced text — the node's `value`, or its `label` when the
+    /// node carries no value.
+    pub text: String,
+    /// `true` for `Live::Assertive`, `false` for `Live::Polite`.
+    pub assertive: bool,
+}
+
 /// Top bit of the u64 NodeId encoding. Set for synthetic (widget-
 /// emitted child) NodeIds, clear for widget-derived NodeIds.
 /// Slotmap-derived WidgetIds never set bit 63 in practice because

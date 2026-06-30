@@ -37,6 +37,7 @@ fn main() {
     let poll = std::rc::Rc::new(std::cell::Cell::new(true));
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .theme(intui::light())
         .on_loop_tick(poll.clone(), || {
             bastyde::web_view::pump_gtk_events();

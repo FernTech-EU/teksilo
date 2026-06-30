@@ -413,3 +413,4 @@ The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an a
 - [bati-macro-reference.md](bati-macro-reference.md) — `bati!` DSL syntax for `name: value` body items, used by the catalog demo's `controls_bati` block.
 - [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
 - [crates/bastyde-core/src/widget_tree/accessibility_impl.rs](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) — walker integration, `merge_descendants_into` helper, the 36 unit tests.
+- [automation-mcp.md](automation-mcp.md) — the in-process AT tree + AT-action channel exposed as a Model Context Protocol server, so an agent can observe and drive the same accessibility surface these overrides shape.

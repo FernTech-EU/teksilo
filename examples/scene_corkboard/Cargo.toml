@@ -10,6 +10,6 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true }
+bastyde = { workspace = true, features = ["automation"] }
 bastyde-scene = { workspace = true }
 accesskit = { workspace = true }

@@ -35,6 +35,7 @@ fn dark_mode_toolbar() -> impl Widget {
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::dark())
         .initial_window(

@@ -48,7 +48,7 @@ pub mod window_chrome;
 #[cfg(test)]
 pub(crate) mod test_widgets;
 
-pub use accessibility::{AccessNodeBuilder, AccessibilityInfo};
+pub use accessibility::{AccessNodeBuilder, AccessibilityInfo, Announcement};
 pub use action::{Action, ActionBuilder, ActionHandler};
 pub use animated_quad::{AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegistry};
 pub use animation::AnimationRequest;
@@ -113,9 +113,9 @@ pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window::state::WindowStateInit;
 pub use window::{
-    BastydeWindowId, DecorationsMode, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
-    UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
-    WindowState,
+    BastydeWindowId, CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig,
+    NoopWindowOps, PostRootBuilder, RootBuilder, UserAttentionKind, WindowCommand, WindowConfig,
+    WindowIcon, WindowOps, WindowPlacement, WindowState,
 };
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,

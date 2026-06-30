@@ -63,6 +63,15 @@ widget builders in**.
   `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `bastyde::core::{WidgetTree, LayoutContext::for_testing}` +
   `bastyde::canvas::MockTextBackend` — `MockTextBackend` is under `canvas`, not `core`.
+- **Agent/CI automation (optional):** an MCP server can observe (accessibility tree +
+  screenshots) and drive (AT actions + synthetic pointer/key/IME input) the app in-process,
+  no OS accessibility layer. `bastyde-automation-mcp --headless` is a self-contained MCP
+  server for deterministic CI / agent-authored tests; to drive a *live* app, enable the
+  `automation` feature on the `bastyde` dep and add `.install_automation_bridge_in_debug()`
+  to the `BastydeAppBuilder` chain (debug-only Unix socket, Linux/macOS; no-op in release /
+  on Windows), then `bastyde-automation-mcp --connect <sock> --token <uuid>` (both printed
+  to stderr at startup). Built on the AccessKit tree every widget already declares, so node
+  ids are stable. See `docs/automation-mcp.md` in the framework repo.
 
 ## Maintenance (skill owner only)
 

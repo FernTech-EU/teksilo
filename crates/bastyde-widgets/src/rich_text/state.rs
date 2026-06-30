@@ -649,7 +649,8 @@ impl EditorState {
 
         // Fire the user edit callback only for genuine content edits — not for
         // a programmatic load/reset (`set_djot`/`set_markdown` repopulate).
-        if saw_content_change && !saw_reset_or_load
+        if saw_content_change
+            && !saw_reset_or_load
             && let Some(cb) = self.on_change.clone()
         {
             cb();

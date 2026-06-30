@@ -226,6 +226,7 @@ fn root() -> impl Widget {
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .theme(bastyde::presets::intui::dark())
         .register_tooltips(build_tooltip_registry())
         .initial_window(

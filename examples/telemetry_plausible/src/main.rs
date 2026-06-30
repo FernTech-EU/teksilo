@@ -145,6 +145,7 @@ fn main() {
         .with_data_residency_region(bastyde_telemetry::DataResidencyRegion::EU);
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .application("eu", "FernTech", "telemetry-plausible-demo")
         .settings(SettingsBundle::new())

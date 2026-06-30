@@ -71,6 +71,7 @@
 # Tooling
 
 - [Debug inspector](inspector.md)
+- [Automation MCP](automation-mcp.md)
 
 # Widget Catalog
 

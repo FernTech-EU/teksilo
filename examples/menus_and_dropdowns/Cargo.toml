@@ -12,6 +12,6 @@ publish = false
 [dependencies]
 # The `TextInput`-backed `.searchable()` combo box showcased in
 # Section 1 comes in unconditionally with the default widget set.
-bastyde = { workspace = true }
+bastyde = { workspace = true, features = ["automation"] }
 # Needed for the tri-state checkable menu item (CheckState).
 bastyde-data = { workspace = true }

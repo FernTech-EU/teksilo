@@ -313,6 +313,7 @@ fn main() {
         .framework_locales(bastyde::widgets::framework_locales());
 
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
         .i18n(i18n_config)

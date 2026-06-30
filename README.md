@@ -156,6 +156,8 @@ The rules under which Bastyde is built:
 
 **Tooling.** In-app debug inspector (F12, debug builds only) with tabs for tree, properties, accessibility, theme, focus, shortcuts, overlays, and data models. Opt-in privacy-conscious telemetry stack with compile-time-validated event schemas and a build-time linter for schema drift.
 
+**Agent automation (MCP).** A Model Context Protocol server lets an AI agent observe (the live accessibility tree plus screenshots) and drive (accessibility actions, synthetic pointer / key / IME input) a Bastyde app — in-process, with no OS accessibility layer needed. Headless mode owns a widget tree on its own thread for deterministic CI and agent-authored tests; a debug-only Unix-socket bridge (Linux/macOS only; no surface in release builds) drives a live running app. It reuses the same AccessKit tree every widget already declares, so node identity is stable across rebuilds. Complements, rather than replaces, a real screen-reader smoke test. See [`docs/automation-mcp.md`](docs/automation-mcp.md).
+
 For depth on any of these, see `docs/`.
 
 ## Getting started

@@ -103,6 +103,8 @@ bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.6.2" }
 bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.6.2" }
 bastyde-resources = { path = "crates/bastyde-resources", version = "0.6.2" }
 bastyde-webview = { path = "crates/bastyde-webview", version = "0.6.2" }
+bastyde-automation = { path = "crates/bastyde-automation", version = "0.6.2" }
+bastyde-automation-mcp = { path = "crates/bastyde-automation-mcp", version = "0.6.2" }
 bastyde = { path = "crates/bastyde", version = "0.6.2" }
 bastyde-preview = { path = "crates/bastyde-preview", version = "0.6.2" }
 bastyde-preview-ui = { path = "crates/bastyde-preview-ui", version = "0.6.2" }

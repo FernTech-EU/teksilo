@@ -292,6 +292,111 @@ impl PlatformWindow {
         FrameOutcome::Rendered
     }
 
+    /// Render `frame` into an offscreen texture and read it back as
+    /// tightly-packed RGBA8 bytes, returning `(rgba, width, height)`.
+    ///
+    /// Used by the debug-only automation bridge to capture a *live* window
+    /// without going through the swapchain — the surface texture is
+    /// configured `RENDER_ATTACHMENT` only (no `COPY_SRC`), so it can't be
+    /// read back directly. The offscreen texture uses the window's own
+    /// surface format so it matches the renderer's pipelines; a BGRA
+    /// readback is swizzled to RGBA here so the output is always RGBA. With
+    /// `crop = Some(rect)` (physical pixels, clamped to the surface) only
+    /// that sub-rectangle is returned. Returns an empty `(vec, 0, 0)` if
+    /// the crop is fully outside the surface.
+    ///
+    /// Note: a native `WebView` subview composites *on top of* the wgpu
+    /// surface and is invisible to this readback (a transparent hole).
+    pub fn capture_offscreen(
+        &mut self,
+        frame: &bastyde_canvas::RenderFrame,
+        clear_color: [f32; 4],
+        crop: Option<bastyde_canvas::Rect>,
+    ) -> (Vec<u8>, u32, u32) {
+        fn crop_rgba(
+            src: &[u8],
+            w: u32,
+            h: u32,
+            rect: bastyde_canvas::Rect,
+        ) -> (Vec<u8>, u32, u32) {
+            let x0 = (rect.x.floor().max(0.0) as u32).min(w);
+            let y0 = (rect.y.floor().max(0.0) as u32).min(h);
+            let x1 = ((rect.x + rect.width).ceil().max(0.0) as u32).min(w);
+            let y1 = ((rect.y + rect.height).ceil().max(0.0) as u32).min(h);
+            if x1 <= x0 || y1 <= y0 {
+                return (Vec::new(), 0, 0);
+            }
+            let cw = x1 - x0;
+            let ch = y1 - y0;
+            let mut out = Vec::with_capacity((cw * ch * 4) as usize);
+            for y in y0..y1 {
+                let row_start = ((y * w + x0) * 4) as usize;
+                let row_end = row_start + (cw * 4) as usize;
+                out.extend_from_slice(&src[row_start..row_end]);
+            }
+            (out, cw, ch)
+        }
+
+        let (w, h) = self.surface_size();
+        let format = self.surface_config.format;
+        // The readback assumes a 4-byte, 8-bit RGBA/BGRA layout (the BGRA
+        // swizzle below + `read_texture_rgba`'s fixed 4-bytes-per-pixel copy).
+        // Desktop wgpu surfaces are always one of these four; a packed
+        // (Rgb10a2) or wide (Rgba16Float) surface format would read back
+        // garbage, so flag it loudly in debug builds.
+        debug_assert!(
+            matches!(
+                format,
+                wgpu::TextureFormat::Rgba8Unorm
+                    | wgpu::TextureFormat::Rgba8UnormSrgb
+                    | wgpu::TextureFormat::Bgra8Unorm
+                    | wgpu::TextureFormat::Bgra8UnormSrgb
+            ),
+            "capture_offscreen: unsupported surface format {format:?} (expected 8-bit RGBA/BGRA)"
+        );
+        let texture = self
+            .renderer
+            .device()
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("bastyde-automation capture"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.renderer
+            .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
+        let mut bytes = bastyde_render::test_support::read_texture_rgba(
+            self.renderer.device(),
+            self.renderer.queue(),
+            &texture,
+            w,
+            h,
+        );
+        // `read_texture_rgba` copies raw channel bytes; a BGRA surface
+        // needs its B/R swapped to become RGBA for PNG encoding.
+        if matches!(
+            format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        ) {
+            for px in bytes.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+        }
+        match crop {
+            Some(rect) => crop_rgba(&bytes, w, h, rect),
+            None => (bytes, w, h),
+        }
+    }
+
     pub fn request_redraw(&self) {
         self.window.request_redraw();
     }

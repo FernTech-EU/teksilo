@@ -236,6 +236,7 @@ fn material_palette() -> Vec<Color> {
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
         // Register bastyde-widgets' own translatable strings so internal

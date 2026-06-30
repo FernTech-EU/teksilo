@@ -91,6 +91,14 @@ web-view-servo = ["web-view", "bastyde-webview/servo-backend"]
 # `features = ["servo-backend"]` and install `ServoBackend` explicitly.
 web-view-headless = ["dep:bastyde-webview", "bastyde-app/web-view"]
 
+# Debug-only automation bridge. Adds `install_automation_bridge_in_debug()`
+# (re-exported here as `BastydeAppBuilderAutomationExt`, mirroring `toast` /
+# `web-view`) so `bastyde-automation-mcp --connect <sock>` can drive a live
+# running app. The active socket is additionally gated on `debug_assertions`,
+# so a release build with this feature still ships no bridge. Also re-exports
+# the GUI-free `bastyde-automation` toolkit as `bastyde::automation`.
+automation = ["dep:bastyde-automation", "bastyde-app/automation"]
+
 # Optional main-thread async executor (`bastyde-async`): adds
 # `BastydeAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
 # `spawn_blocking` for imperative async-in-UI flows. Off by default — apps
@@ -184,6 +192,7 @@ bastyde-text = { path = "../bastyde-text", version = "0.6.2", optional = true, d
 bastyde-i18n = { workspace = true, optional = true }
 bastyde-inspector = { workspace = true, optional = true }
 bastyde-webview = { workspace = true, optional = true }
+bastyde-automation = { workspace = true, optional = true }
 bastyde-resources = { workspace = true }
 bastyde-theme-material3 = { workspace = true, optional = true }
 bastyde-theme-macos = { workspace = true, optional = true }

@@ -77,6 +77,10 @@ fn main() {
         .application("eu", "FernTech", "widget-catalog")
         .settings(SettingsBundle::new())
         .install_inspector_in_debug()
+        // Debug-only automation bridge: drive this catalog from
+        // `bastyde-automation-mcp --connect <sock> --token <uuid>` (the socket
+        // path + token are printed to stderr at startup). No-op in release.
+        .install_automation_bridge_in_debug()
         .install_file_dialog()
         // Toast host + persistent notification archive — drives the
         // Overlays tab's Toast section and notification bell.

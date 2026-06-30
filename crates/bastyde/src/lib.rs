@@ -119,6 +119,18 @@ pub use bastyde_webview as web_view;
 #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
 pub mod webview_install;
 
+/// GUI-free runtime-introspection & automation toolkit
+/// ([`bastyde_automation`]). Re-exported as `bastyde::automation`. The
+/// `install_automation_bridge_in_debug()` method comes from
+/// [`BastydeAppBuilderAutomationExt`](automation_install::BastydeAppBuilderAutomationExt),
+/// re-exported through [`prelude`].
+#[cfg(feature = "automation")]
+pub use bastyde_automation as automation;
+
+/// Automation bridge install hook (extension trait on `BastydeAppBuilder`).
+#[cfg(feature = "automation")]
+pub mod automation_install;
+
 pub mod prelude {
     // DSL entry point
     pub use bastyde_macros::bati;
@@ -183,8 +195,8 @@ pub mod prelude {
 
     // Multi-window API
     pub use bastyde_core::{
-        BastydeWindowId, DecorationsMode, ModalConfig, UserAttentionKind, WindowCommand,
-        WindowConfig, WindowPlacement, WindowState,
+        BastydeWindowId, CloseResponse, DecorationsMode, ModalConfig, UserAttentionKind,
+        WindowCommand, WindowConfig, WindowPlacement, WindowState,
     };
 
     // i18n (architecture §12)
@@ -229,6 +241,11 @@ pub mod prelude {
         WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId,
         WebViewRegistry, WebViewStyle,
     };
+
+    // Automation bridge (debug-only). The extension trait adds
+    // `install_automation_bridge_in_debug()` to `BastydeAppBuilder`.
+    #[cfg(feature = "automation")]
+    pub use crate::automation_install::BastydeAppBuilderAutomationExt;
 
     // Native file dialogs. The extension trait brings
     // `ctx.pick_file(...)`, `ctx.save_file(...)`, etc. into scope.

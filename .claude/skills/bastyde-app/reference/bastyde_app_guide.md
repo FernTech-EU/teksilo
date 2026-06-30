@@ -583,6 +583,34 @@ Test helpers (not in the prelude): `WidgetTree` and `LayoutContext::for_testing(
 live under `bastyde::core`; `MockTextBackend::new()` (fixed 8px char width) lives under
 `bastyde::canvas`.
 
+### Agent / CI automation (MCP)
+
+Beyond unit tests, an app can be **observed and driven by an AI agent or a CI harness**
+through a Model Context Protocol server — in-process, with no OS accessibility layer. It
+exposes the live AccessKit tree (so node ids are stable across rebuilds), AT actions,
+synthetic pointer/key/IME input, and screenshots.
+
+- **Headless (CI / agent-authored tests):** `bastyde-automation-mcp --headless` — a
+  self-contained MCP server, no display or GPU daemon needed (screenshots need a GPU else
+  return `GPU_UNAVAILABLE`). Works on every platform.
+- **Live app:** enable the `automation` feature on the `bastyde` dependency and add one
+  builder call:
+
+  ```rust,ignore
+  BastydeAppBuilder::new()
+      .install_automation_bridge_in_debug()   // debug-only; no-op in release / on Windows
+      // … the rest of the chain …
+      .run();
+  ```
+
+  At startup it prints a socket path + token to stderr; drive it with
+  `bastyde-automation-mcp --connect <sock> --token <uuid>`. The bridge is a debug-only,
+  `0600`, per-process Unix socket (Linux/macOS) — a release build contains no socket.
+
+On connect the server hands the client a "how to drive this app" briefing plus a JSON
+schema per tool, so a capable agent self-guides through the snapshot → act → settle →
+assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
+
 ## Conventions when writing Bastyde code
 
 - **Builder pattern everywhere** — fluent `.child()`, `.spacing()`, `.style()`, `.on_tap()`.

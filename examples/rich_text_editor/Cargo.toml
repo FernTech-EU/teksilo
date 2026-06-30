@@ -10,4 +10,5 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["clipboard"] }
+bastyde = { workspace = true, features = [
+    "automation","clipboard"] }

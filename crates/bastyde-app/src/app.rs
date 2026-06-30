@@ -888,6 +888,190 @@ impl BastydeAppHandler {
     /// routers and the mount-action drain all share — keeping the reinsert
     /// (whose omission silently freezes a window) in exactly one place.
     /// No-op if `winit_id` is not a managed window.
+    /// Route a debug-bridge [`AutomationPayload`](crate::automation_bridge::AutomationPayload):
+    /// resolve the target window, then run the op against the live tree
+    /// (and, for screenshots, the live `PlatformWindow`). `list_windows` and
+    /// `screenshot` are served here (they need the window manager / platform
+    /// window); everything else goes through [`bastyde_automation::execute`]
+    /// with a real `WindowOps`. The settle runs synchronously on this (the
+    /// main) thread, never across a frame boundary.
+    #[cfg(all(feature = "automation", debug_assertions))]
+    fn try_route_automation_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use bastyde_automation::dto::{AutomationOp, AutomationReply, WindowInfo, codes};
+
+        let payload = match payload.downcast::<crate::automation_bridge::AutomationPayload>() {
+            Ok(b) => *b,
+            Err(other) => return Err(other),
+        };
+
+        // Resolve target window: explicit id, else focused, else primary.
+        let bid = match payload.window_id {
+            Some(raw) => crate::window_config::BastydeWindowId::new(raw),
+            None => self
+                .wm
+                .iter()
+                .find(|m| m.focused)
+                .map(|m| m.bastyde_id)
+                .unwrap_or_else(|| self.wm.primary_window_id()),
+        };
+        let Some(winit_id) = self.wm.winit_id_for_bastyde(bid) else {
+            let _ = payload
+                .reply_tx
+                .send(AutomationReply::err(codes::NOT_FOUND, "no such window"));
+            return Ok(());
+        };
+
+        // `list_windows` is served straight from the window manager.
+        if matches!(payload.op, AutomationOp::ListWindows) {
+            let windows: Vec<WindowInfo> = self
+                .wm
+                .iter()
+                .map(|m| WindowInfo {
+                    id: m.bastyde_id.raw(),
+                    label: m.string_id.clone(),
+                    title: Some(m.state.title().get()),
+                    focused: m.focused,
+                })
+                .collect();
+            let _ = payload.reply_tx.send(AutomationReply::ok_json(&windows));
+            return Ok(());
+        }
+
+        // Screenshots reach the `ManagedWindow` (tree + platform window).
+        if matches!(payload.op, AutomationOp::Screenshot { .. }) {
+            self.automation_screenshot(winit_id, event_loop, &payload);
+            return Ok(());
+        }
+
+        // Everything else: a per-tree op with a real `WindowOps`.
+        let crate::automation_bridge::AutomationPayload {
+            op,
+            settle,
+            reply_tx,
+            ..
+        } = payload;
+        self.run_in_window(winit_id, event_loop, move |tree, ops| {
+            let reply = bastyde_automation::execute(tree, ops, &op, &settle);
+            let _ = reply_tx.send(reply);
+        });
+        if let Some(m) = self.wm.windows_map().get(&winit_id) {
+            m.platform_window.request_redraw();
+        }
+        Ok(())
+    }
+
+    /// The screenshot arm of the automation bridge: take the window out of
+    /// the manager (so we can borrow both its tree and its platform window),
+    /// settle, render, capture offscreen, reinsert, then reply with a
+    /// base64-PNG.
+    #[cfg(all(feature = "automation", debug_assertions))]
+    fn automation_screenshot(
+        &mut self,
+        winit_id: winit::window::WindowId,
+        event_loop: &ActiveEventLoop,
+        payload: &crate::automation_bridge::AutomationPayload,
+    ) {
+        use bastyde_automation::dto::{AutomationOp, AutomationReply, codes};
+
+        let node = match &payload.op {
+            AutomationOp::Screenshot { node } => *node,
+            _ => None,
+        };
+
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            let _ = payload
+                .reply_tx
+                .send(AutomationReply::err(codes::NOT_FOUND, "window vanished"));
+            return;
+        };
+        let current_id = current.bastyde_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        // Settle synchronously on the main thread with a real `WindowOps`.
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            let _ = bastyde_automation::run_settle(&mut current.tree, &mut ops, &payload.settle);
+        }
+
+        // Optional crop rect in physical pixels (logical bounds × scale).
+        let scale = current.tree.device_scale_factor();
+        let crop = node.and_then(|n| {
+            let nid = bastyde_core::accesskit::NodeId(n);
+            let wid = bastyde_core::accessibility::node_id_to_widget_id_maybe(nid)
+                .or_else(|| current.tree.widget_for_synthetic(nid))?;
+            let b = current.tree.bounds(wid);
+            Some(bastyde_canvas::Rect {
+                x: b.x * scale,
+                y: b.y * scale,
+                width: b.width * scale,
+                height: b.height * scale,
+            })
+        });
+
+        // WebView blind-spot warning.
+        let warnings = {
+            let update = current.tree.sync_accessibility();
+            if update
+                .nodes
+                .iter()
+                .any(|(_, nd)| nd.role() == bastyde_core::accesskit::Role::WebView)
+            {
+                vec!["webview_hole_possible".to_string()]
+            } else {
+                Vec::new()
+            }
+        };
+
+        let clear = bastyde_render::vertex::srgb_to_linear_rgba(
+            current.tree.theme().colors.surface_main.to_array(),
+        );
+        let frame = current.tree.render();
+        // The GPU readback inside `capture_offscreen` can `.expect()`-panic on
+        // device loss (compositor restart, driver crash, memory pressure).
+        // Catch it so the window is still reinserted (no zombie) and the app
+        // survives — a screenshot failure must not abort a live session.
+        let captured = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            current
+                .platform_window
+                .capture_offscreen(&frame, clear, crop)
+        }));
+
+        current.platform_window.request_redraw();
+        self.wm.reinsert_managed(winit_id, current);
+
+        let reply = match captured {
+            Ok((rgba, w, h)) if w != 0 && h != 0 => {
+                crate::automation_bridge::screenshot_reply(&rgba, w, h, warnings)
+            }
+            Ok(_) => {
+                AutomationReply::err(codes::BAD_ARGUMENT, "crop region empty / outside window")
+            }
+            Err(_) => AutomationReply::err(
+                "GPU_READBACK_FAILED",
+                "offscreen capture failed (GPU device lost?)",
+            ),
+        };
+        let _ = payload.reply_tx.send(reply);
+    }
+
     fn run_in_window(
         &mut self,
         winit_id: winit::window::WindowId,
@@ -1607,7 +1791,11 @@ impl BastydeAppHandler {
         match event {
             WindowEvent::CloseRequested => {
                 if let Some(fid) = bastyde_id {
-                    self.wm.close_window(fid);
+                    // Guarded close: the OS close button / Alt+F4 / Cmd+W
+                    // is an interactive gesture, so it runs through the
+                    // window's close guard (if any) on the next
+                    // `process_pending` tick and may be vetoed.
+                    self.wm.request_close(fid);
                 }
             }
             WindowEvent::Resized(new_size) => {
@@ -2055,10 +2243,19 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                     None => None,
                     Some(payload) => self.try_route_web_view_payload(payload, event_loop).err(),
                 };
+                #[cfg(all(feature = "automation", debug_assertions))]
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_automation_payload(payload, event_loop).err(),
+                };
                 if let Some(payload) = payload {
                     {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
-                            self.wm.queue_close(req.bastyde_id);
+                            // Custom-chrome (Bastyde-drawn) title-bar close
+                            // button — an interactive gesture, so it runs
+                            // through the window's close guard (guarded
+                            // close), matching the OS close button.
+                            self.wm.request_close(req.bastyde_id);
                         } else if let Some(evt) = payload.downcast_ref::<TitleBarSyntheticEvent>() {
                             // Windows custom-chrome wndproc sends this when
                             // `WM_NCLBUTTONUP` fires over a control-button

@@ -290,7 +290,8 @@ impl EventContext<'_> {
     pub fn open_modal(&mut self, request: ModalRequest) -> Option<BastydeWindowId>;
     pub fn find_window(&self, string_id: &str) -> Option<BastydeWindowId>;
     pub fn focus_window(&mut self, id: BastydeWindowId);
-    pub fn close_window(&mut self);                         // the current window
+    pub fn close_window(&mut self);                         // current window, GUARDED
+    pub fn close_window_forced(&mut self);                  // current window, bypasses the guard
     pub fn close_window_by_id(&mut self, id: BastydeWindowId);
     pub fn window_state(&self, id: BastydeWindowId) -> Option<WindowState>;
     pub fn windows(&self) -> Vec<WindowState>;
@@ -402,6 +403,101 @@ based on `ModalPresentation::Auto` and platform capability.
 
 ---
 
+## Intercepting close / quit — confirmation guards
+
+A window can refuse to close. Each `WindowConfig` carries an optional
+**close guard** that the framework runs — with a real `EventContext`
+for that window's own tree — *before* any **interactive** close gesture
+tears the window down:
+
+- the OS close button, `Alt+F4`, `Cmd+W` (winit `CloseRequested`);
+- a custom-chrome (Bastyde-drawn) title-bar close button;
+- a handler calling `ctx.close_window()`.
+
+The guard returns `CloseResponse::Close` to let the close proceed, or
+`CloseResponse::Veto` to cancel it. Quitting the app is just the last
+window closing, so a guard that vetoes the final window's close also
+keeps the app alive.
+
+Guards are **strictly per-window** — closing one window never consults
+another's guard — so this is correct for multi-window apps: an editor
+window with unsaved changes can veto its own close while a tool palette
+beside it closes freely.
+
+### Veto-then-reissue (the async-confirmation pattern)
+
+A confirmation dialog is asynchronous — it waits for a click — so the
+guard cannot answer "close?" synchronously. The idiomatic shape is to
+**veto now, confirm, then re-issue a forced close**:
+
+```rust
+use bastyde::prelude::*;                 // CloseResponse
+use bastyde::widgets::{MessageBox, MessageBoxButtons, StandardButton,
+                       EventContextMessageBoxExt};
+
+WindowConfig::new()
+    .title("Editor")
+    .on_close_requested(move |ctx| {
+        if !dirty.get() {
+            return CloseResponse::Close;     // nothing unsaved → just close
+        }
+        ctx.present_message_box(
+            MessageBox::question(lit!("Close window?"))
+                .text(lit!("The document has unsaved changes."))
+                .buttons(MessageBoxButtons::SaveDiscardCancel)
+                .on_result(move |r, ctx| match r.button {
+                    StandardButton::Save    => { save(); ctx.close_window_forced(); }
+                    StandardButton::Discard => ctx.close_window_forced(),
+                    _                       => {}   // Cancel → stay open
+                }),
+        );
+        CloseResponse::Veto                  // hold the window open for now
+    });
+```
+
+`ctx.close_window_forced()` is the escape hatch: it closes the window
+**unconditionally**, bypassing the guard, so the second close (from the
+dialog's button) actually goes through instead of re-prompting.
+
+### Reactive sugar: `can_close` + `on_close_blocked`
+
+When the gate is a single reactive flag, skip the closure:
+
+```rust
+let may_close = dirty.not();              // Signal<bool>
+
+WindowConfig::new()
+    .can_close(may_close)                 // false → veto
+    .on_close_blocked(move |ctx| {        // fired only when blocked
+        ctx.present_message_box(/* confirmation … */);
+    });
+```
+
+`can_close` is evaluated *before* `on_close_requested`: a `false` signal
+short-circuits to a veto and fires `on_close_blocked`; a `true` signal
+(or no signal) falls through to the guard, then to closing.
+
+### Which closes are guarded
+
+| Close origin | Guarded? |
+| --- | --- |
+| OS close button / `Alt+F4` / `Cmd+W` | ✅ yes |
+| Custom-chrome title-bar close button | ✅ yes |
+| `ctx.close_window()` | ✅ yes |
+| `ctx.close_window_forced()` | ❌ bypasses |
+| `ctx.close_window_by_id(id)` | ❌ bypasses (explicit programmatic close) |
+| `WindowState::close()` | ❌ bypasses |
+| Modal-dismissal / framework teardown | ❌ bypasses |
+
+A window with no guard configured always closes immediately — the guard
+machinery only runs when `on_close_requested` or `can_close` is set.
+
+Working demo: `cargo run -p close-confirmation` (main window: full
+`on_close_requested` + Save/Discard/Cancel; second window: the
+`can_close` sugar).
+
+---
+
 ## `BastydeAppBuilder::run()` lifecycle
 
 1. `run()` builds a `BastydeAppHandler` and spins up the winit event loop.
@@ -425,7 +521,11 @@ based on `ModalPresentation::Auto` and platform capability.
      winit calls.
    - Drains `pending_closes` (from any source — `ctx.close_window()`,
      `ctx.close_window_by_id(id)`, `state.close()`, close requests
-     via `TitleBarHostCallbacks::request_close`).
+     via `TitleBarHostCallbacks::request_close`). Each entry is either
+     *guarded* (interactive gestures — runs the window's close guard,
+     may be vetoed) or *forced* (explicit programmatic closes +
+     framework teardown — unconditional). See **Intercepting close /
+     quit** above.
 5. `handle_redraw_requested` runs `layout_with_ops` + `render_with_ops`
    — both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open

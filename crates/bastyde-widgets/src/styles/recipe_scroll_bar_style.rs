@@ -388,7 +388,9 @@ impl Widget for FullBarPainter {
 
         if self.show_track {
             let track = match &self.thumb_color {
-                Some(prop) => prop.resolve(ctx.theme, true).with_alpha(OVERRIDE_TRACK_ALPHA),
+                Some(prop) => prop
+                    .resolve(ctx.theme, true)
+                    .with_alpha(OVERRIDE_TRACK_ALPHA),
                 None => ctx.theme.colors.scrollbar_track_hover,
             };
             canvas.fill_rounded_rect(bounds, radius, track);

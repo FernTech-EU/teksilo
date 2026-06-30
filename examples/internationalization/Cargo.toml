@@ -10,5 +10,6 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["fonts-arabic"] }
+bastyde = { workspace = true, features = [
+    "automation","fonts-arabic"] }
 jiff = { workspace = true }

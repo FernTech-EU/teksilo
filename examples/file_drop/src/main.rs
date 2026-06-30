@@ -36,6 +36,7 @@ use bastyde::widgets::{
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .theme(bastyde::presets::intui::light())
         .install_inspector_in_debug()
         .install_external_dnd()

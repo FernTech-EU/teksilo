@@ -52,10 +52,118 @@ impl WidgetTree {
         }
 
         let (update, parents) = self.build_accessibility_tree();
+        // A `&mut self` post-pass: diff the freshly-built live nodes and
+        // record any changed text into the announcement ring buffer. Must
+        // run here (not in the `&self` `build_accessibility_tree`) and
+        // before the cache store, so it sees exactly the update that is
+        // about to become canonical.
+        self.collect_announcements(&update);
+        // Bump the AT version only when the tree's *content* actually changed.
+        // A rebuild can be triggered by a shortcut-rebind / locale switch that
+        // produces a byte-for-byte identical `TreeUpdate`; bumping then would
+        // make `WaitCondition::AtVersionAtLeast` wake on no real change.
+        // `TreeUpdate: PartialEq`, so this is a precise (if O(n)) comparison —
+        // acceptable since it only runs on a real rebuild, not a cache hit.
+        let content_changed = self.cached_a11y.as_ref() != Some(&update);
         self.cached_a11y = Some(update.clone());
         self.synthetic_parent_map = parents;
         self.a11y_dirty = false;
+        if content_changed {
+            // Mirror of the shortcut-registry version signal; saturating so the
+            // documented "monotonic" contract holds even past `u64::MAX`.
+            self.at_version.set(self.at_version.get().saturating_add(1));
+        }
         update
+    }
+
+    /// Diff the live-region nodes of a freshly-built `TreeUpdate` against
+    /// the per-node last-announced-text map and push any changes into the
+    /// capped announcement ring buffer. See
+    /// [`crate::accessibility::Announcement`] and
+    /// [`Self::announcements_since`].
+    fn collect_announcements(&mut self, update: &accesskit::TreeUpdate) {
+        use accesskit::Live;
+        let mut seen: std::collections::HashSet<accesskit::NodeId> =
+            std::collections::HashSet::with_capacity(self.automation_last_text.len());
+        for (node_id, node) in &update.nodes {
+            let assertive = match node.live() {
+                Some(Live::Polite) => false,
+                Some(Live::Assertive) => true,
+                // `Live::Off` or unset: not a live region.
+                _ => continue,
+            };
+            // A live region announces its `value` if it has one, else its
+            // `label` (matching how the AT layer voices it).
+            let text = node
+                .value()
+                .or_else(|| node.label())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                // A cleared live region: forget its last text (and leave it out
+                // of `seen`, so `retain` drops it too) so the SAME text
+                // reappearing on a later sync is announced as novel rather than
+                // deduped against the stale entry.
+                self.automation_last_text.remove(node_id);
+                continue;
+            }
+            seen.insert(*node_id);
+            let changed = self
+                .automation_last_text
+                .get(node_id)
+                .map(|prev| prev != &text)
+                .unwrap_or(true);
+            if !changed {
+                continue;
+            }
+            self.automation_last_text.insert(*node_id, text.clone());
+            self.automation_announce_seq = self.automation_announce_seq.saturating_add(1);
+            if self.automation_announcements.len() >= super::AUTOMATION_ANNOUNCE_CAP {
+                self.automation_announcements.pop_front();
+            }
+            self.automation_announcements
+                .push_back(crate::accessibility::Announcement {
+                    seq: self.automation_announce_seq,
+                    text,
+                    assertive,
+                });
+        }
+        // Forget nodes that are no longer present (or no longer live), so a
+        // node that reappears with identical text re-announces.
+        self.automation_last_text.retain(|k, _| seen.contains(k));
+    }
+
+    /// Dispatch a synthetic AccessKit action to the node identified by
+    /// `node_id` (which may be a *synthetic*, widget-emitted child node —
+    /// e.g. a rich-text `TextRun`). Resolves the owning widget exactly the
+    /// way the platform AT adapter does
+    /// ([`node_id_to_widget_id_maybe`](crate::accessibility::node_id_to_widget_id_maybe)
+    /// then [`widget_for_synthetic`](Self::widget_for_synthetic)), builds a
+    /// [`crate::event::WidgetEvent::AccessAction`],
+    /// and dispatches it through `ops` so actions that open windows /
+    /// dialogs work. Returns `true` when a live target widget was resolved.
+    ///
+    /// This is the in-process equivalent of an OS screen reader invoking an
+    /// action — the channel an [automation](crate::WidgetTree) harness uses
+    /// to *drive* the UI without the OS AT layer.
+    pub fn dispatch_access_action(
+        &mut self,
+        node_id: accesskit::NodeId,
+        action: accesskit::Action,
+        data: Option<accesskit::ActionData>,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        let target = crate::accessibility::node_id_to_widget_id_maybe(node_id)
+            .or_else(|| self.widget_for_synthetic(node_id));
+        let event = crate::event::WidgetEvent::AccessAction {
+            action,
+            target,
+            target_node: node_id,
+            data,
+        };
+        self.dispatch_event_with_ops(event, ops);
+        target.is_some()
     }
 
     fn build_accessibility_tree(

@@ -24,4 +24,5 @@ default = []
 servo = ["bastyde/web-view-servo"]
 
 [dependencies]
-bastyde = { workspace = true, features = ["web-view"] }
+bastyde = { workspace = true, features = [
+    "automation","web-view"] }

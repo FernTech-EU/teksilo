@@ -46,6 +46,45 @@ impl WidgetTree {
         self.arena.children(id).to_vec()
     }
 
+    /// The most recent layout proposal applied to this tree (the size
+    /// last passed to [`layout`](Self::layout) / `layout_with_ops`).
+    /// Lets a settle pass re-run layout at the current size without
+    /// recomputing it from a surface dimension. Returns
+    /// `SizeProposal::exact(800.0, 600.0)` on a tree that was never
+    /// laid out.
+    pub fn last_proposal(&self) -> SizeProposal {
+        self.last_proposal
+    }
+
+    /// Monotonic accessibility-tree version. Bumped in
+    /// [`sync_accessibility`](Self::sync_accessibility) only when a rebuild
+    /// produces a tree whose *content* actually differs from the cached one
+    /// (cache hits don't bump, and a rebuild that reproduces an identical
+    /// `TreeUpdate` — e.g. from a shortcut-rebind / locale invalidation —
+    /// doesn't either). Saturating, so the monotonic contract holds past
+    /// `u64::MAX`. Mirrors
+    /// [`ShortcutRegistry::version`](crate::shortcut::ShortcutRegistry::version):
+    /// poll it to detect AT-tree changes without diffing the whole
+    /// `TreeUpdate`.
+    pub fn at_version(&self) -> &crate::signal::Signal<u64> {
+        &self.at_version
+    }
+
+    /// Drain the captured live-region announcements with `seq` strictly
+    /// greater than `seq`. See [`crate::accessibility::Announcement`].
+    /// The buffer is capped at 256 entries, so a caller that lags far
+    /// behind sees only the retained tail. Read after a
+    /// [`sync_accessibility`](Self::sync_accessibility) (or a settle that
+    /// ends in one) to observe announcements raised by the latest
+    /// rebuild.
+    pub fn announcements_since(&self, seq: u64) -> Vec<crate::accessibility::Announcement> {
+        self.automation_announcements
+            .iter()
+            .filter(|a| a.seq > seq)
+            .cloned()
+            .collect()
+    }
+
     /// Parent widget id in the arena graph, or `None` for roots.
     pub fn parent(&self, id: WidgetId) -> Option<WidgetId> {
         self.arena.parent(id)

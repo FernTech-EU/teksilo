@@ -13,9 +13,11 @@ use std::rc::Rc;
 
 use bastyde_core::Theme;
 use bastyde_core::event_source::TreeAppContext;
+use bastyde_core::signal::Signal;
 use bastyde_core::{
-    DecorationsMode, PlatformTitleBarHost, TitleBarHostCallbacks, UserAttentionKind, WidgetTree,
-    WindowCommand, WindowPlacement, WindowState, WindowStateInit,
+    CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, PlatformTitleBarHost,
+    TitleBarHostCallbacks, UserAttentionKind, WidgetTree, WindowCommand, WindowPlacement,
+    WindowState, WindowStateInit,
 };
 use bastyde_platform::AccessibilityPreferences;
 use bastyde_platform::PlatformWindow;
@@ -30,6 +32,54 @@ use winit::window::WindowLevel;
 use crate::app::{AppEventProxy, CloseWindowRequest, ThemeMode};
 
 use crate::window_config::{BastydeWindowId, WindowConfig};
+
+/// A queued window closure awaiting the next
+/// [`process_pending`](WindowManager::process_pending) tick.
+#[derive(Debug, Clone, Copy)]
+struct PendingClose {
+    /// Which window to close.
+    id: BastydeWindowId,
+    /// `true` = close unconditionally (the window's close guard is
+    /// skipped). `false` = consult the window's close guard first; a
+    /// [`CloseResponse::Veto`](bastyde_core::CloseResponse) keeps the
+    /// window open.
+    force: bool,
+}
+
+/// Pure close-verdict logic used by
+/// [`WindowManager::evaluate_close_guard`]. Returns `true` if the close
+/// should proceed, `false` to veto.
+///
+/// Precedence:
+/// 1. [`can_close`](bastyde_core::WindowConfig::can_close) sugar — a
+///    `Some(false)` signal vetoes and fires `on_close_blocked` (the
+///    only side effect here).
+/// 2. the [`on_close_requested`](bastyde_core::WindowConfig::on_close_requested)
+///    guard's [`CloseResponse`].
+/// 3. no guard configured → close.
+///
+/// Factored out of `evaluate_close_guard` so the decision can be
+/// unit-tested headlessly with a `NoopWindowOps`-backed `EventContext`,
+/// without standing up a winit event loop.
+fn close_verdict(
+    can_close: &Option<Signal<bool>>,
+    on_close_blocked: &Option<CloseBlockedCallback>,
+    close_guard: &Option<CloseGuard>,
+    ctx: &mut bastyde_core::widget::EventContext,
+) -> bool {
+    if let Some(may_close) = can_close
+        && !may_close.get()
+    {
+        if let Some(on_blocked) = on_close_blocked {
+            on_blocked(ctx);
+        }
+        return false;
+    }
+    if let Some(guard) = close_guard {
+        return matches!(guard(ctx), CloseResponse::Close);
+    }
+    true
+}
 
 /// Per-window state managed by the WindowManager.
 pub(crate) struct ManagedWindow {
@@ -83,6 +133,24 @@ pub(crate) struct ManagedWindow {
     /// `WindowStateService` is registered. Dropped when the window
     /// is removed from `WindowManager::windows`.
     pub _persist_handles: Vec<bastyde_core::ObserverHandle>,
+    /// Optional close guard taken from
+    /// [`WindowConfig::on_close_requested`](bastyde_core::WindowConfig::on_close_requested).
+    /// Consulted by [`process_pending`](WindowManager::process_pending)
+    /// before a *guarded* close tears this window down; a
+    /// [`CloseResponse::Veto`] cancels the close. `None` = no guard, the
+    /// window closes immediately. This is strictly per-window — closing
+    /// one window never consults another's guard.
+    pub close_guard: Option<CloseGuard>,
+    /// Optional reactive "may this window close?" signal from
+    /// [`WindowConfig::can_close`](bastyde_core::WindowConfig::can_close).
+    /// When present and `false`, a guarded close is vetoed and
+    /// [`on_close_blocked`](Self::on_close_blocked) fires. Evaluated
+    /// before [`close_guard`](Self::close_guard).
+    pub can_close: Option<Signal<bool>>,
+    /// Optional notification fired when [`can_close`](Self::can_close)
+    /// blocks a close, from
+    /// [`WindowConfig::on_close_blocked`](bastyde_core::WindowConfig::on_close_blocked).
+    pub on_close_blocked: Option<CloseBlockedCallback>,
     /// Glyph-atlas content version last uploaded to THIS window's
     /// renderer (`AtlasInfo::version`). Each window compares this
     /// against the shared bridge's current version on its own redraw
@@ -107,10 +175,12 @@ pub struct WindowManager {
     /// Next allocatable `BastydeWindowId`. Bumped by `alloc_id`; never
     /// reused after a window closes.
     next_id: u64,
-    /// Pending close requests collected from handler code (via
-    /// `EventContext::close_window` / `close_window_by_id`). Drained
-    /// once per tick in [`process_pending`](Self::process_pending).
-    pending_closes: Vec<BastydeWindowId>,
+    /// Pending close requests, drained once per tick in
+    /// [`process_pending`](Self::process_pending). Each entry records
+    /// whether the close is *guarded* (consults the window's close
+    /// guard, and may be vetoed) or *forced* (unconditional). See
+    /// [`PendingClose`].
+    pending_closes: Vec<PendingClose>,
     theme: Theme,
     #[cfg(feature = "text")]
     typesetter: Option<bastyde_text::SharedTypesetter>,
@@ -297,6 +367,12 @@ impl WindowManager {
         }
 
         let bastyde_id = self.alloc_id();
+        // Drain the close-guard fields out of the config before any of
+        // its other fields are consumed below; they move onto the
+        // `ManagedWindow` and live for the window's lifetime.
+        let close_guard = config.take_close_guard();
+        let can_close = config.take_can_close();
+        let on_close_blocked = config.take_close_blocked();
         let state = WindowState::new(WindowStateInit {
             id: bastyde_id,
             string_id: config.string_id.clone(),
@@ -739,6 +815,9 @@ impl WindowManager {
             ime_allowed: None,
             ime_purpose: None,
             _persist_handles: persist_handles,
+            close_guard,
+            can_close,
+            on_close_blocked,
             atlas_uploaded_version: primed_atlas_version,
         };
 
@@ -856,9 +935,35 @@ impl WindowManager {
         self.modal_blocked.remove(&bastyde_id);
     }
 
-    /// Queue a window closure (processed in the next event loop tick).
+    /// Queue an **unconditional** window closure (processed in the next
+    /// event loop tick). The window's close guard is *not* consulted —
+    /// use this for explicit programmatic closes and framework-internal
+    /// teardown (modal dismissals, `close_window_by_id`). For a
+    /// *guarded* close that a window's
+    /// [`on_close_requested`](bastyde_core::WindowConfig::on_close_requested)
+    /// can veto, use [`request_close`](Self::request_close).
     pub fn queue_close(&mut self, bastyde_id: BastydeWindowId) {
-        self.pending_closes.push(bastyde_id);
+        self.pending_closes.push(PendingClose {
+            id: bastyde_id,
+            force: true,
+        });
+    }
+
+    /// Queue a **guarded** window closure (processed in the next event
+    /// loop tick). Before tearing the window down,
+    /// [`process_pending`](Self::process_pending) consults the window's
+    /// close guard (from
+    /// [`WindowConfig::on_close_requested`](bastyde_core::WindowConfig::on_close_requested)
+    /// / [`can_close`](bastyde_core::WindowConfig::can_close)); a
+    /// [`CloseResponse::Veto`](bastyde_core::CloseResponse) keeps the
+    /// window open. Used for the interactive close gestures: the OS
+    /// close button, a custom-chrome close button, and
+    /// [`EventContext::close_window`](bastyde_core::widget::EventContext::close_window).
+    pub fn request_close(&mut self, bastyde_id: BastydeWindowId) {
+        self.pending_closes.push(PendingClose {
+            id: bastyde_id,
+            force: false,
+        });
     }
 
     /// Route a Windows-side synthetic title-bar tap. The wndproc
@@ -930,9 +1035,12 @@ impl WindowManager {
         for (winit_id, bastyde_id, cmd) in batch {
             // `Close` is the one command that needs to mutate
             // `self.windows` — queue it for the tick-end close drain
-            // instead of running it inline.
+            // instead of running it inline. `WindowState::close()` is an
+            // explicit programmatic close, so it bypasses the close
+            // guard (forced); interactive gestures go through
+            // `request_close` instead.
             if matches!(cmd, WindowCommand::Close) {
-                self.pending_closes.push(bastyde_id);
+                self.queue_close(bastyde_id);
                 continue;
             }
             let Some(managed) = self.windows.get(&winit_id) else {
@@ -947,11 +1055,104 @@ impl WindowManager {
     /// from handler code goes through [`WindowOpsImpl`] and calls
     /// [`create_window`](Self::create_window) synchronously inside the
     /// same dispatch.
-    pub fn process_pending(&mut self, _target: &winit::event_loop::ActiveEventLoop) {
-        let closes: Vec<_> = self.pending_closes.drain(..).collect();
-        for bastyde_id in closes {
-            self.close_window(bastyde_id);
+    ///
+    /// A *forced* close ([`queue_close`](Self::queue_close)) tears the
+    /// window down immediately. A *guarded* close
+    /// ([`request_close`](Self::request_close)) first runs the window's
+    /// close guard via `evaluate_close_guard`; a
+    /// [`CloseResponse::Veto`](bastyde_core::CloseResponse) keeps the
+    /// window open. Guards are strictly per-window, so this is correct
+    /// for multi-window apps: each pending close consults only its own
+    /// window's guard.
+    pub fn process_pending(&mut self, target: &winit::event_loop::ActiveEventLoop) {
+        let closes: Vec<PendingClose> = self.pending_closes.drain(..).collect();
+        for pending in closes {
+            if pending.force || self.evaluate_close_guard(pending.id, target) {
+                self.close_window(pending.id);
+            }
+            // Vetoed guarded close → the window stays open. The app may
+            // have opened a confirmation dialog from inside the guard;
+            // its "close anyway" button calls
+            // `EventContext::close_window_forced`, which re-queues this
+            // window as a forced close on a later tick.
         }
+    }
+
+    /// Run the close guard for `bastyde_id` (if it declared one) and
+    /// return whether the close should proceed.
+    ///
+    /// A window with no guard returns `true` without building an
+    /// `EventContext`. Otherwise the guard runs with a real
+    /// [`EventContext`](bastyde_core::widget::EventContext) for the
+    /// window's own tree (so it can open a confirmation dialog, set
+    /// signals, fire intents…), and the verdict is:
+    ///
+    /// 1. [`can_close`](bastyde_core::WindowConfig::can_close) sugar: a
+    ///    `false` signal vetoes and fires
+    ///    [`on_close_blocked`](bastyde_core::WindowConfig::on_close_blocked).
+    /// 2. otherwise the
+    ///    [`on_close_requested`](bastyde_core::WindowConfig::on_close_requested)
+    ///    guard's [`CloseResponse`](bastyde_core::CloseResponse).
+    /// 3. otherwise `true` (close).
+    ///
+    /// Strictly per-window — only `bastyde_id`'s own guard is consulted.
+    fn evaluate_close_guard(
+        &mut self,
+        bastyde_id: BastydeWindowId,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) -> bool {
+        let Some(&winit_id) = self.bastyde_to_winit.get(&bastyde_id) else {
+            // Unknown / already-gone window — let `close_window` no-op.
+            return true;
+        };
+        // Fast path: no guard configured → close immediately, without
+        // paying for an EventContext.
+        match self.windows.get(&winit_id) {
+            Some(managed) if managed.close_guard.is_none() && managed.can_close.is_none() => {
+                return true;
+            }
+            None => return true,
+            _ => {}
+        }
+        // Take the window out of the map so we can borrow `&mut self`
+        // for `WindowOpsImpl` while still holding the window's tree.
+        let Some(mut managed) = self.take_managed(winit_id) else {
+            return true;
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = managed
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(managed.platform_window.window_arc());
+
+        // Clone the guard handles so the dispatch closure captures them
+        // disjointly from `managed.tree`, which `run_with_event_context`
+        // borrows mutably.
+        let close_guard = managed.close_guard.clone();
+        let can_close = managed.can_close.clone();
+        let on_close_blocked = managed.on_close_blocked.clone();
+
+        let mut should_close = true;
+        {
+            let mut ops = WindowOpsImpl::new(
+                self,
+                target,
+                bastyde_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            managed.tree.run_with_event_context(&mut ops, |ctx| {
+                should_close = close_verdict(&can_close, &on_close_blocked, &close_guard, ctx);
+            });
+        }
+
+        self.reinsert_managed(winit_id, managed);
+        should_close
     }
 
     /// Get a mutable ManagedWindow for a winit WindowId.
@@ -1150,6 +1351,14 @@ impl WindowManager {
         self.windows.values_mut()
     }
 
+    /// Iterate the `BastydeWindowId` of every managed window. Feeds the
+    /// automation `list_windows` tool (debug-only `automation` feature),
+    /// which pairs each id with its `string_id` label and current title.
+    #[allow(dead_code)]
+    pub(crate) fn bastyde_ids(&self) -> impl Iterator<Item = BastydeWindowId> + '_ {
+        self.windows.values().map(|m| m.bastyde_id)
+    }
+
     /// Get the winit WindowId for a BastydeWindowId.
     pub fn winit_id_for_bastyde(
         &self,
@@ -1206,18 +1415,34 @@ impl WindowManager {
     }
 
     /// Drain per-tree close-window requests raised by handlers via
-    /// [`EventContext::close_window`](bastyde_core::widget::EventContext::close_window).
-    /// Returns `true` when at least one window will be closed.
+    /// [`EventContext::close_window`](bastyde_core::widget::EventContext::close_window)
+    /// (a *guarded* close) and
+    /// [`EventContext::close_window_forced`](bastyde_core::widget::EventContext::close_window_forced)
+    /// (a *forced* close that bypasses the window's close guard).
+    /// Returns `true` when at least one window was queued for closing.
+    ///
+    /// A forced request wins over a guarded one for the same window in
+    /// the same drain — if a handler called both, the window closes
+    /// unconditionally.
     pub fn drain_close_window_requests(&mut self) -> bool {
-        let mut to_close: Vec<BastydeWindowId> = Vec::new();
+        let mut guarded: Vec<BastydeWindowId> = Vec::new();
+        let mut forced: Vec<BastydeWindowId> = Vec::new();
         for managed in self.windows.values_mut() {
-            if managed.tree.take_close_window_request() {
-                to_close.push(managed.bastyde_id);
+            // Drain both flags so neither lingers to a later tick.
+            let wants_guarded = managed.tree.take_close_window_request();
+            let wants_forced = managed.tree.take_force_close_request();
+            if wants_forced {
+                forced.push(managed.bastyde_id);
+            } else if wants_guarded {
+                guarded.push(managed.bastyde_id);
             }
         }
-        let any = !to_close.is_empty();
-        for id in to_close {
+        let any = !guarded.is_empty() || !forced.is_empty();
+        for id in forced {
             self.queue_close(id);
+        }
+        for id in guarded {
+            self.request_close(id);
         }
         any
     }
@@ -1507,5 +1732,116 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
             return false;
         };
         handle.begin_drag(self.current_id, &data, image.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod close_guard_tests {
+    use super::*;
+    use bastyde_core::widget::EventContext;
+    use bastyde_core::{CloseResponse, NoopWindowOps, WidgetTree};
+    use std::cell::Cell;
+
+    /// Drive `close_verdict` inside a real (headless) `EventContext` and
+    /// return its boolean verdict. Mirrors the `run_with_event_context`
+    /// path `process_pending` uses, but with a `NoopWindowOps` sink and
+    /// no winit event loop.
+    fn verdict(
+        can_close: Option<Signal<bool>>,
+        on_blocked: Option<CloseBlockedCallback>,
+        guard: Option<CloseGuard>,
+    ) -> bool {
+        let mut tree = WidgetTree::new();
+        let mut out = true;
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx: &mut EventContext| {
+            out = close_verdict(&can_close, &on_blocked, &guard, ctx);
+        });
+        out
+    }
+
+    #[test]
+    fn no_guard_closes() {
+        assert!(verdict(None, None, None));
+    }
+
+    #[test]
+    fn guard_close_proceeds() {
+        let guard: CloseGuard = Rc::new(|_ctx| CloseResponse::Close);
+        assert!(verdict(None, None, Some(guard)));
+    }
+
+    #[test]
+    fn guard_veto_keeps_window_open() {
+        let guard: CloseGuard = Rc::new(|_ctx| CloseResponse::Veto);
+        assert!(!verdict(None, None, Some(guard)));
+    }
+
+    #[test]
+    fn can_close_false_vetoes_and_fires_blocked() {
+        let fired = Rc::new(Cell::new(false));
+        let flag = fired.clone();
+        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
+
+        let should_close = verdict(Some(Signal::new(false)), Some(on_blocked), None);
+
+        assert!(!should_close, "can_close == false must veto");
+        assert!(fired.get(), "on_close_blocked must fire on a vetoed close");
+    }
+
+    #[test]
+    fn can_close_false_does_not_consult_guard() {
+        // The guard would close, but the sugar signal short-circuits to a
+        // veto before the guard is ever consulted.
+        let guard_ran = Rc::new(Cell::new(false));
+        let gflag = guard_ran.clone();
+        let guard: CloseGuard = Rc::new(move |_ctx| {
+            gflag.set(true);
+            CloseResponse::Close
+        });
+
+        let should_close = verdict(Some(Signal::new(false)), None, Some(guard));
+
+        assert!(!should_close, "can_close == false wins over the guard");
+        assert!(
+            !guard_ran.get(),
+            "the guard must not run once can_close has vetoed"
+        );
+    }
+
+    #[test]
+    fn can_close_true_falls_through_to_guard() {
+        // A permissive sugar signal does not auto-close: the explicit
+        // guard still gets the final say (here it vetoes).
+        let guard: CloseGuard = Rc::new(|_ctx| CloseResponse::Veto);
+        let should_close = verdict(Some(Signal::new(true)), None, Some(guard));
+        assert!(!should_close, "can_close == true still consults the guard");
+    }
+
+    #[test]
+    fn can_close_true_without_guard_closes() {
+        // on_close_blocked is set but must NOT fire when the signal is true.
+        let fired = Rc::new(Cell::new(false));
+        let flag = fired.clone();
+        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
+
+        let should_close = verdict(Some(Signal::new(true)), Some(on_blocked), None);
+
+        assert!(should_close, "a permissive signal with no guard closes");
+        assert!(!fired.get(), "on_close_blocked must not fire when allowed");
+    }
+
+    #[test]
+    fn queue_close_is_forced_request_close_is_guarded() {
+        let mut wm = WindowManager::new(bastyde_core::presets::intui::light());
+        let a = BastydeWindowId::new(1);
+        let b = BastydeWindowId::new(2);
+        wm.queue_close(a);
+        wm.request_close(b);
+
+        assert_eq!(wm.pending_closes.len(), 2);
+        let forced = wm.pending_closes.iter().find(|p| p.id == a).unwrap();
+        let guarded = wm.pending_closes.iter().find(|p| p.id == b).unwrap();
+        assert!(forced.force, "queue_close must enqueue a forced close");
+        assert!(!guarded.force, "request_close must enqueue a guarded close");
     }
 }

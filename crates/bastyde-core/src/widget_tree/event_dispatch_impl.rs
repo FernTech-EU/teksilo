@@ -1468,6 +1468,9 @@ impl WidgetTree {
         if ctx.close_window_requested {
             self.close_window_requested = true;
         }
+        if ctx.force_close_requested {
+            self.force_close_requested = true;
+        }
         self.pending_modal_requests
             .extend(ctx.modal_requests.into_iter().map(|request| {
                 crate::modal::QueuedModalRequest {

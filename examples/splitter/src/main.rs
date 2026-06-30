@@ -256,6 +256,7 @@ fn text_pane(title: &str, body: &str) -> impl Widget {
 
 fn main() {
     BastydeAppBuilder::new()
+        .install_automation_bridge_in_debug()
         .install_inspector_in_debug()
         .theme(bastyde::presets::intui::light())
         .initial_window(

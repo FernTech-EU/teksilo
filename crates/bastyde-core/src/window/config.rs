@@ -8,6 +8,10 @@
 //! handler code. The two paths share the same config and produce the
 //! same windows — there is no "initial vs runtime" split.
 
+use std::rc::Rc;
+
+use crate::signal::Signal;
+use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
 use crate::widget_tree::WidgetTree;
 
@@ -48,6 +52,47 @@ pub type RootBuilder = Box<dyn FnOnce(&mut WidgetTree, WindowState) -> WidgetId>
 /// inspector shell around every window's root in debug builds.
 pub type PostRootBuilder = Box<dyn FnOnce(&mut WidgetTree, WidgetId) -> WidgetId>;
 
+/// Verdict returned by a window's [close guard](WindowConfig::on_close_requested)
+/// when the user (or the app) asks to close the window.
+///
+/// The guard runs *before* the window's tree is torn down. Returning
+/// [`Veto`](CloseResponse::Veto) cancels that one close attempt and
+/// leaves the window open — the idiomatic place to pop a
+/// "you have unsaved changes" confirmation, then re-issue the close via
+/// [`EventContext::close_window_forced`](crate::widget::EventContext::close_window_forced)
+/// once the user confirms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseResponse {
+    /// Proceed with closing the window.
+    Close,
+    /// Cancel this close attempt; the window stays open.
+    Veto,
+}
+
+/// Signature of a window's close-request guard.
+///
+/// Invoked with a real [`EventContext`] for the window's own tree, so
+/// the guard can show a confirmation dialog, open a modal child, set
+/// signals, or fire intents before deciding. It is consulted on every
+/// user-initiated close attempt (OS close button / `Alt+F4` / `Cmd+W`,
+/// a custom-chrome close button, and
+/// [`EventContext::close_window`](crate::widget::EventContext::close_window))
+/// and may run many times over a window's lifetime, so it is an `Fn`,
+/// not an `FnOnce`.
+///
+/// It is **not** consulted for a
+/// [`close_window_forced`](crate::widget::EventContext::close_window_forced),
+/// nor for framework-internal teardown (modal cleanup, the last-window
+/// shutdown drain).
+pub type CloseGuard = Rc<dyn Fn(&mut EventContext) -> CloseResponse>;
+
+/// Signature of the [`on_close_blocked`](WindowConfig::on_close_blocked)
+/// callback — the `Fn`-shaped notification fired when the
+/// [`can_close`](WindowConfig::can_close) sugar signal vetoes a close.
+/// Runs with the window's [`EventContext`] so it can present the
+/// confirmation UI.
+pub type CloseBlockedCallback = Rc<dyn Fn(&mut EventContext)>;
+
 /// Configuration for creating a new window.
 pub struct WindowConfig {
     pub title: String,
@@ -68,6 +113,19 @@ pub struct WindowConfig {
     /// after `root_builder` and uses the returned id as the window's
     /// effective root. See [`PostRootBuilder`].
     pub post_root_builder: Option<PostRootBuilder>,
+    /// Optional close guard. Consulted before this window closes in
+    /// response to a user gesture; returning [`CloseResponse::Veto`]
+    /// cancels the close. See [`WindowConfig::on_close_requested`].
+    pub on_close_requested: Option<CloseGuard>,
+    /// Optional reactive "may this window close?" signal. Sugar over
+    /// `on_close_requested`: when present and `false`, a close attempt
+    /// is vetoed and [`on_close_blocked`](Self::on_close_blocked) fires
+    /// (if set). See [`WindowConfig::can_close`].
+    pub can_close: Option<Signal<bool>>,
+    /// Optional notification fired when the [`can_close`](Self::can_close)
+    /// signal blocks a close — the hook that presents the confirmation
+    /// UI. See [`WindowConfig::on_close_blocked`].
+    pub on_close_blocked: Option<CloseBlockedCallback>,
 }
 
 impl std::fmt::Debug for WindowConfig {
@@ -93,6 +151,15 @@ impl std::fmt::Debug for WindowConfig {
             .field(
                 "post_root_builder",
                 &self.post_root_builder.as_ref().map(|_| "<closure>"),
+            )
+            .field(
+                "on_close_requested",
+                &self.on_close_requested.as_ref().map(|_| "<closure>"),
+            )
+            .field("can_close", &self.can_close.as_ref().map(|_| "<signal>"))
+            .field(
+                "on_close_blocked",
+                &self.on_close_blocked.as_ref().map(|_| "<closure>"),
             )
             .finish()
     }
@@ -121,6 +188,9 @@ impl WindowConfig {
             modal: None,
             root_builder: None,
             post_root_builder: None,
+            on_close_requested: None,
+            can_close: None,
+            on_close_blocked: None,
         }
     }
 
@@ -276,6 +346,85 @@ impl WindowConfig {
         self.post_root_builder.take()
     }
 
+    /// Install a **close guard** consulted before this window closes in
+    /// response to a user gesture — the OS close button / `Alt+F4` /
+    /// `Cmd+W`, a custom-chrome close button, or
+    /// [`EventContext::close_window`](crate::widget::EventContext::close_window).
+    ///
+    /// The guard runs with a real [`EventContext`] for this window's
+    /// tree. Return [`CloseResponse::Close`] to let the close proceed,
+    /// or [`CloseResponse::Veto`] to cancel it. The canonical pattern is
+    /// veto-then-reissue:
+    ///
+    /// ```ignore
+    /// WindowConfig::new()
+    ///     .on_close_requested(move |ctx| {
+    ///         if has_unsaved_changes() {
+    ///             ctx.show_message_box(/* "Save before closing?" */);
+    ///             CloseResponse::Veto
+    ///         } else {
+    ///             CloseResponse::Close
+    ///         }
+    ///     });
+    ///
+    /// // …and from the confirmation dialog's "Discard & Close" button:
+    /// ctx.close_window_forced();
+    /// ```
+    ///
+    /// [`close_window_forced`](crate::widget::EventContext::close_window_forced)
+    /// bypasses the guard, so the second close actually goes through.
+    /// The guard is **not** consulted for framework-internal teardown
+    /// (modal cleanup, the final-window shutdown drain).
+    pub fn on_close_requested(
+        mut self,
+        guard: impl Fn(&mut EventContext) -> CloseResponse + 'static,
+    ) -> Self {
+        self.on_close_requested = Some(Rc::new(guard));
+        self
+    }
+
+    /// Reactive sugar over [`on_close_requested`](Self::on_close_requested):
+    /// bind a `Signal<bool>` that answers "may this window close right
+    /// now?". While the signal reads `false`, every user-initiated close
+    /// attempt is vetoed and [`on_close_blocked`](Self::on_close_blocked)
+    /// (if set) fires so the app can surface a confirmation.
+    ///
+    /// `can_close` is evaluated *before* the `on_close_requested` guard:
+    /// a `false` signal short-circuits to a veto; a `true` signal (or no
+    /// signal) falls through to the guard, then to closing.
+    pub fn can_close(mut self, may_close: Signal<bool>) -> Self {
+        self.can_close = Some(may_close);
+        self
+    }
+
+    /// Notification fired when the [`can_close`](Self::can_close) signal
+    /// blocks a close attempt. Runs with this window's [`EventContext`];
+    /// use it to open the confirmation dialog / modal that, on confirm,
+    /// calls
+    /// [`close_window_forced`](crate::widget::EventContext::close_window_forced).
+    /// No-op unless a `can_close` signal is also set.
+    pub fn on_close_blocked(mut self, on_blocked: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_close_blocked = Some(Rc::new(on_blocked));
+        self
+    }
+
+    /// Take the close guard out of the config. Consumed by the window
+    /// manager once during `create_window`, which stores it on the
+    /// managed window for the window's lifetime.
+    pub fn take_close_guard(&mut self) -> Option<CloseGuard> {
+        self.on_close_requested.take()
+    }
+
+    /// Take the `can_close` signal out of the config.
+    pub fn take_can_close(&mut self) -> Option<Signal<bool>> {
+        self.can_close.take()
+    }
+
+    /// Take the `on_close_blocked` callback out of the config.
+    pub fn take_close_blocked(&mut self) -> Option<CloseBlockedCallback> {
+        self.on_close_blocked.take()
+    }
+
     pub fn is_modal(&self) -> bool {
         self.modal.is_some()
     }
@@ -314,6 +463,38 @@ mod tests {
         assert!(config.position.is_none());
         assert!(config.min_size.is_none());
         assert!(config.max_size.is_none());
+        assert!(config.on_close_requested.is_none());
+        assert!(config.can_close.is_none());
+        assert!(config.on_close_blocked.is_none());
+    }
+
+    #[test]
+    fn close_guard_builders_set_and_take() {
+        let may_close = Signal::new(false);
+        let mut config = WindowConfig::new()
+            .on_close_requested(|_ctx| CloseResponse::Veto)
+            .can_close(may_close.clone())
+            .on_close_blocked(|_ctx| {});
+
+        assert!(config.on_close_requested.is_some());
+        assert!(config.can_close.is_some());
+        assert!(config.on_close_blocked.is_some());
+
+        // The window manager drains the guard fields exactly once at
+        // create_window time; after that the config no longer carries them.
+        let guard = config.take_close_guard();
+        let signal = config.take_can_close();
+        let blocked = config.take_close_blocked();
+        assert!(guard.is_some());
+        assert!(signal.is_some());
+        assert!(blocked.is_some());
+        assert!(config.on_close_requested.is_none());
+        assert!(config.can_close.is_none());
+        assert!(config.on_close_blocked.is_none());
+
+        // The taken signal is the same handle the caller passed in.
+        signal.unwrap().set(true);
+        assert!(may_close.get());
     }
 
     #[test]
