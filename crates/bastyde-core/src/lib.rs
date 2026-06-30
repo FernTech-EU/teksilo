@@ -13,6 +13,7 @@ pub mod async_completion;
 pub mod binding;
 pub mod build_context;
 pub mod color_prop;
+pub mod dim_when_inactive;
 pub mod drag_payload;
 pub(crate) mod drag_state;
 pub mod environment;

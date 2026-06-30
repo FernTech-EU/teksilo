@@ -170,8 +170,40 @@ impl TableStyle for RecipeTableStyle {
 
     fn make_row_background(&self, cfg: &TableRowConfig, ctx: &mut BuildContext) -> WidgetId {
         let alt = cfg.is_alt;
-        let role: Signal<SurfaceRole> =
-            cfg.is_selected
+        // Effective focus = the view holds keyboard focus AND the host window is
+        // active. Either signal absent → treat as satisfied (the stock TableView
+        // passes `None` and paints its own focus-/window-aware band directly).
+        let effective_focus: Option<Signal<bool>> = match (&cfg.is_focused, &cfg.is_window_active) {
+            (Some(f), Some(wa)) => Some(f.and(wa)),
+            (Some(f), None) => Some(f.clone()),
+            (None, Some(wa)) => Some(wa.clone()),
+            (None, None) => None,
+        };
+        let role: Signal<SurfaceRole> = match effective_focus {
+            // Focus-aware: vivid `Selected` only while focused+active, else the
+            // muted `SelectedInactive`.
+            Some(focus) => cfg
+                .is_selected
+                .clone()
+                .zip(&cfg.is_hovered)
+                .zip(&focus)
+                .map(move |((sel, hov), foc)| {
+                    if *sel {
+                        if *foc {
+                            SurfaceRole::Selected
+                        } else {
+                            SurfaceRole::SelectedInactive
+                        }
+                    } else if *hov {
+                        SurfaceRole::Hover
+                    } else if alt {
+                        SurfaceRole::AltRow
+                    } else {
+                        SurfaceRole::Transparent
+                    }
+                }),
+            None => cfg
+                .is_selected
                 .clone()
                 .zip(&cfg.is_hovered)
                 .map(move |(sel, hov)| {
@@ -184,7 +216,8 @@ impl TableStyle for RecipeTableStyle {
                     } else {
                         SurfaceRole::Transparent
                     }
-                });
+                }),
+        };
         ctx.add(RectWidget::new().background(ColorProp::DynamicSurfaceRole(role)))
     }
 

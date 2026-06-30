@@ -1923,9 +1923,11 @@ impl<T: 'static> Widget for TableView<T> {
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
             )
         {
-            // Focus-aware: active `Selected` while the table holds keyboard
-            // focus, muted `SelectedInactive` once focus moves elsewhere.
-            let bg = if self.view_focused.get() {
+            // Focus- and window-aware: vivid `Selected` while the table holds
+            // keyboard focus AND the host window is active; muted
+            // `SelectedInactive` once focus moves elsewhere or the window goes
+            // inactive (the same desaturation serves both states).
+            let bg = if self.view_focused.get() && ctx.window_active {
                 SurfaceRole::Selected.resolve(colors)
             } else {
                 SurfaceRole::SelectedInactive.resolve(colors)

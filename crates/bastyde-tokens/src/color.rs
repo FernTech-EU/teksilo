@@ -158,6 +158,17 @@ impl Color {
         self.mix(Color::new(1.0, 1.0, 1.0, self.a), amount)
     }
 
+    /// Desaturate toward the perceptual-luminance gray of the same brightness.
+    /// `amount=0.0` is unchanged, `1.0` is fully gray (alpha preserved).
+    /// Because it mixes toward a gray of equal luminance, a bright colour
+    /// becomes a bright gray and a dark colour a dark gray — so it reads
+    /// correctly in both light and dark themes. Used for the inactive-window
+    /// accent projection ([`crate::ColorTokens::for_inactive_window`]).
+    pub fn desaturated(self, amount: f32) -> Color {
+        let luma = 0.299 * self.r + 0.587 * self.g + 0.114 * self.b;
+        self.mix(Color::new(luma, luma, luma, self.a), amount)
+    }
+
     /// Format as `#RRGGBB` (uppercase). With `include_alpha = true`, returns
     /// `#RRGGBBAA`. Channels are quantized to 8-bit by rounding `f32 * 255.0`.
     /// Inverse of [`Color::from_hex`] modulo quantization.
@@ -262,6 +273,22 @@ impl Default for Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desaturated_moves_toward_equal_luminance_gray() {
+        let c = Color::from_hex("#0FB5CC"); // teal accent
+        // Fully desaturated → r == g == b (a gray), alpha preserved.
+        let g = c.desaturated(1.0);
+        assert!((g.r() - g.g()).abs() < 1e-6 && (g.g() - g.b()).abs() < 1e-6);
+        let luma = 0.299 * c.r() + 0.587 * c.g() + 0.114 * c.b();
+        assert!((g.r() - luma).abs() < 1e-6);
+        // amount 0 → unchanged; alpha always preserved.
+        assert_eq!(c.desaturated(0.0).to_array(), c.to_array());
+        assert_eq!(c.desaturated(0.5).a(), c.a());
+        // Partial desaturation moves toward gray (reduces channel spread).
+        let spread = |x: Color| (x.r() - x.b()).abs();
+        assert!(spread(c.desaturated(0.7)) < spread(c));
+    }
 
     #[test]
     fn color_from_hex_6_digits() {

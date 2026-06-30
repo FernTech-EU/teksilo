@@ -153,6 +153,41 @@ pub struct ColorTokens {
 }
 
 impl ColorTokens {
+    /// Fraction by which the accent family is desaturated toward graphite for
+    /// an inactive window. `0.0` keeps the accent, `1.0` is fully gray. See
+    /// [`for_inactive_window`](Self::for_inactive_window).
+    pub const INACTIVE_ACCENT_DESATURATION: f32 = 0.70;
+
+    /// Project this palette for an **inactive window**: the accent-control
+    /// family and focus indicators are desaturated toward graphite, matching
+    /// the macOS / Qt `QPalette::Inactive` convention where accent-coloured
+    /// controls grey out when the window loses focus — the default button,
+    /// `Toggle` track, checked `Checkbox` / `RadioButton`, the selected
+    /// `TabBar` / `SegmentedControl` item, `Slider` fill, `ProgressBar`, and
+    /// focus rings. Because every themed control resolves its accent from the
+    /// live `ColorTokens` at paint time, swapping in this projection
+    /// (done by the paint walker when the window is inactive) desaturates them
+    /// all with no per-widget code — and it applies to *any* preset that
+    /// populates these fields (IntUI, Material 3, …), not just one.
+    ///
+    /// Deliberately untouched: `selection_*` / `surface_selected*` /
+    /// `editor_selection_bg` (selection desaturation is *view-focus*-dependent
+    /// and handled per widget via `SurfaceRole::SelectedInactive`); `status_*`
+    /// (status colours keep their meaning); `text_*` / links.
+    pub fn for_inactive_window(&self) -> ColorTokens {
+        let d = Self::INACTIVE_ACCENT_DESATURATION;
+        ColorTokens {
+            accent: self.accent.desaturated(d),
+            accent_hover: self.accent_hover.desaturated(d),
+            accent_pressed: self.accent_pressed.desaturated(d),
+            accent_disabled: self.accent_disabled.desaturated(d),
+            accent_subtle_bg: self.accent_subtle_bg.desaturated(d),
+            border_focused: self.border_focused.desaturated(d),
+            focus_ring: self.focus_ring.desaturated(d),
+            ..self.clone()
+        }
+    }
+
     pub fn light_default() -> Self {
         Self {
             // Surfaces
@@ -613,6 +648,39 @@ mod tests {
         let light = ColorTokens::light_default();
         let dark = ColorTokens::dark_default();
         assert_ne!(light.surface_main, dark.surface_main);
+    }
+
+    #[test]
+    fn for_inactive_window_desaturates_accent_not_selection() {
+        for c in [ColorTokens::light_default(), ColorTokens::dark_default()] {
+            let inactive = c.for_inactive_window();
+
+            // Accent family + focus indicators are desaturated toward graphite.
+            assert_ne!(inactive.accent, c.accent);
+            assert_eq!(
+                inactive.accent,
+                c.accent
+                    .desaturated(ColorTokens::INACTIVE_ACCENT_DESATURATION)
+            );
+            assert_ne!(inactive.accent_hover, c.accent_hover);
+            assert_ne!(inactive.accent_pressed, c.accent_pressed);
+            assert_ne!(inactive.border_focused, c.border_focused);
+            assert_ne!(inactive.focus_ring, c.focus_ring);
+
+            // Selection / status / text are deliberately left untouched —
+            // selection desaturation is view-focus-dependent (per widget) and
+            // status colours must keep their meaning.
+            assert_eq!(inactive.surface_selected, c.surface_selected);
+            assert_eq!(
+                inactive.surface_selected_inactive,
+                c.surface_selected_inactive
+            );
+            assert_eq!(inactive.selection_bg_active, c.selection_bg_active);
+            assert_eq!(inactive.selection_bg_inactive, c.selection_bg_inactive);
+            assert_eq!(inactive.editor_selection_bg, c.editor_selection_bg);
+            assert_eq!(inactive.status_error_bg, c.status_error_bg);
+            assert_eq!(inactive.text_primary, c.text_primary);
+        }
     }
 
     #[test]

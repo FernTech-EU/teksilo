@@ -48,6 +48,17 @@ pub struct TableRowConfig {
     pub is_selected: Signal<bool>,
     pub is_hovered: Signal<bool>,
     pub is_alt: bool,
+    /// Whether the view holds keyboard focus. `None` = "treat as always
+    /// focused" (the stock `TableView` paints its selection band directly and
+    /// passes `None` here). A custom style that paints row backgrounds reactively
+    /// can supply this — combined with [`is_window_active`](Self::is_window_active)
+    /// — to desaturate the selection (`SelectedInactive`) when focus is elsewhere.
+    pub is_focused: Option<Signal<bool>>,
+    /// Whether the host window is active (`focused AND not occluded`). `None` =
+    /// "treat as always active". Custom styles combine this with
+    /// [`is_focused`](Self::is_focused) so a selected row desaturates in a
+    /// background window, matching the stock views.
+    pub is_window_active: Option<Signal<bool>>,
 }
 
 /// Recipe — non-widget data describing the batched paint pass for

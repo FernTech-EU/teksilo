@@ -2075,6 +2075,12 @@ impl BastydeAppHandler {
                     let active = managed.focused && !managed.occluded;
                     managed.tree.set_window_active(active);
                     managed.state.set_focused_from_os(focused);
+                    // Drive a redraw on every focus transition so the
+                    // window-active observers (caret hide/restore, selection
+                    // desaturation, DimWhenInactive) reach a paint pass
+                    // promptly — the OS does not reliably emit RedrawRequested
+                    // on focus change across all platforms.
+                    managed.platform_window.request_redraw();
                     if focused {
                         newly_focused = Some(managed.bastyde_id);
                     }
@@ -2099,14 +2105,14 @@ impl BastydeAppHandler {
                     managed.occluded = occluded;
                     let active = managed.focused && !managed.occluded;
                     managed.tree.set_window_active(active);
-                    // When the window becomes visible again, drive a
-                    // fresh redraw — the render loop stopped pinging
-                    // while we were occluded, so without this nudge
-                    // the window stays frozen until the user moves
-                    // the mouse or hits a key.
-                    if !occluded {
-                        managed.platform_window.request_redraw();
-                    }
+                    // Drive a redraw on both directions. On reveal
+                    // (`!occluded`) the render loop stopped pinging while we
+                    // were occluded, so without this nudge the window stays
+                    // frozen until the user moves the mouse or hits a key. On
+                    // occlusion (`occluded`) the active-state flip must reach a
+                    // paint pass so the caret hides / selection desaturates
+                    // before the window is hidden behind another.
+                    managed.platform_window.request_redraw();
                 }
             }
             _ => {}

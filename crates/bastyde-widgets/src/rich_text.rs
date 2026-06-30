@@ -1959,19 +1959,25 @@ impl Widget for RichTextEditorBody {
             }
         }
 
-        // Selection highlight: only applied when the app set a colour (else the
-        // engine/theme default stands). Resolved each paint; regenerated like
-        // the caret, so a change just needs a render this frame.
-        if let Some(new_sel) = st
-            .selection_color_prop
-            .as_ref()
-            .map(|p| p.resolve(ctx.theme, true).to_array())
-        {
+        // Selection highlight. A custom colour (set via `.selection_color`) is
+        // used as-is and is NOT auto-desaturated when the window goes inactive
+        // — matching macOS, where an explicit selection colour opts out of
+        // system management. Otherwise the theme drives it, window-aware: the
+        // vivid `editor_selection_bg` while the window is active, the muted
+        // `selection_bg_inactive` while it is not. Resolved each paint and
+        // cached, so a change (theme, custom colour, or window-active flip)
+        // just needs a render this frame.
+        let new_sel = if let Some(prop) = st.selection_color_prop.as_ref() {
+            prop.resolve(ctx.theme, true).to_array()
+        } else if ctx.window_active {
+            ctx.theme.colors.editor_selection_bg.to_array()
+        } else {
+            ctx.theme.colors.selection_bg_inactive.to_array()
+        };
+        if st.last_selection_color != Some(new_sel) {
             st.engine.set_selection_color(new_sel);
-            if st.last_selection_color != Some(new_sel) {
-                st.last_selection_color = Some(new_sel);
-                st.pending_full_render = true;
-            }
+            st.last_selection_color = Some(new_sel);
+            st.pending_full_render = true;
         }
 
         // Code block surface colours come from the same theme path
@@ -2056,10 +2062,13 @@ impl Widget for RichTextEditorBody {
 
         // Update the cursor display every paint so selection
         // highlights follow the caret without needing a frame tick.
+        // The caret is suppressed in an inactive window for every policy — the
+        // authoritative final gate, covering the one frame between a
+        // window-active flip and the build-time effect running.
         let caret_on_now = match st.policy.caret_policy {
             CaretPolicy::Hidden => false,
-            CaretPolicy::StaticVisible => st.has_focus,
-            CaretPolicy::Blinking => st.caret_visible.get() && st.has_focus,
+            CaretPolicy::StaticVisible => st.has_focus && st.window_active,
+            CaretPolicy::Blinking => st.caret_visible.get() && st.has_focus && st.window_active,
         };
         let cursor_display = bastyde_text::CursorDisplay {
             position: st.cursor.position(),
@@ -2423,6 +2432,44 @@ impl Widget for RichTextEditor {
                     st.has_selection.set(new_has_selection);
                 }
                 if more && let Some(handle) = &st.frame_request {
+                    handle.set(true);
+                }
+                drop(st);
+            });
+        }
+
+        // Window-active effect — mirror the tree's window-active state onto the
+        // editor state so the frame loop (which has no context) can gate the
+        // caret. The frame loop may not tick while the window is inactive (the
+        // animation scheduler is parked), so on deactivation we hide the caret
+        // *synchronously* here rather than waiting for a tick, and request a
+        // frame so the change reaches a paint pass.
+        {
+            let state = self.state.clone();
+            let wa_signal = ctx.window_active_signal();
+            ctx.effect(&wa_signal, move |&active| {
+                let mut st = state.borrow_mut();
+                st.window_active = active;
+                if active {
+                    // Reactivated: if the editor still holds focus, show the
+                    // caret immediately (restart the blink phase) rather than
+                    // waiting up to one blink interval. `Hidden` policy stays
+                    // hidden — the paint gate suppresses it anyway.
+                    let show =
+                        st.has_focus && !matches!(st.policy.caret_policy, CaretPolicy::Hidden);
+                    if show && !st.caret_visible.get() {
+                        st.caret_visible.set(true);
+                    }
+                    st.blink_last_toggle = None;
+                } else {
+                    // Deactivated: hide the caret synchronously (the frame loop
+                    // may not tick while the window is inactive).
+                    if st.caret_visible.get() {
+                        st.caret_visible.set(false);
+                    }
+                    st.blink_last_toggle = None;
+                }
+                if let Some(handle) = &st.frame_request {
                     handle.set(true);
                 }
                 drop(st);

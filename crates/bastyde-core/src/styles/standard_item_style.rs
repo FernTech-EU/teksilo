@@ -32,6 +32,14 @@ pub struct StandardItemStyleConfig {
     /// click selects without a ring while keyboard navigation reveals one.
     pub is_focus_visible: Signal<bool>,
     pub is_disabled: Signal<bool>,
+    /// Whether the host window is currently active (`focused AND not occluded`).
+    /// Composed with `is_focused` so a selected row shows the vivid `Selected`
+    /// surface only while the view holds keyboard focus **and** the window is
+    /// active; otherwise it falls back to the muted `SelectedInactive` — the
+    /// same desaturation a view-focus loss produces (macOS "unemphasized"
+    /// selection serves both states). Populated from
+    /// `BuildContext::window_active_signal`.
+    pub is_window_active: Signal<bool>,
 }
 
 pub trait StandardItemStyle: 'static {

@@ -2955,3 +2955,73 @@ fn lazy_loading_rows_render_placeholder_cells_and_request_the_window() {
         "request_window must be called for the visible range"
     );
 }
+
+#[test]
+fn selection_band_desaturates_when_window_inactive() {
+    use bastyde_canvas::DecorationKind;
+    use bastyde_tokens::SurfaceRole;
+
+    let model = rows(5);
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    sel.select(0); // even row → no AltRow stripe to confuse the colour match
+    tree.focus(table); // view_focused = true
+
+    let colors = bastyde_core::presets::intui::light().colors;
+    let active = SurfaceRole::Selected.resolve(&colors).to_array();
+    let inactive = SurfaceRole::SelectedInactive.resolve(&colors).to_array();
+    assert_ne!(active, inactive);
+
+    let band_colors = |tree: &mut WidgetTree| -> Vec<[f32; 4]> {
+        tree.render()
+            .decorations
+            .iter()
+            .filter(|d| matches!(d.kind, DecorationKind::WidgetBackground))
+            .map(|d| d.color)
+            .collect()
+    };
+
+    // Active window + focused view: the vivid Selected band is painted.
+    let bands = band_colors(&mut tree);
+    assert!(
+        bands.contains(&active),
+        "active window: vivid Selected band expected, got {bands:?}"
+    );
+    assert!(
+        !bands.contains(&inactive),
+        "active window: no muted band expected"
+    );
+
+    // Window blur: the band desaturates to SelectedInactive even though the
+    // view keeps keyboard focus.
+    tree.set_window_active(false);
+    let bands = band_colors(&mut tree);
+    assert!(
+        bands.contains(&inactive),
+        "inactive window: muted SelectedInactive band expected, got {bands:?}"
+    );
+    assert!(
+        !bands.contains(&active),
+        "inactive window: no vivid band expected"
+    );
+
+    // Reactivate: vivid band returns.
+    tree.set_window_active(true);
+    let bands = band_colors(&mut tree);
+    assert!(
+        bands.contains(&active),
+        "reactivated window: vivid band returns, got {bands:?}"
+    );
+}

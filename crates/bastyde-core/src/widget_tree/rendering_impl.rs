@@ -13,6 +13,10 @@ struct A11yPaintPrefs {
     /// Combined user×OS text-scale factor (the logical accessibility
     /// magnification). Surfaced to widgets via `PaintContext::text_scale`.
     text_scale: f32,
+    /// Window-active state (`focused AND not occluded`). Surfaced to widgets
+    /// via `PaintContext::window_active`. (Carried alongside the a11y prefs as
+    /// a per-paint ambient flag; not itself an accessibility preference.)
+    window_active: bool,
 }
 
 impl WidgetTree {
@@ -114,14 +118,25 @@ impl WidgetTree {
 
         let mut frame = RenderFrame::new();
         // `effective_theme` carries the user/OS text-scale multiplier baked into
-        // its typography, so painted glyphs match the scaled layout sizes.
-        let base_theme = self.effective_theme.clone();
+        // its typography, so painted glyphs match the scaled layout sizes. When
+        // the window is inactive, paint against the accent-desaturated
+        // projection so every accent-coloured control (default button, Toggle,
+        // checked Checkbox/Radio, selected Tab/Segment, Slider fill,
+        // ProgressBar, focus rings) greys out — the Qt `QPalette::Inactive`
+        // model, resolved once theme-side instead of per widget. Colours only;
+        // typography is unchanged, so this is repaint-only (geometry stable).
+        let base_theme = if self.is_window_active() {
+            self.effective_theme.clone()
+        } else {
+            self.effective_theme.for_inactive_window()
+        };
         let text_backend = self.text_backend.clone();
         let a11y_prefs = A11yPaintPrefs {
             high_contrast: self.prefers_high_contrast,
             reduced_motion: self.prefers_reduced_motion,
             large_text: self.text_scale_factor > 1.0,
             text_scale: self.effective_text_scale,
+            window_active: self.is_window_active(),
         };
 
         let overlay_skip: std::collections::HashSet<WidgetId> = self
@@ -410,6 +425,7 @@ fn paint_widget_cached(
             prefers_high_contrast: a11y_prefs.high_contrast,
             prefers_reduced_motion: a11y_prefs.reduced_motion,
             prefers_large_text: a11y_prefs.large_text,
+            window_active: a11y_prefs.window_active,
         };
 
         let bounds = arena.bounds(id);
@@ -547,6 +563,7 @@ fn paint_widget_cached(
                 prefers_high_contrast: a11y_prefs.high_contrast,
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,
+                window_active: a11y_prefs.window_active,
             };
             node.widget.after_paint(&view, &ctx);
         }
@@ -587,6 +604,7 @@ fn paint_widget_cached(
                 prefers_high_contrast: a11y_prefs.high_contrast,
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,
+                window_active: a11y_prefs.window_active,
             };
             let bounds = arena.bounds(id);
             let node = arena.get(id).expect("node id is active (guarded above)");

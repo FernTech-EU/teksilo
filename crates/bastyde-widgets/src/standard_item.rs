@@ -532,6 +532,7 @@ impl StandardListItem {
             is_focused,
             is_focus_visible,
             is_disabled,
+            is_window_active: ctx.window_active_signal(),
         };
         let root_id = style.make_body(&cfg, ctx);
 

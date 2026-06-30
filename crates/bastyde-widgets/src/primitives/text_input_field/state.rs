@@ -89,6 +89,12 @@ pub(crate) struct TextInputState {
 
     // ── Input state ─────────────────────────────────────────────────
     pub has_focus: bool,
+    /// Whether the host window is currently active (`focused AND not
+    /// occluded`). Mirrored from `BuildContext::window_active_signal` by an
+    /// effect in `TextInputField::build` (the frame-loop `tick` has no
+    /// context). Gates the caret alongside `has_focus` — the caret hides in an
+    /// inactive window. Starts `true` to match the tree's initial value.
+    pub window_active: bool,
     pub drag_state: DragState,
     pub needs_full_layout: bool,
     pub content_dirty: bool,
@@ -258,6 +264,7 @@ impl TextInputState {
             event_queue,
             _event_subscription: subscription,
             has_focus: false,
+            window_active: true,
             drag_state: DragState::Idle,
             needs_full_layout: true,
             content_dirty: true,

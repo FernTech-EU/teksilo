@@ -146,6 +146,11 @@ pub mod prelude {
         WidgetBuilder, WidgetEvent, WidgetId,
     };
 
+    // Window-active appearance: the opt-in per-widget dim wrapper. The
+    // automatic layers (caret hide, selection desaturation) need no import;
+    // `.dim_when_inactive(..)` rides in via `WidgetBuilder` above.
+    pub use bastyde_core::dim_when_inactive::DimWhenInactive;
+
     // Geometry (lives in bastyde-canvas)
     pub use bastyde_canvas::{Point, Rect, Size, SizeProposal, Vec2};
 

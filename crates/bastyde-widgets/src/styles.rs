@@ -89,3 +89,35 @@ pub use recipe_text_input_style::{RecipeTextInputStyle, TextInputRecipe};
 pub use recipe_toast_style::{RecipeToastStyle, ToastRecipe};
 pub use recipe_toggle_style::{RecipeToggleStyle, ToggleRecipe};
 pub use recipe_tooltip_style::{RecipeTooltipStyle, TooltipRecipe};
+
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::signal::Signal;
+use bastyde_tokens::ColorTokens;
+
+/// Reactive resolution palette for recipe colours: the live theme palette while
+/// the host window is active, the accent-desaturated projection
+/// ([`ColorTokens::for_inactive_window`]) while it is inactive.
+///
+/// A recipe style that **bakes** a colour into a `ColorProp::Bound(Signal)` /
+/// `PaintProp` at build time (resolving a `RecipeColor` against the theme) must
+/// resolve against this signal rather than a plain `ctx.theme_signal()`. A
+/// `Bound` colour is a concrete value that `ColorProp::resolve` returns verbatim
+/// — it ignores the paint walker's window-inactive theme projection — so accent
+/// chrome baked from `theme_signal` (a Filled button fill, an accent focus
+/// border) would stay vivid in a background window while paint-resolving
+/// controls (Toggle, Checkbox, which read `colors.accent` in `paint()`) greyed
+/// out. Resolving against this greys them out uniformly.
+///
+/// Role-preserving paint paths — passing a `SurfaceRole` / `BorderRole` /
+/// `Signal<Role>` straight to a widget so it resolves against `ctx.theme` at
+/// paint — already follow the projection and need no change.
+pub(crate) fn window_resolution_colors(ctx: &BuildContext) -> Signal<ColorTokens> {
+    let wa = ctx.window_active_signal();
+    ctx.theme_signal().zip(&wa).map(|(theme, active)| {
+        if *active {
+            theme.colors.clone()
+        } else {
+            theme.colors.for_inactive_window()
+        }
+    })
+}

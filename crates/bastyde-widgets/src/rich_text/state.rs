@@ -173,6 +173,15 @@ pub(crate) struct EditorState {
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
+    /// Whether the host window is currently active (`focused AND not
+    /// occluded`). Mirrored from `BuildContext::window_active_signal` by an
+    /// effect in `RichTextEditor::build` (the frame-loop `tick` has no context,
+    /// so it can't observe the signal itself). Gates the caret alongside
+    /// `has_focus`: the caret is hidden whenever the window is inactive, the
+    /// universal desktop convention. Starts `true` to match the tree's initial
+    /// window-active value.
+    pub window_active: bool,
+
     /// Reactive mirror of `has_focus`, kept in lockstep by the
     /// `on_focus` handler. Exposed so the composing
     /// `RichTextEditor` shell can pass it into
@@ -473,6 +482,7 @@ impl EditorState {
             last_code_block_bg: None,
             last_code_block_fg: None,
             has_focus: false,
+            window_active: true,
             focus_signal: Signal::new(false),
             event_queue,
             _event_subscription: subscription,

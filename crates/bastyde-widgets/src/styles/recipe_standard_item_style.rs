@@ -107,6 +107,7 @@ impl StandardItemStyle for RecipeStandardItemStyle {
             &cfg.is_hovered,
             &cfg.is_disabled,
             &cfg.is_focused,
+            &cfg.is_window_active,
         );
 
         // Keyboard-focus ring: drawn on the *current* item (selected, in a
@@ -167,15 +168,20 @@ fn bg_signal(
     is_hovered: &Signal<bool>,
     is_disabled: &Signal<bool>,
     is_focused: &Signal<bool>,
+    is_window_active: &Signal<bool>,
 ) -> Signal<SurfaceRole> {
+    // Effective focus = the view holds keyboard focus AND the host window is
+    // active. A selected row in an inactive window desaturates exactly as it
+    // does when focus moves elsewhere in the same window.
+    let effective_focus = is_focused.and(is_window_active);
     let combined = is_selected.zip3(is_pressed, is_hovered);
-    combined.zip3(is_disabled, is_focused).map(
+    combined.zip3(is_disabled, &effective_focus).map(
         |((selected, pressed, hovered), disabled, focused)| {
             if *disabled {
                 SurfaceRole::Transparent
             } else if *selected {
-                // Focus-aware: active selection while the view holds keyboard
-                // focus, muted "inactive" selection when focus is elsewhere.
+                // Vivid selection while focused AND window-active; muted
+                // "inactive" selection otherwise.
                 if *focused {
                     SurfaceRole::Selected
                 } else {
@@ -190,4 +196,45 @@ fn bg_signal(
             }
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_tokens::SurfaceRole;
+
+    #[test]
+    fn selection_role_requires_focus_and_window_active() {
+        let selected = Signal::new(true);
+        let pressed = Signal::new(false);
+        let hovered = Signal::new(false);
+        let disabled = Signal::new(false);
+        let focused = Signal::new(true);
+        let window_active = Signal::new(true);
+
+        let role = bg_signal(
+            &selected,
+            &pressed,
+            &hovered,
+            &disabled,
+            &focused,
+            &window_active,
+        );
+
+        // Selected, view-focused, window-active → vivid.
+        assert_eq!(role.get(), SurfaceRole::Selected);
+
+        // Window goes inactive (view focus retained) → muted.
+        window_active.set(false);
+        assert_eq!(role.get(), SurfaceRole::SelectedInactive);
+
+        // Window active again but view focus lost → still muted.
+        window_active.set(true);
+        focused.set(false);
+        assert_eq!(role.get(), SurfaceRole::SelectedInactive);
+
+        // Both satisfied again → vivid.
+        focused.set(true);
+        assert_eq!(role.get(), SurfaceRole::Selected);
+    }
 }

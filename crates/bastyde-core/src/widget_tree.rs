@@ -88,6 +88,16 @@ pub struct WidgetTree {
     /// `Calendar` binds this at `Rebuild` level). Fired by
     /// `recompute_effective_theme`.
     text_scale_signal: crate::signal::Signal<f32>,
+    /// Reactive window-active state (`focused AND not occluded`), the
+    /// occlusion-aware companion to `WindowState::focused` (which is raw OS
+    /// focus only). The single source of truth for "is this window active",
+    /// read by `is_window_active()` and published to widgets via
+    /// `window_active_signal()` / `BuildContext::window_active*` /
+    /// `PaintContext::window_active`. Drives caret hiding, selection
+    /// desaturation and `DimWhenInactive`. Starts `true` — winit may not send
+    /// `Focused(true)` for the first window, so a window must not be born
+    /// inactive. Mutated only by `set_window_active`.
+    window_active_signal: crate::signal::Signal<bool>,
     text_backend: Option<Rc<RefCell<dyn bastyde_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     /// Reactive mirror of `focused`. Same pattern as `hovered_signal`
@@ -473,6 +483,10 @@ impl WidgetTree {
             effective_theme: initial_theme,
             effective_text_scale: 1.0,
             text_scale_signal: crate::signal::Signal::new(1.0),
+            // Starts active: winit may not send `Focused(true)` for the first
+            // window, so a window must not be born inactive (caret hidden,
+            // selection muted) before the first focus event arrives.
+            window_active_signal: crate::signal::Signal::new(true),
             text_backend: None,
             focused: None,
             focused_signal: crate::signal::Signal::new(None),
@@ -573,6 +587,7 @@ impl WidgetTree {
             .with_drag_external(drag_is_external)
             .with_query_snapshot(self.last_pointer_position, overlay_snapshot)
             .with_layout_direction(self.layout_direction)
+            .with_window_active(self.is_window_active())
     }
 
     /// Run a closure with a fresh [`EventContext`] anchored at this
@@ -1218,14 +1233,38 @@ impl WidgetTree {
     /// inactive. Propagates to the animation scheduler AND the
     /// animated-quad registry so both pause-resume in lockstep — no
     /// ticks, no frame wakes, no GPU submits.
+    ///
+    /// On an actual state change it also fires `window_active_signal`
+    /// (so build-time binders and `DimWhenInactive` react) and issues a
+    /// global paint-only dirty mark, so every widget that reads
+    /// `PaintContext::window_active` (caret gates, selection bands) repaints
+    /// once. This is a repaint, not a relayout — geometry never changes when
+    /// the window's active state flips (the caret keeps its space). Window
+    /// focus changes are rare and user-driven, so the O(n) mark is cheap and
+    /// strictly lighter than `set_theme`'s `mark_all_dirty` (layout + paint).
     pub fn set_window_active(&mut self, active: bool) {
         let now = std::time::Instant::now();
         self.animation_scheduler.set_window_active(active, now);
         self.animated_quads.set_window_active(active, now);
+        if self.window_active_signal.get() != active {
+            self.window_active_signal.set(active);
+            self.arena.mark_all_needs_paint_only();
+        }
     }
 
+    /// Whether the owning window is currently active (`focused AND not
+    /// occluded`). The reactive companion is [`Self::window_active_signal`].
     pub fn is_window_active(&self) -> bool {
-        self.animation_scheduler.is_window_active()
+        self.window_active_signal.get()
+    }
+
+    /// Reactive handle on window-active state. Fires when the window gains or
+    /// loses active status. Bind at [`BindingLevel::RepaintOnly`] — an
+    /// active-state flip never affects geometry. Starts `true`.
+    ///
+    /// [`BindingLevel::RepaintOnly`]: crate::binding::BindingLevel::RepaintOnly
+    pub fn window_active_signal(&self) -> crate::signal::Signal<bool> {
+        self.window_active_signal.clone()
     }
 
     /// Register a new animated quad for the currently-building widget.

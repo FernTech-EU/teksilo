@@ -27,6 +27,7 @@ use bastyde_core::styles::{
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole};
 
+use super::window_resolution_colors;
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
 // IntUI design tokens for Button. The recipe and its consumers own
@@ -189,13 +190,22 @@ fn bind_fill(
         || recipe.focused.as_ref().is_some_and(is_gradient)
         || recipe.disabled.as_ref().is_some_and(is_gradient);
     if any_gradient {
-        return PaintProp::from_fill(&recipe.idle, &ctx.theme().colors);
+        // Gradient fills bake to a non-reactive PaintProp. Resolve against the
+        // window-active palette at build so a window that *starts* inactive is
+        // already desaturated; live flips of a gradient fill are a known gap
+        // (no IntUI / Material accent button uses a gradient fill).
+        let colors = if ctx.window_active() {
+            ctx.theme().colors.clone()
+        } else {
+            ctx.theme().colors.for_inactive_window()
+        };
+        return PaintProp::from_fill(&recipe.idle, &colors);
     }
     let recipe = recipe.clone();
-    let theme_sig = ctx.theme_signal();
+    let colors_sig = window_resolution_colors(ctx);
     let sig: Signal<Color> = state
-        .zip(&theme_sig)
-        .map(move |(s, theme)| resolve_fill_to_color(recipe.resolve(*s), &theme.colors));
+        .zip(&colors_sig)
+        .map(move |(s, colors)| resolve_fill_to_color(recipe.resolve(*s), colors));
     PaintProp::Solid(ColorProp::Bound(sig))
 }
 
@@ -206,15 +216,10 @@ fn bind_border(
 ) -> (ColorProp, Signal<f32>) {
     let recipe_for_color = recipe.clone();
     let recipe_for_width = recipe.clone();
-    let theme_sig = ctx.theme_signal();
+    let colors_sig = window_resolution_colors(ctx);
     let color: ColorProp = state
-        .zip(&theme_sig)
-        .map(move |(s, theme)| {
-            recipe_for_color
-                .resolve(*s)
-                .color
-                .resolve_with(&theme.colors)
-        })
+        .zip(&colors_sig)
+        .map(move |(s, colors)| recipe_for_color.resolve(*s).color.resolve_with(colors))
         .into();
     let width = state.map(move |s| recipe_for_width.resolve(*s).width);
     (color, width)

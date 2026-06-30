@@ -256,6 +256,23 @@ impl<'a> BuildContext<'a> {
         self.tree.text_scale_signal()
     }
 
+    /// Whether the host window is currently active (`focused AND not
+    /// occluded`). One-shot read for build-time use; for a value that reacts
+    /// to focus changes, bind [`window_active_signal`](Self::window_active_signal).
+    pub fn window_active(&self) -> bool {
+        self.tree.is_window_active()
+    }
+
+    /// Reactive handle on window-active state. Fires when the host window gains
+    /// or loses active status (`focused AND not occluded`). Build
+    /// implementations that show/hide appearance with window focus — caret
+    /// effects, the selection-colour swap in text fields, `DimWhenInactive` —
+    /// bind this, typically at `RepaintOnly` level (an active-state flip never
+    /// affects geometry). Starts `true`.
+    pub fn window_active_signal(&self) -> crate::signal::Signal<bool> {
+        self.tree.window_active_signal()
+    }
+
     /// Reactive handle on the current locale. Fires observers when
     /// `tree.set_locale(...)` is called.
     pub fn locale_signal(&self) -> crate::signal::Signal<Option<String>> {

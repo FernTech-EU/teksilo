@@ -1004,6 +1004,44 @@ mod tests {
     }
 
     #[test]
+    fn filled_button_accent_desaturates_when_window_inactive() {
+        // The Filled button bakes its fill via the theme signal
+        // (`ColorProp::Bound`), which a plain `theme_signal` resolution would
+        // freeze at the active accent — so it must resolve against the
+        // window-active palette to grey out like the paint-resolving controls.
+        let theme = bastyde_core::presets::intui::light();
+        let accent = theme.colors.accent.to_array();
+        let inactive_accent = theme.colors.for_inactive_window().accent.to_array();
+        assert_ne!(accent, inactive_accent);
+
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.add(Button::new(lit!("Save")).variant(ButtonVariant::Filled));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // Active: vivid accent fill.
+        assert!(
+            frame_has_color(&tree.render(), accent),
+            "active window: Filled button paints the vivid accent"
+        );
+
+        // Inactive: the fill desaturates with every other accent control.
+        tree.set_window_active(false);
+        let frame = tree.render();
+        assert!(
+            frame_has_color(&frame, inactive_accent),
+            "inactive window: Filled button fill desaturates"
+        );
+        assert!(
+            !frame_has_color(&frame, accent),
+            "inactive window: no vivid accent remains"
+        );
+
+        // Reactivate: vivid accent returns.
+        tree.set_window_active(true);
+        assert!(frame_has_color(&tree.render(), accent));
+    }
+
+    #[test]
     fn keyup_without_keydown_does_not_fire() {
         // Regression for the MessageBox reopen bug: when a shortcut
         // consumes Enter's KeyDown (dismissing the modal and restoring

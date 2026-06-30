@@ -65,8 +65,12 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // pumps are irregular the blink catches up on the next tick —
     // the visible cadence stays locked to real seconds regardless
     // of how the frame scheduler behaves.
-    let blinking_active =
-        state.has_focus && matches!(state.policy.caret_policy, CaretPolicy::Blinking);
+    // The caret blinks only when the widget is focused AND the host window is
+    // active — a caret in an inactive window is hidden, the universal desktop
+    // convention (Qt / Cocoa / Win32 / GTK).
+    let blinking_active = state.has_focus
+        && state.window_active
+        && matches!(state.policy.caret_policy, CaretPolicy::Blinking);
     if blinking_active {
         let now = std::time::Instant::now();
         let interval = std::time::Duration::from_secs_f32(CARET_BLINK_INTERVAL);
@@ -97,15 +101,20 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         }
     } else {
         state.blink_last_toggle = None;
-        if matches!(state.policy.caret_policy, CaretPolicy::Blinking) && !state.has_focus {
-            // Unfocused: caret off.
+        if matches!(state.policy.caret_policy, CaretPolicy::Blinking)
+            && (!state.has_focus || !state.window_active)
+        {
+            // Unfocused or window inactive: caret off.
             if state.caret_visible.get() {
                 state.caret_visible.set(false);
             }
-        } else if matches!(state.policy.caret_policy, CaretPolicy::StaticVisible)
-            && !state.caret_visible.get()
-        {
-            state.caret_visible.set(true);
+        } else if matches!(state.policy.caret_policy, CaretPolicy::StaticVisible) {
+            // A static caret shows only while focused AND the window is active;
+            // it hides in an inactive window like the blinking one.
+            let should_show = state.has_focus && state.window_active;
+            if state.caret_visible.get() != should_show {
+                state.caret_visible.set(should_show);
+            }
         }
     }
 

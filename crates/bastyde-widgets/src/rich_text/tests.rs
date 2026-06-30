@@ -805,6 +805,118 @@ fn read_only_preset_emits_no_cursor_decoration() {
 }
 
 #[test]
+fn caret_hidden_when_window_inactive() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    tick_once(&mut tree);
+
+    // Focused editor in an active window: caret on (on_focus set it; the blink
+    // interval hasn't elapsed). `caret_visible` is the value the paint gate
+    // (`caret_visible && has_focus && window_active`) reads.
+    assert!(state.borrow().has_focus, "editor took focus");
+    assert!(state.borrow().window_active);
+    assert!(
+        state.borrow().caret_visible.get(),
+        "caret visible when focused in an active window"
+    );
+
+    // Window blur: the window-active effect hides the caret synchronously,
+    // without waiting for a frame tick.
+    tree.set_window_active(false);
+    assert!(!state.borrow().window_active);
+    assert!(
+        !state.borrow().caret_visible.get(),
+        "caret_visible cleared on window blur"
+    );
+
+    // Reactivate: the caret returns immediately (the editor still holds focus).
+    tree.set_window_active(true);
+    assert!(state.borrow().window_active);
+    assert!(
+        state.borrow().caret_visible.get(),
+        "caret restored on window reactivate"
+    );
+}
+
+#[test]
+fn selection_color_desaturates_when_window_inactive() {
+    let theme = bastyde_core::presets::intui::light();
+    let active_color = theme.colors.editor_selection_bg.to_array();
+    let inactive_color = theme.colors.selection_bg_inactive.to_array();
+    assert_ne!(active_color, inactive_color);
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new().with_theme(theme);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    let _ = tree.render();
+
+    // Active window: the vivid theme selection colour is pushed to the engine.
+    assert_eq!(
+        state.borrow().last_selection_color,
+        Some(active_color),
+        "active window uses the vivid editor selection colour"
+    );
+
+    // Inactive: it desaturates to the muted inactive selection colour.
+    tree.set_window_active(false);
+    let _ = tree.render();
+    assert_eq!(
+        state.borrow().last_selection_color,
+        Some(inactive_color),
+        "inactive window desaturates the selection"
+    );
+
+    // Reactivate: the vivid colour returns.
+    tree.set_window_active(true);
+    let _ = tree.render();
+    assert_eq!(
+        state.borrow().last_selection_color,
+        Some(active_color),
+        "reactivating restores the vivid selection"
+    );
+}
+
+#[test]
+fn custom_selection_color_is_not_desaturated_when_inactive() {
+    use bastyde_tokens::Color;
+    let custom = Color::from_hex("#FF00FF");
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc).selection_color(custom);
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    let _ = tree.render();
+    assert_eq!(state.borrow().last_selection_color, Some(custom.to_array()));
+
+    // An app-set selection colour opts out of auto-desaturation (macOS
+    // semantics): it stays fixed when the window goes inactive.
+    tree.set_window_active(false);
+    let _ = tree.render();
+    assert_eq!(
+        state.borrow().last_selection_color,
+        Some(custom.to_array()),
+        "custom selection colour stays fixed while the window is inactive"
+    );
+}
+
+#[test]
 fn caret_color_follows_theme_in_dark_mode() {
     // Regression: the typesetter defaults the caret to opaque black, so
     // the editor must push the theme's `editor_caret` role into the

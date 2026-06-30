@@ -49,6 +49,15 @@ pub struct PaintContext<'a> {
     pub prefers_high_contrast: bool,
     pub prefers_reduced_motion: bool,
     pub prefers_large_text: bool,
+    /// Whether the host window is currently active (`focused AND not
+    /// occluded`). Widgets that change appearance when the window loses focus
+    /// read this directly in `paint()` — the selection band in
+    /// `TableView`/`TreeTableView` desaturates, text engines swap their
+    /// selection colour, custom paint can dim. A window-active flip triggers a
+    /// global repaint ([`WidgetArena::mark_all_needs_paint_only`]), so no
+    /// per-widget signal binding is required to keep a paint-time read correct.
+    /// `true` in headless test contexts.
+    pub window_active: bool,
 }
 
 /// Read-only view of the widget tree's geometry passed to

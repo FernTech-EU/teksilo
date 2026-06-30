@@ -132,6 +132,20 @@ impl Theme {
         self.appearance.is_dark()
     }
 
+    /// A copy of this theme projected for an **inactive window** — the accent
+    /// family and focus indicators desaturated toward graphite (see
+    /// [`ColorTokens::for_inactive_window`](bastyde_tokens::ColorTokens::for_inactive_window)).
+    /// The paint walker swaps this in when the host window loses focus, so every
+    /// accent-coloured control greys out with no per-widget code. Only the
+    /// colours change; typography / layout / shape / motion are untouched, so
+    /// this never affects layout.
+    pub fn for_inactive_window(&self) -> Theme {
+        Theme {
+            colors: self.colors.for_inactive_window(),
+            ..self.clone()
+        }
+    }
+
     /// Look up a typed theme extension. See [`ThemeExtensions`].
     pub fn extension<T: std::any::Any + Send + Sync>(&self) -> Option<&T> {
         self.extensions.get::<T>()

@@ -138,6 +138,12 @@ pub struct EventContext<'ops> {
     /// this tree belongs to. Cloned from the tree at construction.
     /// `None` for standalone trees.
     pub(crate) current_window: Option<crate::window::WindowState>,
+    /// Snapshot of the tree's occlusion-aware window-active state
+    /// (`focused AND not occluded`) at construction time. Distinct from
+    /// `current_window.focused()` (raw OS focus, no occlusion). Read by
+    /// [`window_active`](Self::window_active). Defaults `true` (matches the
+    /// tree's initial value) for standalone / test contexts.
+    pub(crate) tree_window_active: bool,
     /// Last `PointerMove` position observed by the tree. Snapshotted
     /// at handler-invocation time so widgets that don't see the live
     /// pointer event (e.g. an `on_hover` callback that fires on the
@@ -297,6 +303,7 @@ impl<'ops> EventContext<'ops> {
             request_a11y_update: false,
             window_ops: None,
             current_window: None,
+            tree_window_active: true,
             tree_pointer_position: None,
             press_claimed_by_interactive_child: false,
             overlay_bounds_snapshot: Vec::new(),
@@ -355,6 +362,14 @@ impl<'ops> EventContext<'ops> {
     ) -> Self {
         self.window_ops = Some(ops);
         self.current_window = current_window;
+        self
+    }
+
+    /// Snapshot the tree's occlusion-aware window-active state. Called by
+    /// `make_event_context` once per event batch so handlers can read
+    /// [`window_active`](Self::window_active).
+    pub(crate) fn with_window_active(mut self, active: bool) -> Self {
+        self.tree_window_active = active;
         self
     }
 
@@ -598,6 +613,16 @@ impl<'ops> EventContext<'ops> {
 
     pub fn window(&self) -> Option<&crate::window::WindowState> {
         self.current_window.as_ref()
+    }
+
+    /// Whether the host window is currently active (`focused AND not
+    /// occluded`) — the occlusion-aware companion to
+    /// `self.window().map(|w| w.focused())` (raw OS focus). Snapshotted at
+    /// context construction. Matches [`BuildContext::window_active`].
+    ///
+    /// [`BuildContext::window_active`]: crate::build_context::BuildContext::window_active
+    pub fn window_active(&self) -> bool {
+        self.tree_window_active
     }
 
     /// Open a new window, creating the winit-level surface

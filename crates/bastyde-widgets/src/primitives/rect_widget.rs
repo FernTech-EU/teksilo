@@ -285,6 +285,50 @@ mod tests {
     }
 
     #[test]
+    fn accent_role_desaturates_when_window_inactive() {
+        use bastyde_tokens::SurfaceRole;
+
+        let theme = bastyde_core::presets::intui::light();
+        let accent = theme.colors.accent.to_array();
+        let inactive_accent = theme.colors.for_inactive_window().accent.to_array();
+        assert_ne!(accent, inactive_accent);
+
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.add(
+            RectWidget::new()
+                .background(SurfaceRole::Accent)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+
+        // Active: the role resolves to the vivid accent.
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+        assert_eq!(
+            frame.shapes[0].color, accent,
+            "active window paints the vivid accent"
+        );
+
+        // Inactive: the paint walker swaps in the accent-desaturated theme
+        // projection, so the *same* SurfaceRole::Accent resolves to the muted
+        // colour — the systemic theme-side path that greys every accent control
+        // (Toggle, Button, Tab, Segment, Checkbox/Radio, Slider, ProgressBar)
+        // with no per-widget code.
+        tree.set_window_active(false);
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+        assert_eq!(
+            frame.shapes[0].color, inactive_accent,
+            "inactive window desaturates the accent"
+        );
+
+        // Reactivate: vivid accent returns.
+        tree.set_window_active(true);
+        let frame = tree.render();
+        assert_eq!(frame.shapes[0].color, accent);
+    }
+
+    #[test]
     fn bind_background_reads_from_state() {
         let color = Signal::new(Color::BLUE);
         let mut tree = WidgetTree::new();

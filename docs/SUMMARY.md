@@ -21,6 +21,7 @@
 - [Idle & animation](idle-and-animation.md)
 - [Accessibility overrides](accessibility-overrides.md)
 - [Global text scale](text-scale.md)
+- [Window-active appearance](window-activation.md)
 - [Internationalization](i18n.md)
 - [Grid view](grid-view.md)
 

@@ -1519,8 +1519,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
             )
         {
-            // Focus-aware: active while the view holds focus, muted otherwise.
-            let bg = if self.view_focused.get() {
+            // Focus- and window-aware: vivid while the view holds keyboard
+            // focus AND the host window is active, muted otherwise (the same
+            // `SelectedInactive` serves view-unfocused and window-inactive).
+            let bg = if self.view_focused.get() && ctx.window_active {
                 SurfaceRole::Selected.resolve(colors)
             } else {
                 SurfaceRole::SelectedInactive.resolve(colors)

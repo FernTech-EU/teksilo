@@ -519,6 +519,10 @@ impl TextInputField {
 }
 
 impl Widget for TextInputField {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Resolve the interaction signal (external override wins).
         if let Some(signal) = self.external_interaction.take() {
@@ -817,6 +821,12 @@ impl Widget for TextInputField {
         // effect on the theme signal that re-applies the palette on
         // every theme switch instead of capturing a single snapshot.
         let theme_signal = ctx.theme_signal();
+        // The selection colour is also window-active-aware. `ctx.effect` can
+        // only observe *mutable* signals (a derived `theme.zip(window_active)`
+        // would panic), so the theme effect reads the live window-active value
+        // via `.get()`, and the separate window-active effect (below, near the
+        // frame handles) re-applies the selection colour reading the live
+        // theme. Between them, a change to either axis re-applies correctly.
         {
             let theme = theme_signal.get();
             let colors = &theme.colors;
@@ -824,17 +834,18 @@ impl Widget for TextInputField {
             st.engine.set_text_color(colors.text_primary.to_array());
             st.engine.set_cursor_color(colors.text_primary.to_array());
             st.engine
-                .set_selection_color(colors.selection_bg_active.to_array());
+                .set_selection_color(field_selection_color(colors, ctx.window_active()));
         }
         {
             let state = self.state().clone();
+            let wa_signal = ctx.window_active_signal();
             ctx.effect(&theme_signal, move |theme| {
                 let colors = &theme.colors;
                 let mut st = state.borrow_mut();
                 st.engine.set_text_color(colors.text_primary.to_array());
                 st.engine.set_cursor_color(colors.text_primary.to_array());
                 st.engine
-                    .set_selection_color(colors.selection_bg_active.to_array());
+                    .set_selection_color(field_selection_color(colors, wa_signal.get()));
                 if let Some(ref mut suffix_engine) = st.suffix_engine {
                     let secondary = colors.text_secondary.to_array();
                     suffix_engine.set_text_color(secondary);
@@ -990,6 +1001,44 @@ impl Widget for TextInputField {
                     if let Some(handle) = &st.frame_request {
                         handle.set(true);
                     }
+                }
+            });
+        }
+
+        // Window-active effect — mirror the tree's window-active state onto the
+        // field state so the frame loop (no context) can gate the caret, and
+        // re-apply the window-aware selection colour (reading the live theme,
+        // since `ctx.effect` can't observe a derived theme×active signal). The
+        // loop may not tick while the window is inactive (animation scheduler
+        // parked), so on deactivation hide the caret synchronously here and
+        // request a frame so it reaches a paint pass.
+        {
+            let state = self.state().clone();
+            let wa_signal = ctx.window_active_signal();
+            let theme_for_sel = theme_signal.clone();
+            ctx.effect(&wa_signal, move |&active| {
+                let mut st = state.borrow_mut();
+                st.window_active = active;
+                let theme = theme_for_sel.get();
+                st.engine
+                    .set_selection_color(field_selection_color(&theme.colors, active));
+                if active {
+                    // Reactivated: show the caret immediately if still focused
+                    // (restart the blink phase), rather than waiting one interval.
+                    if st.has_focus && !st.caret_visible.get() {
+                        st.caret_visible.set(true);
+                    }
+                    st.blink_last_toggle = None;
+                } else {
+                    // Deactivated: hide the caret synchronously (the frame loop
+                    // may not tick while the window is inactive).
+                    if st.caret_visible.get() {
+                        st.caret_visible.set(false);
+                    }
+                    st.blink_last_toggle = None;
+                }
+                if let Some(handle) = &st.frame_request {
+                    handle.set(true);
                 }
             });
         }
@@ -1191,7 +1240,10 @@ impl Widget for TextInputField {
             st.content_dirty = true;
         }
 
-        let caret_on = st.caret_visible.get() && st.has_focus;
+        // Suppress the caret in an inactive window for every paint — the
+        // authoritative gate, covering the frame between a window-active flip
+        // and the build-time effect running.
+        let caret_on = st.caret_visible.get() && st.has_focus && st.window_active;
         // `NoEcho` while masked lays out an *empty* source, so the real
         // document cursor (which may sit past 0) must not be handed to
         // the engine — pin the displayed caret/selection to the start.
@@ -1482,6 +1534,19 @@ fn paint_suffix_glyphs(canvas: &mut Canvas, frame: &bastyde_text::RenderFrame, o
     }
 }
 
+/// Selection-highlight colour for a text field: the vivid `selection_bg_active`
+/// while the host window is active, the muted `selection_bg_inactive` while it
+/// is inactive — so a field's selection desaturates in a background window
+/// (the universal desktop convention; the same `selection_bg_inactive` the OS
+/// uses for unfocused selection).
+fn field_selection_color(colors: &bastyde_tokens::ColorTokens, window_active: bool) -> [f32; 4] {
+    if window_active {
+        colors.selection_bg_active.to_array()
+    } else {
+        colors.selection_bg_inactive.to_array()
+    }
+}
+
 /// Simplified frame-loop tick for single-line text input.
 fn tick(state: &mut TextInputState, delta: f32) -> bool {
     if !state.pending_chars.is_empty() {
@@ -1492,7 +1557,11 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
 
     let had_events = state.drain_events();
 
-    let blinking_active = state.has_focus;
+    // Blink only when focused AND the host window is active — the caret hides
+    // in an inactive window (the universal desktop convention). The else-branch
+    // below then turns it off, since `!blinking_active` now also covers the
+    // window-inactive case.
+    let blinking_active = state.has_focus && state.window_active;
     if blinking_active {
         let now = std::time::Instant::now();
         let interval = std::time::Duration::from_secs_f32(CARET_BLINK_INTERVAL);
@@ -1802,4 +1871,85 @@ fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f3
         })
         .map(|w: f32| w * em)
         .sum()
+}
+
+#[cfg(test)]
+mod window_active_tests {
+    use super::*;
+    use bastyde_canvas::{Point, SizeProposal};
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use bastyde_core::signal::Signal;
+    use bastyde_core::widget_tree::WidgetTree;
+
+    #[test]
+    fn field_selection_color_swaps_on_window_active() {
+        let colors = bastyde_core::presets::intui::light().colors;
+        assert_eq!(
+            field_selection_color(&colors, true),
+            colors.selection_bg_active.to_array(),
+            "active window uses the vivid selection colour"
+        );
+        assert_eq!(
+            field_selection_color(&colors, false),
+            colors.selection_bg_inactive.to_array(),
+            "inactive window uses the muted selection colour"
+        );
+        assert_ne!(
+            field_selection_color(&colors, true),
+            field_selection_color(&colors, false)
+        );
+    }
+
+    #[test]
+    fn caret_hidden_when_window_inactive() {
+        let text = Signal::new("hello".to_string());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(TextInputField::new(text));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        let _ = tree.render();
+
+        // Reach the built field's shared state (created lazily in build()) to
+        // observe the caret-gate inputs directly — the caret paints as an
+        // engine-internal fill, not a top-level decoration.
+        let state = tree
+            .widget_as_any(id)
+            .and_then(|a| a.downcast_ref::<TextInputField>())
+            .map(|f| f.state().clone())
+            .expect("built TextInputField is reachable via as_any");
+
+        // Focus the field by clicking its centre.
+        let b = tree.bounds(id);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // One frame so the blink turns the caret on (on_focus sets it on; the
+        // 500 ms interval hasn't elapsed after a single 16 ms tick).
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert!(state.borrow().has_focus, "field took focus");
+        assert!(state.borrow().window_active);
+        assert!(
+            state.borrow().caret_visible.get(),
+            "caret visible when focused in an active window"
+        );
+
+        // Window blur: caret hidden (effect clears it synchronously).
+        tree.set_window_active(false);
+        assert!(!state.borrow().window_active);
+        assert!(
+            !state.borrow().caret_visible.get(),
+            "caret hidden while the window is inactive"
+        );
+
+        // Reactivate: caret returns immediately (field still holds focus).
+        tree.set_window_active(true);
+        assert!(
+            state.borrow().caret_visible.get(),
+            "caret restored on window reactivate"
+        );
+    }
 }

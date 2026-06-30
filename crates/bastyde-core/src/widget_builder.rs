@@ -1425,6 +1425,27 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).accept_long_press_buttons(mask)
     }
 
+    /// Dim this widget's subtree to `factor` opacity whenever the host window
+    /// is **inactive** (not focused / occluded), restoring full opacity when it
+    /// becomes active again. The opt-in, per-widget layer of the window-active
+    /// appearance model — for custom content an app wants to fade back when its
+    /// window isn't the active one. Stock widgets handle their own
+    /// inactive appearance (caret hiding, selection desaturation) and need no
+    /// wrapping. Layout- and a11y-transparent; the opacity snaps (no tween),
+    /// which is correct under `prefers-reduced-motion`. See
+    /// [`DimWhenInactive`](crate::dim_when_inactive::DimWhenInactive).
+    fn dim_when_inactive(self, factor: f32) -> crate::dim_when_inactive::DimWhenInactive {
+        crate::dim_when_inactive::DimWhenInactive::new()
+            .child(self)
+            .factor(factor)
+    }
+
+    /// [`dim_when_inactive`](Self::dim_when_inactive) with the default factor
+    /// ([`DEFAULT_DIM_FACTOR`](crate::dim_when_inactive::DEFAULT_DIM_FACTOR), 70 %).
+    fn dim_when_inactive_default(self) -> crate::dim_when_inactive::DimWhenInactive {
+        crate::dim_when_inactive::DimWhenInactive::new().child(self)
+    }
+
     fn on_drag(
         self,
         f: impl FnMut(DragPhase, &mut EventContext) + 'static,

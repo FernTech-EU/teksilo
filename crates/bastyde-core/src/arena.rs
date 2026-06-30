@@ -1261,6 +1261,23 @@ impl WidgetArena {
         }
     }
 
+    /// Mark every active node for repaint **without** touching layout, rebuild,
+    /// or the per-widget paint caches. Used for a global visual change that
+    /// leaves geometry untouched — the window's active-state flip (caret
+    /// hiding, selection desaturation, `DimWhenInactive`). Lighter than
+    /// [`Self::mark_all_dirty`]: the paint walker re-runs `paint()` for any
+    /// node whose `needs_paint` is set and overwrites its cache, so there is no
+    /// need to clear `cached_paint`; and skipping `needs_layout` avoids a
+    /// pointless relayout pass. Dormant nodes are skipped — they don't paint,
+    /// and they're re-marked on reactivation.
+    pub fn mark_all_needs_paint_only(&mut self) {
+        for (_, node) in self.nodes.iter_mut() {
+            if node.activation == ActivationState::Active {
+                node.dirty.needs_paint = true;
+            }
+        }
+    }
+
     /// Resolve the effective theme for a widget by walking ancestors and
     /// applying any theme overrides encountered along the way.
     /// The base theme is the tree-level default.
