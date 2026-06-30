@@ -351,15 +351,10 @@ impl Widget for DockActivityBar {
             let p = pos;
             pos += 1;
             model_indices.push(model_i);
-            let icon = self
-                .model
-                .side_active_dock(self.side, model_i)
-                .and_then(|d| self.model.dock_icon(d));
-            let label = self
-                .model
-                .side_active_dock(self.side, model_i)
-                .and_then(|d| self.model.dock_title(d))
-                .unwrap_or_else(|| lit!("Panel"));
+            // Label / icon: explicit activity title → primary (first
+            // non-collapsed) pane's dock → "Panel" / no-icon.
+            let icon = self.model.activity_icon(tab);
+            let label = self.model.activity_label(tab);
             let id = ctx.add(DockRailItem::new(
                 self.side,
                 model_i,
@@ -493,16 +488,24 @@ impl Widget for DockActivityBar {
                 .on_drag_leave(move |_ctx| indicator_leave.set(None))
                 .on_drop(move |payload, pos, ctx| {
                     indicator_drop.set(None);
+                    // A disabled side never mutates from a UI drop (Path 1 of the
+                    // mid-drag-disable race: without this the model silently
+                    // rejects but the side would still be revealed + the drop
+                    // consumed). The widget-destroyed path is handled in core.
+                    if !model.is_side_enabled(side) {
+                        return false;
+                    }
                     let bar = self_bounds_drop.get();
                     let shown =
                         shown_items(&item_bounds_drop, &model_indices_drop, &visible_count_drop);
                     let (vpos, _) = rail_insertion(pos.y, &shown, bar.y, bar.height);
                     // Visible insertion position → model tab index; past the
-                    // last shown item ⇒ the side's end.
+                    // last shown item ⇒ just after the last *visible* tab (not
+                    // past trailing hidden tabs).
                     let at = model_indices_drop
                         .get(vpos)
                         .copied()
-                        .unwrap_or_else(|| model.tab_count(side));
+                        .unwrap_or_else(|| model.side_append_index(side));
                     if let Some(tab_id) = dropped_dock_tab(&payload) {
                         model.move_tab(tab_id, side, at);
                         model.set_side_visible(side, true);
@@ -900,11 +903,7 @@ impl Widget for DockOverflowMenu {
             }
             let p = pos;
             pos += 1;
-            let label = self
-                .model
-                .side_active_dock(self.side, model_i)
-                .and_then(|d| self.model.dock_title(d))
-                .unwrap_or_else(|| lit!("Panel"));
+            let label = self.model.activity_label(tab);
             let row = ctx.add(DockOverflowRow::new(
                 self.side,
                 model_i,

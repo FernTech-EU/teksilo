@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bastyde_canvas::Size;
 use bastyde_core::signal::Signal;
-use bastyde_i18n::LocalizedString;
+use bastyde_core::widget::Widget;
+use bastyde_i18n::{LocalizedString, lit};
 use bastyde_settings::Versioned;
 use bastyde_tokens::Orientation;
 
@@ -25,6 +26,12 @@ pub use super::geometry::{CornerOwners, DockCorner, DockSide};
 
 /// Builds an icon for a dock widget's tab / rail item on demand.
 pub type DockIconFactory = Rc<dyn Fn() -> IconWidget>;
+
+/// Builds a dock's inline header-action widget (typically a row of
+/// `IconButton`s such as "New File" / "Collapse All") on demand. Shown inside
+/// the dock header, before the framework options (`⋮`) button — the VS Code
+/// "view actions" pattern. See [`DockWidget::header_actions`](super::DockWidget::header_actions).
+pub type DockHeaderActionsFactory = Rc<dyn Fn(DockWidgetId) -> Box<dyn Widget>>;
 
 /// Process-unique identity for a registered dock widget (the atomic unit).
 #[derive(
@@ -225,10 +232,16 @@ impl DockPolicy {
 pub(crate) struct DockWidgetMeta {
     pub title: LocalizedString,
     pub icon: Option<DockIconFactory>,
-    pub closable: bool,
     #[allow(dead_code)]
     pub min_size: Option<Size>,
     pub default: DockOpenLocation,
+    /// App-supplied inline header actions (e.g. "New File" / "Collapse All")
+    /// shown in the dock header before the `⋮` options button.
+    pub header_actions: Option<DockHeaderActionsFactory>,
+    /// Whether a **sole-pane** (bare) dock renders a header bar (title +
+    /// actions + `⋮`). The multi-pane Accordion header is always present; this
+    /// only governs the bare case. Default `false`.
+    pub show_header: bool,
 }
 
 /// One tab of a side's TabWidget: a `Splitter` arrangement of panes, each pane
@@ -350,6 +363,10 @@ struct Inner {
     docks: HashMap<DockWidgetId, DockWidgetMeta>,
     locations: HashMap<DockWidgetId, DockLoc>,
     open_sigs: HashMap<DockWidgetId, Signal<bool>>,
+    /// Per-activity `hidden` reflect signals (the context-menu checklist binds
+    /// these so the checkmark tracks live model state). Cached per `DockTabId`,
+    /// kept in sync by `sync_derived`. Mirrors `open_sigs`.
+    tab_hidden_sigs: HashMap<DockTabId, Signal<bool>>,
     corners: CornerOwners,
     /// App-declared lock policy (not persisted). Read by the widgets in
     /// `build()` to gate user affordances.
@@ -413,6 +430,7 @@ impl DockingModel {
             docks: HashMap::new(),
             locations: HashMap::new(),
             open_sigs: HashMap::new(),
+            tab_hidden_sigs: HashMap::new(),
             corners: CornerOwners::default(),
             policy: DockPolicy::default(),
             version: Signal::new(0),
@@ -454,6 +472,13 @@ impl DockingModel {
             }
             for (id, sig) in &inner.open_sigs {
                 updates_b.push((sig.clone(), inner.locations.contains_key(id)));
+            }
+            for (tab_id, sig) in &inner.tab_hidden_sigs {
+                let hidden = inner
+                    .sides
+                    .values()
+                    .any(|st| st.tabs.iter().any(|t| t.id == *tab_id && t.hidden));
+                updates_b.push((sig.clone(), hidden));
             }
         }
         for (sig, val) in updates_b {
@@ -676,14 +701,13 @@ impl DockingModel {
                     changed = true;
                     // If we just hid the selected tab, move selection to the
                     // nearest non-hidden tab (forward first, then backward).
+                    // When *no* tab is left visible (we hid the last one), reset
+                    // to a coherent `0` rather than leaving `selected_tab` on the
+                    // now-hidden index — otherwise the derived `selected_tab`
+                    // signal points at an absent tab and the strip's
+                    // `tw_selected` holds a `TabId` not in its visible list.
                     if hidden && st.selected_tab == ti {
-                        let n = st.tabs.len();
-                        let next = (ti + 1..n)
-                            .find(|&j| !st.tabs[j].hidden)
-                            .or_else(|| (0..ti).rev().find(|&j| !st.tabs[j].hidden));
-                        if let Some(j) = next {
-                            st.selected_tab = j;
-                        }
+                        st.selected_tab = Self::nearest_visible_tab(&st.tabs, ti + 1).unwrap_or(0);
                     }
                     break 'outer;
                 }
@@ -831,6 +855,17 @@ impl DockingModel {
             st.selected_tab = 0;
             st.visible = false;
         }
+    }
+
+    /// The nearest non-hidden tab index, searching forward from `from` and then
+    /// backward before it. `None` when every tab is hidden. Shared by
+    /// `set_tab_hidden` (re-home the selection off a just-hidden tab) and
+    /// `import_state` (clamp a persisted selection that landed on a hidden tab).
+    fn nearest_visible_tab(tabs: &[DockTab], from: usize) -> Option<usize> {
+        let n = tabs.len();
+        (from..n)
+            .find(|&j| !tabs[j].hidden)
+            .or_else(|| (0..from.min(n)).rev().find(|&j| !tabs[j].hidden))
     }
 
     /// Recompute `locations` for every dock on a side after structural edits.
@@ -1318,6 +1353,24 @@ impl DockingModel {
             .unwrap_or(0)
     }
 
+    /// The model index at which a whole-tab "append to this side" should insert:
+    /// just **after the last non-hidden tab**, so the appended tab reappears in
+    /// the right relative order even when hidden tabs trail in the model. Equal
+    /// to `tab_count` when no tab is hidden. Used by the whole-tab drop paths
+    /// (rail / strip / pane / empty-side) instead of a blind `tab_count`.
+    pub(crate) fn side_append_index(&self, side: DockSide) -> usize {
+        let inner = self.0.borrow();
+        match inner.sides.get(&side) {
+            Some(st) => st
+                .tabs
+                .iter()
+                .rposition(|t| !t.hidden)
+                .map(|i| i + 1)
+                .unwrap_or(st.tabs.len()),
+            None => 0,
+        }
+    }
+
     /// Title + icon for a registered dock (for tab / rail rendering).
     pub(crate) fn dock_title(&self, id: DockWidgetId) -> Option<LocalizedString> {
         self.0.borrow().docks.get(&id).map(|m| m.title.clone())
@@ -1325,15 +1378,6 @@ impl DockingModel {
 
     pub(crate) fn dock_icon(&self, id: DockWidgetId) -> Option<DockIconFactory> {
         self.0.borrow().docks.get(&id).and_then(|m| m.icon.clone())
-    }
-
-    pub(crate) fn dock_closable(&self, id: DockWidgetId) -> bool {
-        self.0
-            .borrow()
-            .docks
-            .get(&id)
-            .map(|m| m.closable)
-            .unwrap_or(true)
     }
 
     /// Snapshot a side's tabs for rendering.
@@ -1376,26 +1420,153 @@ impl DockingModel {
         None
     }
 
-    /// The active dock on a side (the first pane of the given tab), used to
-    /// derive a tab/rail label when none is explicit.
-    pub(crate) fn side_active_dock(&self, side: DockSide, tab_idx: usize) -> Option<DockWidgetId> {
-        let inner = self.0.borrow();
-        let st = inner.sides.get(&side)?;
-        let tab = st.tabs.get(tab_idx)?;
-        tab.panes.first().copied()
-    }
-
     /// The id of the tab at `idx` in a side's full tab list. The live inverse
     /// of [`select_tab_by_id`](Self::select_tab_by_id) — the strip's
     /// index → id selection sync uses it so both directions resolve against the
     /// *current* order and agree across a reorder (a build-time snapshot would
     /// disagree and feed back unboundedly).
-    pub(crate) fn side_tab_id_at(&self, side: DockSide, idx: usize) -> Option<DockTabId> {
+    pub fn tab_id_at(&self, side: DockSide, idx: usize) -> Option<DockTabId> {
         let inner = self.0.borrow();
         inner
             .sides
             .get(&side)
             .and_then(|st| st.tabs.get(idx).map(|t| t.id))
+    }
+
+    // ─── activity naming + label/icon derivation ───────────────────────────
+
+    /// The dock whose title + icon represent an activity in the rail / strip:
+    /// the first **non-collapsed** pane (so the label follows the panel the user
+    /// actually sees), falling back to the first pane.
+    pub(crate) fn primary_dock_of(view: &DockTabView) -> Option<DockWidgetId> {
+        view.panes
+            .iter()
+            .enumerate()
+            .find(|(i, _)| !view.splitter.is_collapsed(*i))
+            .map(|(_, d)| *d)
+            .or_else(|| view.panes.first().copied())
+    }
+
+    /// The displayed name for an activity: an explicit [`set_tab_title`](Self::set_tab_title)
+    /// override, else the primary pane's dock title, else the `"Panel"` fallback.
+    pub(crate) fn activity_label(&self, view: &DockTabView) -> LocalizedString {
+        view.title
+            .clone()
+            .or_else(|| Self::primary_dock_of(view).and_then(|d| self.dock_title(d)))
+            .unwrap_or_else(|| lit!("Panel"))
+    }
+
+    /// The icon for an activity: an explicit tab icon, else the primary pane's
+    /// dock icon, else `None` (rail / strip then fall back to the title initial).
+    pub(crate) fn activity_icon(&self, view: &DockTabView) -> Option<DockIconFactory> {
+        view.icon
+            .clone()
+            .or_else(|| Self::primary_dock_of(view).and_then(|d| self.dock_icon(d)))
+    }
+
+    /// Give an activity (tab) a stable, explicit name, independent of which dock
+    /// occupies pane 0 (e.g. a grouped "Source Control" activity holding a file
+    /// tree and a git pane). Pass `None` to clear it (the label then derives from
+    /// the primary dock again). App-config — reconstructed each run, like dock
+    /// titles; not persisted. Structural → rebuild.
+    pub fn set_tab_title(&self, tab_id: DockTabId, title: Option<LocalizedString>) {
+        let mut changed = false;
+        {
+            let mut inner = self.0.borrow_mut();
+            'outer: for st in inner.sides.values_mut() {
+                if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    tab.title = title;
+                    changed = true;
+                    break 'outer;
+                }
+            }
+        }
+        if changed {
+            self.notify();
+        }
+    }
+
+    /// The explicit title set on an activity (`None` when it derives from its
+    /// primary dock).
+    pub fn tab_title(&self, tab_id: DockTabId) -> Option<LocalizedString> {
+        let inner = self.0.borrow();
+        inner
+            .sides
+            .values()
+            .flat_map(|st| st.tabs.iter())
+            .find(|t| t.id == tab_id)
+            .and_then(|t| t.title.clone())
+    }
+
+    /// The activity (tab) currently holding a dock — apps hold stable
+    /// [`DockWidgetId`]s, so this is the bridge to address the enclosing tab.
+    pub fn activity_of(&self, dock_id: DockWidgetId) -> Option<DockTabId> {
+        let inner = self.0.borrow();
+        let loc = inner.locations.get(&dock_id)?;
+        inner
+            .sides
+            .get(&loc.side)
+            .and_then(|st| st.tabs.get(loc.tab_idx))
+            .map(|t| t.id)
+    }
+
+    /// Sugar: name the activity that currently holds `dock_id`. The natural way
+    /// to title a grouped activity from app code that holds the dock id.
+    pub fn set_dock_activity_title(
+        &self,
+        dock_id: DockWidgetId,
+        title: impl Into<LocalizedString>,
+    ) {
+        if let Some(tab_id) = self.activity_of(dock_id) {
+            self.set_tab_title(tab_id, Some(title.into()));
+        }
+    }
+
+    /// The enabled sides a tab / dock on `from` can be relocated to (every side
+    /// except `from`, keeping only [`is_side_enabled`](Self::is_side_enabled)).
+    /// The "Move to" menus iterate this so a disabled side is never offered as a
+    /// silently-rejected target.
+    pub fn enabled_move_targets(&self, from: DockSide) -> Vec<DockSide> {
+        DockSide::ALL
+            .into_iter()
+            .filter(|&s| s != from && self.is_side_enabled(s))
+            .collect()
+    }
+
+    /// A reactive `true`-while-hidden signal for an activity, cached per id —
+    /// the context-menu checklist binds it so its checkmark tracks live model
+    /// state (`set_tab_hidden` from any source updates it via `sync_derived`).
+    /// Mirrors [`dock_open_signal`](Self::dock_open_signal).
+    pub(crate) fn tab_hidden_signal(&self, tab_id: DockTabId) -> Signal<bool> {
+        let mut inner = self.0.borrow_mut();
+        let hidden = inner
+            .sides
+            .values()
+            .any(|st| st.tabs.iter().any(|t| t.id == tab_id && t.hidden));
+        inner
+            .tab_hidden_sigs
+            .entry(tab_id)
+            .or_insert_with(|| Signal::new(hidden))
+            .clone()
+    }
+
+    /// App-supplied inline header-action factory for a dock, if declared.
+    pub(crate) fn dock_header_actions(&self, id: DockWidgetId) -> Option<DockHeaderActionsFactory> {
+        self.0
+            .borrow()
+            .docks
+            .get(&id)
+            .and_then(|m| m.header_actions.clone())
+    }
+
+    /// Whether a sole-pane (bare) dock should render its own header bar.
+    pub(crate) fn dock_show_header(&self, id: DockWidgetId) -> bool {
+        self.0
+            .borrow()
+            .docks
+            .get(&id)
+            .map(|m| m.show_header)
+            .unwrap_or(false)
     }
 
     // ─── persistence ───────────────────────────────────────────────────
@@ -1479,10 +1650,16 @@ impl DockingModel {
                         });
                     }
                 }
+                // Clamp the persisted selection into range, then re-home it off
+                // a hidden tab onto the nearest visible one. A session that was
+                // closed with a hidden tab selected would otherwise restore with
+                // `selected_tab` pointing at a hidden tab — no active highlight
+                // in the rail, a wrong roving tab-stop — until the first click.
                 let selected_tab = if tabs.is_empty() {
                     0
                 } else {
-                    dto.selected_tab.min(tabs.len() - 1)
+                    let clamped = dto.selected_tab.min(tabs.len() - 1);
+                    Self::nearest_visible_tab(&tabs, clamped).unwrap_or(clamped)
                 };
                 if let Some(st) = inner.sides.get_mut(&side) {
                     st.presentation = dto.presentation;
@@ -1526,9 +1703,10 @@ mod tests {
             DockWidgetMeta {
                 title: lit!("Dock"),
                 icon: None,
-                closable: true,
                 min_size: None,
                 default: DockOpenLocation::side(side),
+                header_actions: None,
+                show_header: false,
             },
         );
         id
@@ -1780,9 +1958,10 @@ mod tests {
             DockWidgetMeta {
                 title: lit!("A"),
                 icon: None,
-                closable: true,
                 min_size: None,
                 default: DockOpenLocation::side(DockSide::Leading),
+                header_actions: None,
+                show_header: false,
             },
         );
         m2.register_meta(
@@ -1790,9 +1969,10 @@ mod tests {
             DockWidgetMeta {
                 title: lit!("B"),
                 icon: None,
-                closable: true,
                 min_size: None,
                 default: DockOpenLocation::side(DockSide::Bottom),
+                header_actions: None,
+                show_header: false,
             },
         );
         m2.import_state(&state);
@@ -2078,9 +2258,10 @@ mod tests {
                 DockWidgetMeta {
                     title: lit!("Dock"),
                     icon: None,
-                    closable: true,
                     min_size: None,
                     default: DockOpenLocation::side(DockSide::Leading),
+                    header_actions: None,
+                    show_header: false,
                 },
             );
         }
@@ -2092,5 +2273,228 @@ mod tests {
             DockRailItemSize::Labeled
         );
         assert_eq!(m2.side_tab_display(DockSide::Leading), DockTabDisplay::Icon);
+    }
+
+    // ─── selection coherence: hiding / importing onto a hidden tab ─────────
+
+    #[test]
+    fn hiding_the_only_visible_tab_resets_selection_to_zero() {
+        // Bug #1: hiding the last visible activity used to leave `selected_tab`
+        // pointing at the now-hidden tab, so the strip's `tw_selected` held a
+        // TabId absent from its (empty) list. Selection must land on a coherent
+        // value (0) instead.
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        let b = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+        let (ta, tb) = {
+            let t = m.side_tabs(DockSide::Leading);
+            (t[0].id, t[1].id)
+        };
+        // Hide both — the second hide makes the side have zero visible tabs.
+        m.set_tab_hidden(ta, true);
+        m.select_tab_by_id(DockSide::Leading, tb);
+        assert_eq!(m.side_selected_tab(DockSide::Leading), 1);
+        m.set_tab_hidden(tb, true);
+        assert_eq!(m.side_visible_tab_count(DockSide::Leading), 0);
+        assert_eq!(
+            m.side_selected_tab(DockSide::Leading),
+            0,
+            "selection resets to a coherent index when no tab is visible"
+        );
+    }
+
+    #[test]
+    fn import_state_clamps_selection_off_a_hidden_tab() {
+        // Bug #5: a session persisted with a hidden tab selected used to restore
+        // with `selected_tab` on the hidden tab. import must re-home it onto a
+        // visible tab.
+        let m = model();
+        let a = reg(&m, DockSide::Bottom);
+        let b = reg(&m, DockSide::Bottom);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        m.open_dock(b, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        // Select tab 1 (b), then hide it: selection moves to a (0) and b stays
+        // hidden. Forge a state that *says* selected = 1 (the hidden tab).
+        let tb = m.side_tabs(DockSide::Bottom)[1].id;
+        m.set_tab_hidden(tb, true);
+        let mut state = m.export_state();
+        state.bottom.selected_tab = 1; // hidden tab b
+
+        let m2 = model();
+        for id in [a, b] {
+            m2.register_meta(
+                id,
+                DockWidgetMeta {
+                    title: lit!("Dock"),
+                    icon: None,
+                    min_size: None,
+                    default: DockOpenLocation::side(DockSide::Bottom),
+                    header_actions: None,
+                    show_header: false,
+                },
+            );
+        }
+        m2.import_state(&state);
+        assert_eq!(
+            m2.side_selected_tab(DockSide::Bottom),
+            0,
+            "selection clamped onto the visible tab, not the hidden one"
+        );
+    }
+
+    // ─── #6: append after the last *visible* tab (not past hidden ones) ────
+
+    #[test]
+    fn side_append_index_lands_after_last_visible_tab() {
+        let m = model();
+        let a = reg(&m, DockSide::Bottom);
+        let b = reg(&m, DockSide::Bottom);
+        let c = reg(&m, DockSide::Bottom);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        m.open_dock(b, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        m.open_dock(c, DockOpenLocation::side(DockSide::Bottom).new_tab());
+        // Hide the trailing two (b, c) → only a visible at model index 0.
+        let (tb, tc) = {
+            let t = m.side_tabs(DockSide::Bottom);
+            (t[1].id, t[2].id)
+        };
+        m.set_tab_hidden(tb, true);
+        m.set_tab_hidden(tc, true);
+        // Appending must land at index 1 (right after the last visible tab a),
+        // NOT at 3 (past the trailing hidden b, c).
+        assert_eq!(m.side_append_index(DockSide::Bottom), 1);
+    }
+
+    #[test]
+    fn move_tab_appends_before_trailing_hidden_tabs() {
+        // A whole-tab move that "appends to the side" must land before any
+        // trailing hidden tabs, so order is preserved when they are restored.
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        let b = reg(&m, DockSide::Leading);
+        let mover = reg(&m, DockSide::Trailing);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(mover, DockOpenLocation::side(DockSide::Trailing).new_tab());
+        // Hide b on the leading side (it trails a in the model).
+        let tb = m.side_tabs(DockSide::Leading)[1].id;
+        m.set_tab_hidden(tb, true);
+        // Move `mover` to leading, appending after the last visible tab (a).
+        let mover_tab = m.side_tabs(DockSide::Trailing)[0].id;
+        m.move_tab(
+            mover_tab,
+            DockSide::Leading,
+            m.side_append_index(DockSide::Leading),
+        );
+        // Restore b and verify order: [a, mover, b] — mover before the hidden b.
+        m.set_tab_hidden(tb, false);
+        let order: Vec<_> = m
+            .side_tabs(DockSide::Leading)
+            .iter()
+            .map(|t| t.panes[0])
+            .collect();
+        assert_eq!(order, vec![a, mover, b], "moved tab sits before hidden b");
+    }
+
+    // ─── naming + primary-pane label derivation ────────────────────────────
+
+    #[test]
+    fn set_tab_title_overrides_the_derived_label() {
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        let tab = m.side_tabs(DockSide::Leading)[0].id;
+        assert_eq!(m.activity_of(a), Some(tab));
+        assert!(m.tab_title(tab).is_none());
+        m.set_dock_activity_title(a, lit!("Source Control"));
+        assert_eq!(
+            m.tab_title(tab).unwrap().resolve_now(),
+            "Source Control",
+            "explicit activity title set via the dock id"
+        );
+        let view = m.side_tabs(DockSide::Leading)[0].clone();
+        assert_eq!(m.activity_label(&view).resolve_now(), "Source Control");
+    }
+
+    #[test]
+    fn activity_label_follows_first_non_collapsed_pane() {
+        // A grouped activity's label tracks the first *non-collapsed* pane, so
+        // collapsing the lead pane surfaces the next pane's title.
+        let m = model();
+        let a = DockWidgetId::fresh();
+        let b = DockWidgetId::fresh();
+        m.register_meta(
+            a,
+            DockWidgetMeta {
+                title: lit!("Alpha"),
+                icon: None,
+                min_size: None,
+                default: DockOpenLocation::side(DockSide::Leading),
+                header_actions: None,
+                show_header: false,
+            },
+        );
+        m.register_meta(
+            b,
+            DockWidgetMeta {
+                title: lit!("Beta"),
+                icon: None,
+                min_size: None,
+                default: DockOpenLocation::side(DockSide::Leading),
+                header_actions: None,
+                show_header: false,
+            },
+        );
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        m.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+        let view = m.side_tabs(DockSide::Leading)[0].clone();
+        assert_eq!(m.activity_label(&view).resolve_now(), "Alpha");
+        // Collapse pane 0 → the label follows pane 1 (Beta).
+        view.splitter.set_collapsed(0, true);
+        let view = m.side_tabs(DockSide::Leading)[0].clone();
+        assert_eq!(
+            m.activity_label(&view).resolve_now(),
+            "Beta",
+            "label follows the first non-collapsed pane"
+        );
+    }
+
+    // ─── side availability ─────────────────────────────────────────────────
+
+    #[test]
+    fn enabled_move_targets_excludes_self_and_disabled() {
+        let m = model();
+        assert_eq!(
+            m.enabled_move_targets(DockSide::Leading),
+            vec![DockSide::Trailing, DockSide::Top, DockSide::Bottom]
+        );
+        m.set_side_enabled(DockSide::Bottom, false);
+        assert_eq!(
+            m.enabled_move_targets(DockSide::Leading),
+            vec![DockSide::Trailing, DockSide::Top],
+            "a disabled side is never a move target"
+        );
+        m.set_side_enabled(DockSide::Top, false);
+        m.set_side_enabled(DockSide::Trailing, false);
+        assert!(
+            m.enabled_move_targets(DockSide::Leading).is_empty(),
+            "no enabled target → empty (the Move-to entry is then omitted)"
+        );
+    }
+
+    #[test]
+    fn tab_hidden_signal_tracks_live_state() {
+        let m = model();
+        let a = reg(&m, DockSide::Leading);
+        m.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+        let tab = m.side_tabs(DockSide::Leading)[0].id;
+        let sig = m.tab_hidden_signal(tab);
+        assert!(!sig.get());
+        m.set_tab_hidden(tab, true);
+        assert!(sig.get(), "signal follows an external set_tab_hidden");
+        m.set_tab_hidden(tab, false);
+        assert!(!sig.get());
     }
 }

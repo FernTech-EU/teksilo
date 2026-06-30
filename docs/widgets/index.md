@@ -9,6 +9,7 @@ Every public widget in `bastyde-widgets`, grouped by category. Each page links t
 
 - [AspectRatio](aspect_ratio.md) — AspectRatio — a single-child wrapper that constrains layout to a fixed
 - [Center](center.md) — Center — a single-child wrapper that centers its child within the available
+- [DeadZone](dead_zone.md) — `DeadZone` — a gesture **dead zone** wrapper
 - [Divider](divider.md) — Divider — a themed separator line that visually partitions content
 - [Expand](expand.md) — Expand — a layout modifier that claims slack space in a stack and
 - [FixedSize](fixed_size.md) — FixedSize — a layout modifier that pins a child to its natural size,

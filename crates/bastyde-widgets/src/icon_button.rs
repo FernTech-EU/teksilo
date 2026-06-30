@@ -487,6 +487,17 @@ impl IconButton {
             .has_popup(bastyde_core::accesskit::HasPopup::Menu)
     }
 
+    /// "More actions" / overflow button — three **vertical** dots (the kebab
+    /// `⋮`). The conventional trigger for a per-item options menu (view-header
+    /// `…`, list-row overflow). Advertises `HasPopup::Menu` for assistive
+    /// technology. Pair with a `PopoverIconButton` + `MenuList` (use `.bare()`
+    /// so the menu isn't wrapped in a second popover surface).
+    pub fn more() -> Self {
+        Self::new((BuiltInIcons::global().more)())
+            .tooltip(bastyde_i18n::tr_widget!(a11y_builtin_more()))
+            .has_popup(bastyde_core::accesskit::HasPopup::Menu)
+    }
+
     /// Visibility toggle (eye / eye-off). Toggles password visibility.
     /// Uses the icon-swap bistate mode internally — the icon advertises
     /// the **expected action**, matching the prevailing password-field
@@ -881,6 +892,7 @@ pub struct BuiltInIcons {
     pub eye: fn() -> IconWidget,
     pub eye_off: fn() -> IconWidget,
     pub menu: fn() -> IconWidget,
+    pub more: fn() -> IconWidget,
 }
 
 static GLOBAL_ICONS: OnceLock<BuiltInIcons> = OnceLock::new();
@@ -899,6 +911,7 @@ impl BuiltInIcons {
             eye: default_eye_icon,
             eye_off: default_eye_off_icon,
             menu: default_menu_icon,
+            more: default_more_icon,
         }
     }
 
@@ -994,6 +1007,10 @@ fn default_eye_off_icon() -> IconWidget {
 
 fn default_menu_icon() -> IconWidget {
     IconWidget::from_svg(include_str!("../resources/icons/builtin-menu.svg"))
+}
+
+fn default_more_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-more.svg"))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

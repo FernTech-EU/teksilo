@@ -1822,3 +1822,127 @@ fn keyboard_input_makes_focus_visible_pointer_input_clears_it() {
         "pointer input turns :focus-visible off"
     );
 }
+
+// ─── dock header / options button (obs 1) ──────────────────────────────────
+
+/// Whether any laid-out node in the subtree carries the given AT name.
+fn has_named(tree: &WidgetTree, id: WidgetId, name: &str) -> bool {
+    let n = tree.accessibility_node(id);
+    if n.name() == Some(name) && tree.bounds(id).height > 0.0 {
+        return true;
+    }
+    tree.children(id).iter().any(|&c| has_named(tree, c, name))
+}
+
+#[test]
+fn bare_dock_shows_options_header_only_when_opted_in() {
+    // show_header(true): a sole-pane dock gets a header carrying the `⋮`
+    // options button (access label "More actions: <title>").
+    let model = DockingModel::new();
+    let (id, dw) = dock("Explorer");
+    let dw = dw.show_header(true);
+    let layout = DockingLayout::new(model.clone())
+        .center(FixedLeaf(400.0, 300.0))
+        .dock(dw);
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    let mut t = tree();
+    let root = t.add(layout);
+    t.layout(SizeProposal::exact(900.0, 600.0));
+    assert!(
+        has_named(&t, root, "More actions: Explorer"),
+        "show_header(true) ⇒ a bare dock has the ⋮ options button"
+    );
+}
+
+#[test]
+fn bare_dock_has_no_options_header_by_default() {
+    let model = DockingModel::new();
+    let (id, dw) = dock("Explorer"); // show_header defaults off
+    let layout = DockingLayout::new(model.clone())
+        .center(FixedLeaf(400.0, 300.0))
+        .dock(dw);
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    let mut t = tree();
+    let root = t.add(layout);
+    t.layout(SizeProposal::exact(900.0, 600.0));
+    assert!(
+        !has_named(&t, root, "More actions: Explorer"),
+        "a bare dock is headerless unless show_header(true)"
+    );
+}
+
+#[test]
+fn split_pane_docks_each_get_an_options_button() {
+    // Two stacked docks → a split (Accordion per pane), each accordion header
+    // carrying its own `⋮` options button.
+    let model = DockingModel::new();
+    let (id_a, a) = dock("Explorer");
+    let (id_b, b) = dock("Search");
+    let layout = DockingLayout::new(model.clone())
+        .center(FixedLeaf(400.0, 300.0))
+        .dock(a)
+        .dock(b);
+    model.open_dock(id_a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(id_b, DockOpenLocation::side(DockSide::Leading).stack());
+    let mut t = tree();
+    let root = t.add(layout);
+    t.layout(SizeProposal::exact(900.0, 600.0));
+    assert!(has_named(&t, root, "More actions: Explorer"));
+    assert!(has_named(&t, root, "More actions: Search"));
+}
+
+#[test]
+fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
+    // The dock-header action cluster (app `header_actions` + the ⋮ options
+    // button) must follow the accordion header's axis: a horizontal row on
+    // leading / trailing sides (vertical header), and a *vertical* column on
+    // top / bottom sides (rotated vertical header strip) — otherwise the
+    // buttons lay out horizontally and overflow the narrow strip.
+    use crate::icon_button::IconButton;
+    use bastyde_core::WidgetBuilder;
+
+    // Returns (action-button center, ⋮-button center) for a two-pane split dock
+    // opened on `side`, the first pane carrying a findable header action.
+    fn centers(side: DockSide) -> ((f32, f32), (f32, f32)) {
+        let model = DockingModel::new();
+        let id_a = DockWidgetId::fresh();
+        let id_b = DockWidgetId::fresh();
+        let a = DockWidget::new(id_a, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0))
+            .header_actions(|_| IconButton::menu().access_label(lit!("ActX")));
+        let b = DockWidget::new(id_b, lit!("Search"), |_| FixedLeaf(120.0, 120.0));
+        let layout = DockingLayout::new(model.clone())
+            .center(FixedLeaf(400.0, 300.0))
+            .dock(a)
+            .dock(b);
+        model.open_dock(id_a, DockOpenLocation::side(side));
+        model.open_dock(id_b, DockOpenLocation::side(side).stack());
+        let mut t = tree();
+        let root = t.add(layout);
+        t.layout(SizeProposal::exact(1000.0, 700.0));
+        let act = find_named(&t, root, "ActX").expect("action button laid out");
+        let more = find_named(&t, root, "More actions: Explorer").expect("⋮ button laid out");
+        let center = |id| {
+            let b = t.bounds(id);
+            (b.x + b.width / 2.0, b.y + b.height / 2.0)
+        };
+        (center(act), center(more))
+    }
+
+    // Leading side → vertical header → horizontal cluster (HStack): the two
+    // buttons are separated mostly along x.
+    let (la, lm) = centers(DockSide::Leading);
+    let (ldx, ldy) = ((la.0 - lm.0).abs(), (la.1 - lm.1).abs());
+    assert!(
+        ldx > ldy,
+        "leading-side cluster is a horizontal row (dx {ldx} > dy {ldy})"
+    );
+
+    // Top side → rotated vertical header → vertical cluster (VStack): the two
+    // buttons are separated mostly along y (the regression this guards).
+    let (ta, tm) = centers(DockSide::Top);
+    let (tdx, tdy) = ((ta.0 - tm.0).abs(), (ta.1 - tm.1).abs());
+    assert!(
+        tdy > tdx,
+        "top-side cluster is a vertical column (dy {tdy} > dx {tdx})"
+    );
+}

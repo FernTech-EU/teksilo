@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
+use bastyde_core::WidgetBuilder;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
@@ -22,23 +23,31 @@ use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
-use crate::accordion::{Accordion, AccordionOrientation};
+use crate::accordion::{
+    ACCORDION_FILL_HEADER_EXTENT, ACCORDION_HEADER_PADDING_HORIZONTAL, Accordion,
+    AccordionOrientation,
+};
 use crate::drop_target::DropTarget;
-use crate::icon_button::IconButton;
+use crate::icon_button::{IconButton, IconButtonSize};
 use crate::popover_widget::PopoverIconButton;
-use crate::primitives::{Center, IconWidget, RectWidget, TextWidget, ZStack};
+use crate::primitives::{
+    Center, Divider, Expand, HStack, IconWidget, MinSize, Padding, RectWidget, Spacer, TextWidget,
+    VStack, ZStack,
+};
 use crate::splitter::Splitter;
 use bastyde_core::overlay::OverlayPlacement;
 
-use super::context_menu::{DockMenuKind, activity_context_menu, background_menu};
+use super::context_menu::{
+    DockMenuKind, activity_context_menu, background_menu, dock_has_options, dock_options_menu,
+};
 use super::drag::{
     DockDragData, DockDropOverlay, DropZone, compute_drop_zone, dropped_dock_tab,
     dropped_dock_widget,
 };
 use super::geometry::DockSide;
 use super::model::{
-    DockIconFactory, DockOpenLocation, DockTabId, DockTabView, DockWidgetId, DockWidgetMeta,
-    DockingModel, side_orientation,
+    DockHeaderActionsFactory, DockIconFactory, DockOpenLocation, DockTabId, DockTabView,
+    DockWidgetId, DockWidgetMeta, DockingModel, side_orientation,
 };
 
 /// Builds a dock widget's content on demand (keyed by its [`DockWidgetId`]).
@@ -50,9 +59,10 @@ pub struct DockWidget {
     id: DockWidgetId,
     title: LocalizedString,
     icon: Option<DockIconFactory>,
-    closable: bool,
     default: DockOpenLocation,
     factory: DockContentFactory,
+    header_actions: Option<DockHeaderActionsFactory>,
+    show_header: bool,
 }
 
 impl DockWidget {
@@ -67,9 +77,10 @@ impl DockWidget {
             id,
             title: title.into(),
             icon: None,
-            closable: true,
             default: DockOpenLocation::side(DockSide::Leading),
             factory: Rc::new(move |i| Box::new(factory(i)) as Box<dyn Widget>),
+            header_actions: None,
+            show_header: false,
         }
     }
 
@@ -79,9 +90,28 @@ impl DockWidget {
         self
     }
 
-    /// Whether the dock shows a close affordance (default `true`).
-    pub fn closable(mut self, closable: bool) -> Self {
-        self.closable = closable;
+    /// Attach a factory for the dock's **inline header actions** — a widget
+    /// (typically an `HStack` of [`IconButton`]s) shown in the dock header
+    /// before the `⋮` options button, the VS Code "view actions" pattern
+    /// ("New File", "Collapse All", …). Built on demand each time the dock is
+    /// placed into a header. The actions appear in any header the dock has: the
+    /// multi-pane [`Accordion`] header always, and the sole-pane (bare) header
+    /// when [`show_header(true)`](Self::show_header) is set.
+    pub fn header_actions<W: Widget + 'static>(
+        mut self,
+        f: impl Fn(DockWidgetId) -> W + 'static,
+    ) -> Self {
+        self.header_actions = Some(Rc::new(move |i| Box::new(f(i)) as Box<dyn Widget>));
+        self
+    }
+
+    /// Give a **sole-pane** (bare) dock its own header bar (title + actions +
+    /// `⋮` options). Default `false`. The multi-pane Accordion header is always
+    /// present regardless; this only governs the bare case. Turn it on to get a
+    /// discoverable options button (and inline `header_actions`) on a dock that
+    /// is the only one on its side.
+    pub fn show_header(mut self, show: bool) -> Self {
+        self.show_header = show;
         self
     }
 
@@ -102,9 +132,10 @@ impl DockWidget {
             DockWidgetMeta {
                 title: self.title,
                 icon: self.icon,
-                closable: self.closable,
                 min_size: None,
                 default: self.default,
+                header_actions: self.header_actions,
+                show_header: self.show_header,
             },
             self.factory,
         )
@@ -195,6 +226,9 @@ fn empty_side_drop_target(
             .child_id(label)
             .accept_when(|p| dropped_dock_tab(p).is_some() || dropped_dock_widget(p).is_some())
             .on_drop(move |p, _pos, ctx| {
+                if !m.is_side_enabled(side) {
+                    return false;
+                }
                 if let Some(tab_id) = dropped_dock_tab(&p) {
                     m.move_tab(tab_id, side, 0);
                     m.set_side_visible(side, true);
@@ -294,7 +328,7 @@ impl Widget for DockSidePanel {
             let side = self.side;
             let tw = tw_selected.clone();
             ctx.effect(&dock_selected, move |&idx| {
-                let target = model.side_tab_id_at(side, idx).map(|id| {
+                let target = model.tab_id_at(side, idx).map(|id| {
                     TabId::from_raw(NonZeroU64::new(id.raw()).unwrap_or(NonZeroU64::MIN))
                 });
                 if tw.get() != target {
@@ -334,19 +368,10 @@ impl Widget for DockSidePanel {
         let mut handles: Vec<TabHandle> = Vec::with_capacity(model_indices.len());
         for &model_i in &model_indices {
             let tab = &all_tabs[model_i];
-            let label = tab
-                .title
-                .clone()
-                .or_else(|| {
-                    self.model
-                        .side_active_dock(self.side, model_i)
-                        .and_then(|d| self.model.dock_title(d))
-                })
-                .unwrap_or_else(|| lit!("Panel"));
-            let icon_factory = self
-                .model
-                .side_active_dock(self.side, model_i)
-                .and_then(|d| self.model.dock_icon(d));
+            // Label / icon: explicit activity title (set_tab_title) → primary
+            // (first non-collapsed) pane's dock → "Panel" / no-icon.
+            let label = self.model.activity_label(tab);
+            let icon_factory = self.model.activity_icon(tab);
 
             // Each tab declares its title + icon; the bar's reactive
             // `tab_display` (wired below from the side's "Tab size" pref) decides
@@ -385,7 +410,14 @@ impl Widget for DockSidePanel {
         // tab indices (a no-op when nothing is hidden) for `move_tab`.
         let ext_indices = model_indices.clone();
         let ext_model = self.model.clone();
-        let total_tabs = all_tab_ids.len();
+        // Appending past the last visible tab must land just **after the last
+        // visible tab's model index**, not at the absolute end — otherwise a
+        // dropped/promoted tab is ordered after any trailing *hidden* tabs and
+        // reappears out of place when they are restored.
+        let after_last_visible = model_indices
+            .last()
+            .map(|&i| i + 1)
+            .unwrap_or(all_tab_ids.len());
 
         let policy = self.model.policy();
         let mut tw = TabWidget::new(tw_selected)
@@ -420,7 +452,13 @@ impl Widget for DockSidePanel {
             // unconditionally — when a lock is on, the gated source simply never
             // produces the matching payload, so the branch is inert.)
             .on_external_drop(move |payload, idx, ctx| {
-                let at = ext_indices.get(idx).copied().unwrap_or(total_tabs);
+                // A disabled side never mutates from a UI drop (its panel isn't
+                // even built — this keeps that a local invariant rather than
+                // consuming the drop while the model silently rejects it).
+                if !ext_model.is_side_enabled(side) {
+                    return false;
+                }
+                let at = ext_indices.get(idx).copied().unwrap_or(after_last_visible);
                 if let Some(tab_id) = dropped_dock_tab(payload) {
                     ext_model.move_tab(tab_id, side, at);
                     ctx.request_accessibility_update();
@@ -447,7 +485,10 @@ impl Widget for DockSidePanel {
                 .accept_external_tabs(true)
                 // Same-side reorder.
                 .on_reorder(move |tid, dest, _ctx| {
-                    let at = reorder_indices.get(dest).copied().unwrap_or(total_tabs);
+                    let at = reorder_indices
+                        .get(dest)
+                        .copied()
+                        .unwrap_or(after_last_visible);
                     reorder_model.move_tab(DockTabId::from_raw(tid.raw().get()), side, at);
                 })
                 // Cross-side drop: relocate the whole tab to this side.
@@ -455,7 +496,7 @@ impl Widget for DockSidePanel {
                     if let Some(p) =
                         (handle.payload.as_ref() as &dyn Any).downcast_ref::<DockTabPayload>()
                     {
-                        let at = recv_indices.get(idx).copied().unwrap_or(total_tabs);
+                        let at = recv_indices.get(idx).copied().unwrap_or(after_last_visible);
                         recv_model.move_tab(p.tab_id, side, at);
                         ctx.request_accessibility_update();
                     }
@@ -496,10 +537,13 @@ impl Widget for DockSidePanel {
                     DropFeedback::NoFeedback
                 })
                 .on_drop(move |payload, _pos, ctx| {
+                    if !drop_model.is_side_enabled(drop_side) {
+                        return false;
+                    }
                     // A drop landing on non-pane chrome (the strip, gaps): a tab
                     // relocates to this side; a single dock joins it too.
                     if let Some(tab_id) = dropped_dock_tab(&payload) {
-                        let at = drop_model.tab_count(drop_side);
+                        let at = drop_model.side_append_index(drop_side);
                         drop_model.move_tab(tab_id, drop_side, at);
                         ctx.request_accessibility_update();
                         true
@@ -678,8 +722,16 @@ impl DockTabContentWidget {
         splitter: Option<&crate::splitter::SplitterModel>,
     ) -> WidgetId {
         let content = self.build_dock_content(ctx, dock);
+        let multi_pane = splitter.is_some();
         let Some(splitter) = splitter else {
-            return content;
+            // Sole-pane (bare) dock. By default it renders headerless (the side
+            // tab / rail is its header). Opting in (`DockWidget::show_header`)
+            // gives it a VS Code–style header bar carrying its own actions + the
+            // `⋮` options menu.
+            if !self.model.dock_show_header(dock) {
+                return content;
+            }
+            return self.build_bare_dock_header(ctx, dock, content);
         };
         let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
         // Initial expanded state follows the Splitter (so a rebuild preserves a
@@ -701,6 +753,11 @@ impl DockTabContentWidget {
                 },
             )
             .fill(true);
+        // The dock's header actions (app-supplied) + the framework `⋮` options
+        // menu sit in the accordion header's trailing slot.
+        if let Some(trailing) = self.dock_header_trailing(ctx, dock, multi_pane) {
+            accordion = accordion.trailing_id(trailing);
+        }
         // The accordion header is the dock's drag handle — only when the policy
         // allows dragging a single dock out of a split pane.
         if self.model.policy().allow_dock_drag {
@@ -709,6 +766,98 @@ impl DockTabContentWidget {
             });
         }
         ctx.add(accordion.content_id(content))
+    }
+
+    /// Build the trailing cluster of a dock header — the app's inline
+    /// `header_actions` (if any) followed by the framework `⋮` options button
+    /// ([`dock_options_menu`]). Returns `None` when there is nothing to show
+    /// (no app actions and an empty options menu).
+    fn dock_header_trailing(
+        &self,
+        ctx: &mut BuildContext,
+        dock: DockWidgetId,
+        multi_pane: bool,
+    ) -> Option<WidgetId> {
+        let actions = self.model.dock_header_actions(dock);
+        let has_options = dock_has_options(&self.model, self.side, multi_pane);
+        if actions.is_none() && !has_options {
+            return None;
+        }
+        let mut kids: Vec<WidgetId> = Vec::new();
+        if let Some(factory) = actions {
+            kids.push(ctx.add_boxed(factory(dock)));
+        }
+        if has_options {
+            let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+            let menu = dock_options_menu(&self.model, self.side, self.tab.id, dock, multi_pane);
+            let options = PopoverIconButton::new(IconButton::more().size(IconButtonSize::Compact))
+                // `.bare()` so the `MenuList` is the popover content directly,
+                // not wrapped in a second popover surface (a menu-on-a-popover).
+                .bare()
+                .content(menu)
+                .placement(OverlayPlacement::BelowPreferred)
+                .access_label(lit!(format!("More actions: {}", title.resolve_now())));
+            kids.push(ctx.add(options));
+        }
+        // Top / bottom sides render the accordion header as a rotated *vertical*
+        // strip (`AccordionOrientation::Horizontal`), so the action cluster must
+        // stack vertically there; leading / trailing sides keep the horizontal
+        // header row and an `HStack`.
+        let vertical_header =
+            side_orientation(self.side) == bastyde_tokens::Orientation::Horizontal;
+        let cluster = if vertical_header {
+            let mut col = VStack::new().spacing(2.0);
+            for k in kids {
+                col = col.add_child(k);
+            }
+            ctx.add(col)
+        } else {
+            let mut row = HStack::new().spacing(2.0);
+            for k in kids {
+                row = row.add_child(k);
+            }
+            ctx.add(row)
+        };
+        Some(cluster)
+    }
+
+    /// The sole-pane dock header bar (opt-in via `DockWidget::show_header`):
+    /// `[title] [Spacer] [actions + ⋮]` above the content, matching the VS Code
+    /// view-header layout. Always a horizontal bar regardless of side.
+    fn build_bare_dock_header(
+        &self,
+        ctx: &mut BuildContext,
+        dock: DockWidgetId,
+        content: WidgetId,
+    ) -> WidgetId {
+        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        let title_id = ctx.add(
+            TextWidget::new(title)
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary)
+                .single_line(),
+        );
+        let spacer_id = ctx.add(Spacer::new());
+        let mut row = HStack::new()
+            .spacing(2.0)
+            .add_child(title_id)
+            .add_child(spacer_id);
+        if let Some(trailing) = self.dock_header_trailing(ctx, dock, false) {
+            row = row.add_child(trailing);
+        }
+        let row_id = ctx.add(row);
+        let padded =
+            ctx.add(Padding::symmetric(2.0, ACCORDION_HEADER_PADDING_HORIZONTAL).child_id(row_id));
+        // Fixed-height header bar (matching the Accordion header extent) with a
+        // 1 dp divider beneath it, above the content.
+        let header = ctx.add(MinSize::new(0.0, ACCORDION_FILL_HEADER_EXTENT).child_id(padded));
+        let divider = ctx.add(Divider::horizontal());
+        ctx.add(
+            VStack::new()
+                .add_child(header)
+                .add_child(divider)
+                .child(Expand::new().flex(1.0).child_id(content)),
+        )
     }
 }
 
@@ -798,8 +947,10 @@ impl Widget for DockPanePane {
                         true
                     } else if let Some(tab_id) = dropped_dock_tab(&payload) {
                         // A whole tab always relocates to this side (it never
-                        // splits a pane — only a single DockWidget does).
-                        let at = model.tab_count(side);
+                        // splits a pane — only a single DockWidget does). Append
+                        // after the last *visible* tab (not past trailing hidden
+                        // ones).
+                        let at = model.side_append_index(side);
                         model.move_tab(tab_id, side, at);
                         zone_drop.set(None);
                         ctx.request_accessibility_update();

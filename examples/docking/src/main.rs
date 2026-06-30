@@ -134,6 +134,47 @@ fn dock_icon(kind: DockIcon, size: f32) -> IconWidget {
     IconWidget::from_path(path, size)
 }
 
+/// A simple "+" glyph for the "New …" header action.
+fn plus_icon(size: f32) -> IconWidget {
+    use bastyde::canvas::{Path, Point};
+    let u = size / 24.0;
+    let p = |x: f32, y: f32| Point::new(x * u, y * u);
+    let mut path = Path::new();
+    // Vertical bar.
+    path.move_to(p(10.8, 4.0));
+    path.line_to(p(13.2, 4.0));
+    path.line_to(p(13.2, 20.0));
+    path.line_to(p(10.8, 20.0));
+    path.close();
+    // Horizontal bar.
+    path.move_to(p(4.0, 10.8));
+    path.line_to(p(20.0, 10.8));
+    path.line_to(p(20.0, 13.2));
+    path.line_to(p(4.0, 13.2));
+    path.close();
+    IconWidget::from_path(path, size)
+}
+
+/// The inline header-action bar for a dock (the VS Code "view actions" pattern):
+/// a "New" button + a "Collapse All" button, both reporting into the status line.
+fn dock_header_actions(status: Signal<String>, what: &'static str) -> impl Widget {
+    let status_new = status.clone();
+    HStack::new()
+        .spacing(2.0)
+        .child(
+            IconButton::new(plus_icon(14.0))
+                .size(IconButtonSize::Compact)
+                .tooltip(lit!(format!("New {what}")))
+                .on_activate_fn(move |_| status_new.set(format!("New {what} (demo action)"))),
+        )
+        .child(
+            IconButton::new(IconWidget::chevron_up(14.0))
+                .size(IconButtonSize::Compact)
+                .tooltip(lit!("Collapse All"))
+                .on_activate_fn(move |_| status.set(String::from("Collapse All (demo action)"))),
+        )
+}
+
 fn list_panel(title: &str, items: &[&str]) -> impl Widget {
     let mut stack = VStack::new().spacing(8.0).child(
         TextWidget::new(lit!(title))
@@ -252,6 +293,12 @@ impl Widget for DockingDemo {
                     )
                 })
                 .icon(|| dock_icon(DockIcon::Explorer, 18.0))
+                // Inline header actions (shown in the dock's Accordion header
+                // next to the ⋮ options menu — VS Code "view actions" pattern).
+                .header_actions({
+                    let status = self.status.clone();
+                    move |_| dock_header_actions(status.clone(), "File")
+                })
                 .default_location(DockOpenLocation::side(DockSide::Leading)),
             )
             .dock(
@@ -283,6 +330,12 @@ impl Widget for DockingDemo {
                     list_panel("Properties", &["Name", "Type", "Layout", "Accessibility"])
                 })
                 .icon(|| dock_icon(DockIcon::Properties, 18.0))
+                // A sole-pane dock opts into a header bar (title + actions + ⋮).
+                .show_header(true)
+                .header_actions({
+                    let status = self.status.clone();
+                    move |_| dock_header_actions(status.clone(), "Property")
+                })
                 .default_location(DockOpenLocation::side(DockSide::Trailing)),
             );
 
@@ -303,6 +356,11 @@ impl Widget for DockingDemo {
         );
         self.model
             .open_dock(ids.properties, DockOpenLocation::side(DockSide::Trailing));
+        // Give the grouped leading activity (Explorer + Search) a stable name,
+        // independent of which pane is first — the rail item reads "Source"
+        // rather than silently tracking pane 0's dock title.
+        self.model
+            .set_dock_activity_title(ids.explorer, lit!("Source"));
 
         let toolbar = self.build_toolbar();
 

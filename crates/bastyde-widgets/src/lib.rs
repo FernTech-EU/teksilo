@@ -185,9 +185,9 @@ pub use popover_widget::{PopoverButton, PopoverIconButton, PopoverTrigger, Popov
 pub use primitives::TextInputField;
 pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 pub use primitives::{
-    AspectRatio, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack, IconWidget,
-    ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget, Shrinkable,
-    Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
+    AspectRatio, Center, DeadZone, Divider, Expand, FixedSize, FormLayout, Grid, HStack,
+    IconWidget, ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget,
+    Shrinkable, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 #[cfg(feature = "telemetry")]
 pub use privacy_settings::PrivacySettings;

@@ -641,6 +641,16 @@ impl WidgetTree {
             .unwrap_or(false)
     }
 
+    /// Whether `id` is a gesture dead-zone boundary — a press inside its
+    /// subtree must not arm a drag/swipe on any ancestor above it. See
+    /// [`WidgetNode::gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone).
+    fn is_gesture_dead_zone(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .map(|n| n.gesture_dead_zone)
+            .unwrap_or(false)
+    }
+
     /// On `PointerDown`, when a descendant has captured the pointer for a
     /// non-drag gesture (a tap / long-press), arm every strict ancestor that
     /// carries a drag/swipe recognizer so an ancestor drag can still begin
@@ -661,9 +671,21 @@ impl WidgetTree {
         if self.widget_has_drag(captured) {
             return;
         }
+        // The press is inside a gesture dead zone (the captured control *is* the
+        // dead zone) → arm no ancestor drag at all.
+        if self.is_gesture_dead_zone(captured) {
+            return;
+        }
         let mut observers = Vec::new();
         let mut current = self.arena.parent(captured);
         while let Some(id) = current {
+            // A dead-zone boundary stops the walk: ancestors AT or ABOVE it are
+            // never armed, so a control inside the dead zone can never start the
+            // ancestor's drag (the robust fix for "clicking a header button +
+            // a few px of jitter drags the whole panel").
+            if self.is_gesture_dead_zone(id) {
+                break;
+            }
             if self.widget_has_drag(id) {
                 // Build the arena (the bubble never reached this ancestor) and
                 // feed it the press so its DragRecognizer records the origin.

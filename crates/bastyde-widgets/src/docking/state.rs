@@ -6,7 +6,7 @@
 //! Only **user-controllable** values are persisted (per-side size /
 //! visibility / presentation / selection and the full tab → arrangement
 //! tree, plus corner ownership). App-config — rail thickness, minimum sizes,
-//! content factories, closable flags — is declared each run and reconstructed
+//! content factories, header actions — is declared each run and reconstructed
 //! (Qt `saveState` parity). Drops into the framework persistence layer via
 //! [`bastyde_settings::Versioned`] + `SettingsFile<DockLayoutState>`.
 

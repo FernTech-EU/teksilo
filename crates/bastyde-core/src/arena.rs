@@ -125,6 +125,16 @@ pub struct WidgetNode {
     /// `HighlightLayer` and `HoverProbe` to paint over the user's
     /// content without absorbing clicks. Default `false`.
     pub event_pass_through: bool,
+    /// When `true`, a pointer press anywhere in this widget's subtree must
+    /// NOT arm a drag/swipe recognizer on any ancestor **above** this node —
+    /// the subtree is a *gesture dead zone* for ancestor gestures. Used so
+    /// interactive controls (buttons, a `⋮` menu) placed inside a draggable /
+    /// swipeable container (a dock-panel header, a card, a list row) can be
+    /// clicked without a few px of pointer jitter starting the ancestor's drag.
+    /// The boundary is honored by `arm_drag_observers`. Mirrors Electron's
+    /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
+    /// wrapper widget.
+    pub gesture_dead_zone: bool,
     /// When `true`, this widget AND its entire subtree are invisible to
     /// hit-testing: the recursion returns immediately without descending
     /// into children, so the point falls through to whatever sits
@@ -315,6 +325,7 @@ impl WidgetNode {
             clips_children: false,
             ime: None,
             event_pass_through: false,
+            gesture_dead_zone: false,
             hit_transparent: false,
             opacity_prop: None,
             transform_prop: None,
@@ -1189,6 +1200,9 @@ impl WidgetArena {
             }
             if let Some(pass_through) = handler_set.event_pass_through {
                 node.event_pass_through = pass_through;
+            }
+            if let Some(dead_zone) = handler_set.gesture_dead_zone {
+                node.gesture_dead_zone = dead_zone;
             }
             if let Some(hit_transparent) = handler_set.hit_transparent {
                 node.hit_transparent = hit_transparent;

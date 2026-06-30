@@ -43,6 +43,7 @@ a11y-builtin-clear = Effacer
 a11y-builtin-add = Ajouter
 a11y-builtin-bell = Notifications
 a11y-builtin-menu = Menu
+a11y-builtin-more = Plus d’actions
 a11y-builtin-visibility = Afficher/masquer
 a11y-password-reveal = Afficher ou masquer le mot de passe
 a11y-caps-lock-on = Verrouillage des majuscules activé

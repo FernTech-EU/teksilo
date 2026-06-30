@@ -103,6 +103,7 @@
 - [DateEdit](widgets/date_edit.md)
 - [DateRangeEdit](widgets/date_range_edit.md)
 - [DateTimeEdit](widgets/date_time_edit.md)
+- [DeadZone](widgets/dead_zone.md)
 - [Dialog](widgets/dialog.md)
 - [Divider](widgets/divider.md)
 - [DockingLayout](widgets/docking.md)

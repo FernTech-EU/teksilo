@@ -179,6 +179,16 @@ pub struct Accordion {
     /// header fires this (it typically calls `ctx.start_drag(...)`). Tap-to-
     /// toggle still works — the gesture arena disambiguates.
     on_header_drag: Option<std::rc::Rc<dyn Fn(&mut EventContext)>>,
+    /// Optional trailing header slot — a widget placed at the trailing end of
+    /// the header (before the disclosure chevron), e.g. a "More actions" (`⋮`)
+    /// options button or an inline action toolbar. Its own tap/press recognizer
+    /// captures first (innermost-hit wins), so operating it does **not** toggle
+    /// the disclosure. See [`Accordion::trailing`].
+    trailing: Option<Box<dyn Widget>>,
+    /// A pre-registered trailing slot by id (for callers that must build the
+    /// slot in-context first). Takes precedence over `trailing`. See
+    /// [`Accordion::trailing_id`].
+    trailing_id: Option<WidgetId>,
     /// Fill-mode layout state: the header + animated body are direct children
     /// laid out by the accordion itself (so the body fills the leftover *and*
     /// animates). `None` in the default (VStack-rooted) mode.
@@ -204,6 +214,8 @@ impl Accordion {
             orientation: AccordionOrientation::Vertical,
             fill: false,
             on_header_drag: None,
+            trailing: None,
+            trailing_id: None,
             fill_header_id: None,
             fill_body_id: None,
         }
@@ -237,6 +249,25 @@ impl Accordion {
     /// Tap-to-toggle is unaffected — the gesture arena tells a tap from a drag.
     pub fn on_header_drag(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_header_drag = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Place a widget at the trailing end of the header, before the disclosure
+    /// chevron — an options (`⋮`) button, an inline action toolbar, etc. The
+    /// slot's own controls capture their gestures (innermost hit wins), so
+    /// clicking them does not toggle the accordion. Mirrors
+    /// [`ToolBoxItem::trailing`](crate::tool_box::ToolBoxItem) /
+    /// [`TabWidget::bar_trailing_slot`](crate::tab_widget::TabWidget::bar_trailing_slot).
+    pub fn trailing(mut self, widget: impl Widget + 'static) -> Self {
+        self.trailing = Some(Box::new(widget));
+        self
+    }
+
+    /// Like [`trailing`](Self::trailing) but takes a **pre-registered** widget
+    /// id — for callers that must build the slot in-context (e.g. a slot that
+    /// itself adds boxed children). Takes precedence over `trailing`.
+    pub fn trailing_id(mut self, id: WidgetId) -> Self {
+        self.trailing_id = Some(id);
         self
     }
 
@@ -324,6 +355,20 @@ impl Widget for Accordion {
 
         let horizontal = self.orientation == AccordionOrientation::Horizontal;
 
+        // Optional trailing header slot (options `⋮` button / action toolbar),
+        // inserted just before the disclosure chevron in either orientation.
+        // Wrap it in a [`DeadZone`](crate::primitives::DeadZone) so operating the
+        // controls (even with a few px of click jitter) never starts the header
+        // drag and gap-taps don't toggle the disclosure — while a press anywhere
+        // ELSE on the header still drags. The block is structural (the node-level
+        // `gesture_dead_zone` flag stops drag-arming at the boundary), so it is
+        // robust against the capture-release path a recognizer-shadowing absorber
+        // loses to.
+        let trailing_id = self
+            .trailing_id
+            .or_else(|| self.trailing.take().map(|w| ctx.add_boxed(w)))
+            .map(|tid| ctx.add(crate::primitives::DeadZone::new().child_id(tid)));
+
         // Header: a horizontal row (vertical orientation) or a narrow vertical
         // strip with a rotated label (horizontal orientation). Two chevrons
         // toggled by `visible_when` so the glyph updates reactively.
@@ -341,14 +386,15 @@ impl Widget for Accordion {
                 RotatedLabel::new(self.title.clone(), header_fg.clone()).style(title_style.clone()),
             );
             let spacer_id = ctx.add(Spacer::new());
-            ctx.add(
-                VStack::new()
-                    .spacing(8.0)
-                    .add_child(chevron_left_id)
-                    .add_child(chevron_right_id)
-                    .add_child(title_id)
-                    .add_child(spacer_id),
-            )
+            let mut col = VStack::new()
+                .spacing(8.0)
+                .add_child(chevron_left_id)
+                .add_child(chevron_right_id)
+                .add_child(title_id);
+            if let Some(t) = trailing_id {
+                col = col.add_child(t);
+            }
+            ctx.add(col.add_child(spacer_id))
         } else {
             let chevron_down_id =
                 ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
@@ -365,14 +411,14 @@ impl Widget for Accordion {
             let title_id = ctx.add(title_widget);
             let spacer_id = ctx.add(Spacer::new());
 
-            ctx.add(
-                HStack::new()
-                    .spacing(8.0)
-                    .add_child(title_id)
-                    .add_child(spacer_id)
-                    .add_child(chevron_down_id)
-                    .add_child(chevron_right_id),
-            )
+            let mut row = HStack::new()
+                .spacing(8.0)
+                .add_child(title_id)
+                .add_child(spacer_id);
+            if let Some(t) = trailing_id {
+                row = row.add_child(t);
+            }
+            ctx.add(row.add_child(chevron_down_id).add_child(chevron_right_id))
         };
 
         // Int UI focus convention: an accent-colored border
@@ -519,6 +565,9 @@ impl Widget for Accordion {
             .cursor(CursorIcon::Pointer);
 
         // Optional drag source on the header (e.g. a dock panel's drag handle).
+        // The whole header drags — EXCEPT the trailing slot, which is wrapped in
+        // a `DeadZone` so its action buttons / `⋮` menu can be clicked (even with
+        // click jitter) without starting the panel drag.
         if let Some(drag) = self.on_header_drag.clone() {
             handler_set = handler_set.on_drag(move |phase, ctx| {
                 if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
@@ -758,6 +807,7 @@ impl Widget for FillBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_core::WidgetBuilder;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
 
@@ -1106,6 +1156,167 @@ mod tests {
             tree.bounds(body).bottom() <= 300.5,
             "body bottom {} must stay within the 300px pane",
             tree.bounds(body).bottom()
+        );
+    }
+
+    #[test]
+    fn trailing_slot_renders_and_captures_its_own_tap() {
+        // The header trailing slot (e.g. an options `⋮` button) must be laid out
+        // in the header AND, when it carries its own tap handler, consume the
+        // tap so the accordion does not toggle (the gesture arena gives the
+        // innermost hit precedence — the same property ToolBox slots rely on).
+        use crate::primitives::{FixedSize, RectWidget};
+        use bastyde_core::event::{Modifiers, PointerButton};
+        use std::cell::Cell as StdCell;
+        use std::rc::Rc;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let tapped = Rc::new(StdCell::new(false));
+        let sink = tapped.clone();
+        let trailing = tree.add(
+            FixedSize::new()
+                .bind_width(24.0_f32)
+                .bind_height(24.0_f32)
+                .child(RectWidget::new())
+                .on_tap(move |_e, _ctx| sink.set(true)),
+        );
+        let content = tree.add(TextWidget::new(lit!("body")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded.clone())
+                .fill(true)
+                .trailing_id(trailing)
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(260.0, 140.0));
+
+        // The trailing widget is laid out (non-zero bounds) inside the header.
+        let tb = tree.bounds(trailing);
+        assert!(tb.width > 0.0 && tb.height > 0.0, "trailing slot is placed");
+        let _ = acc;
+
+        // Tapping the trailing widget fires its handler and does NOT toggle.
+        let p = bastyde_canvas::Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: p,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(tapped.get(), "trailing widget received the tap");
+        assert!(
+            expanded.get(),
+            "tapping the trailing widget must not toggle the accordion"
+        );
+    }
+
+    #[test]
+    fn dragging_the_trailing_slot_does_not_start_the_header_drag() {
+        // Regression: a draggable header (`on_header_drag`) must NOT be dragged
+        // by interacting with its trailing controls — clicking/dragging an
+        // options button there used to arm the header-drag recognizer and a few
+        // px of jitter started dragging the whole dock. The trailing absorber
+        // shadows the header drag.
+        use crate::primitives::{FixedSize, RectWidget};
+        use std::cell::Cell as StdCell;
+        use std::rc::Rc;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let header_dragged = Rc::new(StdCell::new(false));
+        let hd = header_dragged.clone();
+        let trailing = tree.add(
+            FixedSize::new()
+                .bind_width(24.0_f32)
+                .bind_height(24.0_f32)
+                .child(RectWidget::new()),
+        );
+        let content = tree.add(TextWidget::new(lit!("body")));
+        let acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded.clone())
+                .fill(true)
+                .trailing_id(trailing)
+                .on_header_drag(move |_ctx| hd.set(true))
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(260.0, 140.0));
+
+        // Dragging from the trailing control must NOT start the header drag.
+        let tb = tree.bounds(trailing);
+        let from = bastyde_canvas::Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
+        tree.drag(
+            from,
+            bastyde_canvas::Point::new(from.x + 90.0, from.y + 12.0),
+        );
+        assert!(
+            !header_dragged.get(),
+            "dragging the trailing control must not start the header drag"
+        );
+
+        // Sanity: dragging the header title area still starts the drag.
+        let ab = tree.bounds(acc);
+        tree.drag(
+            bastyde_canvas::Point::new(ab.x + 10.0, ab.y + 6.0),
+            bastyde_canvas::Point::new(ab.x + 120.0, ab.y + 30.0),
+        );
+        assert!(
+            header_dragged.get(),
+            "dragging the header title still starts the drag"
+        );
+    }
+
+    #[test]
+    fn incremental_move_on_trailing_button_does_not_drag_header() {
+        // The real-mouse case the user hit: pressing a header action button and
+        // moving the pointer a few px (a normal click jitter) must NOT start the
+        // header drag — even though the button's tap is cancelled by the move
+        // and its capture is released mid-gesture.
+        use crate::primitives::{FixedSize, RectWidget};
+        use bastyde_core::event::PointerButton;
+        use std::cell::Cell as StdCell;
+        use std::rc::Rc;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let header_dragged = Rc::new(StdCell::new(false));
+        let hd = header_dragged.clone();
+        // A real interactive trailing control (captures the tap, like a button).
+        let trailing = tree.add(
+            FixedSize::new()
+                .bind_width(24.0_f32)
+                .bind_height(24.0_f32)
+                .child(RectWidget::new())
+                .on_tap(|_e, _ctx| {}),
+        );
+        let content = tree.add(TextWidget::new(lit!("body")));
+        let _acc = tree.add(
+            Accordion::new(lit!("Panel"), expanded.clone())
+                .fill(true)
+                .trailing_id(trailing)
+                .on_header_drag(move |_ctx| hd.set(true))
+                .content_id(content),
+        );
+        tree.layout(SizeProposal::exact(260.0, 140.0));
+
+        let tb = tree.bounds(trailing);
+        let (cx, cy) = (tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
+        tree.pointer_down_button(bastyde_canvas::Point::new(cx, cy), PointerButton::Primary);
+        // Incremental small moves (a real mouse stream), accumulating well past
+        // the drag threshold.
+        for i in 1..=10 {
+            tree.pointer_move(bastyde_canvas::Point::new(cx + (i as f32) * 3.0, cy + 1.0));
+        }
+        tree.pointer_up_button(
+            bastyde_canvas::Point::new(cx + 30.0, cy + 1.0),
+            PointerButton::Primary,
+        );
+        assert!(
+            !header_dragged.get(),
+            "a jittery click on the trailing control must not start the header drag"
         );
     }
 

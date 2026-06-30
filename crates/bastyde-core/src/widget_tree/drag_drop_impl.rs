@@ -702,7 +702,15 @@ impl WidgetTree {
         // programmatic `start_drag` + release), re-run the bubbling engagement at
         // the drop position so the drop still lands — and bubbles past a
         // non-accepting per-row target exactly as a hover would.
-        let mut drop_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        // Ignore a `current_target` whose widget was destroyed since the last
+        // hover (a rebuild tore it down mid-drag) — otherwise the drop resolves
+        // to a dead arena id and is silently lost. Fall through to the
+        // re-hit-test below so the drop still lands on whatever is live now.
+        let mut drop_target = self
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.current_target)
+            .filter(|&t| self.arena.is_active(t));
         if drop_target.is_none() {
             let hit = self.hit_test(position);
             let mut candidate = hit.and_then(|t| self.find_drop_target_at_or_above(t));
@@ -934,6 +942,138 @@ mod tests {
         });
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
+    }
+
+    #[test]
+    fn drop_falls_through_a_destroyed_current_target() {
+        // A rebuild that destroys the hovered drop target mid-drag (e.g. a
+        // docking side disabled while dragging over its rail) must not leave a
+        // stale `current_target` that swallows the drop into a dead arena id.
+        // The drop should re-hit-test and land on the live target beneath.
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let bg_dropped = Rc::new(Cell::new(false));
+        let bg_sink = bg_dropped.clone();
+
+        let mut tree = WidgetTree::new();
+        // Children stack (topmost = last added). Source at the bottom (just the
+        // drag origin), then the background drop target, then the foreground
+        // drop target on top.
+        let source = tree.add(FillWidget::new());
+        let _bg = tree.add(FillWidget::new().on_drop(move |_p, _pos, _ctx| {
+            bg_sink.set(true);
+            true
+        }));
+        // Foreground drop target on top — engages on hover so it becomes the
+        // drag's `current_target`.
+        let fg = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_payload, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 50.0,
+                        width: 200.0,
+                    }
+                })
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(7_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Hover over the foreground target → it becomes `current_target`.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        assert_eq!(
+            tree.active_drag.as_ref().unwrap().current_target,
+            Some(fg),
+            "fg engaged as the current drop target"
+        );
+
+        // Tear the foreground target down mid-drag.
+        tree.arena.destroy(fg);
+        assert!(!tree.arena.is_active(fg));
+
+        // Drop where fg used to be → must fall through to the live bg, not
+        // vanish into the destroyed fg id.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(tree.active_drag.is_none(), "drag session cleared");
+        assert!(
+            bg_dropped.get(),
+            "drop landed on the live background target, not the destroyed one"
+        );
+    }
+
+    #[test]
+    fn drag_arming_walks_to_an_ancestor_without_a_dead_zone() {
+        // Baseline: pressing a button inside a draggable ancestor arms the
+        // ancestor's drag recognizer (so a press-drag can start the ancestor
+        // drag — the cross-widget tap/drag disambiguation).
+        let mut tree = WidgetTree::new();
+        let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
+        let inner = tree.add(StackWidget::new().add_child(button));
+        let ancestor = tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .on_drag(|_phase, _ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let b = tree.bounds(button);
+        tree.pointer_down_button(
+            Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            PointerButton::Primary,
+        );
+        assert_eq!(
+            tree.drag_observers,
+            vec![ancestor],
+            "the draggable ancestor is armed when the button press is not in a dead zone"
+        );
+        tree.pointer_up_button(
+            Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            PointerButton::Primary,
+        );
+    }
+
+    #[test]
+    fn gesture_dead_zone_blocks_ancestor_drag_arming() {
+        // The fix: a `gesture_dead_zone` boundary between the button and the
+        // draggable ancestor stops the arming walk — the ancestor is NEVER
+        // armed, so no amount of pointer jitter while clicking the button can
+        // start the ancestor's drag (capture-release-proof, unlike a
+        // recognizer-shadowing absorber).
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new();
+        let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
+        let dead_zone = tree.add(StackWidget::new().add_child(button).gesture_dead_zone(true));
+        let _ancestor = tree.add(
+            StackWidget::new()
+                .add_child(dead_zone)
+                .on_drag(|_phase, _ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let b = tree.bounds(button);
+        tree.pointer_down_button(
+            Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            PointerButton::Primary,
+        );
+        assert!(
+            tree.drag_observers.is_empty(),
+            "a dead zone blocks the draggable ancestor from being armed"
+        );
+        tree.pointer_up_button(
+            Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+            PointerButton::Primary,
+        );
     }
 
     #[test]

@@ -1506,6 +1506,21 @@ impl WidgetTree {
             // `cancel_active_drag` fires on_drag_leave on the current
             // target before cleanup — the same contract as Escape.
             self.cancel_active_drag(&mut *ops);
+        } else {
+            // The drag *source* survived but its current hover **target** was
+            // torn down by the rebuild (e.g. a side disabled / collapsed
+            // mid-drag destroyed the panel under the pointer). Clear the stale
+            // target id so a subsequent drop doesn't resolve to a destroyed
+            // widget (and silently vanish); the next move — or the drop's own
+            // re-hit-test — re-engages a live target.
+            let stale_target = self
+                .active_drag
+                .as_ref()
+                .and_then(|d| d.current_target)
+                .is_some_and(|t| !self.arena.is_active(t));
+            if stale_target && let Some(drag) = self.active_drag.as_mut() {
+                drag.current_target = None;
+            }
         }
     }
 
@@ -2299,6 +2314,9 @@ impl WidgetTree {
                         if let Some(pass_through) = handler_set.event_pass_through {
                             node.event_pass_through = pass_through;
                         }
+                        if let Some(dead_zone) = handler_set.gesture_dead_zone {
+                            node.gesture_dead_zone = dead_zone;
+                        }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
                         }
@@ -2441,6 +2459,9 @@ impl WidgetTree {
                         }
                         if let Some(pass_through) = handler_set.event_pass_through {
                             node.event_pass_through = pass_through;
+                        }
+                        if let Some(dead_zone) = handler_set.gesture_dead_zone {
+                            node.gesture_dead_zone = dead_zone;
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;

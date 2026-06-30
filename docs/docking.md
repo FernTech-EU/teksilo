@@ -63,8 +63,9 @@ model.open_dock(terminal, DockOpenLocation::side(DockSide::Bottom));
 ```
 
 `DockWidget::new(id, title, factory)` declares a panel; `factory(id)` builds its
-content lazily. `.icon(..)`, `.closable(..)`, `.default_location(..)` configure
-chrome. `DockingLayout::new(model).center(w).dock(dw)…` assembles the widget;
+content lazily. `.icon(..)`, `.default_location(..)`, `.header_actions(..)`,
+`.show_header(..)` configure chrome (see “Dock header & options” below).
+`DockingLayout::new(model).center(w).dock(dw)…` assembles the widget;
 `.dock(..)` registers the panel **eagerly**, so the initial layout can be set on
 the model before mounting.
 
@@ -105,10 +106,12 @@ content is preserved across it.
 
 A side's content is a stack of **tabs** (each tab sized to its own content,
 `TabSizing::Independent`). A tab's content is a **Splitter** of panes, **one
-DockWidget per pane**. A sole pane renders bare (the tab / rail is its header);
-a split pane is wrapped in an **Accordion** whose draggable header titles the
-dock and **collapses on click** — header-only (taps/drags inside the content are
-absorbed, so clicking the panel body never collapses or moves it). Collapsing
+DockWidget per pane**. A sole pane renders bare (the tab / rail is its header)
+unless the dock opts into its own header bar with
+[`DockWidget::show_header(true)`](#dock-header--options); a split pane is wrapped
+in an **Accordion** whose draggable header titles the dock and **collapses on
+click** — header-only (taps/drags inside the content are absorbed, so clicking
+the panel body never collapses or moves it). Collapsing
 **folds the Splitter pane down to the header** (its siblings grow to take the
 space) and expanding **restores it to the same size** — the accordion drives
 `SplitterModel::set_collapsed`, and the pane's `collapsed_size` is the header
@@ -193,15 +196,22 @@ Tab size             ▸  Text / Icon / Icon + Text   (dock tab)
   it stays **listable + restorable** — it is *not* closed. The selected tab
   hands off to the nearest visible one.
 - **Move to** relocates the whole tab to another side, shows that side, and
-  selects it (`move_tab`).
+  selects it (`move_tab`). The submenu lists **only enabled sides**
+  (`DockingModel::enabled_move_targets`); a side turned off with
+  `disable_side(..)` / `set_side_enabled(.., false)` is never offered (it would
+  be silently rejected). When no enabled target remains the **Move to** entry is
+  omitted entirely.
 - The **checkable list** toggles each activity's visibility (`set_tab_hidden`).
+  Each checkmark is bound to the activity's **live** hidden state, so it tracks
+  an external `set_tab_hidden` (e.g. a keyboard shortcut) while the menu is open.
 - **Restoring when every activity is hidden** (no tab/rail item to right-click):
   in **Rail** presentation, right-click the empty rail (the `DockActivityBar`
   always shows) → the list + size submenu; in **Strip** presentation, the tab bar
   keeps a trailing **hamburger** (`☰`) that opens the same menu. The menu is
   placed with `BelowPreferred`, so it flips above / clamps to stay on-screen even
-  for a bottom-docked bar. The menu lives **only** on tabs, rail items, and the
-  `DockActivityBar` — never on panes, accordions, or dock content.
+  for a bottom-docked bar. The same activity menu is reachable from tabs, rail
+  items, the `DockActivityBar` background, **and** the dock-header `⋮` options
+  button (see [Dock header & options](#dock-header--options)).
 - **Activity bar size** (`DockRailItemSize::{Default, Compact, Labeled}`) and
   **Tab size** (`DockTabDisplay::{Text, Icon, IconText}`) are per-side, reactive,
   and persisted. The rail / strip rebind and re-render when they change.
@@ -226,6 +236,64 @@ Drive any of it from outside the menu too: `model.set_tab_hidden(tab, ..)`,
 `model.set_side_rail_size(side, ..)`, `model.set_side_tab_display(side, ..)`,
 `model.select_tab_by_id(side, tab)`. Per-tab context menus on a `TabWidget` are
 available generally via `TabInfo::context_menu(..)`.
+
+## Dock header & options
+
+Every dock can carry a header (the VS Code / IntelliJ "view header" pattern)
+with two kinds of controls:
+
+- **App actions** — `DockWidget::header_actions(|id| …)` declares a widget
+  (typically an `HStack` of `IconButton`s: "New File", "Collapse All", refresh,
+  filter …) shown inline in the header.
+- **The `⋮` options menu** — an always-visible "More actions" button, the
+  discoverable counterpart to the right-click activity menu. Its contents depend
+  on whether the dock shares its activity:
+  - **a pane in a grouped (split) activity** → `Move to new activity`
+    (`promote_to_tab` — pull this dock out into its own tab) and `Move to side ▸`
+    (move just this dock to another enabled side as a new activity).
+  - **a sole-pane dock** (it *is* its activity) → `Hide` and `Move to ▸`.
+
+  There is **no "Close"**: a dock can only be **hidden** (and restored from the
+  activity checklist or the rail/strip background menu). Closing would leave the
+  user no way to bring the panel back.
+
+Where the header appears:
+
+- **Split panes** always have an `Accordion` header, so the actions + `⋮` show
+  there automatically (in the header's trailing slot, before the chevron — the
+  new `Accordion::trailing` / `trailing_id`).
+- **A sole-pane (bare) dock** is headerless by default. Opt in with
+  `DockWidget::show_header(true)` to give it a VS Code–style header bar
+  (`[title] [Spacer] [actions] [⋮]`) above its content. (The side tab / rail is
+  otherwise its only header.)
+
+The `⋮` button is omitted when it would open an empty menu (a dock under a
+fully-locked `DockPolicy`). Every "Move to" surface honours side availability —
+a disabled side is never offered.
+
+The action buttons + `⋮` sit in a `DeadZone` — the
+accordion (split-pane) header is a drag handle, so the whole header drags the
+dock **except** the trailing controls: you can click them (even with the few px
+of pointer jitter a real click carries) without starting a panel drag. This is
+backed by the node-level `gesture_dead_zone` flag (the framework counterpart of
+Electron's `-webkit-app-region: no-drag`), so it's robust by construction rather
+than a gesture-timing race.
+
+## Activity names
+
+An activity's displayed name (rail item / tab label) derives in three steps:
+
+1. an explicit title set with `DockingModel::set_tab_title(tab_id, …)` (or the
+   sugar `set_dock_activity_title(dock_id, …)` — apps hold stable dock ids), else
+2. the title of the activity's **primary pane** — its first *non-collapsed* dock
+   (so collapsing the lead pane surfaces the next pane's title), else
+3. the literal `"Panel"`.
+
+For a single-dock activity this is just the dock's own title. For a **grouped**
+activity (several docks stacked into one tab) set an explicit title so the rail /
+tab reads e.g. "Source" rather than silently tracking whichever dock happens to
+sit in pane 0. Like dock titles and rail config, activity titles are app-config —
+reconstructed each run, **not** persisted in `DockLayoutState`.
 
 ## Drag-to-dock
 
@@ -320,8 +388,8 @@ model.import_state(&state);                          // restore (also reset-to-d
 
 Only **user-controllable** state is serialized (per-side size / visibility /
 presentation / selection and the full tab → arrangement tree, plus corner
-owners). App-config — rail thickness, minimums, content factories, closable — is
-declared each run and reconstructed (Qt `saveState` parity). On import, unknown
+owners). App-config — rail thickness, minimums, content factories, header
+actions — is declared each run and reconstructed (Qt `saveState` parity). On import, unknown
 dock ids are dropped, emptied panes/tabs pruned, selections clamped.
 
 ### Saving / restoring with `bastyde-settings`
@@ -359,6 +427,18 @@ let layout = DockingLayout::new(model.clone())
 // docks are now registered → safe to restore:
 model.import_state(&dock_file.snapshot());
 // `import_state(&DockLayoutState::default())` is also the reset-to-default path.
+```
+
+`import_state` rebuilds the activity (`DockTab`) structure from the snapshot, so
+any **explicit activity title** set with `set_dock_activity_title` /
+`set_tab_title` is cleared (titles, like dock icons and policy, are app-config,
+not in `DockLayoutState`). Re-apply those *after* importing — a single-dock
+activity recovers its name from the re-registered dock title automatically, but a
+**grouped** activity's custom name (e.g. "Source") must be set again:
+
+```rust
+model.import_state(&dock_file.snapshot());
+model.set_dock_activity_title(explorer, lit!("Source")); // re-name the group
 ```
 
 **3. Auto-save on change.** Bind one effect (in the root widget's `build()`) to

@@ -3,6 +3,7 @@
 
 pub mod aspect_ratio;
 pub mod center;
+pub mod dead_zone;
 pub mod divider;
 pub mod expand;
 pub mod fixed_size;
@@ -39,6 +40,7 @@ pub mod zstack;
 
 pub use aspect_ratio::AspectRatio;
 pub use center::Center;
+pub use dead_zone::DeadZone;
 pub use divider::Divider;
 pub use expand::Expand;
 pub use fixed_size::FixedSize;

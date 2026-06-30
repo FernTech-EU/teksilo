@@ -81,6 +81,7 @@ slack distribution math, and worked examples.
 - [MaxSize](../crates/bastyde-widgets/src/primitives/max_size.rs) — clamps response to a ceiling.
 - [AspectRatio](../crates/bastyde-widgets/src/primitives/aspect_ratio.rs) — constrains a child to a fixed width-to-height ratio.
 - [Switcher](../crates/bastyde-widgets/src/primitives/switcher.rs) — shows one of N children, driven by `Signal<usize>`.
+- [DeadZone](../crates/bastyde-widgets/src/primitives/dead_zone.rs) — layout-transparent **gesture dead zone**: a press inside it never arms a drag/swipe on an ancestor. Wrap interactive controls (buttons, a `⋮` menu) inside a draggable/swipeable container (a dock-panel header, a card, a list row) so clicking them — even with click jitter — can't start the ancestor's drag. The framework counterpart of Electron's `-webkit-app-region: no-drag`; backed by the node-level `gesture_dead_zone` flag (robust by construction, not a recognizer-timing race).
 - [FocusScope](../crates/bastyde-widgets/src/focus_scope.rs) — layout-transparent **Tab traversal boundary** (lives at crate root). Scopes its descendants' `tab_index` so sibling regions don't interleave, and traps or passes Tab via `TraversalScopePolicy::{Cycle, Continue}`. See [events-and-gestures.md §6.1](events-and-gestures.md).
 
 ## Visual primitives

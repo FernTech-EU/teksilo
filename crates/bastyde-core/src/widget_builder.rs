@@ -306,6 +306,10 @@ pub struct HandlerSet {
     /// hit-testing — events fall through to whatever sits behind it.
     /// Used by the debug inspector's overlay widgets.
     pub(crate) event_pass_through: Option<bool>,
+    /// When `Some(true)`, a press in this node's subtree must not arm a
+    /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
+    /// [`super::arena::WidgetNode::gesture_dead_zone`].
+    pub(crate) gesture_dead_zone: Option<bool>,
     /// When `Some(true)`, this node and its WHOLE subtree are invisible
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
@@ -348,6 +352,7 @@ impl HandlerSet {
             clips_children: None,
             ime: None,
             event_pass_through: None,
+            gesture_dead_zone: None,
             hit_transparent: None,
             context_menu_factory: None,
             focus_within: None,
@@ -578,6 +583,18 @@ impl HandlerSet {
     /// and `HoverProbe` use this).
     pub fn event_pass_through(mut self, pass_through: bool) -> Self {
         self.event_pass_through = Some(pass_through);
+        self
+    }
+
+    /// Mark this widget's subtree a **gesture dead zone**: a pointer press
+    /// inside it must not arm a drag/swipe recognizer on any ancestor above
+    /// it. Use to let interactive controls (buttons, a `⋮` menu) sit inside a
+    /// draggable / swipeable container (a dock-panel header, a card, a list
+    /// row) without a few px of click jitter starting the ancestor's drag.
+    /// The container's own drag still works everywhere else. Honored by
+    /// `arm_drag_observers`; see the `DeadZone` wrapper widget.
+    pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
+        self.gesture_dead_zone = Some(dead_zone);
         self
     }
 
@@ -920,6 +937,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::event_pass_through`].
     pub fn event_pass_through(mut self, pass_through: bool) -> Self {
         self.handler_set.event_pass_through = Some(pass_through);
+        self
+    }
+
+    /// Mark this widget's subtree a gesture dead zone. See
+    /// [`HandlerSet::gesture_dead_zone`].
+    pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
+        self.handler_set.gesture_dead_zone = Some(dead_zone);
         self
     }
 
@@ -1543,6 +1567,12 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::event_pass_through`].
     fn event_pass_through(self, pass_through: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).event_pass_through(pass_through)
+    }
+
+    /// Mark this widget's subtree a gesture dead zone. See
+    /// [`HandlerSet::gesture_dead_zone`].
+    fn gesture_dead_zone(self, dead_zone: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
     }
 
     /// Make this widget and its whole subtree invisible to pointer

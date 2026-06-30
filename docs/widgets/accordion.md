@@ -33,7 +33,7 @@ let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 
 ## Builder methods at a glance
 
-`orientation`, `horizontal`, `fill`, `on_header_drag`, `title_color`, `title_style`, `content_id`, `content`
+`orientation`, `horizontal`, `fill`, `on_header_drag`, `trailing`, `trailing_id`, `title_color`, `title_style`, `content_id`, `content`
 
 ## API reference
 
@@ -140,6 +140,21 @@ content, no overflow) and the header tween still plays. Default `false`.
 Make the header a **drag source**: a drag gesture starting on it fires
 `f` (which should begin a drag, e.g. `ctx.start_drag(source, payload)`).
 Tap-to-toggle is unaffected — the gesture arena tells a tap from a drag.
+
+#### `pub fn trailing(mut self, widget: impl Widget + 'static) -> Self`
+
+Place a widget at the trailing end of the header, before the disclosure
+chevron — an options (`⋮`) button, an inline action toolbar, etc. The
+slot's own controls capture their gestures (innermost hit wins), so
+clicking them does not toggle the accordion. Mirrors
+`ToolBoxItem::trailing` /
+`TabWidget::bar_trailing_slot`.
+
+#### `pub fn trailing_id(mut self, id: WidgetId) -> Self`
+
+Like `trailing` but takes a **pre-registered** widget
+id — for callers that must build the slot in-context (e.g. a slot that
+itself adds boxed children). Takes precedence over `trailing`.
 
 #### `pub fn title_color(mut self, color: impl Into<ColorProp>) -> Self`
 
