@@ -140,8 +140,8 @@ impl Widget for MyWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let root = ctx.add(
             VStack::new().spacing(8.0)
-                .child(TextWidget::new("Hello").style(TextStyleRole::BodyBold))
-                .child(Button::new("Click").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Go)))
+                .child(TextWidget::new(lit!("Hello")).style(TextStyleRole::BodyBold))
+                .child(Button::new(lit!("Click")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Go)))
         );
         self.root = Some(root);
         vec![root]
@@ -166,24 +166,24 @@ impl Widget for MyWidget {
 ```rust,ignore
 // Inline children — .child() takes impl Widget + 'static
 VStack::new().spacing(10.0)
-    .child(TextWidget::new("Title").style(TextStyleRole::BodyBold))
-    .child(Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)))
+    .child(TextWidget::new(lit!("Title")).style(TextStyleRole::BodyBold))
+    .child(Button::new(lit!("Save")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)))
 
 // Iterator children
-VStack::new().children(items.iter().map(|it| TextWidget::new(it.name.clone())))
+VStack::new().children(items.iter().map(|it| TextWidget::new(lit!(it.name.clone()))))
 
 // Conditional child
-container.child_opt(show_extra.then(|| TextWidget::new("Extra")))
+container.child_opt(show_extra.then(|| TextWidget::new(lit!("Extra"))))
 
 // Pre-registered child when you need the id
-let label = ctx.add(TextWidget::new("Status").bind_text(status_signal));
+let label = ctx.add(TextWidget::new(lit!("Status")).bind_text(status_signal));
 HStack::new().add_child(label)
 
 // Switcher — show one child at a time, driven by Signal<usize>
 let page = ctx.signal(0usize);
 ctx.add(Switcher::new(page.clone())
-    .child(TextWidget::new("Page 0"))
-    .child(TextWidget::new("Page 1")))
+    .child(TextWidget::new(lit!("Page 0")))
+    .child(TextWidget::new(lit!("Page 1"))))
 ```
 
 ## Layout model
@@ -240,8 +240,8 @@ overflow rather than truncate.
 
 ```rust,ignore
 let count = ctx.signal(0i32);
-let label = TextWidget::new("").bind_text(count.map(|n| format!("Count: {n}")));
-let inc = Button::new("+1").on_activate_fn({
+let label = TextWidget::new(lit!("")).bind_text(count.map(|n| format!("Count: {n}")));
+let inc = Button::new(lit!("+1")).on_activate_fn({
     let count = count.clone();
     move |_ctx| count.set(count.get() + 1)
 });
@@ -304,7 +304,7 @@ impl Widget for Root {
             if let Some(AppIntent::Open(path)) = AppIntent::from_intent(i) { open(path); }
         }));
 
-        let btn = Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save));
+        let btn = Button::new(lit!("Save")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save));
         vec![ctx.add(btn)]
     }
 }
@@ -336,7 +336,7 @@ focus/scroll/interaction state survive.
 **Variants** select a widget's look (Tier 1):
 
 ```rust,ignore
-Button::new("Save").variant(ButtonVariant::Filled)   // Filled/Tinted/Outlined/Plain/Ghost/Link/Destructive
+Button::new(lit!("Save")).variant(ButtonVariant::Filled)   // Filled/Tinted/Outlined/Plain/Ghost/Link/Destructive
 Toggle::new(on).variant(ToggleVariant::Switch)
 ```
 
@@ -353,7 +353,7 @@ RectWidget::new().background(bg)
 ```
 
 For full restyling, every themable widget supports a **style protocol** (escape hatch).
-Override per-call (`Button::new("X").style(MyStyle)`) or theme-wide
+Override per-call (`Button::new(lit!("X")).style(MyStyle)`) or theme-wide
 (`theme.style_slots.button = Some(Rc::new(MyStyle))`). `ctx.theme_signal()` /
 `ctx.locale_signal()` exist for cases no role covers — use sparingly.
 
@@ -514,7 +514,7 @@ BastydeAppBuilder::new()
     /* ... */;
 
 // From any handler:
-ctx.show_toast(Toast::success("Saved").action(ToastAction::new("Undo", |c| c.send_intent(AppIntent::Undo))));
+ctx.show_toast(Toast::success(lit!("Saved")).action(ToastAction::new(lit!("Undo"), |c| c.send_intent(AppIntent::Undo))));
 ```
 
 Severities: `info`/`success`/`warning`/`error`/`loading`. Action constructors are
@@ -552,26 +552,28 @@ bati!(VStack { /* … */ })          // returns a widget value → pass to .chil
 ```rust,ignore
 // Plain builder
 VStack::new().spacing(10.0)
-    .child(TextWidget::new("Title").style(TextStyleRole::BodyBold))
-    .child(Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)))
+    .child(TextWidget::new(lit!("Title")).style(TextStyleRole::BodyBold))
+    .child(Button::new(lit!("Save")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)))
 
 // bati!
 bati!(ctx =>
     VStack {
         spacing: 10.0
-        TextWidget("Title") { style: TextStyleRole::BodyBold }
-        Button("Save") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Save) }
+        TextWidget(lit!("Title")) { style: TextStyleRole::BodyBold }
+        Button(lit!("Save")) { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Save) }
     }
 )
 ```
 
 **Reading rules:**
 
-- **Element head** — `Button("Save")` → `Button::new("Save")`. An UpperCamel head gets
-  `::new` appended automatically; a bare type (`VStack`) → `VStack::new()`; an explicit
+- **Element head** — `Button(lit!("Save"))` → `Button::new(lit!("Save"))`. An UpperCamel head
+  gets `::new` appended automatically; a bare type (`VStack`) → `VStack::new()`; an explicit
   lowercase constructor is emitted as-is (`Padding::uniform(24.0)`, `ProgressBar::indeterminate()`).
-  Use the explicit `Button::new(tr!(save()))` form to pass a localized `tr!` / `lit!` string —
-  a bare `Button("Save")` only works for a plain `&str`.
+  Whatever sits in `(…)` is passed **verbatim** to the constructor, so the head form (bare vs
+  explicit `::new`) is independent of the argument. Note labels are `LocalizedString` under the
+  default `i18n` feature: wrap them in `tr!(key())` (translated) or `lit!("text")` (untranslated)
+  — a bare `&str` does **not** convert (see Internationalization above).
 - **`name: value`** → `.name(value)`. Multi-arg `border: color, 2.0` → `.border(color, 2.0)`.
   A bare lowercase word is a zero-arg call: `fills_stack` → `.fills_stack()`.
 - **Bare child** → `.child(...)`, for the layout/container widgets that have a `.child()`
@@ -593,13 +595,13 @@ is a compile error that names the slot you meant:
 ```rust,ignore
 bati!(ctx =>
     Card {
-        header: TextWidget("Title") { style: TextStyleRole::BodyBold }
+        header: TextWidget(lit!("Title")) { style: TextStyleRole::BodyBold }
         content: VStack {
             spacing: 8.0
-            TextWidget("Line one")
-            TextWidget("Line two")
+            TextWidget(lit!("Line one"))
+            TextWidget(lit!("Line two"))
         }
-        footer: Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
+        footer: Button(lit!("OK")) { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
         padding: 16.0
     }
 )
@@ -612,8 +614,8 @@ rest of the block (in a slot it routes to the slot's `*_id` twin):
 ```rust,ignore
 bati!(ctx =>
     Card {
-        header: title = TextWidget("Manuscript") { style: TextStyleRole::BodyBold }
-        content: Button("Focus title") {
+        header: title = TextWidget(lit!("Manuscript")) { style: TextStyleRole::BodyBold }
+        content: Button(lit!("Focus title")) {
             on_tap: move |_, ctx| ctx.focus(title)     // `title` is in scope here
         }
     }
@@ -638,7 +640,7 @@ bati!(ctx =>
     HStack {
         spacing: 8.0
         #{ confirm }                                      // → .add_child(confirm)
-        Button("Cancel") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Cancel) }
+        Button(lit!("Cancel")) { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Cancel) }
     }
 )
 ```
@@ -660,11 +662,11 @@ you back to builder syntax:
 bati!(ctx =>
     VStack {
         if items.is_empty() {
-            TextWidget("Nothing here yet")
+            TextWidget(lit!("Nothing here yet"))
         }
         for item in items.iter() {
             let id = item.id;                          // owned capture for the move closure
-            Button(item.title.clone()) {
+            Button(lit!(item.title.clone())) {
                 on_tap: move |_, ctx| ctx.send_intent(AppIntent::Select(id))
             }
         }
@@ -681,8 +683,8 @@ bati!(ctx =>
 - A Rust **struct literal** as a property value must be parenthesized — `prop: (MyStruct { … })`
   — because an unparenthesized `{ … }` is parsed as a `bati!` element. Enum variants
   (`prop: Type::Variant(x)`) need no parens.
-- No method chains in property-arg position: write `item: MenuItem::new("x") { on_activate_fn: cb }`
-  (body form), not `item: MenuItem::new("x").on_activate(cb)`.
+- No method chains in property-arg position: write `item: MenuItem::new(lit!("x")) { on_activate_fn: cb }`
+  (body form), not `item: MenuItem::new(lit!("x")).on_activate(cb)`.
 
 The best way to learn `bati!` is to read real trees: the framework ships large, runnable
 `bati!` examples (`cargo run -p widget-catalog` is the densest; `simple_button` /
