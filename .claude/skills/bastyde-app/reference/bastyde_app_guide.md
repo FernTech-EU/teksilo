@@ -532,26 +532,163 @@ In-app and OS-level drops share one pipeline. Attach `.on_drag_hover` / `.on_dra
 
 ## The `bati!` DSL
 
-Optional block-structured macro for widget trees. Desugars 1:1 to builder calls at compile
-time — no runtime, no virtual tree.
+`bati!` is an **optional** block-structured macro for widget trees. It desugars 1:1 to the
+builder calls you'd otherwise write — no runtime, no virtual tree, byte-for-byte the same
+output. It earns its keep on **deep, nested trees** where builder chains (`.child(...).child(...)`)
+get hard to scan; for a flat two- or three-widget tree the plain builder API is just as
+clear. The two are fully interchangeable and nest in either direction, so adopt it where it
+helps and ignore it where it doesn't.
+
+**Two invocation forms** (the `ctx =>` preamble names your `BuildContext` local; `=>` is
+literal):
 
 ```rust,ignore
-use bastyde::prelude::*;
+bati!(ctx => VStack { /* … */ })   // inserts the root via ctx.add → returns WidgetId
+bati!(VStack { /* … */ })          // returns a widget value → pass to .child(...) / a slot
+```
 
+**The same tree, both ways** — identical expansion:
+
+```rust,ignore
+// Plain builder
+VStack::new().spacing(10.0)
+    .child(TextWidget::new("Title").style(TextStyleRole::BodyBold))
+    .child(Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)))
+
+// bati!
 bati!(ctx =>
     VStack {
-        spacing: 12.0
-        TextWidget::new(lit!("Title")) { style: TextStyleRole::BodyBold }
-        open_btn = Button("Open") { on_activate: AppIntent::Save }
-        TextWidget("Status") { linked_to: open_btn }
+        spacing: 10.0
+        TextWidget("Title") { style: TextStyleRole::BodyBold }
+        Button("Save") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Save) }
     }
 )
 ```
 
-Items are newline-separated. `name: value` → `.name(value)`. `name = Element` hoists a
-`let` + attaches by id. Bare UpperCamel children → `.child(...)`. Supports
-`if`/`match`/`for`/`let`/`rust { }`/`..spread` and a `#{ expr }` escape. Use it or the
-plain builder API — they're interchangeable.
+**Reading rules:**
+
+- **Element head** — `Button("Save")` → `Button::new("Save")`. An UpperCamel head gets
+  `::new` appended automatically; a bare type (`VStack`) → `VStack::new()`; an explicit
+  lowercase constructor is emitted as-is (`Padding::uniform(24.0)`, `ProgressBar::indeterminate()`).
+  Use the explicit `Button::new(tr!(save()))` form to pass a localized `tr!` / `lit!` string —
+  a bare `Button("Save")` only works for a plain `&str`.
+- **`name: value`** → `.name(value)`. Multi-arg `border: color, 2.0` → `.border(color, 2.0)`.
+  A bare lowercase word is a zero-arg call: `fills_stack` → `.fills_stack()`.
+- **Bare child** → `.child(...)`, for the layout/container widgets that have a `.child()`
+  (VStack, HStack, ZStack, Padding, Expand, Panel, ScrollArea, Toolbar, GroupBox, …).
+  Properties and children interleave freely; body items are **newline-separated** (commas
+  between them are optional).
+- **Handlers are closures, verbatim** — `on_tap: |ev, ctx| …`, `on_activate_fn: |ctx| …`,
+  `on_hover: move |entered, ctx| …`. `move`, capture, and arity stay exactly as written, and
+  handler methods are auto-moved to the end of the chain so you can place them in any order.
+
+> The single most common mistake: it's `on_activate_fn: |ctx| ctx.send_intent(AppIntent::Save)`
+> — a **closure that fires the intent**, not `on_activate: AppIntent::Save`. Handlers are
+> always closures.
+
+**Named-slot widgets.** Card, Dialog, TabWidget, Popover, Snackbar, Accordion, Breadcrumb,
+TitleBar (and friends) take content by **named slot**, not by bare child — a bare child there
+is a compile error that names the slot you meant:
+
+```rust,ignore
+bati!(ctx =>
+    Card {
+        header: TextWidget("Title") { style: TextStyleRole::BodyBold }
+        content: VStack {
+            spacing: 8.0
+            TextWidget("Line one")
+            TextWidget("Line two")
+        }
+        footer: Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
+        padding: 16.0
+    }
+)
+```
+
+**Bind an id** with `name = Element` when a later item — usually a handler closure — needs to
+reference that widget. It hoists a `let name = ctx.add(Element)` and stays in scope for the
+rest of the block (in a slot it routes to the slot's `*_id` twin):
+
+```rust,ignore
+bati!(ctx =>
+    Card {
+        header: title = TextWidget("Manuscript") { style: TextStyleRole::BodyBold }
+        content: Button("Focus title") {
+            on_tap: move |_, ctx| ctx.focus(title)     // `title` is in scope here
+        }
+    }
+)
+```
+
+To splice an **already-registered** id, use the `#{ id }` escape (`→ .add_child(id)`), or the
+plain property forms `add_child: id` / `child_id: id` / `<slot>_id: id`.
+
+This is also the standard escape hatch when a child needs a builder chain `bati!` can't
+express inline (a multi-arg constructor plus method calls — `bati!` has no method-chain form
+at a property/child head): pre-register it with `ctx.add(...)`, then splice the `WidgetId`.
+The stock `widget-catalog` example does exactly this for its richer controls:
+
+```rust,ignore
+let confirm = ctx.add(
+    Button::new(tr!(confirm()))
+        .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
+        .variant(ButtonVariant::Filled),
+);
+bati!(ctx =>
+    HStack {
+        spacing: 8.0
+        #{ confirm }                                      // → .add_child(confirm)
+        Button("Cancel") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Cancel) }
+    }
+)
+```
+
+**Structural forms** let conditionals and iteration stay inside the block instead of forcing
+you back to builder syntax:
+
+| Form | Desugars to |
+| --- | --- |
+| `if c { E }` | `.child_opt(if c { Some(‹E›) } else { None })` |
+| `if c { A } else { B }` (≤ 4 arms) | `.child(BatiBranch::…)` |
+| `match x { p => E, … }` (2–4 arms) | `.child(match x { … })` |
+| `for p in it { let …; E }` | `.children(it.map(\|p\| ‹E›))` |
+| `let x = …;` at body | a local for the following body items |
+| `..ids` | splices an iterator of `WidgetId` as children |
+| `rust { … }` | imperative escape — trailing expr → child, trailing `;` → side-effect |
+
+```rust,ignore
+bati!(ctx =>
+    VStack {
+        if items.is_empty() {
+            TextWidget("Nothing here yet")
+        }
+        for item in items.iter() {
+            let id = item.id;                          // owned capture for the move closure
+            Button(item.title.clone()) {
+                on_tap: move |_, ctx| ctx.send_intent(AppIntent::Select(id))
+            }
+        }
+    }
+)
+```
+
+**Gotchas worth knowing up front:**
+
+- `if` / `match` cap at **4 arms** — beyond that, call a helper returning `Box<dyn Widget>`.
+- `if signal { … }` does **not** auto-wire reactive visibility (the macro never invents
+  reactivity the builder doesn't have). Bind `visible_when(id, signal)` on a registered child
+  yourself.
+- A Rust **struct literal** as a property value must be parenthesized — `prop: (MyStruct { … })`
+  — because an unparenthesized `{ … }` is parsed as a `bati!` element. Enum variants
+  (`prop: Type::Variant(x)`) need no parens.
+- No method chains in property-arg position: write `item: MenuItem::new("x") { on_activate_fn: cb }`
+  (body form), not `item: MenuItem::new("x").on_activate(cb)`.
+
+The best way to learn `bati!` is to read real trees: the framework ships large, runnable
+`bati!` examples (`cargo run -p widget-catalog` is the densest; `simple_button` /
+`text-and-layout` are the gentle ones). The `/bati-macro` skill (in the framework repo)
+handles read/write/translate/debug requests; the full grammar and desugaring cheat sheet
+live in `docs/bati-macro-reference.md` and `docs/bati-language-spec-v3.md` there.
 
 ## EventContext capabilities
 
