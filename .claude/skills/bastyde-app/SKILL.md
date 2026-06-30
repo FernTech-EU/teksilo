@@ -1,6 +1,6 @@
 ---
 name: bastyde-app
-description: Build or modify a Rust desktop GUI app that DEPENDS ON the `bastyde` crate (FernTech's pure-Rust GUI framework) — questions about bastyde widgets, layout, Signal/Prop reactivity, events, theming, settings, i18n, animations, or the `bati!` DSL, or any time a Cargo.toml in scope lists `bastyde` as a dependency. Also handles `/bastyde-app`. SKIP when editing the bastyde framework itself (a workspace defining bastyde-core / bastyde-widgets — use that repo's CLAUDE.md); when working inside the framework repo, the extract-widget-api / bati-macro skills are better for single-widget API dumps or bati! questions.
+description: Build or modify a Rust desktop GUI app that DEPENDS ON the `bastyde` crate (FernTech's pure-Rust GUI framework) — questions about bastyde widgets, layout, Signal/Prop reactivity, events, theming, settings, i18n, animations, the `bati!` DSL, or driving/testing the app via the bastyde-automation MCP (agent/CI automation), or any time a Cargo.toml in scope lists `bastyde` as a dependency. Also handles `/bastyde-app`. SKIP when editing the bastyde framework itself (a workspace defining bastyde-core / bastyde-widgets — use that repo's CLAUDE.md); when working inside the framework repo, the extract-widget-api / bati-macro skills are better for single-widget API dumps or bati! questions.
 user_invocable: true
 ---
 
@@ -48,6 +48,39 @@ Use whatever version the app's `Cargo.toml` already pins — do **not** assume a
 `use bastyde::widgets::*;` brings the widget builders — **the prelude does NOT pull the
 widget builders in**.
 
+## Driving & testing the app (automation MCP)
+
+Bastyde ships **`bastyde-automation`** + **`bastyde-automation-mcp`** — a Model Context
+Protocol server that lets an AI agent / CI harness **observe** (the live accessibility
+tree, the full widget/layout tree with bounds + per-widget parameters, and screenshots)
+and **drive** (accessibility actions + synthetic pointer/key/IME input) the app
+**in-process, with no OS accessibility layer**. Reach for it to author UI tests, reproduce
+a bug, debug layout, or let an agent exercise the running app.
+
+- **Headless** (CI / agent-authored tests, every platform): `bastyde-automation-mcp
+  --headless` — a self-contained MCP server; no display or GPU daemon needed. (The stock
+  binary drives a built-in demo; to headlessly drive *your* app, build a tiny harness over
+  `bastyde_automation::execute` — the toolkit is GUI-free.)
+- **Live app** (Linux/macOS, debug builds): enable the `automation` feature on the
+  `bastyde` dependency and add one builder call —
+
+  ```rust
+  BastydeAppBuilder::new()
+      .install_automation_bridge_in_debug()   // debug-only; no-op in release / on Windows
+      // … the rest of the chain …
+      .run();
+  ```
+
+  It prints a socket path + token to stderr; drive it with `bastyde-automation-mcp
+  --connect <sock> --token <uuid>`.
+
+On connect the server hands the client a "how to drive this app" briefing plus a JSON
+schema per tool, so a capable agent self-guides the **snapshot → find node → act → settle
+→ assert** loop. Notable tools: `snapshot_tree` / `find_node` / `assert_node` (semantics),
+`invoke_action` / `inject_*` / `type_text` (drive), `layout_tree` / `inspect_node` (full
+widget geometry + parameters — what the debug inspector shows), `screenshot`. Full
+reference: `docs/automation-mcp.md` in the framework repo.
+
 ## High-leverage gotchas (verified against 0.7 source — re-verify via step 2 if newer)
 
 - **No `Theme::default()`** — pick a preset: `intui::light()` / `intui::dark()`.
@@ -63,15 +96,7 @@ widget builders in**.
   `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `bastyde::core::{WidgetTree, LayoutContext::for_testing}` +
   `bastyde::canvas::MockTextBackend` — `MockTextBackend` is under `canvas`, not `core`.
-- **Agent/CI automation (optional):** an MCP server can observe (accessibility tree +
-  screenshots) and drive (AT actions + synthetic pointer/key/IME input) the app in-process,
-  no OS accessibility layer. `bastyde-automation-mcp --headless` is a self-contained MCP
-  server for deterministic CI / agent-authored tests; to drive a *live* app, enable the
-  `automation` feature on the `bastyde` dep and add `.install_automation_bridge_in_debug()`
-  to the `BastydeAppBuilder` chain (debug-only Unix socket, Linux/macOS; no-op in release /
-  on Windows), then `bastyde-automation-mcp --connect <sock> --token <uuid>` (both printed
-  to stderr at startup). Built on the AccessKit tree every widget already declares, so node
-  ids are stable. See `docs/automation-mcp.md` in the framework repo.
+  (For agent/CI-driven testing of the running app, see *Driving & testing the app* above.)
 
 ## Maintenance (skill owner only)
 

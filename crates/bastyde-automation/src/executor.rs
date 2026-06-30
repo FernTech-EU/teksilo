@@ -50,6 +50,27 @@ pub fn execute(
                 None => AutomationReply::err(codes::NOT_FOUND, format!("no node {node}")),
             }
         }
+        AutomationOp::LayoutTree {
+            max_depth,
+            include_debug,
+        } => AutomationReply::ok(layout_tree_json(tree, *max_depth, *include_debug)),
+        AutomationOp::InspectNode { node } => {
+            let nid = accesskit::NodeId(*node);
+            if bastyde_core::accessibility::is_synthetic(nid) {
+                return AutomationReply::err(
+                    codes::NOT_FOUND,
+                    "synthetic node has no backing widget — use read_node for its AT detail",
+                );
+            }
+            let widget = bastyde_core::accessibility::node_id_to_widget_id_maybe(nid)
+                .filter(|w| tree.widget_type_name(*w).is_some());
+            match widget {
+                Some(w) => AutomationReply::ok_json(&layout_node(tree, w, true)),
+                None => {
+                    AutomationReply::err(codes::NOT_FOUND, format!("no widget for node {node}"))
+                }
+            }
+        }
         AutomationOp::FindNode { role, label } => {
             let update = tree.sync_accessibility();
             let found = find_node_ref(&update, role.as_deref(), label.as_deref());
@@ -486,6 +507,70 @@ fn semantic_node(
         actions,
         children: node.children().iter().map(|c| c.0).collect(),
     }
+}
+
+/// Build a [`LayoutNode`] for one arena widget.
+fn layout_node(tree: &WidgetTree, id: WidgetId, include_debug: bool) -> crate::dto::LayoutNode {
+    let to_ref = |w: WidgetId| bastyde_core::accessibility::widget_id_to_node_id(w).0;
+    let b = tree.bounds(id);
+    crate::dto::LayoutNode {
+        id: to_ref(id),
+        type_name: tree
+            .widget_type_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "?".to_string()),
+        bounds: NodeBounds {
+            x: b.x as f64,
+            y: b.y as f64,
+            width: b.width as f64,
+            height: b.height as f64,
+        },
+        active: tree.is_active(id),
+        clips_children: tree.widget_clips_children(id),
+        parent: tree.parent(id).map(to_ref),
+        children: tree.children(id).into_iter().map(to_ref).collect(),
+        debug: if include_debug {
+            tree.widget_debug_string(id)
+        } else {
+            None
+        },
+    }
+}
+
+/// Walk the arena widget tree from the roots (BFS, depth-capped), keying every
+/// widget by the same `NodeRef` space as the AT tools.
+fn layout_tree_json(
+    tree: &WidgetTree,
+    max_depth: Option<usize>,
+    include_debug: bool,
+) -> serde_json::Value {
+    use std::collections::{HashSet, VecDeque};
+    let to_ref = |w: WidgetId| bastyde_core::accessibility::widget_id_to_node_id(w).0;
+    let roots = tree.roots();
+    let mut out: Vec<crate::dto::LayoutNode> = Vec::new();
+    let mut seen: HashSet<WidgetId> = HashSet::new();
+    let mut queue: VecDeque<(WidgetId, usize)> = roots.iter().map(|r| (*r, 0usize)).collect();
+    while let Some((id, depth)) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let descend = max_depth.map(|d| depth < d).unwrap_or(true);
+        let mut node = layout_node(tree, id, include_debug);
+        if !descend {
+            // At the cap: drop child refs so there are no dangling ids.
+            node.children.clear();
+        }
+        out.push(node);
+        if descend {
+            for c in tree.children(id) {
+                queue.push_back((c, depth + 1));
+            }
+        }
+    }
+    serde_json::json!({
+        "roots": roots.into_iter().map(to_ref).collect::<Vec<_>>(),
+        "nodes": out,
+    })
 }
 
 fn find_node(update: &accesskit::TreeUpdate, node: NodeRef) -> Option<SemanticNode> {

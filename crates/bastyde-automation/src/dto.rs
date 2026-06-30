@@ -82,6 +82,41 @@ pub struct NodeBounds {
     pub height: f64,
 }
 
+/// One widget in the *layout/arena* tree (the inspector's view) — richer than
+/// [`SemanticNode`] because it includes widgets the accessibility tree prunes
+/// (layout primitives, dormant `Switcher` branches, presentational /
+/// `access_exclude` widgets). Keyed by the **same** [`NodeRef`] space as the
+/// AT tools (`widget_id_to_node_id`), so a layout node and an AT node for the
+/// same widget share an `id`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LayoutNode {
+    /// The widget's [`NodeRef`].
+    pub id: NodeRef,
+    /// The widget's concrete Rust type name (e.g.
+    /// `"bastyde_widgets::button::Button"`).
+    #[serde(rename = "type")]
+    pub type_name: String,
+    /// Layout-resolved bounds in logical window-relative pixels.
+    pub bounds: NodeBounds,
+    /// Whether the widget is currently active (vs dormant — e.g. a hidden
+    /// `Switcher` branch, whose `bounds` are its last laid-out values).
+    pub active: bool,
+    /// Whether the widget clips its children (`ScrollArea`, `MaxSize`, …).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clips_children: bool,
+    /// Parent widget ref, or `None` for a root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<NodeRef>,
+    /// Child widget refs, in tree order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<NodeRef>,
+    /// The widget's `Debug` repr — its constructor parameters / fields, the
+    /// same "debug repr" the inspector's Properties tab shows. Present only
+    /// when requested (`include_debug` / `inspect_node`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<String>,
+}
+
 /// One managed window, as reported by `list_windows`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct WindowInfo {
@@ -291,6 +326,22 @@ pub enum AutomationOp {
         max_depth: Option<usize>,
     },
     ReadNode {
+        node: NodeRef,
+    },
+    /// Walk the full widget/layout (arena) tree — includes widgets the AT tree
+    /// prunes (layout primitives, dormant branches, presentational widgets).
+    LayoutTree {
+        #[serde(default)]
+        max_depth: Option<usize>,
+        /// Include each widget's `Debug` repr (its parameters). Off by default
+        /// (it can be large).
+        #[serde(default)]
+        include_debug: bool,
+    },
+    /// One widget's full layout-tree record (type, bounds, flags, tree
+    /// position, and its `Debug` repr) — the inspector's Properties tab for a
+    /// single node. Works for any widget, AT-visible or not.
+    InspectNode {
         node: NodeRef,
     },
     FindNode {

@@ -70,6 +70,22 @@ pub struct ReadParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LayoutTreeParams {
+    pub window_id: Option<u64>,
+    /// Optional depth limit from the roots (omit for the whole tree).
+    pub max_depth: Option<usize>,
+    /// Include each widget's Debug repr (its parameters). Off by default — it
+    /// can be large.
+    pub include_debug: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct InspectParams {
+    pub window_id: Option<u64>,
+    pub node: u64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct NodeParams {
     pub window_id: Option<u64>,
     pub node: u64,
@@ -257,6 +273,39 @@ impl AutomationServer {
         self.run(
             p.window_id,
             AutomationOp::ReadNode { node: p.node },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Walk the full widget/layout tree (incl. widgets the accessibility tree prunes — layout primitives, dormant branches, presentational widgets) with each widget's type, bounds, flags, and tree position. Returns { roots, nodes } keyed by the same node ids as the AT tools."
+    )]
+    pub(crate) async fn layout_tree(
+        &self,
+        Parameters(p): Parameters<LayoutTreeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::LayoutTree {
+                max_depth: p.max_depth,
+                include_debug: p.include_debug.unwrap_or(false),
+            },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Inspect one widget by node id: its type, bounds, flags (active/clips_children), tree position, and its Debug repr (constructor parameters). The inspector's Properties tab for a single node. Works for any widget, AT-visible or not."
+    )]
+    pub(crate) async fn inspect_node(
+        &self,
+        Parameters(p): Parameters<InspectParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::InspectNode { node: p.node },
             SettleSpec::default(),
         )
         .await
@@ -666,6 +715,14 @@ tree). For timed UI (tooltips, debounced reactivity) pass `settle.clock_millis` 
 to advance the simulated clock, call `advance_clock {millis}`, or poll with \
 `wait_for_condition {kind, ...}` (node_exists / node_value / node_gone / \
 at_version_at_least).
+
+Layout debugging: `layout_tree {max_depth?, include_debug?}` walks the FULL \
+widget tree — including widgets the accessibility tree prunes (layout \
+primitives, dormant branches, presentational widgets) — with each widget's \
+type, bounds, and tree position; `inspect_node {node}` gives one widget's full \
+record incl. its Debug repr (parameters). Use these for overlap / clipping / \
+off-screen / wrong-size questions the semantic tree can't answer. Layout nodes \
+share ids with AT nodes, so the same widget correlates across both.
 
 Other tools: `get_overlays` detects open menus/popovers/dialogs; \
 `list_live_regions` + `pull_announcements {since_seq}` capture status/toast \

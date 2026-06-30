@@ -37,6 +37,16 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
         mutating: false,
     },
     ToolDescriptor {
+        name: "layout_tree",
+        description: "Walk the full widget/layout tree (incl. widgets the AT tree prunes) with bounds + types.",
+        mutating: false,
+    },
+    ToolDescriptor {
+        name: "inspect_node",
+        description: "One widget's full layout record: type, bounds, flags, tree position, Debug repr.",
+        mutating: false,
+    },
+    ToolDescriptor {
         name: "find_node",
         description: "Find the first node matching a role and/or label.",
         mutating: false,
@@ -153,5 +163,5 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
 ];
 
-/// The number of tools in the catalog (24).
+/// The number of tools in the catalog (26).
 pub const TOOL_COUNT: usize = TOOL_CATALOG.len();

@@ -43,8 +43,8 @@ pub mod recording_ops;
 
 pub use dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, AutomationRequest,
-    NodeBounds, NodeRef, PointerAction, PointerButtonDto, SemanticNode, SettleSpec, ShortcutInfo,
-    WaitCondition, WindowInfo, codes,
+    LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, SemanticNode, SettleSpec,
+    ShortcutInfo, WaitCondition, WindowInfo, codes,
 };
 pub use executor::{execute, run_settle};
 pub use mcp_schema::{TOOL_CATALOG, TOOL_COUNT, ToolDescriptor};

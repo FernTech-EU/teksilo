@@ -13,7 +13,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::gesture::TapEvent;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
+use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
@@ -185,6 +185,52 @@ impl Widget for Probe {
     }
 }
 
+/// A minimal presentational container: holds one child, emits NO AT role (so
+/// the accessibility walk prunes it), but is a real arena widget with bounds.
+/// Used to prove `layout_tree` sees what the AT tree doesn't.
+#[derive(Debug)]
+struct Container {
+    pending: Option<Box<dyn Widget>>,
+    child_id: Option<WidgetId>,
+}
+
+impl Container {
+    fn new(child: impl Widget + 'static) -> Self {
+        Self {
+            pending: Some(Box::new(child)),
+            child_id: None,
+        }
+    }
+}
+
+impl Widget for Container {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if let Some(child) = self.pending.take() {
+            self.child_id = Some(ctx.add_boxed(child));
+        }
+        self.child_id.into_iter().collect()
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(200.0, 100.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: bastyde_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+    // No `accessibility` override → bare presentational node, pruned from the AT tree.
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -274,6 +320,99 @@ fn read_missing_node_is_not_found() {
         &default_settle(),
     );
     assert!(matches!(reply, AutomationReply::Err { code, .. } if code == codes::NOT_FOUND));
+}
+
+#[test]
+fn layout_tree_includes_widgets_the_at_tree_prunes() {
+    // A presentational Container wrapping a Button: the Container has no AT
+    // role (pruned from the AT tree) but is a real arena widget.
+    let mut tree = WidgetTree::new();
+    let _root = tree.add(Container::new(Probe::new(accesskit::Role::Button, "Inner")));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let mut ops = RecordingWindowOps::new();
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::LayoutTree {
+            max_depth: None,
+            include_debug: false,
+        },
+        &default_settle(),
+    );
+    let AutomationReply::Ok { data } = reply else {
+        panic!("{reply:?}");
+    };
+    let nodes: Vec<LayoutNode> = serde_json::from_value(data["nodes"].clone()).unwrap();
+    let types: Vec<&str> = nodes.iter().map(|n| n.type_name.as_str()).collect();
+    assert!(
+        types.iter().any(|t| t.contains("Container")),
+        "the presentational Container is in the layout tree: {types:?}"
+    );
+    assert!(
+        types.iter().any(|t| t.contains("Probe")),
+        "the Button is too: {types:?}"
+    );
+    // Every node carries real bounds (the Container is 400x300 — the root fills
+    // the proposal — and is active).
+    let container = nodes
+        .iter()
+        .find(|n| n.type_name.contains("Container"))
+        .unwrap();
+    assert!(container.active);
+    assert!(container.bounds.width > 0.0 && container.bounds.height > 0.0);
+    assert!(
+        !container.children.is_empty(),
+        "Container has the Button as a child"
+    );
+
+    // Contrast: the Container is absent from the AT snapshot (no role).
+    let at = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::SnapshotTree { max_depth: None },
+        &default_settle(),
+    );
+    let AutomationReply::Ok { data: at } = at else {
+        panic!();
+    };
+    let at_roles: Vec<&str> = at["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n["role"].as_str())
+        .collect();
+    assert!(at_roles.contains(&"Button"), "Button is in the AT tree");
+}
+
+#[test]
+fn inspect_node_returns_type_bounds_and_debug() {
+    let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "Inspect"));
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InspectNode { node: node_ref(id) },
+        &default_settle(),
+    );
+    let AutomationReply::Ok { data } = reply else {
+        panic!("{reply:?}");
+    };
+    let ln: LayoutNode = serde_json::from_value(data).unwrap();
+    assert_eq!(ln.id, node_ref(id));
+    assert!(ln.type_name.contains("Probe"), "type: {}", ln.type_name);
+    assert!(ln.active);
+    // The Debug repr (the inspector's Properties data) is present.
+    assert!(ln.debug.as_deref().unwrap_or("").contains("Probe"));
+
+    // A made-up id resolves to nothing.
+    let missing = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InspectNode { node: 7 },
+        &default_settle(),
+    );
+    assert!(matches!(missing, AutomationReply::Err { code, .. } if code == codes::NOT_FOUND));
 }
 
 #[test]
@@ -843,8 +982,8 @@ fn dto_round_trips_through_json() {
 }
 
 #[test]
-fn tool_catalog_has_24_entries() {
-    assert_eq!(crate::mcp_schema::TOOL_COUNT, 24);
+fn tool_catalog_has_26_entries() {
+    assert_eq!(crate::mcp_schema::TOOL_COUNT, 26);
     // Names are unique.
     let mut names: Vec<&str> = crate::mcp_schema::TOOL_CATALOG
         .iter()

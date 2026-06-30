@@ -46,6 +46,36 @@ impl WidgetTree {
         self.arena.children(id).to_vec()
     }
 
+    /// Root widget ids of the arena (the entry points for a full widget-tree
+    /// walk). Mirrors what the debug inspector starts its tree view from.
+    pub fn roots(&self) -> Vec<WidgetId> {
+        self.arena.roots()
+    }
+
+    /// The concrete Rust type name of the widget at `id` (e.g.
+    /// `"bastyde_widgets::button::Button"`), or `None` if the id isn't in the
+    /// arena. The same `Widget::type_name()` the inspector's tree view labels
+    /// rows with.
+    pub fn widget_type_name(&self, id: WidgetId) -> Option<&'static str> {
+        self.arena.get(id).map(|n| n.widget.type_name())
+    }
+
+    /// The widget at `id` formatted via its `Debug` impl — its constructor
+    /// parameters / fields, the same "debug repr" the inspector's Properties
+    /// tab shows. `None` if the id isn't in the arena.
+    pub fn widget_debug_string(&self, id: WidgetId) -> Option<String> {
+        self.arena.get(id).map(|n| format!("{:?}", n.widget))
+    }
+
+    /// Whether the widget at `id` clips its children (e.g. `ScrollArea`,
+    /// `MaxSize`). `false` if the id isn't in the arena.
+    pub fn widget_clips_children(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .map(|n| n.clips_children)
+            .unwrap_or(false)
+    }
+
     /// The most recent layout proposal applied to this tree (the size
     /// last passed to [`layout`](Self::layout) / `layout_with_ops`).
     /// Lets a settle pass re-run layout at the current size without

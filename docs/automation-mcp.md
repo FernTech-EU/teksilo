@@ -120,6 +120,8 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 **Query** — `snapshot_tree`, `read_node`, `find_node`, `assert_node`,
 `list_windows`
 
+**Layout / geometry** — `layout_tree`, `inspect_node`
+
 **Drive (AT actions)** — `invoke_action`, `focus_node`, `set_value`,
 `expand`, `collapse`, `scroll`
 
@@ -137,6 +139,20 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 `SemanticNode` carries `id`, `role`, `label`, `value`, `toggled`, `expanded`,
 `selected`, `disabled`, `focused`, `live`, `numeric_value`, `bounds`,
 `actions`, and `children`.
+
+`layout_tree` and `inspect_node` expose the **full widget/layout (arena)
+tree** — the same data the debug inspector's Tree + Properties tabs show, and
+strictly richer than the accessibility snapshot: it includes widgets the AT
+tree *prunes* (layout primitives like `HStack`/`Padding`/`Spacer`, dormant
+`Switcher` branches, presentational / `access_exclude` widgets), so an agent
+can debug layout (overlap, clipping, off-screen, wrong size) — not just
+semantics. Each `LayoutNode` carries `id`, `type` (the concrete Rust type
+name), `bounds`, `active`, `clips_children`, `parent`, `children`, and — when
+requested (`include_debug`, or always for `inspect_node`) — `debug`, the
+widget's `Debug` repr (its constructor parameters). Layout nodes are keyed by
+the **same** node-id space as the AT tools, so when a widget appears in both,
+the two records share an `id` and can be correlated. (Coordinates are logical
+window-relative pixels, identical to the AT `bounds`.)
 
 ### Multi-window routing
 
