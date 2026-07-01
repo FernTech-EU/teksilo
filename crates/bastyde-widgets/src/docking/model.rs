@@ -129,8 +129,11 @@ impl DockOpenLocation {
 pub enum DockRailItemSize {
     /// The rail's configured size (`DockRail::size`); icon only, title on hover.
     Default = 0,
-    /// Compact items ([`IconButtonSize::Compact`](crate::icon_button::IconButtonSize::Compact));
-    /// icon only, title on hover.
+    /// Compact items — the standard
+    /// [`IconButtonSize::Default`](crate::icon_button::IconButtonSize::Default)
+    /// regardless of the rail's configured (larger) size; icon only, title on
+    /// hover. Not the extra-small `Compact` button: a rail glyph is the
+    /// activity's identifier and must stay legible.
     Compact = 1,
     /// Icon at the configured size **plus** a 90°-rotated title beneath it (the
     /// vertical-accordion look). The title shows inline, so no hover tooltip.

@@ -215,12 +215,13 @@ impl DockRail {
     }
 
     /// The rail strip's effective thickness for a size `mode` — the item extent
-    /// (Compact shrinks it; Default / Labeled keep the configured size) plus the
-    /// rail's padding. Drives the side's rail width so the activity bar itself
-    /// follows the Default / Compact / Icon + Label switch, not just its items.
+    /// (Compact shrinks it to the standard [`IconButtonSize::Default`]; Default /
+    /// Labeled keep the configured size) plus the rail's padding. Drives the
+    /// side's rail width so the activity bar itself follows the Default /
+    /// Compact / Icon + Label switch, not just its items.
     pub(crate) fn effective_thickness(&self, mode: DockRailItemSize) -> f32 {
         let size = if matches!(mode, DockRailItemSize::Compact) {
-            IconButtonSize::Compact
+            IconButtonSize::Default
         } else {
             self.size
         };
@@ -297,12 +298,14 @@ impl DockActivityBar {
         }
     }
 
-    /// The effective rail-item size: compact items shrink the glyph; Default and
+    /// The effective rail-item size: compact items shrink to the standard
+    /// [`IconButtonSize::Default`] (not the extra-small `Compact` — a rail item
+    /// is an identify target, so its glyph must stay legible); Default and
     /// Labeled both keep the rail's configured icon size (Labeled just adds a
     /// rotated title beneath).
     fn effective_item_size(&self) -> IconButtonSize {
         match self.model.side_rail_size(self.side) {
-            DockRailItemSize::Compact => IconButtonSize::Compact,
+            DockRailItemSize::Compact => IconButtonSize::Default,
             DockRailItemSize::Default | DockRailItemSize::Labeled => self.config.size,
         }
     }
