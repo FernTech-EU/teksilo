@@ -650,14 +650,21 @@ included). Activating an item sets `selected_id` and dismisses the
 popover.
 
 ```rust
-.show_overflow_dropdown(true)   // default
+.overflow_button(TabOverflowButton::Auto)   // default
 ```
 
-The dropdown is rendered whenever `show_overflow_dropdown(true)`, not
-only on overflow — Firefox does the same, since the fast-jump is useful
-even with a few tabs. The popover's surface is a `Panel` with
-`SurfaceRole::Raised` and bounded height (max 320 dp, 28 dp per row),
-scrolling internally on long lists.
+`TabOverflowButton` governs *when* the button appears:
+
+| Mode | Behaviour |
+| --- | --- |
+| `Auto` (default) | Shown **only when the tab headers overflow** the viewport — the same condition that reveals the scroll arrows (`visible_when` on the ScrollArea's `max_scroll` signal). Stays out of the way until it is useful. |
+| `Always` | Shown whenever the bar has at least one tab, even when everything fits (a persistent fast-jump affordance — the old default). |
+| `Never` | Never built. |
+
+`show_overflow_dropdown(bool)` is a convenience over `overflow_button`:
+`true` → `Always`, `false` → `Never`. The popover's surface is a `Panel`
+with `SurfaceRole::Raised` and bounded height (max 320 dp, 28 dp per
+row), scrolling internally on long lists.
 
 The dropdown advertises `HasPopup::Menu` to AccessKit so screen readers
 announce it as a popup trigger.

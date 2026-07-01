@@ -69,7 +69,9 @@ use bastyde_tokens::Easing;
 use crate::list_source::ListSource;
 use crate::primitives::FixedSize;
 use crate::scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
-use crate::tab_widget::delegate::{TabBarOrientation, TabDelegate, TabDisplayMode, TabSizing};
+use crate::tab_widget::delegate::{
+    TabBarOrientation, TabDelegate, TabDisplayMode, TabOverflowButton, TabSizing,
+};
 use crate::tab_widget::header::{HeaderShared, TabHeader, TabHeaderConfig};
 use crate::tab_widget::id::TabId;
 use crate::{
@@ -217,7 +219,7 @@ pub struct TabBar<T: 'static> {
 
     show_separator: bool,
     show_scroll_arrows: bool,
-    show_overflow_dropdown: bool,
+    overflow_button: TabOverflowButton,
     vertical_wheel_scrolls_horizontally: bool,
     shift_wheel_scrolls_horizontally: bool,
 
@@ -455,7 +457,7 @@ impl<T: 'static> TabBar<T> {
             bar_trailing_slot: None,
             show_separator: true,
             show_scroll_arrows: true,
-            show_overflow_dropdown: true,
+            overflow_button: TabOverflowButton::Auto,
             vertical_wheel_scrolls_horizontally: true,
             shift_wheel_scrolls_horizontally: true,
             on_close: None,
@@ -712,10 +714,25 @@ impl<T: 'static> TabBar<T> {
         self
     }
 
-    /// Toggle the trailing "show all tabs" overflow dropdown — a
-    /// `Popover` with a `MenuList` of every tab. Default: on.
+    /// When the trailing "show all tabs" overflow dropdown appears — a
+    /// `Popover` with a `MenuList` of every tab. Default:
+    /// [`TabOverflowButton::Auto`] (shown only when the headers overflow the
+    /// viewport). See [`TabOverflowButton`] for `Always` / `Never`.
+    pub fn overflow_button(mut self, mode: TabOverflowButton) -> Self {
+        self.overflow_button = mode;
+        self
+    }
+
+    /// Convenience over [`overflow_button`](Self::overflow_button): `true` maps
+    /// to [`TabOverflowButton::Always`], `false` to [`TabOverflowButton::Never`].
+    /// Prefer `overflow_button(TabOverflowButton::Auto)` for the default
+    /// "only when overflowing" behaviour.
     pub fn show_overflow_dropdown(mut self, on: bool) -> Self {
-        self.show_overflow_dropdown = on;
+        self.overflow_button = if on {
+            TabOverflowButton::Always
+        } else {
+            TabOverflowButton::Never
+        };
         self
     }
 
@@ -1506,8 +1523,10 @@ impl<T: 'static> Widget for TabBar<T> {
         // Overflow dropdown — a chevron-down `PopoverIconButton` whose
         // popover content is a `ListView` mirroring the full tab
         // list. Activating an item sets `selected_id` and dismisses
-        // the popover.
-        if self.show_overflow_dropdown && !header_labels.is_empty() {
+        // the popover. `Auto` (default) reveals it only when the headers
+        // overflow the viewport (`max_scroll_main > 0`), mirroring the
+        // scroll-arrow auto-show; `Always` keeps it pinned; `Never` omits it.
+        if self.overflow_button != TabOverflowButton::Never && !header_labels.is_empty() {
             // Build (id, label, enabled) entries so the dropdown can
             // route activation by stable TabId rather than by index.
             let entries: Vec<DropdownEntry> = header_labels
@@ -1526,6 +1545,11 @@ impl<T: 'static> Widget for TabBar<T> {
                 entries,
                 self.idle_text_role,
             );
+            if self.overflow_button == TabOverflowButton::Auto {
+                // Reveal only when there is something scrolled out of view.
+                let overflowing = max_scroll_main.clone().map(|m| *m > 0.5);
+                ctx.visible_when(dropdown_id, overflowing);
+            }
             outer_children.push(dropdown_id);
         }
 

@@ -87,7 +87,10 @@ pub use bar::{
     DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar, TabBarDragData,
 };
 use bastyde_i18n::LocalizedString;
-pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabDisplayMode, TabSizing};
+pub use delegate::{
+    ContextMenuFactory, TabBarOrientation, TabDelegate, TabDisplayMode, TabOverflowButton,
+    TabSizing,
+};
 pub use handle::{STATIC_KIND, TabHandle};
 pub use id::TabId;
 pub use info::{IconFactory, TabInfo};
@@ -273,7 +276,7 @@ pub struct TabWidget {
     max_tab_width: Option<f32>,
     pinned_tab_width: Option<f32>,
     show_scroll_arrows: Option<bool>,
-    show_overflow_dropdown: Option<bool>,
+    overflow_button: Option<TabOverflowButton>,
     reorderable: bool,
     on_close: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
     on_reorder: Option<Rc<dyn Fn(TabId, usize, &mut EventContext)>>,
@@ -366,7 +369,7 @@ impl TabWidget {
             max_tab_width: None,
             pinned_tab_width: None,
             show_scroll_arrows: None,
-            show_overflow_dropdown: None,
+            overflow_button: None,
             reorderable: false,
             on_close: None,
             on_reorder: None,
@@ -735,10 +738,22 @@ impl TabWidget {
         self.show_scroll_arrows = Some(on);
         self
     }
-    /// Show or hide the "show all tabs" overflow dropdown button when tabs
-    /// overflow. Default (unset) uses the style's preference.
+    /// When the trailing "show all tabs" overflow dropdown appears. Default
+    /// (unset) is [`TabOverflowButton::Auto`] — shown only when the tab headers
+    /// overflow the bar's viewport. See [`TabOverflowButton`] for
+    /// `Always` / `Never`.
+    pub fn overflow_button(mut self, mode: TabOverflowButton) -> Self {
+        self.overflow_button = Some(mode);
+        self
+    }
+    /// Convenience over [`overflow_button`](Self::overflow_button): `true` maps
+    /// to [`TabOverflowButton::Always`], `false` to [`TabOverflowButton::Never`].
     pub fn show_overflow_dropdown(mut self, on: bool) -> Self {
-        self.show_overflow_dropdown = Some(on);
+        self.overflow_button = Some(if on {
+            TabOverflowButton::Always
+        } else {
+            TabOverflowButton::Never
+        });
         self
     }
     /// Allow drag-to-reorder of tabs within the bar. Default `false`.
@@ -1359,8 +1374,8 @@ impl Widget for TabWidget {
             if let Some(s) = self.show_scroll_arrows {
                 bar = bar.show_scroll_arrows(s);
             }
-            if let Some(s) = self.show_overflow_dropdown {
-                bar = bar.show_overflow_dropdown(s);
+            if let Some(mode) = self.overflow_button {
+                bar = bar.overflow_button(mode);
             }
             if self.reorderable {
                 bar = bar.reorderable(true);

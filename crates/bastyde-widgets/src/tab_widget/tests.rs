@@ -1546,6 +1546,106 @@ fn hover_and_click_close(tree: &mut WidgetTree, header: WidgetId) {
     tree.click(close);
 }
 
+// ─── Overflow dropdown visibility mode ──────────────────────────────
+
+/// Find the "show all tabs" overflow trigger by its AT name, requiring
+/// real laid-out bounds — so a dormant (hidden) trigger reads as `None`.
+fn active_overflow_trigger(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+    let info = tree.accessibility_node(id);
+    if info.role() == accesskit::Role::Button
+        && info.name().is_some_and(|n| n.contains("Show all tabs"))
+        && tree.bounds(id).height > 0.0
+    {
+        return Some(id);
+    }
+    tree.children(id)
+        .iter()
+        .find_map(|&c| active_overflow_trigger(tree, c))
+}
+
+fn overflow_bar(mode: crate::tab_widget::TabOverflowButton) -> (WidgetTree, WidgetId) {
+    // Six min-120 tabs: fit at 900 px wide (no overflow), overflow at 300.
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let model = ListModel::from_vec(
+        (0..6)
+            .map(|i| {
+                TabHandle::dynamic(
+                    TabId::fresh(),
+                    "doc",
+                    TabInfo::new().title(label(&format!("Document {i}"))),
+                    (),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar = tree.add(
+        TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
+            .min_tab_width(120.0)
+            .overflow_button(mode),
+    );
+    (tree, bar)
+}
+
+#[test]
+fn overflow_button_auto_reveals_only_when_tabs_overflow() {
+    use crate::tab_widget::TabOverflowButton;
+    // The ScrollArea writes its `max_scroll` extent during layout; the
+    // `visible_when` gate on that signal re-activates on the *next* pass (as
+    // the frame loop settles). Lay out twice per size to reach that steady
+    // state, exactly as a live window would.
+    let settle = |tree: &mut WidgetTree, w: f32| {
+        tree.layout(SizeProposal::exact(w, 60.0));
+        tree.layout(SizeProposal::exact(w, 60.0));
+    };
+    let (mut tree, bar) = overflow_bar(TabOverflowButton::Auto);
+    // Narrow: the headers overflow the viewport → the trigger appears. Grab
+    // its (rebuild-stable) id here so we can query dormancy directly across
+    // resizes, rather than re-reading a pruned AT node / stale bounds.
+    settle(&mut tree, 300.0);
+    let trigger = active_overflow_trigger(&tree, bar)
+        .expect("Auto: overflow → the 'show all tabs' trigger is revealed");
+    assert!(tree.is_active(trigger), "Auto: revealed trigger is active");
+    // Re-widen: everything fits → the trigger goes dormant again (regression
+    // against a stuck-visible trigger).
+    settle(&mut tree, 900.0);
+    assert!(
+        !tree.is_active(trigger),
+        "Auto: no overflow → the 'show all tabs' trigger is hidden"
+    );
+    // Narrow again: it comes back.
+    settle(&mut tree, 300.0);
+    assert!(
+        tree.is_active(trigger),
+        "Auto: re-narrowed → the trigger is revealed again"
+    );
+}
+
+#[test]
+fn overflow_button_always_shows_even_without_overflow() {
+    use crate::tab_widget::TabOverflowButton;
+    let (mut tree, bar) = overflow_bar(TabOverflowButton::Always);
+    tree.layout(SizeProposal::exact(900.0, 60.0));
+    assert!(
+        active_overflow_trigger(&tree, bar).is_some(),
+        "Always: the trigger is shown even when every tab fits"
+    );
+}
+
+#[test]
+fn overflow_button_never_omits_the_trigger() {
+    use crate::tab_widget::TabOverflowButton;
+    let (mut tree, bar) = overflow_bar(TabOverflowButton::Never);
+    // Even when the tabs overflow, Never never builds the trigger.
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    assert!(
+        active_overflow_trigger(&tree, bar).is_none(),
+        "Never: the 'show all tabs' trigger is never built"
+    );
+}
+
 // ─── Vertical orientation ───────────────────────────────────────────
 
 #[test]

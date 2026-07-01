@@ -35,6 +35,7 @@ use crate::primitives::{
     VStack, ZStack,
 };
 use crate::splitter::Splitter;
+use crate::toolbar::{Toolbar, ToolbarAction, ToolbarOrientation};
 use bastyde_core::overlay::OverlayPlacement;
 
 use super::context_menu::{
@@ -90,18 +91,29 @@ impl DockWidget {
         self
     }
 
-    /// Attach a factory for the dock's **inline header actions** — a widget
-    /// (typically an `HStack` of [`IconButton`]s) shown in the dock header
-    /// before the `⋮` options button, the VS Code "view actions" pattern
-    /// ("New File", "Collapse All", …). Built on demand each time the dock is
-    /// placed into a header. The actions appear in any header the dock has: the
-    /// multi-pane [`Accordion`] header always, and the sole-pane (bare) header
-    /// when [`show_header(true)`](Self::show_header) is set.
-    pub fn header_actions<W: Widget + 'static>(
+    /// Attach a factory for the dock's **inline header actions** — a flat list
+    /// of [`ToolbarAction`]s shown before the `⋮` options button, the VS Code
+    /// "view actions" pattern ("New File", "Collapse All", …). Built on demand
+    /// each time the dock is placed into a header. The framework hosts them in a
+    /// [`Toolbar`], so the actions gain **overflow** (when the header is tight,
+    /// the lowest-[`priority`](ToolbarAction::priority) actions collapse into a
+    /// `⌄` menu) and the correct **axis** for free — a horizontal row on leading
+    /// / trailing sides, a vertical column on the rotated top / bottom strip. The
+    /// actions appear in any header the dock has: the multi-pane [`Accordion`]
+    /// header always, and the sole-pane (bare) header when
+    /// [`show_header(true)`](Self::show_header) is set.
+    ///
+    /// ```ignore
+    /// DockWidget::new(id, lit!("Explorer"), build).header_actions(|_| vec![
+    ///     ToolbarAction::new(lit!("New File"), new_icon).on_activate(..),
+    ///     ToolbarAction::new(lit!("Collapse All"), collapse_icon).on_activate(..),
+    /// ])
+    /// ```
+    pub fn header_actions(
         mut self,
-        f: impl Fn(DockWidgetId) -> W + 'static,
+        f: impl Fn(DockWidgetId) -> Vec<ToolbarAction> + 'static,
     ) -> Self {
-        self.header_actions = Some(Rc::new(move |i| Box::new(f(i)) as Box<dyn Widget>));
+        self.header_actions = Some(Rc::new(f));
         self
     }
 
@@ -769,9 +781,11 @@ impl DockTabContentWidget {
     }
 
     /// Build the trailing cluster of a dock header — the app's inline
-    /// `header_actions` (if any) followed by the framework `⋮` options button
-    /// ([`dock_options_menu`]). Returns `None` when there is nothing to show
-    /// (no app actions and an empty options menu).
+    /// `header_actions` plus the framework `⋮` options button
+    /// ([`dock_options_menu`]) — hosted in a [`Toolbar`] so excess actions
+    /// overflow into a `⌄` menu and everything follows the header's axis. Returns
+    /// `None` when there is nothing to show (no app actions and an empty options
+    /// menu).
     fn dock_header_trailing(
         &self,
         ctx: &mut BuildContext,
@@ -783,42 +797,74 @@ impl DockTabContentWidget {
         if actions.is_none() && !has_options {
             return None;
         }
-        let mut kids: Vec<WidgetId> = Vec::new();
-        if let Some(factory) = actions {
-            kids.push(ctx.add_boxed(factory(dock)));
-        }
-        if has_options {
-            let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        // A *multi-pane* dock on a top / bottom side renders the accordion header
+        // as a rotated *vertical* strip (`AccordionOrientation::Horizontal`), so
+        // the cluster stacks vertically. Every other header — leading / trailing
+        // accordions and every bare (`!multi_pane`) bar, which is always
+        // horizontal regardless of side — lays out horizontally.
+        let vertical =
+            multi_pane && side_orientation(self.side) == bastyde_tokens::Orientation::Horizontal;
+        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+
+        // The app's header actions, hosted in a compact shrink-to-fit `Toolbar`
+        // that collapses its excess into a `⌄` when the header is narrow. Only
+        // built when the dock declares actions.
+        let toolbar_id = actions.map(|factory| {
+            let mut bar = Toolbar::new()
+                .orientation(if vertical {
+                    ToolbarOrientation::Vertical
+                } else {
+                    ToolbarOrientation::Horizontal
+                })
+                .compact(true)
+                .spacing(2.0)
+                .label(lit!(format!("{} actions", title.resolve_now())));
+            for action in factory(dock) {
+                bar = bar.action(action);
+            }
+            ctx.add(bar)
+        });
+
+        // The framework `⋮` dock-options menu, kept **separate from and after**
+        // the actions toolbar, so it stays the last / outermost affordance even
+        // when the toolbar collapses its own actions into a `⌄` (Move-to / Hide
+        // must never hide behind the overflow). `.bare()` makes the `MenuList`
+        // the popover content directly (not a menu-on-a-popover); it carries the
+        // Move-to *submenu* a flat toolbar overflow row could not express.
+        let options_id = has_options.then(|| {
             let menu = dock_options_menu(&self.model, self.side, self.tab.id, dock, multi_pane);
-            let options = PopoverIconButton::new(IconButton::more().size(IconButtonSize::Compact))
-                // `.bare()` so the `MenuList` is the popover content directly,
-                // not wrapped in a second popover surface (a menu-on-a-popover).
-                .bare()
-                .content(menu)
-                .placement(OverlayPlacement::BelowPreferred)
-                .access_label(lit!(format!("More actions: {}", title.resolve_now())));
-            kids.push(ctx.add(options));
+            ctx.add(
+                PopoverIconButton::new(IconButton::more().size(IconButtonSize::Compact))
+                    .bare()
+                    .content(menu)
+                    .placement(OverlayPlacement::BelowPreferred)
+                    .access_label(lit!(format!("More actions: {}", title.resolve_now()))),
+            )
+        });
+
+        // Arrange `[toolbar] [⋮]` along the header axis. A lone child (only
+        // actions, or only the `⋮`) needs no wrapper.
+        let kids: Vec<WidgetId> = [toolbar_id, options_id].into_iter().flatten().collect();
+        match kids.as_slice() {
+            [] => None,
+            [only] => Some(*only),
+            _ => {
+                let cluster = if vertical {
+                    let mut col = VStack::new().spacing(2.0);
+                    for k in &kids {
+                        col = col.add_child(*k);
+                    }
+                    ctx.add(col)
+                } else {
+                    let mut row = HStack::new().spacing(2.0);
+                    for k in &kids {
+                        row = row.add_child(*k);
+                    }
+                    ctx.add(row)
+                };
+                Some(cluster)
+            }
         }
-        // Top / bottom sides render the accordion header as a rotated *vertical*
-        // strip (`AccordionOrientation::Horizontal`), so the action cluster must
-        // stack vertically there; leading / trailing sides keep the horizontal
-        // header row and an `HStack`.
-        let vertical_header =
-            side_orientation(self.side) == bastyde_tokens::Orientation::Horizontal;
-        let cluster = if vertical_header {
-            let mut col = VStack::new().spacing(2.0);
-            for k in kids {
-                col = col.add_child(k);
-            }
-            ctx.add(col)
-        } else {
-            let mut row = HStack::new().spacing(2.0);
-            for k in kids {
-                row = row.add_child(k);
-            }
-            ctx.add(row)
-        };
-        Some(cluster)
     }
 
     /// The sole-pane dock header bar (opt-in via `DockWidget::show_header`):
@@ -831,11 +877,15 @@ impl DockTabContentWidget {
         content: WidgetId,
     ) -> WidgetId {
         let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        // The title is rigid: it never truncates. When the header is tight the
+        // trailing toolbar (shrinkable) absorbs the deficit and collapses its
+        // actions into the `⌄`, so the dock name always stays fully readable.
         let title_id = ctx.add(
             TextWidget::new(title)
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
-                .single_line(),
+                .single_line()
+                .no_shrink(),
         );
         let spacer_id = ctx.add(Spacer::new());
         let mut row = HStack::new()

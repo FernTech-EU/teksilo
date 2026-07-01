@@ -1893,22 +1893,30 @@ fn split_pane_docks_each_get_an_options_button() {
 
 #[test]
 fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
-    // The dock-header action cluster (app `header_actions` + the ⋮ options
-    // button) must follow the accordion header's axis: a horizontal row on
-    // leading / trailing sides (vertical header), and a *vertical* column on
-    // top / bottom sides (rotated vertical header strip) — otherwise the
-    // buttons lay out horizontally and overflow the narrow strip.
-    use crate::icon_button::IconButton;
-    use bastyde_core::WidgetBuilder;
+    // The dock-header action cluster — the app's `header_actions` (hosted in a
+    // `Toolbar`) AND the ⋮ options button — must follow the accordion header's
+    // axis: a horizontal row on leading / trailing sides (vertical header), and a
+    // *vertical* column on top / bottom sides (rotated vertical header strip).
+    // The framework owns the arrangement (the `Toolbar`'s orientation), so two
+    // app actions must lay out along the same axis as the ⋮ — they must not stay
+    // horizontal inside the narrow vertical strip.
+    use crate::primitives::IconWidget;
+    use crate::toolbar::ToolbarAction;
 
-    // Returns (action-button center, ⋮-button center) for a two-pane split dock
-    // opened on `side`, the first pane carrying a findable header action.
-    fn centers(side: DockSide) -> ((f32, f32), (f32, f32)) {
+    // Returns the centers of (action #1, action #2, ⋮) for a two-pane split dock
+    // opened on `side`, the first pane carrying two findable header actions.
+    fn centers(side: DockSide) -> [(f32, f32); 3] {
         let model = DockingModel::new();
         let id_a = DockWidgetId::fresh();
         let id_b = DockWidgetId::fresh();
         let a = DockWidget::new(id_a, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0))
-            .header_actions(|_| IconButton::menu().access_label(lit!("ActX")));
+            .header_actions(|_| {
+                // Icon-only toolbar actions: the label becomes the AT name.
+                vec![
+                    ToolbarAction::new(lit!("ActX"), || IconWidget::chevron_up(12.0)),
+                    ToolbarAction::new(lit!("ActY"), || IconWidget::chevron_up(12.0)),
+                ]
+            });
         let b = DockWidget::new(id_b, lit!("Search"), |_| FixedLeaf(120.0, 120.0));
         let layout = DockingLayout::new(model.clone())
             .center(FixedLeaf(400.0, 300.0))
@@ -1919,30 +1927,40 @@ fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
         let mut t = tree();
         let root = t.add(layout);
         t.layout(SizeProposal::exact(1000.0, 700.0));
-        let act = find_named(&t, root, "ActX").expect("action button laid out");
-        let more = find_named(&t, root, "More actions: Explorer").expect("⋮ button laid out");
-        let center = |id| {
+        let center = |name: &str| {
+            let id = find_named(&t, root, name).unwrap_or_else(|| panic!("{name} laid out"));
             let b = t.bounds(id);
             (b.x + b.width / 2.0, b.y + b.height / 2.0)
         };
-        (center(act), center(more))
+        [
+            center("ActX"),
+            center("ActY"),
+            center("More actions: Explorer"),
+        ]
     }
 
-    // Leading side → vertical header → horizontal cluster (HStack): the two
-    // buttons are separated mostly along x.
-    let (la, lm) = centers(DockSide::Leading);
-    let (ldx, ldy) = ((la.0 - lm.0).abs(), (la.1 - lm.1).abs());
+    // The three controls must be (near-)collinear along the header axis: leading
+    // side → horizontal row (varies in x, ~constant y); top side → vertical
+    // column (varies in y, ~constant x). Comparing the *spread* across all three
+    // catches the reported bug where the two app actions stayed horizontal.
+    let spread = |c: [(f32, f32); 3]| {
+        let xs = [c[0].0, c[1].0, c[2].0];
+        let ys = [c[0].1, c[1].1, c[2].1];
+        let span = |v: [f32; 3]| {
+            v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min)
+        };
+        (span(xs), span(ys))
+    };
+
+    let (lx, ly) = spread(centers(DockSide::Leading));
     assert!(
-        ldx > ldy,
-        "leading-side cluster is a horizontal row (dx {ldx} > dy {ldy})"
+        lx > ly,
+        "leading-side cluster is a horizontal row (x-span {lx} > y-span {ly})"
     );
 
-    // Top side → rotated vertical header → vertical cluster (VStack): the two
-    // buttons are separated mostly along y (the regression this guards).
-    let (ta, tm) = centers(DockSide::Top);
-    let (tdx, tdy) = ((ta.0 - tm.0).abs(), (ta.1 - tm.1).abs());
+    let (tx, ty) = spread(centers(DockSide::Top));
     assert!(
-        tdy > tdx,
-        "top-side cluster is a vertical column (dy {tdy} > dx {tdx})"
+        ty > tx,
+        "top-side cluster (both actions + ⋮) is a vertical column (y-span {ty} > x-span {tx})"
     );
 }

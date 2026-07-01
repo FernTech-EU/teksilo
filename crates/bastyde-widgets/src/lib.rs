@@ -221,7 +221,7 @@ pub use stepper::{
 pub use tab_widget::{
     ContextMenuFactory, IconFactory as TabIconFactory, STATIC_KIND, StaticContentFactory, TabBar,
     TabBarOrientation, TabBarVisibility, TabDelegate, TabDisplayMode, TabHandle, TabId, TabInfo,
-    TabSizing, TabWidget,
+    TabOverflowButton, TabSizing, TabWidget,
 };
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
@@ -239,9 +239,7 @@ pub use toast::{
 };
 pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
-pub use toolbar::{
-    Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
-};
+pub use toolbar::{Toolbar, ToolbarAction, ToolbarItem, ToolbarOrientation, ToolbarOverflow};
 pub use tree_source::{TreeRow, TreeRowMeta};
 pub use tree_table_view::TreeTableView;
 pub use tree_view::{TreeRowContext, TreeView};

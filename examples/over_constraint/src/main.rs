@@ -76,18 +76,34 @@ fn toolbar_row() -> impl Widget + 'static {
                 IconButton::new(IconWidget::checkmark(16.0)).tooltip(lit!("Confirm")),
             )
             .overflow_as(
-                ToolbarAction::new(lit!("Confirm"))
-                    .icon(|| IconWidget::checkmark(16.0))
+                ToolbarAction::new(lit!("Confirm"), || IconWidget::checkmark(16.0))
                     .on_activate(|_| {}),
             ),
         )
         .item(ToolbarItem::separator())
         // Collapsible actions — overflow into the chevron menu.
-        .action(ToolbarAction::new(lit!("New Document")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Open Recent Project…")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Save Document As…")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Export to PDF")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Print Preview")).on_activate(|_| {}))
+        .action(
+            ToolbarAction::new(lit!("New Document"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Open Recent Project…"), || {
+                IconWidget::chevron_down(16.0)
+            })
+            .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Save Document As…"), || IconWidget::chevron_up(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Export to PDF"), || IconWidget::chevron_right(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Print Preview"), || IconWidget::chevron_left(16.0))
+                .on_activate(|_| {}),
+        )
 }
 
 /// 2. Priority: the label absorbs the deficit down to a 60px floor; the icon

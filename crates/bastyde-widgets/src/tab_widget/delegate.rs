@@ -109,6 +109,27 @@ pub enum TabDisplayMode {
     IconText,
 }
 
+/// When the trailing "show all tabs" overflow dropdown button appears.
+///
+/// The dropdown is a chevron-down `PopoverIconButton` whose popover lists every
+/// tab (a jump-to menu for tabs scrolled out of view). This mode governs *when*
+/// the button itself is shown — independent of whether the tabs actually
+/// overflow the viewport (which is what drives the scroll arrows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabOverflowButton {
+    /// Show the button **only when the tab headers overflow** the bar's
+    /// viewport — i.e. exactly when there is something scrolled out of view, the
+    /// same condition that auto-reveals the scroll arrows. The default: the
+    /// button stays out of the way until it is useful.
+    #[default]
+    Auto,
+    /// Always show the button whenever the bar has at least one tab, even when
+    /// every tab is already visible (a persistent jump-to affordance).
+    Always,
+    /// Never show the button.
+    Never,
+}
+
 /// Type alias for label-resolving callbacks.
 type LabelFn<T> = Box<dyn Fn(usize, &T) -> LocalizedString>;
 /// Type alias for icon-resolving callbacks.

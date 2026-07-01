@@ -97,10 +97,15 @@ impl Widget for DeadZone {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        // Layout-transparent: forward the child's **full** response — grow
+        // weight, shrink weight, and compression floor — not just its size.
+        // Flattening to a bare `Size` (`.into()`) would make the wrapper rigid
+        // (`shrink = 0`), silently swallowing a shrinkable child's shrink weight
+        // — so a shrink-to-fit `Toolbar` wrapped in a `DeadZone` inside a tight
+        // dock header could no longer collapse, over-constraining the header.
         self.child
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
     }
 
     fn place_children(
@@ -185,5 +190,36 @@ mod tests {
             "a jittery press on the dead-zone button must not start the ancestor drag"
         );
         let _ = ancestor;
+    }
+
+    #[test]
+    fn dead_zone_forwards_shrink_so_a_wrapped_child_still_compresses() {
+        // Regression: `DeadZone` must be layout-transparent for the FULL
+        // response (flex + shrink + min), not just the size. Flattening to a
+        // bare `Size` made the wrapper rigid (`shrink = 0`), which swallowed a
+        // shrinkable child's shrink weight — a shrink-to-fit `Toolbar` wrapped
+        // in a `DeadZone` inside a tight dock header then over-constrained the
+        // header (title pushed out of view) instead of collapsing.
+        use crate::primitives::{FixedSize, HStack, Shrinkable};
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        // A shrinkable child: natural 100 px wide, compression floor 20 px.
+        let dead = tree.add(
+            DeadZone::new().child(
+                Shrinkable::new()
+                    .min_width(20.0)
+                    .child(FixedSize::new().bind_width(100.0).bind_height(20.0)),
+            ),
+        );
+        // A rigid 100-wide sibling forces the whole deficit onto the dead zone.
+        let rigid = tree.add(FixedSize::new().bind_width(100.0).bind_height(20.0));
+        tree.add(HStack::new().add_child(rigid).add_child(dead));
+        // 200 px natural, 120 px offered → 80 px deficit; the shrinkable dead
+        // zone must absorb it (down toward its 20 px floor).
+        tree.layout(SizeProposal::exact(120.0, 20.0));
+        let w = tree.bounds(dead).width;
+        assert!(
+            w < 100.0,
+            "the DeadZone must forward the child's shrink weight (width was {w}, expected < 100)"
+        );
     }
 }

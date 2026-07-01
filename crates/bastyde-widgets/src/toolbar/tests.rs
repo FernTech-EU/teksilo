@@ -108,7 +108,10 @@ fn themed_tree() -> WidgetTree {
 fn many_actions(n: usize) -> Toolbar {
     let mut tb = Toolbar::new();
     for i in 0..n {
-        tb = tb.action(ToolbarAction::new(lit!(format!("Action {i}"))).on_activate(|_| {}));
+        tb = tb.action(
+            ToolbarAction::new(lit!(format!("Action {i}")), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        );
     }
     tb
 }
@@ -194,9 +197,9 @@ fn toolbar_fills_offered_width_instead_of_reporting_natural() {
 
 #[test]
 fn toolbar_has_toolbar_role_orientation_and_name() {
-    let tb = Toolbar::new()
-        .label(lit!("Formatting"))
-        .action(ToolbarAction::new(lit!("Bold")).on_activate(|_| {}));
+    let tb = Toolbar::new().label(lit!("Formatting")).action(
+        ToolbarAction::new(lit!("Bold"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+    );
     let mut tree = themed_tree();
     let id = tree.add(tb);
     tree.layout(SizeProposal::exact(400.0, 50.0));
@@ -209,7 +212,7 @@ fn toolbar_has_toolbar_role_orientation_and_name() {
 fn vertical_orientation_is_announced() {
     let tb = Toolbar::new()
         .orientation(ToolbarOrientation::Vertical)
-        .action(ToolbarAction::new(lit!("A")).on_activate(|_| {}));
+        .action(ToolbarAction::new(lit!("A"), || IconWidget::checkmark(16.0)).on_activate(|_| {}));
     let mut tree = themed_tree();
     let id = tree.add(tb);
     tree.layout(SizeProposal::exact(60.0, 400.0));
@@ -308,14 +311,21 @@ fn roving_tab_suppresses_a_composite_controls_inner_leaf() {
     let view_mode = Signal::new(Some("List".to_string()));
     let tb = Toolbar::new()
         .item(
-            ToolbarItem::custom(ComboBox::new(["List", "Grid", "Columns"], view_mode))
-                .overflow_as(ToolbarAction::new(lit!("View mode")).on_activate(|_| {})),
+            ToolbarItem::custom(ComboBox::new(["List", "Grid", "Columns"], view_mode)).overflow_as(
+                ToolbarAction::new(lit!("View mode"), || IconWidget::checkmark(16.0))
+                    .on_activate(|_| {}),
+            ),
         )
         .item(
             ToolbarItem::custom(IconButton::new(IconWidget::checkmark(16.0)).tooltip(lit!("Ok")))
-                .overflow_as(ToolbarAction::new(lit!("Ok")).on_activate(|_| {})),
+                .overflow_as(
+                    ToolbarAction::new(lit!("Ok"), || IconWidget::checkmark(16.0))
+                        .on_activate(|_| {}),
+                ),
         )
-        .action(ToolbarAction::new(lit!("New")).on_activate(|_| {}));
+        .action(
+            ToolbarAction::new(lit!("New"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+        );
 
     let mut tree = themed_tree();
     let id = tree.add(tb);
@@ -391,17 +401,31 @@ fn example_mix_overflow_rows_dormant_while_closed_across_resizes() {
         .item(
             ToolbarItem::custom(IconButton::new(IconWidget::checkmark(16.0)).tooltip(lit!("Ok")))
                 .overflow_as(
-                    ToolbarAction::new(lit!("Confirm"))
-                        .icon(|| IconWidget::checkmark(16.0))
+                    ToolbarAction::new(lit!("Confirm"), || IconWidget::checkmark(16.0))
                         .on_activate(|_| {}),
                 ),
         )
         .item(ToolbarItem::separator())
-        .action(ToolbarAction::new(lit!("New Document")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Open Recent Project")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Save Document As")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Export to PDF")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Print Preview")).on_activate(|_| {}));
+        .action(
+            ToolbarAction::new(lit!("New Document"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Open Recent Project"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Save Document As"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Export to PDF"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        )
+        .action(
+            ToolbarAction::new(lit!("Print Preview"), || IconWidget::checkmark(16.0))
+                .on_activate(|_| {}),
+        );
 
     let mut tree = themed_tree();
     let _id = tree.add(tb);
@@ -461,10 +485,14 @@ fn collapsing_a_combobox_does_not_leak_its_dropdown_open() {
     let view_mode = Signal::new(Some("List".to_string()));
     let tb = Toolbar::new()
         .item(
-            ToolbarItem::custom(ComboBox::new(["List", "Grid", "Columns"], view_mode))
-                .overflow_as(ToolbarAction::new(lit!("View")).on_activate(|_| {})),
+            ToolbarItem::custom(ComboBox::new(["List", "Grid", "Columns"], view_mode)).overflow_as(
+                ToolbarAction::new(lit!("View"), || IconWidget::checkmark(16.0))
+                    .on_activate(|_| {}),
+            ),
         )
-        .action(ToolbarAction::new(lit!("New")).on_activate(|_| {}));
+        .action(
+            ToolbarAction::new(lit!("New"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+        );
     let mut tree = themed_tree();
     let _id = tree.add(tb);
 
@@ -499,7 +527,9 @@ fn embedded_overflow_widget_combobox_does_not_leak_its_dropdown() {
                     ))
                 }),
         )
-        .action(ToolbarAction::new(lit!("New")).on_activate(|_| {}));
+        .action(
+            ToolbarAction::new(lit!("New"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+        );
     let mut tree = themed_tree();
     let _id = tree.add(tb);
 
@@ -549,8 +579,9 @@ fn a_collapsible_custom_overflows_when_it_does_not_fit() {
     // A custom widget made collapsible via `.overflow_as(..)` participates in
     // overflow just like an action — it collapses into the chevron menu.
     let tb = Toolbar::new().item(
-        ToolbarItem::custom(TextWidget::new(lit!("A very wide collapsible widget")))
-            .overflow_as(ToolbarAction::new(lit!("Wide")).on_activate(|_| {})),
+        ToolbarItem::custom(TextWidget::new(lit!("A very wide collapsible widget"))).overflow_as(
+            ToolbarAction::new(lit!("Wide"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+        ),
     );
     let overflowing = tb.is_overflowing();
     let mut tree = themed_tree();
@@ -584,9 +615,11 @@ fn pinned_custom_widget_stays_inline_under_pressure() {
     // the pinned widget is never collapsed (it's not an action).
     let tb = Toolbar::new()
         .item(ToolbarItem::custom(TextWidget::new(lit!("Search:"))))
-        .action(ToolbarAction::new(lit!("One")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Two")).on_activate(|_| {}))
-        .action(ToolbarAction::new(lit!("Three")).on_activate(|_| {}));
+        .action(ToolbarAction::new(lit!("One"), || IconWidget::checkmark(16.0)).on_activate(|_| {}))
+        .action(ToolbarAction::new(lit!("Two"), || IconWidget::checkmark(16.0)).on_activate(|_| {}))
+        .action(
+            ToolbarAction::new(lit!("Three"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+        );
     let overflowing = tb.is_overflowing();
     let mut tree = themed_tree();
     let _id = tree.add(tb);
@@ -599,7 +632,7 @@ fn tooltip_appears_on_hover() {
     // A ToolbarAction with a plain tooltip forwards it to the inline Button.
     // Hovering the button and waiting out the delay should show one overlay.
     let tb = Toolbar::new().action(
-        ToolbarAction::new(lit!("Save"))
+        ToolbarAction::new(lit!("Save"), || IconWidget::checkmark(16.0))
             .tooltip(lit!("Tip"))
             .on_activate(|_| {}),
     );
@@ -619,4 +652,113 @@ fn tooltip_appears_on_hover() {
         "tooltip should appear after hovering the toolbar action"
     );
     assert!(tree.find_by_label("Tip").is_some());
+}
+
+#[test]
+fn compact_toolbar_reports_the_button_height_not_the_panel_padding() {
+    // Regression: the toolbar's surface `Panel` must add no padding, else a
+    // compact bar reports ~46 dp for a 22 dp button and spills a tight slot
+    // (e.g. a dock header). A 2-action compact bar is exactly one button tall.
+    #[derive(Debug)]
+    struct HeightProbe {
+        target: WidgetId,
+        out: Rc<Cell<f32>>,
+    }
+    impl Widget for HeightProbe {
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            let h = ctx
+                .child_size(self.target, SizeProposal::unspecified())
+                .map(|s| s.height)
+                .unwrap_or(-1.0);
+            self.out.set(h);
+            p.resolve(0.0, 0.0).into()
+        }
+        fn cacheable_layout(&self) -> bool {
+            false
+        }
+    }
+    let bar = Toolbar::new()
+        .compact(true)
+        .action(ToolbarAction::new(lit!("A"), || {
+            IconWidget::checkmark(16.0)
+        }))
+        .action(ToolbarAction::new(lit!("B"), || {
+            IconWidget::checkmark(16.0)
+        }));
+    let mut tree = themed_tree();
+    let id = tree.add(bar);
+    let out = Rc::new(Cell::new(0.0));
+    tree.add(HeightProbe {
+        target: id,
+        out: out.clone(),
+    });
+    tree.layout(SizeProposal::exact(400.0, 400.0));
+    let compact_size = crate::styles::recipe_icon_button_style::ICON_BUTTON_SIZE_COMPACT;
+    assert!(
+        (out.get() - compact_size).abs() < 1.0,
+        "compact toolbar should be one Compact button tall ({compact_size}), got {}",
+        out.get()
+    );
+}
+
+#[test]
+fn compact_toolbar_overflows_gradually_and_re_expands() {
+    // Regression (dock header): a *compact* toolbar measures its natural content
+    // via `measure_intrinsic`, so items that have collapsed into the overflow
+    // (and gone dormant) still count. Otherwise the measured content shrinks as
+    // items collapse, the bar collapses wholesale, and it never re-expands when
+    // the slot widens again.
+    let mut tb = Toolbar::new().compact(true);
+    for i in 0..6 {
+        tb = tb.action(ToolbarAction::new(lit!(format!("A{i}")), || {
+            IconWidget::checkmark(16.0)
+        }));
+    }
+    let overflowed = tb.is_overflowing().clone();
+    let mut tree = themed_tree();
+    tree.add(tb);
+
+    tree.layout(SizeProposal::exact(400.0, 30.0));
+    assert!(!overflowed.get(), "wide: everything inline");
+
+    tree.layout(SizeProposal::exact(70.0, 30.0));
+    assert!(overflowed.get(), "narrow: overflow kicks in");
+
+    tree.layout(SizeProposal::exact(400.0, 30.0));
+    assert!(
+        !overflowed.get(),
+        "re-widened: the bar restores every action inline (the regression)"
+    );
+}
+
+#[test]
+fn menu_action_opens_a_dropdown_on_click() {
+    // A ToolbarAction with `.menu(..)` renders its inline control as a
+    // PopoverIconButton: clicking it opens the MenuList (not firing on_activate).
+    use bastyde_core::event::PointerButton;
+    let tb = Toolbar::new().action(
+        ToolbarAction::new(lit!("Sort"), || IconWidget::checkmark(16.0))
+            .menu(|| MenuList::new().item(MenuItem::new(lit!("By name")).on_activate_fn(|_| {}))),
+    );
+    let mut tree = themed_tree();
+    let id = tree.add(tb);
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    let btn = tree
+        .first_focusable_descendant(id)
+        .expect("dropdown trigger should be focusable");
+    let c = tree.bounds(btn).center();
+    tree.pointer_down_button(c, PointerButton::Primary);
+    tree.pointer_up_button(c, PointerButton::Primary);
+    assert!(
+        !tree.active_overlays().is_empty(),
+        "clicking a menu action opens its dropdown popover"
+    );
+    assert!(
+        tree.find_by_label("By name").is_some(),
+        "the dropdown shows its menu items"
+    );
 }

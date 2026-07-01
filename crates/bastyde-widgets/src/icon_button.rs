@@ -216,6 +216,16 @@ impl IconButton {
         self
     }
 
+    /// Per-call style override from an already-shared
+    /// [`SharedIconButtonStyle`] (`Rc<dyn IconButtonStyle>`). Same effect as
+    /// [`style`](Self::style) but takes the erased handle directly, so a host
+    /// (e.g. a `Toolbar` applying one style to all its icon buttons) can share a
+    /// single `Rc` instead of cloning a concrete style per button.
+    pub fn style_shared(mut self, style: SharedIconButtonStyle) -> Self {
+        self.style_override = Some(style);
+        self
+    }
+
     /// Returns the configured size variant. Used by wrappers like
     /// [`PopoverIconButton`](crate::popover_widget::PopoverIconButton)
     /// that need to reason about the trigger's footprint at build time
@@ -315,6 +325,19 @@ impl IconButton {
         content: impl bastyde_core::widget::Widget + 'static,
     ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Attach a composite tooltip from an already-boxed widget — the boxed twin
+    /// of [`composite_tooltip`](Self::composite_tooltip), for hosts that build
+    /// the body via a `Fn() -> Box<dyn Widget>` factory (e.g. a `ToolbarAction`).
+    pub fn composite_tooltip_boxed(
+        mut self,
+        content: Box<dyn bastyde_core::widget::Widget>,
+    ) -> Self {
+        self.composite_tooltip_content = Some(content);
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
         self

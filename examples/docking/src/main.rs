@@ -21,7 +21,8 @@ use bastyde::prelude::*;
 use bastyde::widgets::{
     Badge, Button, DockCorner, DockOpenLocation, DockPolicy, DockRail, DockRailItemSize, DockSide,
     DockWidget, DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton,
-    IconButtonSize, IconWidget, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    IconButtonSize, IconWidget, MenuItem, MenuList, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
+    ToolbarAction, VStack,
 };
 
 #[derive(Debug)]
@@ -155,24 +156,48 @@ fn plus_icon(size: f32) -> IconWidget {
     IconWidget::from_path(path, size)
 }
 
-/// The inline header-action bar for a dock (the VS Code "view actions" pattern):
-/// a "New" button + a "Collapse All" button, both reporting into the status line.
-fn dock_header_actions(status: Signal<String>, what: &'static str) -> impl Widget {
+/// The inline header actions for a dock (the VS Code "view actions" pattern):
+/// "New", "Collapse All", plus a couple more to show the toolbar **overflow**.
+/// Declared as plain [`ToolbarAction`]s — the framework hosts them in a
+/// `Toolbar`, so they collapse into a `⌄` menu when the header is tight and lay
+/// out along the header's axis (vertical in a rotated top / bottom strip) with
+/// no orientation or overflow logic here.
+fn dock_header_actions(status: Signal<String>, what: &'static str) -> Vec<ToolbarAction> {
     let status_new = status.clone();
-    HStack::new()
-        .spacing(2.0)
-        .child(
-            IconButton::new(plus_icon(14.0))
-                .size(IconButtonSize::Compact)
-                .tooltip(lit!(format!("New {what}")))
-                .on_activate_fn(move |_| status_new.set(format!("New {what} (demo action)"))),
-        )
-        .child(
-            IconButton::new(IconWidget::chevron_up(14.0))
-                .size(IconButtonSize::Compact)
-                .tooltip(lit!("Collapse All"))
-                .on_activate_fn(move |_| status.set(String::from("Collapse All (demo action)"))),
-        )
+    let status_filter = status.clone();
+    let status_refresh = status.clone();
+    let status_menu = status.clone();
+    vec![
+        ToolbarAction::new(lit!(format!("New {what}")), || plus_icon(14.0))
+            .on_activate(move |_| status_new.set(format!("New {what} (demo action)"))),
+        ToolbarAction::new(lit!("Collapse All"), || IconWidget::chevron_up(14.0))
+            .on_activate(move |_| status.set(String::from("Collapse All (demo action)"))),
+        // A dropdown action: the icon opens a MenuList (PopoverIconButton),
+        // instead of firing a handler.
+        ToolbarAction::new(lit!("More"), || IconWidget::chevron_down(14.0)).menu({
+            let status = status_menu.clone();
+            move || {
+                let s1 = status.clone();
+                let s2 = status.clone();
+                MenuList::new()
+                    .item(
+                        MenuItem::new(lit!("Sort by name"))
+                            .on_activate_fn(move |_| s1.set(String::from("Sort by name"))),
+                    )
+                    .item(
+                        MenuItem::new(lit!("Sort by date"))
+                            .on_activate_fn(move |_| s2.set(String::from("Sort by date"))),
+                    )
+            }
+        }),
+        // Lower-priority actions collapse into the overflow `⌄` first.
+        ToolbarAction::new(lit!("Filter"), || dock_icon(DockIcon::Search, 14.0))
+            .priority(-1)
+            .on_activate(move |_| status_filter.set(String::from("Filter (demo action)"))),
+        ToolbarAction::new(lit!("Refresh"), || IconWidget::chevron_up(14.0))
+            .priority(-2)
+            .on_activate(move |_| status_refresh.set(String::from("Refresh (demo action)"))),
+    ]
 }
 
 fn list_panel(title: &str, items: &[&str]) -> impl Widget {
@@ -316,6 +341,10 @@ impl Widget for DockingDemo {
                     text_panel("Terminal", "$ cargo run -p docking\n   Compiling …")
                 })
                 .icon(|| dock_icon(DockIcon::Terminal, 18.0))
+                .header_actions({
+                    let status = self.status.clone();
+                    move |_| dock_header_actions(status.clone(), "Term")
+                })
                 .default_location(DockOpenLocation::side(DockSide::Bottom)),
             )
             .dock(
@@ -339,9 +368,13 @@ impl Widget for DockingDemo {
                 .default_location(DockOpenLocation::side(DockSide::Trailing)),
             );
 
-        // Initial layout: leading rail with Explorer + Search stacked (a
-        // ToolBox); bottom strip with Terminal + Problems as two tabs;
-        // trailing Properties.
+        // Initial layout exercising every dock-header shape:
+        //  • Leading — Explorer + Search grouped into the "Source" activity: a
+        //    two-pane Splitter of vertical Accordion headers (Explorer carries
+        //    inline header actions next to its ⋮).
+        //  • Bottom — Terminal + Problems grouped: rotated (horizontal-strip)
+        //    Accordion headers, so the action toolbar stacks vertically.
+        //  • Trailing — Properties as a sole pane with an opt-in header bar.
         self.model
             .open_dock(ids.explorer, DockOpenLocation::side(DockSide::Leading));
         self.model.open_dock(
@@ -352,7 +385,7 @@ impl Widget for DockingDemo {
             .open_dock(ids.terminal, DockOpenLocation::side(DockSide::Bottom));
         self.model.open_dock(
             ids.problems,
-            DockOpenLocation::side(DockSide::Bottom).new_tab(),
+            DockOpenLocation::side(DockSide::Bottom).stack(),
         );
         self.model
             .open_dock(ids.properties, DockOpenLocation::side(DockSide::Trailing));

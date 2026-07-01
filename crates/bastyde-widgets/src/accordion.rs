@@ -322,12 +322,15 @@ impl Widget for Accordion {
         let focus_ring_width = theme.shape.focus_ring_width;
         let expanded = self.expanded.clone();
 
-        // Keyboard focus state for the focus ring (Int UI shows the accent
-        // border only on *keyboard* focus, not on a pointer click).
-        let kb_focused = ctx.signal(false);
-        // Pointer-over-header state, used solely to infer the focus origin:
-        // if the pointer is over the header when focus arrives, it's a click.
-        let hovered = ctx.signal(false);
+        // The header's focus ring (Int UI accent border) shows only on
+        // *keyboard* focus. `header_focused` is the header's own focus; ANDing it
+        // with the tree's focus-visible modality suppresses the ring for any
+        // pointer-origin focus — including focus that falls through to the header
+        // when a trailing-slot control (e.g. a toolbar button) is clicked without
+        // itself taking focus. (This replaces the old pointer-hover heuristic,
+        // which failed once a captured pointer cleared the header's hover.)
+        let header_focused = ctx.signal(false);
+        let kb_focused = header_focused.and(&ctx.focus_visible());
 
         // Refresh this node's announced `aria-expanded` whenever the state
         // flips — from a tap, the keyboard, or an external `expanded.set(...)`.
@@ -403,10 +406,14 @@ impl Widget for Accordion {
             ctx.visible_when(chevron_down_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
+            // Rigid: the header title never truncates. When the header is tight
+            // the trailing slot (an options `⋮` / a shrinkable toolbar) absorbs
+            // the deficit, so the disclosure's label always stays readable.
             let title_widget = TextWidget::new(self.title.clone())
                 .color(header_fg)
                 .style(title_style.clone())
                 .single_line()
+                .no_shrink()
                 .a11y_hidden();
             let title_id = ctx.add(title_widget);
             let spacer_id = ctx.add(Spacer::new());
@@ -503,9 +510,7 @@ impl Widget for Accordion {
         let expanded_tap = self.expanded.clone();
         let expanded_key = self.expanded.clone();
         let expanded_access = self.expanded.clone();
-        let kb_focused_focus = kb_focused.clone();
-        let hovered_focus = hovered.clone();
-        let hovered_hover = hovered.clone();
+        let header_focused_focus = header_focused.clone();
 
         let mut handler_set = HandlerSet::new()
             .on_tap({
@@ -547,18 +552,11 @@ impl Widget for Accordion {
                     }
                 }
             })
-            .on_hover({
-                move |entered: bool, _ctx: &mut EventContext| {
-                    hovered_hover.set(entered);
-                }
-            })
             .on_focus({
                 move |gained: bool, _ctx: &mut EventContext| {
-                    // Show the focus ring only for *keyboard* focus. If the
-                    // pointer is over the header when focus arrives, the focus
-                    // came from a click — keep the ring hidden (same heuristic
-                    // as the sibling ToolBox header).
-                    kb_focused_focus.set(gained && !hovered_focus.get());
+                    // The `kb_focused` ring signal ANDs this with focus-visible,
+                    // so a pointer-origin focus never lights the ring.
+                    header_focused_focus.set(gained);
                 }
             })
             .focusable(true)

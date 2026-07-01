@@ -242,9 +242,25 @@ available generally via `TabInfo::context_menu(..)`.
 Every dock can carry a header (the VS Code / IntelliJ "view header" pattern)
 with two kinds of controls:
 
-- **App actions** — `DockWidget::header_actions(|id| …)` declares a widget
-  (typically an `HStack` of `IconButton`s: "New File", "Collapse All", refresh,
-  filter …) shown inline in the header.
+- **App actions** — `DockWidget::header_actions(|id| …)` declares a flat
+  **`Vec<ToolbarAction>`** ("New File", "Collapse All", refresh, filter …) shown
+  inline in the header. The framework hosts them in a compact `Toolbar` and lays
+  it out along the header's axis, so you never pick `HStack` vs `VStack`: a
+  horizontal row on leading / trailing sides, a vertical column on the rotated
+  top / bottom strip. Because it is a `Toolbar`, **excess actions collapse into a
+  trailing `⌄` overflow menu** when the header is tight (lowest `priority` first)
+  and reappear as it widens — in *every* header shape (bare bar, vertical
+  Accordion header, rotated top/bottom strip), since the header hosts the toolbar
+  in a shrink-forwarding `DeadZone` (see below). Each `ToolbarAction` takes a
+  label + icon; `.on_activate(..)` fires a command, or `.menu(|| MenuList…)`
+  makes the action a dropdown (`PopoverIconButton`).
+
+  ```rust
+  DockWidget::new(id, lit!("Explorer"), build).header_actions(|_| vec![
+      ToolbarAction::new(lit!("New File"), || new_icon()).on_activate(..),
+      ToolbarAction::new(lit!("Collapse All"), || collapse_icon()).on_activate(..),
+  ])
+  ```
 - **The `⋮` options menu** — an always-visible "More actions" button, the
   discoverable counterpart to the right-click activity menu. Its contents depend
   on whether the dock shares its activity:
@@ -271,13 +287,16 @@ The `⋮` button is omitted when it would open an empty menu (a dock under a
 fully-locked `DockPolicy`). Every "Move to" surface honours side availability —
 a disabled side is never offered.
 
-The action buttons + `⋮` sit in a `DeadZone` — the
+The action toolbar + `⋮` sit in a `DeadZone` — the
 accordion (split-pane) header is a drag handle, so the whole header drags the
 dock **except** the trailing controls: you can click them (even with the few px
 of pointer jitter a real click carries) without starting a panel drag. This is
 backed by the node-level `gesture_dead_zone` flag (the framework counterpart of
 Electron's `-webkit-app-region: no-drag`), so it's robust by construction rather
-than a gesture-timing race.
+than a gesture-timing race. The `DeadZone` is layout-transparent for the *full*
+`LayoutResponse` (it forwards its child's `shrink` / `min`), so the wrapped
+toolbar still collapses into its `⌄` when the header is tight instead of shoving
+the title out of view.
 
 ## Activity names
 

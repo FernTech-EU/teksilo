@@ -14,13 +14,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bastyde_canvas::Size;
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::Widget;
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_settings::Versioned;
 use bastyde_tokens::Orientation;
 
 use crate::primitives::IconWidget;
 use crate::splitter::{PaneDescriptor, SplitterModel};
+use crate::toolbar::ToolbarAction;
 
 pub use super::geometry::{CornerOwners, DockCorner, DockSide};
 
@@ -31,7 +31,13 @@ pub type DockIconFactory = Rc<dyn Fn() -> IconWidget>;
 /// `IconButton`s such as "New File" / "Collapse All") on demand. Shown inside
 /// the dock header, before the framework options (`⋮`) button — the VS Code
 /// "view actions" pattern. See [`DockWidget::header_actions`](super::DockWidget::header_actions).
-pub type DockHeaderActionsFactory = Rc<dyn Fn(DockWidgetId) -> Box<dyn Widget>>;
+/// Builds a dock's inline header actions on demand: a flat list of
+/// [`ToolbarAction`]s. The framework hosts them in a [`Toolbar`](crate::toolbar::Toolbar)
+/// in the dock header, so they gain **overflow** (excess actions collapse into a
+/// `⌄` menu) and the correct **axis** for free — a horizontal row on leading /
+/// trailing sides, a vertical column on the rotated top / bottom strip — and an
+/// app never repeats the orientation or overflow logic.
+pub type DockHeaderActionsFactory = Rc<dyn Fn(DockWidgetId) -> Vec<ToolbarAction>>;
 
 /// Process-unique identity for a registered dock widget (the atomic unit).
 #[derive(
