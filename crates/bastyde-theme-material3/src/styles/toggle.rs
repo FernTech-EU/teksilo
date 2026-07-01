@@ -7,7 +7,7 @@
 //! context, so this is a full `impl ToggleStyle`. M3's switch has a
 //! 52×32 dp track and a thumb that grows from 16 dp (off) to 24 dp (on);
 //! the off track shows an outline. Exact M3 colors are read from the
-//! [`Material3Palette`](crate::Material3Palette) extension (always present
+//! [`Material3Palette`] extension (always present
 //! under this theme), with role-color fallbacks for safety.
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};

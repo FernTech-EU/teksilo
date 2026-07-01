@@ -1092,7 +1092,7 @@ impl WindowManager {
     ///    [`on_close_blocked`](bastyde_core::WindowConfig::on_close_blocked).
     /// 2. otherwise the
     ///    [`on_close_requested`](bastyde_core::WindowConfig::on_close_requested)
-    ///    guard's [`CloseResponse`](bastyde_core::CloseResponse).
+    ///    guard's [`CloseResponse`].
     /// 3. otherwise `true` (close).
     ///
     /// Strictly per-window — only `bastyde_id`'s own guard is consulted.

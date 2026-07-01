@@ -509,7 +509,7 @@ fn semantic_node(
     }
 }
 
-/// Build a [`LayoutNode`] for one arena widget.
+/// Build a [`LayoutNode`](crate::dto::LayoutNode) for one arena widget.
 fn layout_node(tree: &WidgetTree, id: WidgetId, include_debug: bool) -> crate::dto::LayoutNode {
     let to_ref = |w: WidgetId| bastyde_core::accessibility::widget_id_to_node_id(w).0;
     let b = tree.bounds(id);
