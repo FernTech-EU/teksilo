@@ -119,6 +119,12 @@ framework repo.
   `LanguageIdentifier`.
 - **Prefer roles over `Color`** so the UI follows the theme — `SurfaceRole`/`TextRole`/
   `BorderRole` and their typed `Signal<…>` forms (there is no generic `Signal<Role>`).
+- **Data models = the whole `bastyde::data` layer, not just `ListView`.** A dynamic
+  list/tree/table is a data-driven widget bound to a *model you own* (`ListModel`/`TreeModel`)
+  or a *`ListDataSource`/`TreeDataSource` you implement over your domain* — never a hand-rolled
+  `for`-loop of children. Decide that ownership shape first (see the guide's *Reactive data
+  models* section). Doc caveat: `docs/data-models.md` §3's `ListDataSource` snippet is stale
+  (omits `type Key: ItemKey`); trust `docs/data-source.md` + the source.
 - **Composing-widget invariant:** the id from `build()`, the root id used by
   `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `bastyde::core::{WidgetTree, LayoutContext::for_testing}` +

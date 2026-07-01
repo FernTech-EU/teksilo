@@ -456,19 +456,47 @@ and `Duration::ZERO` debounce.
 
 ## Reactive data models (`bastyde::data`)
 
-A GUI-agnostic peer layer. Concrete generic typing throughout (no `QVariant`, no role
-integers); all handles are `Rc<RefCell<…>>` so `.clone()` = share-by-handle. Mutations
-notify observers **after** dropping the borrow (no reactive deadlock).
+A GUI-agnostic peer layer (the `bastyde-data` crate). Concrete generic typing throughout (no
+`QVariant`, no role integers); all handles are `Rc<RefCell<…>>` so `.clone()` = share-by-handle.
+Mutations notify observers **after** dropping the borrow (no reactive deadlock). Full reference:
+`docs/data-models.md` + `docs/data-source.md` in the framework repo.
 
-- `ListModel<T>` / `ListDataSource` (escape hatch for huge sources).
-- `TreeModel<T>` (shape) + `TreeSlice<T>` (per-view flattening + independent expand state).
-- `SelectionModel` — `Single`/`Multi`/`None`, `selection_signal()`, Shift+click anchor.
-- `SortFilterListModel<T>` / `SortFilterTreeModel<T>` (with `TreeFilterMode`:
+**Decide the ownership shape first** — this is the main design choice, not just "which model":
+
+- **View-model owns the collection** (Qt `QStandardItemModel` shape) — hold a built-in
+  `ListModel<T>` / `TreeModel<T>` and keep it in sync (`push`/`insert`/`remove`/`move_item`/
+  `replace_all`). Right for bounded, in-memory, fully-resident data.
+- **Domain owns the data** (Qt `QAbstractItemModel` shape) — implement `ListDataSource` /
+  `TreeDataSource` **directly** over your store (DB cursor, Qleany entity store, paged feed);
+  no second in-memory copy to sync, identity is your own domain key. Bind with
+  `ListView::from_source` / `TreeView::from_source` (add `_keyed` for `KeyedSelectionModel`).
+  A first-class path, **not** a mere "escape hatch for huge sources" — reach for it whenever
+  the truth lives elsewhere. The built-in models *are* sources, so both shapes feed the same
+  widgets.
+
+The pieces:
+
+- `ListModel<T>` (flat, in-memory) / `TreeModel<T>` (shape) + `TreeSlice<T>` (per-view
+  flattening + independent expand state — `TreeModel` is **not** itself a `TreeDataSource`,
+  wrap it). Projections: `SortFilterListModel<T>` / `SortFilterTreeModel<T>` (`TreeFilterMode`:
   `HideNonMatching` / `KeepAncestors` / `KeepDescendants`).
-- `CheckedModel` / `TreeCheckedModel<T>` — per-row checkbox state with descendant→ancestor
-  tristate aggregation. `CheckState` is `Unchecked`/`Checked`/`Indeterminate`.
+- **Source traits** `ListDataSource` / `TreeDataSource` — `type Item` + `type Key: ItemKey`; a
+  small required read surface plus **defaulted** capability methods for drag-and-drop (`drag` /
+  `can_accept` / `accept_drop`) and lazy/windowed loading (`row_state` / `request_window` /
+  `fetch_more`, `DataChange::WindowLoaded`). Non-object-safe → consumed generically via `from_source`.
+- **Selection is a separate concern:** `SelectionModel` (index-based; `Single`/`Multi`/`None`,
+  `selection_signal()`, Shift+click anchor) vs `KeyedSelectionModel<K>` (identity-based —
+  survives reorder/filter/window-slide, consistent across two views of one source).
+- **Checkedness is another orthogonal axis:** `CheckedModel` / `TreeCheckedModel<T>` — per-row
+  checkbox state with descendant→ancestor tristate aggregation. `CheckState` is
+  `Unchecked`/`Checked`/`Indeterminate`.
+- Change notifications: `DataChange` / `TreeChange`; `NodeId` is stable across mutations —
+  store IDs/keys, never indices, in long-lived state.
 
-Feed these into `ListView`, `TreeView`, `TableView`, `TreeTableView`, `GridView`.
+Feed these into `ListView` (virtualized) / `Repeater` (bounded, non-virtualized, ≤~100) /
+`TreeView` / `TableView` / `TreeTableView` / `GridView`; rows via `StandardListItem` /
+`StandardTreeItem`. **A dynamic list/tree/table is always one of these widgets bound to a model
+or source — never a hand-rolled `for … .child(…)` loop.**
 
 ## Widget catalog (quick reference)
 
