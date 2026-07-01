@@ -249,9 +249,9 @@ impl IconWidget {
     pub fn from_svg(svg_str: &str) -> Self {
         match SvgIcon::parse(svg_str) {
             Ok(icon) => Self::from_svg_icon(&icon),
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(debug_assertions)]
-                eprintln!("bastyde: SVG parse error: {e}");
+                eprintln!("bastyde: SVG parse error: {_e}");
                 Self::from_path(Path::new(), 0.0)
             }
         }
@@ -294,9 +294,9 @@ impl IconWidget {
                     follow_text_scale: false,
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(debug_assertions)]
-                eprintln!("bastyde: PNG decode error: {e}");
+                eprintln!("bastyde: PNG decode error: {_e}");
                 Self::from_path(Path::new(), size)
             }
         }
@@ -349,9 +349,9 @@ impl IconWidget {
                     follow_text_scale: false,
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(debug_assertions)]
-                eprintln!("bastyde: WebP decode error: {e}");
+                eprintln!("bastyde: WebP decode error: {_e}");
                 Self::from_path(Path::new(), size)
             }
         }
