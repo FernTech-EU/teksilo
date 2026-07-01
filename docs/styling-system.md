@@ -360,7 +360,7 @@ pub fn brutalist_light() -> Theme {
 ## Migration status (as of this branch)
 
 Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **35 widgets**
+slot lookup. No themable widget self-paints anymore. **36 widgets**
 across six families:
 
 **Controls**
@@ -372,6 +372,7 @@ across six families:
 | `SplitButton` | `SplitButtonStyle` | `RecipeSplitButtonStyle` | `style_slots.split_button` |
 | `Checkbox` | `CheckboxStyle` | `RecipeCheckboxStyle` | `style_slots.checkbox` |
 | `RadioButton` | `RadioStyle` | `RecipeRadioStyle` | `style_slots.radio` |
+| `RadioTile` | `RadioTileStyle` | `RecipeRadioTileStyle` | `style_slots.radio_tile` |
 | `IconButton` | `IconButtonStyle` | `RecipeIconButtonStyle` | `style_slots.icon_button` |
 | `Slider` | `SliderStyle` | `RecipeSliderStyle` | `style_slots.slider` |
 | `SegmentedControl` | `SegmentedControlStyle` | `RecipeSegmentedControlStyle` | `style_slots.segmented_control` |

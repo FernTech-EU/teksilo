@@ -80,6 +80,8 @@ Every public widget in `bastyde-widgets`, grouped by category. Each page links t
 - [ProgressBar](progress_bar.md) — ProgressBar — a bar showing progress from 0.0 to 1.0
 - [RadioButton](radio_button.md) — RadioButton — mutually exclusive selection control
 - [RadioGroup](radio_group.md) — RadioGroup — invisible layout container that groups `RadioButton`s
+- [RadioTile](radio_tile.md) — RadioTile — a "selectable card" radio option
+- [RadioTileGroup](radio_tile_group.md) — RadioTileGroup — an N-ary group of `RadioTile`s with single selection
 - [SegmentedControl](segmented_control.md) — SegmentedControl — mutually exclusive segments in a horizontal row
 - [Slider](slider.md) — Slider — a draggable value selector bound to a `Signal<f32>`
 - [Spinner](spinner.md) — `Spinner` — a shader-driven circular-arc loading indicator

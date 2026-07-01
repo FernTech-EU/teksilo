@@ -55,10 +55,10 @@ use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, FontPicker, GridSizing, GridView, GroupBox,
     GroupHeader, IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList,
-    Orientation, PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea,
-    SegmentedControl, Slider, Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem,
-    StandardTreeItem, StatusBar, TabWidget, TextInput, TextScaleControl, ThemeSwitcher, Toggle,
-    ToolBox, Toolbar, TreeView,
+    Orientation, PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, RadioTile,
+    RadioTileGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, Splitter,
+    SplitterModel, StandardListItem, StandardTreeItem, StatusBar, TabWidget, TextInput,
+    TextScaleControl, ThemeSwitcher, TileLayout, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -2080,6 +2080,122 @@ impl WidgetCatalog for RadioGroup {
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/radio_group.rs", RadioGroup);
+
+// ---------------------------------------------------------------------------
+// RadioTile
+// ---------------------------------------------------------------------------
+impl WidgetCatalog for RadioTile {
+    fn id() -> &'static str {
+        "radio_tile"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "RadioTile"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            .choice("selected", "Selected", &["Yes", "No"], 0)
+            .opt_text("title", "Title", Some("Single file"))
+            .opt_text(
+                "description",
+                "Description",
+                Some("One .skrib archive (zip). Portable, easy to back up."),
+            )
+            .bool_("enabled", "Enabled", true)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![
+            PreviewVariant::defaults("selected"),
+            PreviewVariant::knobs("unselected", KnobOverrides::new().choice("selected", 1)),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
+            PreviewVariant::knobs(
+                "no-description",
+                KnobOverrides::new().opt_text("description", None),
+            ),
+        ]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        let title = knobs.opt_text("title").get();
+        let description = knobs.opt_text("description").get();
+        let enabled = knobs.bool_("enabled").get();
+        let mut tile = RadioTile::new()
+            .bind_selection(0, knobs.choice("selected"))
+            .enabled(enabled);
+        if let Some(title) = title {
+            tile = tile.title(lit!(title));
+        }
+        if let Some(description) = description {
+            tile = tile.description(lit!(description));
+        }
+        Box::new(FixedSize::new().bind_width(300.0).child(tile))
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/radio_tile.rs", RadioTile);
+
+// ---------------------------------------------------------------------------
+// RadioTileGroup
+// ---------------------------------------------------------------------------
+impl WidgetCatalog for RadioTileGroup {
+    fn id() -> &'static str {
+        "radio_tile_group"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "RadioTileGroup"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        fn build_row() -> Box<dyn Widget> {
+            let selected = Signal::new(0_usize);
+            Box::new(
+                FixedSize::new().bind_width(560.0).child(
+                    RadioTileGroup::new(selected)
+                        .tile(
+                            RadioTile::new()
+                                .title(lit!("Single file"))
+                                .description(lit!(
+                                    "One .skrib archive (zip). Portable, easy to back up."
+                                )),
+                        )
+                        .tile(RadioTile::new().title(lit!("Bundle")).description(lit!(
+                            "A folder holding every text & asset. Friendlier to version control."
+                        )))
+                        .layout(TileLayout::Row),
+                ),
+            )
+        }
+        fn build_grid() -> Box<dyn Widget> {
+            let selected = Signal::new(1_usize);
+            Box::new(
+                FixedSize::new().bind_width(560.0).child(
+                    RadioTileGroup::new(selected)
+                        .tiles((0..4).map(|i| {
+                            RadioTile::new()
+                                .title(lit!(format!("Option {}", i + 1)))
+                                .description(lit!("A selectable option in the grid."))
+                        }))
+                        .layout(TileLayout::Grid {
+                            min_tile_width: 240.0,
+                        }),
+                ),
+            )
+        }
+        vec![
+            PreviewVariant::scenario("row", build_row),
+            PreviewVariant::scenario("grid", build_grid),
+        ]
+    }
+    fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        scenario_for::<Self>(variant)
+    }
+}
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/radio_tile_group.rs",
+    RadioTileGroup
+);
 
 // ---------------------------------------------------------------------------
 // SplitButton

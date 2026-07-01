@@ -30,6 +30,7 @@ is per-call `.style(impl FooStyle)` → theme-wide
 | `Button` | `ButtonVariant` (Filled/Tinted/Outlined/Plain/Ghost/Link/Destructive) | `ButtonStyle` | `style_slots.button` |
 | `Checkbox` | `CheckboxVariant` (Square/Rounded/Circle) | `CheckboxStyle` | `style_slots.checkbox` |
 | `RadioButton` | `RadioVariant` (Circle/Square/Rounded) | `RadioStyle` | `style_slots.radio` |
+| `RadioTile` | `RadioTileVariant` (Outlined/Elevated/Filled) | `RadioTileStyle` | `style_slots.radio_tile` |
 | `IconButton` | `IconButtonSize` (Compact/Default/Toolbar/Large/Hero) | `IconButtonStyle` | `style_slots.icon_button` |
 | `Panel` | `PanelVariant` (Plain/Sunken/Raised/Highlighted) | `PanelStyle` | `style_slots.panel` |
 | `Card` | `CardVariant` (Plain/Elevated/Outlined/Filled) | `CardStyle` | `style_slots.card` |
@@ -139,6 +140,7 @@ Themed framing, sectioning, and window-level structure.
 
 - [Checkbox](../crates/bastyde-widgets/src/checkbox.rs) — two-state and tristate (`CheckState`).
 - [RadioButton](../crates/bastyde-widgets/src/radio_button.rs) — single radio, bound to a shared value via [RadioGroup](../crates/bastyde-widgets/src/radio_group.rs) for mutual exclusion.
+- [RadioTile](../crates/bastyde-widgets/src/radio_tile.rs) / [RadioTileGroup](../crates/bastyde-widgets/src/radio_tile_group.rs) — "selectable card" radios: icon + title + inline radio + wrapping description. N-ary group with `TileLayout::{Row, Grid, Column, Vertical}` (equal-size cards, adaptive wrapping grid, or a compact settings list with trailing meta), a WAI-ARIA roving radiogroup keyboard, and `Role::RadioGroup` + per-tile `Role::RadioButton`.
 - [Toggle](../crates/bastyde-widgets/src/toggle.rs) — on/off control; four `ToggleVariant`s (Switch / Pill / Square / Inset) via the `ToggleStyle` trait.
 - [Slider](../crates/bastyde-widgets/src/slider.rs) — horizontal or vertical, optional stepping.
 - [SegmentedControl](../crates/bastyde-widgets/src/segmented_control.rs) — `Signal<usize>`-driven segmented chooser; `RadioGroup` AT role.

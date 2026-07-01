@@ -152,6 +152,8 @@
 - [Pulse](widgets/pulse.md)
 - [RadioButton](widgets/radio_button.md)
 - [RadioGroup](widgets/radio_group.md)
+- [RadioTile](widgets/radio_tile.md)
+- [RadioTileGroup](widgets/radio_tile_group.md)
 - [RectWidget](widgets/rect_widget.md)
 - [Repeater](widgets/repeater.md)
 - [ResizeStrip](widgets/resize_strip.md)

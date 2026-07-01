@@ -53,6 +53,8 @@ mod popover_style;
 mod progress_bar_style;
 #[path = "styles/radio_style.rs"]
 mod radio_style;
+#[path = "styles/radio_tile_style.rs"]
+mod radio_tile_style;
 #[path = "styles/recipe.rs"]
 mod recipe;
 #[path = "styles/rich_text_editor_style.rs"]
@@ -146,6 +148,9 @@ pub use progress_bar_style::{
     ProgressBarStyle, ProgressBarStyleConfig, ProgressKind, SharedProgressBarStyle,
 };
 pub use radio_style::{RadioStyle, RadioStyleConfig, RadioVariant, SharedRadioStyle};
+pub use radio_tile_style::{
+    RadioTileStyle, RadioTileStyleConfig, RadioTileVariant, SharedRadioTileStyle,
+};
 pub use recipe::{
     BorderPosition, BorderRecipe, BorderSides, BorderStyle, FillRecipe, GradientStop,
     PerStateRecipe, RecipeColor, ShadowRecipe, ShapeRecipe, WidgetState, apply_border_position,

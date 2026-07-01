@@ -6,11 +6,31 @@
 use bastyde::prelude::*;
 use bastyde::tokens::Orientation;
 use bastyde::widgets::{
-    Checkbox, ComboBox, Divider, FixedSize, RadioButton, SegmentedControl, Slider, TextWidget,
-    Toggle, VStack,
+    Checkbox, ComboBox, Divider, FixedSize, IconWidget, RadioButton, RadioTile, RadioTileGroup,
+    SegmentedControl, Slider, TextWidget, TileLayout, Toggle, VStack,
 };
 
 use crate::shared::{Signals, section, tab_header};
+
+// Minimal tintable glyphs for the RadioTile showcase (geometry only).
+const FILE_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M6 2h8l4 4v16H6z'/></svg>";
+const FOLDER_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 6h6l2 2h10v11H3z'/></svg>";
+const BAN_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 3a9 9 0 100 18 9 9 0 000-18zm0 2a7 7 0 015.7 11L7 6.3A7 7 0 0112 5z'/></svg>";
+const LAYERS_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 3l9 5-9 5-9-5z'/></svg>";
+const NOTE_SVG: &str =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 3h14v18H5z'/></svg>";
+
+/// A leading tile icon whose tint follows selection.
+fn tile_icon(svg: &'static str, index: usize, selected: &Signal<usize>) -> IconWidget {
+    let color = selected.map(move |s| {
+        if *s == index {
+            TextRole::Accent
+        } else {
+            TextRole::Secondary
+        }
+    });
+    IconWidget::from_svg(svg).icon_size(20.0).color(color)
+}
 
 pub fn title() -> LocalizedString {
     tr!(tab_inputs_title())
@@ -93,6 +113,56 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             tr!(inp_segment_third()),
         ]),
     );
+    let radio_tile = section(
+        ctx,
+        lit!("RadioTile"),
+        VStack::new()
+            .spacing(12.0)
+            .child(
+                RadioTileGroup::new(sigs.radio_tile_selected.clone())
+                    .layout(TileLayout::Row)
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(FILE_SVG, 0, &sigs.radio_tile_selected))
+                            .title(lit!("Single file"))
+                            .description(lit!("One .skrib archive (zip).")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(FOLDER_SVG, 1, &sigs.radio_tile_selected))
+                            .title(lit!("Bundle"))
+                            .description(lit!("A folder of every text & asset.")),
+                    ),
+            )
+            .child(
+                RadioTileGroup::new(sigs.radio_tile_vertical_selected.clone())
+                    .layout(TileLayout::Vertical)
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(BAN_SVG, 0, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("None"))
+                            .trailing(lit!("empty binder")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(LAYERS_SVG, 1, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("Light Novel"))
+                            .trailing(lit!("15 chapters")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(LAYERS_SVG, 2, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("Novel"))
+                            .trailing(lit!("20 chapters")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(NOTE_SVG, 3, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("Notebook"))
+                            .trailing(lit!("free-form notes")),
+                    ),
+            ),
+    );
     let combo = section(
         ctx,
         lit!("ComboBox"),
@@ -122,6 +192,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .add_child(slider_stepped)
             .add_child(slider_v)
             .add_child(segmented)
+            .add_child(radio_tile)
             .add_child(combo),
     )
 }
@@ -135,6 +206,50 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             tr!(inp_segment_second()),
             tr!(inp_segment_third()),
         ]),
+    );
+    // RadioTileGroup's `.tile(...)` chain can't be expressed in bati! ctor
+    // syntax — pre-register it and reference by id.
+    let radio_tile_widget = ctx.add(
+        VStack::new()
+            .spacing(12.0)
+            .child(
+                RadioTileGroup::new(sigs.radio_tile_selected.clone())
+                    .layout(TileLayout::Row)
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(FILE_SVG, 0, &sigs.radio_tile_selected))
+                            .title(lit!("Single file"))
+                            .description(lit!("One .skrib archive (zip).")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(FOLDER_SVG, 1, &sigs.radio_tile_selected))
+                            .title(lit!("Bundle"))
+                            .description(lit!("A folder of every text & asset.")),
+                    ),
+            )
+            .child(
+                RadioTileGroup::new(sigs.radio_tile_vertical_selected.clone())
+                    .layout(TileLayout::Vertical)
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(BAN_SVG, 0, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("None"))
+                            .trailing(lit!("empty binder")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(LAYERS_SVG, 1, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("Novel"))
+                            .trailing(lit!("20 chapters")),
+                    )
+                    .tile(
+                        RadioTile::new()
+                            .icon(tile_icon(NOTE_SVG, 2, &sigs.radio_tile_vertical_selected))
+                            .title(lit!("Notebook"))
+                            .trailing(lit!("free-form notes")),
+                    ),
+            ),
     );
     let combo_widget = ctx.add(
         ComboBox::from_items(
@@ -288,6 +403,15 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ segmented_widget }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("RadioTile")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ radio_tile_widget }
             }
 
             VStack {

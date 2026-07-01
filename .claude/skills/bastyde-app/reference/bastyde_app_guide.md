@@ -503,8 +503,9 @@ or source — never a hand-rolled `for … .child(…)` loop.**
 Import from `bastyde::widgets`. The main families:
 
 - **Controls:** Button, IconButton, CommandLinkButton, PopoverButton, SplitButton,
-  Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Spinner,
-  Link, Badge, SpinBox, Avatar.
+  Checkbox, RadioButton, RadioTile / RadioTileGroup (selectable-card radios; N-ary group with
+  `TileLayout::{Row, Grid, Column, Vertical}` — the last is a compact fixed-height settings list),
+  Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Spinner, Link, Badge, SpinBox, Avatar.
 - **Containers:** Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Splitter,
   DockingLayout, TabWidget / TabBar, Dialog, Popover, Snackbar, GroupBox, Wizard,
   Breadcrumb, MessageBox, DropZone, DropTarget, Toast.

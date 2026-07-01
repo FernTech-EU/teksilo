@@ -58,6 +58,8 @@ pub struct Signals {
     pub slider_v_value: Signal<f32>,
     pub slider_stepped: Signal<f32>,
     pub segment_selected: Signal<usize>,
+    pub radio_tile_selected: Signal<usize>,
+    pub radio_tile_vertical_selected: Signal<usize>,
     pub combo_selected: Signal<Option<String>>,
     pub spin_value: Signal<f64>,
 
@@ -97,6 +99,8 @@ impl Signals {
             slider_v_value: ctx.signal(0.3_f32),
             slider_stepped: ctx.signal(25.0_f32),
             segment_selected: ctx.signal(0_usize),
+            radio_tile_selected: ctx.signal(0_usize),
+            radio_tile_vertical_selected: ctx.signal(3_usize),
             combo_selected: ctx.signal(None::<String>),
             spin_value: ctx.signal(0.0_f64),
 

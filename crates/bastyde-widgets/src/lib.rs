@@ -72,6 +72,8 @@ pub mod privacy_settings;
 pub mod progress_bar;
 pub mod radio_button;
 pub mod radio_group;
+pub mod radio_tile;
+pub mod radio_tile_group;
 pub mod repeater;
 pub mod rich_text;
 pub mod scroll_area;
@@ -121,8 +123,9 @@ pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use banner::{Banner, BannerSeverity};
 pub use bastyde_core::styles::{
-    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
-    SharedDropTargetStyle, TabIndicatorPosition,
+    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant, RadioTileStyle,
+    RadioTileStyleConfig, RadioTileVariant, SharedDropTargetStyle, SharedRadioTileStyle,
+    TabIndicatorPosition,
 };
 pub use bastyde_data::CheckState;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
@@ -196,6 +199,8 @@ pub use privacy_settings::PrivacySettings;
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
 pub use radio_group::RadioGroup;
+pub use radio_tile::{RadioTile, RadioTileIndicatorSide};
+pub use radio_tile_group::{RadioTileGroup, TileLayout};
 pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};

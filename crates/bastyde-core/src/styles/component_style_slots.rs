@@ -33,10 +33,10 @@ use crate::styles::{
     SharedDateEditStyle, SharedDialogStyle, SharedDropTargetStyle, SharedDropZoneStyle,
     SharedGridViewStyle, SharedIconButtonStyle, SharedLinkStyle, SharedListContainerStyle,
     SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
-    SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
-    SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
-    SharedSplitButtonStyle, SharedSplitterStyle, SharedStandardItemStyle, SharedTabStyle,
-    SharedTableStyle, SharedTextInputStyle, SharedToastStyle, SharedToggleStyle,
+    SharedRadioStyle, SharedRadioTileStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
+    SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
+    SharedSpinBoxStyle, SharedSplitButtonStyle, SharedSplitterStyle, SharedStandardItemStyle,
+    SharedTabStyle, SharedTableStyle, SharedTextInputStyle, SharedToastStyle, SharedToggleStyle,
     SharedTooltipStyle, SharedWebViewStyle,
 };
 
@@ -52,6 +52,7 @@ pub struct ComponentStyleSlots {
     pub toggle: Option<SharedToggleStyle>,
     pub checkbox: Option<SharedCheckboxStyle>,
     pub radio: Option<SharedRadioStyle>,
+    pub radio_tile: Option<SharedRadioTileStyle>,
     pub slider: Option<SharedSliderStyle>,
     pub text_input: Option<SharedTextInputStyle>,
     pub combo_box: Option<SharedComboBoxStyle>,
@@ -99,6 +100,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("toggle", &self.toggle.is_some())
             .field("checkbox", &self.checkbox.is_some())
             .field("radio", &self.radio.is_some())
+            .field("radio_tile", &self.radio_tile.is_some())
             .field("slider", &self.slider.is_some())
             .field("text_input", &self.text_input.is_some())
             .field("combo_box", &self.combo_box.is_some())
@@ -148,6 +150,7 @@ impl PartialEq for ComponentStyleSlots {
             }
         }
         rc_eq(&self.button, &other.button)
+            && rc_eq(&self.radio_tile, &other.radio_tile)
             && rc_eq(&self.split_button, &other.split_button)
             && rc_eq(&self.splitter, &other.splitter)
             && rc_eq(&self.icon_button, &other.icon_button)
