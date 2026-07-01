@@ -741,6 +741,50 @@ impl WidgetTree {
         self.frame_tick_requested.get()
     }
 
+    /// The next wake-up deadline for the per-frame-effect path, or
+    /// `None` when no per-frame effect is armed.
+    ///
+    /// This is the **60 Hz cap** for continuous per-frame animations
+    /// (`Pulse`, caret blink, drag auto-scroll, `--cycle` drivers). The
+    /// per-frame-effect path used to force `ControlFlow::Poll`, which
+    /// free-runs at the display's refresh rate — so on a 300 Hz panel a
+    /// single `Pulse`/`Cycle` rendered at 300 fps (measured ~45 % CPU) for
+    /// motion that looks identical at 60 fps. Routing it through a fixed
+    /// 16.667 ms deadline (folded into
+    /// [`next_timer_deadline`](Self::next_timer_deadline)) makes it pace at
+    /// 60 Hz regardless of refresh rate, matching the signal-tween
+    /// [`AnimationScheduler`](crate::animation::AnimationScheduler) and
+    /// shader-quad [`AnimatedQuadRegistry`](crate::animated_quad::AnimatedQuadRegistry),
+    /// which already share the same interval.
+    ///
+    /// A **throttled** subscriber (registered via
+    /// [`FrameTickScheduler::subscribe_throttled`](crate::frame_tick_scheduler::FrameTickScheduler::subscribe_throttled)
+    /// — e.g. `Cycle`, whose visible child only changes once per period)
+    /// stretches the deadline to its own interval: the loop then sleeps to
+    /// the period instead of rendering identical 60 fps frames in between.
+    /// The interval used is the **minimum across all currently-visible
+    /// subscribers**, so a `Cycle` next to a `Pulse` still ticks at 60 Hz
+    /// while a lone `Cycle` sleeps to its period. Raw `request_frame`
+    /// consumers with no subscription fall back to 60 Hz.
+    ///
+    /// Paces from `last_frame_time` so the cadence is drift-free; before
+    /// the first render it fires on the next loop turn.
+    pub fn frame_tick_deadline(&self) -> Option<std::time::Instant> {
+        // 60 Hz fallback for raw `request_frame` consumers (no subscriber).
+        const DEFAULT_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
+        if !self.frame_tick_requested.get() {
+            return None;
+        }
+        let interval = self
+            .frame_tick_scheduler
+            .min_visible_interval(&self.arena, self.paint_epoch)
+            .unwrap_or(DEFAULT_INTERVAL);
+        Some(match self.last_frame_time {
+            Some(prev) => prev + interval,
+            None => std::time::Instant::now(),
+        })
+    }
+
     /// Subscribe `owner` to the per-frame-effect scheduler. The
     /// returned [`FrameTickSubscription`](crate::frame_tick_scheduler::FrameTickSubscription)
     /// is an RAII guard — drop it (typically by replacing the field on
@@ -759,6 +803,25 @@ impl WidgetTree {
         owner: WidgetId,
     ) -> crate::frame_tick_scheduler::FrameTickSubscription {
         self.frame_tick_scheduler.subscribe(owner)
+    }
+
+    /// Like [`subscribe_frame_tick`](Self::subscribe_frame_tick), but the
+    /// owner only needs to wake **at most once per `interval`** while
+    /// visible. Same visibility gate; between wakes the event loop sleeps
+    /// to the interval deadline instead of rendering identical 60 fps
+    /// frames. Use for effects whose visible output changes far less often
+    /// than 60 Hz — e.g. `Cycle`'s once-per-period index advance.
+    ///
+    /// Apps should not call this directly — use
+    /// [`BuildContext::subscribe_frame_tick_throttled`](crate::build_context::BuildContext::subscribe_frame_tick_throttled)
+    /// from inside `Widget::build`.
+    pub fn subscribe_frame_tick_throttled(
+        &self,
+        owner: WidgetId,
+        interval: std::time::Duration,
+    ) -> crate::frame_tick_scheduler::FrameTickSubscription {
+        self.frame_tick_scheduler
+            .subscribe_throttled(owner, interval)
     }
 
     /// Advance the frame tick signal when (and only when) a frame was

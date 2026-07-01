@@ -802,6 +802,12 @@ impl WidgetTree {
             .next_deadline(&self.arena, self.paint_epoch);
         let gesture_deadline = self.next_gesture_deadline();
         let wake_at_deadline = self.pending_wake_at.get();
+        // Per-frame-effect path (Pulse / Cycle / caret blink / drag
+        // auto-scroll): a fixed 60 Hz deadline instead of the old
+        // `ControlFlow::Poll` free-run, so continuous animations render
+        // at 60 Hz regardless of the display's refresh rate. See
+        // `frame_tick_deadline`.
+        let frame_tick_deadline = self.frame_tick_deadline();
 
         [
             tooltip_deadline,
@@ -812,6 +818,7 @@ impl WidgetTree {
             animated_quad_deadline,
             gesture_deadline,
             wake_at_deadline,
+            frame_tick_deadline,
         ]
         .into_iter()
         .flatten()
@@ -1029,6 +1036,75 @@ mod tests {
         assert!(!tree.is_visible(widget));
         tree.activate(widget);
         assert!(tree.is_visible(widget));
+    }
+
+    #[test]
+    fn frame_tick_deadline_caps_per_frame_effects_at_60hz() {
+        let mut tree = WidgetTree::new();
+        // Not armed → no per-frame-effect deadline.
+        assert!(tree.frame_tick_deadline().is_none());
+
+        // Arm the per-frame-effect path (what Pulse / Cycle / caret blink
+        // / drag auto-scroll do via `request_frame` or the render re-arm).
+        tree.request_frame();
+        // Pace from a known frame time so the interval is assertable.
+        let t0 = std::time::Instant::now();
+        tree.last_frame_time = Some(t0);
+
+        let deadline = tree
+            .frame_tick_deadline()
+            .expect("an armed per-frame effect must publish a deadline");
+        let interval = deadline.saturating_duration_since(t0);
+        // 60 Hz == 16.667 ms; the cap replaces the old ControlFlow::Poll
+        // free-run (which rendered at the display's full refresh rate).
+        assert!(
+            interval >= std::time::Duration::from_micros(16_000)
+                && interval <= std::time::Duration::from_micros(17_500),
+            "per-frame effects must pace at ~60 Hz (got {interval:?})"
+        );
+
+        // It must flow through next_timer_deadline so the event loop uses
+        // WaitUntil rather than the removed Poll free-run.
+        assert_eq!(
+            tree.next_timer_deadline(),
+            Some(deadline),
+            "frame-tick deadline must be surfaced by next_timer_deadline"
+        );
+    }
+
+    #[test]
+    fn throttled_subscriber_stretches_deadline_but_per_frame_wins_min() {
+        use crate::test_widgets::FillWidget;
+        let mut tree = WidgetTree::new();
+        let w = tree.add(FillWidget::new());
+        // Cycle-style throttled subscription: wake at most once per 1.5 s.
+        let _throttled =
+            tree.subscribe_frame_tick_throttled(w, std::time::Duration::from_millis(1500));
+        tree.request_frame();
+        let t0 = std::time::Instant::now();
+        tree.last_frame_time = Some(t0);
+
+        // paint_epoch == 0 (never rendered) → the sentinel treats the
+        // subscriber as visible, so its throttled interval governs.
+        let d = tree.frame_tick_deadline().expect("armed");
+        let dt = d.saturating_duration_since(t0);
+        assert!(
+            dt >= std::time::Duration::from_millis(1490)
+                && dt <= std::time::Duration::from_millis(1510),
+            "a lone throttled subscriber must pace at its interval (~1.5 s), got {dt:?}"
+        );
+
+        // A per-frame subscriber pulls the *shared* deadline back to 60 Hz:
+        // the deadline is the minimum interval across visible subscribers,
+        // so a Cycle sharing a tree with a Pulse rides the Pulse's cadence.
+        let w2 = tree.add(FillWidget::new());
+        let _per_frame = tree.subscribe_frame_tick(w2);
+        let d2 = tree.frame_tick_deadline().expect("armed");
+        let dt2 = d2.saturating_duration_since(t0);
+        assert!(
+            dt2 <= std::time::Duration::from_millis(20),
+            "a per-frame subscriber must pull the shared deadline to 60 Hz, got {dt2:?}"
+        );
     }
 
     #[test]

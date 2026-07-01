@@ -374,11 +374,6 @@ impl IdleTrace {
         self.maybe_report();
     }
 
-    fn note_frame_request_redraw(&mut self) {
-        self.frame_request_redraws += 1;
-        self.maybe_report();
-    }
-
     fn maybe_report(&mut self) {
         if self.last_report.elapsed() < Duration::from_secs(1) {
             return;
@@ -601,7 +596,6 @@ impl BastydeAppHandler {
         let mut timer_windows = 0_usize;
         let mut animation_timers = 0_usize;
         let mut tooltip_timers = 0_usize;
-        let mut any_frame_requested = false;
         for managed in self.wm.iter() {
             let animation_count = managed.tree.active_animation_count();
             let tooltip_count = managed.tree.pending_tooltip_count();
@@ -610,34 +604,29 @@ impl BastydeAppHandler {
             }
             animation_timers += animation_count;
             tooltip_timers += tooltip_count;
+            // `next_timer_deadline` now folds in the per-frame-effect
+            // path's fixed 60 Hz deadline (Pulse / Cycle / caret blink /
+            // drag auto-scroll) alongside the tween + shader schedulers,
+            // so continuous animations pace through `WaitUntil` below
+            // instead of forcing `ControlFlow::Poll` (which free-ran at
+            // the display's refresh rate — 300 fps on a 300 Hz panel).
             if let Some(deadline) = managed.tree.next_timer_deadline() {
                 earliest_deadline = Some(match earliest_deadline {
                     Some(current) => current.min(deadline),
                     None => deadline,
                 });
             }
-            if managed.tree.frame_requested() {
-                any_frame_requested = true;
-            }
         }
 
-        // An installed loop-tick owner (e.g. the `bastyde-async` executor)
-        // can request continuous polling while it still has runnable work.
-        if let Some(poll) = &self.loop_tick_poll
-            && poll.get()
-        {
-            any_frame_requested = true;
-        }
+        // The ONLY remaining consumer that forces true `ControlFlow::Poll`:
+        // an installed loop-tick owner (e.g. the `bastyde-async` executor)
+        // with runnable work. Async task processing wants to run as fast as
+        // possible and is not an animation, so it is deliberately *not*
+        // 60 Hz-capped. Every per-frame *animation* effect now paces through
+        // the `WaitUntil` deadline instead.
+        let force_poll = self.loop_tick_poll.as_ref().is_some_and(|poll| poll.get());
 
-        if any_frame_requested {
-            // A widget has a per-frame effect actively running
-            // (caret blink, drag auto-scroll, continuous animation
-            // that drives the state via its tick closure). Poll
-            // mode keeps winit pumping events at the OS's maximum
-            // rate instead of sleeping — the only way to get a
-            // visibly regular blink cadence without a dedicated
-            // timer wake. Other widgets that only need deadline
-            // wakes keep doing that; frame pumping is additive.
+        if force_poll {
             event_loop.set_control_flow(ControlFlow::Poll);
         } else if let Some(deadline) = earliest_deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
@@ -1763,12 +1752,19 @@ impl BastydeAppHandler {
             }
         }
 
-        if managed.tree.frame_requested() {
-            if let Some(trace) = &mut self.idle_trace {
-                trace.note_frame_request_redraw();
-            }
-            managed.platform_window.request_redraw();
-        }
+        // A live per-frame effect (Pulse / Cycle / caret blink / drag
+        // auto-scroll) leaves `frame_requested()` armed after this render.
+        // We deliberately do NOT `request_redraw()` here: an immediate
+        // redraw request makes winit skip the `WaitUntil` sleep and
+        // free-run at the display's refresh rate — the exact 300 fps
+        // uncapped behaviour we're removing. Instead the fixed 60 Hz
+        // deadline published by `WidgetTree::frame_tick_deadline` (folded
+        // into `next_timer_deadline`) drives the next frame: at the
+        // deadline, `new_events(ResumeTimeReached)` calls
+        // `request_redraw_all()`. This mirrors how the shader-quad
+        // animation path has always paced itself, so per-frame animations
+        // now show in the idle trace as `resume_time_reached` /
+        // `request_redraw_all` rather than `frame_request`.
 
         self.wm.reinsert_managed(window_id, current);
     }

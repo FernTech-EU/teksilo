@@ -195,6 +195,26 @@ impl<'a> BuildContext<'a> {
         sub
     }
 
+    /// Like [`subscribe_frame_tick`](Self::subscribe_frame_tick), but the
+    /// widget only needs to wake **at most once per `interval`** while
+    /// visible. Same visibility gate and RAII guard; between wakes the
+    /// event loop sleeps to the interval deadline rather than rendering
+    /// identical 60 fps frames. Use when the widget's visible output
+    /// changes far less often than 60 Hz — e.g. `Cycle`'s once-per-period
+    /// index advance, or a seconds-granular clock.
+    pub fn subscribe_frame_tick_throttled(
+        &self,
+        interval: std::time::Duration,
+    ) -> crate::frame_tick_scheduler::FrameTickSubscription {
+        let sub = self
+            .tree
+            .subscribe_frame_tick_throttled(self.self_id(), interval);
+        // Bootstrap the first frame after registration (see
+        // `subscribe_frame_tick`).
+        self.tree.request_frame();
+        sub
+    }
+
     /// Clone the shared wake-at deadline cell. Stash it on widget
     /// state and set `Some(instant)` from a frame-tick effect to
     /// schedule a one-shot deadline wake-up without keeping the event

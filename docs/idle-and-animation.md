@@ -177,11 +177,22 @@ the loop. Classify it:
   through `next_timer_deadline` in
   [overlay_impl.rs](../crates/bastyde-core/src/widget_tree/overlay_impl.rs).
   If it doesn't, the event loop can't decide whether to sleep.
-- **Poll mode forced?** `ControlFlow::Poll` is used for
-  `frame_tick_requested` (caret blink, drag auto-scroll). It must
-  clear itself the frame it is no longer needed. **For visual
-  continuous animations** (Pulse, Cycle, …), prefer
-  `ctx.subscribe_frame_tick()` over the raw
+- **Poll mode forced?** `ControlFlow::Poll` is reserved for the
+  async executor's loop-tick (`loop_tick_poll`), which must process
+  runnable tasks as fast as possible and is *not* an animation. The
+  per-frame-effect path (`frame_tick_requested`: Pulse, Cycle, caret
+  blink, drag auto-scroll) does **not** force Poll — it publishes a
+  fixed **60 Hz** deadline via
+  [`WidgetTree::frame_tick_deadline`](../crates/bastyde-core/src/widget_tree.rs),
+  folded into `next_timer_deadline`, so continuous animations render
+  through `ControlFlow::WaitUntil` at 60 Hz **regardless of the
+  display's refresh rate**. (It used to force Poll, which free-ran at
+  the panel's refresh — a single `Pulse`/`Cycle` measured 300 fps /
+  ~45 % CPU on a 300 Hz panel vs. 60 fps / ~13 % CPU after the cap.)
+  This matches the signal-tween `AnimationScheduler` and shader-quad
+  `AnimatedQuadRegistry`, which already pace at the same 16.667 ms
+  interval. **For visual continuous animations** (Pulse, Cycle, …),
+  prefer `ctx.subscribe_frame_tick()` over the raw
   `frame_request_handle().set(true)` re-arm — the scheduler-backed
   path automatically pauses the chain when the owner widget is
   hidden, while the raw handle keeps the event loop pumping

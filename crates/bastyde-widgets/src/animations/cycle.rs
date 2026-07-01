@@ -27,7 +27,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -125,29 +125,39 @@ impl Widget for Cycle {
             return vec![root];
         }
 
-        // Discrete index advance via the frame tick. The framework
-        // auto-arms the chain after every render in which `self_id`
-        // was painted (see `BuildContext::subscribe_frame_tick`), so
-        // a Cycle parked inside a non-selected `Switcher` branch
-        // contributes zero idle frames and resumes from `elapsed`
-        // when shown again.
-        let period_secs = self.period.as_secs_f32().max(0.001);
-        let elapsed = Rc::new(Cell::new(0.0_f32));
+        // Discrete index advance. Cycle only changes its visible child
+        // once per period, so it subscribes *throttled* rather than
+        // per-frame: the event loop sleeps to the period deadline instead
+        // of rendering ~90 identical frames per boundary at 60 Hz. The
+        // visibility gate is unchanged — a Cycle parked in a non-selected
+        // `Switcher` branch (or an off-screen tab) still ticks zero times,
+        // and resumes when shown again (its `last_advance` clock keeps
+        // running on real time, so it advances on the first wake past the
+        // next boundary).
+        //
+        // Timing is absolute (`Instant::now`) rather than accumulated
+        // frame deltas: at the throttled cadence the tree's per-frame
+        // delta is clamped to 0.1 s (a spike guard) and cannot measure a
+        // multi-second period. Absolute time is also self-correcting when
+        // a wake lands late.
+        let period = self.period;
+        let last_advance: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
         let selected_for_tick = selected;
-        ctx.effect(&ctx.frame_tick(), move |&delta| {
-            let t = elapsed.get() + delta;
-            if t >= period_secs {
-                let next = (selected_for_tick.get() + 1) % n;
-                selected_for_tick.set(next);
-                // Carry over the overflow so jitter at the period
-                // boundary doesn't accumulate (slow drift).
-                elapsed.set(t - period_secs);
-            } else {
-                elapsed.set(t);
+        ctx.effect(&ctx.frame_tick(), move |_delta| {
+            let now = Instant::now();
+            match last_advance.get() {
+                // First tick after (re)build: start the clock, don't jump.
+                None => last_advance.set(Some(now)),
+                Some(prev) if now.duration_since(prev) >= period => {
+                    let next = (selected_for_tick.get() + 1) % n;
+                    selected_for_tick.set(next);
+                    last_advance.set(Some(now));
+                }
+                Some(_) => {}
             }
         });
         self.frame_tick_sub = None;
-        self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
+        self.frame_tick_sub = Some(ctx.subscribe_frame_tick_throttled(period));
 
         vec![root]
     }

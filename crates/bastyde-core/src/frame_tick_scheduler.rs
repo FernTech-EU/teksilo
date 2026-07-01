@@ -58,15 +58,34 @@
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::time::Duration;
 
 use crate::arena::WidgetArena;
 use crate::motion_visibility;
 use crate::widget_id::WidgetId;
 
+/// The per-frame cadence — 60 Hz, matching `AnimationScheduler` /
+/// `AnimatedQuadRegistry`'s `DEFAULT_FRAME_INTERVAL`. A subscriber with
+/// no explicit interval wakes at this rate.
+const PER_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+
+/// One registered per-frame-effect owner plus its wake cadence.
+#[derive(Clone, Copy)]
+struct Subscriber {
+    id: WidgetId,
+    /// `None` = wake every frame (the 60 Hz cap); `Some(d)` = wake at
+    /// most once per `d` while visible. Throttled subscribers (e.g.
+    /// `Cycle`, which only changes its visible child once per period)
+    /// keep the exact same visibility gate but let the event loop sleep
+    /// to their interval deadline instead of rendering identical frames
+    /// at 60 Hz.
+    interval: Option<Duration>,
+}
+
 /// Internal table of subscriptions. Wrapped in `Rc<RefCell<...>>` so
 /// per-widget RAII guards can mutate it on drop without holding a
 /// `&mut WidgetTree`.
-type SubscriberSet = Rc<RefCell<Vec<WidgetId>>>;
+type SubscriberSet = Rc<RefCell<Vec<Subscriber>>>;
 
 /// Scheduler for per-frame effects that should run only while their
 /// owner widget is visible.
@@ -101,7 +120,33 @@ impl FrameTickScheduler {
     /// owner are allowed (e.g. a composite that has both a Pulse and
     /// a Cycle child); each guard owns one slot.
     pub fn subscribe(&self, owner: WidgetId) -> FrameTickSubscription {
-        self.subscribers.borrow_mut().push(owner);
+        self.subscribe_with(owner, None)
+    }
+
+    /// Subscribe `owner` to wake **at most once per `interval`** while
+    /// visible. Identical visibility gate to [`subscribe`](Self::subscribe)
+    /// — but between wakes the event loop sleeps to the interval deadline
+    /// (published via `WidgetTree::frame_tick_deadline`) instead of
+    /// re-rendering the identical frame 60 times a second. Use for
+    /// per-frame effects whose visible output changes far less often than
+    /// 60 Hz (`Cycle`'s once-per-period index advance, a seconds-granular
+    /// clock, …). A throttled subscriber sharing a tree with a per-frame
+    /// one (a `Cycle` next to a `Pulse`) transparently rides the faster
+    /// cadence — the deadline is the minimum interval across all visible
+    /// subscribers.
+    pub fn subscribe_throttled(
+        &self,
+        owner: WidgetId,
+        interval: Duration,
+    ) -> FrameTickSubscription {
+        self.subscribe_with(owner, Some(interval))
+    }
+
+    fn subscribe_with(&self, owner: WidgetId, interval: Option<Duration>) -> FrameTickSubscription {
+        self.subscribers.borrow_mut().push(Subscriber {
+            id: owner,
+            interval,
+        });
         FrameTickSubscription {
             set: Rc::downgrade(&self.subscribers),
             owner,
@@ -125,7 +170,29 @@ impl FrameTickScheduler {
         self.subscribers
             .borrow()
             .iter()
-            .any(|&id| motion_visibility::painted_this_frame(arena, id, paint_epoch))
+            .any(|s| motion_visibility::painted_this_frame(arena, s.id, paint_epoch))
+    }
+
+    /// The smallest wake interval among **currently-visible** subscribers
+    /// (a per-frame subscriber counts as the 60 Hz `PER_FRAME_INTERVAL`).
+    /// `None` when no subscriber is visible — the caller then falls back to
+    /// 60 Hz for raw `request_frame` consumers (caret blink, drag
+    /// auto-scroll, `--cycle` drivers) that hold no subscription.
+    ///
+    /// This is what lets a lone visible `Cycle` pace the event loop at its
+    /// period instead of 60 Hz, while a `Cycle` sharing a tab with a
+    /// `Pulse` transparently rides the Pulse's 60 Hz cadence (the min).
+    /// The visibility filter is the same `painted_this_frame` gate as
+    /// [`should_arm_frame_tick`](Self::should_arm_frame_tick), so a
+    /// throttled subscriber that is dormant contributes nothing and does
+    /// not wake the loop.
+    pub fn min_visible_interval(&self, arena: &WidgetArena, paint_epoch: u64) -> Option<Duration> {
+        self.subscribers
+            .borrow()
+            .iter()
+            .filter(|s| motion_visibility::painted_this_frame(arena, s.id, paint_epoch))
+            .map(|s| s.interval.unwrap_or(PER_FRAME_INTERVAL))
+            .min()
     }
 
     /// Whether at least one subscription is registered. Used by the
@@ -142,7 +209,7 @@ impl FrameTickScheduler {
 /// the parent tree has been torn down (the `Weak` upgrade fails
 /// gracefully).
 pub struct FrameTickSubscription {
-    set: Weak<RefCell<Vec<WidgetId>>>,
+    set: Weak<RefCell<Vec<Subscriber>>>,
     owner: WidgetId,
 }
 
@@ -160,7 +227,7 @@ impl Drop for FrameTickSubscription {
             return;
         };
         let mut subs = set.borrow_mut();
-        if let Some(pos) = subs.iter().position(|&id| id == self.owner) {
+        if let Some(pos) = subs.iter().position(|s| s.id == self.owner) {
             subs.swap_remove(pos);
         }
     }
