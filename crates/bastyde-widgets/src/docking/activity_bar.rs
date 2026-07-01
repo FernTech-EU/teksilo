@@ -83,6 +83,20 @@ fn item_extent(size: IconButtonSize) -> f32 {
     }
 }
 
+/// Map an [`IconButtonSize`] to the glyph (icon) dimension (dp) drawn inside a
+/// rail item's square box. Mirrors [`IconButton`](crate::IconButton)'s own
+/// size → glyph scaling so a caller's rail icon tracks the rail size instead of
+/// staying a fixed dp — a 40 dp `Large` box gets a 24 dp glyph, not a tiny one.
+fn item_glyph_size(size: IconButtonSize) -> f32 {
+    use crate::styles::recipe_icon_button_style::*;
+    match size {
+        IconButtonSize::Compact | IconButtonSize::Default => ICON_BUTTON_ICON_SIZE,
+        IconButtonSize::Toolbar => ICON_BUTTON_ICON_SIZE_TOOLBAR,
+        IconButtonSize::Large => ICON_BUTTON_ICON_SIZE_LARGE,
+        IconButtonSize::Hero => ICON_BUTTON_ICON_SIZE_HERO,
+    }
+}
+
 /// Spacing between rail items.
 const RAIL_ITEM_SPACING: f32 = 2.0;
 /// Padding around the rail's item column.
@@ -330,6 +344,7 @@ impl Widget for DockActivityBar {
         let visible = self.model.side_visible_signal(self.side);
         let tabs = self.model.side_tabs(self.side);
         let extent = self.effective_item_extent();
+        let glyph = item_glyph_size(self.effective_item_size());
         let labeled = self.model.side_rail_size(self.side).shows_label();
         let visible_count = self.visible_count.clone();
 
@@ -363,6 +378,7 @@ impl Widget for DockActivityBar {
                 icon,
                 label,
                 extent,
+                glyph,
                 labeled,
                 selected.clone(),
                 visible.clone(),
@@ -969,6 +985,9 @@ struct DockRailItem {
     icon: Option<DockIconFactory>,
     label: LocalizedString,
     extent: f32,
+    /// Glyph (icon) dimension drawn inside the `extent`-sized box — derived from
+    /// the rail size so the icon scales with it (see [`item_glyph_size`]).
+    glyph: f32,
     /// Labeled mode: paint a 90°-rotated title under the icon (no tooltip).
     /// Icon-only modes attach the title as a hover tooltip instead.
     labeled: bool,
@@ -1008,6 +1027,7 @@ impl DockRailItem {
         icon: Option<DockIconFactory>,
         label: LocalizedString,
         extent: f32,
+        glyph: f32,
         labeled: bool,
         selected: Signal<usize>,
         visible: Signal<bool>,
@@ -1025,6 +1045,7 @@ impl DockRailItem {
             icon,
             label,
             extent,
+            glyph,
             labeled,
             selected,
             visible,
@@ -1095,7 +1116,10 @@ impl Widget for DockRailItem {
         );
 
         let glyph = if let Some(icon) = self.icon.take() {
-            ctx.add((icon)())
+            // Size the caller's icon to the rail's glyph dimension so it tracks
+            // the rail size (Compact…Hero) instead of whatever fixed dp the
+            // factory picked — the rail owns glyph sizing, like `IconButton`.
+            ctx.add((icon)().icon_size(self.glyph))
         } else {
             let s = self.label.resolve_now();
             let ch: String = s.chars().take(1).collect();
