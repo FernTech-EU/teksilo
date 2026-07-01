@@ -154,7 +154,7 @@ pub struct ListView<T: 'static> {
     /// Optional row-activation callback (a click per `activate_on`, or
     /// Enter/Space on the focused row) — distinct from *selection*, which also
     /// moves on arrow navigation.
-    on_activate: Option<Rc<dyn Fn(usize)>>,
+    on_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
     /// Whether activation is a single or double click (default `DoubleClick`).
     activate_on: crate::data_views::ActivateOn,
 
@@ -402,11 +402,18 @@ impl<T: 'static> ListView<T> {
         self
     }
 
-    /// Set the row-**activation** handler — invoked with the flat row index on a
-    /// click (per [`activate_on`](Self::activate_on)) or **Enter** on the
-    /// focused row. Distinct from *selection*: arrow-key navigation and
-    /// **Space** move / toggle the selection but do **not** activate.
-    pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
+    /// Set the row-**activation** handler — invoked with the flat row index and
+    /// the live [`EventContext`](bastyde_core::widget::EventContext) on a click
+    /// (per [`activate_on`](Self::activate_on)) or **Enter** on the focused row.
+    /// The context lets the handler open a modal, toast, or dispatch an intent —
+    /// matching [`TableView::on_row_activate`](crate::TableView::on_row_activate)
+    /// / [`GridView::on_tile_activate`](crate::GridView::on_tile_activate).
+    /// Distinct from *selection*: arrow-key navigation and **Space** move /
+    /// toggle the selection but do **not** activate.
+    pub fn on_activate(
+        mut self,
+        f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
         self.on_activate = Some(Rc::new(f));
         self
     }
@@ -740,7 +747,7 @@ impl<T: 'static> Widget for ListView<T> {
             let ta_timeout = self.type_ahead_timeout;
             let with_item_str = self.source.with_item_str_fn.clone();
 
-            handlers = handlers.on_key(move |event, _ctx| {
+            handlers = handlers.on_key(move |event, ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     use bastyde_core::event::Key;
                     let count = (len_for_key)();
@@ -877,7 +884,7 @@ impl<T: 'static> Widget for ListView<T> {
                                 sel.select(current);
                             }
                             if let Some(ref cb) = activate_key {
-                                cb(current);
+                                cb(current, ctx);
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
@@ -1113,10 +1120,11 @@ impl<T: 'static> Widget for ListView<T> {
                     let activate_index = i;
                     let handlers = match self.activate_on {
                         crate::data_views::ActivateOn::SingleClick => {
-                            HandlerSet::new().on_tap(move |_tap, _ctx| cb(activate_index))
+                            HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
                         }
                         crate::data_views::ActivateOn::DoubleClick => {
-                            HandlerSet::new().on_double_tap(move |_tap, _ctx| cb(activate_index))
+                            HandlerSet::new()
+                                .on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
                         }
                     };
                     ctx.apply_handlers(child_id, handlers);
@@ -2013,7 +2021,7 @@ mod tests {
             ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
                 .item_height(20.0)
                 .selection(sel)
-                .on_activate(move |i| act.set(Some(i))),
+                .on_activate(move |i, _ctx| act.set(Some(i))),
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.focus(lv);
