@@ -25,6 +25,7 @@ cargo run -p multi_window                      # Multi-window demo
 cargo run -p recent_projects                   # MRU/persistence demo
 cargo run -p rich_text_editor                  # Rich text editing
 cargo run -p rich_text_viewer                  # Rich text viewing
+cargo run -p font-picker                       # FontPicker: list/search/filter all installed fonts (per-row in-font samples, script + monospaced filters), live preview
 cargo run -p spin_box                          # Numeric input demo
 cargo run -p password-field                    # Secure/password input (reveal toggle, masking, caps-lock)
 cargo run -p tool_box                          # Tool box widget demo

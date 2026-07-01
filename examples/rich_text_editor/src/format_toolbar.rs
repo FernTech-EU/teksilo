@@ -36,7 +36,7 @@ use bastyde::prelude::*;
 use bastyde::res;
 use bastyde::text_document::Alignment;
 use bastyde::widgets::rich_text::{EditorHandle, RichTextEditor};
-use bastyde::widgets::{ComboBox, Divider, IconButton, IconWidget, Toolbar, VStack};
+use bastyde::widgets::{ComboBox, Divider, FontPicker, IconButton, IconWidget, Toolbar, VStack};
 
 /// Heading level shown in the picker. Matches the HTML `<h1>..<h6>`
 /// convention; `Normal` is the plain-paragraph option (level 0).
@@ -144,6 +144,15 @@ impl Widget for FormatToolbar {
         let heading_selected: Signal<Option<HeadingLevel>> =
             ctx.signal(Some(HeadingLevel::from_u8(self.handle.get_heading_level())));
 
+        // ── Font-family mirror signal (two-way bound to FontPicker). Empty
+        // means "no explicit family" → show the placeholder, not a blank row.
+        let font_family: Signal<Option<String>> = ctx.signal(
+            self.handle
+                .caret_char_format()
+                .font_family
+                .filter(|s| !s.is_empty()),
+        );
+
         // ── Editor → toolbar re-sync via per-frame poll with version
         // diff. NOT direct `ctx.effect(&format_version, ...)` because
         // `format_version` and `cursor_position` are written from
@@ -171,6 +180,7 @@ impl Widget for FormatToolbar {
             let is_right = is_align_right.clone();
             let is_justify = is_align_justify.clone();
             let heading = heading_selected.clone();
+            let font_family = font_family.clone();
             let in_table = is_in_table.clone();
             let last_fv = last_fv.clone();
             let last_cp = last_cp.clone();
@@ -195,6 +205,13 @@ impl Widget for FormatToolbar {
                 if heading.get() != target {
                     heading.set(target);
                 }
+                let font_target = handle
+                    .caret_char_format()
+                    .font_family
+                    .filter(|s| !s.is_empty());
+                if font_family.get() != font_target {
+                    font_family.set(font_target);
+                }
                 in_table.set(handle.is_in_table());
             });
         }
@@ -212,6 +229,20 @@ impl Widget for FormatToolbar {
                     if handle.get_heading_level() != target {
                         handle.set_heading_level(target);
                     }
+                }
+            });
+        }
+
+        // ── FontPicker → editor effect. Same feedback guard as the heading
+        // picker: apply the chosen family to the selection only when it
+        // differs from the caret's current family.
+        {
+            let handle = self.handle.clone();
+            ctx.effect(&font_family, move |sel| {
+                if let Some(name) = sel.as_ref()
+                    && handle.caret_char_format().font_family.as_deref() != Some(name.as_str())
+                {
+                    handle.set_font_family(name.clone());
                 }
             });
         }
@@ -261,6 +292,14 @@ impl Widget for FormatToolbar {
             })
             .label(lit!("Heading level"))
             .max_visible_items(7),
+        );
+
+        // Font-family picker: every installed font, applied to the current
+        // selection as a character format (a single paragraph can mix fonts).
+        let font_picker_id = ctx.add(
+            FontPicker::new(font_family.clone())
+                .label(lit!("Font family"))
+                .max_visible_items(10),
         );
 
         // Alignment buttons share an activation pattern: set the
@@ -404,6 +443,7 @@ impl Widget for FormatToolbar {
                 .add_child(strike_id)
                 .child(Divider::vertical())
                 .add_child(heading_picker_id)
+                .add_child(font_picker_id)
                 .child(Divider::vertical())
                 .add_child(align_left_id)
                 .add_child(align_center_id)

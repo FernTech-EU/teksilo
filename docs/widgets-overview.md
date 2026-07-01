@@ -143,6 +143,7 @@ Themed framing, sectioning, and window-level structure.
 - [Slider](../crates/bastyde-widgets/src/slider.rs) — horizontal or vertical, optional stepping.
 - [SegmentedControl](../crates/bastyde-widgets/src/segmented_control.rs) — `Signal<usize>`-driven segmented chooser; `RadioGroup` AT role.
 - [ComboBox](../crates/bastyde-widgets/src/combo_box.rs) — selection-only dropdown; virtualized via `ListView` past `max_visible_items`.
+- [FontPicker](../crates/bastyde-widgets/src/font_picker.rs) — lists/searches/filters all installed fonts with per-row in-font samples; spacing + writing-system filters (off-thread coverage index). See [font-picker.md](font-picker.md).
 - [ProgressBar](../crates/bastyde-widgets/src/progress_bar.rs) — determinate or indeterminate; linear.
 - [Spinner](../crates/bastyde-widgets/src/spinner.rs) — circular-arc loading indicator on the shader-driven `AnimatedQuadKind::SpinnerArc` pipeline; honours `prefers-reduced-motion`.
 - [Link](../crates/bastyde-widgets/src/link.rs) — typographic hyperlink with hover and visited states.

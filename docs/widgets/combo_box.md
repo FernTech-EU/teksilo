@@ -27,7 +27,7 @@ The widget is split across four internal modules:
 
 ## Builder methods at a glance
 
-`from_items`, `from_model`, `from_source`, `item_label`, `render_item`, `on_select`, `max_visible_items`, `type_ahead_timeout`, `placeholder`, `label`, `enabled`, `variant`, `style`, `text_style`, `text_role`, `searchable`, `search_query`, `filter`
+`from_items`, `from_model`, `from_source`, `item_label`, `render_item`, `render_selected`, `on_select`, `max_visible_items`, `type_ahead_timeout`, `placeholder`, `label`, `enabled`, `variant`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `searchable`, `search_query`, `filter`
 
 ## API reference
 
@@ -119,6 +119,25 @@ label may be announced twice — one from the wrapper, one from the
 inner text. Wrap primary text nodes in `.a11y_hidden()` to avoid
 duplication, and reserve visible widgets for presentation only.
 
+#### `pub fn render_selected(mut self, f: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self`
+
+Custom renderer for the trigger's *selected value* — the widget shown
+when the combo is closed. The parallel of `render_item`
+for the trigger rather than the dropdown rows.
+
+When set, the closed combo shows `f(&value)` for the current
+selection instead of the plain text label (`item_label`). The
+canonical use is a `FontPicker` rendering the selected family name in
+its own typeface. The subtree is rebuilt whenever the selection
+changes and whenever the locale changes (so a `None`-state
+placeholder re-translates), without rebuilding the whole ComboBox.
+
+**Accessibility.** The rendered subtree is excluded from the
+accessibility tree — the ComboBox's own `accessibility(builder)`
+already announces the selected value via `set_value`, so the custom
+visual can never double-announce. When nothing is selected the
+trigger shows the `placeholder` text.
+
 #### `pub fn on_select(mut self, f: impl Fn(&T, &mut EventContext) + 'static) -> Self`
 
 Register a callback fired when the user commits a selection — by
@@ -189,6 +208,39 @@ Default (unset) is `TextStyleRole::Body`.
 Override the selected-value text color. Accepts `Color`, a role, or
 a `Signal` of either. Default (unset) is enabled-derived
 (`Primary` / `Disabled`); setting this replaces that cascade.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip that appears after a hover delay. The
+tooltip is anchored to the trigger only — with the framework's
+overlay-boundary gate it does not re-trigger while the pointer
+is over the open dropdown's option rows.
+
+Mutually exclusive with `rich_tooltip` /
+`rich_tooltip_content` /
+`composite_tooltip` — last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip resolved from the app-wide tooltip registry.
+The `key` is looked up via
+`TooltipRegistry` at build
+time; the resolved body supports inline markup, a shortcut chip,
+and a "more" disclosure. Overrides any previously set tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline
+`TooltipContent` — for one-off
+tooltips that aren't worth registering centrally. Overrides any
+previously set tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip — third tier, hosting an arbitrary
+widget tree (tabbed sections, charts, conditional rows). Promotes
+to a focusable `Role::Dialog` after the standard dwell. Overrides
+any plain or rich tooltip previously set.
 
 #### `pub fn searchable(mut self, enabled: bool) -> Self`
 

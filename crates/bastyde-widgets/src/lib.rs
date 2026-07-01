@@ -40,6 +40,7 @@ pub mod drop_target;
 pub mod drop_zone;
 pub mod file_picker_field;
 pub mod focus_scope;
+pub mod font_picker;
 pub mod grid_view;
 pub mod group_box;
 pub mod group_header;
@@ -147,6 +148,7 @@ pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use focus_scope::FocusScope;
+pub use font_picker::{FontMeta, FontPicker, FontPreviewMode, FontSpacingFilter};
 // Re-export the policy enum alongside the widget so consumers need a single
 // `use bastyde::widgets::{FocusScope, TraversalScopePolicy}`.
 pub use bastyde_core::focus::TraversalScopePolicy;

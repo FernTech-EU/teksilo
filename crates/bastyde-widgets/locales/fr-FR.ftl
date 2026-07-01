@@ -343,3 +343,7 @@ theme-switcher-label = Thème
 theme-switcher-light = Clair
 theme-switcher-dark = Sombre
 theme-switcher-system = Système
+
+# FontPicker widget. Voir crates/bastyde-widgets/src/font_picker.rs.
+font-picker-label = Police
+font-picker-placeholder = Choisir une police…

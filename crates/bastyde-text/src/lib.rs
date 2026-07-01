@@ -18,8 +18,9 @@ pub use rich_text_engine::{RichTextEngine, WrapMode};
 
 pub use text_typeset::{
     CharacterGeometry, CursorAffinity, CursorDisplay, DecorationKind as TypesetterDecorationKind,
-    DecorationRect, FontFaceId, GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult,
-    ImageQuad, RenderFrame, TextFontService,
+    DecorationRect, FontFaceId, FontFamilyInfo, GlyphQuad as TypesetterGlyphQuad, HitRegion,
+    HitTestResult, ImageQuad, RenderFrame, TextFontService, WritingSystem,
+    WritingSystemIndexBuilder, WritingSystemSet,
 };
 
 pub use text_document;

@@ -463,6 +463,44 @@ impl TypesetterBridge {
         &mut self.service
     }
 
+    // ── Font enumeration (font picker) ──────────────────────────
+
+    /// Enumerate every installed font family, deduplicated and sorted.
+    ///
+    /// Cheap: reads only font metadata (family name + monospaced flag), so
+    /// no font file is opened. This is the item source for a `FontPicker`.
+    /// Reachable from a widget's `build()` via
+    /// `ctx.app_state::<SharedTypesetter>()?.bridge().borrow().families()`.
+    pub fn families(&self) -> Vec<text_typeset::FontFamilyInfo> {
+        self.service.families()
+    }
+
+    /// Enumerate installed font family names, deduplicated and sorted — the
+    /// simple projection of [`families`](Self::families).
+    pub fn family_names(&self) -> Vec<String> {
+        self.service.family_names()
+    }
+
+    /// True if any face of the named family is monospaced (font metadata,
+    /// no bytes loaded). Case-insensitive on the family name.
+    pub fn family_is_monospaced(&self, family: &str) -> bool {
+        self.service.family_is_monospaced(family)
+    }
+
+    /// Build a `Send` snapshot of every family's face byte-sources, to be
+    /// moved to a background thread and turned into a writing-system
+    /// coverage map (see [`WritingSystemIndexBuilder`]).
+    ///
+    /// Cheap on the calling thread; the expensive per-face OS/2 parsing runs
+    /// in [`WritingSystemIndexBuilder::build`] off-thread. `FontPicker` uses
+    /// this to build its writing-system filter index without stalling the UI.
+    ///
+    /// [`WritingSystemIndexBuilder`]: text_typeset::WritingSystemIndexBuilder
+    /// [`WritingSystemIndexBuilder::build`]: text_typeset::WritingSystemIndexBuilder::build
+    pub fn writing_system_index_builder(&self) -> text_typeset::WritingSystemIndexBuilder {
+        self.service.writing_system_index_builder()
+    }
+
     /// Current HiDPI display scale factor as last set by
     /// [`TextBackend::set_scale_factor`]. Reads through to the
     /// shared [`TextFontService`].

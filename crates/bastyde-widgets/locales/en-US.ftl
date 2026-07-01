@@ -366,3 +366,7 @@ theme-switcher-label = Theme
 theme-switcher-light = Light
 theme-switcher-dark = Dark
 theme-switcher-system = System
+
+# FontPicker widget. See crates/bastyde-widgets/src/font_picker.rs.
+font-picker-label = Font
+font-picker-placeholder = Select a font…

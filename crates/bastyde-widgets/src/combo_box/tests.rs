@@ -1254,6 +1254,40 @@ fn accessibility_value_when_selection_present() {
     assert_eq!(node.placeholder(), None);
 }
 
+#[test]
+fn render_selected_rebuilds_on_selection_and_excludes_from_a11y() {
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Banana".to_string()));
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen_h = seen.clone();
+    let cb = tree.add(
+        ComboBox::new(fruits(), selected.clone())
+            .label(lit!("Fruit"))
+            .render_selected(move |v: &String| {
+                seen_h.borrow_mut().push(v.clone());
+                Box::new(TextWidget::new(lit!(v.clone())))
+            }),
+    );
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+
+    // The custom trigger renderer ran for the initial selection.
+    assert_eq!(seen.borrow().as_slice(), &["Banana".to_string()]);
+
+    // a11y still reports the selected value via the ComboBox node — the
+    // custom trigger content is excluded from the AT tree, so it can never
+    // double-announce.
+    let node = build_raw_a11y_node(&mut tree, cb);
+    assert_eq!(node.value(), Some("Banana"));
+
+    // Changing the selection rebuilds the trigger with the new value.
+    selected.set(Some("Cherry".to_string()));
+    tree.layout(SizeProposal::exact(300.0, 50.0));
+    assert_eq!(
+        seen.borrow().as_slice(),
+        &["Banana".to_string(), "Cherry".to_string()]
+    );
+}
+
 // ─── Searchable mode ──────────────────────────────────────────────
 
 #[test]

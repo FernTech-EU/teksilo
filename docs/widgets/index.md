@@ -75,6 +75,7 @@ Every public widget in `bastyde-widgets`, grouped by category. Each page links t
 - [Badge](badge.md) — Badge — a pill-shaped label for tags, status indicators, and counts
 - [Checkbox](checkbox.md) — Checkbox — a two-state or tristate checkbox with an optional label
 - [ComboBox](combo_box.md) — ComboBox — dropdown selection widget
+- [FontPicker](font_picker.md) — FontPicker — a drop-in font-family selector
 - [Link](link.md) — Link — a clickable text label rendered as underlined inline text
 - [ProgressBar](progress_bar.md) — ProgressBar — a bar showing progress from 0.0 to 1.0
 - [RadioButton](radio_button.md) — RadioButton — mutually exclusive selection control

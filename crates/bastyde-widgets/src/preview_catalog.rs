@@ -53,12 +53,12 @@ use crate::primitives::{
 use crate::primitives::{MaxSize, RectWidget};
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
-    Button, ButtonVariant, Card, Checkbox, ComboBox, GridSizing, GridView, GroupBox, GroupHeader,
-    IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList, Orientation,
-    PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl,
-    Slider, Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem, StandardTreeItem,
-    StatusBar, TabWidget, TextInput, TextScaleControl, ThemeSwitcher, Toggle, ToolBox, Toolbar,
-    TreeView,
+    Button, ButtonVariant, Card, Checkbox, ComboBox, FontPicker, GridSizing, GridView, GroupBox,
+    GroupHeader, IconButton, IconButtonSize, LanguageSwitcher, Link, ListView, MenuItem, MenuList,
+    Orientation, PaneDescriptor, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea,
+    SegmentedControl, Slider, Snackbar, SplitButton, Splitter, SplitterModel, StandardListItem,
+    StandardTreeItem, StatusBar, TabWidget, TextInput, TextScaleControl, ThemeSwitcher, Toggle,
+    ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1242,6 +1242,60 @@ impl WidgetCatalog for ComboBox<String> {
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/combo_box.rs", ComboBox<String>);
+
+// ---------------------------------------------------------------------------
+// FontPicker
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for FontPicker {
+    fn id() -> &'static str {
+        "font_picker"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "FontPicker"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            .opt_text("selected", "Selected", Some("Georgia"))
+            .opt_text("label", "A11y label", Some("Font"))
+            .bool_("enabled", "Enabled", true)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![
+            PreviewVariant::defaults("default"),
+            PreviewVariant::knobs("empty", KnobOverrides::new().opt_text("selected", None)),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
+        ]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        // A fixed family list keeps the preview deterministic (and PNG
+        // export stable) instead of enumerating the host's system fonts.
+        // Names that resolve on the host render their own-font samples;
+        // others fall back to the default face.
+        let enabled = knobs.bool_("enabled").get();
+        let mut fp = FontPicker::new(knobs.opt_text("selected"))
+            .families([
+                "Georgia",
+                "Verdana",
+                "Arial",
+                "Courier New",
+                "Times New Roman",
+                "Trebuchet MS",
+            ])
+            .enabled(enabled);
+        if let Some(label) = knobs.opt_text("label").get() {
+            fp = fp.label(lit!(label));
+        }
+        Box::new(fp)
+    }
+    fn icon() -> Option<Box<dyn Widget>> {
+        Some(icons::combo_box())
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/font_picker.rs", FontPicker);
 
 // ---------------------------------------------------------------------------
 // LanguageSwitcher

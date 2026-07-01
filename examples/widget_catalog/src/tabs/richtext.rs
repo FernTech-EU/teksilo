@@ -9,7 +9,7 @@
 use bastyde::prelude::*;
 use bastyde::text_document::TextDocument;
 use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Divider, FixedSize, TextWidget, VStack};
+use bastyde::widgets::{Divider, FixedSize, FontPicker, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -94,6 +94,15 @@ fn viewer_widget() -> FixedSize {
         .child(RichTextEditor::read_only(viewer_doc()))
 }
 
+/// A font-family picker: lists every installed font, previewing each name
+/// next to a script-aware sample rendered in that font, and shows the
+/// chosen family in its own typeface in the closed control.
+fn font_picker_widget() -> FixedSize {
+    FixedSize::new()
+        .bind_width(320.0_f32)
+        .child(FontPicker::new(Signal::new(None::<String>)))
+}
+
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let editor = section(
@@ -102,6 +111,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         editor_widget(),
     );
     let viewer = section(ctx, lit!("RichTextEditor::read_only"), viewer_widget());
+    let font = section(
+        ctx,
+        lit!("FontPicker (choose a font family)"),
+        font_picker_widget(),
+    );
 
     ctx.add(
         VStack::new()
@@ -109,7 +123,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .add_child(header)
             .child(Divider::new())
             .add_child(editor)
-            .add_child(viewer),
+            .add_child(viewer)
+            .add_child(font),
     )
 }
 
@@ -118,6 +133,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // pre-build each and splice via `#{ id }`.
     let editor_id = ctx.add(editor_widget());
     let viewer_id = ctx.add(viewer_widget());
+    let font_id = ctx.add(font_picker_widget());
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -150,6 +166,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ viewer_id }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("FontPicker (choose a font family)")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ font_id }
             }
         }
     )

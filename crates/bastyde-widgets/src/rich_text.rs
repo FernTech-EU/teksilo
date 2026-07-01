@@ -1414,6 +1414,28 @@ impl EditorHandle {
         });
     }
 
+    /// Set the font family for the current selection (a character-format
+    /// change applied over the selected range). Like the other char-format
+    /// setters (`set_bold`, …), this is a **no-op when there is no
+    /// selection** — the document model has no typing/pending format, so a
+    /// bare caret has no range to format. `family` must be a name resolvable
+    /// by the shared typesetter's font registrar — e.g. a value chosen from
+    /// a [`FontPicker`](crate::font_picker::FontPicker).
+    pub fn set_font_family(&self, family: impl Into<String>) {
+        self.apply_char_format(TextFormat {
+            font_family: Some(family.into()),
+            ..Default::default()
+        });
+    }
+
+    /// Set the font size (in points) for the current selection.
+    pub fn set_font_size(&self, size: u32) {
+        self.apply_char_format(TextFormat {
+            font_point_size: Some(size),
+            ..Default::default()
+        });
+    }
+
     /// Apply an arbitrary [`TextFormat`] (escape hatch for fields not
     /// covered by the dedicated setters: `letter_spacing`,
     /// `foreground_color`, …).

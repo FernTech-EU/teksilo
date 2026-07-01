@@ -38,7 +38,7 @@ use bastyde_core::overlay::{
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
-use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{DataChange, ListDataSource, ListModel};
 use bastyde_tokens::{TextRole, TextStyleRole};
@@ -85,6 +85,13 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     selected: Signal<Option<T>>,
     item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    /// Optional custom renderer for the *trigger's selected value* (the
+    /// widget shown when the combo is closed). When set, the closed combo
+    /// shows this widget for the current selection instead of the plain
+    /// text label — e.g. a `FontPicker` rendering the chosen family in its
+    /// own typeface. Rebuilt on every selection change (see
+    /// [`render_selected`](Self::render_selected)).
+    render_selected: Option<Rc<dyn Fn(&T) -> Box<dyn Widget>>>,
     /// Optional callback fired whenever the user commits a selection —
     /// from a dropdown-row tap or keyboard pick — with a live
     /// `EventContext`. Distinct from observing the `selected` signal:
@@ -192,6 +199,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             selected,
             item_label,
             render_item: None,
+            render_selected: None,
             on_select: None,
             placeholder: LocalizedString::literal(String::new()),
             label: None,
@@ -292,6 +300,27 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// duplication, and reserve visible widgets for presentation only.
     pub fn render_item(mut self, f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static) -> Self {
         self.render_item = Some(Rc::new(f));
+        self
+    }
+
+    /// Custom renderer for the trigger's *selected value* — the widget shown
+    /// when the combo is closed. The parallel of [`render_item`](Self::render_item)
+    /// for the trigger rather than the dropdown rows.
+    ///
+    /// When set, the closed combo shows `f(&value)` for the current
+    /// selection instead of the plain text label (`item_label`). The
+    /// canonical use is a `FontPicker` rendering the selected family name in
+    /// its own typeface. The subtree is rebuilt whenever the selection
+    /// changes and whenever the locale changes (so a `None`-state
+    /// placeholder re-translates), without rebuilding the whole ComboBox.
+    ///
+    /// **Accessibility.** The rendered subtree is excluded from the
+    /// accessibility tree — the ComboBox's own `accessibility(builder)`
+    /// already announces the selected value via `set_value`, so the custom
+    /// visual can never double-announce. When nothing is selected the
+    /// trigger shows the `placeholder` text.
+    pub fn render_selected(mut self, f: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self {
+        self.render_selected = Some(Rc::new(f));
         self
     }
 
@@ -602,21 +631,37 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 .into(),
         };
 
-        // Build the selected-label subtree the style will host. Wrapped
-        // in `.a11y_hidden()` because the combo box's own
-        // `accessibility(builder)` already announces the selected value
-        // via `set_value`, so a screen reader exposed to the inner text
-        // node would double-announce.
-        let mut label = TextWidget::new(lit!(""))
-            .bind_text(label_text)
-            .bind_color(text_role)
-            .single_line()
-            .a11y_hidden();
-        label = match &self.label_style {
-            Some(style) => label.style(style.clone()),
-            None => label.style(TextStyleRole::Body),
+        // Build the selected-value subtree the style will host. Either the
+        // default reactive text label, or — when `render_selected` is set —
+        // a custom trigger view (`SelectedContent`) rebuilt on each
+        // selection change. Both are excluded from the accessibility tree:
+        // the combo box's own `accessibility(builder)` already announces the
+        // selected value via `set_value`, so an exposed inner text node
+        // would double-announce.
+        let label_id = if let Some(render) = self.render_selected.clone() {
+            ctx.add(
+                SelectedContent {
+                    selected: self.selected.clone(),
+                    render,
+                    placeholder: self.placeholder.clone(),
+                    placeholder_style: self.label_style.clone(),
+                    text_role: text_role.clone(),
+                    child: None,
+                }
+                .access_exclude_subtree(),
+            )
+        } else {
+            let mut label = TextWidget::new(lit!(""))
+                .bind_text(label_text)
+                .bind_color(text_role)
+                .single_line()
+                .a11y_hidden();
+            label = match &self.label_style {
+                Some(style) => label.style(style.clone()),
+                None => label.style(TextStyleRole::Body),
+            };
+            ctx.add(label)
         };
-        let label_id = ctx.add(label);
 
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeComboBoxStyle` default. The style produces
@@ -1125,5 +1170,81 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             out.push(id);
         }
         out
+    }
+}
+
+/// Trigger-content wrapper used when the caller supplies
+/// [`ComboBox::render_selected`]. Rebuilds its single child whenever the
+/// selection (or locale) changes, so the custom selected-value view tracks
+/// the selection without rebuilding the whole ComboBox. Laid out to fill the
+/// slot the [`ComboBoxStyle`] gives it, exactly like the default text label.
+struct SelectedContent<T: Clone + PartialEq + 'static> {
+    selected: Signal<Option<T>>,
+    render: Rc<dyn Fn(&T) -> Box<dyn Widget>>,
+    placeholder: LocalizedString,
+    placeholder_style: Option<bastyde_core::color_prop::TextStyleProp>,
+    text_role: bastyde_core::color_prop::ColorProp,
+    child: Option<WidgetId>,
+}
+
+impl<T: Clone + PartialEq + 'static> std::fmt::Debug for SelectedContent<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SelectedContent").finish_non_exhaustive()
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> Widget for SelectedContent<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        use bastyde_core::binding::BindingLevel;
+        // Rebuild on selection change (new value → new custom view) and on
+        // locale change (so the `None`-state placeholder re-translates).
+        self.selected
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        ctx.locale_signal()
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        let child = match self.selected.get() {
+            Some(v) => ctx.add_boxed((self.render)(&v)),
+            None => {
+                let mut ph = TextWidget::new(self.placeholder.clone())
+                    .bind_color(self.text_role.clone())
+                    .single_line();
+                ph = match &self.placeholder_style {
+                    Some(style) => ph.style(style.clone()),
+                    None => ph.style(TextStyleRole::Body),
+                };
+                ctx.add(ph)
+            }
+        };
+        self.child = Some(child);
+        vec![child]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        self.child
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
     }
 }
