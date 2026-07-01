@@ -1046,9 +1046,24 @@ impl Widget for DockRailItem {
             .selected
             .zip(&self.visible)
             .map(move |(s, v)| *s == idx && *v);
-        let bg = active.map(|a| {
+        // Window-active-aware selection highlight. `surface_selected` is
+        // deliberately excluded from the theme-side inactive-window accent
+        // desaturation (`ColorTokens::for_inactive_window`), so — like
+        // `StandardListItem` / `TableView` — the rail item must opt in
+        // explicitly, swapping to the muted `SelectedInactive` token when the
+        // host window loses focus (macOS / Qt `QPalette::Inactive`). The rail
+        // is persistent chrome whose "active" item tracks the open side (app
+        // state, not a keyboard-focus-scoped selection), so it gates on
+        // window-active alone — not view focus — keeping the open-side
+        // indicator vivid while the window is active regardless of where
+        // keyboard focus sits.
+        let bg = active.zip(&ctx.window_active_signal()).map(|(a, win)| {
             if *a {
-                SurfaceRole::Selected
+                if *win {
+                    SurfaceRole::Selected
+                } else {
+                    SurfaceRole::SelectedInactive
+                }
             } else {
                 SurfaceRole::Transparent
             }
