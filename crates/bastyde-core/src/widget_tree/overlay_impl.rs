@@ -446,6 +446,17 @@ impl WidgetTree {
         let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
             return false;
         };
+        // A modal (a `Centered` overlay — see `modal_overlay_for_widget`) is
+        // always a host surface: a dropdown / popover / menu opened *inside* a
+        // modal must dismiss only its own cascade, never tear down the hosting
+        // modal. Without this, a `ComboBox`/menu inside a modal that closes via
+        // `dismiss_all_except_hosts` / `dismiss_self_overlay_chain_for_source`
+        // walks past the modal (whose content is not a `Dialog`-role widget) and
+        // dismisses it too. Same fix that stopped a `TabWidget` overflow menu
+        // from closing its hosting composite tooltip, extended to modals.
+        if matches!(overlay.placement, crate::overlay::OverlayPlacement::Centered) {
+            return true;
+        }
         let Some(node) = self.arena.get(overlay.content_id) else {
             return false;
         };
@@ -1132,6 +1143,49 @@ mod tests {
         tree.dismiss_overlay(id);
         assert!(tree.active_overlays().is_empty());
         assert!(!tree.is_visible(content));
+    }
+
+    /// A modal (a `Centered` overlay) must count as a host surface so a
+    /// `ComboBox` / menu / popover opened *inside* it — which closes via
+    /// `dismiss_all_except_hosts` / `dismiss_self_overlay_chain_for_source` —
+    /// dismisses only its own cascade and never tears down the hosting modal.
+    #[test]
+    fn modal_centered_overlay_is_a_host_surface() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let modal_content = tree.add(FillWidget::new().label("Modal"));
+        let dropdown_content = tree.add(FillWidget::new().label("Dropdown"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let modal = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: modal_content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Centered,
+            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        let dropdown = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: dropdown_content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: Some(modal),
+            on_dismiss: None,
+            fade_duration: None,
+        });
+
+        assert!(
+            tree.overlay_is_host_surface(modal),
+            "a Centered modal overlay must be treated as a host surface"
+        );
+        assert!(
+            !tree.overlay_is_host_surface(dropdown),
+            "a plain dropdown overlay is not a host surface"
+        );
     }
 
     #[test]
