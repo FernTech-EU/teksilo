@@ -1555,6 +1555,27 @@ mod tests {
     }
 
     #[test]
+    fn stroked_circle_subpath_opens_with_moveto() {
+        // Regression: a stroked `<circle>` must produce a subpath that opens with
+        // a `MoveTo`. Without it a renderer has no start point for the arc and
+        // draws a stray line from the origin to the circle — a diagonal line
+        // through a sun/gear icon from its top-left corner.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+            <circle cx="8" cy="8" r="2.3"/>
+        </svg>"##;
+        let icon = SvgIcon::parse(svg).unwrap();
+        assert_eq!(icon.strokes.len(), 1, "the stroked circle should yield one stroke");
+        assert!(
+            matches!(
+                icon.strokes[0].path.commands.first(),
+                Some(PathCommand::MoveTo(_))
+            ),
+            "a stroked circle subpath must open with MoveTo, got {:?}",
+            icon.strokes[0].path.commands.first()
+        );
+    }
+
+    #[test]
     fn parse_svg_ellipse() {
         let svg = r#"<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
             <ellipse cx="100" cy="50" rx="80" ry="40"/>

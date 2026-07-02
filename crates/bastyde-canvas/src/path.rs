@@ -134,6 +134,10 @@ impl Path {
             radius * 2.0,
         );
         let mut path = Self::new();
+        // A subpath must open with a `MoveTo`, or a renderer has no start point
+        // for the arc and draws a stray line from the origin. The arc begins at
+        // angle 0 — the rightmost point (center.x + radius, center.y).
+        path.move_to(Point::new(center.x + radius, center.y));
         path.arc_to(rect, 0.0, 360.0);
         path.close();
         path
@@ -339,6 +343,19 @@ mod tests {
     fn circle_path_not_empty() {
         let p = Path::circle(Point::new(50.0, 50.0), 25.0);
         assert!(!p.is_empty());
+    }
+
+    #[test]
+    fn circle_path_opens_with_moveto() {
+        // A subpath must open with a MoveTo or a renderer draws a stray line
+        // from the origin to the arc. The circle starts at angle 0 (rightmost).
+        let p = Path::circle(Point::new(50.0, 50.0), 25.0);
+        match p.commands.first() {
+            Some(PathCommand::MoveTo(pt)) => {
+                assert!((pt.x - 75.0).abs() < 0.01 && (pt.y - 50.0).abs() < 0.01);
+            }
+            other => panic!("circle must open with MoveTo, got {other:?}"),
+        }
     }
 
     #[test]

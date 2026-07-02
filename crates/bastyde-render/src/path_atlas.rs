@@ -693,11 +693,16 @@ fn arc_to_cubics(
         let p4x = center_x + rx_s * cos_b;
         let p4y = center_y + ry_s * sin_b;
 
-        if (remaining - sweep_angle).abs() < 0.001 {
-            // First segment: line_to the start point to connect with the existing path.
-            // If the path is empty, tiny-skia will treat this as a move_to.
-            pb.line_to(p1x, p1y);
+        if (remaining - sweep_angle).abs() < 0.001 && pb.is_empty() {
+            // First segment of a subpath that opens with an arc (e.g. a bare
+            // `<circle>`): move_to its start point. tiny-skia would otherwise
+            // insert an implicit move_to(0,0) before this line_to and draw a
+            // stray line from the origin to the arc.
+            pb.move_to(p1x, p1y);
         } else {
+            // Connect to the arc's start from the current point (a shared
+            // vertex on rounded rects / continued subpaths; a zero-length
+            // no-op when a move_to already placed us there).
             pb.line_to(p1x, p1y);
         }
         pb.cubic_to(p2x, p2y, p3x, p3y, p4x, p4y);
