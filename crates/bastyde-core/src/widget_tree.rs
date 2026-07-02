@@ -1926,6 +1926,35 @@ impl WidgetTree {
     /// Apply a `HandlerSet` to an existing node in the arena, routed
     /// into the rebuild-cleared `handlers` slot (the widget's own
     /// self-applied handlers).
+    /// Register any *bound* builder-level accessibility Props
+    /// (`access_hidden` / `access_label` / `access_description` /
+    /// `access_value`) at `BindingLevel::AccessibilityOnly`, so that a change
+    /// to the underlying signal flips `a11y_dirty` and the AccessKit tree
+    /// re-walks — re-resolving the announced hidden-state / name / description
+    /// / value — without a visual relayout. Static Props are ignored by
+    /// `register_if_bound`. Takes the registry explicitly (rather than `&self`)
+    /// so insertion-path callers can keep a disjoint `&mut self.arena` borrow
+    /// on the node alive.
+    fn register_access_prop_bindings(
+        access: &crate::widget_builder::AccessibilityOverrides,
+        id: WidgetId,
+        registry: &crate::binding::BindingRegistry,
+    ) {
+        use crate::binding::BindingLevel::AccessibilityOnly;
+        if let Some(p) = access.hidden.as_ref() {
+            p.register_if_bound(id, registry, AccessibilityOnly);
+        }
+        if let Some(p) = access.label.as_ref() {
+            p.register_if_bound(id, registry, AccessibilityOnly);
+        }
+        if let Some(p) = access.description.as_ref() {
+            p.register_if_bound(id, registry, AccessibilityOnly);
+        }
+        if let Some(p) = access.value.as_ref() {
+            p.register_if_bound(id, registry, AccessibilityOnly);
+        }
+    }
+
     pub(crate) fn apply_self_handler_set(
         &mut self,
         id: WidgetId,
@@ -1934,6 +1963,11 @@ impl WidgetTree {
         // `visible_when` needs the binding registry (which the arena lacks), so
         // pull it out here and apply it via `self.visible_when` after.
         let visible_when = handler_set.visible_when.take();
+        // Same reason for the reactive access Props: the arena can't reach the
+        // registry, so register them here before handing the set to the arena.
+        if let Some(access) = handler_set.access.as_ref() {
+            Self::register_access_prop_bindings(access, id, &self.binding_registry);
+        }
         self.arena
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::Own);
         if let Some(prop) = visible_when {
@@ -1951,9 +1985,12 @@ impl WidgetTree {
         id: WidgetId,
         mut handler_set: crate::widget_builder::HandlerSet,
     ) {
-        // See `apply_self_handler_set`: route `visible_when` through the
-        // registry-aware `self.visible_when`.
+        // See `apply_self_handler_set`: route `visible_when` and the reactive
+        // access Props through the registry (the arena can't reach it).
         let visible_when = handler_set.visible_when.take();
+        if let Some(access) = handler_set.access.as_ref() {
+            Self::register_access_prop_bindings(access, id, &self.binding_registry);
+        }
         self.arena
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::External);
         if let Some(prop) = visible_when {
@@ -2408,17 +2445,16 @@ impl WidgetTree {
                         // mode. Mirrored here because this insertion path
                         // bypasses `apply_handler_set`.
                         if handler_set.access.is_some() {
-                            // Register a bound `access_hidden` prop at
-                            // AccessibilityOnly so the AT tree re-walks when it
-                            // flips. (Disjoint field borrow: `node` borrows
-                            // `self.arena`, this reads `self.binding_registry`.)
-                            if let Some(hidden) =
-                                handler_set.access.as_ref().and_then(|a| a.hidden.as_ref())
-                            {
-                                hidden.register_if_bound(
+                            // Register any bound access_hidden/label/description/
+                            // value Props at AccessibilityOnly so the AT tree
+                            // re-walks when they flip. (Disjoint field borrow:
+                            // `node` borrows `self.arena`, this reads
+                            // `self.binding_registry`.)
+                            if let Some(access) = handler_set.access.as_ref() {
+                                Self::register_access_prop_bindings(
+                                    access,
                                     id,
                                     &self.binding_registry,
-                                    crate::binding::BindingLevel::AccessibilityOnly,
                                 );
                             }
                             node.access_overrides = handler_set.access;
@@ -2551,17 +2587,16 @@ impl WidgetTree {
                         // Builder-level accessibility overrides + subtree
                         // mode. Same rationale as in `insert_widget`.
                         if handler_set.access.is_some() {
-                            // Register a bound `access_hidden` prop at
-                            // AccessibilityOnly so the AT tree re-walks when it
-                            // flips. (Disjoint field borrow: `node` borrows
-                            // `self.arena`, this reads `self.binding_registry`.)
-                            if let Some(hidden) =
-                                handler_set.access.as_ref().and_then(|a| a.hidden.as_ref())
-                            {
-                                hidden.register_if_bound(
+                            // Register any bound access_hidden/label/description/
+                            // value Props at AccessibilityOnly so the AT tree
+                            // re-walks when they flip. (Disjoint field borrow:
+                            // `node` borrows `self.arena`, this reads
+                            // `self.binding_registry`.)
+                            if let Some(access) = handler_set.access.as_ref() {
+                                Self::register_access_prop_bindings(
+                                    access,
                                     id,
                                     &self.binding_registry,
-                                    crate::binding::BindingLevel::AccessibilityOnly,
                                 );
                             }
                             node.access_overrides = handler_set.access;

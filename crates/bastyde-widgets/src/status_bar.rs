@@ -164,6 +164,19 @@ impl Widget for StatusBar {
         let _ = ctx.theme_signal();
         let spacing = STATUS_BAR_ITEM_GAP;
 
+        // Register a bound `name` prop on the StatusBar itself at
+        // AccessibilityOnly so a change to the status text re-walks the AT tree
+        // and re-announces it (WCAG 4.1.3) — particularly when
+        // `announce_changes(true)` makes this a `Live::Polite` region.
+        // Static names are ignored by `register_if_bound`.
+        if let Some(name) = self.name.as_ref() {
+            name.register_if_bound(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {

@@ -242,6 +242,16 @@ impl Widget for ProgressBar {
             let leaf_id = ctx.add(IndeterminateSweepLeaf::signal(self.orientation, pos, fill));
             ctx.add(ZStack::new().add_child(frame_id).add_child(leaf_id))
         } else {
+            // Determinate: register the bound value on the ProgressBar itself at
+            // AccessibilityOnly so a progress update re-walks the AT tree and
+            // re-announces `numeric_value` (WCAG 4.1.3). The value otherwise
+            // only drives RepaintOnly painting inside the recipe frame and
+            // never reaches assistive tech.
+            self.value.register_if_bound(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::AccessibilityOnly,
+            );
             style.make_body(&cfg, ctx)
         };
         self.root_child_id = Some(root);
@@ -284,9 +294,12 @@ impl Widget for ProgressBar {
         if let Some(ref label) = self.label {
             builder.set_name(label.clone());
         }
-        if self.indeterminate {
-            builder.set_live(bastyde_core::accesskit::Live::Polite);
-        } else {
+        // Announce progress updates to assistive tech (WCAG 4.1.3) for BOTH
+        // states: the indeterminate "busy" state and each determinate value
+        // change. Previously only the indeterminate branch was live, so a
+        // determinate bar advancing 0% -> 100% was silent to screen readers.
+        builder.set_live(bastyde_core::accesskit::Live::Polite);
+        if !self.indeterminate {
             let value = self.value.get();
             builder.set_numeric_value(value as f64);
             builder.set_min_numeric_value(0.0);
@@ -473,6 +486,21 @@ mod tests {
             info.role(),
             bastyde_core::accesskit::Role::ProgressIndicator
         );
+
+        // Inspect the raw AccessKit node for numeric value + live region.
+        let update = tree.sync_accessibility();
+        let nid = bastyde_core::accessibility::widget_id_to_node_id(pb);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == nid)
+            .map(|(_, n)| n)
+            .expect("progress bar node in tree");
+        assert_eq!(node.numeric_value(), Some(0.75));
+        // WCAG 4.1.3 (audit G4): a determinate progress bar is a polite live
+        // region so value advances are announced — previously only the
+        // indeterminate branch set this, leaving determinate progress silent.
+        assert_eq!(node.live(), Some(bastyde_core::accesskit::Live::Polite));
     }
 
     #[test]

@@ -2046,6 +2046,59 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_dirties_accessibility_tree() {
+        // Regression for audit Blocker G1: every `BindingLevel::Rebuild`
+        // consumer (ListView / TreeView / TableView / ComboBox / Calendar /
+        // DockingLayout / ...) tears down and re-creates its subtree on an
+        // ordinary model change, allocating fresh WidgetIds and changing the
+        // AccessKit tree shape. That pass must dirty the cached AT snapshot,
+        // or screen readers keep reading the pre-mutation tree indefinitely.
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Bumpable { value: 0 });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let _ = tree.sync_accessibility(); // populate cache, clears a11y_dirty
+        assert!(
+            !tree.a11y_dirty,
+            "sync_accessibility should clear the dirty flag"
+        );
+
+        // Marking for rebuild is exactly what a Rebuild-level binding does;
+        // the following layout pass drains pending rebuilds.
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(
+            tree.a11y_dirty,
+            "a rebuild must dirty the AT tree so the next sync re-walks"
+        );
+    }
+
+    #[test]
+    fn bound_access_label_change_dirties_accessibility_tree() {
+        use crate::signal::Signal;
+        use crate::test_widgets::FillWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        // Regression for audit G15: a reactive `.access_label(signal)` (and
+        // likewise description / value) must register at AccessibilityOnly so
+        // changing the signal re-walks the AT tree and re-resolves the
+        // announced name. Previously only `access_hidden` was registered, so
+        // label / description / value updates were invisible to screen readers.
+        let label = Signal::new("first".to_string());
+        let mut tree = WidgetTree::new();
+        let _id = tree.add(FillWidget::new().access_label(label.clone()));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let _ = tree.sync_accessibility(); // populate cache, clears a11y_dirty
+        assert!(!tree.a11y_dirty, "sync_accessibility should clear the flag");
+
+        label.set("second".to_string());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(
+            tree.a11y_dirty,
+            "changing a bound access_label must dirty the AT tree"
+        );
+    }
+
+    #[test]
     fn disabled_ancestor_blocks_event_to_descendant() {
         use crate::signal::Signal;
         use crate::test_widgets::StackWidget;

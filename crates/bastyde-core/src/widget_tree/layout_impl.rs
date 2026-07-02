@@ -192,6 +192,15 @@ impl WidgetTree {
         for widget_id in to_rebuild {
             self.rebuild_single_widget(widget_id);
         }
+        // A rebuild destroys old child subtrees and allocates fresh
+        // WidgetIds, so the AccessKit tree shape changed — dirty the cached
+        // snapshot so the next `sync_accessibility` re-walks. This is the one
+        // place every `BindingLevel::Rebuild` consumer converges (data-view
+        // model updates via the binding registry AND `with_widget_mut(Rebuild)`
+        // via `apply_tree_mutations`, both draining the same `needs_rebuild`
+        // arena flag) — without this, an ordinary `ListModel::push()` leaves
+        // screen readers on a stale tree indefinitely.
+        self.a11y_dirty = true;
         // Rebuild destroys old child subtrees and allocates fresh WidgetIds;
         // drop any focus/hover state whose target is no longer valid so we
         // don't dispatch to dead widgets on the next event.
