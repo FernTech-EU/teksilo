@@ -30,7 +30,7 @@ TextInput::new(search.clone())
 
 ## Builder methods at a glance
 
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `validator`, `caret_position`, `caret_setter`, `validation_feedback_signal`, `validation`, `bind_validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `composite_tooltip`, `text`
+`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `validator`, `caret_position`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
 
 ## API reference
 
@@ -95,10 +95,10 @@ Accessible name for the composite. Propagated to the outer
 container's a11y node; the inner `TextInputField` still
 carries `Role::TextInput` with the document's value.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(input_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to the
+arena and the inner `TextInputField` at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -159,7 +159,7 @@ onto the editing surface.
 Install a commit-time validator. Forwarded 1:1 to
 `TextInputField::validator`. Pair with
 `Self::validation_feedback_signal` (or
-`Self::bind_validation_feedback`) to surface the outcome
+`Self::validation_feedback`) to surface the outcome
 in the inline strip.
 
 #### `pub fn caret_position(&self) -> Signal<usize>`
@@ -186,13 +186,19 @@ after `build`. Composing widgets observe this to compose
 feedback across multiple fields (range editor's
 worse-of-two ladder, etc.).
 
-#### `pub fn validation(mut self, validation: Signal<ValidationState>) -> Self`
+#### `pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self`
 
 Bind an external `ValidationState` signal directly (e.g. when
-validation runs server-side). Use `bind_validation_feedback`
+validation runs server-side), or set a fixed initial value. Use
+`validation_feedback`
 when wiring a local validator's output.
 
-#### `pub fn bind_validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self`
+A bound `Signal` becomes the shared write target used internally
+(by the validator-feedback bridge) and externally by the caller —
+preserving the two-way channel this method has always offered. A
+static value seeds a fresh, unshared signal.
+
+#### `pub fn validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self`
 
 Bridge a `Signal<ValidationFeedback>` (typically from a
 validator-equipped widget like `DateEdit::validation_feedback_signal`
@@ -217,6 +223,13 @@ Attach a registry-driven rich tooltip by key. Mutually exclusive with
 
 Attach an inline rich tooltip from a pre-built `tooltip::TooltipContent`.
 Mutually exclusive with `tooltip` and `composite_tooltip` (last call wins).
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach an inline rich tooltip from a pre-built `tooltip::TooltipContent`.
+Canonical alias for `Self::rich_tooltip` — matches the name used by
+`Button`, `ComboBox`, and other widgets. Mutually exclusive with
+`tooltip` and `composite_tooltip` (last call wins).
 
 #### `pub fn composite_tooltip( mut self, content: impl bastyde_core::widget::Widget + 'static, ) -> Self`
 

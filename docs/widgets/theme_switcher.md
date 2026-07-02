@@ -37,7 +37,7 @@ app-supplied set (e.g. the `bastyde-theme-{fluent,macos,material3}` presets);
 
 ## Builder methods at a glance
 
-`variant`, `label`, `themes`, `system`
+`variant`, `label`, `themes`, `system`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -76,3 +76,27 @@ is `false`.
 #### `pub fn system(mut self, include: bool) -> Self`
 
 Whether to offer the "System" (follow-OS) entry. Default `true`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip, forwarded to the inner `ComboBox`.
+Mutually exclusive with the rich / composite variants — last
+call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip resolved from the app-wide registry,
+forwarded to the inner `ComboBox`. Overrides any previously
+set tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline
+`TooltipContent`, forwarded to
+the inner `ComboBox`. Overrides any previously set tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip hosting an arbitrary widget tree,
+forwarded to the inner `ComboBox`. Overrides any previously
+set tooltip.

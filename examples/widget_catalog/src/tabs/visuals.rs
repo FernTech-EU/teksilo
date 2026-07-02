@@ -27,16 +27,13 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let rect = section(
         ctx,
         lit!("RectWidget"),
-        FixedSize::new()
-            .bind_width(220.0_f32)
-            .bind_height(36.0_f32)
-            .child(
-                RectWidget::new()
-                    .background(SurfaceRole::AccentSubtle)
-                    .border_color(BorderRole::Strong)
-                    .border_width(1.0)
-                    .corner_radius(CornerRadius::uniform(6.0)),
-            ),
+        FixedSize::new().width(220.0_f32).height(36.0_f32).child(
+            RectWidget::new()
+                .background(SurfaceRole::AccentSubtle)
+                .border_color(BorderRole::Strong)
+                .border_width(1.0)
+                .corner_radius(CornerRadius::uniform(6.0)),
+        ),
     );
     let text = section(
         ctx,
@@ -162,8 +159,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 220.0_f32
-                    bind_height: 36.0_f32
+                    width: 220.0_f32
+                    height: 36.0_f32
                     RectWidget {
                         background: SurfaceRole::AccentSubtle
                         border_color: BorderRole::Strong

@@ -35,7 +35,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -103,8 +103,9 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
     label: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     max_visible_items: usize,
     /// Type-ahead reset window: keystrokes more than this far apart start a
     /// fresh prefix instead of extending the previous one. Mirrors
@@ -203,7 +204,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             on_select: None,
             placeholder: LocalizedString::literal(String::new()),
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
             type_ahead_timeout: Duration::from_millis(500),
             searchable: false,
@@ -375,10 +376,10 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -527,7 +528,7 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComboBox")
             .field("items", &self.source.len())
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -535,10 +536,8 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
 impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled to the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state to the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Refresh the four interaction signals every build. The three
@@ -652,8 +651,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             )
         } else {
             let mut label = TextWidget::new(lit!(""))
-                .bind_text(label_text)
-                .bind_color(text_role)
+                .text(label_text)
+                .color(text_role)
                 .single_line()
                 .a11y_hidden();
             label = match &self.label_style {
@@ -1207,7 +1206,7 @@ impl<T: Clone + PartialEq + 'static> Widget for SelectedContent<T> {
             Some(v) => ctx.add_boxed((self.render)(&v)),
             None => {
                 let mut ph = TextWidget::new(self.placeholder.clone())
-                    .bind_color(self.text_role.clone())
+                    .color(self.text_role.clone())
                     .single_line();
                 ph = match &self.placeholder_style {
                     Some(style) => ph.style(style.clone()),

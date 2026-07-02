@@ -72,13 +72,13 @@ impl MaxSize {
     }
 
     /// Bind max width to a reactive state.
-    pub fn bind_max_width(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn max_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.max_width = Some(state.into());
         self
     }
 
     /// Bind max height to a reactive state.
-    pub fn bind_max_height(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn max_height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.max_height = Some(state.into());
         self
     }
@@ -243,13 +243,13 @@ mod tests {
     }
 
     #[test]
-    fn bind_max_width_dynamic() {
+    fn max_width_dynamic() {
         let max_w = Signal::new(400.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
         let max = tree.add(
             MaxSize::width(9999.0)
-                .bind_max_width(max_w.clone())
+                .max_width(max_w.clone())
                 .child_id(child),
         );
         tree.layout(SizeProposal::unspecified());

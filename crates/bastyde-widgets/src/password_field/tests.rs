@@ -91,7 +91,7 @@ fn revealed_swaps_to_text_role_with_plaintext_under_swap_policy() {
         PasswordField::new(pw.clone())
             .label(lit!("Password"))
             .at_reveal_policy(AtRevealPolicy::SwapRole)
-            .bind_revealed(revealed.clone()),
+            .revealed(revealed.clone()),
     );
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
@@ -121,7 +121,7 @@ fn always_protected_keeps_password_role_when_revealed() {
         PasswordField::new(pw.clone())
             .label(lit!("Password"))
             .at_reveal_policy(AtRevealPolicy::AlwaysProtected)
-            .bind_revealed(revealed.clone()),
+            .revealed(revealed.clone()),
     );
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
@@ -186,7 +186,7 @@ fn hold_reveal_mode_builds() {
 fn revealed_signal_accessor_round_trips() {
     let pw = Signal::new(String::new());
     let revealed = Signal::new(false);
-    let field = PasswordField::new(pw).bind_revealed(revealed.clone());
+    let field = PasswordField::new(pw).revealed(revealed.clone());
     field.revealed_signal().set(true);
     assert!(
         revealed.get(),

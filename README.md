@@ -50,7 +50,7 @@ fn main() {
                     tree.add(
                         VStack::new()
                             .spacing(12.0)
-                            .child(TextWidget::new(lit!("")).bind_text(label))
+                            .child(TextWidget::new(lit!("")).text(label))
                             .child(
                                 Button::new(lit!("Increment"))
                                     .on_activate_fn(move |_| {

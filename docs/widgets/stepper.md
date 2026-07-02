@@ -30,7 +30,7 @@ let form = Form { name: Signal::new(String::new()), plan: Signal::new(Plan::Free
 
 Stepper::new()
     .step(Step::new(lit!("Account"))
-        .content({ let f = form.clone(); move || TextInput::new().bind_text(f.name.clone()) })
+        .content({ let f = form.clone(); move || TextInput::new().text(f.name.clone()) })
         .complete_when(form.name.map(|n| !n.is_empty())))
     .step(Step::new(lit!("Plan"))
         .content({ let f = form.clone(); move || plan_picker(f.plan.clone()) }))
@@ -42,7 +42,7 @@ Stepper::new()
 
 ## Builder methods at a glance
 
-`step`, `steps`, `controller`, `orientation`, `vertical`, `non_linear`, `circle_size`, `chrome`, `chrome_position`, `back_label`, `next_label`, `finish_label`, `skip_label`, `help`, `cancel`, `on_finish`
+`step`, `steps`, `controller`, `orientation`, `vertical`, `non_linear`, `circle_size`, `chrome`, `chrome_position`, `back_label`, `next_label`, `finish_label`, `skip_label`, `help`, `cancel`, `on_finish`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -162,3 +162,23 @@ Add a Cancel button + callback to the footer.
 Called when Finish is activated on the last step. Receives the event
 context and the controller (for `skipped` / `visited` introspection);
 read collected values from the form signals your steps wrote.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip to this stepper. Clears any
+previously set rich or composite tooltip.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key. Clears any
+previously set plain or composite tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip with inline content. Clears any previously set
+plain or composite tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip (arbitrary widget body). Clears any
+previously set plain or rich tooltip.

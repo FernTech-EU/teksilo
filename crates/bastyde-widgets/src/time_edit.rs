@@ -48,7 +48,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::{Action, Role};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -107,8 +107,9 @@ pub struct TimeEdit {
     max_time: Option<Time>,
     step_minutes: u32,
     placeholder: LocalizedString,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena and the
+    /// inner `TextInput` at build time.
+    enabled: Prop<bool>,
     read_only: bool,
     validation_behavior: ValidationBehavior,
     width_policy: crate::date_edit::WidthPolicy,
@@ -151,7 +152,7 @@ impl TimeEdit {
             max_time: None,
             step_minutes: 1,
             placeholder: LocalizedString::literal(String::new()),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
             width_policy: crate::date_edit::WidthPolicy::Default,
@@ -230,9 +231,10 @@ impl TimeEdit {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -367,11 +369,9 @@ impl Widget for TimeEdit {
         }
 
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
-        let enabled = self.initial_enabled;
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
+        let enabled = self.enabled.clone();
         let read_only = self.read_only;
 
         // Resolve clock format: explicit override → locale default.
@@ -642,7 +642,12 @@ impl Widget for TimeEdit {
         let handlers = HandlerSet::new()
             .focus_within(self.focused.clone())
             .on_key_preview(move |event, ctx_evt| {
-                if !enabled || read_only {
+                // `enabled` gating is redundant here: a disabled TimeEdit's
+                // arena-disabled state cascades to the focused inner field,
+                // and `arena.is_enabled(target)` already gates the whole
+                // preview dispatch before this closure runs. `read_only` has
+                // no arena equivalent, so it still needs an explicit check.
+                if read_only {
                     return EventResponse::Ignored;
                 }
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {

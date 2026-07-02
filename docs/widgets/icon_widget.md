@@ -34,7 +34,7 @@ let _chevron = IconWidget::chevron_down(16.0)
 
 ## Builder methods at a glance
 
-`from_path`, `checkmark`, `dash`, `radio_dot`, `chevron_down`, `chevron_right`, `chevron_left`, `chevron_up`, `from_svg`, `from_svg_icon`, `from_png`, `from_webp`, `from_raster`, `from_animated`, `mode`, `color`, `bind_color`, `icon_size`, `follow_text_scale`
+`from_path`, `checkmark`, `dash`, `radio_dot`, `chevron_down`, `chevron_right`, `chevron_left`, `chevron_up`, `from_svg`, `from_svg_icon`, `from_png`, `from_webp`, `from_raster`, `from_animated`, `mode`, `color`, `icon_size`, `follow_text_scale`
 
 ## API reference
 
@@ -149,10 +149,6 @@ Set the tint. Accepts any `impl Into<ColorProp>`:
 - A `TextRole` / `SurfaceRole` / `BorderRole` — resolved against
   the theme at paint time (reactive across theme switches).
 - A `Signal<Color>` — reactive state (usually interaction-driven).
-
-#### `pub fn bind_color(self, state: impl Into<ColorProp>) -> Self`
-
-Compatibility shim. Prefer `.color(signal)` or `.color(role)` in new code.
 
 #### `pub fn icon_size(mut self, size: f32) -> Self`
 

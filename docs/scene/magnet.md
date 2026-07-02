@@ -357,7 +357,7 @@ focused. Default `m`.
 Set the initial enabled state (default enabled). Replaces the
 internal signal.
 
-#### `pub fn bind_enabled(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn enabled(mut self, signal: Signal<bool>) -> Self`
 
 Drive enabled/disabled from an app-owned signal (toolbar toggle).
 

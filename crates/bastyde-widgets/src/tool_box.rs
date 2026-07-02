@@ -39,7 +39,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -106,19 +106,19 @@ pub struct ToolBoxItem {
     /// plain and rich variants — the last setter called wins.
     composite_tooltip_content: Option<Box<dyn Widget>>,
     content: PendingChild,
-    /// Initial-enabled hint. Forwarded into the arena via
-    /// `ctx.enabled_when(header_id, false)` at build time when `false`.
+    /// Enabled state, static or reactive. Forwarded into the arena via
+    /// `ctx.enabled_when(header_id, self.enabled.clone())` at build time.
     /// After build the arena is the single source of truth and ANDs
     /// with ancestors — so a disabled `ToolBox` ancestor disables every
-    /// item header regardless of its own `initial_enabled`.
-    initial_enabled: bool,
+    /// item header regardless of its own `enabled`.
+    enabled: Prop<bool>,
 }
 
 impl std::fmt::Debug for ToolBoxItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolBoxItem")
             .field("label", &self.label)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -136,7 +136,7 @@ impl ToolBoxItem {
             rich_tooltip: None,
             composite_tooltip_content: None,
             content: PendingChild::Deferred(Box::new(content)),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
         }
     }
 
@@ -151,7 +151,7 @@ impl ToolBoxItem {
             rich_tooltip: None,
             composite_tooltip_content: None,
             content: PendingChild::Id(content_id),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
         }
     }
 
@@ -225,14 +225,15 @@ impl ToolBoxItem {
 
     /// Disable the item: its header renders in the disabled text role,
     /// click and keyboard activation are ignored, and arrow navigation
-    /// skips it.
+    /// skips it. Accepts a static bool or a reactive `Signal<bool>`.
     ///
-    /// Forwarded to the arena via `ctx.enabled_when(header_id, false)`
-    /// at build time; the arena is then the single source of truth and
-    /// ANDs with ancestors — disabling the surrounding `ToolBox` (or
-    /// any ancestor) disables every item regardless of this flag.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Forwarded to the arena via
+    /// `ctx.enabled_when(header_id, self.enabled.clone())` at build time;
+    /// the arena is then the single source of truth and ANDs with
+    /// ancestors — disabling the surrounding `ToolBox` (or any ancestor)
+    /// disables every item regardless of this flag.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 }
@@ -611,13 +612,13 @@ impl Widget for ToolBoxHeader {
         let indicator_id = if is_horizontal {
             ctx.add(
                 FixedSize::new()
-                    .bind_height(TOOL_BOX_INDICATOR_THICKNESS)
+                    .height(TOOL_BOX_INDICATOR_THICKNESS)
                     .child_id(indicator_rect_id),
             )
         } else {
             ctx.add(
                 FixedSize::new()
-                    .bind_width(TOOL_BOX_INDICATOR_THICKNESS)
+                    .width(TOOL_BOX_INDICATOR_THICKNESS)
                     .child_id(indicator_rect_id),
             )
         };
@@ -633,11 +634,10 @@ impl Widget for ToolBoxHeader {
             //   [indicator] [leading?] [chevron L/R] [rotated label] [trailing?] [spacer]
             // Chevron points right while collapsed (content expands to the
             // trailing side) and left once expanded.
-            let chevron_right_id = ctx.add(
-                IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()),
-            );
-            let chevron_left_id = ctx
-                .add(IconWidget::chevron_left(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            let chevron_right_id =
+                ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).color(text_role.clone()));
+            let chevron_left_id =
+                ctx.add(IconWidget::chevron_left(TOOL_BOX_CHEVRON_SIZE).color(text_role.clone()));
             ctx.visible_when(chevron_left_id, is_selected.clone());
             ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
             let label_id = ctx.add(RotatedLabel::new(self.label.clone(), text_role));
@@ -665,15 +665,15 @@ impl Widget for ToolBoxHeader {
             //   [indicator] [leading?] [label] [spacer] [trailing?] [chevron]
             let label_id = ctx.add(
                 TextWidget::new(self.label.clone())
-                    .bind_color(text_role.clone())
+                    .color(text_role.clone())
                     .style(TextStyleRole::Body)
                     .single_line()
                     .a11y_hidden(),
             );
-            let chevron_down_id = ctx
-                .add(IconWidget::chevron_down(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
+            let chevron_down_id =
+                ctx.add(IconWidget::chevron_down(TOOL_BOX_CHEVRON_SIZE).color(text_role.clone()));
             let chevron_right_id =
-                ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role));
+                ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).color(text_role));
             ctx.visible_when(chevron_down_id, is_selected.clone());
             ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
@@ -697,7 +697,7 @@ impl Widget for ToolBoxHeader {
         };
 
         // Background fills the whole header.
-        let bg_rect_id = ctx.add(RectWidget::new().bind_background(bg_role));
+        let bg_rect_id = ctx.add(RectWidget::new().background(bg_role));
 
         // Focus-border rect is inset by half the focus stroke width on
         // every side so the centred stroke fits *entirely* inside the
@@ -706,8 +706,8 @@ impl Widget for ToolBoxHeader {
         let focus_inset = focus_ring_width * 0.5;
         let focus_rect_id = ctx.add(
             RectWidget::new()
-                .bind_border_color(focus_border_color)
-                .bind_border_width(focus_border_width),
+                .border_color(focus_border_color)
+                .border_width(focus_border_width),
         );
         let focus_padded_id =
             ctx.add(crate::primitives::Padding::uniform(focus_inset).child_id(focus_rect_id));
@@ -1241,8 +1241,7 @@ impl Widget for RotatedLabel {
 impl Widget for ToolBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let items = std::mem::take(&mut self.items);
-        let enabled_flags: Rc<Vec<bool>> =
-            Rc::new(items.iter().map(|i| i.initial_enabled).collect());
+        let enabled_flags: Rc<Vec<bool>> = Rc::new(items.iter().map(|i| i.enabled.get()).collect());
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(items.len())));
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> =
@@ -1264,7 +1263,7 @@ impl Widget for ToolBox {
             let header_id = ctx.add(ToolBoxHeader::new(
                 item.label.clone(),
                 index,
-                item.initial_enabled,
+                item.enabled.get(),
                 self.selected.clone(),
                 header_ids.clone(),
                 panel_ids.clone(),
@@ -1876,8 +1875,8 @@ mod tests {
         let selected = Signal::new(0_usize);
         let mut t = tree();
         let tall = FixedSize::new()
-            .bind_width(120.0_f32)
-            .bind_height(1000.0_f32)
+            .width(120.0_f32)
+            .height(1000.0_f32)
             .child(TextWidget::new(lit!("x")));
         let tb = t.add(
             ToolBox::new(selected.clone())

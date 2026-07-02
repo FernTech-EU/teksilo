@@ -900,22 +900,22 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
         .spacing(28.0)
         .child(
             TextWidget::new(lit!(""))
-                .bind_text(pan_text)
+                .text(pan_text)
                 .style(TextStyleRole::Body),
         )
         .child(
             TextWidget::new(lit!(""))
-                .bind_text(zoom_text)
+                .text(zoom_text)
                 .style(TextStyleRole::Body),
         )
         .child(
             TextWidget::new(lit!(""))
-                .bind_text(sel_text)
+                .text(sel_text)
                 .style(TextStyleRole::Body),
         )
         .child(
             TextWidget::new(lit!(""))
-                .bind_text(drag_text)
+                .text(drag_text)
                 .style(TextStyleRole::Body),
         )
 }

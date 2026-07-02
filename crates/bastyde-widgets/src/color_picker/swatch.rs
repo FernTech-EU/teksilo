@@ -60,8 +60,9 @@ pub struct ColorSwatch {
     label: Option<LocalizedString>,
     size: Option<f32>,
     corner_radius: Option<f32>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: bastyde_core::signal::Prop<bool>,
     on_activate: Option<ActivateFn>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
@@ -85,7 +86,7 @@ impl ColorSwatch {
             label: None,
             size: None,
             corner_radius: None,
-            initial_enabled: true,
+            enabled: bastyde_core::signal::Prop::Static(true),
             on_activate: None,
             focus_origin: Rc::new(Cell::new(None)),
             tooltip_text: None,
@@ -122,9 +123,10 @@ impl ColorSwatch {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -185,7 +187,7 @@ impl std::fmt::Debug for ColorSwatch {
         f.debug_struct("ColorSwatch")
             .field("color", &self.color.get())
             .field("selected", &self.selected)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -193,10 +195,8 @@ impl std::fmt::Debug for ColorSwatch {
 impl Widget for ColorSwatch {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let on_activate = self.on_activate.clone();
         // Framework gates events on `arena.is_enabled` and the focus
         // walker skips disabled subtrees.

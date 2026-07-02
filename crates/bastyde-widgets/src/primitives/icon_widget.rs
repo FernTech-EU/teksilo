@@ -453,11 +453,6 @@ impl IconWidget {
         self
     }
 
-    /// Compatibility shim. Prefer `.color(signal)` or `.color(role)` in new code.
-    pub fn bind_color(self, state: impl Into<ColorProp>) -> Self {
-        self.color(state)
-    }
-
     /// Set the display size of the icon. The path/image is scaled to fit
     /// this size during rendering. This does not affect the design-time
     /// coordinate space — SVG paths scale correctly.

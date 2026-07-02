@@ -2092,16 +2092,11 @@ fn nested_table_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, 
         .overscroll_behavior(inner);
     let inner_y = tv.scroll_y_signal().clone();
     let tv_id = tree.add(tv);
-    let viewport = tree.add(
-        FixedSize::new()
-            .bind_width(220.0)
-            .bind_height(120.0)
-            .child_id(tv_id),
-    );
+    let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child_id(tv_id));
     let filler = tree.add(
         FixedSize::new()
-            .bind_width(220.0)
-            .bind_height(300.0)
+            .width(220.0)
+            .height(300.0)
             .child(TextWidget::new(lit!(""))),
     );
     let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));

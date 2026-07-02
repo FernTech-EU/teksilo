@@ -66,8 +66,8 @@ fn main() {
                         WebView::new()
                             .html(include_str!("../assets/index.html"))
                             .devtools(cfg!(debug_assertions))
-                            .bind_url(url.clone())
-                            .bind_title(title.clone())
+                            .url_signal(url.clone())
+                            .title_signal(title.clone())
                             .on_message(|msg, _ctx| {
                                 println!("JS → Rust: {msg}");
                             })
@@ -142,10 +142,10 @@ fn main() {
                     };
 
                     // --- URL display (reactive) ---
-                    let url_label = TextWidget::new(lit!("")).bind_text(url.clone());
+                    let url_label = TextWidget::new(lit!("")).text(url.clone());
                     // --- Loading indicator (driven by on_page_load) ---
                     let loading_label = TextWidget::new(lit!(""))
-                        .bind_text(loading.map(|l| if *l { "  ⏳" } else { "" }.to_string()));
+                        .text(loading.map(|l| if *l { "  ⏳" } else { "" }.to_string()));
 
                     // --- Dormancy status line: the visible pass/fail indicator ---
                     let status = selected.map(|s| {
@@ -155,7 +155,7 @@ fn main() {
                             String::from("Native UI tab — WebView subview hidden ✓")
                         }
                     });
-                    let status_label = TextWidget::new(lit!("")).bind_text(status);
+                    let status_label = TextWidget::new(lit!("")).text(status);
 
                     // --- Native-UI tab content (pure Bastyde) ---
                     let native_panel = VStack::new()

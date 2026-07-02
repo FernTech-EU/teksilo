@@ -40,7 +40,7 @@ use bastyde_canvas::{Point, Rect, SizeProposal};
 use bastyde_core::accesskit::{Live, Role};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
     TextInputVariant,
@@ -91,7 +91,9 @@ pub struct PasswordField {
     text: Signal<String>,
     placeholder: LocalizedString,
     label: LocalizedString,
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     read_only: bool,
     max_length: Option<usize>,
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
@@ -138,7 +140,7 @@ impl PasswordField {
             text: password,
             placeholder: LocalizedString::literal(String::new()),
             label: LocalizedString::literal(String::new()),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             max_length: None,
             char_filter: None,
@@ -178,10 +180,11 @@ impl PasswordField {
         self
     }
 
-    /// Initial enabled state. Use `ctx.enabled_when(id, signal)` for
-    /// reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time — a bound `Signal<bool>` updates live as it
+    /// changes.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -268,7 +271,7 @@ impl PasswordField {
     /// Bind an external reveal signal (shared with other UI, observed
     /// for analytics, or driven programmatically). Defaults to an
     /// internal signal exposed via [`revealed_signal`](Self::revealed_signal).
-    pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self {
+    pub fn revealed(mut self, revealed: Signal<bool>) -> Self {
         self.revealed = Some(revealed);
         self
     }
@@ -372,9 +375,7 @@ impl Widget for PasswordField {
         use crate::styles::recipe_text_input_style as field_dims;
 
         let self_id = ctx.self_id();
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Reveal signal: external binding wins, else the internal one.
         let revealed = self
@@ -395,7 +396,7 @@ impl Widget for PasswordField {
 
         // ── Secure inner field ──────────────────────────────────────
         let mut field = TextInputField::new(self.text.clone())
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)
@@ -403,7 +404,7 @@ impl Widget for PasswordField {
             .echo_char(self.echo_char)
             .at_reveal_policy(self.at_reveal_policy)
             .allow_copy(self.allow_copy)
-            .bind_revealed(revealed.clone());
+            .revealed(revealed.clone());
         if let Some(max) = self.max_length {
             field = field.max_length(max);
         }

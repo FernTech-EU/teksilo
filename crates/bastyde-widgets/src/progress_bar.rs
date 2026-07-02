@@ -30,7 +30,7 @@
 //!
 //! // Reactive determinate bar:
 //! let progress = Signal::new(0.0_f32);
-//! let _bar = ProgressBar::new(0.0).bind_value(progress);
+//! let _bar = ProgressBar::new(0.0).value(progress);
 //!
 //! // Indeterminate (animated sweep):
 //! let _spinner_bar = ProgressBar::indeterminate();
@@ -109,7 +109,7 @@ impl ProgressBar {
     }
 
     /// Bind the progress value to a reactive state.
-    pub fn bind_value(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn value(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.value = state.into();
         self
     }

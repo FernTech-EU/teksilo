@@ -189,8 +189,8 @@ fn main() {
                         .tree_column("name");
 
                     // Wire the proxy to the table's signals.
-                    proxy_for_table.bind_sort_signal(table.sort_signal().clone());
-                    proxy_for_table.bind_filters_signal(table.filters_signal().clone());
+                    proxy_for_table.sort_signal(table.sort_signal().clone());
+                    proxy_for_table.filters_signal(table.filters_signal().clone());
 
                     // Default sort by name ascending.
                     table.set_sort(Some("name"), SortDirection::Ascending);

@@ -82,8 +82,8 @@ AT-transparent (their content represents itself).
 
 Override the active `SplitterStyle` for this instance only.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable or disable handle dragging. When `false`, divider handles are
-rendered inert — the pane layout is still valid but the user cannot
-resize panes.
+Enable or disable handle dragging, statically or reactively. When
+`false`, divider handles are rendered inert — the pane layout is
+still valid but the user cannot resize panes.

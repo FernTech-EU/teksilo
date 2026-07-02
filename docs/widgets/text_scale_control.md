@@ -33,7 +33,7 @@ key and seeds every window, so the chosen size is restored automatically.
 
 ## Builder methods at a glance
 
-`label`
+`label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -64,3 +64,32 @@ automatic persistence; any `Signal<f32>` works for ad-hoc / preview use.
 
 Attach a visible label placed to the leading side of the spinbox
 (e.g. `tr!(text_size())`). Also used as the control's accessible name.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip that appears after a hover delay.
+
+Clears any previously set rich or composite tooltip (last-call wins).
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip resolved from the app-wide tooltip registry.
+
+`key` is looked up in the
+`TooltipRegistry` at build time.
+Clears any previously set plain or composite tooltip (last-call wins).
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline
+`TooltipContent`.
+
+Clears any previously set plain or composite tooltip (last-call wins).
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip that hosts an arbitrary widget body.
+
+The `content` widget is rendered inside the tooltip overlay after the
+heavy hover delay. Clears any previously set plain or rich tooltip
+(last-call wins).

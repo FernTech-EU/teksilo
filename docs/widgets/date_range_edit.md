@@ -62,7 +62,7 @@ let _w = DateRangeEdit::new(range.clone())
 
 ## Builder methods at a glance
 
-`style`, `min_date`, `max_date`, `format_pattern`, `placeholder_start`, `placeholder_end`, `first_day_of_week`, `enabled`, `read_only`, `label`, `validation_behavior`, `end_width_policy`, `validation_feedback_signal`, `on_value_changed`, `value`
+`style`, `min_date`, `max_date`, `format_pattern`, `placeholder_start`, `placeholder_end`, `first_day_of_week`, `enabled`, `read_only`, `label`, `validation_behavior`, `end_width_policy`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `validation_feedback_signal`, `on_value_changed`, `value`
 
 ## API reference
 
@@ -112,9 +112,10 @@ Placeholder shown in the end half when no date is set.
 
 Override which weekday appears in the first column of the calendar popup.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -138,6 +139,30 @@ the end half follows this policy. Default
 `WidthPolicy::Default` (natural width); pass
 `WidthPolicy::Fill` to make the end half absorb extra
 space the parent offers.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Show a plain single-line tooltip on hover. Mutually exclusive with the
+rich / composite tooltip slots — this setter clears the other two so the
+last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Show a rich tooltip sourced from the registry by `key`. Mutually
+exclusive with the plain / composite tooltip slots — this setter clears
+the other two so the last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Show a rich tooltip from an inline `TooltipContent` value. Mutually
+exclusive with the plain / registry-key tooltip slots — this setter
+clears the other two so the last call wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Show a composite tooltip whose body is an arbitrary widget tree. Mutually
+exclusive with the plain / rich tooltip slots — this setter clears the
+other two so the last call wins.
 
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 

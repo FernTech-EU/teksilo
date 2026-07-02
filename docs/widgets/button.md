@@ -36,7 +36,7 @@ let _btn = Button::new(lit!("Save"))
 
 ## Builder methods at a glance
 
-`current_variant`, `share_interaction`, `variant`, `style`, `bind_label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `has_popup`, `expanded_when`, `leading`, `trailing`
+`current_variant`, `share_interaction`, `variant`, `style`, `label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `has_popup`, `expanded_when`, `leading`, `trailing`
 
 ## API reference
 
@@ -128,14 +128,14 @@ Override the active `ButtonStyle` for this widget instance
 only. Useful for one-off custom-painted buttons (glassmorphism
 CTA, Material-3 ripple, etc.) without forking the Button.
 
-#### `pub fn bind_label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self`
+#### `pub fn label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self`
 
 Bind the button's label to a reactive source — replaces the
 static label captured at `new(...)`. Accepts any
 `impl Into<Prop<String>>`: a `Signal<String>` for live
 updates, or a plain `String` (which is the same as constructing
 the button with that string). Mirrors
-`TextWidget::bind_text`.
+`TextWidget::text`.
 The inner label `TextWidget` is built with the bound prop, so
 the visible text refreshes without rebuilding the Button. The
 AT node's `set_name` reads the current value via `Prop::get`.
@@ -181,20 +181,14 @@ progress bars, conditional rows). Promotes to a focusable
 promotion threshold. Overrides any plain or rich tooltip
 previously set on this button.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Disabled buttons ignore input
-and dim their content (the framework's
+Set the enabled state, statically or reactively. Disabled buttons
+ignore input and dim their content (the framework's
 `PaintContext::effective_enabled` propagates through to the
 label/icon leaves). Forwarded into the arena via
-`ctx.enabled_when(self_id, false)` at build time.
-
-For a reactive enabled state, call
-`ctx.enabled_when(button_id, my_signal)` from the composing
-widget. Both routes write to the same arena `enabled_state`;
-an external `enabled_when` registered after this builder runs
-wins (last-write semantics) and updates reactively from the
-signal.
+`ctx.enabled_when(self_id, self.enabled.clone())` at build time —
+a bound signal updates live as it changes.
 
 #### `pub fn text_role(mut self, role: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
 
@@ -226,7 +220,7 @@ popup (menu, dialog, listbox, tree, grid). Surfaced via
 `set_has_popup` in the a11y node so screen readers announce
 it as leading into the named popup kind.
 
-#### `pub fn expanded_when(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
 
 Bind a signal reporting whether this button's popup is
 currently visible. The Popover / Dialog wrapper owns the

@@ -162,7 +162,7 @@ impl Widget for GroupBox {
         // purely a visual cue.
         let content_wrapper_id = if let Some(ref checked) = self.checked {
             let dim_color = theme_signal.map(|t| t.colors.surface_main.with_alpha(0.6));
-            let dim_overlay_id = ctx.add(RectWidget::new().bind_background(dim_color));
+            let dim_overlay_id = ctx.add(RectWidget::new().background(dim_color));
             ctx.visible_when(dim_overlay_id, checked.map(|v| !*v));
             ctx.enabled_when(padded_content_id, checked.clone());
             ctx.add(

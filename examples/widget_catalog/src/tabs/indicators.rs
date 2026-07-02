@@ -42,7 +42,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let progress_v = section(
         ctx,
         tr!(ind_progress_vertical_heading()),
-        FixedSize::new().bind_height(120.0_f32).child(
+        FixedSize::new().height(120.0_f32).child(
             ProgressBar::new(0.4)
                 .orientation(Orientation::Vertical)
                 .thickness(8.0),
@@ -168,7 +168,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_height: 120.0_f32
+                    height: 120.0_f32
                     ProgressBar::new(0.4) {
                         orientation: Orientation::Vertical
                         thickness: 8.0

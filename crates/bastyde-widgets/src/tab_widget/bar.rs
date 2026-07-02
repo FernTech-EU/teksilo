@@ -2458,8 +2458,8 @@ fn build_overflow_dropdown(
     // shrinks on a short list; the constant width keeps the popover
     // from stretching to fit a long label).
     let sized = FixedSize::new()
-        .bind_width(DROPDOWN_WIDTH - DROPDOWN_PADDING * 2.0)
-        .bind_height(content_h - DROPDOWN_PADDING * 2.0)
+        .width(DROPDOWN_WIDTH - DROPDOWN_PADDING * 2.0)
+        .height(content_h - DROPDOWN_PADDING * 2.0)
         .child(list);
 
     // Raised surface — `SurfaceRole::Raised` is the popup-fill

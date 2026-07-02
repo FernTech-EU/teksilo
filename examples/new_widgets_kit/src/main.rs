@@ -119,7 +119,7 @@ impl Root {
         // Live readout of what's typed in the search field — shows the
         // user that the bound signal updates on every keystroke.
         let search_readout = TextWidget::new(lit!(""))
-            .bind_text(self.search_text.map(|s| {
+            .text(self.search_text.map(|s| {
                 if s.is_empty() {
                     "Type to filter — text mirrors here as you type. Press Enter to submit."
                         .to_string()
@@ -134,7 +134,7 @@ impl Root {
         let submit_count = ctx.signal(0_usize);
         let submit_count_for_label = submit_count.clone();
         let submit_readout = TextWidget::new(lit!(""))
-            .bind_text(submit_count_for_label.map(|n| {
+            .text(submit_count_for_label.map(|n| {
                 if *n == 0 {
                     String::new()
                 } else {
@@ -209,7 +209,7 @@ impl Root {
 
         // Live readout of the picker state.
         let path_readout = TextWidget::new(lit!(""))
-            .bind_text(self.path_text.map(|p| {
+            .text(self.path_text.map(|p| {
                 if p.is_empty() {
                     "No file picked yet — click the trailing Browse button.".to_string()
                 } else {
@@ -244,11 +244,11 @@ impl Root {
         let last_action = ctx.signal::<Option<bool>>(None);
 
         let preview = TextWidget::new(lit!(""))
-            .bind_text(rename_text.map(|s| format!("Current name: {}", s)))
+            .text(rename_text.map(|s| format!("Current name: {}", s)))
             .style(TextStyleRole::BodyBold);
 
         let action_readout = TextWidget::new(lit!(""))
-            .bind_text(last_action.map(|state| match state {
+            .text(last_action.map(|state| match state {
                 None => String::new(),
                 Some(true) => "Last result: accepted — name updated above.".to_string(),
                 Some(false) => "Last result: cancelled — name unchanged.".to_string(),

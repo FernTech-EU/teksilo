@@ -9,12 +9,14 @@ Excess actions collapse into a trailing chevron (`⌄`) that opens a popover
 menu, mirroring Qt's `QToolBar` extension button, macOS `NSToolbar`'s
 overflow menu, and WinUI `CommandBar`. Synthesized API:
 
-- **Actions** (`ToolbarAction`) — a command with a label, optional icon,
-  tooltip, enabled state, optional toggle (checkable), an **overflow
-  priority** (NSToolbar: lowest priority collapses first), and an
-  **`always_overflow`** flag (WinUI secondary commands). Each action has a
-  toolbar form (a `Button`) and a menu form (a `MenuItem`), so it renders
-  correctly whether inline or in the overflow menu.
+- **Actions** (`ToolbarAction`) — a command with a **label + icon** (both
+  required), an optional tooltip, enabled state, optional toggle (checkable)
+  or dropdown `menu`, an **overflow priority**
+  (NSToolbar: lowest priority collapses first), and an **`always_overflow`**
+  flag (WinUI secondary commands). Each action has a toolbar form (an
+  `IconButton`, or a `PopoverIconButton` when it carries a menu) and a
+  menu form (a `MenuItem`, or a submenu), so it renders correctly whether
+  inline or in the overflow menu.
 - **Pinned widgets** (`ToolbarItem::custom`) — arbitrary widgets (a search
   field, a `SegmentedControl`) that never collapse.
 - **Collapsible widgets** — an arbitrary widget that *does* overflow, by
@@ -29,7 +31,9 @@ overflow menu, and WinUI `CommandBar`. Synthesized API:
   is tight the inline widget is hidden and its overflow form appears in the
   menu.
 - **Separators** and **flexible space** (NSToolbar `flexibleSpace`).
-- **Display mode** (icon+text / icon-only / text-only) and **orientation**.
+- Toolbar-wide **`button_size`** (default
+  `Compact`), **`button_style`**
+  (a shared `IconButtonStyle` for every action), and **orientation**.
 
 Overflow is computed every layout pass from each item's intrinsic size
 (measured even while collapsed, via
@@ -55,14 +59,14 @@ action is announced twice. Toggle actions carry `Toggled`.
 use bastyde_widgets::toolbar::{Toolbar, ToolbarAction, ToolbarItem};
 use bastyde_i18n::lit;
 let _bar = Toolbar::new()
-    .action(ToolbarAction::new(lit!("Save")).on_activate(|ctx| { /* ... */ }))
-    .action(ToolbarAction::new(lit!("Undo")).priority(-1))
+    .action(ToolbarAction::new(lit!("Save"), save_icon).on_activate(|ctx| { /* ... */ }))
+    .action(ToolbarAction::new(lit!("Undo"), undo_icon).priority(-1))
     .item(ToolbarItem::flexible_space());
 ```
 
 ## Builder methods at a glance
 
-`item`, `action`, `child`, `add_child`, `orientation`, `display_mode`, `spacing`, `label`, `is_overflowing`
+`item`, `action`, `child`, `add_child`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`
 
 ## API reference
 
@@ -82,20 +86,6 @@ pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 pub const TOOLBAR_SPACING: f32 = 4.0;
 ```
 
-## `pub enum ToolbarDisplayMode`
-
-How toolbar actions render their label and icon.
-
-```rust
-pub enum ToolbarDisplayMode { /* variants */ }
-```
-
-### Variants
-
-- **`IconAndText`** — Icon (if any) beside the label. The default.
-- **`IconOnly`** — Icon only; the label becomes the accessible name + tooltip.
-- **`TextOnly`** — Label only; the icon is dropped.
-
 ## `pub enum ToolbarOrientation`
 
 Layout axis of the toolbar.
@@ -111,9 +101,11 @@ pub enum ToolbarOrientation { /* variants */ }
 
 ## `pub struct ToolbarAction`
 
-A toolbar command: a label plus optional icon/tooltip/toggle, an activation
-handler, an overflow priority, and an `always_overflow` flag. Renders as a
-`Button` inline and as a `MenuItem` in the overflow menu.
+A toolbar command: a **label + an icon** (both required), plus optional
+tooltip/toggle, an activation handler, an overflow priority, and an
+`always_overflow` flag. Renders as an icon-only `IconButton` inline (the
+label is its tooltip + accessible name) and as a labelled `MenuItem` in the
+overflow menu.
 
 ```rust
 pub struct ToolbarAction { /* fields */ }
@@ -121,22 +113,61 @@ pub struct ToolbarAction { /* fields */ }
 
 ### Methods
 
-#### `pub fn new(label: impl Into<LocalizedString>) -> Self`
+#### `pub fn new(label: impl Into<LocalizedString>, icon: impl Fn() -> IconWidget + 'static) -> Self`
 
-A new action with the given (translatable) label and a no-op handler.
+A new action with the given (translatable) `label` and `icon` factory,
+and a no-op handler. The label is the inline button's tooltip +
+accessible name (the button is icon-only); the icon factory builds the
+glyph for both the inline `IconButton` and the overflow menu row
+(`IconWidget` isn't `Clone`, so it is a factory).
 
-#### `pub fn icon(mut self, factory: impl Fn() -> IconWidget + 'static) -> Self`
+#### `pub fn menu(mut self, factory: impl Fn() -> MenuList + 'static) -> Self`
 
-Icon factory — called to build the icon for both the inline button and
-the overflow menu item (`IconWidget` isn't `Clone`).
+Turn this action into a **dropdown**: its inline control becomes a
+`PopoverIconButton` that opens the `MenuList` built by `factory`
+(instead of a plain button that runs `on_activate`), and in the overflow
+it becomes a submenu. `MenuList` isn't `Clone`, so pass a factory that
+builds a fresh one. Mutually exclusive with `on_activate` / `toggle`
+(the menu owns the interaction).
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Tooltip / accessible-name supplement (also the AT name in `IconOnly`).
+Plain-text tooltip shown after a hover delay (also the AT name
+supplement in `IconOnly` mode). Overrides any previously set rich
+tooltip — every setter clears the other so last-call wins.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
-Initial enabled state.
+Attach a rich tooltip resolved from the app-wide tooltip registry.
+The `key` is looked up via
+`TooltipRegistry` at build
+time; the resolved body text supports inline markup
+(``label``, `*italic*`, `**bold**`) and the entry's
+shortcut / "more" fields are rendered automatically.
+
+Overrides any previously set plain `.tooltip(...)` — every setter
+clears the other so last-call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline
+`TooltipContent` — for
+one-off tooltips that aren't worth registering in the central
+catalog. Overrides any previously set plain `.tooltip(...)`.
+
+#### `pub fn composite_tooltip(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
+
+Attach a composite tooltip whose body is built by `factory` — an
+arbitrary widget tree (tabbed sections, charts, conditional rows).
+Because `ToolbarAction` is `Clone`, the body is supplied as a
+factory closure (not a `Box<dyn Widget>` instance, which is not
+`Clone`); the closure is invoked to produce a fresh body for the
+inline button. Overrides any previously set tooltip — every setter
+clears the others so last-call wins.
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enabled state, static or reactive.
 
 #### `pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -191,7 +222,7 @@ Make a `custom` widget collapsible with an explicit menu
 **row** — the `ToolbarAction` shown when it overflows (NSToolbar
 `menuFormRepresentation`). Best for controls whose menu form is a
 single command; an icon-only inline control reuses its icon here as the
-menu item's leading glyph (set it via `ToolbarAction::icon`).
+menu item's leading glyph (pass it to `ToolbarAction::new`).
 
 #### `pub fn overflow_widget(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
@@ -224,8 +255,8 @@ pub struct Toolbar { /* fields */ }
 #### `pub fn new() -> Self`
 
 Create an empty toolbar with the default orientation (horizontal) and
-`IconAndText` display mode. Add commands with `action` or
-layout items with `item`.
+`Compact`, ghost icon buttons. Add commands with `action`
+or layout items with `item`.
 
 #### `pub fn item(mut self, item: ToolbarItem) -> Self`
 
@@ -251,10 +282,17 @@ Add a pinned inline child by pre-registered id (sugar for
 
 Set the layout axis (default `ToolbarOrientation::Horizontal`).
 
-#### `pub fn display_mode(mut self, mode: ToolbarDisplayMode) -> Self`
+#### `pub fn button_size(mut self, size: IconButtonSize) -> Self`
 
-Set how inline actions render their label and icon (default
-`ToolbarDisplayMode::IconAndText`).
+Size variant applied to every action's inline `IconButton` and the
+overflow chevron (default `IconButtonSize::Compact`).
+
+#### `pub fn button_style(mut self, style: impl IconButtonStyle) -> Self`
+
+A toolbar-wide `IconButtonStyle` applied to every action button and the
+overflow chevron — one shared style for the whole bar (the icon-button
+analogue of `theme.style_slots`). Default: the theme's flat / ghost
+icon-button style.
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
@@ -264,6 +302,18 @@ Gap between consecutive toolbar items in logical pixels (default
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the accessible name (default: the localized "Toolbar").
+
+#### `pub fn compact(mut self, compact: bool) -> Self`
+
+**Compact** (shrink-to-fit) sizing. By default a toolbar *fills* the main
+extent it is offered (it is meant to span a full command bar). In compact
+mode it instead reports its **natural content** extent as the wanted size
+and is *shrinkable* down to its collapsed minimum (the pinned items plus
+the overflow chevron) — so it sits as a tight cluster when there is room,
+composes next to other widgets (e.g. a title and a `Spacer`) without
+claiming their space, and still collapses excess actions into the `⌄`
+menu when the slot is genuinely too narrow. Use it to embed a toolbar in a
+constrained header rather than a full-width bar.
 
 #### `pub fn is_overflowing(&self) -> Signal<bool>`
 

@@ -84,7 +84,7 @@ use bastyde_canvas::{Path, Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{IconButtonStyleConfig, SharedIconButtonStyle};
 use bastyde_core::widget::{EventContext, LayoutContext, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
@@ -118,15 +118,15 @@ pub struct IconButton {
     /// Optional composite tooltip body (CK3-style widget tree).
     /// Mutually exclusive with the other two tooltip slots.
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
-    /// Initial enabled-state. Forwarded into the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time when `false`;
+    /// Enabled state, static or reactive. Forwarded into the arena via
+    /// `ctx.enabled_when(self_id, self.enabled.clone())` at build time;
     /// not kept as a runtime snapshot. After `build()` the arena's
     /// `enabled_state` is the single source of truth; the leaves
     /// (icon, label) read it through `PaintContext::effective_enabled`
     /// for color resolution, event dispatch reads it via
     /// `arena.is_enabled()` for gating, the a11y walker reads it for
     /// `set_disabled()`.
-    initial_enabled: bool,
+    enabled: Prop<bool>,
     size: IconButtonSize,
     /// Embedded mode — Secondary-at-rest icon color, the JetBrains
     /// "built-in" look. Default `false` (stand-alone, full-weight icon).
@@ -151,7 +151,7 @@ pub struct IconButton {
     // open state. Both fields are opt-in via `.has_popup(...)` /
     // `.expanded_when(...)`.
     has_popup: Option<bastyde_core::accesskit::HasPopup>,
-    expanded_signal: Option<Signal<bool>>,
+    expanded_signal: Option<Prop<bool>>,
 
     /// Optional caller-supplied interaction signal. When set, `build()`
     /// uses this signal instead of allocating its own — letting an
@@ -190,7 +190,7 @@ impl IconButton {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             size: IconButtonSize::Default,
             embedded: false,
             action: None,
@@ -343,21 +343,22 @@ impl IconButton {
         self
     }
 
-    /// Set the initial enabled state. Disabled buttons ignore input
-    /// and dim their icon (handled by the framework's
-    /// `PaintContext::effective_enabled`). Forwarded into the arena
-    /// via `ctx.enabled_when(self_id, false)` at build time.
+    /// Set the enabled state, statically or reactively. Disabled
+    /// buttons ignore input and dim their icon (handled by the
+    /// framework's `PaintContext::effective_enabled`). Forwarded into
+    /// the arena via `ctx.enabled_when(self_id, self.enabled.clone())`
+    /// at build time — a bound signal updates live as it changes.
     ///
     /// For a reactive enabled state — e.g. a toolbar button that
-    /// enables only when the caret is inside a table — call
-    /// `ctx.enabled_when(button_id, my_signal)` from the composing
-    /// widget's `build()` instead of (or in addition to) this builder.
-    /// Both routes write to the same arena `enabled_state`; an
-    /// external `enabled_when` registered after this builder runs
-    /// wins (last-write semantics) and updates reactively from the
-    /// signal.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// enables only when the caret is inside a table — pass a
+    /// `Signal<bool>` here, or call `ctx.enabled_when(button_id,
+    /// my_signal)` from the composing widget's `build()` instead of
+    /// (or in addition to) this builder. Both routes write to the
+    /// same arena `enabled_state`; an external `enabled_when`
+    /// registered after this builder runs wins (last-write semantics)
+    /// and updates reactively from the signal.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -445,8 +446,8 @@ impl IconButton {
     /// flips it on show / dismiss; IconButton reads it in
     /// `accessibility()` to publish `set_expanded`. Only meaningful
     /// alongside [`has_popup`](Self::has_popup).
-    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
-        self.expanded_signal = Some(signal);
+    pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
+        self.expanded_signal = Some(signal.into());
         self
     }
 
@@ -547,7 +548,7 @@ impl IconButton {
 impl std::fmt::Debug for IconButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IconButton")
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .field("size", &self.size)
             .field("embedded", &self.embedded)
             .finish()
@@ -601,16 +602,14 @@ impl bastyde_core::widget::Widget for IconButton {
         let size = self.size;
         let self_id = ctx.self_id();
 
-        // Forward the initial-enabled hint into the arena. After this
-        // point the arena is the single source of truth — events,
-        // focus, a11y, and the leaves' role-resolution all consult
+        // Forward the enabled state into the arena. After this point
+        // the arena is the single source of truth — events, focus,
+        // a11y, and the leaves' role-resolution all consult
         // `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`.
         // We never carry an `InteractionState::Disabled` in the
         // interaction signal: that was the snapshot duality the
         // architecture refactor removed.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Reactive view of "is this widget effectively enabled?",
         // factoring this node and every ancestor's `enabled_state`.
@@ -645,7 +644,7 @@ impl bastyde_core::widget::Widget for IconButton {
         if let Some(ref expanded) = self.expanded_signal {
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
-            expanded.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+            expanded.register_if_bound(self_id, registry, BindingLevel::AccessibilityOnly);
         }
 
         // Icon color: a caller-supplied override wins over the auto
@@ -673,13 +672,13 @@ impl bastyde_core::widget::Widget for IconButton {
             let primary_icon =
                 std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
                     .icon_size(icon_size)
-                    .bind_color(icon_color.clone());
+                    .color(icon_color.clone());
             let alt_icon = self
                 .toggled_icon
                 .take()
                 .expect("toggled_icon checked above")
                 .icon_size(icon_size)
-                .bind_color(icon_color);
+                .color(icon_color);
             ctx.add(
                 Switcher::new(toggled_index)
                     .child(primary_icon)
@@ -688,7 +687,7 @@ impl bastyde_core::widget::Widget for IconButton {
         } else {
             let icon = std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
                 .icon_size(icon_size)
-                .bind_color(icon_color);
+                .color(icon_color);
             ctx.add(icon)
         };
 

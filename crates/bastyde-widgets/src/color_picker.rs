@@ -50,7 +50,7 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::{Action, Live, Role};
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{LocalizedString, resolve_message_widget};
@@ -140,13 +140,13 @@ pub struct ColorPicker {
     show_footer: bool,
     on_done: Option<Rc<dyn Fn(&mut EventContext)>>,
     on_cancel: Option<Rc<dyn Fn(&mut EventContext)>>,
-    swatches: Vec<Color>,
-    swatches_signal: Option<Signal<Vec<Color>>>,
+    swatches: Prop<Vec<Color>>,
     swatch_columns: usize,
     layout: ColorPickerLayout,
     label: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     /// Cache of the most recent color formatted as a hex string. The
     /// live-region effect updates this whenever the bound color changes;
     /// `accessibility()` reads it (via `binding.value().get()` then
@@ -203,12 +203,11 @@ impl ColorPicker {
             show_footer: false,
             on_done: None,
             on_cancel: None,
-            swatches: DEFAULT_SWATCHES.to_vec(),
-            swatches_signal: None,
+            swatches: Prop::Static(DEFAULT_SWATCHES.to_vec()),
             swatch_columns: 6,
             layout: ColorPickerLayout::Standard,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             last_announced_hex: Rc::new(RefCell::new(None)),
             style_override: None,
             root_child_id: None,
@@ -317,16 +316,11 @@ impl ColorPicker {
         self
     }
 
-    /// Replace the default 12-color [`DEFAULT_SWATCHES`] with a custom palette.
-    pub fn swatches(mut self, s: Vec<Color>) -> Self {
-        self.swatches = s;
-        self
-    }
-
-    /// Bind the preset swatch palette to a reactive `Signal<Vec<Color>>`
+    /// Replace the default 12-color [`DEFAULT_SWATCHES`] with a custom
+    /// palette — statically, or reactively via a bound `Signal<Vec<Color>>`
     /// that updates live without rebuilding the picker.
-    pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self {
-        self.swatches_signal = Some(s);
+    pub fn swatches(mut self, s: impl Into<Prop<Vec<Color>>>) -> Self {
+        self.swatches = s.into();
         self
     }
 
@@ -350,9 +344,10 @@ impl ColorPicker {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -410,7 +405,7 @@ impl std::fmt::Debug for ColorPicker {
         f.debug_struct("ColorPicker")
             .field("alpha_enabled", &self.alpha_enabled)
             .field("layout", &self.layout)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -467,21 +462,19 @@ impl Widget for ColorPicker {
         }
 
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton. Inner
+        // Forward the enabled state into the arena; see IconButton. Inner
         // sub-widgets (HsvCanvas, HueStrip, AlphaStrip, SwatchGrid)
         // inherit disabled via the ancestor walk — their per-widget
-        // `initial_enabled` is only consulted at build time and then
-        // they too forward into the arena, so the AND semantics fall
-        // out for free.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // `enabled` snapshot below is only consulted at build time and
+        // then they too forward into the arena, so the AND semantics
+        // fall out for free.
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // ── Resolve flags ──
         let alpha_enabled = self.alpha_enabled;
         let show_alpha_strip = self.show_alpha_strip.unwrap_or(alpha_enabled);
         let layout = self.layout;
-        let enabled = self.initial_enabled;
+        let enabled = self.enabled.get();
         use crate::styles::recipe_color_picker_style as cp;
 
         // ── Build subcomponents ──
@@ -668,14 +661,16 @@ impl Widget for ColorPicker {
 
         // Swatch grid — Standard / Wide only (Compact doesn't surface
         // a swatch grid; building one anyway would orphan it in the
-        // arena and absorb hit-tests inside the trigger).
+        // arena and absorb hit-tests inside the trigger). A bound signal
+        // is an explicit opt-in — the grid shows even if currently empty
+        // (a live-updating list may start empty and populate later); a
+        // static palette additionally requires `show_swatches` and a
+        // non-empty vec.
+        let swatches_is_bound = matches!(self.swatches, Prop::Bound(_));
         let swatches_id: Option<WidgetId> = if layout != ColorPickerLayout::Compact
-            && (self.show_swatches && !self.swatches.is_empty() || self.swatches_signal.is_some())
+            && (swatches_is_bound || (self.show_swatches && !self.swatches.get().is_empty()))
         {
-            let swatches_signal = self
-                .swatches_signal
-                .clone()
-                .unwrap_or_else(|| Signal::new(self.swatches.clone()));
+            let swatches_signal = self.swatches.as_signal();
             let on_select: Rc<dyn Fn(Color, &mut EventContext)> = {
                 let value = value.clone();
                 Rc::new(move |c, _ctx_evt| {

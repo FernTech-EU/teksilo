@@ -38,7 +38,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::SharedRadioTileStyle;
 use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -97,7 +97,9 @@ pub struct RadioTileGroup {
     /// Fixed row height for [`TileLayout::Vertical`]; `None` uses
     /// [`VERTICAL_ROW_HEIGHT`].
     row_height: Option<f32>,
-    initial_enabled: bool,
+    /// Enabled state for the whole group, static or reactive; forwarded
+    /// to the arena at build time.
+    enabled: Prop<bool>,
     style_override: Option<SharedRadioTileStyle>,
     /// Written by the group's `on_focus`.
     group_focused: Signal<bool>,
@@ -126,7 +128,7 @@ impl RadioTileGroup {
             spacing: None,
             line_spacing: 12.0,
             row_height: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             style_override: None,
             group_focused: Signal::new(false),
             ring_visible: Signal::new(false),
@@ -183,9 +185,10 @@ impl RadioTileGroup {
         self
     }
 
-    /// Set the initial enabled state for the whole group.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state for the whole group, statically or
+    /// reactively.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -390,9 +393,7 @@ impl std::fmt::Debug for RadioTileGroup {
 impl Widget for RadioTileGroup {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Whole-group keyboard focus ring: visible only when the group holds
         // focus AND the last input was keyboard (`:focus-visible`).

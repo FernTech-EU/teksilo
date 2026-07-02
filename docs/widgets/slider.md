@@ -29,7 +29,7 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 
 ## Builder methods at a glance
 
-`step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`
+`step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -63,10 +63,11 @@ range.
 Set the slider orientation (`Horizontal` by default). Vertical
 sliders map Up/Down arrow keys to increase/decrease.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(slider_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time via
+`ctx.enabled_when(slider_id, self.enabled.clone())`.
 
 #### `pub fn variant(mut self, variant: SliderVariant) -> Self`
 
@@ -93,3 +94,29 @@ only.
 Set an accessible name for the slider, announced by screen readers.
 ARIA requires sliders to have a label; when none is set here the
 caller is responsible for labelling via a wrapping element.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter
+wins and clears the others.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip driven by a registry key. The registry
+entry supplies title, body markup, optional shortcut chip and
+cascade links. Mutually exclusive with the other tooltip setters.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline `TooltipContent`
+value, bypassing the registry lookup. Mutually exclusive with the
+other tooltip setters.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Uses the heavier `tooltip_delay_heavy` delay. Mutually exclusive
+with the other tooltip setters.

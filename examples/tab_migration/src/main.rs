@@ -99,7 +99,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
                         )
                         .child(
                             TextWidget::new(lit!(""))
-                                .bind_text(edits.map(|n| n.to_string()))
+                                .text(edits.map(|n| n.to_string()))
                                 .style(TextStyleRole::BodyBold)
                                 .color(TextRole::Accent),
                         ),

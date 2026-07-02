@@ -281,7 +281,7 @@ TabWidget::new(selected)
 
 // or — reactive, driven by an external signal:
 let orient = Signal::new(TabBarOrientation::Horizontal);
-TabWidget::new(selected).orientation_signal(orient.clone());
+TabWidget::new(selected).orientation(orient.clone());
 // later:
 orient.set(TabBarOrientation::Vertical);  // bar flips, panes preserved
 ```
@@ -355,7 +355,7 @@ The two orientations apply Shared sizing differently:
   intentionally **don't apply to vertical's height axis** — they'd
   force pills unreasonably tall.
 
-Reactive: `TabWidget::sizing_signal(Signal<TabSizing>)` rebinds at
+Reactive: `TabWidget::sizing(Signal<TabSizing>)` rebinds at
 `BindingLevel::Rebuild` so toggling Shared ↔ Independent is a one-line
 operation from a toolbar button.
 
@@ -378,8 +378,8 @@ pub enum TabDisplayMode {
 ```
 
 Set it statically with `TabWidget::tab_display(mode)` or reactively with
-`TabWidget::tab_display_signal(Signal<TabDisplayMode>)` (bound at
-`BindingLevel::Rebuild`, like `sizing_signal`).
+`TabWidget::tab_display(Signal<TabDisplayMode>)` (bound at
+`BindingLevel::Rebuild`, like `sizing`).
 
 Mode-specific behaviour:
 

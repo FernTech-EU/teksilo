@@ -90,7 +90,8 @@ Choose the layout (default `TileLayout::Row`).
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
-Gap between tiles along the main axis (and between grid columns).
+Override the gap between tiles along the main axis (and grid columns).
+Defaults to 6 dp for `TileLayout::Vertical`, 12 dp otherwise.
 
 #### `pub fn line_spacing(mut self, spacing: f32) -> Self`
 
@@ -103,9 +104,10 @@ Takes precedence over the theme value
 (`RadioTileRecipe::vertical_row_height`, 44 dp by default). No effect on
 other layouts.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state for the whole group.
+Set the enabled state for the whole group, statically or
+reactively.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::RadioTileStyle) -> Self`
 

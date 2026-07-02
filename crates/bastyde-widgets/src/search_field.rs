@@ -63,7 +63,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{PopoverStyleConfig, PopoverVariant};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -91,12 +91,12 @@ fn search_glyph(glyph_size: f32, slot_width: f32) -> impl Widget + 'static {
     let icon = (BuiltInIcons::global().search)()
         .icon_size(glyph_size)
         .color(TextRole::Secondary);
-    // `bind_height` is load-bearing — without it, `Center`'s
+    // `height` is load-bearing — without it, `Center`'s
     // `proposal.resolve(0, 0)` collapses the unspecified-height side
     // to zero and the slot disappears even though its width is set.
     FixedSize::new()
-        .bind_width(slot_width)
-        .bind_height(glyph_size)
+        .width(slot_width)
+        .height(glyph_size)
         .child(Center::new().child(icon))
 }
 
@@ -106,7 +106,7 @@ pub struct SearchField {
     placeholder: Option<LocalizedString>,
     label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    enabled: Prop<bool>,
     suggestion_provider: Option<SuggestionProvider>,
     max_suggestions: usize,
     min_chars: usize,
@@ -160,7 +160,7 @@ impl SearchField {
             text,
             placeholder: None,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             suggestion_provider: None,
             max_suggestions: DEFAULT_MAX_SUGGESTIONS,
             min_chars: 1,
@@ -200,8 +200,8 @@ impl SearchField {
     }
 
     /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, on: bool) -> Self {
-        self.initial_enabled = on;
+    pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self {
+        self.enabled = on.into();
         self
     }
 
@@ -296,9 +296,7 @@ impl Widget for SearchField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // ── Reactive state ──────────────────────────────────────────
         // Suggestions list — recomputed on every text change.
@@ -332,7 +330,7 @@ impl Widget for SearchField {
             .placeholder(placeholder)
             .show_clear_button(true)
             .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .on_submit_fn(move |ctx| {
                 let idx = highlighted_for_submit.get();
                 let list = suggestions_for_submit.get();
@@ -815,7 +813,7 @@ impl Widget for SuggestionPanel {
             });
             let bg = ctx.add(
                 RectWidget::new()
-                    .bind_background(bg_role)
+                    .background(bg_role)
                     .corner_radius(CornerRadius::uniform(sf::ROW_CORNER_RADIUS)),
             );
             let label_id = ctx.add(

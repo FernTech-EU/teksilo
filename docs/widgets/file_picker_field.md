@@ -23,7 +23,7 @@ let _f = FilePickerField::new(path.clone())
 
 ## Builder methods at a glance
 
-`kind`, `dialog_title`, `starting_dir`, `default_file_name`, `add_filter`, `on_pick`, `placeholder`, `label`, `enabled`
+`kind`, `dialog_title`, `starting_dir`, `default_file_name`, `add_filter`, `on_pick`, `placeholder`, `label`, `validation`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -96,7 +96,33 @@ Placeholder text shown when the field is empty.
 
 Accessible name for the path field.
 
-#### `pub fn enabled(mut self, on: bool) -> Self`
+#### `pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self`
+
+Bind an external `ValidationState` signal — shown as the same inline
+error/warning strip and border tint the inner `TextInput` renders (e.g.
+"the chosen folder does not exist / is not writable").
+
+#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
 
 Set the initial enabled state for the text field and Browse button.
 Forwarded to the arena at build time.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after the hover delay.
+Clears any previously set rich or composite tooltip (last call wins).
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip by registry key.
+Clears any previously set plain or composite tooltip (last call wins).
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline `crate::tooltip::TooltipContent`.
+Clears any previously set plain or composite tooltip (last call wins).
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Clears any previously set plain or rich tooltip (last call wins).

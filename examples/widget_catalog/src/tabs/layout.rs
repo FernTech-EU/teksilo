@@ -22,7 +22,7 @@ pub fn refs() -> LocalizedString {
 }
 
 fn masonry_tile(height: f32) -> impl Widget + 'static {
-    FixedSize::new().bind_height(height).child(
+    FixedSize::new().height(height).child(
         Panel::new()
             .background(SurfaceRole::AccentSubtle)
             .child(Center::new().child(TextWidget::new(lit!("·")).style(TextStyleRole::Small))),
@@ -52,18 +52,15 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let zstack = section(
         ctx,
         lit!("ZStack"),
-        FixedSize::new()
-            .bind_width(120.0_f32)
-            .bind_height(60.0_f32)
-            .child(
-                ZStack::new()
-                    .child(RectWidget::new().background(SurfaceRole::Sunken))
-                    .child(
-                        TextWidget::new(tr!(lay_overlay()))
-                            .style(TextStyleRole::SmallBold)
-                            .color(TextRole::OnAccent),
-                    ),
-            ),
+        FixedSize::new().width(120.0_f32).height(60.0_f32).child(
+            ZStack::new()
+                .child(RectWidget::new().background(SurfaceRole::Sunken))
+                .child(
+                    TextWidget::new(tr!(lay_overlay()))
+                        .style(TextStyleRole::SmallBold)
+                        .color(TextRole::OnAccent),
+                ),
+        ),
     );
     let grid = section(
         ctx,
@@ -125,41 +122,36 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 TextWidget::new(tr!(lay_form_value_b())).style(TextStyleRole::Body),
             ),
     );
-    let center = section(
-        ctx,
-        lit!("Center"),
-        FixedSize::new()
-            .bind_width(180.0_f32)
-            .bind_height(60.0_f32)
-            .child(
+    let center =
+        section(
+            ctx,
+            lit!("Center"),
+            FixedSize::new().width(180.0_f32).height(60.0_f32).child(
                 ZStack::new()
                     .child(RectWidget::new().background(SurfaceRole::Raised))
                     .child(Center::new().child(
                         TextWidget::new(tr!(lay_centered())).style(TextStyleRole::SmallBold),
                     )),
             ),
-    );
+        );
     let expand = section(
         ctx,
         lit!("Expand"),
-        FixedSize::new()
-            .bind_width(200.0_f32)
-            .bind_height(28.0_f32)
-            .child(
-                HStack::new()
-                    .spacing(0.0)
-                    .child(color_cell(SurfaceRole::Sunken, "fixed"))
-                    .child(
-                        Expand::new()
-                            .flex(1.0)
-                            .child(color_cell(SurfaceRole::AltRow, "1fr")),
-                    )
-                    .child(
-                        Expand::new()
-                            .flex(2.0)
-                            .child(color_cell(SurfaceRole::AccentSubtle, "2fr")),
-                    ),
-            ),
+        FixedSize::new().width(200.0_f32).height(28.0_f32).child(
+            HStack::new()
+                .spacing(0.0)
+                .child(color_cell(SurfaceRole::Sunken, "fixed"))
+                .child(
+                    Expand::new()
+                        .flex(1.0)
+                        .child(color_cell(SurfaceRole::AltRow, "1fr")),
+                )
+                .child(
+                    Expand::new()
+                        .flex(2.0)
+                        .child(color_cell(SurfaceRole::AccentSubtle, "2fr")),
+                ),
+        ),
     );
     let padding = section(
         ctx,
@@ -172,15 +164,12 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let spacer = section(
         ctx,
         lit!("Spacer"),
-        FixedSize::new()
-            .bind_width(220.0_f32)
-            .bind_height(28.0_f32)
-            .child(
-                HStack::new()
-                    .child(color_cell(SurfaceRole::Sunken, "L"))
-                    .child(Spacer::new())
-                    .child(color_cell(SurfaceRole::AltRow, "R")),
-            ),
+        FixedSize::new().width(220.0_f32).height(28.0_f32).child(
+            HStack::new()
+                .child(color_cell(SurfaceRole::Sunken, "L"))
+                .child(Spacer::new())
+                .child(color_cell(SurfaceRole::AltRow, "R")),
+        ),
     );
     let divider = section(
         ctx,
@@ -194,14 +183,11 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let fixed_size = section(
         ctx,
         lit!("FixedSize"),
-        FixedSize::new()
-            .bind_width(140.0_f32)
-            .bind_height(40.0_f32)
-            .child(
-                Panel::new()
-                    .background(SurfaceRole::AccentSubtle)
-                    .child(TextWidget::new(tr!(lay_fixed_size())).style(TextStyleRole::SmallBold)),
-            ),
+        FixedSize::new().width(140.0_f32).height(40.0_f32).child(
+            Panel::new()
+                .background(SurfaceRole::AccentSubtle)
+                .child(TextWidget::new(tr!(lay_fixed_size())).style(TextStyleRole::SmallBold)),
+        ),
     );
     let min_size = section(
         ctx,
@@ -225,7 +211,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         section(
             ctx,
             lit!("AspectRatio"),
-            FixedSize::new().bind_width(180.0_f32).child(
+            FixedSize::new().width(180.0_f32).child(
                 AspectRatio::widescreen().child(
                     Panel::new()
                         .background(SurfaceRole::AltRow)
@@ -247,15 +233,12 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         lit!("Switcher"),
         VStack::new().spacing(6.0).child(switcher_btn).child(
-            FixedSize::new()
-                .bind_width(180.0_f32)
-                .bind_height(40.0_f32)
-                .child(
-                    Switcher::new(switcher_idx)
-                        .child(color_cell(SurfaceRole::AccentSubtle, "page 0"))
-                        .child(color_cell(SurfaceRole::Raised, "page 1"))
-                        .child(color_cell(SurfaceRole::Sunken, "page 2")),
-                ),
+            FixedSize::new().width(180.0_f32).height(40.0_f32).child(
+                Switcher::new(switcher_idx)
+                    .child(color_cell(SurfaceRole::AccentSubtle, "page 0"))
+                    .child(color_cell(SurfaceRole::Raised, "page 1"))
+                    .child(color_cell(SurfaceRole::Sunken, "page 2")),
+            ),
         ),
     );
     ctx.add(
@@ -354,8 +337,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 120.0_f32
-                    bind_height: 60.0_f32
+                    width: 120.0_f32
+                    height: 60.0_f32
                     ZStack {
                         RectWidget {
                             background: SurfaceRole::Raised
@@ -445,8 +428,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 180.0_f32
-                    bind_height: 60.0_f32
+                    width: 180.0_f32
+                    height: 60.0_f32
                     ZStack {
                         RectWidget {
                             background: SurfaceRole::AccentSubtle
@@ -467,8 +450,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 200.0_f32
-                    bind_height: 28.0_f32
+                    width: 200.0_f32
+                    height: 28.0_f32
                     HStack {
                         spacing: 0.0
                         child: color_cell(SurfaceRole::Raised, "fixed")
@@ -507,8 +490,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 220.0_f32
-                    bind_height: 28.0_f32
+                    width: 220.0_f32
+                    height: 28.0_f32
                     HStack {
                         child: color_cell(SurfaceRole::Raised, "L")
                         Spacer
@@ -542,8 +525,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 140.0_f32
-                    bind_height: 40.0_f32
+                    width: 140.0_f32
+                    height: 40.0_f32
                     Panel {
                         background: SurfaceRole::AltRow
                         TextWidget::new(tr!(lay_fixed_size())) {
@@ -592,7 +575,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 180.0_f32
+                    width: 180.0_f32
                     AspectRatio::widescreen() {
                         Panel {
                             background: SurfaceRole::Sunken
@@ -618,8 +601,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                         on_activate_fn: move |_| switcher_idx_for_btn.set((switcher_idx_for_btn.get() + 1) % 3)
                     }
                     FixedSize {
-                        bind_width: 180.0_f32
-                        bind_height: 40.0_f32
+                        width: 180.0_f32
+                        height: 40.0_f32
                         Switcher::new(switcher_idx) {
                             child: color_cell(SurfaceRole::AltRow, "page 0")
                             child: color_cell(SurfaceRole::AccentSubtle, "page 1")

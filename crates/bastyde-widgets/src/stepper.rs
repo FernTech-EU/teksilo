@@ -28,7 +28,7 @@
 //!
 //! Stepper::new()
 //!     .step(Step::new(lit!("Account"))
-//!         .content({ let f = form.clone(); move || TextInput::new().bind_text(f.name.clone()) })
+//!         .content({ let f = form.clone(); move || TextInput::new().text(f.name.clone()) })
 //!         .complete_when(form.name.map(|n| !n.is_empty())))
 //!     .step(Step::new(lit!("Plan"))
 //!         .content({ let f = form.clone(); move || plan_picker(f.plan.clone()) }))

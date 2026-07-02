@@ -149,7 +149,7 @@ impl Widget for MainRoot {
         let root = ctx.add(
             VStack::new()
                 .spacing(12.0)
-                .child(TextWidget::new(lit!("")).bind_text(status))
+                .child(TextWidget::new(lit!("")).text(status))
                 // Caret hides + selection desaturates automatically when the
                 // window is inactive — no per-widget opt-in.
                 .child(TextInput::new(field_text))

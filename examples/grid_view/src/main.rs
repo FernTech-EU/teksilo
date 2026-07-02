@@ -102,7 +102,7 @@ fn main() {
                     });
 
                     let grid_id = tree.add(grid);
-                    let status_line = TextWidget::new(lit!("0 selected")).bind_text(status.clone());
+                    let status_line = TextWidget::new(lit!("0 selected")).text(status.clone());
 
                     tree.add(
                         VStack::new()

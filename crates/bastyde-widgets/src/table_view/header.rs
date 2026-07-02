@@ -223,7 +223,7 @@ impl Widget for HeaderCell {
         let label_id = ctx.add(
             TextWidget::new(lit!(self.label.clone()))
                 .style(TextStyleRole::Body)
-                .bind_color(ColorProp::from(TextRole::Primary))
+                .color(ColorProp::from(TextRole::Primary))
                 .single_line()
                 .a11y_hidden(),
         );

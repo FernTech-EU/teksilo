@@ -207,10 +207,10 @@ impl Widget for Root {
 
         let font_label = TextWidget::new(lit!(""))
             .color(theme.colors.text_primary)
-            .bind_text(font_size.clone().map(|v| format!("Font size: {v:.0} pt")));
+            .text(font_size.clone().map(|v| format!("Font size: {v:.0} pt")));
         let show_paths_label = TextWidget::new(lit!(""))
             .color(theme.colors.text_secondary)
-            .bind_text(
+            .text(
                 show_paths
                     .clone()
                     .map(|v| format!("Show paths: {}", if *v { "on" } else { "off" })),
@@ -307,7 +307,7 @@ impl Widget for Root {
             });
             let path_text_widget = TextWidget::new(lit!(""))
                 .color(theme.colors.text_secondary)
-                .bind_text(path_text_signal);
+                .text(path_text_signal);
 
             let label_stack = VStack::new()
                 .spacing(2.0)

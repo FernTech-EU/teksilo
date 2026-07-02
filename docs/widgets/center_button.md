@@ -33,7 +33,7 @@ let bell = NotificationCenterButton::new(archive)
 
 ## Builder methods at a glance
 
-`size`, `show_badge_when_zero`, `max_badge_count`, `placement`, `on_action_invoked`
+`size`, `show_badge_when_zero`, `max_badge_count`, `placement`, `on_action_invoked`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -85,3 +85,36 @@ Threaded into the embedded `NotificationLog` —
 see `NotificationLog::on_action_invoked` for the contract.
 Wire this to dispatch archived actions; without it the
 action buttons in the log are inert.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter
+called wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip`.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline `crate::tooltip::TooltipContent`.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`composite_tooltip`.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip containing an arbitrary widget tree.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`rich_tooltip_content`.

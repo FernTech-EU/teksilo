@@ -50,10 +50,10 @@ Append multiple `Step`s from an iterator.
 
 Set the visual variant of the trigger button (default `Filled`).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable or disable the trigger button. When `false`, tapping or
-pressing the trigger is a no-op.
+Enable or disable the trigger button, statically or reactively.
+When disabled, tapping or pressing the trigger is a no-op.
 
 #### `pub fn non_linear(mut self, non_linear: bool) -> Self`
 

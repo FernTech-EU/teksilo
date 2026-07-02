@@ -33,14 +33,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         ctx,
         tr!(dt_calendar_single()),
         FixedSize::new()
-            .bind_width(280.0_f32)
+            .width(280.0_f32)
             .child(Calendar::single(cal_single_signal).show_today_button(true)),
     );
     let calendar_range = section(
         ctx,
         tr!(dt_calendar_range()),
         FixedSize::new()
-            .bind_width(280.0_f32)
+            .width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
     );
     // Each edit is capped near its own content width — `MaxSize` makes a
@@ -111,7 +111,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 280.0_f32
+                    width: 280.0_f32
                     Calendar::single(cal_single_signal) {
                         show_today_button: true
                     }
@@ -125,7 +125,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 280.0_f32
+                    width: 280.0_f32
                     Calendar::range(cal_range_signal) {
                         show_today_button: true
                     }

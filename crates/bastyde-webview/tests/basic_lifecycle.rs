@@ -176,7 +176,7 @@ fn webview_opened_while_parked_starts_hidden() {
     assert_eq!(records.visibility_log(wv_id), vec![false, true]);
 }
 
-/// Two-way `bind_url`: the binding's registration tick is treated as the
+/// Two-way `url_signal`: the binding's registration tick is treated as the
 /// baseline (no spurious load — the initial page comes from `.url(...)`), but a
 /// later external `set()` drives a navigation, and re-setting the same value
 /// does not re-navigate (the guard filters the echo).
@@ -186,7 +186,7 @@ fn inbound_url_binding_navigates() {
     let mut tree = tree_with_registry(registry);
 
     let url = Signal::new(String::from("https://a.com"));
-    let webview = WebView::new().url("https://a.com").bind_url(url.clone());
+    let webview = WebView::new().url("https://a.com").url_signal(url.clone());
     let wv_id = webview.id();
     tree.add(webview);
     layout(&mut tree);
@@ -206,7 +206,7 @@ fn inbound_url_binding_navigates() {
     assert_eq!(
         loads(&records),
         vec!["https://a.com".to_string()],
-        "only the initial source load; the bind_url baseline must not navigate"
+        "only the initial source load; the url_signal baseline must not navigate"
     );
 
     // External programmatic navigation.

@@ -185,7 +185,7 @@ impl Widget for FileDialogShowcase {
             .child(save_btn);
 
         let status_text = TextWidget::new(lit!("status"))
-            .bind_text(self.status.clone())
+            .text(self.status.clone())
             .style(TextStyleRole::Small);
 
         // Spinner pulses while a dialog is in flight, proving the

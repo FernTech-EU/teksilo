@@ -31,7 +31,7 @@ let _w = Popover::new(lit!("Choose…"))
 
 ## Builder methods at a glance
 
-`surface_variant`, `style`, `content`, `content_id`, `variant`, `enabled`, `placement`, `dismiss_behavior`, `trigger`, `trigger_id`, `caret`, `caret_size`, `focus_on_show`
+`surface_variant`, `style`, `content`, `content_id`, `variant`, `enabled`, `placement`, `dismiss_behavior`, `trigger`, `trigger_id`, `caret`, `caret_size`, `focus_on_show`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -79,9 +79,10 @@ Set the popover body by pre-registered `WidgetId`.
 
 Set the `ButtonVariant` used for the built-in text trigger. Default `Plain`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable or disable the trigger button. Default `true`.
+Enable or disable the trigger button, statically or reactively.
+Default `true`.
 
 #### `pub fn placement(mut self, placement: OverlayPlacement) -> Self`
 
@@ -117,3 +118,23 @@ Override the caret size in logical pixels (clamped to `0`). Default `10`.
 Request focus on a specific widget immediately after the popover
 opens. The slot is written by the content widget during `build()`
 (same pattern as `ComboBox`'s search-input slot).
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain-text tooltip to the trigger button. Clears any
+previously set rich or composite tooltip on this `Popover`.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip driven by a registry key. Clears any
+previously set plain or composite tooltip on this `Popover`.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline `crate::tooltip::TooltipContent`
+value. Clears any previously set plain or composite tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip (arbitrary widget body) to the trigger
+button. Clears any previously set plain or rich tooltip.

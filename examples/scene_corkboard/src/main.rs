@@ -343,7 +343,7 @@ fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -
             build_card(card, delegate_selection.clone(), id)
         })
         .default_size(sw, sh)
-        .bind_view_state(
+        .view_state(
             camera.pan_x.clone(),
             camera.pan_y.clone(),
             camera.zoom.clone(),

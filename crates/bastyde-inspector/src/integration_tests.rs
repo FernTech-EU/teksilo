@@ -429,24 +429,24 @@ fn overflow_stripes_collected_for_overflowing_user_root() {
     // so `collect_overflow` must record an overhang strip.
     let row = tree.add(
         FixedSize::new()
-            .bind_width(Signal::new(300.0))
-            .bind_height(Signal::new(60.0))
+            .width(Signal::new(300.0))
+            .height(Signal::new(60.0))
             .child(
                 HStack::new()
                     .child(
                         FixedSize::new()
-                            .bind_width(Signal::new(200.0))
-                            .bind_height(Signal::new(40.0)),
+                            .width(Signal::new(200.0))
+                            .height(Signal::new(40.0)),
                     )
                     .child(
                         FixedSize::new()
-                            .bind_width(Signal::new(200.0))
-                            .bind_height(Signal::new(40.0)),
+                            .width(Signal::new(200.0))
+                            .height(Signal::new(40.0)),
                     )
                     .child(
                         FixedSize::new()
-                            .bind_width(Signal::new(200.0))
-                            .bind_height(Signal::new(40.0)),
+                            .width(Signal::new(200.0))
+                            .height(Signal::new(40.0)),
                     ),
             ),
     );

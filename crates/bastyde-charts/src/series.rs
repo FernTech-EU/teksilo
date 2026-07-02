@@ -10,7 +10,7 @@
 //! `Prop<Vec<ChartSeries<T>>>`.
 
 use bastyde_core::color_prop::ColorProp;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::Prop;
 
 /// One numeric data point at a category/x-axis position.
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ impl<T> ChartDatum<T> {
 pub struct ChartSeries<T> {
     pub name: String,
     pub color: Option<ColorProp>,
-    pub visible: Signal<bool>,
+    pub visible: Prop<bool>,
     pub data: Vec<ChartDatum<T>>,
 }
 
@@ -65,7 +65,7 @@ impl<T> ChartSeries<T> {
         Self {
             name: name.into(),
             color: None,
-            visible: Signal::new(true),
+            visible: Prop::Static(true),
             data: Vec::new(),
         }
     }
@@ -85,9 +85,10 @@ impl<T> ChartSeries<T> {
     }
 
     /// Bind the series visibility to an externally-owned signal (so a
-    /// legend or a settings UI can toggle multiple series in sync).
-    pub fn visibility(mut self, signal: Signal<bool>) -> Self {
-        self.visible = signal;
+    /// legend or a settings UI can toggle multiple series in sync), or set
+    /// a fixed value.
+    pub fn visibility(mut self, visible: impl Into<Prop<bool>>) -> Self {
+        self.visible = visible.into();
         self
     }
 }
@@ -95,6 +96,7 @@ impl<T> ChartSeries<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_core::signal::Signal;
 
     #[test]
     fn builder_chain() {

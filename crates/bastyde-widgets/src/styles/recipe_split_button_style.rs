@@ -71,9 +71,9 @@ impl SplitButtonStyle for RecipeSplitButtonStyle {
         // Shared frame (single RectWidget behind the content row).
         let bg_id = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
-                .bind_border_color(border_role)
-                .bind_border_width(border_width)
+                .background(bg_role)
+                .border_color(border_role)
+                .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(SPLIT_BUTTON_CORNER_RADIUS)),
         );
 

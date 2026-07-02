@@ -158,9 +158,9 @@ impl MenuEntry {
         });
         match &self.state {
             MenuItemState::Plain => {}
-            MenuItemState::Check(s) => mi = mi.bind_checked(s.clone()),
+            MenuItemState::Check(s) => mi = mi.checked(s.clone()),
             MenuItemState::ReflectCheck(s) => mi = mi.reflect_checked(s.clone()),
-            MenuItemState::TriCheck(s) => mi = mi.bind_check_state(s.clone()),
+            MenuItemState::TriCheck(s) => mi = mi.check_state(s.clone()),
             MenuItemState::Radio { value, selected } => mi = mi.radio(*value, selected.clone()),
         }
         mi

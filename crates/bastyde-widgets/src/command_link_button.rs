@@ -20,7 +20,7 @@
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{
@@ -46,8 +46,9 @@ pub struct CommandLinkButton {
     title: LocalizedString,
     description: Option<LocalizedString>,
     icon: Option<IconWidget>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     action: Option<Box<dyn Fn(&mut EventContext)>>,
     /// Per-call title text-style override. `None` ⇒ `TextStyleRole::BodyBold`.
     title_style: Option<bastyde_core::color_prop::TextStyleProp>,
@@ -78,7 +79,7 @@ impl CommandLinkButton {
             title: ls,
             description: None,
             icon: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             action: None,
             title_style: None,
             description_style: None,
@@ -106,10 +107,10 @@ impl CommandLinkButton {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -198,7 +199,7 @@ impl std::fmt::Debug for CommandLinkButton {
         f.debug_struct("CommandLinkButton")
             .field("title", &self.title)
             .field("description", &self.description)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -221,10 +222,8 @@ fn resolve_border_role(state: InteractionState) -> BorderRole {
 impl Widget for CommandLinkButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled to the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state to the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = interaction.clone();
@@ -258,7 +257,7 @@ impl Widget for CommandLinkButton {
             .unwrap_or_else(|| TextStyleRole::BodyBold.into());
         let title_widget = TextWidget::new(self.title.clone())
             .style(title_style)
-            .bind_color(title_color)
+            .color(title_color)
             .single_line()
             .a11y_hidden();
         let title_id = ctx.add(title_widget);
@@ -279,7 +278,7 @@ impl Widget for CommandLinkButton {
             let desc = ctx.add(
                 TextWidget::new(description.clone())
                     .style(desc_style)
-                    .bind_color(desc_color)
+                    .color(desc_color)
                     .a11y_hidden(),
             );
             text_column = text_column.add_child(desc);
@@ -293,7 +292,7 @@ impl Widget for CommandLinkButton {
         if let Some(icon) = self.icon.take() {
             let icon_id = ctx.add(
                 icon.icon_size(COMMAND_LINK_BUTTON_ICON_SIZE)
-                    .bind_color(icon_role),
+                    .color(icon_role),
             );
             row = row.add_child(icon_id);
         }
@@ -312,9 +311,9 @@ impl Widget for CommandLinkButton {
         // Surface (background + border, drives hover / press / focus).
         let rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
-                .bind_border_color(border_role)
-                .bind_border_width(border_width)
+                .background(bg_role)
+                .border_color(border_role)
+                .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(corner_radius)),
         );
 

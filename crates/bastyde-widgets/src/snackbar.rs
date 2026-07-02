@@ -45,6 +45,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use bastyde_core::signal::Prop;
 use bastyde_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
 use bastyde_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
@@ -210,7 +211,13 @@ impl Widget for SnackbarSurface {
 pub struct Snackbar {
     label: LocalizedString,
     variant: ButtonVariant,
-    enabled: bool,
+    /// Enabled state (static or reactive). Wired into the arena on the
+    /// trigger node -- the default `Button` and, on the `.trigger(...)`
+    /// path, the `OverlayTrigger` -- so a disabled trigger greys out,
+    /// reports `disabled` to AT, and has its dispatch gated. The snapshot
+    /// read in `build()` is a redundant early-out kept in the custom-trigger
+    /// closures.
+    enabled: Prop<bool>,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
     pending_content: Option<PendingChild>,
@@ -231,7 +238,7 @@ impl Snackbar {
         Self {
             label: ls,
             variant: ButtonVariant::Plain,
-            enabled: true,
+            enabled: Prop::Static(true),
             dismiss: DismissBehavior::ClickOutside,
             auto_dismiss_after: Some(DEFAULT_AUTO_DISMISS),
             pending_content: None,
@@ -279,9 +286,9 @@ impl Snackbar {
         self
     }
 
-    /// Set the initial enabled state of the trigger.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Set the enabled state of the trigger, statically or reactively.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -338,7 +345,7 @@ impl std::fmt::Debug for Snackbar {
         f.debug_struct("Snackbar")
             .field("label", &self.label)
             .field("style", &self.variant)
-            .field("enabled", &self.enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -347,7 +354,10 @@ impl Widget for Snackbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let label = self.label.clone();
-        let enabled = self.enabled;
+        // Redundant early-out for the custom-trigger closures below; the
+        // arena.s `enabled_when` (wired on the OverlayTrigger) already gates
+        // dispatch, so this snapshot is belt-and-suspenders.
+        let enabled = self.enabled.get();
         let dismiss = self.dismiss.clone();
         let auto_dismiss_after = self.auto_dismiss_after;
         let style = self.variant;
@@ -438,6 +448,7 @@ impl Widget for Snackbar {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
+            .enabled(self.enabled.clone())
             .name(label);
             ctx.add(overlay_trigger)
         } else {
@@ -447,7 +458,7 @@ impl Widget for Snackbar {
             ctx.add(
                 Button::new(label)
                     .variant(style)
-                    .enabled(enabled)
+                    .enabled(self.enabled.clone())
                     .on_activate_fn(move |ctx| {
                         present_snackbar(
                             ctx,

@@ -201,9 +201,10 @@ Required — the dialog panics at build time if no factory is set.
 Visual style of the default trigger button. Has no effect when
 `.trigger(…)` replaces the button with a custom widget.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable or disable the trigger button (default `true`).
+Enable or disable the trigger button, statically or reactively
+(default `true`).
 
 #### `pub fn presentation(mut self, presentation: ModalPresentation) -> Self`
 

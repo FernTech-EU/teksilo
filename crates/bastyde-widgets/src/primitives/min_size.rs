@@ -71,13 +71,13 @@ impl MinSize {
     }
 
     /// Bind min width to a reactive state.
-    pub fn bind_min_width(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn min_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.min_width = Some(state.into());
         self
     }
 
     /// Bind min height to a reactive state.
-    pub fn bind_min_height(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn min_height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.min_height = Some(state.into());
         self
     }
@@ -256,15 +256,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_min_width_dynamic() {
+    fn min_width_dynamic() {
         let min_w = Signal::new(48.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(
-            MinSize::width(0.0)
-                .bind_min_width(min_w.clone())
-                .child_id(child),
-        );
+        let min = tree.add(MinSize::width(0.0).min_width(min_w.clone()).child_id(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 48.0).abs() < 0.01);
 

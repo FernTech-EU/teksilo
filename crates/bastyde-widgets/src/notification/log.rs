@@ -247,7 +247,7 @@ impl Widget for NotificationLog {
                 Some(w) => ctx.add_boxed(w),
                 None => ctx.add(
                     TextWidget::new(bastyde_i18n::tr_widget!(notifications_empty()))
-                        .bind_color(TextRole::Secondary)
+                        .color(TextRole::Secondary)
                         .style(TextStyleRole::Body),
                 ),
             };
@@ -275,7 +275,7 @@ impl Widget for NotificationLog {
                 if Some(bucket) != current_bucket {
                     let header = TextWidget::new(bucket_label(bucket))
                         .style(TextStyleRole::SmallBold)
-                        .bind_color(TextRole::Secondary);
+                        .color(TextRole::Secondary);
                     sections = sections.add_child(ctx.add(header));
                     current_bucket = Some(bucket);
                 }
@@ -358,7 +358,7 @@ fn build_actions_row(
             row = row.child(
                 TextWidget::new(lit!(label))
                     .style(TextStyleRole::Small)
-                    .bind_color(TextRole::Secondary),
+                    .color(TextRole::Secondary),
             );
             continue;
         }

@@ -180,11 +180,7 @@ impl Widget for Panel {
             Some(id) => id,
             // Headless / empty panel — emit a zero-size placeholder so
             // the style still has a `content: WidgetId` to wrap.
-            None => ctx.add(
-                crate::primitives::FixedSize::new()
-                    .bind_width(0.0)
-                    .bind_height(0.0),
-            ),
+            None => ctx.add(crate::primitives::FixedSize::new().width(0.0).height(0.0)),
         };
 
         let style: SharedPanelStyle = self

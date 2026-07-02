@@ -14,6 +14,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
+use bastyde_core::signal::Prop;
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
 };
@@ -94,7 +95,9 @@ fn present_wizard(spec: &Rc<WizardSpec>, ctx: &mut EventContext) {
 pub struct Wizard {
     label: LocalizedString,
     variant: ButtonVariant,
-    enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at build
+    /// time.
+    enabled: Prop<bool>,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     size: (u32, u32),
@@ -117,7 +120,7 @@ impl Wizard {
         Self {
             label: label.into(),
             variant: ButtonVariant::Filled,
-            enabled: true,
+            enabled: Prop::Static(true),
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::Manual,
             size: (DEFAULT_WIZARD_WIDTH, DEFAULT_WIZARD_HEIGHT),
@@ -149,10 +152,10 @@ impl Wizard {
         self.variant = variant;
         self
     }
-    /// Enable or disable the trigger button. When `false`, tapping or
-    /// pressing the trigger is a no-op.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Enable or disable the trigger button, statically or reactively.
+    /// When disabled, tapping or pressing the trigger is a no-op.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
     /// Allow jumping between steps by clicking their indicators (the
@@ -242,7 +245,7 @@ impl std::fmt::Debug for Wizard {
 
 impl Widget for Wizard {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
+        let enabled = self.enabled.clone();
         let spec = self.spec();
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
@@ -251,19 +254,21 @@ impl Widget for Wizard {
                 .cursor(CursorIcon::Pointer)
                 .on_tap({
                     let spec = spec.clone();
+                    let enabled = enabled.clone();
                     move |_pos, ctx| {
-                        if enabled {
+                        if enabled.get() {
                             present_wizard(&spec, ctx);
                         }
                     }
                 })
                 .on_key({
                     let spec = spec.clone();
+                    let enabled = enabled.clone();
                     move |event, ctx| match event {
                         WidgetEvent::KeyUp {
                             key: Key::Enter | Key::Space,
                             ..
-                        } if enabled => {
+                        } if enabled.get() => {
                             present_wizard(&spec, ctx);
                             EventResponse::Handled
                         }
@@ -272,8 +277,9 @@ impl Widget for Wizard {
                 })
                 .on_access_action({
                     let spec = spec.clone();
+                    let enabled = enabled.clone();
                     move |action, ctx| {
-                        if action == bastyde_core::accesskit::Action::Click && enabled {
+                        if action == bastyde_core::accesskit::Action::Click && enabled.get() {
                             present_wizard(&spec, ctx);
                             EventResponse::Handled
                         } else {
@@ -281,14 +287,18 @@ impl Widget for Wizard {
                         }
                     }
                 });
-            ctx.add(OverlayTrigger::new(trigger, handlers).name(self.label.clone()))
+            ctx.add(
+                OverlayTrigger::new(trigger, handlers)
+                    .enabled(self.enabled.clone())
+                    .name(self.label.clone()),
+            )
         } else {
             ctx.add(
                 Button::new(self.label.clone())
                     .variant(self.variant)
-                    .enabled(enabled)
+                    .enabled(enabled.clone())
                     .on_activate_fn(move |ctx| {
-                        if enabled {
+                        if enabled.get() {
                             present_wizard(&spec, ctx);
                         }
                     }),

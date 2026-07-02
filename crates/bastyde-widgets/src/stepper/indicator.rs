@@ -116,7 +116,7 @@ impl Widget for StepIndicator {
 
         let mut block = VStack::new().spacing(2.0).child(
             TextWidget::new(lit!(""))
-                .bind_text(title_sig)
+                .text(title_sig)
                 .style(TextStyleRole::Body)
                 .color(if self.is_active() {
                     TextRole::Primary
@@ -131,7 +131,7 @@ impl Widget for StepIndicator {
             let supporting_sig = locale2.map(move |_| supporting.resolve_now());
             block = block.child(
                 TextWidget::new(lit!(""))
-                    .bind_text(supporting_sig)
+                    .text(supporting_sig)
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .single_line(),

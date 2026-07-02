@@ -80,7 +80,7 @@ fn viewer_doc() -> TextDocument {
 }
 
 fn editor_widget() -> FixedSize {
-    FixedSize::new().bind_width(560.0_f32).child(
+    FixedSize::new().width(560.0_f32).child(
         RichTextEditor::editor(editor_doc())
             .min_lines(3)
             .max_lines(12),
@@ -89,8 +89,8 @@ fn editor_widget() -> FixedSize {
 
 fn viewer_widget() -> FixedSize {
     FixedSize::new()
-        .bind_width(560.0_f32)
-        .bind_height(240.0_f32)
+        .width(560.0_f32)
+        .height(240.0_f32)
         .child(RichTextEditor::read_only(viewer_doc()))
 }
 
@@ -99,7 +99,7 @@ fn viewer_widget() -> FixedSize {
 /// chosen family in its own typeface in the closed control.
 fn font_picker_widget() -> FixedSize {
     FixedSize::new()
-        .bind_width(320.0_f32)
+        .width(320.0_f32)
         .child(FontPicker::new(Signal::new(None::<String>)))
 }
 

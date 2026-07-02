@@ -55,7 +55,7 @@ pub struct Step {
     pub(crate) initial_status: StepStatus,
     /// Reactive completion gate — when `Some`, the Next button binds its
     /// enabled state to this signal while this step is active.
-    pub(crate) complete: Option<bastyde_core::signal::Signal<bool>>,
+    pub(crate) complete: Option<bastyde_core::signal::Prop<bool>>,
     /// Imperative fallback — checked on the Next click; if it returns
     /// `false`, navigation does not advance.
     pub(crate) validate: Option<StepValidator>,
@@ -116,8 +116,8 @@ impl Step {
     /// Reactive Next gate: while this step is active, Next is enabled iff
     /// `signal` is `true`. Derive it from the same form signals the step's
     /// content writes — e.g. `name.map(|n| !n.is_empty())`.
-    pub fn complete_when(mut self, signal: bastyde_core::signal::Signal<bool>) -> Self {
-        self.complete = Some(signal);
+    pub fn complete_when(mut self, signal: impl Into<bastyde_core::signal::Prop<bool>>) -> Self {
+        self.complete = Some(signal.into());
         self
     }
 

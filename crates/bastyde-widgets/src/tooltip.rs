@@ -178,7 +178,7 @@ impl TooltipWidget {
 impl Widget for TooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let text = TextWidget::new(lit!(""))
-            .bind_text(self.text.clone())
+            .text(self.text.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .single_line();

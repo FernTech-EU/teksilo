@@ -71,7 +71,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{CheckState, FlatEntry};
@@ -255,27 +255,17 @@ impl StandardListItem {
         self
     }
 
-    /// Set the initial selection state (static value).
-    pub fn selected(mut self, b: bool) -> Self {
-        self.selected = Signal::new(b);
+    /// Set the selection state, statically or reactively via a bound
+    /// `Signal<bool>`.
+    pub fn selected(mut self, selected: impl Into<Prop<bool>>) -> Self {
+        self.selected = selected.into().as_signal();
         self
     }
 
-    /// Bind the selection state to a reactive `Signal<bool>`.
-    pub fn bind_selected(mut self, s: Signal<bool>) -> Self {
-        self.selected = s;
-        self
-    }
-
-    /// Set the initial enabled state (static value).
-    pub fn enabled(mut self, b: bool) -> Self {
-        self.enabled = Signal::new(b);
-        self
-    }
-
-    /// Bind the enabled state to a reactive `Signal<bool>`.
-    pub fn bind_enabled(mut self, s: Signal<bool>) -> Self {
-        self.enabled = s;
+    /// Set the enabled state, statically or reactively via a bound
+    /// `Signal<bool>` / `Prop<bool>`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into().as_signal();
         self
     }
 
@@ -401,8 +391,8 @@ impl StandardListItem {
             .style(self.label_style.clone())
             .a11y_hidden();
         label_widget = match &self.label_color {
-            Some(c) => label_widget.bind_color(c.clone()),
-            None => label_widget.bind_color(label_role.clone()),
+            Some(c) => label_widget.color(c.clone()),
+            None => label_widget.color(label_role.clone()),
         };
         let label_id = ctx.add(label_widget);
 
@@ -412,7 +402,7 @@ impl StandardListItem {
                 .style(self.subtitle_style.clone())
                 .a11y_hidden();
             subtitle_widget = match &self.subtitle_color {
-                Some(c) => subtitle_widget.bind_color(c.clone()),
+                Some(c) => subtitle_widget.color(c.clone()),
                 None => subtitle_widget.color(TextRole::Secondary),
             };
             let subtitle_text_id = ctx.add(subtitle_widget);
@@ -661,7 +651,7 @@ pub struct StandardTreeItem {
     inner: StandardListItem,
     depth: usize,
     has_children: bool,
-    is_expanded: Signal<bool>,
+    is_expanded: Prop<bool>,
     on_toggle: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,
 }
 
@@ -672,7 +662,7 @@ impl StandardTreeItem {
             inner: StandardListItem::new(label),
             depth: 0,
             has_children: false,
-            is_expanded: Signal::new(false),
+            is_expanded: Prop::Static(false),
             on_toggle: None,
         }
     }
@@ -767,27 +757,19 @@ impl StandardTreeItem {
         self
     }
 
-    /// Set the initial selection state (static value).
-    pub fn selected(mut self, b: bool) -> Self {
-        self.inner = self.inner.selected(b);
+    /// Set the selection state, statically or reactively via a bound
+    /// `Signal<bool>`. Forwarded to the inner [`StandardListItem`] — see
+    /// its [`selected`](StandardListItem::selected).
+    pub fn selected(mut self, selected: impl Into<Prop<bool>>) -> Self {
+        self.inner = self.inner.selected(selected);
         self
     }
 
-    /// Bind the selection state to a reactive `Signal<bool>`.
-    pub fn bind_selected(mut self, s: Signal<bool>) -> Self {
-        self.inner = self.inner.bind_selected(s);
-        self
-    }
-
-    /// Set the initial enabled state (static value).
-    pub fn enabled(mut self, b: bool) -> Self {
-        self.inner = self.inner.enabled(b);
-        self
-    }
-
-    /// Bind the enabled state to a reactive `Signal<bool>`.
-    pub fn bind_enabled(mut self, s: Signal<bool>) -> Self {
-        self.inner = self.inner.bind_enabled(s);
+    /// Set the enabled state, statically or reactively via a bound
+    /// `Signal<bool>` / `Prop<bool>`. Forwarded to the inner
+    /// [`StandardListItem`].
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.inner = self.inner.enabled(enabled);
         self
     }
 
@@ -885,15 +867,10 @@ impl StandardTreeItem {
         self
     }
 
-    /// Set the initial expanded state (static value).
-    pub fn is_expanded(mut self, b: bool) -> Self {
-        self.is_expanded = Signal::new(b);
-        self
-    }
-
-    /// Bind the expanded state to a reactive `Signal<bool>`.
-    pub fn bind_is_expanded(mut self, s: Signal<bool>) -> Self {
-        self.is_expanded = s;
+    /// Set the expanded state, statically or reactively via a bound
+    /// `Signal<bool>`.
+    pub fn is_expanded(mut self, expanded: impl Into<Prop<bool>>) -> Self {
+        self.is_expanded = expanded.into();
         self
     }
 
@@ -956,7 +933,7 @@ impl Widget for StandardTreeItem {
 
         // 2. Indent column — empty FixedSize at `depth * step` width.
         let indent_width = self.depth as f32 * si::STANDARD_ITEM_TREE_INDENT_STEP;
-        let indent_id = ctx.add(FixedSize::new().bind_width(indent_width));
+        let indent_id = ctx.add(FixedSize::new().width(indent_width));
 
         // 3. Chevron column — always reserved width so siblings at
         //    the same depth align. `TwistArrow` paints nothing for
@@ -972,7 +949,7 @@ impl Widget for StandardTreeItem {
         {
             chevron = chevron.on_click(move |ctx| cb(ctx));
         }
-        let chevron_column_id = ctx.add(FixedSize::new().bind_width(chevron_size).child(chevron));
+        let chevron_column_id = ctx.add(FixedSize::new().width(chevron_size).child(chevron));
 
         // 4. Outer HStack: indent | chevron column | inner row.
         let outer_row_id = ctx.add(
@@ -1181,7 +1158,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
             FixedSize::new()
-                .bind_width(20.0_f32)
+                .width(20.0_f32)
                 .child(TwistArrow::new(20.0, true, false))
                 .on_tap(move |_, _| f.set(f.get() + 1)),
         );
@@ -1208,8 +1185,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
             FixedSize::new()
-                .bind_width(40.0_f32)
-                .bind_height(40.0_f32)
+                .width(40.0_f32)
+                .height(40.0_f32)
                 .child(TextWidget::new(lit!("x")))
                 .on_tap(move |_, _| f.set(f.get() + 1)),
         );

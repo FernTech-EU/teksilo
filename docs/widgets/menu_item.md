@@ -16,8 +16,8 @@ Every item operates in one of three **modes** selected by builder methods:
 | Builder | AT Role | Leading glyph |
 |---|---|---|
 | (default) | `Role::MenuItem` | icon or blank |
-| `.bind_checked(signal)` | `Role::MenuItemCheckBox` | checkmark / blank |
-| `.bind_check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
+| `.checked(signal)` | `Role::MenuItemCheckBox` | checkmark / blank |
+| `.check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
 | `.reflect_checked(signal)` | `Role::MenuItemCheckBox` | checkmark (read-only) |
 | `.radio(value, selected)` | `Role::MenuItemRadio` | filled dot / blank |
 
@@ -39,7 +39,7 @@ let _w = MenuItem::new(lit!("&Save"))
 
 ## Builder methods at a glance
 
-`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `shortcut_label`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `bind_checked`, `reflect_checked`, `bind_check_state`, `radio`
+`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `shortcut_label`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
 
 ## API reference
 
@@ -172,17 +172,17 @@ Set a custom submenu open delay (default: 200ms).
 
 Whether this is a submenu trigger.
 
-#### `pub fn bind_checked(mut self, state: Signal<bool>) -> Self`
+#### `pub fn checked(mut self, state: Signal<bool>) -> Self`
 
 Bind this item to a two-state `Signal<bool>`. The item renders
 `Role::MenuItemCheckBox`; activation flips the signal. By
 Windows convention, the leading icon slot becomes a checkmark
 when the signal is `true`, blank otherwise.
 
-Mutually exclusive with `bind_check_state`
+Mutually exclusive with `check_state`
 and `radio` — last call wins.
 
-#### `pub fn reflect_checked(mut self, state: Signal<bool>) -> Self`
+#### `pub fn reflect_checked(mut self, state: impl Into<Prop<bool>>) -> Self`
 
 Render `Role::MenuItemCheckBox` whose checkmark **reflects** `state`
 read-only: activation does NOT write the signal — the truth lives
@@ -190,11 +190,11 @@ elsewhere (a model / method), and this item's `on_activate`/intent is
 responsible for the change, after which `state` updates the checkmark
 reactively. Use for "View ▸ Sidebar / Full Screen"-style commands that
 mirror externally-owned state (e.g. `DockingModel::dock_open_signal`),
-where two-way `bind_checked` would fight the model.
+where two-way `checked` would fight the model.
 
 Mutually exclusive with the other check / radio binders — last call wins.
 
-#### `pub fn bind_check_state(mut self, state: Signal<CheckState>) -> Self`
+#### `pub fn check_state(mut self, state: Signal<CheckState>) -> Self`
 
 Bind this item to a tri-state `Signal<CheckState>`. The item
 renders `Role::MenuItemCheckBox`; activation cycles
@@ -207,7 +207,7 @@ The leading-slot glyph is `checkmark` for `Checked`, `dash`
 for `Indeterminate`, blank for `Unchecked` — matching the
 Windows mixed-state convention.
 
-Mutually exclusive with `bind_checked`
+Mutually exclusive with `checked`
 and `radio` — last call wins.
 
 #### `pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self`
@@ -223,6 +223,6 @@ For "2 of 3"-style AT announcement, the enclosing
 by selection-signal identity and emits `push_to_radio_group`
 relationships automatically — no app-side wiring required.
 
-Mutually exclusive with `bind_checked`
-and `bind_check_state` — last call
+Mutually exclusive with `checked`
+and `check_state` — last call
 wins.

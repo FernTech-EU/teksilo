@@ -409,7 +409,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
 
         // A spacer pushes the bell to the bottom edge (status bar).
-        let spacer = tree.add(FixedSize::new().bind_height(500.0).child(Spacer::new()));
+        let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
         let bell = tree.add(NotificationCenterButton::new(archive.clone()));
         let user_root = tree.add(VStack::new().add_child(spacer).add_child(bell));
 
@@ -453,7 +453,7 @@ mod tests {
             archive.push(entry(&format!("n{i}")));
         }
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let spacer = tree.add(FixedSize::new().bind_height(500.0).child(Spacer::new()));
+        let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
         let bell = tree.add(NotificationCenterButton::new(archive.clone()));
         tree.add(VStack::new().add_child(spacer).add_child(bell));
         tree.layout(SizeProposal::exact(400.0, 600.0));

@@ -83,8 +83,8 @@ impl Widget for ValidationStrip {
 
         let label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Small)
-            .bind_text(text_signal)
-            .bind_color(bastyde_core::color_prop::ColorProp::DynamicTextRole(
+            .text(text_signal)
+            .color(bastyde_core::color_prop::ColorProp::DynamicTextRole(
                 color_signal,
             ))
             .single_line()

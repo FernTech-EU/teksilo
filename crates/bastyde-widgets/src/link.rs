@@ -33,7 +33,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{LinkStyleConfig, SharedLinkStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -58,9 +58,10 @@ pub struct Link {
     /// when no transient interaction (hover / press) is active.
     /// Default is a permanently-`false` signal so links that don't
     /// represent URLs render as unvisited.
-    visited: Option<Signal<bool>>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    visited: Option<Prop<bool>>,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     /// Per-call override for the link chrome.
     style_override: Option<SharedLinkStyle>,
     root_child_id: Option<WidgetId>,
@@ -79,7 +80,7 @@ impl Link {
             composite_tooltip_content: None,
             interaction: None,
             visited: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             style_override: None,
             root_child_id: None,
         }
@@ -89,8 +90,8 @@ impl Link {
     /// when no transient interaction (hover / press) is active. Visited
     /// is overridden by hover/press, following the web convention. The
     /// app owns the signal (typically backed by URL-history state).
-    pub fn visited(mut self, visited: Signal<bool>) -> Self {
-        self.visited = Some(visited);
+    pub fn visited(mut self, visited: impl Into<Prop<bool>>) -> Self {
+        self.visited = Some(visited.into());
         self
     }
 
@@ -155,10 +156,11 @@ impl Link {
         self.url.as_deref()
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time — a bound `Signal<bool>` updates live as it
+    /// changes.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 }
@@ -172,10 +174,8 @@ impl std::fmt::Debug for Link {
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         let interaction = ctx.signal(InteractionState::Idle);
@@ -192,7 +192,11 @@ impl Widget for Link {
         let is_focused = interaction
             .map(|s| matches!(s, InteractionState::Focused))
             .and(&ctx.focus_visible());
-        let is_visited = self.visited.clone().unwrap_or_else(|| Signal::new(false));
+        let is_visited = self
+            .visited
+            .as_ref()
+            .map(|p| p.as_signal())
+            .unwrap_or_else(|| Signal::new(false));
         let is_disabled = effective_enabled.map(|on| !*on);
 
         let style: SharedLinkStyle = self

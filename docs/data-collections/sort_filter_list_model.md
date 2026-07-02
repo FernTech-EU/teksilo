@@ -68,7 +68,7 @@ assert_eq!(proxy.len(), 2); // Alice, Carol
 
 ## Builder methods at a glance
 
-`from_source`, `with_comparator`, `with_predicate`, `bind_sort_signal`, `bind_filters_signal`, `set_sort`, `clear_sort`, `set_filter`, `clear_filters`, `first_changed_index`, `source_index_of`, `visible_index_of`
+`from_source`, `with_comparator`, `with_predicate`, `sort_signal`, `filters_signal`, `set_sort`, `clear_sort`, `set_filter`, `clear_filters`, `first_changed_index`, `source_index_of`, `visible_index_of`
 
 ## API reference
 
@@ -118,12 +118,12 @@ Register a predicate factory for a column id. The factory receives the
 current filter text (empty = no filter, never invoked) and returns a
 boxed predicate evaluated against each row. Chainable.
 
-#### `pub fn bind_sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>)`
+#### `pub fn sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>)`
 
 Bind a sort signal — typically `TableView::sort_signal()`. Updates
 re-project the view. The current value is read once at bind time.
 
-#### `pub fn bind_filters_signal(&self, signal: Signal<HashMap<String, String>>)`
+#### `pub fn filters_signal(&self, signal: Signal<HashMap<String, String>>)`
 
 Bind a filters signal — typically `TableView::filters_signal()`.
 Updates re-project the view. The current value is read once at bind

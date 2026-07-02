@@ -30,7 +30,7 @@ let _swatch = ColorSwatch::new(Color::new(0.21, 0.52, 0.89, 1.0))
 
 ## Builder methods at a glance
 
-`selected`, `label`, `size`, `corner_radius`, `enabled`, `on_activate_fn`
+`selected`, `label`, `size`, `corner_radius`, `enabled`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -78,11 +78,40 @@ the theme's `recipe_color_picker_style::SWATCH_SIZE`.
 Set the corner radius of the swatch cell in logical pixels.
 Defaults to `recipe_color_picker_style::SWATCH_CORNER_RADIUS`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Register an activation callback invoked on tap, Enter, Space, or
 the `Action::Click` accessibility action.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `Self::rich_tooltip`, `Self::rich_tooltip_content`,
+and `Self::composite_tooltip` — this call clears the other slots.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up from the tooltip registry by key.
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip_content`,
+and `Self::composite_tooltip` — this call clears the other slots.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip with inline content (no registry lookup required).
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip`,
+and `Self::composite_tooltip` — this call clears the other slots.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip`,
+and `Self::rich_tooltip_content` — this call clears the other slots.

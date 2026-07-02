@@ -50,7 +50,7 @@ scope.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/font_picker/index.html)
 
 ## `pub enum FontSpacingFilter`
 
@@ -171,9 +171,9 @@ Placeholder shown when nothing is selected. Defaults to a localized
 
 Accessible / control label. Defaults to a localized "Font".
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable / disable the control.
+Enable / disable the control, statically or reactively.
 
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 

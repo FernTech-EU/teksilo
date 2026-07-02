@@ -127,7 +127,7 @@ fn main() {
                                     .child(
                                         TextWidget::new(lit!(""))
                                             .style(TextStyleRole::BodyBold)
-                                            .bind_text(total_label),
+                                            .text(total_label),
                                     ),
                             ),
                         );

@@ -125,7 +125,9 @@ pub struct FontPicker {
 
     placeholder: Option<LocalizedString>,
     label: Option<LocalizedString>,
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the inner
+    /// [`ComboBox`] at build time.
+    enabled: Prop<bool>,
     variant: ComboBoxVariant,
     style_override: Option<SharedComboBoxStyle>,
     max_visible_items: Option<usize>,
@@ -190,7 +192,7 @@ impl FontPicker {
             show_selected_in_own_font: true,
             placeholder: None,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             variant: ComboBoxVariant::default(),
             style_override: None,
             max_visible_items: None,
@@ -334,9 +336,9 @@ impl FontPicker {
         self
     }
 
-    /// Enable / disable the control.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Enable / disable the control, statically or reactively.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -559,7 +561,7 @@ impl Widget for FontPicker {
             })
             .variant(self.variant)
             .searchable(self.searchable)
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .label(
                 self.label
                     .clone()

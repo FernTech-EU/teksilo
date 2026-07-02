@@ -10,7 +10,7 @@ impl WidgetTree {
         // One unified flush: both visual buckets and the a11y flag
         // are drained from the same walk, so a signal bound at both
         // a visual level and `AccessibilityOnly` (e.g. a Button's
-        // `bind_label` re-registers the same Signal at RepaintOnly
+        // `label` re-registers the same Signal at RepaintOnly
         // *and* AccessibilityOnly) flips both. Two separate flushes
         // would race on the shared per-Signal dirty flag and the
         // second flush would always see it cleared.

@@ -170,7 +170,7 @@ fn build_kit(
                     Pulse::opacity(0.25, 1.0)
                         .period(Duration::from_millis(1100))
                         .child(
-                            FixedSize::new().bind_width(14.0).bind_height(14.0).child(
+                            FixedSize::new().width(14.0).height(14.0).child(
                                 RectWidget::new()
                                     .background(Color::from_rgb(0.85, 0.18, 0.20))
                                     .corner_radius(CornerRadius::uniform(7.0)),
@@ -324,13 +324,13 @@ fn build_kit(
                     // a 6×6 black reference dot centered on top. If
                     // Rotate's pivot matches the slot center, the cube
                     // rotates around the dot.
-                    FixedSize::new().bind_width(80.0).bind_height(80.0).child(
+                    FixedSize::new().width(80.0).height(80.0).child(
                         ZStack::new()
                             .child(Rotate::new(rotate_angle.clone()).child(
                                 RectWidget::new().background(Color::from_rgb(0.30, 0.55, 0.85)),
                             ))
                             .child(Center::new().child(
-                                FixedSize::new().bind_width(6.0).bind_height(6.0).child(
+                                FixedSize::new().width(6.0).height(6.0).child(
                                     RectWidget::new().background(Color::from_rgb(0.0, 0.0, 0.0)),
                                 ),
                             )),

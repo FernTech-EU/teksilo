@@ -20,8 +20,8 @@
 //! # let loading_signal: Signal<bool> = Signal::new(false);
 //! let _wv = WebView::new()
 //!     .url("https://example.com")
-//!     .bind_title(title_signal.clone())
-//!     .bind_loading(loading_signal.clone())
+//!     .title_signal(title_signal.clone())
+//!     .loading_signal(loading_signal.clone())
 //!     .on_message(|msg, _ctx| println!("JS said: {msg}"));
 //! ```
 //!
@@ -331,22 +331,22 @@ impl WebView {
     /// the two directions don't loop.
     ///
     /// The **initial** page still comes from [`url`](Self::url) /
-    /// [`html`](Self::html) / [`source`](Self::source); `bind_url` governs
+    /// [`html`](Self::html) / [`source`](Self::source); `url_signal` governs
     /// navigation *after* the first load (the signal's value at build time is
     /// taken as the baseline and does not trigger a navigation).
-    pub fn bind_url(mut self, signal: Signal<String>) -> Self {
+    pub fn url_signal(mut self, signal: Signal<String>) -> Self {
         self.url_signal = Some(signal);
         self
     }
 
     /// Bind the page title (read-only — updated on `TitleChanged`).
-    pub fn bind_title(mut self, signal: Signal<String>) -> Self {
+    pub fn title_signal(mut self, signal: Signal<String>) -> Self {
         self.title_signal = Some(signal);
         self
     }
 
     /// Bind the loading flag (read-only — true between page-load start/finish).
-    pub fn bind_loading(mut self, signal: Signal<bool>) -> Self {
+    pub fn loading_signal(mut self, signal: Signal<bool>) -> Self {
         self.loading_signal = Some(signal);
         self
     }

@@ -727,7 +727,7 @@ with an animation. Demo: `cargo run -p scene-corkboard` ("Add Act").
 ### App-owned view state
 
 Pan / zoom / rotation default to view-owned signals. Inject app-owned ones with
-`bind_view_state(pan_x, pan_y, zoom, rotation)` so view state survives a
+`view_state(pan_x, pan_y, zoom, rotation)` so view state survives a
 rebuild-from-state, a "Reset View" button can snap it home, and a toolbar can
 read it. `initial_pan` / `initial_zoom` / `initial_rotation` seed starting
 values without giving up ownership. These builders run pre-mount, like the

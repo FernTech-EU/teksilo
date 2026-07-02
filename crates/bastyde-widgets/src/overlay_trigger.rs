@@ -4,7 +4,7 @@
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -21,6 +21,12 @@ pub(crate) struct OverlayTrigger {
     /// Optional signal reporting whether the owned popup is
     /// currently visible. Published via `set_expanded`.
     expanded_signal: Option<Signal<bool>>,
+    /// Enabled state, wired into the arena on this trigger's node so
+    /// a disabled custom trigger greys out (via `effective_enabled`),
+    /// reports `disabled` to AT, and has its pointer/key dispatch
+    /// gated — the same treatment a stock `Button` gets. Default
+    /// `Prop::Static(true)`.
+    enabled: Prop<bool>,
 }
 
 impl OverlayTrigger {
@@ -40,7 +46,17 @@ impl OverlayTrigger {
             name: None,
             has_popup: None,
             expanded_signal: None,
+            enabled: Prop::Static(true),
         }
+    }
+
+    /// Set the trigger's enabled state (static or reactive). When
+    /// `false`, the trigger child greys out, reports `disabled` to
+    /// AT, and stops accepting pointer/key dispatch — via the arena's
+    /// `enabled_when` cascade onto this node.
+    pub(crate) fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
     }
 
     pub(crate) fn name(mut self, name: impl Into<String>) -> Self {
@@ -69,6 +85,12 @@ impl std::fmt::Debug for OverlayTrigger {
 
 impl Widget for OverlayTrigger {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Wire enabled into the arena on this trigger node. The child is
+        // a descendant, so `arena.is_enabled` (ancestor walk) gates its
+        // dispatch, `effective_enabled` greys it out, and the a11y walker
+        // marks it disabled — with no per-trigger bool snapshot.
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
         if let Some(pending) = self.pending_child.take() {
             self.child_id = Some(match pending {
                 PendingChild::Id(id) => id,
@@ -98,7 +120,6 @@ impl Widget for OverlayTrigger {
         // Register the expanded_signal so flips trigger an a11y
         // refresh on this trigger node.
         if let Some(ref expanded_signal) = self.expanded_signal {
-            let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
             expanded_signal.bind_to(
                 self_id,

@@ -108,16 +108,16 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         lit!("TabWidget"),
         FixedSize::new()
-            .bind_width(420.0_f32)
-            .bind_height(160.0_f32)
+            .width(420.0_f32)
+            .height(160.0_f32)
             .child(embedded_tab_widget(sigs.inner_tabs_selected.clone())),
     );
     let styled_tabs = section(
         ctx,
         lit!("TabWidget — per-state colours, dividers, indicator below label"),
         FixedSize::new()
-            .bind_width(420.0_f32)
-            .bind_height(160.0_f32)
+            .width(420.0_f32)
+            .height(160.0_f32)
             .child(styled_tab_widget(sigs.styled_tabs_selected.clone())),
     );
     let group_box = section(
@@ -165,7 +165,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let tool_box = section(
         ctx,
         lit!("ToolBox"),
-        FixedSize::new().bind_height(220.0_f32).child(
+        FixedSize::new().height(220.0_f32).child(
             ToolBox::new(sigs.tool_box_selected.clone())
                 .add(ToolBoxItem::new(
                     tr!(cnt_toolbox_general()),
@@ -185,8 +185,8 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         lit!("ScrollArea"),
         FixedSize::new()
-            .bind_width(280.0_f32)
-            .bind_height(120.0_f32)
+            .width(280.0_f32)
+            .height(120.0_f32)
             .child(ScrollArea::new().child({
                 let mut col = VStack::new().spacing(4.0);
                 for _ in 0..30 {
@@ -202,8 +202,8 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         tr!(cnt_scrollbar_standalone_heading()),
         FixedSize::new()
-            .bind_width(280.0_f32)
-            .bind_height(14.0_f32)
+            .width(280.0_f32)
+            .height(14.0_f32)
             .child(ScrollBar::new(
                 ScrollBarOrientation::Horizontal,
                 sb_pos,
@@ -211,13 +211,11 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 sb_vp,
             )),
     );
-    let split = section(
-        ctx,
-        lit!("Splitter"),
-        FixedSize::new()
-            .bind_width(360.0_f32)
-            .bind_height(120.0_f32)
-            .child(
+    let split =
+        section(
+            ctx,
+            lit!("Splitter"),
+            FixedSize::new().width(360.0_f32).height(120.0_f32).child(
                 Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
                     .pane(Panel::new().background(SurfaceRole::AccentSubtle).child(
                         TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small),
@@ -226,7 +224,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                         TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small),
                     )),
             ),
-    );
+        );
 
     ctx.add(
         VStack::new()
@@ -271,8 +269,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let inner_sel: Signal<Option<TabId>> = ctx.signal(None);
     let tab_widget_widget = ctx.add(
         FixedSize::new()
-            .bind_width(420.0_f32)
-            .bind_height(160.0_f32)
+            .width(420.0_f32)
+            .height(160.0_f32)
             .child(embedded_tab_widget(inner_sel)),
     );
     let toolbox_widget = ctx.add(
@@ -439,7 +437,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_height: 220.0_f32
+                    height: 220.0_f32
                     child_id: toolbox_widget
                 }
             }
@@ -451,8 +449,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 280.0_f32
-                    bind_height: 120.0_f32
+                    width: 280.0_f32
+                    height: 120.0_f32
                     child_id: scroll_area_widget
                 }
             }
@@ -464,8 +462,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 280.0_f32
-                    bind_height: 14.0_f32
+                    width: 280.0_f32
+                    height: 14.0_f32
                     child_id: scrollbar_widget
                 }
             }
@@ -477,8 +475,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 360.0_f32
-                    bind_height: 120.0_f32
+                    width: 360.0_f32
+                    height: 120.0_f32
                     child_id: splitview_widget
                 }
             }

@@ -158,7 +158,7 @@ impl Widget for CalendarHeader {
 
         // Center label — a Flat Button bound to a derived label
         // signal (mode + visible_month → "May 2026" / "2026" /
-        // "2020 — 2029"). Reactive via `Button::bind_label`, so
+        // "2020 — 2029"). Reactive via `Button::label`, so
         // the calendar doesn't have to rebuild on mode flips.
         let label_signal = self.visible_month.zip(&self.mode).map(|(ym, m)| match m {
             CalendarMode::Days => {
@@ -173,7 +173,7 @@ impl Widget for CalendarHeader {
         });
         let mode_for_action = self.mode.clone();
         let title_btn = crate::button::Button::new(lit!(""))
-            .bind_label(label_signal)
+            .label(label_signal)
             .variant(crate::button::ButtonVariant::Ghost)
             .on_activate_fn(move |ctx_evt| {
                 let cur = mode_for_action.get();
@@ -312,8 +312,8 @@ impl Widget for NavArrow {
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
         let sized = ctx.add(
             FixedSize::new()
-                .bind_width(CALENDAR_NAV_ARROW_SIZE * scale)
-                .bind_height(CALENDAR_NAV_ARROW_SIZE * scale)
+                .width(CALENDAR_NAV_ARROW_SIZE * scale)
+                .height(CALENDAR_NAV_ARROW_SIZE * scale)
                 .child_id(z),
         );
 

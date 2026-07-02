@@ -98,13 +98,11 @@ Secondary explanatory text rendered below the label, left-aligned
 with the label (not the box). Uses the `small` / `text_secondary`
 style. Has no effect unless `label(...)` is also set.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena via
-`ctx.enabled_when(self_id, false)` at build time. For
-reactive enable/disable, call
-`ctx.enabled_when(checkbox_id, signal)` from the composing
-widget.
+Set the enabled state, statically or reactively. Forwarded to the
+arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
+build time — a bound `Signal<bool>` updates live.
 
 #### `pub fn variant(mut self, variant: CheckboxVariant) -> Self`
 

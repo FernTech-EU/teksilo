@@ -125,7 +125,7 @@ impl ControlButton {
     /// widget tree (the OS treats the area as non-client). `build`
     /// installs an effect that maps the bool to the `bg_signal`
     /// colour identically to the internal hover handler.
-    pub(crate) fn bind_external_hover(mut self, signal: Signal<bool>) -> Self {
+    pub(crate) fn external_hover(mut self, signal: Signal<bool>) -> Self {
         self.external_hover = Some(signal);
         self
     }
@@ -151,7 +151,7 @@ impl ControlButton {
     /// Bind the accessible name read by AT when this button's a11y node
     /// is queried. The glyph text drawn in the cell is purely visual and
     /// is hidden from AT — assistive users get this name instead.
-    pub(crate) fn bind_a11y_name(mut self, name: Signal<String>) -> Self {
+    pub(crate) fn set_a11y_name(mut self, name: Signal<String>) -> Self {
         self.a11y_name = name;
         self
     }
@@ -188,8 +188,8 @@ impl Widget for ControlButton {
         let stack = ctx.add(ZStack::new().add_child(bg_rect).add_child(centred_glyph));
         let sized = ctx.add(
             FixedSize::new()
-                .bind_width(self.width)
-                .bind_height(self.height)
+                .width(self.width)
+                .height(self.height)
                 .child_id(stack),
         );
 
@@ -403,8 +403,8 @@ impl Widget for WindowControls {
         let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(minimize_action)
-            .bind_a11y_name(minimize_name)
-            .bind_external_hover(minimize_hover);
+            .set_a11y_name(minimize_name)
+            .external_hover(minimize_hover);
         let minimize_id = ctx.add(minimize);
 
         // Maximize/restore: both states use `□` (U+25A1). The
@@ -432,13 +432,13 @@ impl Widget for WindowControls {
         let maximize_normal = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(maximize_action)
-            .bind_a11y_name(maximize_name)
-            .bind_external_hover(maximize_hover.clone());
+            .set_a11y_name(maximize_name)
+            .external_hover(maximize_hover.clone());
         let maximize_zoomed = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(maximize_action_restore)
-            .bind_a11y_name(restore_name)
-            .bind_external_hover(maximize_hover);
+            .set_a11y_name(restore_name)
+            .external_hover(maximize_hover);
         let max_normal_id = ctx.add(maximize_normal);
         let max_zoomed_id = ctx.add(maximize_zoomed);
         let maximize_switcher = Switcher::new(switcher_idx)
@@ -453,8 +453,8 @@ impl Widget for WindowControls {
         let close = ControlButton::new("\u{00D7}", cell_w, cell_h, fg)
             .hover_background(close_hover)
             .with_action(close_action)
-            .bind_a11y_name(close_name)
-            .bind_external_hover(close_hover_signal);
+            .set_a11y_name(close_name)
+            .external_hover(close_hover_signal);
         let close_id = ctx.add(close);
 
         let row = HStack::new()

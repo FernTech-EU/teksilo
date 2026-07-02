@@ -417,14 +417,11 @@ impl WidgetCatalog for Expand {
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
-            FixedSize::new()
-                .bind_width(220.0_f32)
-                .bind_height(60.0_f32)
-                .child(
-                    Expand::new()
-                        .flex(knobs.f32_("flex").get())
-                        .child(RectWidget::new().background(SurfaceRole::AccentSubtle)),
-                ),
+            FixedSize::new().width(220.0_f32).height(60.0_f32).child(
+                Expand::new()
+                    .flex(knobs.f32_("flex").get())
+                    .child(RectWidget::new().background(SurfaceRole::AccentSubtle)),
+            ),
         )
     }
     fn icon() -> Option<Box<dyn Widget>> {
@@ -463,8 +460,8 @@ impl WidgetCatalog for Center {
     fn build(_variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
             FixedSize::new()
-                .bind_width(200.0_f32)
-                .bind_height(80.0_f32)
+                .width(200.0_f32)
+                .height(80.0_f32)
                 .child(Center::new().child(sample_text("Centered"))),
         )
     }
@@ -594,7 +591,7 @@ impl WidgetCatalog for TextInput {
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
-            FixedSize::new().bind_width(220.0_f32).child(
+            FixedSize::new().width(220.0_f32).child(
                 TextInput::new(knobs.text("value"))
                     .variant(text_input_variant(knobs.enum_("variant").get()))
                     .placeholder(lit!(knobs.text("placeholder").get()))
@@ -841,7 +838,7 @@ impl WidgetCatalog for Slider {
         }
         // Vertical sliders need a fixed height to be visible.
         let widget: Box<dyn Widget> = if matches!(orient, Orientation::Vertical) {
-            Box::new(FixedSize::new().bind_height(160.0_f32).child(s))
+            Box::new(FixedSize::new().height(160.0_f32).child(s))
         } else {
             Box::new(s)
         };
@@ -910,7 +907,7 @@ impl WidgetCatalog for ProgressBar {
             bar = bar.label(lit!(label));
         }
         let widget: Box<dyn Widget> = if matches!(orient, Orientation::Vertical) {
-            Box::new(FixedSize::new().bind_height(160.0_f32).child(bar))
+            Box::new(FixedSize::new().height(160.0_f32).child(bar))
         } else {
             Box::new(bar)
         };
@@ -1418,13 +1415,13 @@ impl WidgetCatalog for crate::primitives::Divider {
         let wrapped: Box<dyn Widget> = if orient == 1 {
             Box::new(
                 crate::primitives::FixedSize::new()
-                    .bind_height(120.0_f32)
+                    .height(120.0_f32)
                     .child(d),
             )
         } else {
             Box::new(
                 crate::primitives::FixedSize::new()
-                    .bind_width(220.0_f32)
+                    .width(220.0_f32)
                     .child(d),
             )
         };
@@ -2121,7 +2118,7 @@ impl WidgetCatalog for RadioTile {
         let description = knobs.opt_text("description").get();
         let enabled = knobs.bool_("enabled").get();
         let mut tile = RadioTile::new()
-            .bind_selection(0, knobs.choice("selected"))
+            .selection(0, knobs.choice("selected"))
             .enabled(enabled);
         if let Some(title) = title {
             tile = tile.title(lit!(title));
@@ -2129,7 +2126,7 @@ impl WidgetCatalog for RadioTile {
         if let Some(description) = description {
             tile = tile.description(lit!(description));
         }
-        Box::new(FixedSize::new().bind_width(300.0).child(tile))
+        Box::new(FixedSize::new().width(300.0).child(tile))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/radio_tile.rs", RadioTile);
@@ -2151,7 +2148,7 @@ impl WidgetCatalog for RadioTileGroup {
         fn build_row() -> Box<dyn Widget> {
             let selected = Signal::new(0_usize);
             Box::new(
-                FixedSize::new().bind_width(560.0).child(
+                FixedSize::new().width(560.0).child(
                     RadioTileGroup::new(selected)
                         .tile(
                             RadioTile::new()
@@ -2170,7 +2167,7 @@ impl WidgetCatalog for RadioTileGroup {
         fn build_grid() -> Box<dyn Widget> {
             let selected = Signal::new(1_usize);
             Box::new(
-                FixedSize::new().bind_width(560.0).child(
+                FixedSize::new().width(560.0).child(
                     RadioTileGroup::new(selected)
                         .tiles((0..4).map(|i| {
                             RadioTile::new()
@@ -2258,8 +2255,8 @@ impl WidgetCatalog for ListView<String> {
             ]);
             Box::new(
                 FixedSize::new()
-                    .bind_width(280.0_f32)
-                    .bind_height(220.0_f32)
+                    .width(280.0_f32)
+                    .height(220.0_f32)
                     .child(ListView::new(model, |_idx, item, selected| {
                         Box::new(StandardListItem::new(lit!(item.clone())).selected(selected))
                     })),
@@ -2309,8 +2306,8 @@ impl WidgetCatalog for GridView<String> {
         fn framed(grid: GridView<String>) -> Box<dyn Widget> {
             Box::new(
                 FixedSize::new()
-                    .bind_width(360.0_f32)
-                    .bind_height(320.0_f32)
+                    .width(360.0_f32)
+                    .height(320.0_f32)
                     .child(grid),
             )
         }
@@ -2397,22 +2394,16 @@ impl WidgetCatalog for TreeView<String> {
             model.insert_child(crates_node, 2, "bastyde-render".to_string());
             let docs = model.insert_child(root, 1, "docs".to_string());
             model.insert_child(docs, 0, "architecture.md".to_string());
-            Box::new(
-                FixedSize::new()
-                    .bind_width(280.0_f32)
-                    .bind_height(220.0_f32)
-                    .child(TreeView::new_with_context(
-                        model,
-                        |item, entry, selected, ctx| {
-                            Box::new(
-                                StandardTreeItem::new(lit!(item.clone()))
-                                    .from_entry(entry)
-                                    .selected(selected)
-                                    .on_toggle_rc(ctx.toggle_callback()),
-                            )
-                        },
-                    )),
-            )
+            Box::new(FixedSize::new().width(280.0_f32).height(220.0_f32).child(
+                TreeView::new_with_context(model, |item, entry, selected, ctx| {
+                    Box::new(
+                        StandardTreeItem::new(lit!(item.clone()))
+                            .from_entry(entry)
+                            .selected(selected)
+                            .on_toggle_rc(ctx.toggle_callback()),
+                    )
+                }),
+            ))
         }
         vec![PreviewVariant::scenario("default", build_default)]
     }
@@ -2631,8 +2622,8 @@ impl WidgetCatalog for ScrollArea {
             }
             Box::new(
                 FixedSize::new()
-                    .bind_width(280.0_f32)
-                    .bind_height(180.0_f32)
+                    .width(280.0_f32)
+                    .height(180.0_f32)
                     .child(ScrollArea::new().child(col)),
             )
         }
@@ -2685,14 +2676,11 @@ impl WidgetCatalog for Splitter {
                 .padding(12.0)
                 .child(sample_text("Right pane"));
             Box::new(
-                FixedSize::new()
-                    .bind_width(420.0_f32)
-                    .bind_height(220.0_f32)
-                    .child(
-                        Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
-                            .pane(left)
-                            .pane(right),
-                    ),
+                FixedSize::new().width(420.0_f32).height(220.0_f32).child(
+                    Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
+                        .pane(left)
+                        .pane(right),
+                ),
             )
         }
         fn build_three_pane() -> Box<dyn Widget> {
@@ -2717,15 +2705,12 @@ impl WidgetCatalog for Splitter {
                     .child(sample_text(label))
             };
             Box::new(
-                FixedSize::new()
-                    .bind_width(480.0_f32)
-                    .bind_height(220.0_f32)
-                    .child(
-                        Splitter::new(model)
-                            .pane(pane("Sidebar", SurfaceRole::Sunken))
-                            .pane(pane("Editor", SurfaceRole::Raised))
-                            .pane(pane("Inspector", SurfaceRole::Sunken)),
-                    ),
+                FixedSize::new().width(480.0_f32).height(220.0_f32).child(
+                    Splitter::new(model)
+                        .pane(pane("Sidebar", SurfaceRole::Sunken))
+                        .pane(pane("Editor", SurfaceRole::Raised))
+                        .pane(pane("Inspector", SurfaceRole::Sunken)),
+                ),
             )
         }
         vec![
@@ -2758,24 +2743,21 @@ impl WidgetCatalog for TabWidget {
             use crate::tab_widget::{TabId, TabInfo};
             let selected: Signal<Option<TabId>> = Signal::new(None);
             Box::new(
-                FixedSize::new()
-                    .bind_width(420.0_f32)
-                    .bind_height(220.0_f32)
-                    .child(
-                        TabWidget::new(selected)
-                            .static_tab(
-                                TabInfo::new().title(lit!("Overview")),
-                                Center::new().child(sample_text("Overview tab content")),
-                            )
-                            .static_tab(
-                                TabInfo::new().title(lit!("Details")),
-                                Center::new().child(sample_text("Details tab content")),
-                            )
-                            .static_tab(
-                                TabInfo::new().title(lit!("Settings")),
-                                Center::new().child(sample_text("Settings tab content")),
-                            ),
-                    ),
+                FixedSize::new().width(420.0_f32).height(220.0_f32).child(
+                    TabWidget::new(selected)
+                        .static_tab(
+                            TabInfo::new().title(lit!("Overview")),
+                            Center::new().child(sample_text("Overview tab content")),
+                        )
+                        .static_tab(
+                            TabInfo::new().title(lit!("Details")),
+                            Center::new().child(sample_text("Details tab content")),
+                        )
+                        .static_tab(
+                            TabInfo::new().title(lit!("Settings")),
+                            Center::new().child(sample_text("Settings tab content")),
+                        ),
+                ),
             )
         }
         vec![PreviewVariant::scenario("three-tabs", build_three_tabs)]
@@ -2804,24 +2786,21 @@ impl WidgetCatalog for ToolBox {
         fn build_three_items() -> Box<dyn Widget> {
             let selected = Signal::new(0_usize);
             Box::new(
-                FixedSize::new()
-                    .bind_width(280.0_f32)
-                    .bind_height(280.0_f32)
-                    .child(
-                        ToolBox::new(selected)
-                            .item(
-                                lit!("General"),
-                                Padding::uniform(12.0).child(sample_text("General settings")),
-                            )
-                            .item(
-                                lit!("Editor"),
-                                Padding::uniform(12.0).child(sample_text("Editor settings")),
-                            )
-                            .item(
-                                lit!("Keymap"),
-                                Padding::uniform(12.0).child(sample_text("Keymap settings")),
-                            ),
-                    ),
+                FixedSize::new().width(280.0_f32).height(280.0_f32).child(
+                    ToolBox::new(selected)
+                        .item(
+                            lit!("General"),
+                            Padding::uniform(12.0).child(sample_text("General settings")),
+                        )
+                        .item(
+                            lit!("Editor"),
+                            Padding::uniform(12.0).child(sample_text("Editor settings")),
+                        )
+                        .item(
+                            lit!("Keymap"),
+                            Padding::uniform(12.0).child(sample_text("Keymap settings")),
+                        ),
+                ),
             )
         }
         vec![PreviewVariant::scenario("three-items", build_three_items)]

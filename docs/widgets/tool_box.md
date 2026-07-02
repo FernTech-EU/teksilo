@@ -117,30 +117,41 @@ not also select the section.
 Attach a plain-text tooltip shown after a hover delay on the header
 row. The text may come from `tr!(...)` (translated, locale-reactive)
 or `lit!(...)`. Mirrors `.tooltip(...)` on Button / IconButton /
-MenuItem. Overrides any previously set rich tooltip.
+MenuItem. Clears any previously set rich or composite tooltip (the
+last tooltip setter called wins).
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide
 `TooltipRegistry` by key.
-Overrides any previously set plain `.tooltip(...)` text.
+Clears any previously set plain or composite tooltip (the last
+tooltip setter called wins).
 
 #### `pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent` — for
-one-offs that don't belong in the registry. Overrides any
-previously set plain `.tooltip(...)` text.
+one-offs that don't belong in the registry. Clears any previously
+set plain or composite tooltip (the last tooltip setter called wins).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip — an arbitrary `impl Widget` body shown
+in a larger, scrollable overlay after a longer hover delay. Use for
+rich on-demand previews: charts, property tables, image thumbnails.
+Clears any previously set plain or rich tooltip (the last tooltip
+setter called wins).
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Disable the item: its header renders in the disabled text role,
 click and keyboard activation are ignored, and arrow navigation
-skips it.
+skips it. Accepts a static bool or a reactive `Signal<bool>`.
 
-Forwarded to the arena via `ctx.enabled_when(header_id, false)`
-at build time; the arena is then the single source of truth and
-ANDs with ancestors — disabling the surrounding `ToolBox` (or
-any ancestor) disables every item regardless of this flag.
+Forwarded to the arena via
+`ctx.enabled_when(header_id, self.enabled.clone())` at build time;
+the arena is then the single source of truth and ANDs with
+ancestors — disabling the surrounding `ToolBox` (or any ancestor)
+disables every item regardless of this flag.
 
 ## `pub const TOOL_BOX_HEADER_MIN_HEIGHT`
 

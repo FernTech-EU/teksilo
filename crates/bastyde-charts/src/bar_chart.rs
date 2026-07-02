@@ -989,7 +989,7 @@ mod tests {
         let mut s = ChartSeries::<String>::new("X");
         s.push("a".into(), 1.0);
         s.push("b".into(), 2.0);
-        s.visible.set(false);
+        s.visible = Prop::Static(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(BarChart::new(vec![s]));
         tree.layout(SizeProposal::exact(400.0, 200.0));

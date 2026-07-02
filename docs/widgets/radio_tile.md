@@ -40,7 +40,7 @@ RadioTileGroup::new(selected)
 
 ## Builder methods at a glance
 
-`bind_selection`, `icon`, `icon_boxed`, `title`, `description`, `body`, `body_boxed`, `trailing`, `trailing_slot`, `compact`, `title_style`, `title_color`, `description_style`, `description_color`, `enabled`, `variant`, `show_indicator`, `indicator_side`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`selection`, `icon`, `icon_boxed`, `title`, `description`, `body`, `body_boxed`, `trailing`, `trailing_slot`, `compact`, `title_style`, `title_color`, `description_style`, `description_color`, `enabled`, `variant`, `show_indicator`, `indicator_side`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -75,9 +75,9 @@ pub struct RadioTile { /* fields */ }
 Create a tile with no selection binding. The enclosing
 `RadioTileGroup` assigns
 this tile's `value` (its position) and shared selection signal. Use
-`bind_selection` for a standalone tile.
+`selection` for a standalone tile.
 
-#### `pub fn bind_selection(mut self, value: usize, selected: Signal<usize>) -> Self`
+#### `pub fn selection(mut self, value: usize, selected: Signal<usize>) -> Self`
 
 Bind this tile to an explicit `value` + shared `Signal<usize>` for use
 **outside** a `RadioTileGroup`. Inside a group this is set automatically.
@@ -146,10 +146,11 @@ Override the description text style (default `TextStyleRole::Small`).
 
 Override the description text color (default `TextRole::Secondary`).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. A disabled tile is skipped by the
-group's keyboard navigation and cannot be selected.
+Set the enabled state, statically or reactively. A disabled tile
+is skipped by the group's keyboard navigation and cannot be
+selected.
 
 #### `pub fn variant(mut self, variant: RadioTileVariant) -> Self`
 

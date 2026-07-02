@@ -55,7 +55,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`style`, `required`, `min_date`, `max_date`, `format_pattern`, `placeholder`, `first_day_of_week`, `show_calendar_button`, `calendar_popover_placement`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`
+`style`, `required`, `min_date`, `max_date`, `format_pattern`, `placeholder`, `first_day_of_week`, `show_calendar_button`, `calendar_popover_placement`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -155,10 +155,10 @@ the calendar popover. Default `true`.
 Override where the calendar popover appears relative to the field.
 Default is `OverlayPlacement::BelowPreferred`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -202,3 +202,28 @@ not on external writes to the bound signal.
 #### `pub fn value(&self) -> Signal<Option<Date>>`
 
 Return a clone of the bound value signal for external observation.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+Mutually exclusive with `Self::rich_tooltip`,
+`Self::rich_tooltip_content`, and `Self::composite_tooltip` —
+this call clears those slots.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up by registry key. Mutually exclusive
+with `Self::tooltip`, `Self::rich_tooltip_content`, and
+`Self::composite_tooltip` — this call clears those slots.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline content. Mutually exclusive with
+`Self::tooltip`, `Self::rich_tooltip`, and
+`Self::composite_tooltip` — this call clears those slots.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip`,
+and `Self::rich_tooltip_content` — this call clears those slots.

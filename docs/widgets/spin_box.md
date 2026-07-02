@@ -89,7 +89,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`style`, `single_step`, `page_step`, `decimals`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `value`
+`style`, `single_step`, `page_step`, `decimals`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
 
 ## API reference
 
@@ -295,10 +295,11 @@ via a wrapping element or `access_label`.
 
 Set the placeholder text shown in the field when it is empty.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(spinbox_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time via
+`ctx.enabled_when(spinbox_id, self.enabled.clone())`.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -327,6 +328,39 @@ step, button tap, wheel tick, Enter, blur). Bound observers
 on the value signal also see every change; use this hook
 when the caller needs an `EventContext` (e.g. to fire an
 intent).
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — each setter
+clears the other two so the last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up by registry key.
+
+The key must match a `TooltipContent`
+registered in the application's tooltip registry. Mutually
+exclusive with `tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip`.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip with inline content (no registry key
+required). Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`composite_tooltip`.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget
+tree. Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`rich_tooltip_content`.
 
 #### `pub fn value(&self) -> Signal<T>`
 

@@ -74,7 +74,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
@@ -130,8 +130,9 @@ pub struct DateTimeEdit {
     /// the string is rendered as styled secondary text.
     separator: Option<String>,
     placeholder: LocalizedString,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     read_only: bool,
     label: Option<LocalizedString>,
     validation_behavior: ValidationBehavior,
@@ -192,7 +193,7 @@ impl DateTimeEdit {
             show_calendar_button: true,
             separator: None,
             placeholder: LocalizedString::literal(String::new()),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             label: None,
             validation_behavior: ValidationBehavior::AutoCorrect,
@@ -296,9 +297,10 @@ impl DateTimeEdit {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -407,11 +409,8 @@ impl Widget for DateTimeEdit {
         use crate::styles::recipe_text_input_style as field_dims;
         let focus_ring_width = theme.shape.focus_ring_width;
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
-        let enabled = self.initial_enabled;
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let read_only = self.read_only;
 
         // ── required-source mirror via ctx.effect ─────────────
@@ -530,18 +529,18 @@ impl Widget for DateTimeEdit {
         let separator_id = match self.separator.as_deref() {
             None => {
                 let dot = middle_dot_icon(field_dims::TEXT_FIELD_HEIGHT * 0.4)
-                    .bind_color(bastyde_tokens::TextRole::Secondary);
+                    .color(bastyde_tokens::TextRole::Secondary);
                 ctx.add(
                     FixedSize::new()
-                        .bind_width(field_dims::TEXT_FIELD_HEIGHT * 0.55)
-                        .bind_height(field_dims::TEXT_FIELD_HEIGHT)
+                        .width(field_dims::TEXT_FIELD_HEIGHT * 0.55)
+                        .height(field_dims::TEXT_FIELD_HEIGHT)
                         .child(Center::new().child(dot)),
                 )
             }
             Some(s) if s.is_empty() => ctx.add(
                 FixedSize::new()
-                    .bind_width(0.0_f32)
-                    .bind_height(field_dims::TEXT_FIELD_HEIGHT),
+                    .width(0.0_f32)
+                    .height(field_dims::TEXT_FIELD_HEIGHT),
             ),
             Some(s) => {
                 let text = TextWidget::new(lit!(s))
@@ -617,10 +616,11 @@ impl Widget for DateTimeEdit {
                     popover_open.set(false);
                 })
             };
+            let trigger_enabled = self.enabled.as_signal().map(move |on| *on && !read_only);
             let trigger_btn = IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                 .embedded()
                 .size(IconButtonSize::Default)
-                .enabled(enabled && !read_only)
+                .enabled(trigger_enabled)
                 .tooltip(localized(move || {
                     resolve_message_widget("date-time-edit-trigger-tooltip", &[])
                 }))
@@ -1077,7 +1077,7 @@ impl DateTimeEdit {
         };
         let is_time_half = matches!(kind, DateTimeHalfKind::Time { .. });
         let mut field = TextInputField::new(text_signal.clone())
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(placeholder)
             .text_height(text_area_height)
@@ -1212,14 +1212,18 @@ impl DateTimeEdit {
             }
         };
 
-        let enabled = self.initial_enabled;
+        // No manual `enabled` gate here: dispatch is already centrally
+        // gated by `arena.is_enabled()` (walking up from the focused
+        // field through this ZStack to the composite root's
+        // `enabled_when`) before any handler — including
+        // `on_key_preview` — runs.
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
         ctx.add(
             ZStack::new()
                 .add_child(sized_field_id)
                 .on_key_preview(move |event, ctx_evt| {
-                    if !enabled || read_only {
+                    if read_only {
                         return EventResponse::Ignored;
                     }
                     let WidgetEvent::KeyDown { key, modifiers, .. } = event else {

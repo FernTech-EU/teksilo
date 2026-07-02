@@ -56,7 +56,7 @@ screen readers can announce "Apple, 1 of 5".
 
 ## Builder methods at a glance
 
-`style`, `placeholder`, `label`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`
+`style`, `placeholder`, `label`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -88,7 +88,7 @@ Set the placeholder text shown when the query is empty.
 
 Set an accessible label for the field (announced by screen readers, not visually shown).
 
-#### `pub fn enabled(mut self, on: bool) -> Self`
+#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
 
 Set the initial enabled state. Forwarded to the arena at build time.
 
@@ -114,3 +114,30 @@ Minimum number of characters the user must type before suggestions appear (defau
 #### `pub fn on_select(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
 
 Install a callback invoked when the user picks a suggestion (tap, Enter, or Space).
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Show a plain one-line tooltip after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — calling this
+clears the other slots (last call wins).
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Show a registry-driven rich tooltip keyed by `key`.
+
+Mutually exclusive with the other tooltip setters — last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Show an inline rich tooltip with the given `TooltipContent`.
+
+Mutually exclusive with the other tooltip setters — last call wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Show a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with the other tooltip setters — last call wins.

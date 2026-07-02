@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_platform::file_dialog::{
@@ -64,9 +64,9 @@ pub struct FilePickerField {
     /// Optional external validation state, forwarded to the inner `TextInput`
     /// (renders the same inline error/warning strip + border tint as a plain
     /// text field).
-    validation: Option<Signal<ValidationState>>,
+    validation: Option<Prop<ValidationState>>,
     /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    enabled: Prop<bool>,
     root_child_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
@@ -93,7 +93,7 @@ impl FilePickerField {
             placeholder: None,
             label: None,
             validation: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             root_child_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -162,15 +162,15 @@ impl FilePickerField {
     /// Bind an external [`ValidationState`] signal — shown as the same inline
     /// error/warning strip and border tint the inner [`TextInput`] renders (e.g.
     /// "the chosen folder does not exist / is not writable").
-    pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
-        self.validation = Some(validation);
+    pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self {
+        self.validation = Some(validation.into());
         self
     }
 
     /// Set the initial enabled state for the text field and Browse button.
     /// Forwarded to the arena at build time.
-    pub fn enabled(mut self, on: bool) -> Self {
-        self.initial_enabled = on;
+    pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self {
+        self.enabled = on.into();
         self
     }
 
@@ -252,9 +252,7 @@ impl Widget for FilePickerField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Snapshot dialog config + result writer for the Browse-button
         // closure (which can't borrow `self`).
@@ -272,7 +270,7 @@ impl Widget for FilePickerField {
 
         let browse = IconButton::browse()
             .embedded()
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .on_activate_fn(move |ctx| {
                 let request = build_request_owned(
                     kind,
@@ -300,7 +298,7 @@ impl Widget for FilePickerField {
         // no Option<TextInput> storage, no map_input plumbing, just
         // direct construction from the FilePickerField's own config.
         let mut input = TextInput::new(self.text.clone())
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .trailing_slot(browse);
         if let Some(ph) = self.placeholder.clone() {
             input = input.placeholder(ph);

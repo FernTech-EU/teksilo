@@ -27,7 +27,7 @@ let _tap_target = MinSize::new(44.0, 44.0)
 
 ## Builder methods at a glance
 
-`width`, `height`, `bind_min_width`, `bind_min_height`, `child_id`, `child`
+`width`, `height`, `min_width`, `min_height`, `child_id`, `child`
 
 ## API reference
 
@@ -57,11 +57,11 @@ Enforce a minimum only on the width axis; the height axis is unconstrained by th
 
 Enforce a minimum only on the height axis; the width axis is unconstrained by this modifier.
 
-#### `pub fn bind_min_width(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn min_width(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind min width to a reactive state.
 
-#### `pub fn bind_min_height(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn min_height(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind min height to a reactive state.
 

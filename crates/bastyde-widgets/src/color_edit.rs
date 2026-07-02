@@ -46,7 +46,7 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::overlay::{DismissBehavior, OverlayPlacement};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
@@ -84,8 +84,7 @@ pub struct ColorEdit {
 
     // Picker pass-through.
     alpha_enabled: bool,
-    swatches: Option<Vec<Color>>,
-    swatches_signal: Option<Signal<Vec<Color>>>,
+    swatches: Option<Prop<Vec<Color>>>,
     swatch_columns: usize,
     picker_layout: ColorPickerLayout,
     show_rgb_spinners: bool,
@@ -103,8 +102,9 @@ pub struct ColorEdit {
 
     // Composite.
     label: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     on_open: Option<OnVoid>,
     on_close: Option<OnVoid>,
 
@@ -127,7 +127,7 @@ impl std::fmt::Debug for ColorEdit {
         f.debug_struct("ColorEdit")
             .field("alpha_enabled", &self.alpha_enabled)
             .field("picker_layout", &self.picker_layout)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -156,7 +156,6 @@ impl ColorEdit {
             binding,
             alpha_enabled: false,
             swatches: None,
-            swatches_signal: None,
             swatch_columns: 6,
             picker_layout: ColorPickerLayout::Compact,
             show_rgb_spinners: true,
@@ -168,7 +167,7 @@ impl ColorEdit {
             placement: OverlayPlacement::BelowPreferred,
             dismiss_behavior: DismissBehavior::EscapeOrClickOutside,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             on_open: None,
             on_close: None,
             tooltip_text: None,
@@ -184,16 +183,11 @@ impl ColorEdit {
         self
     }
 
-    /// Provide a static palette of preset swatches shown in the popover.
-    pub fn swatches(mut self, s: Vec<Color>) -> Self {
-        self.swatches = Some(s);
-        self
-    }
-
-    /// Bind the preset swatches list to a reactive `Signal<Vec<Color>>`
-    /// so the palette updates without reopening the popover.
-    pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self {
-        self.swatches_signal = Some(s);
+    /// Provide a palette of preset swatches shown in the popover —
+    /// statically, or reactively via a bound `Signal<Vec<Color>>` so the
+    /// palette updates without reopening the popover.
+    pub fn swatches(mut self, s: impl Into<Prop<Vec<Color>>>) -> Self {
+        self.swatches = Some(s.into());
         self
     }
 
@@ -269,9 +263,10 @@ impl ColorEdit {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -352,10 +347,8 @@ impl ColorEdit {
 impl Widget for ColorEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Bridge nullable binding ↔ proxy. The picker writes the
         // proxy; we mirror that to the source as Some(c). External
@@ -414,13 +407,9 @@ impl Widget for ColorEdit {
                     }
                     ctx_evt.dismiss_self_overlay_chain();
                 }
-            })
-            .enabled(self.initial_enabled);
+            });
         if let Some(s) = self.swatches.clone() {
             picker = picker.swatches(s);
-        }
-        if let Some(s) = self.swatches_signal.clone() {
-            picker = picker.swatches_signal(s);
         }
 
         // ── Build the trigger ──
@@ -471,13 +460,13 @@ impl Widget for ColorEdit {
         // pair `.label(...)` with `.show_hex_in_trigger(false)`. When
         // no label is set, the bound hex signal feeds the Button label
         // — every value mutation refreshes the visible text and the
-        // AT name reactively via Button's `bind_label` plumbing.
+        // AT name reactively via Button's `label` plumbing.
         let trigger = if let Some(ls) = self.label.take() {
             Button::new(ls)
         } else {
-            Button::new(lit!("")).bind_label(label_signal)
+            Button::new(lit!("")).label(label_signal)
         };
-        let mut trigger = trigger.enabled(self.initial_enabled).leading(swatch);
+        let mut trigger = trigger.leading(swatch);
         if self.show_chevron {
             trigger = trigger.trailing(IconWidget::chevron_down(12.0).access_hidden(true));
         }

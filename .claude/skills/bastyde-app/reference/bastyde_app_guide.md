@@ -176,7 +176,7 @@ VStack::new().children(items.iter().map(|it| TextWidget::new(lit!(it.name.clone(
 container.child_opt(show_extra.then(|| TextWidget::new(lit!("Extra"))))
 
 // Pre-registered child when you need the id
-let label = ctx.add(TextWidget::new(lit!("Status")).bind_text(status_signal));
+let label = ctx.add(TextWidget::new(lit!("Status")).text(status_signal));
 HStack::new().add_child(label)
 
 // Switcher — show one child at a time, driven by Signal<usize>
@@ -240,7 +240,7 @@ overflow rather than truncate.
 
 ```rust,ignore
 let count = ctx.signal(0i32);
-let label = TextWidget::new(lit!("")).bind_text(count.map(|n| format!("Count: {n}")));
+let label = TextWidget::new(lit!("")).text(count.map(|n| format!("Count: {n}")));
 let inc = Button::new(lit!("+1")).on_activate_fn({
     let count = count.clone();
     move |_ctx| count.set(count.get() + 1)

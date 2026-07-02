@@ -37,7 +37,7 @@ renders an empty, placeholder ComboBox.
 
 ## Builder methods at a glance
 
-`variant`, `label`, `locales`
+`variant`, `label`, `locales`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -72,3 +72,27 @@ Pass a `tr!(...)` to localize it.
 Override the locale list instead of auto-discovering it from the
 active `I18nManager`. Useful in previews / tests, or to restrict
 the offered set.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip, forwarded to the inner `ComboBox`.
+Mutually exclusive with the rich / composite variants — last
+call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip resolved from the app-wide registry,
+forwarded to the inner `ComboBox`. Overrides any previously
+set tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip driven by inline
+`TooltipContent`, forwarded to
+the inner `ComboBox`. Overrides any previously set tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip hosting an arbitrary widget tree,
+forwarded to the inner `ComboBox`. Overrides any previously
+set tooltip.

@@ -39,7 +39,7 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{ButtonStyle, ButtonStyleConfig, SharedButtonStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -222,7 +222,7 @@ pub struct Button {
     /// Button label as a `Prop<String>`. `new(tr!(...))` stores a
     /// `Prop::Bound` (locale-reactive) when an i18n manager is installed,
     /// falling back to `Prop::Static` for `lit!(...)` or no manager;
-    /// `bind_label(signal)` overrides with a caller-supplied source. Either
+    /// `label(signal)` overrides with a caller-supplied source. Either
     /// way the inner `TextWidget` re-renders reactively without rebuilding
     /// the Button. The accessibility node's `set_name` reads the current
     /// value via `Prop::get()`, keeping AT in sync with bound updates.
@@ -235,18 +235,14 @@ pub struct Button {
     /// built-in [`crate::styles::RecipeButtonStyle`] default.
     style_override: Option<SharedButtonStyle>,
     action: Option<CommandFactory>,
-    /// Initial enabled-state. Forwarded into the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time when `false`;
+    /// Enabled state, static or reactive. Forwarded into the arena via
+    /// `ctx.enabled_when(self_id, self.enabled.clone())` at build time;
     /// not kept as a runtime snapshot. After `build()` the arena's
     /// `enabled_state` is the single source of truth — leaves resolve
     /// colors via `PaintContext::effective_enabled`, events are gated
     /// by `arena.is_enabled()`, the a11y walker reads it for
     /// `set_disabled()`.
-    initial_enabled: bool,
-    /// Optional reactive enabled binding — applied via
-    /// `ctx.enabled_when(self_id, ..)` at build time and wins over
-    /// `initial_enabled` (last-write). `None` = use the static state.
-    enabled_binding: Option<bastyde_core::signal::Prop<bool>>,
+    enabled: Prop<bool>,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
     tooltip_text: Option<LocalizedString>,
@@ -279,7 +275,7 @@ pub struct Button {
     /// currently visible. Surfaced via `set_expanded` in
     /// `accessibility()`. Used alongside `has_popup` for the
     /// standard ARIA disclosure pattern.
-    expanded_signal: Option<Signal<bool>>,
+    expanded_signal: Option<Prop<bool>>,
     /// Optional caller-supplied interaction signal. When set, `build()`
     /// uses this signal instead of allocating its own — letting an
     /// external widget (e.g. `PopoverButton`'s disclosure caret)
@@ -328,8 +324,7 @@ impl Button {
             variant: ButtonVariant::Plain,
             style_override: None,
             action: None,
-            initial_enabled: true,
-            enabled_binding: None,
+            enabled: Prop::Static(true),
             icon: None,
             icon_location: IconLocation::None,
             tooltip_text: None,
@@ -392,7 +387,7 @@ impl Button {
     /// `impl Into<Prop<String>>`: a `Signal<String>` for live
     /// updates, or a plain `String` (which is the same as constructing
     /// the button with that string). Mirrors
-    /// [`TextWidget::bind_text`](crate::primitives::TextWidget::bind_text).
+    /// [`TextWidget::text`](crate::primitives::TextWidget::text).
     /// The inner label `TextWidget` is built with the bound prop, so
     /// the visible text refreshes without rebuilding the Button. The
     /// AT node's `set_name` reads the current value via `Prop::get`.
@@ -400,7 +395,7 @@ impl Button {
     /// Translation note: derive the signal with
     /// `state.map(|s| tr!(status_label(value = s)).resolve_now())` for translated
     /// reactive labels — Button only sees the resolved `String`.
-    pub fn bind_label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self {
+    pub fn label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self {
         self.label = label.into();
         self
     }
@@ -484,29 +479,14 @@ impl Button {
         self
     }
 
-    /// Set the initial enabled state. Disabled buttons ignore input
-    /// and dim their content (the framework's
+    /// Set the enabled state, statically or reactively. Disabled buttons
+    /// ignore input and dim their content (the framework's
     /// `PaintContext::effective_enabled` propagates through to the
     /// label/icon leaves). Forwarded into the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time.
-    ///
-    /// For a reactive enabled state, call
-    /// `ctx.enabled_when(button_id, my_signal)` from the composing
-    /// widget. Both routes write to the same arena `enabled_state`;
-    /// an external `enabled_when` registered after this builder runs
-    /// wins (last-write semantics) and updates reactively from the
-    /// signal.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
-        self
-    }
-
-    /// Bind the enabled state to a reactive `Signal<bool>` (or `Prop<bool>`):
-    /// the button greys out and blocks activation while `false`, updating live
-    /// as the signal changes. Consistent with `bind_text`/`bind_color`; wins
-    /// over the static [`enabled`](Self::enabled).
-    pub fn bind_enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self {
-        self.enabled_binding = Some(enabled.into());
+    /// `ctx.enabled_when(self_id, self.enabled.clone())` at build time —
+    /// a bound signal updates live as it changes.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -554,8 +534,8 @@ impl Button {
     /// signal and flips it on show / dismiss; Button reads it in
     /// `accessibility()` to publish `set_expanded`. Only
     /// meaningful alongside `.has_popup(...)`.
-    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
-        self.expanded_signal = Some(signal);
+    pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
+        self.expanded_signal = Some(signal.into());
         self
     }
 
@@ -588,15 +568,15 @@ impl Button {
     }
 
     /// Construct the label `TextWidget` used inside the button's
-    /// content layout. Always routes through `bind_text(prop)` —
+    /// content layout. Always routes through `text(prop)` —
     /// `Prop::Static` and `Prop::Bound` are both handled uniformly
     /// by the TextWidget. `new(lit!(""))` seeds the placeholder
-    /// initial text; `bind_text` immediately overwrites it with the
+    /// initial text; `text` immediately overwrites it with the
     /// prop's current value (and tracks updates for `Prop::Bound`).
     fn make_label_text(&self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> TextWidget {
         let mut text = TextWidget::new(lit!(""))
-            .bind_text(self.label.clone())
-            .bind_color(color)
+            .text(self.label.clone())
+            .color(color)
             .single_line()
             .a11y_hidden();
         if let Some(style) = &self.label_style {
@@ -627,7 +607,7 @@ impl Button {
                 IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
             })
             .icon_size(btn::BUTTON_ICON_SIZE)
-            .bind_color(color)
+            .color(color)
     }
 
     /// Assemble the V2 attached-handler set (tap / hover / key / focus /
@@ -655,7 +635,7 @@ impl std::fmt::Debug for Button {
         f.debug_struct("Button")
             .field("label", &self.label.get())
             .field("variant", &self.variant)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -697,19 +677,13 @@ impl bastyde_core::widget::Widget for Button {
         let variant = self.variant;
         let self_id = ctx.self_id();
 
-        // Forward the initial-enabled hint into the arena. After this
-        // point the arena is the single source of truth — events,
-        // focus, a11y, and the leaves' role-resolution all consult
+        // Forward the enabled state into the arena. After this point the
+        // arena is the single source of truth — events, focus, a11y, and
+        // the leaves' role-resolution all consult
         // `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`.
         // The interaction signal no longer carries Disabled: that was
         // the snapshot duality the architecture refactor removed.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
-        // A reactive binding wins over the static initial state (last-write).
-        if let Some(binding) = self.enabled_binding.take() {
-            ctx.enabled_when(self_id, binding);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Reactive view of "is this widget effectively enabled?".
         let effective_enabled = ctx.effective_enabled_signal(self_id);
@@ -734,17 +708,17 @@ impl bastyde_core::widget::Widget for Button {
         if let Some(ref expanded_signal) = self.expanded_signal {
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
-            expanded_signal.bind_to(
+            expanded_signal.register_if_bound(
                 self_id,
                 registry,
                 bastyde_core::binding::BindingLevel::RepaintOnly,
             );
         }
 
-        // If `bind_label(signal)` was used, register the prop on the
+        // If `label(signal)` was used, register the prop on the
         // Button itself at AccessibilityOnly so `set_name` re-runs
         // when the signal changes. The inner `TextWidget` already
-        // re-renders via its own `bind_text` plumbing — this binding
+        // re-renders via its own `text` plumbing — this binding
         // is purely for the AT name.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
@@ -947,7 +921,7 @@ impl bastyde_core::widget::Widget for Button {
         builder.set_role(bastyde_core::accesskit::Role::Button);
         // Read the current label value uniformly through `Prop::get`
         // — Static returns the captured `String`; Bound returns the
-        // signal's current value. Keeps AT in sync with `bind_label`.
+        // signal's current value. Keeps AT in sync with `label`.
         builder.set_name(self.label.get());
         // `set_disabled()` is now driven by the framework's
         // accessibility walker from `arena.is_enabled(self_id)`. The
@@ -1229,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn bind_label_updates_at_name_when_signal_changes() {
+    fn label_updates_at_name_when_signal_changes() {
         // Regression for the calendar header use case: a Button bound
         // to a `Signal<String>` must (1) display the signal's current
         // value and (2) refresh its accessibility name when the
@@ -1239,7 +1213,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
             Button::new(lit!(""))
-                .bind_label(label.clone())
+                .label(label.clone())
                 .on_activate_fn(|_| {}),
         );
         tree.layout(SizeProposal::exact(300.0, 80.0));
@@ -1253,7 +1227,7 @@ mod tests {
         assert_eq!(node.label().unwrap_or_default(), "May 2026");
 
         // Flip the signal — AT name should refresh after the next
-        // layout pass (the bind_label registration triggers a
+        // layout pass (the label registration triggers a
         // re-evaluation of `accessibility()`).
         label.set("2026".to_string());
         tree.layout(SizeProposal::exact(300.0, 80.0));

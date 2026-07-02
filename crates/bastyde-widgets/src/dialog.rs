@@ -49,7 +49,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use bastyde_core::overlay::{OverlayDismissCallback, OverlayId};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{DialogStyleConfig, SharedDialogStyle};
 use bastyde_core::widget::{EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -574,7 +574,9 @@ impl Widget for DialogContent {
 pub struct Dialog {
     label: LocalizedString,
     variant: ButtonVariant,
-    enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the trigger at
+    /// build time.
+    enabled: Prop<bool>,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     content_factory: Option<DialogFactory>,
@@ -588,7 +590,7 @@ impl Dialog {
         Self {
             label: label.into(),
             variant: ButtonVariant::Filled,
-            enabled: true,
+            enabled: Prop::Static(true),
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
             content_factory: None,
@@ -617,9 +619,10 @@ impl Dialog {
         self
     }
 
-    /// Enable or disable the trigger button (default `true`).
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Enable or disable the trigger button, statically or reactively
+    /// (default `true`).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -654,7 +657,7 @@ impl std::fmt::Debug for Dialog {
         f.debug_struct("Dialog")
             .field("label", &self.label)
             .field("style", &self.variant)
-            .field("enabled", &self.enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -662,7 +665,12 @@ impl std::fmt::Debug for Dialog {
 impl Widget for Dialog {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let label = self.label.clone();
-        let enabled = self.enabled;
+        // Live signal view of the enabled state — the manual gates below
+        // run inside event closures dispatched later, so a plain `bool`
+        // snapshot captured here would go stale for a `Prop::Bound`
+        // value. `.as_signal()` returns the underlying signal when bound,
+        // or wraps a static value in a fresh `Signal::new(v)`.
+        let enabled = self.enabled.as_signal();
         let close_behavior = self.close_behavior;
         let presentation = self.presentation;
         let style = self.variant;
@@ -696,8 +704,9 @@ impl Widget for Dialog {
                 .on_tap({
                     let label = label.clone();
                     let content_factory = content_factory.clone();
+                    let enabled = enabled.clone();
                     move |_pos, ctx| {
-                        if !enabled {
+                        if !enabled.get() {
                             return;
                         }
                         tap_open.set(true);
@@ -714,11 +723,12 @@ impl Widget for Dialog {
                 .on_key({
                     let label = label.clone();
                     let content_factory = content_factory.clone();
+                    let enabled = enabled.clone();
                     move |event, ctx| match event {
                         WidgetEvent::KeyUp {
                             key: Key::Enter | Key::Space,
                             ..
-                        } if enabled => {
+                        } if enabled.get() => {
                             key_open.set(true);
                             queue_dialog_request(
                                 ctx,
@@ -736,8 +746,9 @@ impl Widget for Dialog {
                 .on_access_action({
                     let label = label.clone();
                     let content_factory = content_factory.clone();
+                    let enabled = enabled.clone();
                     move |action, ctx| {
-                        if action == bastyde_core::accesskit::Action::Click && enabled {
+                        if action == bastyde_core::accesskit::Action::Click && enabled.get() {
                             action_open.set(true);
                             queue_dialog_request(
                                 ctx,
@@ -757,6 +768,7 @@ impl Widget for Dialog {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
+            .enabled(self.enabled.clone())
             .name(label)
             .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
             .expanded_when(is_open.clone());
@@ -771,14 +783,15 @@ impl Widget for Dialog {
             ctx.add(
                 Button::new(label)
                     .variant(style)
-                    .enabled(enabled)
+                    .enabled(enabled.clone())
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
                     .expanded_when(is_open.clone())
                     .on_tap({
                         let label = self.label.clone();
                         let content_factory = content_factory.clone();
+                        let enabled = enabled.clone();
                         move |_pos, ctx| {
-                            if !enabled {
+                            if !enabled.get() {
                                 return;
                             }
                             tap_open.set(true);
@@ -795,11 +808,12 @@ impl Widget for Dialog {
                     .on_key({
                         let label = self.label.clone();
                         let content_factory = content_factory.clone();
+                        let enabled = enabled.clone();
                         move |event, ctx| match event {
                             WidgetEvent::KeyUp {
                                 key: Key::Enter | Key::Space,
                                 ..
-                            } if enabled => {
+                            } if enabled.get() => {
                                 key_open.set(true);
                                 queue_dialog_request(
                                     ctx,
@@ -817,8 +831,9 @@ impl Widget for Dialog {
                     .on_access_action({
                         let label = self.label.clone();
                         let content_factory = content_factory.clone();
+                        let enabled = enabled.clone();
                         move |action, ctx| {
-                            if action == bastyde_core::accesskit::Action::Click && enabled {
+                            if action == bastyde_core::accesskit::Action::Click && enabled.get() {
                                 action_open.set(true);
                                 queue_dialog_request(
                                     ctx,

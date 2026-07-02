@@ -136,7 +136,7 @@ PieChart::new(data)
     .center(
         VStack::new()
             .child(TextWidget::new(lit!("Total")).style(TextStyleRole::Tiny))
-            .child(TextWidget::new(lit!("")).bind_text(total)),
+            .child(TextWidget::new(lit!("")).text(total)),
     )
 ```
 

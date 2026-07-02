@@ -25,7 +25,7 @@
 //!   [`ValidationOutcome::Valid`] / [`ValidationOutcome::Corrected`] /
 //!   [`ValidationOutcome::Invalid`] which the inner field maps to a
 //!   visible inline strip via the standard
-//!   `bind_validation_feedback` bridge.
+//!   `validation_feedback` bridge.
 //! - **Nullable**: empty (after trim) commits `None`; non-empty
 //!   parses normally and commits `Some(color)`.
 //!
@@ -48,7 +48,7 @@ use bastyde_canvas::SizeProposal;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::Role;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::{localized, resolve_message_widget};
@@ -120,8 +120,9 @@ pub struct HexColorInput {
     uppercase: bool,
     label: Option<LocalizedString>,
     placeholder: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     read_only: bool,
     width: Option<f32>,
     on_value_changed: Option<OnValueChanged>,
@@ -154,7 +155,7 @@ impl std::fmt::Debug for HexColorInput {
             .field("short_form_enabled", &self.short_form_enabled)
             .field("require_hash", &self.require_hash)
             .field("uppercase", &self.uppercase)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
@@ -191,7 +192,7 @@ impl HexColorInput {
             uppercase,
             label: None,
             placeholder: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             width: None,
             on_value_changed: None,
@@ -260,9 +261,10 @@ impl HexColorInput {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -358,10 +360,8 @@ impl HexColorInput {
 impl Widget for HexColorInput {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let alpha_enabled = self.alpha_enabled;
         let short_form_enabled = self.short_form_enabled;
         let require_hash = self.require_hash;
@@ -514,7 +514,7 @@ impl Widget for HexColorInput {
 
         let mut text_input = TextInput::new(self.text_signal.clone())
             .placeholder(lit!(placeholder))
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.get())
             .read_only(self.read_only)
             .input_mask(mask_string.to_string())
             .char_filter(|c: char| c.is_ascii_hexdigit() || c == '#')

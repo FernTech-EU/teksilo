@@ -44,7 +44,7 @@ TextWidget::new(lit!("Section")).style(TextStyleRole::BodyBold)
 TextWidget::new(lit!("Custom")).color(Color::from_hex("#FF00FF"))
 
 // Reactive signal (usually interaction state): repaints on signal change.
-TextWidget::new(lit!("")).bind_text(status).color(hover_color_signal)
+TextWidget::new(lit!("")).text(status).color(hover_color_signal)
 
 // Panel with role-based surface and border.
 Panel::new()
@@ -302,7 +302,7 @@ Layout primitives accept `impl Into<Prop<f32>>` for dimensions that may come fro
 | `HStack` / `VStack` / `Wrap` | `.spacing(...)` | [primitives/hstack.rs](../crates/bastyde-widgets/src/primitives/hstack.rs), `vstack.rs`, `wrap.rs` |
 | `Grid` | `.column_gap(...)` / `.row_gap(...)` | [primitives/grid.rs](../crates/bastyde-widgets/src/primitives/grid.rs) |
 | `Padding` | `Padding::new / uniform / symmetric` | [primitives/padding.rs](../crates/bastyde-widgets/src/primitives/padding.rs) |
-| `MinSize` / `MaxSize` / `FixedSize` | `.bind_width` / `.bind_height` / etc. | existing `.bind_*` builders |
+| `MinSize` / `MaxSize` / `FixedSize` | `.width` / `.height` / etc. | existing `.bind_*` builders |
 | `RectWidget` | `.border_width(...)` / `.corner_radius(...)` | [primitives/rect_widget.rs](../crates/bastyde-widgets/src/primitives/rect_widget.rs) |
 
 Pass a static `f32`, a `Signal<f32>`, or a `Prop<f32>`; the builder registers a `BindingLevel::Relayout` binding for signal variants so layout re-runs on theme-driven spacing changes.
@@ -345,7 +345,7 @@ RectWidget::new().background(bg)
 
 ```rust
 // Don't write this for normal theme colors:
-.bind_color(ctx.theme_signal().map(|t| t.colors.text_primary))
+.color(ctx.theme_signal().map(|t| t.colors.text_primary))
 
 // Write this instead:
 .color(TextRole::Primary)
@@ -361,8 +361,8 @@ RectWidget::new().background(bg)
 | `.background(theme.colors.surface_raised)` | `.background(SurfaceRole::Raised)` |
 | `.border_color(theme.colors.border)` | `.border_color(BorderRole::Default)` |
 | `.style(theme.typography.body_bold.clone())` | `.style(TextStyleRole::BodyBold)` |
-| `.bind_color(theme_signal.map(\|t\| t.colors.X))` | `.color(TextRole::X)` (if X has a role) |
-| `.bind_background(theme_signal.map(\|t\| t.colors.X))` | `.background(SurfaceRole::X)` |
+| `.color(theme_signal.map(\|t\| t.colors.X))` | `.color(TextRole::X)` (if X has a role) |
+| `.background(theme_signal.map(\|t\| t.colors.X))` | `.background(SurfaceRole::X)` |
 | `interaction.zip(&theme_signal).map(\|(s, t)\| resolve_bg(s, &t.colors))` | `interaction.map(\|s\| resolve_bg_role(s))` returning `Signal<SurfaceRole>` |
 
 ---

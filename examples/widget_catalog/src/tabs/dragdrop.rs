@@ -28,45 +28,39 @@ fn prepend(log: &Signal<String>, line: String) {
 }
 
 fn images_zone(log: Signal<String>) -> FixedSize {
-    FixedSize::new()
-        .bind_width(360.0_f32)
-        .bind_height(120.0_f32)
-        .child(
-            DropZone::new(tr!(dnd_zone_images_title()))
-                .subtitle(tr!(dnd_zone_images_subtitle()))
-                .accept_extensions(["png", "jpg", "jpeg", "gif"])
-                .on_files_dropped(move |paths, _ctx| {
-                    for p in &paths {
-                        prepend(&log, format!("🖼  {}", p.display()));
-                    }
-                }),
-        )
+    FixedSize::new().width(360.0_f32).height(120.0_f32).child(
+        DropZone::new(tr!(dnd_zone_images_title()))
+            .subtitle(tr!(dnd_zone_images_subtitle()))
+            .accept_extensions(["png", "jpg", "jpeg", "gif"])
+            .on_files_dropped(move |paths, _ctx| {
+                for p in &paths {
+                    prepend(&log, format!("🖼  {}", p.display()));
+                }
+            }),
+    )
 }
 
 fn any_zone(log: Signal<String>) -> FixedSize {
     let files_log = log.clone();
     let text_log = log.clone();
     let urls_log = log;
-    FixedSize::new()
-        .bind_width(360.0_f32)
-        .bind_height(120.0_f32)
-        .child(
-            DropZone::new(tr!(dnd_zone_any_title()))
-                .subtitle(tr!(dnd_zone_any_subtitle()))
-                .on_files_dropped(move |paths, _ctx| {
-                    for p in &paths {
-                        prepend(&files_log, format!("📄  {}", p.display()));
-                    }
-                })
-                .on_text_dropped(move |text, _ctx| {
-                    prepend(&text_log, format!("📝  {text}"));
-                })
-                .on_urls_dropped(move |urls, _ctx| {
-                    for u in &urls {
-                        prepend(&urls_log, format!("🔗  {u}"));
-                    }
-                }),
-        )
+    FixedSize::new().width(360.0_f32).height(120.0_f32).child(
+        DropZone::new(tr!(dnd_zone_any_title()))
+            .subtitle(tr!(dnd_zone_any_subtitle()))
+            .on_files_dropped(move |paths, _ctx| {
+                for p in &paths {
+                    prepend(&files_log, format!("📄  {}", p.display()));
+                }
+            })
+            .on_text_dropped(move |text, _ctx| {
+                prepend(&text_log, format!("📝  {text}"));
+            })
+            .on_urls_dropped(move |urls, _ctx| {
+                for u in &urls {
+                    prepend(&urls_log, format!("🔗  {u}"));
+                }
+            }),
+    )
 }
 
 /// A DropTarget wraps an ordinary Panel — the child stays visible and
@@ -98,7 +92,7 @@ fn log_panel(log: Signal<String>) -> Panel {
             Padding::uniform(12.0).child(
                 TextWidget::new(lit!(String::new()))
                     .style(TextStyleRole::Mono)
-                    .bind_text(log),
+                    .text(log),
             ),
         )
 }

@@ -38,7 +38,7 @@ let _w = TreeView::new(tree_model, |item, entry, _selected| {
 
 ## Builder methods at a glance
 
-`new_with_context`, `from_source`, `from_source_keyed`, `overscroll_behavior`, `item_height`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height_fn`, `auto_item_height`, `row_click_expands`, `selection`, `keyed_selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `tree_slice`
+`new_with_context`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `item_height`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height_fn`, `auto_item_height`, `row_click_expands`, `selection`, `keyed_selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `tree_slice`
 
 ## API reference
 
@@ -131,6 +131,11 @@ two views of the same source. The view stays `TreeView<T>` — the `Key` is
 captured here. Pruning consults the source's
 `contains_key`, so a
 collapsed-but-present node keeps its selection.
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole view. A disabled view greys out and stops
+accepting focus / selection / keyboard input (arena-gated).
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 

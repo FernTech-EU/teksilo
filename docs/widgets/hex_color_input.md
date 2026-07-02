@@ -27,7 +27,7 @@ code isn't clobbered by a sibling widget tweaking the value.
   `ValidationOutcome::Valid` / `ValidationOutcome::Corrected` /
   `ValidationOutcome::Invalid` which the inner field maps to a
   visible inline strip via the standard
-  `bind_validation_feedback` bridge.
+  `validation_feedback` bridge.
 - **Nullable**: empty (after trim) commits `None`; non-empty
   parses normally and commits `Some(color)`.
 
@@ -44,7 +44,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`nullable`, `alpha_enabled`, `short_form_enabled`, `require_hash`, `uppercase`, `label`, `placeholder`, `enabled`, `read_only`, `width`, `on_value_changed`, `on_invalid`, `validation_feedback_signal`
+`nullable`, `alpha_enabled`, `short_form_enabled`, `require_hash`, `uppercase`, `label`, `placeholder`, `enabled`, `read_only`, `width`, `on_value_changed`, `on_invalid`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `validation_feedback_signal`
 
 ## API reference
 
@@ -104,9 +104,10 @@ Attach a visible label above the field and use it as the AT name.
 Placeholder text shown when the field is empty. Defaults to the
 framework's locale-specific `#RRGGBB` / `#RRGGBBAA` hint.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -127,6 +128,38 @@ and new values are identical.
 
 Called after a commit attempt when the input is invalid, with the raw
 typed string. The field is left as-is so the user can correct the value.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after the standard hover delay.
+
+Mutually exclusive with `Self::rich_tooltip`, `Self::rich_tooltip_content`,
+and `Self::composite_tooltip` — each setter clears the other three so
+the last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip driven by a registry key.
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip_content`,
+and `Self::composite_tooltip` — each setter clears the other three so
+the last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline `crate::tooltip::TooltipContent`.
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip`,
+and `Self::composite_tooltip` — each setter clears the other three so
+the last call wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with `Self::tooltip`, `Self::rich_tooltip`,
+and `Self::rich_tooltip_content` — each setter clears the other three so
+the last call wins.
 
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 

@@ -47,7 +47,7 @@ everything else is shared by the generic.
 
 ## Builder methods at a glance
 
-`content`, `placement`, `dismiss_behavior`, `fade_duration`, `has_popup_kind`, `show_disclosure_caret`, `on_open`, `on_close`, `open_signal`, `surface`, `bare`, `surface_style`, `surface_name`
+`content`, `placement`, `dismiss_behavior`, `fade_duration`, `has_popup_kind`, `show_disclosure_caret`, `on_open`, `on_close`, `open_signal`, `surface`, `bare`, `surface_style`, `surface_name`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -157,6 +157,34 @@ Accessible name for the surface's `Role::Dialog` node. Defaults
 to empty (the wrapped content usually carries its own role and
 name). No effect under `bare` or for the Menu
 variant (which is presentational).
+
+#### `pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self`
+
+Show a plain single-line tooltip on the trigger after a hover delay.
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — each setter clears
+the other three so the last call wins. The tooltip anchors on the
+trigger, not on the popover content.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Show a rich tooltip (looked up by registry key) on the trigger after
+a hover delay. Mutually exclusive with the other tooltip setters —
+the last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Show an inline rich tooltip (pre-built `TooltipContent`) on the
+trigger after a hover delay. Mutually exclusive with the other tooltip
+setters — the last call wins.
+
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Show a composite tooltip (arbitrary widget tree) on the trigger after
+a longer hover delay. Mutually exclusive with the other tooltip setters
+— the last call wins.
 
 ## `pub type PopoverButton`
 

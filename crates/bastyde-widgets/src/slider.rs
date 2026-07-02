@@ -33,7 +33,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use bastyde_core::focus::FocusOrigin;
 use bastyde_core::gesture::DragPhase;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
 };
@@ -57,8 +57,9 @@ pub struct Slider {
     max: f32,
     step: Option<f32>,
     orientation: Orientation,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     /// Accessible name, announced by screen readers as the control's label.
     label: Option<LocalizedString>,
     variant: SliderVariant,
@@ -92,7 +93,7 @@ impl Slider {
             max,
             step: None,
             orientation: Orientation::Horizontal,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             label: None,
             variant: SliderVariant::default(),
             tick_count: None,
@@ -123,10 +124,11 @@ impl Slider {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(slider_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time via
+    /// `ctx.enabled_when(slider_id, self.enabled.clone())`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -213,7 +215,7 @@ impl std::fmt::Debug for Slider {
         f.debug_struct("Slider")
             .field("min", &self.min)
             .field("max", &self.max)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .field("variant", &self.variant)
             .finish()
     }
@@ -225,10 +227,8 @@ impl Widget for Slider {
         ctx: &mut bastyde_core::build_context::BuildContext,
     ) -> Vec<bastyde_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Resolve the active style: per-call override > theme slot >
@@ -617,7 +617,7 @@ mod tests {
         let sid = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         let _row = tree.add(
             HStack::new()
-                .child(FixedSize::new().bind_width(40.0).bind_height(60.0))
+                .child(FixedSize::new().width(40.0).height(60.0))
                 .add_child(sid),
         );
         tree.layout(SizeProposal::exact(240.0, 60.0));

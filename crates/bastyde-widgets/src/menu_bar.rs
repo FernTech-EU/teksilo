@@ -292,7 +292,7 @@ impl MenuBar {
     ///
     /// Uses [`CollapsePolicy::Responsive`]. Observe the collapsed state
     /// via [`is_collapsed`](Self::is_collapsed), or bind your own signal
-    /// with [`collapsible_bound`](Self::collapsible_bound).
+    /// with [`collapsed_signal`](Self::collapsed_signal).
     pub fn collapsible(mut self) -> Self {
         self.collapse_policy
             .get_or_insert(CollapsePolicy::Responsive);
@@ -302,8 +302,10 @@ impl MenuBar {
     /// Like [`collapsible`](Self::collapsible), but uses the supplied
     /// signal as the collapsed-state source so the application can
     /// observe (and react to) collapse transitions. The responsive
-    /// decision writes this signal.
-    pub fn collapsible_bound(mut self, collapsed: Signal<bool>) -> Self {
+    /// decision **writes** this signal (it is not a plain read-only
+    /// input) — kept as a `Signal<bool>` rather than `Prop<bool>` since a
+    /// static value would have nowhere to receive those writes.
+    pub fn collapsed_signal(mut self, collapsed: Signal<bool>) -> Self {
         self.collapse_policy
             .get_or_insert(CollapsePolicy::Responsive);
         self.last_collapsed.set(collapsed.get());
@@ -631,7 +633,7 @@ impl Widget for MenuBarTrigger {
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
-            .bind_background(bg_role)
+            .background(bg_role)
             .corner_radius(bastyde_tokens::CornerRadius::uniform(radius_control));
         let bg_id = ctx.add(bg);
 
@@ -1004,8 +1006,8 @@ impl Widget for MenuBar {
 
         let bg = RectWidget::new()
             .background(SurfaceRole::Main)
-            .bind_border_color(theme_signal.map(|t| t.colors.border.with_alpha(0.2)))
-            .bind_border_width(0.0_f32);
+            .border_color(theme_signal.map(|t| t.colors.border.with_alpha(0.2)))
+            .border_width(0.0_f32);
         let bg_id = ctx.add(bg);
 
         let padding = Padding::symmetric(0.0, 2.0).child_id(row_id);
@@ -2179,7 +2181,7 @@ mod tests {
                 .collapse_policy(CollapsePolicy::Always),
         );
         // FixedSize fills its child to 600px wide.
-        let _slot = t.add(FixedSize::new().bind_width(600.0_f32).child_id(mb));
+        let _slot = t.add(FixedSize::new().width(600.0_f32).child_id(mb));
         t.layout(SizeProposal::exact(800.0, 100.0));
         t.layout(SizeProposal::exact(800.0, 100.0));
 

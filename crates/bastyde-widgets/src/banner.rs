@@ -136,7 +136,7 @@ impl Widget for Banner {
         let title = ctx.add(
             TextWidget::new(self.title.clone())
                 .style(TextStyleRole::BodyBold)
-                .bind_color(TextRole::Primary)
+                .color(TextRole::Primary)
                 .single_line(),
         );
         let mut text_column = VStack::new()
@@ -146,7 +146,7 @@ impl Widget for Banner {
             let desc = ctx.add(
                 TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
-                    .bind_color(TextRole::Secondary),
+                    .color(TextRole::Secondary),
             );
             text_column = text_column.add_child(desc);
         }

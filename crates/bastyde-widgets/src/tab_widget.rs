@@ -61,7 +61,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::drag_payload::DragPayload;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
 };
@@ -234,14 +234,14 @@ pub struct TabWidget {
     /// [`Self::tab_bar_height`] / [`Self::compact_bar`].
     tab_bar_height: Option<f32>,
     /// Reactive sizing strategy. `None` until `.tab_sizing(...)`
-    /// or `.sizing_signal(...)` is called; defaulted by the bar
+    /// or `.sizing(...)` is called; defaulted by the bar
     /// (`TabSizing::Shared`) otherwise. When a signal is bound,
     /// the [`TabWidget`] also binds it at
     /// [`BindingLevel::Rebuild`]
     /// so toggling the signal swaps Shared ↔ Independent live.
     sizing: Option<Signal<TabSizing>>,
     /// Reactive tab display mode (icon / text / icon+text). `None` until
-    /// `.tab_display(...)` / `.tab_display_signal(...)`; defaulted by the bar
+    /// `.tab_display(...)` is called; defaulted by the bar
     /// ([`TabDisplayMode::Auto`]) otherwise. Bound at [`BindingLevel::Rebuild`]
     /// like `sizing`, so flipping it swaps what the tabs show live.
     tab_display: Option<Signal<TabDisplayMode>>,
@@ -303,6 +303,13 @@ pub struct TabWidget {
     bar_visibility: TabBarVisibility,
 
     root_child_id: Option<WidgetId>,
+
+    /// Whole-widget enabled state, statically or reactively. Forwarded to
+    /// the arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
+    /// build time; a disabled `TabWidget` greys out and stops accepting
+    /// focus / selection / keyboard input (arena-gated). Distinct from
+    /// per-tab `TabInfo::enabled`.
+    enabled: Prop<bool>,
 }
 
 /// Controls whether a [`TabWidget`]'s tab strip is shown.
@@ -383,7 +390,16 @@ impl TabWidget {
             tab_bar_height: None,
             bar_visibility: TabBarVisibility::Always,
             root_child_id: None,
+            enabled: Prop::Static(true),
         }
+    }
+
+    /// Enable or disable the whole widget. A disabled `TabWidget` greys out
+    /// and stops accepting focus / selection / keyboard input
+    /// (arena-gated). Distinct from per-tab `TabInfo::enabled`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
     }
 
     /// Set the tab-strip visibility policy (default
@@ -413,7 +429,7 @@ impl TabWidget {
     /// Configure the bar to render vertically — pills stacked
     /// top-to-bottom on the leading edge, content fills the trailing
     /// area (sidebar / IDE-perspective convention). Equivalent to
-    /// `self.orientation_signal().set(TabBarOrientation::Vertical)`.
+    /// `self.orientation(TabBarOrientation::Vertical)`.
     pub fn vertical(self) -> Self {
         self.orientation.set(TabBarOrientation::Vertical);
         self
@@ -427,12 +443,13 @@ impl TabWidget {
         self
     }
 
-    /// Replace the internal orientation signal with an external one
-    /// — lets a parent widget toggle orientation reactively (e.g. a
-    /// "View → Vertical Tabs" toolbar button) without recreating the
-    /// `TabWidget`.
-    pub fn orientation_signal(mut self, signal: Signal<TabBarOrientation>) -> Self {
-        self.orientation = signal;
+    /// Set the bar orientation, statically or reactively. Passing a
+    /// `Signal<TabBarOrientation>` replaces the internal orientation
+    /// signal with the external one — lets a parent widget toggle
+    /// orientation reactively (e.g. a "View → Vertical Tabs" toolbar
+    /// button) without recreating the `TabWidget`.
+    pub fn orientation(mut self, orientation: impl Into<Prop<TabBarOrientation>>) -> Self {
+        self.orientation = orientation.into().as_signal();
         self
     }
 
@@ -583,37 +600,31 @@ impl TabWidget {
 
     /// Set the per-tab sizing strategy as a static value. Internally
     /// stores it as a `Signal<TabSizing>` so the widget can be
-    /// retrofitted to reactive control via [`Self::sizing_signal`]
+    /// retrofitted to reactive control via [`Self::sizing`]
     /// without breaking existing call sites.
     pub fn tab_sizing(mut self, mode: TabSizing) -> Self {
         self.sizing = Some(Signal::new(mode));
         self
     }
 
-    /// Bind the per-tab sizing strategy to an external signal —
-    /// flipping the signal swaps Shared ↔ Independent live, with no
+    /// Bind the per-tab sizing strategy, statically or reactively —
+    /// flipping a bound signal swaps Shared ↔ Independent live, with no
     /// rebuild on the parent's part. The signal is bound at
     /// `BindingLevel::Rebuild` inside [`build`](Widget::build);
     /// memoized panes survive the rebuild so per-tab state is
     /// preserved.
-    pub fn sizing_signal(mut self, signal: Signal<TabSizing>) -> Self {
-        self.sizing = Some(signal);
+    pub fn sizing(mut self, sizing: impl Into<Prop<TabSizing>>) -> Self {
+        self.sizing = Some(sizing.into().as_signal());
         self
     }
 
     /// Choose what every tab shows — icon, label, or both
-    /// ([`TabDisplayMode`]). Static value; stored as a `Signal` so it can be
-    /// retrofitted to [`Self::tab_display_signal`].
-    pub fn tab_display(mut self, mode: TabDisplayMode) -> Self {
-        self.tab_display = Some(Signal::new(mode));
-        self
-    }
-
-    /// Bind the tab display mode to an external signal — flipping it swaps
-    /// icon / text / icon+text live (the bar rebuilds, memoized panes survive),
-    /// with no rebuild on the parent's part. Bound at `BindingLevel::Rebuild`.
-    pub fn tab_display_signal(mut self, signal: Signal<TabDisplayMode>) -> Self {
-        self.tab_display = Some(signal);
+    /// ([`TabDisplayMode`]), statically or reactively. A bound signal can be
+    /// flipped to swap icon / text / icon+text live (the bar rebuilds,
+    /// memoized panes survive), with no rebuild on the parent's part. Bound
+    /// at `BindingLevel::Rebuild`.
+    pub fn tab_display(mut self, mode: impl Into<Prop<TabDisplayMode>>) -> Self {
+        self.tab_display = Some(mode.into().as_signal());
         self
     }
 
@@ -928,7 +939,7 @@ impl TabWidget {
                 .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
                 .closable(|_, h: &TabHandle| h.info.closable)
                 .pinned(|_, h: &TabHandle| h.info.pinned)
-                .enabled(|_, h: &TabHandle| h.info.initial_enabled)
+                .enabled(|_, h: &TabHandle| h.info.initial_enabled.get())
                 .tooltip(|_, h: &TabHandle| {
                     // Pinned tabs render icon-only; promote `title` to the
                     // tooltip if the caller didn't set one explicitly so
@@ -1170,6 +1181,7 @@ impl TabWidget {
 impl Widget for TabWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Bind orientation at Rebuild level — toggling the signal
         // (e.g. via a toolbar button) rebuilds TabWidget with the

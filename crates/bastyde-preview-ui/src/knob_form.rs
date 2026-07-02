@@ -140,7 +140,7 @@ fn build_i32(
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line()
-        .bind_text(value_label);
+        .text(value_label);
     ctx.add(
         HStack::new()
             .spacing(8.0)
@@ -163,7 +163,7 @@ fn build_f32(
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line()
-        .bind_text(value_label);
+        .text(value_label);
     ctx.add(
         HStack::new()
             .spacing(8.0)

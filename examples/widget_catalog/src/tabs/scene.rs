@@ -127,8 +127,8 @@ fn build_scene_view() -> SceneView {
 
 fn sized_scene() -> FixedSize {
     FixedSize::new()
-        .bind_width(560.0_f32)
-        .bind_height(360.0_f32)
+        .width(560.0_f32)
+        .height(360.0_f32)
         .child(build_scene_view())
 }
 

@@ -197,7 +197,7 @@ impl Widget for ToastSurface {
         let title = ctx.add(
             TextWidget::new(self.data.title.clone())
                 .style(TextStyleRole::BodyBold)
-                .bind_color(TextRole::Primary)
+                .color(TextRole::Primary)
                 .single_line(),
         );
         let mut text_column = VStack::new()
@@ -207,7 +207,7 @@ impl Widget for ToastSurface {
             let body_widget = ctx.add(
                 TextWidget::new(body.clone())
                     .style(TextStyleRole::Body)
-                    .bind_color(TextRole::Secondary),
+                    .color(TextRole::Secondary),
             );
             text_column = text_column.add_child(body_widget);
         }

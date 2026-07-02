@@ -121,9 +121,9 @@ impl IconButtonStyle for RecipeIconButtonStyle {
 
         let bg_id = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
-                .bind_border_color(border_role)
-                .bind_border_width(border_width)
+                .background(bg_role)
+                .border_color(border_role)
+                .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(corner_radius)),
         );
 
@@ -131,8 +131,8 @@ impl IconButtonStyle for RecipeIconButtonStyle {
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_id));
         ctx.add(
             FixedSize::new()
-                .bind_width(button_dim)
-                .bind_height(button_dim)
+                .width(button_dim)
+                .height(button_dim)
                 .child_id(zstack_id),
         )
     }

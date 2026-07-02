@@ -64,7 +64,7 @@ impl ButtonStyle for GlowButton {
         );
         let body = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
+                .background(bg)
                 .corner_radius(CornerRadius::uniform(16.0)),
         );
         let padded_label = ctx.add(Padding::new(6.0, 20.0, 6.0, 20.0).child_id(cfg.label));
@@ -95,13 +95,13 @@ impl ToggleStyle for SquareToggle {
                 });
         let rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
+                .background(bg)
                 .corner_radius(CornerRadius::uniform(3.0)),
         );
         ctx.add(
             FixedSize::new()
-                .bind_width(36.0_f32)
-                .bind_height(20.0_f32)
+                .width(36.0_f32)
+                .height(20.0_f32)
                 .child_id(rect),
         )
     }

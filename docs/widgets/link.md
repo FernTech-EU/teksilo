@@ -51,7 +51,7 @@ pub struct Link { /* fields */ }
 
 Create a link with the given display text.
 
-#### `pub fn visited(mut self, visited: Signal<bool>) -> Self`
+#### `pub fn visited(mut self, visited: impl Into<Prop<bool>>) -> Self`
 
 Mark the link's target as visited. Drives `TextRole::LinkVisited`
 when no transient interaction (hover / press) is active. Visited
@@ -93,7 +93,8 @@ widget tree. See `Button::composite_tooltip`.
 
 Return the URL previously set via `url`, if any.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time — a bound `Signal<bool>` updates live as it
+changes.

@@ -43,7 +43,7 @@ let _edit = ColorEdit::new(color)
 
 ## Builder methods at a glance
 
-`nullable`, `alpha_enabled`, `swatches`, `swatches_signal`, `swatch_columns`, `picker_layout`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_hex_in_trigger`, `show_chevron`, `trigger_swatch_size`, `placement`, `dismiss_behavior`, `label`, `enabled`, `on_open`, `on_close`
+`nullable`, `alpha_enabled`, `swatches`, `swatch_columns`, `picker_layout`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_hex_in_trigger`, `show_chevron`, `trigger_swatch_size`, `placement`, `dismiss_behavior`, `label`, `enabled`, `on_open`, `on_close`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -75,14 +75,11 @@ Clear button alongside the `ColorEdit`.
 
 Enable or disable the alpha channel in the picker and the hex trigger label.
 
-#### `pub fn swatches(mut self, s: Vec<Color>) -> Self`
+#### `pub fn swatches(mut self, s: impl Into<Prop<Vec<Color>>>) -> Self`
 
-Provide a static palette of preset swatches shown in the popover.
-
-#### `pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self`
-
-Bind the preset swatches list to a reactive `Signal<Vec<Color>>`
-so the palette updates without reopening the popover.
+Provide a palette of preset swatches shown in the popover —
+statically, or reactively via a bound `Signal<Vec<Color>>` so the
+palette updates without reopening the popover.
 
 #### `pub fn swatch_columns(mut self, n: usize) -> Self`
 
@@ -134,9 +131,10 @@ Replace the trigger button's visible label with a static localized
 string. When set, the hex value is no longer displayed in the trigger
 (combine with `.show_hex_in_trigger(false)` if needed).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn on_open(mut self, f: impl Fn() + 'static) -> Self`
 
@@ -154,3 +152,39 @@ trigger that wakes the editor explicitly.
 Install a callback fired when the color-picker popover closes.
 See `on_open` for why this is `Fn()` and not
 `Fn(&mut EventContext)`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — calling this
+clears the other slots (last setter wins).
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — calling this
+clears the other slots (last setter wins).
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline `TooltipContent` value.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`composite_tooltip` — calling this
+clears the other slots (last setter wins).
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`rich_tooltip_content` — calling
+this clears the other slots (last setter wins).

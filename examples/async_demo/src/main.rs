@@ -117,7 +117,7 @@ impl Widget for Root {
             VStack::new()
                 .spacing(14.0)
                 .child(TextWidget::new(lit!("bastyde-async demo")).style(TextStyleRole::BodyBold))
-                .child(TextWidget::new(lit!("")).bind_text(self.status.clone()))
+                .child(TextWidget::new(lit!("")).text(self.status.clone()))
                 .child(load_btn)
                 .child(open_btn),
         );

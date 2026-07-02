@@ -188,14 +188,14 @@ impl Widget for Root {
         // ── Compose the TabWidget ────────────────────────────────
         //
         // The orientation signal flows into TabWidget directly via
-        // `.orientation_signal(...)`. TabWidget binds it at
+        // `.orientation(...)`. TabWidget binds it at
         // `BindingLevel::Rebuild`, so toggling from the toolbar
         // rebuilds with the new outer layout. Memoized panes
         // survive the rebuild — focus, scroll, and per-document
         // state (counts, undo, …) are preserved.
         let tw = TabWidget::new(self.selected.clone())
-            .orientation_signal(self.orientation.clone())
-            .sizing_signal(self.sizing.clone())
+            .orientation(self.orientation.clone())
+            .sizing(self.sizing.clone())
             // Static: pinned welcome (icon-only, tooltip-promoted title).
             .static_tab_with_id(
                 self.welcome_id,
@@ -340,7 +340,7 @@ impl Widget for Root {
                 )
                 .child(
                     TextWidget::new(lit!(""))
-                        .bind_text(selected_summary)
+                        .text(selected_summary)
                         .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
                 ),
@@ -554,7 +554,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
                         )
                         .child(
                             TextWidget::new(lit!(""))
-                                .bind_text(edits.map(|n| n.to_string()))
+                                .text(edits.map(|n| n.to_string()))
                                 .style(TextStyleRole::BodyBold)
                                 .color(TextRole::Accent),
                         ),

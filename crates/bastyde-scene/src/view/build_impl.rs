@@ -275,7 +275,7 @@ impl SceneView {
 
         // Walk every lightweight item and let it register its own
         // reactive bindings against this SceneView. Items with
-        // signal-bound state (e.g. `TextItem::bind_text`) call
+        // signal-bound state (e.g. `TextItem::text`) call
         // `signal.bind_to(scene_view_id, registry, RepaintOnly)`
         // here so a signal change dirties our paint and the next
         // walk reads the current value. Items without bindings

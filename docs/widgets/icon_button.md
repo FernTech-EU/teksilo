@@ -81,7 +81,7 @@ let _w = TextInput::new(value)
 
 ## Builder methods at a glance
 
-`style`, `size_variant`, `is_embedded`, `share_interaction`, `embedded`, `icon_role`, `focusable`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `size`, `toolbar`, `large`, `hero`, `on_activate_fn`, `toggle`, `toggle_with_icon`, `has_popup`, `expanded_when`, `browse`, `expand`, `search`, `copy`, `clear`, `add`, `bell`, `menu`, `visibility_toggle`
+`style`, `style_shared`, `size_variant`, `is_embedded`, `share_interaction`, `embedded`, `icon_role`, `focusable`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `composite_tooltip_boxed`, `enabled`, `size`, `toolbar`, `large`, `hero`, `on_activate_fn`, `toggle`, `toggle_with_icon`, `has_popup`, `expanded_when`, `browse`, `expand`, `search`, `copy`, `clear`, `add`, `bell`, `menu`, `more`, `visibility_toggle`
 
 ## API reference
 
@@ -113,6 +113,14 @@ Per-call style override. Replaces the theme-wide default
 `IconButtonStyle` for just this IconButton instance — same role
 as `Button::style(...)`. The override fully owns the background +
 border + size composition; icon coloring stays on the widget.
+
+#### `pub fn style_shared(mut self, style: SharedIconButtonStyle) -> Self`
+
+Per-call style override from an already-shared
+`SharedIconButtonStyle` (`Rc<dyn IconButtonStyle>`). Same effect as
+`style` but takes the erased handle directly, so a host
+(e.g. a `Toolbar` applying one style to all its icon buttons) can share a
+single `Rc` instead of cloning a concrete style per button.
 
 #### `pub fn size_variant(&self) -> IconButtonSize`
 
@@ -189,21 +197,28 @@ Attach a rich tooltip driven by inline `TooltipContent`.
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn composite_tooltip_boxed( mut self, content: Box<dyn bastyde_core::widget::Widget>, ) -> Self`
 
-Set the initial enabled state. Disabled buttons ignore input
-and dim their icon (handled by the framework's
-`PaintContext::effective_enabled`). Forwarded into the arena
-via `ctx.enabled_when(self_id, false)` at build time.
+Attach a composite tooltip from an already-boxed widget — the boxed twin
+of `composite_tooltip`, for hosts that build
+the body via a `Fn() -> Box<dyn Widget>` factory (e.g. a `ToolbarAction`).
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Set the enabled state, statically or reactively. Disabled
+buttons ignore input and dim their icon (handled by the
+framework's `PaintContext::effective_enabled`). Forwarded into
+the arena via `ctx.enabled_when(self_id, self.enabled.clone())`
+at build time — a bound signal updates live as it changes.
 
 For a reactive enabled state — e.g. a toolbar button that
-enables only when the caret is inside a table — call
-`ctx.enabled_when(button_id, my_signal)` from the composing
-widget's `build()` instead of (or in addition to) this builder.
-Both routes write to the same arena `enabled_state`; an
-external `enabled_when` registered after this builder runs
-wins (last-write semantics) and updates reactively from the
-signal.
+enables only when the caret is inside a table — pass a
+`Signal<bool>` here, or call `ctx.enabled_when(button_id,
+my_signal)` from the composing widget's `build()` instead of
+(or in addition to) this builder. Both routes write to the
+same arena `enabled_state`; an external `enabled_when`
+registered after this builder runs wins (last-write semantics)
+and updates reactively from the signal.
 
 #### `pub fn size(mut self, size: IconButtonSize) -> Self`
 
@@ -259,7 +274,7 @@ the a11y node so screen readers announce it as opening the
 named popup kind. Wired automatically by
 `PopoverIconButton`.
 
-#### `pub fn expanded_when(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
 
 Bind a signal reporting whether this button's popup is
 currently visible. The popover wrapper owns the signal and
@@ -303,6 +318,14 @@ Menu / hamburger button (three horizontal bars). Used by the
 collapsible `MenuBar` as the
 collapsed representation that reveals the bar when activated.
 Advertises `HasPopup::Menu` for assistive technology.
+
+#### `pub fn more() -> Self`
+
+"More actions" / overflow button — three **vertical** dots (the kebab
+`⋮`). The conventional trigger for a per-item options menu (view-header
+`…`, list-row overflow). Advertises `HasPopup::Menu` for assistive
+technology. Pair with a `PopoverIconButton` + `MenuList` (use `.bare()`
+so the menu isn't wrapped in a second popover surface).
 
 #### `pub fn visibility_toggle(visible: Signal<bool>) -> Self`
 

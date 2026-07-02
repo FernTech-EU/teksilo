@@ -12,7 +12,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
@@ -26,7 +26,7 @@ type FooterAction = Rc<dyn Fn(&mut EventContext, &StepperController)>;
 
 pub(crate) struct FooterStep {
     pub initial_status: StepStatus,
-    pub complete: Option<Signal<bool>>,
+    pub complete: Option<Prop<bool>>,
     pub validate: Option<StepValidator>,
 }
 
@@ -98,7 +98,12 @@ impl Widget for StepperFooter {
         let completion: Vec<Signal<bool>> = self
             .steps
             .iter()
-            .map(|s| s.complete.clone().unwrap_or_else(|| Signal::new(true)))
+            .map(|s| {
+                s.complete
+                    .as_ref()
+                    .map(|p| p.as_signal())
+                    .unwrap_or_else(|| Signal::new(true))
+            })
             .collect();
         let next_enabled = current.flat_map(move |i| {
             completion

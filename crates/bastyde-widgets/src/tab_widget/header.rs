@@ -474,7 +474,7 @@ impl Widget for TabHeader {
             // Icon tint follows the same role — selected tab gets
             // a primary-tinted icon, idle gets secondary, disabled
             // gets the disabled tint.
-            let icon = icon.bind_color(role_signal.clone());
+            let icon = icon.color(role_signal.clone());
             let id = ctx.add(icon);
             row = row.add_child(id);
         }

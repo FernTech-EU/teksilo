@@ -70,7 +70,7 @@ drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 
 ## Builder methods at a glance
 
-`child`, `child_id`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `bind_is_targeted`, `bind_drag_state`, `on_drop`, `on_drop_typed`, `on_drag_leave`, `variant`, `style`
+`child`, `child_id`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `on_drop`, `on_drop_typed`, `on_drag_leave`, `variant`, `style`
 
 ## API reference
 
@@ -143,15 +143,15 @@ Ergonomic companion to `Self::on_drop_typed`.
 
 Custom predicate — full control over payload inspection.
 
-#### `pub fn bind_is_targeted(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn targeted_signal(mut self, signal: Signal<bool>) -> Self`
 
 The widget writes `true` while a drag with an *accepted* payload is over
 the target, `false` otherwise — SwiftUI's `isTargeted` pattern. Drive
 custom visuals off this signal.
 
-#### `pub fn bind_drag_state(mut self, signal: Signal<DropTargetDragState>) -> Self`
+#### `pub fn drag_state_signal(mut self, signal: Signal<DropTargetDragState>) -> Self`
 
-Full three-state version of `Self::bind_is_targeted`.
+Full three-state version of `Self::targeted_signal`.
 
 #### `pub fn on_drop( mut self, f: impl FnMut(DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 

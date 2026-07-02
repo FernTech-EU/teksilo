@@ -70,7 +70,10 @@ const COLLAPSED_VISIBLE_EPSILON: f32 = 0.01;
 /// constructor patterns.
 pub struct Splitter {
     model: SplitterModel,
-    enabled: bool,
+    /// Enabled state, static or reactive, gating whether the divider
+    /// handles are draggable. Forwarded to each `SplitterHandle` at
+    /// build time.
+    enabled: Prop<bool>,
     style_override: Option<SharedSplitterStyle>,
     /// One content slot per pane (in model order), consumed on first build.
     pane_content: Vec<Option<PendingChild>>,
@@ -111,7 +114,7 @@ impl Splitter {
     pub fn new(model: SplitterModel) -> Self {
         Self {
             model,
-            enabled: true,
+            enabled: Prop::Static(true),
             style_override: None,
             pane_content: Vec::new(),
             pane_labels: Vec::new(),
@@ -167,11 +170,11 @@ impl Splitter {
         self
     }
 
-    /// Enable or disable handle dragging. When `false`, divider handles are
-    /// rendered inert — the pane layout is still valid but the user cannot
-    /// resize panes.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Enable or disable handle dragging, statically or reactively. When
+    /// `false`, divider handles are rendered inert — the pane layout is
+    /// still valid but the user cannot resize panes.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -196,7 +199,7 @@ impl std::fmt::Debug for Splitter {
         f.debug_struct("Splitter")
             .field("panes", &self.model.pane_count())
             .field("orientation", &self.model.orientation())
-            .field("enabled", &self.enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -310,7 +313,7 @@ impl Widget for Splitter {
             let handle = SplitterHandle::new(SplitterHandleConfig {
                 model: self.model.clone(),
                 index: i,
-                enabled: self.enabled,
+                enabled: self.enabled.get(),
                 gutter_thickness: gutter,
                 style: style.clone(),
                 container_bounds: self.container_bounds.clone(),

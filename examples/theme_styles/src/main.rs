@@ -54,7 +54,7 @@ impl ButtonStyle for GlowButton {
 
         let body = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
+                .background(bg)
                 .corner_radius(CornerRadius::uniform(20.0)), // pill-ish
         );
         let padded_label = ctx.add(Padding::new(8.0, 24.0, 8.0, 24.0).child_id(cfg.label));
@@ -79,7 +79,7 @@ impl ButtonStyle for BrutalistButton {
         });
         let body = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
+                .background(bg)
                 .corner_radius(CornerRadius::uniform(0.0)) // sharp
                 .border_width(2.0)
                 .border_color(Color::BLACK),

@@ -38,7 +38,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -88,8 +88,9 @@ pub struct SplitButton {
     /// Per-call override for the main-region label text color. `None` ⇒ the
     /// variant/interaction-derived cascade; setting this replaces it.
     text_role_override: Option<bastyde_core::color_prop::ColorProp>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at build
+    /// time.
+    enabled: Prop<bool>,
     initial_selected: usize,
     /// Whether picking an item from the dropdown promotes it to the new
     /// session default (IntelliJ's "remember last used"). `true` for
@@ -140,7 +141,7 @@ impl SplitButton {
             style_override: None,
             label_style: None,
             text_role_override: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             initial_selected: 0,
             promote_on_select: true,
             tooltip_text: None,
@@ -222,10 +223,10 @@ impl SplitButton {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -322,7 +323,7 @@ impl std::fmt::Debug for SplitButton {
         f.debug_struct("SplitButton")
             .field("rows", &self.rows.len())
             .field("style", &self.variant)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -374,10 +375,8 @@ impl Widget for SplitButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let variant = self.variant;
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         // Drives the style's reactive `is_disabled` (custom chrome may dim
         // the frame). The recipe default leaves the frame undimmed and the
         // leaves substitute disabled colours in their own paint.
@@ -540,8 +539,8 @@ impl Widget for SplitButton {
             .clone()
             .unwrap_or_else(|| text_role.clone().into());
         let mut label_widget = TextWidget::new(lit!(""))
-            .bind_text(main_label_text)
-            .bind_color(label_color)
+            .text(main_label_text)
+            .color(label_color)
             .single_line()
             .a11y_hidden();
         if let Some(style) = &self.label_style {
@@ -597,22 +596,21 @@ impl Widget for SplitButton {
             ctx.add(RectWidget::new().background(bastyde_tokens::BorderRole::Default));
         let divider_id = ctx.add(
             FixedSize::new()
-                .bind_width(SPLIT_BUTTON_DIVIDER_WIDTH)
-                .bind_height(SPLIT_BUTTON_HEIGHT)
+                .width(SPLIT_BUTTON_DIVIDER_WIDTH)
+                .height(SPLIT_BUTTON_HEIGHT)
                 .child_id(divider_fill_id),
         );
 
         // ---- Chevron region ----
-        let chevron_icon_id = ctx.add(
-            IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).bind_color(text_role.clone()),
-        );
+        let chevron_icon_id = ctx
+            .add(IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).color(text_role.clone()));
         let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
             FixedSize::new()
-                .bind_width(SPLIT_BUTTON_CHEVRON_WIDTH)
-                .bind_height(SPLIT_BUTTON_HEIGHT)
+                .width(SPLIT_BUTTON_CHEVRON_WIDTH)
+                .height(SPLIT_BUTTON_HEIGHT)
                 .child_id(chevron_centered_id)
                 .on_tap({
                     let menu_open = self.menu_open.clone();

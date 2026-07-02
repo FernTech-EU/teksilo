@@ -106,8 +106,8 @@ fn collapsible_section(width: Signal<f32>) -> impl Widget + 'static {
         )
         .child(
             FixedSize::new()
-                .bind_width(width)
-                .bind_height(36.0_f32)
+                .width(width)
+                .height(36.0_f32)
                 .child(make_collapsible_bar()),
         )
 }

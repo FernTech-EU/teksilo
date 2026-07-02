@@ -29,7 +29,7 @@ GridView::new(model, |tc| {
 
 ## Builder methods at a glance
 
-`from_source`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `type_ahead_timeout`
+`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `type_ahead_timeout`
 
 ## API reference
 
@@ -67,6 +67,11 @@ widget for each tile from a `TileContext`.
 #### `pub fn from_source<S: bastyde_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by any `ListDataSource` (large / external data).
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole view. A disabled view greys out and stops
+accepting focus / selection / keyboard input (arena-gated).
 
 #### `pub fn sizing(mut self, sizing: GridSizing) -> Self`
 
@@ -222,7 +227,7 @@ Widget shown when the model is empty.
 
 Widget overlaid while `is_loading` reads `true`.
 
-#### `pub fn is_loading(mut self, flag: Signal<bool>) -> Self`
+#### `pub fn is_loading(mut self, flag: impl Into<Prop<bool>>) -> Self`
 
 Reactive loading flag; when `true` the `loading_view`
 is shown above the grid.

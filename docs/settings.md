@@ -526,7 +526,7 @@ unchanged.
 
 | Task | Recipe |
 |---|---|
-| Add a new scalar pref | Declare a `const KEY: SettingsKey<T> = SettingsKey::new(...)`, call `ctx.settings().signal_for(&KEY)` from `build()`, bind with `.bind_text(...)` / `.bind_color(...)` etc. |
+| Add a new scalar pref | Declare a `const KEY: SettingsKey<T> = SettingsKey::new(...)`, call `ctx.settings().signal_for(&KEY)` from `build()`, bind with `.text(...)` / `.color(...)` etc. |
 | Persist a struct | Define `struct Foo { version: u32, ... }`, `impl Versioned for Foo`, open with `SettingsFile::load(path, delay, &Migrator::new())`, register via `app_state(handle.clone())`. |
 | Persist a list | Define `T: MruEntry`, `MruList::open(&paths, "name", N)`, register via `app_state(handle)`. |
 | Auto-save / restore window geometry | `.settings(SettingsBundle::new().with_window_state(true))` and `.id("main")` on the `WindowConfig`. Done. |

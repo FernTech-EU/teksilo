@@ -52,8 +52,8 @@ let table = TableView::from_source(proxy.clone())
     .selection(selection.clone());
 
 // One-shot wiring: the proxy now consumes the table's signals.
-proxy.bind_sort_signal(table.sort_signal().clone());
-proxy.bind_filters_signal(table.filters_signal().clone());
+proxy.sort_signal(table.sort_signal().clone());
+proxy.filters_signal(table.filters_signal().clone());
 table.set_sort(Some("name"), SortDirection::Ascending);
 ```
 
@@ -216,8 +216,8 @@ let proxy = SortFilterListModel::new(model)
     .with_comparator("name", |a, b| a.name.cmp(&b.name))
     .with_predicate("name", |t| { /* … */ });
 let table = TableView::from_source(proxy.clone());
-proxy.bind_sort_signal(table.sort_signal().clone());
-proxy.bind_filters_signal(table.filters_signal().clone());
+proxy.sort_signal(table.sort_signal().clone());
+proxy.filters_signal(table.filters_signal().clone());
 ```
 
 The proxy:
@@ -260,7 +260,7 @@ button that mutate the `filters_signal[col_id]` slot in place.
 
 Callers that already use `SortFilterListModel<T>` /
 `SortFilterTreeModel<T>` get filtered output for free —
-`bind_filters_signal` re-projects the visible list whenever the popover
+`filters_signal` re-projects the visible list whenever the popover
 mutates the map.
 
 The editor inside the popover is a deliberately minimal text field:

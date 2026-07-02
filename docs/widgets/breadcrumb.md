@@ -97,6 +97,26 @@ collapsed into the overflow `…` menu.
 
 Closure invoked on activation.
 
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip to this breadcrumb segment, shown
+after a hover delay. Clears any previously set rich or composite tooltip.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip to this breadcrumb segment, looked up by registry
+key. Clears any previously set plain or composite tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip to this breadcrumb segment from inline content.
+Clears any previously set plain or composite tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip (arbitrary widget tree) to this breadcrumb
+segment. Clears any previously set plain or rich tooltip.
+
 ## `pub struct Breadcrumb`
 
 A breadcrumb navigation row with **automatic overflow**: when the trail is

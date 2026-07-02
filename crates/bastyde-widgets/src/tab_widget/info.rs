@@ -48,7 +48,7 @@ pub type CompositeTooltipFactory = Rc<dyn Fn() -> Box<dyn Widget>>;
 ///     .icon(|| IconWidget::checkmark(16.0))
 ///     .closable(true);
 /// ```
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct TabInfo {
     pub(crate) title: Option<LocalizedString>,
     pub(crate) icon: Option<IconFactory>,
@@ -66,7 +66,7 @@ pub struct TabInfo {
     /// arena is then the single source of truth and ANDs with
     /// ancestors. A disabled `TabBar` ancestor disables every tab
     /// regardless of this flag.
-    pub(crate) initial_enabled: bool,
+    pub(crate) initial_enabled: bastyde_core::signal::Prop<bool>,
     /// Mark the tab's content pane as focusable so keyboard users can
     /// reach it. ARIA: a `tabpanel` with no focusable content must
     /// itself be focusable (`tabindex="0"`). Opt-in because the
@@ -79,6 +79,12 @@ pub struct TabInfo {
     pub(crate) context_menu: Option<ContextMenuFactory>,
 }
 
+impl Default for TabInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for TabInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabInfo")
@@ -89,7 +95,7 @@ impl std::fmt::Debug for TabInfo {
             .field("has_composite_tooltip", &self.composite_tooltip.is_some())
             .field("closable", &self.closable)
             .field("pinned", &self.pinned)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("initial_enabled", &self.initial_enabled.get())
             .field("focusable_panel", &self.focusable_panel)
             .field("has_context_menu", &self.context_menu.is_some())
             .finish()
@@ -108,7 +114,7 @@ impl TabInfo {
             composite_tooltip: None,
             closable: false,
             pinned: false,
-            initial_enabled: true,
+            initial_enabled: bastyde_core::signal::Prop::Static(true),
             focusable_panel: false,
             context_menu: None,
         }
@@ -213,8 +219,8 @@ impl TabInfo {
     /// Forwarded to the arena via `ctx.enabled_when(header_id, false)`
     /// at build time when `false`. Ancestor-driven disable (e.g. a
     /// disabled `TabBar`) ANDs with this flag automatically.
-    pub fn enabled(mut self, b: bool) -> Self {
-        self.initial_enabled = b;
+    pub fn enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self {
+        self.initial_enabled = enabled.into();
         self
     }
 

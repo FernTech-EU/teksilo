@@ -21,7 +21,7 @@ CommandLinkButton::new(tr!(create_new_project()))
 
 ## Builder methods at a glance
 
-`description`, `icon`, `enabled`, `on_activate_fn`, `title_style`, `description_style`, `title_color`, `description_color`
+`description`, `icon`, `enabled`, `on_activate_fn`, `title_style`, `description_style`, `title_color`, `description_color`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -90,10 +90,10 @@ Optional descriptive subtitle rendered below the title.
 Leading icon — large enough to anchor the card visually
 (rendered at 28 dp).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time.
 
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -118,3 +118,23 @@ Override the title's text color. Accepts `Color`, a role, or a
 #### `pub fn description_color( mut self, color: impl Into<bastyde_core::color_prop::ColorProp>, ) -> Self`
 
 Override the description's text color. Default is `TextRole::Secondary`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+Clears any previously set rich or composite tooltip.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up by registry key.
+Clears any previously set plain or composite tooltip.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip with inline content (no registry lookup).
+Clears any previously set plain or composite tooltip.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip hosting an arbitrary widget tree body.
+Clears any previously set plain or rich tooltip.

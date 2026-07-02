@@ -6,14 +6,17 @@
 RectWidget — a leaf widget that paints a filled and/or stroked rounded rectangle.
 
 `RectWidget` has no intrinsic content: it fills whatever space its parent
-proposes (or reports `0×0` when unconstrained) and draws a solid or reactive
-background color, an optional border, and an optional corner radius. It is
-the low-level building block for card backgrounds, focus rings, dividers, and
-highlight overlays.
+proposes (or reports `0×0` when unconstrained) and draws a fill (solid color
+or gradient), an optional border (a uniform stroke positioned inside / center
+/ outside, or per-side edge fills for an underline), and an optional corner
+radius. It is the low-level building block for card backgrounds, focus rings,
+dividers, underlined fields, and highlight overlays.
 
-All visual properties accept `impl Into<ColorProp>` (a raw `Color`, a theme
-role such as `SurfaceRole::Hover`, or a `Signal<Color>`) so reactive
-interaction-driven colors require no extra wiring.
+The fill accepts `impl Into<PaintProp>` — anything `Into<ColorProp>` (a raw
+`Color`, a theme role such as `SurfaceRole::Hover`, or a `Signal<Color>`) for
+a solid, plus `PaintProp::Linear` / `Radial` for a gradient. Border color
+accepts `impl Into<ColorProp>`, so reactive interaction-driven colors require
+no extra wiring.
 
 ```rust
 # use bastyde_tokens::{Color, CornerRadius};
@@ -26,7 +29,7 @@ let _w = RectWidget::new()
 
 ## Builder methods at a glance
 
-`background`, `border_color`, `border_width`, `corner_radius`, `bind_background`, `bind_border_color`, `bind_border_width`, `bind_corner_radius`
+`background`, `border_sides`, `border_position`, `border_color`, `border_width`, `corner_radius`
 
 ## API reference
 
@@ -52,10 +55,21 @@ pub struct RectWidget { /* fields */ }
 
 Create a fully transparent, zero-border rectangle with no corner radius.
 
-#### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn background(mut self, paint: impl Into<PaintProp>) -> Self`
 
-Fill color. Accepts `Color`, a theme role (`SurfaceRole`, etc.),
-or a `Signal<Color>`.
+Fill. Accepts `Color`, a theme role (`SurfaceRole`, etc.), a
+`Signal<Color>`, or a `PaintProp` (e.g. a gradient).
+
+#### `pub fn border_sides(mut self, sides: impl Into<Prop<Option<BorderSides>>>) -> Self`
+
+Per-side border widths (e.g. `BorderSides::bottom` for an
+underline). When set, overrides the uniform stroke; sides are
+drawn as edge fills in `border_color`.
+
+#### `pub fn border_position(mut self, position: BorderPosition) -> Self`
+
+Where a uniform stroke sits relative to the rect edge
+(inside / center / outside). Ignored when `border_sides` is set.
 
 #### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -70,19 +84,3 @@ Stroke width, in logical pixels. Accepts a static value or a reactive `Signal<f3
 
 Corner radius for the fill and stroke. Accepts a `CornerRadius` (per-corner
 control) or a reactive `Signal<CornerRadius>`.
-
-#### `pub fn bind_background(self, state: impl Into<ColorProp>) -> Self`
-
-Compatibility shim — `.bind_background(signal)` → `.background(signal)`.
-
-#### `pub fn bind_border_color(self, state: impl Into<ColorProp>) -> Self`
-
-Compatibility shim — `.bind_border_color(signal)` → `.border_color(signal)`.
-
-#### `pub fn bind_border_width(self, state: impl Into<Prop<f32>>) -> Self`
-
-Compatibility shim — `.bind_border_width(signal)` → `.border_width(signal)`.
-
-#### `pub fn bind_corner_radius(self, state: impl Into<Prop<CornerRadius>>) -> Self`
-
-Compatibility shim — `.bind_corner_radius(signal)` → `.corner_radius(signal)`.

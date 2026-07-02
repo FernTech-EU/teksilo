@@ -34,7 +34,7 @@ use std::rc::Rc;
 use bastyde_canvas::{Point, Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
 };
@@ -82,8 +82,9 @@ pub struct TextInput {
     // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
     placeholder: LocalizedString,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena and the
+    /// inner `TextInputField` at build time.
+    enabled: Prop<bool>,
     read_only: bool,
     max_length: Option<usize>,
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
@@ -97,7 +98,7 @@ pub struct TextInput {
     input_mask: Option<String>,
     /// Optional validator closure. Forwarded 1:1 to
     /// `TextInputField::validator`. Runs on commit (Enter, Tab-out,
-    /// blur). Set this AND `bind_validation_feedback` together for
+    /// blur). Set this AND `validation_feedback` together for
     /// the standard validator → feedback display pattern.
     validator: Option<crate::primitives::text_input_field::ValidatorFn>,
     /// Captured pre-build so composing widgets can read live caret
@@ -128,7 +129,7 @@ pub struct TextInput {
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
     validation: Signal<ValidationState>,
-    /// Set by `.bind_validation_feedback(...)`; wired via `ctx.effect`
+    /// Set by `.validation_feedback(...)`; wired via `ctx.effect`
     /// in `build()` so the bridge outlives construction.
     feedback_to_bridge: Option<Signal<ValidationFeedback>>,
     tooltip_text: Option<LocalizedString>,
@@ -151,7 +152,7 @@ impl std::fmt::Debug for TextInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextInput")
             .field("placeholder", &self.placeholder)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -162,7 +163,7 @@ impl TextInput {
         Self {
             text,
             placeholder: LocalizedString::literal(String::new()),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             max_length: None,
             on_submit: None,
@@ -233,10 +234,10 @@ impl TextInput {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(input_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena and the inner `TextInputField` at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -319,7 +320,7 @@ impl TextInput {
     /// Install a commit-time validator. Forwarded 1:1 to
     /// [`TextInputField::validator`]. Pair with
     /// [`Self::validation_feedback_signal`] (or
-    /// [`Self::bind_validation_feedback`]) to surface the outcome
+    /// [`Self::validation_feedback`]) to surface the outcome
     /// in the inline strip.
     pub fn validator(
         mut self,
@@ -366,10 +367,16 @@ impl TextInput {
     }
 
     /// Bind an external [`ValidationState`] signal directly (e.g. when
-    /// validation runs server-side). Use [`bind_validation_feedback`](Self::bind_validation_feedback)
+    /// validation runs server-side), or set a fixed initial value. Use
+    /// [`validation_feedback`](Self::validation_feedback)
     /// when wiring a local validator's output.
-    pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
-        self.validation = validation;
+    ///
+    /// A bound `Signal` becomes the shared write target used internally
+    /// (by the validator-feedback bridge) and externally by the caller —
+    /// preserving the two-way channel this method has always offered. A
+    /// static value seeds a fresh, unshared signal.
+    pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self {
+        self.validation = validation.into().as_signal();
         self
     }
 
@@ -382,7 +389,7 @@ impl TextInput {
     /// - `Pristine` / `Valid` → `ValidationState::None`
     /// - `Corrected { message, .. }` → `ValidationState::Corrected(message)`
     /// - `Invalid { message }` → `ValidationState::Error(message)`
-    pub fn bind_validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self {
+    pub fn validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self {
         let target = self.validation.clone();
         // Snapshot once now so we observe the current state at construction
         // time too (subsequent changes flow via the field's own commit
@@ -459,10 +466,8 @@ impl Widget for TextInput {
         let _theme = ctx.theme();
         use crate::styles::recipe_text_input_style as field_dims;
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
@@ -477,7 +482,7 @@ impl Widget for TextInput {
             (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text.clone())
-            .enabled(self.initial_enabled)
+            .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)
@@ -626,8 +631,8 @@ impl Widget for TextInput {
             ctx.visible_when(clear_id, visible);
             let reserve_id = ctx.add(
                 crate::primitives::FixedSize::new()
-                    .bind_width(16.0_f32)
-                    .bind_height(16.0_f32)
+                    .width(16.0_f32)
+                    .height(16.0_f32)
                     .child_id(clear_id),
             );
             row = row.add_child(reserve_id);
@@ -732,7 +737,7 @@ impl Widget for TextInput {
         // truth. Style chrome that needs `is_disabled` derives it
         // from `effective_enabled_signal(self_id)`.
 
-        // Bridge `bind_validation_feedback` source → composite state.
+        // Bridge `validation_feedback` source → composite state.
         // No dedupe — each commit changes the feedback identity even
         // when the user-visible message stays the same (e.g. repeated
         // Invalid commits), and the strip is cheap to repaint.
@@ -743,11 +748,11 @@ impl Widget for TextInput {
             });
         } else if validator_installed {
             // Auto-bridge: a validator was installed but no explicit
-            // `bind_validation_feedback` source was provided. Mirror
+            // `validation_feedback` source was provided. Mirror
             // the inner field's published outcome into our display
             // state so calling `.validator(...)` on TextInput "just
             // works" — the strip and border respond without a
-            // separate `.bind_validation_feedback(...)` call.
+            // separate `.validation_feedback(...)` call.
             let target = self.validation.clone();
             let src = inner_feedback.clone();
             ctx.effect(&src, move |fb| {

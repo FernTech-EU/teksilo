@@ -177,10 +177,10 @@ Accessible label describing what this combo box is for
 placeholder and of the current selection — screen readers
 announce this as the name of the control.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time.
 
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 

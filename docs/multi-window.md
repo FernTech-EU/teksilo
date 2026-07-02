@@ -221,7 +221,7 @@ impl Widget for AppRoot {
 
         vec![ctx.add(
             Button::new()
-                .bind_label(label)
+                .label(label)
                 .on_activate_fn(|ctx| {
                     let Some(w) = ctx.window() else { return };
                     let next = if w.placement().get().is_fullscreen() {

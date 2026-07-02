@@ -379,10 +379,9 @@ impl Widget for Accordion {
             // Vertical strip: [chevron_left|right] [rotated title] [spacer].
             // Chevron points right while collapsed (content opens to the
             // right), left once expanded.
-            let chevron_left_id =
-                ctx.add(IconWidget::chevron_left(16.0).bind_color(header_fg.clone()));
+            let chevron_left_id = ctx.add(IconWidget::chevron_left(16.0).color(header_fg.clone()));
             let chevron_right_id =
-                ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
+                ctx.add(IconWidget::chevron_right(16.0).color(header_fg.clone()));
             ctx.visible_when(chevron_left_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
             let title_id = ctx.add(
@@ -399,10 +398,9 @@ impl Widget for Accordion {
             }
             ctx.add(col.add_child(spacer_id))
         } else {
-            let chevron_down_id =
-                ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
+            let chevron_down_id = ctx.add(IconWidget::chevron_down(16.0).color(header_fg.clone()));
             let chevron_right_id =
-                ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
+                ctx.add(IconWidget::chevron_right(16.0).color(header_fg.clone()));
             ctx.visible_when(chevron_down_id, expanded.clone());
             ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
@@ -443,8 +441,8 @@ impl Widget for Accordion {
         let focus_border_width = kb_focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             crate::primitives::RectWidget::new()
-                .bind_border_color(focus_border_role)
-                .bind_border_width(focus_border_width)
+                .border_color(focus_border_role)
+                .border_width(focus_border_width)
                 .corner_radius(bastyde_tokens::CornerRadius::uniform(
                     accordion_corner_radius,
                 )),
@@ -1137,8 +1135,8 @@ mod tests {
         // Content far taller than the pane.
         let content = tree.add(
             FixedSize::new()
-                .bind_width(80.0_f32)
-                .bind_height(900.0_f32)
+                .width(80.0_f32)
+                .height(900.0_f32)
                 .child(TextWidget::new(lit!("x"))),
         );
         let acc = tree.add(
@@ -1174,8 +1172,8 @@ mod tests {
         let sink = tapped.clone();
         let trailing = tree.add(
             FixedSize::new()
-                .bind_width(24.0_f32)
-                .bind_height(24.0_f32)
+                .width(24.0_f32)
+                .height(24.0_f32)
                 .child(RectWidget::new())
                 .on_tap(move |_e, _ctx| sink.set(true)),
         );
@@ -1229,8 +1227,8 @@ mod tests {
         let hd = header_dragged.clone();
         let trailing = tree.add(
             FixedSize::new()
-                .bind_width(24.0_f32)
-                .bind_height(24.0_f32)
+                .width(24.0_f32)
+                .height(24.0_f32)
                 .child(RectWidget::new()),
         );
         let content = tree.add(TextWidget::new(lit!("body")));
@@ -1285,8 +1283,8 @@ mod tests {
         // A real interactive trailing control (captures the tap, like a button).
         let trailing = tree.add(
             FixedSize::new()
-                .bind_width(24.0_f32)
-                .bind_height(24.0_f32)
+                .width(24.0_f32)
+                .height(24.0_f32)
                 .child(RectWidget::new())
                 .on_tap(|_e, _ctx| {}),
         );

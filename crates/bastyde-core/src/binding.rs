@@ -98,7 +98,7 @@ struct BindingGroup {
 /// Indexed by source-signal identity (`source_id`) so the per-frame
 /// flush iterates unique sources rather than every binding. Typical
 /// catalog scene: ~30-40 unique sources covering 100-300+ bindings
-/// (every reactive theme query, every `bind_label`, every visibility
+/// (every reactive theme query, every `label`, every visibility
 /// signal pulls a binding off the same shared root).
 #[derive(Clone, Default)]
 pub struct BindingRegistry {
@@ -169,7 +169,7 @@ impl BindingRegistry {
     ///
     /// One-pass is load-bearing for correctness, not just an
     /// optimisation: a signal bound at both `AccessibilityOnly` and
-    /// some visual level (e.g. `Button::bind_label` registers at
+    /// some visual level (e.g. `Button::label` registers at
     /// `RepaintOnly` for the inner TextWidget AND at
     /// `AccessibilityOnly` for the AT name) shares one underlying
     /// dirty flag across both bindings. If the visual flush cleared

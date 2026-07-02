@@ -36,7 +36,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{RadioStyleConfig, RadioVariant, SharedRadioStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -53,8 +53,9 @@ pub struct RadioButton {
     caption: Option<LocalizedString>,
     value: usize,
     selected: Signal<usize>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
@@ -78,7 +79,7 @@ impl RadioButton {
             caption: None,
             value,
             selected,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -113,11 +114,11 @@ impl RadioButton {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time. Reactive
-    /// enable/disable is supported via `ctx.enabled_when(id, signal)`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena via `ctx.enabled_when(self_id, self.enabled.clone())`
+    /// at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -197,10 +198,8 @@ impl Widget for RadioButton {
         let variant = self.variant;
         let self_id = ctx.self_id();
 
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         let interaction = ctx.signal(InteractionState::Idle);

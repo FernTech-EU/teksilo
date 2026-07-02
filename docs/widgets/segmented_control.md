@@ -70,6 +70,40 @@ selected / focus / enabled state so it matches the label.
 
 Hover tooltip — most useful for icon-only segments.
 
+Mutually exclusive with `rich_tooltip` /
+`rich_tooltip_content` /
+`composite_tooltip` — last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Rich hover tooltip resolved from the app-wide registry by key.
+
+Mutually exclusive with `tooltip` /
+`rich_tooltip_content` /
+`composite_tooltip` — last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Rich hover tooltip driven by an inline
+`TooltipContent` entry
+(no registry key needed).
+
+Mutually exclusive with `tooltip` /
+`rich_tooltip` /
+`composite_tooltip` — last call wins.
+
+#### `pub fn composite_tooltip(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
+
+Composite hover tooltip built by a factory closure at attach time.
+
+The factory is called once per `build()` to produce the tooltip
+body widget. It is stored as an `Rc<dyn Fn>` so that `Segment`
+remains `Clone`.
+
+Mutually exclusive with `tooltip` /
+`rich_tooltip` /
+`rich_tooltip_content` — last call wins.
+
 #### `pub fn disabled(mut self, disabled: bool) -> Self`
 
 Disable this segment: not selectable via click or keyboard,
@@ -103,11 +137,11 @@ Append several segments. Label-only:
 `.segments([tr!(day()), tr!(week())])`; rich:
 `.segments([Segment::new(...).icon(...), ...])`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. For reactive enable/disable use
-`ctx.enabled_when(segmented_control_id, signal)`.
+Set the enabled state, statically or reactively. Forwarded to
+the arena at build time via
+`ctx.enabled_when(segmented_control_id, self.enabled.clone())`.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::SegmentedControlStyle) -> Self`
 

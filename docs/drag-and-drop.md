@@ -462,9 +462,9 @@ arrived yet, only advertised formats), real check at drop. `on_drop` re-checks t
 filter before invoking the callback (the hover gate is visual only; the framework
 still routes the drop to the target).
 
-**Caller-observable state.** `bind_is_targeted(Signal<bool>)` (SwiftUI's
+**Caller-observable state.** `targeted_signal(Signal<bool>)` (SwiftUI's
 `isTargeted` pattern — `true` only while an *accepted* drag hovers) and
-`bind_drag_state(Signal<DropTargetDragState>)` (full `Idle` / `HoverAccept` /
+`drag_state_signal(Signal<DropTargetDragState>)` (full `Idle` / `HoverAccept` /
 `HoverReject`) let the surrounding UI drive its own visuals. `on_drop_typed::<T>`
 implicitly sets `accept_typed::<T>()` and hands the extracted `T` to the callback.
 

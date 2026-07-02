@@ -10,8 +10,8 @@
 //! icons, chips, or thumbnails that must stay at their designed size
 //! regardless of the surrounding layout.
 //!
-//! With [`bind_width`](FixedSize::bind_width) or
-//! [`bind_height`](FixedSize::bind_height), the corresponding dimension is
+//! With [`width`](FixedSize::width) or
+//! [`height`](FixedSize::height), the corresponding dimension is
 //! locked to a reactive `Signal<f32>` value; the signal change triggers a
 //! relayout automatically. Unbound dimensions still fall back to the child's
 //! natural size.
@@ -22,7 +22,7 @@
 //! let sidebar_width = Signal::new(240.0_f32);
 //! // Pin the sidebar width to a reactive signal
 //! let _sidebar = FixedSize::new()
-//!     .bind_width(sidebar_width)
+//!     .width(sidebar_width)
 //!     .child(RectWidget::new());
 //! ```
 
@@ -35,7 +35,7 @@ use bastyde_core::widget_id::WidgetId;
 /// or constrains it to specific reactive dimensions.
 ///
 /// Without bindings, reports the child's natural size (ignoring parent proposal).
-/// With `bind_width`/`bind_height`, constrains to the bound values.
+/// With `width`/`height`, constrains to the bound values.
 #[derive(Debug)]
 pub struct FixedSize {
     child_id: Option<WidgetId>,
@@ -69,13 +69,13 @@ impl FixedSize {
     }
 
     /// Bind width to a reactive state. When the state changes, relayout is triggered.
-    pub fn bind_width(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.width = Some(state.into());
         self
     }
 
     /// Bind height to a reactive state. When the state changes, relayout is triggered.
-    pub fn bind_height(mut self, state: impl Into<Prop<f32>>) -> Self {
+    pub fn height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.height = Some(state.into());
         self
     }
@@ -204,11 +204,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_width_constrains_size() {
+    fn width_constrains_size() {
         let width = Signal::new(150.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).child_id(child));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -217,11 +217,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_width_triggers_relayout_on_change() {
+    fn width_triggers_relayout_on_change() {
         let width = Signal::new(200.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).child_id(child));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(fixed).width - 200.0).abs() < 0.01);
 

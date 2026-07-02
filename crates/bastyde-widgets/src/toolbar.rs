@@ -71,7 +71,7 @@ use bastyde_core::accesskit::HasPopup;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::OverlayPlacement;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{IconButtonSize, IconButtonStyle, SharedIconButtonStyle};
 use bastyde_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
@@ -132,7 +132,9 @@ pub struct ToolbarAction {
     /// factory (`Rc`, which is `Clone`) is invoked once per `make_button`
     /// to produce a fresh body. Mutually exclusive with the other two.
     composite_tooltip_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
-    enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the inline
+    /// `IconButton` / `PopoverIconButton` and the overflow `MenuItem`.
+    enabled: Prop<bool>,
     on_activate: Rc<dyn Fn(&mut EventContext)>,
     toggle: Option<Signal<bool>>,
     /// Optional dropdown menu. When set, the inline control is a
@@ -157,7 +159,7 @@ impl ToolbarAction {
             tooltip: None,
             rich_tooltip_source: None,
             composite_tooltip_factory: None,
-            enabled: true,
+            enabled: Prop::Static(true),
             on_activate: Rc::new(|_| {}),
             toggle: None,
             menu: None,
@@ -231,9 +233,9 @@ impl ToolbarAction {
         self
     }
 
-    /// Initial enabled state.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Enabled state, static or reactive.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -274,7 +276,7 @@ impl ToolbarAction {
     ) -> Box<dyn Widget> {
         let mut btn = IconButton::new((self.icon)())
             .size(size)
-            .enabled(self.enabled);
+            .enabled(self.enabled.clone());
         if let Some(style) = style {
             btn = btn.style_shared(style.clone());
         }
@@ -326,15 +328,15 @@ impl ToolbarAction {
         if let Some(ref menu) = self.menu {
             let m = menu.clone();
             return MenuItem::submenu(self.label.clone(), move || Box::new(m()) as Box<dyn Widget>)
-                .enabled(self.enabled)
+                .enabled(self.enabled.clone())
                 .icon((self.icon)());
         }
         let mut mi = MenuItem::new(self.label.clone())
-            .enabled(self.enabled)
+            .enabled(self.enabled.clone())
             .icon((self.icon)());
         let act = self.on_activate.clone();
         if let Some(ref toggle) = self.toggle {
-            mi = mi.bind_checked(toggle.clone());
+            mi = mi.checked(toggle.clone());
             let toggle = toggle.clone();
             mi = mi.on_activate_fn(move |ctx| {
                 toggle.set(!toggle.get());

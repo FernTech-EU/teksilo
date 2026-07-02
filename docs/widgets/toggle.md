@@ -32,7 +32,7 @@ let _w = Toggle::new(dark_mode)
 
 ## Builder methods at a glance
 
-`label`, `enabled`, `variant`, `style`
+`label`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -57,11 +57,11 @@ current state) and written (flipped on each activation).
 
 Accessible label announced by AT and optionally displayed beside the switch.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena via
-`ctx.enabled_when(self_id, false)` at build time. Reactive
-enable/disable is supported via `ctx.enabled_when(id, signal)`.
+Set the enabled state, statically or reactively. Forwarded to the
+arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
+build time.
 
 #### `pub fn variant(mut self, variant: ToggleVariant) -> Self`
 
@@ -76,3 +76,34 @@ ignore the variant entirely.
 Override the active `ToggleStyle` for this widget instance
 only. Useful for one-off custom-painted toggles in a single
 view.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter
+called wins and clears the others.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up by registry `key`.
+
+Mutually exclusive with the other tooltip setters — the last
+setter called wins and clears the others.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline `crate::tooltip::TooltipContent`
+value rather than a registry key.
+
+Mutually exclusive with the other tooltip setters — the last
+setter called wins and clears the others.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with the other tooltip setters — the last
+setter called wins and clears the others.

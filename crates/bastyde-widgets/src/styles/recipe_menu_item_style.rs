@@ -105,8 +105,8 @@ impl MenuItemStyle for RecipeMenuItemStyle {
             let gap_spacer = ctx.add(Spacer::new());
             let gap = ctx.add(
                 FixedSize::new()
-                    .bind_width(recipe.icon_label_gap)
-                    .bind_height(1.0_f32)
+                    .width(recipe.icon_label_gap)
+                    .height(1.0_f32)
                     .child_id(gap_spacer),
             );
             row = row.add_child(gap);
@@ -145,7 +145,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         );
         let bg = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
+                .background(bg_role)
                 .corner_radius(CornerRadius::uniform(recipe.item_corner_radius)),
         );
 

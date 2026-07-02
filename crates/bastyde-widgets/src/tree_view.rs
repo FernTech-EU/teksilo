@@ -45,7 +45,7 @@ use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::drag_payload::DragPayload;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -244,6 +244,12 @@ pub struct TreeView<T: 'static> {
     scrollbar_id: Option<WidgetId>,
     viewport_height: Rc<Cell<f32>>,
     tree_id: usize,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; a disabled view greys out and stops accepting focus /
+    /// selection / keyboard input (arena-gated).
+    enabled: Prop<bool>,
 }
 
 impl<T: 'static> TreeView<T> {
@@ -423,7 +429,15 @@ impl<T: 'static> TreeView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             tree_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            enabled: Prop::Static(true),
         }
+    }
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
     }
 
     /// Set the scroll-chaining behavior at the boundary (default
@@ -675,6 +689,9 @@ impl<T: 'static> std::fmt::Debug for TreeView<T> {
 
 impl<T: 'static> Widget for TreeView<T> {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
         // --- Version signal for rebuild triggering ---
         // A persistent field (not `ctx.signal`) so the realization
         // re-check in `place_children` can bump it after measurement.
@@ -2741,12 +2758,7 @@ mod tests {
         .item_height(20.0)
         .overscroll_behavior(inner);
         let tv_id = tree.add(tv);
-        let viewport = tree.add(
-            FixedSize::new()
-                .bind_width(200.0)
-                .bind_height(100.0)
-                .child_id(tv_id),
-        );
+        let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child_id(tv_id));
         let filler = tree.add(FixedLeaf(200.0, 200.0));
         let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);

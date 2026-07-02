@@ -1112,9 +1112,9 @@ impl Widget for DockRailItem {
         // the rail items read as buttons rather than full-square fills.
         let bg_rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
-                .bind_border_color(border_color)
-                .bind_border_width(border_width)
+                .background(bg)
+                .border_color(border_color)
+                .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
         );
 
@@ -1135,8 +1135,8 @@ impl Widget for DockRailItem {
         let centered = ctx.add(Center::new().child_id(glyph));
         let icon_box = ctx.add(
             FixedSize::new()
-                .bind_width(self.extent)
-                .bind_height(self.extent)
+                .width(self.extent)
+                .height(self.extent)
                 .child_id(centered),
         );
 
@@ -1440,9 +1440,9 @@ impl Widget for DockOverflowRow {
         let border_width = ring.map(move |f| if *f { focus_ring_width } else { 0.0 });
         let bg_rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
-                .bind_border_color(border_color)
-                .bind_border_width(border_width)
+                .background(bg_role)
+                .border_color(border_color)
+                .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
         );
         let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));

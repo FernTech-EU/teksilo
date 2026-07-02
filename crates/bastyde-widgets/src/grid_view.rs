@@ -45,7 +45,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::GridViewStyle;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -248,7 +248,7 @@ pub struct GridView<T: 'static> {
     empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
     #[allow(clippy::type_complexity)]
     loading_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
-    is_loading: Option<Signal<bool>>,
+    is_loading: Option<Prop<bool>>,
     loading_id: Option<WidgetId>,
 
     // Sections
@@ -283,6 +283,12 @@ pub struct GridView<T: 'static> {
     empty_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
     overlay_id: Option<WidgetId>,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; a disabled view greys out and stops accepting focus /
+    /// selection / keyboard input (arena-gated).
+    enabled: Prop<bool>,
 }
 
 impl<T: 'static> GridView<T> {
@@ -366,7 +372,15 @@ impl<T: 'static> GridView<T> {
             empty_id: None,
             scrollbar_id: None,
             overlay_id: None,
+            enabled: Prop::Static(true),
         }
+    }
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
     }
 
     // ── Tile sizing & layout ────────────────────────────────────────────
@@ -652,8 +666,8 @@ impl<T: 'static> GridView<T> {
 
     /// Reactive loading flag; when `true` the [`loading_view`](Self::loading_view)
     /// is shown above the grid.
-    pub fn is_loading(mut self, flag: Signal<bool>) -> Self {
-        self.is_loading = Some(flag);
+    pub fn is_loading(mut self, flag: impl Into<Prop<bool>>) -> Self {
+        self.is_loading = Some(flag.into());
         self
     }
 
@@ -788,6 +802,9 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
 
 impl<T: 'static> Widget for GridView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
         let strategy = self.ensure_strategy();
 
         // Rebuild trigger (data changes, empty/non-empty transition).
@@ -880,7 +897,7 @@ impl<T: 'static> Widget for GridView<T> {
         if let Some(flag) = &self.is_loading {
             let v = version.clone();
             let c = Rc::new(Cell::new(0_u64));
-            ctx.effect(flag, move |_| {
+            ctx.effect(&flag.as_signal(), move |_| {
                 c.set(c.get() + 1);
                 v.set(c.get());
             });

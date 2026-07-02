@@ -398,7 +398,7 @@ impl Widget for DockingDemo {
         let toolbar = self.build_toolbar();
 
         let status_line = TextWidget::new(lit!(""))
-            .bind_text(self.status.clone())
+            .text(self.status.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary);
 

@@ -219,11 +219,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
 
     let padded_id = ctx.add(Padding::uniform(4.0).child_id(row_id));
     let outer_height = viewport_height + 8.0;
-    let sized_id = ctx.add(
-        FixedSize::new()
-            .bind_height(outer_height)
-            .child_id(padded_id),
-    );
+    let sized_id = ctx.add(FixedSize::new().height(outer_height).child_id(padded_id));
 
     register_scroll_into_view(
         ctx,

@@ -42,7 +42,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::EventResponse;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -237,6 +237,12 @@ pub struct TreeTableView<T: 'static> {
     viewport_height: Rc<Cell<f32>>,
     resize_state: ResizeStateHandle,
     table_id: usize,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; a disabled view greys out and stops accepting focus /
+    /// selection / keyboard input (arena-gated).
+    enabled: Prop<bool>,
 }
 
 impl<T: 'static> TreeTableView<T> {
@@ -302,6 +308,7 @@ impl<T: 'static> TreeTableView<T> {
             viewport_height: Rc::new(Cell::new(600.0)),
             resize_state: Rc::new(RefCell::new(None)),
             table_id,
+            enabled: Prop::Static(true),
         }
     }
 
@@ -313,6 +320,13 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     // ── Builder ────────────────────────────────────────────────────────
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
 
     /// Set the scroll-chaining behavior at the boundary (default
     /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
@@ -793,6 +807,9 @@ impl<T: 'static> std::fmt::Debug for TreeTableView<T> {
 
 impl<T: 'static> Widget for TreeTableView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let indent_per_level = self.effective_indent();
@@ -889,8 +906,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // and a custom filter mode; auto-binding would clobber them.
         // Callers wire the proxy explicitly:
         //
-        //   proxy.bind_sort_signal(tree_table.sort_signal().clone());
-        //   proxy.bind_filters_signal(tree_table.filters_signal().clone());
+        //   proxy.sort_signal(tree_table.sort_signal().clone());
+        //   proxy.filters_signal(tree_table.filters_signal().clone());
         //
         // Documented in the module-level comment.
 
@@ -2274,16 +2291,11 @@ mod tests {
             .overscroll_behavior(inner);
         let inner_y = tt.scroll_y_signal().clone();
         let tt_id = tree.add(tt);
-        let viewport = tree.add(
-            FixedSize::new()
-                .bind_width(220.0)
-                .bind_height(120.0)
-                .child_id(tt_id),
-        );
+        let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child_id(tt_id));
         let filler = tree.add(
             FixedSize::new()
-                .bind_width(220.0)
-                .bind_height(300.0)
+                .width(220.0)
+                .height(300.0)
                 .child(TextWidget::new(lit!(""))),
         );
         let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));

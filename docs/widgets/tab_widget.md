@@ -54,7 +54,7 @@ opted in via `TabInfo::focusable_panel(true)`.
 
 ## Builder methods at a glance
 
-`bar_visibility`, `tab_bar_height`, `compact_bar`, `vertical`, `horizontal`, `orientation_signal`, `static_tab`, `tab`, `tab_id`, `static_tab_factory`, `static_tab_id`, `static_tab_with_id`, `static_tab_factory_with_id`, `dynamic_tab`, `dynamic_model`, `tab_sizing`, `sizing_signal`, `tab_display`, `tab_display_signal`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `min_tab_width`, `max_tab_width`, `pinned_tab_width`, `show_scroll_arrows`, `show_overflow_dropdown`, `reorderable`, `on_close`, `on_reorder`, `on_pin_toggle`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`, `bar_leading_slot`, `bar_trailing_slot`, `bar_leading_slot_id`, `bar_trailing_slot_id`
+`enabled`, `bar_visibility`, `tab_bar_height`, `compact_bar`, `vertical`, `horizontal`, `orientation`, `static_tab`, `tab`, `tab_id`, `static_tab_factory`, `static_tab_id`, `static_tab_with_id`, `static_tab_factory_with_id`, `dynamic_tab`, `dynamic_model`, `tab_sizing`, `sizing`, `tab_display`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `min_tab_width`, `max_tab_width`, `pinned_tab_width`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `reorderable`, `on_close`, `on_reorder`, `on_pin_toggle`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`, `bar_leading_slot`, `bar_trailing_slot`, `bar_leading_slot_id`, `bar_trailing_slot_id`
 
 ## API reference
 
@@ -89,6 +89,12 @@ Construct an empty `TabWidget`. Selection is `None` until
 the first `static_tab(...)` / `dynamic_model(...)` adds a
 tab and the framework activates it.
 
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole widget. A disabled `TabWidget` greys out
+and stops accepting focus / selection / keyboard input
+(arena-gated). Distinct from per-tab `TabInfo::enabled`.
+
 #### `pub fn bar_visibility(mut self, visibility: TabBarVisibility) -> Self`
 
 Set the tab-strip visibility policy (default
@@ -113,7 +119,7 @@ Shorthand for a **compact** (38 dp) tab strip — denser than the standard
 Configure the bar to render vertically — pills stacked
 top-to-bottom on the leading edge, content fills the trailing
 area (sidebar / IDE-perspective convention). Equivalent to
-`self.orientation_signal().set(TabBarOrientation::Vertical)`.
+`self.orientation(TabBarOrientation::Vertical)`.
 
 #### `pub fn horizontal(self) -> Self`
 
@@ -121,12 +127,13 @@ Configure the bar to render horizontally — pills laid out
 left-to-right above the content (browser tab convention).
 This is the default.
 
-#### `pub fn orientation_signal(mut self, signal: Signal<TabBarOrientation>) -> Self`
+#### `pub fn orientation(mut self, orientation: impl Into<Prop<TabBarOrientation>>) -> Self`
 
-Replace the internal orientation signal with an external one
-— lets a parent widget toggle orientation reactively (e.g. a
-"View → Vertical Tabs" toolbar button) without recreating the
-`TabWidget`.
+Set the bar orientation, statically or reactively. Passing a
+`Signal<TabBarOrientation>` replaces the internal orientation
+signal with the external one — lets a parent widget toggle
+orientation reactively (e.g. a "View → Vertical Tabs" toolbar
+button) without recreating the `TabWidget`.
 
 #### `pub fn static_tab(mut self, info: TabInfo, content: impl Widget + 'static) -> Self`
 
@@ -195,29 +202,25 @@ dynamic-tab subtree; static tabs are unaffected.
 
 Set the per-tab sizing strategy as a static value. Internally
 stores it as a `Signal<TabSizing>` so the widget can be
-retrofitted to reactive control via `Self::sizing_signal`
+retrofitted to reactive control via `Self::sizing`
 without breaking existing call sites.
 
-#### `pub fn sizing_signal(mut self, signal: Signal<TabSizing>) -> Self`
+#### `pub fn sizing(mut self, sizing: impl Into<Prop<TabSizing>>) -> Self`
 
-Bind the per-tab sizing strategy to an external signal —
-flipping the signal swaps Shared ↔ Independent live, with no
+Bind the per-tab sizing strategy, statically or reactively —
+flipping a bound signal swaps Shared ↔ Independent live, with no
 rebuild on the parent's part. The signal is bound at
 `BindingLevel::Rebuild` inside `build`;
 memoized panes survive the rebuild so per-tab state is
 preserved.
 
-#### `pub fn tab_display(mut self, mode: TabDisplayMode) -> Self`
+#### `pub fn tab_display(mut self, mode: impl Into<Prop<TabDisplayMode>>) -> Self`
 
 Choose what every tab shows — icon, label, or both
-(`TabDisplayMode`). Static value; stored as a `Signal` so it can be
-retrofitted to `Self::tab_display_signal`.
-
-#### `pub fn tab_display_signal(mut self, signal: Signal<TabDisplayMode>) -> Self`
-
-Bind the tab display mode to an external signal — flipping it swaps
-icon / text / icon+text live (the bar rebuilds, memoized panes survive),
-with no rebuild on the parent's part. Bound at `BindingLevel::Rebuild`.
+(`TabDisplayMode`), statically or reactively. A bound signal can be
+flipped to swap icon / text / icon+text live (the bar rebuilds,
+memoized panes survive), with no rebuild on the parent's part. Bound
+at `BindingLevel::Rebuild`.
 
 #### `pub fn tab_background(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self`
 
@@ -301,10 +304,17 @@ Fixed width for pinned (icon-only) tabs in logical pixels. Default
 Show or hide the leading/trailing scroll-arrow buttons when tabs overflow.
 Default (unset) uses the style's preference.
 
+#### `pub fn overflow_button(mut self, mode: TabOverflowButton) -> Self`
+
+When the trailing "show all tabs" overflow dropdown appears. Default
+(unset) is `TabOverflowButton::Auto` — shown only when the tab headers
+overflow the bar's viewport. See `TabOverflowButton` for
+`Always` / `Never`.
+
 #### `pub fn show_overflow_dropdown(mut self, on: bool) -> Self`
 
-Show or hide the "show all tabs" overflow dropdown button when tabs
-overflow. Default (unset) uses the style's preference.
+Convenience over `overflow_button`: `true` maps
+to `TabOverflowButton::Always`, `false` to `TabOverflowButton::Never`.
 
 #### `pub fn reorderable(mut self, on: bool) -> Self`
 

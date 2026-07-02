@@ -35,7 +35,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
@@ -300,7 +300,13 @@ impl Widget for PopoverSurface {
 pub struct Popover {
     label: LocalizedString,
     variant: ButtonVariant,
-    enabled: bool,
+    /// Enabled state (static or reactive). Wired into the arena on the
+    /// trigger node -- the default `Button` and, on the `.trigger(...)`
+    /// path, the `OverlayTrigger` -- so a disabled trigger greys out,
+    /// reports `disabled` to AT, and has its dispatch gated. The snapshot
+    /// read in `build()` is a redundant early-out kept in the custom-trigger
+    /// closures.
+    enabled: Prop<bool>,
     placement: OverlayPlacement,
     dismiss: DismissBehavior,
     pending_content: Option<PendingChild>,
@@ -344,7 +350,7 @@ impl Popover {
         Self {
             label: ls,
             variant: ButtonVariant::Plain,
-            enabled: true,
+            enabled: Prop::Static(true),
             placement: OverlayPlacement::BelowPreferred,
             dismiss: DismissBehavior::EscapeOrClickOutside,
             pending_content: None,
@@ -399,9 +405,10 @@ impl Popover {
         self
     }
 
-    /// Enable or disable the trigger button. Default `true`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Enable or disable the trigger button, statically or reactively.
+    /// Default `true`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -496,7 +503,7 @@ impl std::fmt::Debug for Popover {
         f.debug_struct("Popover")
             .field("label", &self.label)
             .field("style", &self.variant)
-            .field("enabled", &self.enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -505,7 +512,10 @@ impl Widget for Popover {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let label = self.label.clone();
-        let enabled = self.enabled;
+        // Redundant early-out for the custom-trigger closures below; the
+        // arena.s `enabled_when` (wired on the OverlayTrigger) already gates
+        // dispatch, so this snapshot is belt-and-suspenders.
+        let enabled = self.enabled.get();
         let placement = self.placement.clone();
         let dismiss = self.dismiss.clone();
         let show_caret = self.show_caret;
@@ -661,6 +671,7 @@ impl Widget for Popover {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
+            .enabled(self.enabled.clone())
             .name(label)
             .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
             .expanded_when(is_open.clone());
@@ -678,7 +689,7 @@ impl Widget for Popover {
             ctx.add(
                 Button::new(label)
                     .variant(style)
-                    .enabled(enabled)
+                    .enabled(self.enabled.clone())
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
                     .expanded_when(is_open.clone())
                     .on_tap({

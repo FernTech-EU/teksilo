@@ -75,7 +75,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bastyde_canvas::{Canvas, Point, Vec2};
 use bastyde_core::event::Key;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, PaintContext};
 use bastyde_i18n::LocalizedString;
 
@@ -494,16 +494,10 @@ impl MagnetismConfig {
         self
     }
 
-    /// Set the initial enabled state (default enabled). Replaces the
-    /// internal signal.
-    pub fn enabled(mut self, on: bool) -> Self {
-        self.enabled = Signal::new(on);
-        self
-    }
-
-    /// Drive enabled/disabled from an app-owned signal (toolbar toggle).
-    pub fn bind_enabled(mut self, signal: Signal<bool>) -> Self {
-        self.enabled = signal;
+    /// Set the enabled state, statically or reactively (an app-owned
+    /// signal drives enabled/disabled from e.g. a toolbar toggle).
+    pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self {
+        self.enabled = on.into().as_signal();
         self
     }
 

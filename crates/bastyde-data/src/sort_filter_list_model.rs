@@ -312,7 +312,7 @@ impl<T: 'static> SortFilterListModel<T> {
 
     /// Bind a sort signal — typically `TableView::sort_signal()`. Updates
     /// re-project the view. The current value is read once at bind time.
-    pub fn bind_sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>) {
+    pub fn sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>) {
         self.inner.borrow_mut().sort = signal.get();
         rebuild_and_notify(&self.inner);
         let weak = Rc::downgrade(&self.inner);
@@ -330,7 +330,7 @@ impl<T: 'static> SortFilterListModel<T> {
     /// Bind a filters signal — typically `TableView::filters_signal()`.
     /// Updates re-project the view. The current value is read once at bind
     /// time.
-    pub fn bind_filters_signal(&self, signal: Signal<HashMap<String, String>>) {
+    pub fn filters_signal(&self, signal: Signal<HashMap<String, String>>) {
         self.inner.borrow_mut().filters = signal.get();
         rebuild_and_notify(&self.inner);
         let weak = Rc::downgrade(&self.inner);
@@ -351,7 +351,7 @@ impl<T: 'static> SortFilterListModel<T> {
     pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection) {
         let new = col_id.map(|c| (c.to_string(), dir));
         // Clone the signal handle without keeping the borrow alive — the
-        // observer registered by `bind_sort_signal` will call back into
+        // observer registered by `sort_signal` will call back into
         // `inner.borrow_mut()` from `sig.set(...)`.
         let sig = self.inner.borrow().sort_signal.clone();
         if let Some(sig) = sig {
@@ -722,7 +722,7 @@ mod tests {
         let proxy = SortFilterListModel::new(sample())
             .with_comparator("name", |a: &Row, b| a.name.cmp(&b.name));
         let sig: Signal<Option<(String, SortDirection)>> = Signal::new(None);
-        proxy.bind_sort_signal(sig.clone());
+        proxy.sort_signal(sig.clone());
 
         sig.set(Some(("name".to_string(), SortDirection::Ascending)));
         assert_eq!(collect_names(&proxy), vec!["alice", "bob", "carol", "dan"]);
@@ -741,7 +741,7 @@ mod tests {
             Box::new(move |r: &Row| r.name.contains(&t))
         });
         let sig: Signal<HashMap<String, String>> = Signal::new(HashMap::new());
-        proxy.bind_filters_signal(sig.clone());
+        proxy.filters_signal(sig.clone());
 
         let mut m = HashMap::new();
         m.insert("name".to_string(), "a".to_string());
@@ -757,7 +757,7 @@ mod tests {
         let proxy =
             SortFilterListModel::new(sample()).with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
         let sig: Signal<Option<(String, SortDirection)>> = Signal::new(None);
-        proxy.bind_sort_signal(sig.clone());
+        proxy.sort_signal(sig.clone());
         proxy.set_sort(Some("id"), SortDirection::Ascending);
         assert_eq!(
             sig.get(),

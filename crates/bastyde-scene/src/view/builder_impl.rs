@@ -4,13 +4,14 @@
 //! Builder and configuration methods for [`SceneView`].
 //!
 //! Covers construction (`new` / `with_model`), delegate wiring, selection,
-//! camera seeding (`initial_pan` / `initial_zoom` / `bind_view_state`),
+//! camera seeding (`initial_pan` / `initial_zoom` / `view_state`),
 //! zoom/pan-bound overrides, drag mode, background/foreground paint hooks,
 //! magnetism, debug overlays, accessibility tuning (`a11y_mode`,
 //! `a11y_off_screen_mode`, `a11y_bounds_space`, `nested_a11y`), focus-order
 //! callbacks, reactive signal accessors, and the `with_scroll_bars` adaptor.
 
 use super::*;
+use bastyde_core::signal::Prop;
 
 impl SceneView {
     /// Wrap a [`Scene`] in a viewport (single-view sugar). The scene is moved
@@ -476,21 +477,18 @@ impl SceneView {
     /// a marquee. `DragMode::ScrollHandDrag` makes left-drag
     /// pan the view unconditionally; `DragMode::NoDrag` disables
     /// the on-drag handler entirely.
-    pub fn drag_mode(self, mode: crate::item_handlers::DragMode) -> Self {
-        self.drag_mode.set(mode);
-        self
-    }
-
-    /// Replace the view's internal drag-mode signal with an
-    /// app-owned one — so a toolbar widget can hold the same
-    /// `Signal<DragMode>` and toggle Hand vs Select vs NoDrag
-    /// at runtime without touching the SceneView directly.
     ///
-    /// After binding, the view's own `drag_mode(...)` setter
-    /// writes to the shared signal too. To stop sharing, call
-    /// `bind_drag_mode(Signal::new(mode))` with a fresh signal.
-    pub fn bind_drag_mode(mut self, sig: Signal<crate::item_handlers::DragMode>) -> Self {
-        self.drag_mode = sig;
+    /// Accepts a static `DragMode` — which sets the current value on the
+    /// view's internal signal — or a `Signal<DragMode>` (via
+    /// `impl Into<Prop<DragMode>>`), which **replaces** the internal signal
+    /// with the app-owned one so a toolbar can hold the same handle and
+    /// toggle Hand vs Select vs NoDrag at runtime. To stop sharing, pass a
+    /// fresh `Signal::new(mode)`.
+    pub fn drag_mode(mut self, mode: impl Into<Prop<crate::item_handlers::DragMode>>) -> Self {
+        match mode.into() {
+            Prop::Static(m) => self.drag_mode.set(m),
+            Prop::Bound(sig) => self.drag_mode = sig,
+        }
         self
     }
 
@@ -498,7 +496,7 @@ impl SceneView {
     /// signals plus the bounds origin. Coalesced so a simultaneous pan/zoom/
     /// rotation tick registers a single binding per observing widget (instead
     /// of five). Called in `new` and re-called by
-    /// [`bind_view_state`](Self::bind_view_state) after the signals are swapped.
+    /// [`view_state`](Self::view_state) after the signals are swapped.
     fn compose_view_transform(
         pan_x: &Signal<f32>,
         pan_y: &Signal<f32>,
@@ -527,7 +525,7 @@ impl SceneView {
     ///
     /// Must be called before the view is added to the tree (like the other
     /// builder methods) — `build()` reads `view_transform_signal` once.
-    pub fn bind_view_state(
+    pub fn view_state(
         mut self,
         pan_x: Signal<f32>,
         pan_y: Signal<f32>,
@@ -550,7 +548,7 @@ impl SceneView {
     }
 
     /// Seed the initial pan offset (logical pixels). The view keeps ownership
-    /// of the signals; for app-owned signals use [`bind_view_state`](Self::bind_view_state).
+    /// of the signals; for app-owned signals use [`view_state`](Self::view_state).
     pub fn initial_pan(self, x: f32, y: f32) -> Self {
         self.pan_x.set(x);
         self.pan_y.set(y);

@@ -101,14 +101,14 @@ fn make_pie() -> PieChart<String> {
                     .child(
                         TextWidget::new(lit!(""))
                             .style(TextStyleRole::BodyBold)
-                            .bind_text(total_label),
+                            .text(total_label),
                     ),
             ),
         )
 }
 
 fn sized(w: f32, h: f32, body: impl Widget + 'static) -> FixedSize {
-    FixedSize::new().bind_width(w).bind_height(h).child(body)
+    FixedSize::new().width(w).height(h).child(body)
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

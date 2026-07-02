@@ -180,7 +180,7 @@ fn icon_only_tab_centers_its_icon() {
 }
 
 #[test]
-fn tab_display_signal_flips_icon_text_live() {
+fn tab_display_flips_icon_text_live() {
     use crate::IconWidget;
     use crate::tab_widget::TabDisplayMode;
 
@@ -202,7 +202,7 @@ fn tab_display_signal_flips_icon_text_live() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let root = tree.add(
         TabWidget::new(selected.clone())
-            .tab_display_signal(mode.clone())
+            .tab_display(mode.clone())
             .tab_sizing(TabSizing::Independent)
             // A compact floor so an icon-only tab can shrink below the default
             // editor-tab minimum (the bar's row clamps to `min_tab_width`).
@@ -230,7 +230,7 @@ fn tab_display_signal_flips_icon_text_live() {
     let w_icon = tree.bounds(icon_tab).width;
     assert!(
         w_icon < w_text,
-        "flipping tab_display_signal to Icon shrinks the tab to its icon live \
+        "flipping tab_display to Icon shrinks the tab to its icon live \
          ({w_icon} < {w_text})"
     );
 }

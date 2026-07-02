@@ -33,7 +33,7 @@ let _w = TextWidget::new(lit!("Save document")).single_line();
 
 ## Builder methods at a glance
 
-`color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `bind_text`, `bind_color`, `text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`
+`color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`
 
 ## API reference
 
@@ -109,18 +109,12 @@ Override the text backend used for measurement and rasterization.
 In normal app code the framework provides the backend automatically;
 this method is used by headless tests that inject a `MockTextBackend`.
 
-#### `pub fn bind_text(mut self, state: impl Into<Prop<String>>) -> Self`
+#### `pub fn text(mut self, state: impl Into<Prop<String>>) -> Self`
 
-Bind the text content to a reactive state.
+Set the text content. Accepts a static `String`/`&str` or a reactive
+`Signal<String>` / `Prop<String>` (resolved and re-rendered on change).
 
-#### `pub fn bind_color(self, state: impl Into<ColorProp>) -> Self`
-
-Compatibility shim: `.bind_color(signal)` is equivalent to
-`.color(signal)` now that `.color(...)` accepts `impl Into<ColorProp>`.
-New code should prefer `.color(TextRole::X)` for theme-driven colors
-and `.color(signal)` for reactive state.
-
-#### `pub fn text(&self) -> String`
+#### `pub fn resolved_text(&self) -> String`
 
 Get the current text value (resolves from state if bound).
 

@@ -152,25 +152,25 @@ impl Widget for StepButton {
             interaction.map(move |state| resolve_icon_role(*state, enabled_signal_icon.get()));
 
         let bg = RectWidget::new()
-            .bind_background(bg_role)
+            .background(bg_role)
             .corner_radius(self.corner_radius);
         let bg_id = ctx.add(bg);
 
-        // Swap icon color in via bind_color. The icon's design size
+        // Swap icon color in via color. The icon's design size
         // is preserved; only the tint follows the signal.
         let sized_icon = std::mem::replace(
             &mut self.icon,
             IconWidget::from_path(bastyde_canvas::Path::new(), 0.0),
         )
-        .bind_color(icon_role);
+        .color(icon_role);
         let icon_id = ctx.add(Center::new().child(sized_icon));
 
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(icon_id));
 
         let root_id = ctx.add(
             crate::primitives::FixedSize::new()
-                .bind_width(self.width)
-                .bind_height(self.height)
+                .width(self.width)
+                .height(self.height)
                 .child_id(zstack_id),
         );
 

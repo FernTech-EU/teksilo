@@ -95,9 +95,9 @@ tree). Mutually exclusive with `.content(...)`.
 
 Override the default trigger `ButtonVariant` (default: `Plain`).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state of the trigger.
+Set the enabled state of the trigger, statically or reactively.
 
 #### `pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self`
 

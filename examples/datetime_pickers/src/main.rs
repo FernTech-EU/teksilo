@@ -112,7 +112,7 @@ impl Widget for Root {
         let calendar_single_id = ctx.add(calendar_single);
         let single_status_id = ctx.add(
             TextWidget::new(lit!(""))
-                .bind_text(single_value_text)
+                .text(single_value_text)
                 .single_line(),
         );
 
@@ -121,7 +121,7 @@ impl Widget for Root {
         let calendar_range_id = ctx.add(calendar_range);
         let range_status_id = ctx.add(
             TextWidget::new(lit!(""))
-                .bind_text(range_value_text)
+                .text(range_value_text)
                 .single_line(),
         );
 
@@ -131,36 +131,25 @@ impl Widget for Root {
             .max_date(Date::constant(2030, 12, 31))
             .placeholder(lit!("YYYY-MM-DD"));
         let date_edit_id = ctx.add(date_edit);
-        let date_edit_status_id = ctx.add(
-            TextWidget::new(lit!(""))
-                .bind_text(edit_date_text)
-                .single_line(),
-        );
+        let date_edit_status_id =
+            ctx.add(TextWidget::new(lit!("")).text(edit_date_text).single_line());
 
         // Section: TimeEdit (24h)
         let time_24h = TimeEdit::new(self.edit_time_24h.clone()).format(TimeFormat::Hour24);
         let time_24h_id = ctx.add(time_24h);
-        let time24_status_id = ctx.add(
-            TextWidget::new(lit!(""))
-                .bind_text(time24_text)
-                .single_line(),
-        );
+        let time24_status_id = ctx.add(TextWidget::new(lit!("")).text(time24_text).single_line());
 
         // Section: TimeEdit (12h with seconds)
         let time_12h = TimeEdit::new(self.edit_time_12h.clone())
             .format(TimeFormat::Hour12)
             .seconds(SecondsMode::Editable);
         let time_12h_id = ctx.add(time_12h);
-        let time12_status_id = ctx.add(
-            TextWidget::new(lit!(""))
-                .bind_text(time12_text)
-                .single_line(),
-        );
+        let time12_status_id = ctx.add(TextWidget::new(lit!("")).text(time12_text).single_line());
 
         // Section: DateTimeEdit
         let dt_edit = DateTimeEdit::new(self.edit_dt.clone()).format_pattern_separator();
         let dt_edit_id = ctx.add(dt_edit);
-        let dt_status_id = ctx.add(TextWidget::new(lit!("")).bind_text(dt_text).single_line());
+        let dt_status_id = ctx.add(TextWidget::new(lit!("")).text(dt_text).single_line());
 
         // Section: DateRangeEdit
         let range_edit_text = self.edit_range.map(|r| match r {
@@ -183,7 +172,7 @@ impl Widget for Root {
         let range_edit_id = ctx.add(range_edit);
         let range_edit_status_id = ctx.add(
             TextWidget::new(lit!(""))
-                .bind_text(range_edit_text)
+                .text(range_edit_text)
                 .single_line(),
         );
 

@@ -232,8 +232,8 @@ mod tests {
         let id = tree.add(
             Blur::new(radius.clone()).child(
                 FixedSize::new()
-                    .bind_width(120.0)
-                    .bind_height(40.0)
+                    .width(120.0)
+                    .height(40.0)
                     .child(RectWidget::new()),
             ),
         );
@@ -270,8 +270,8 @@ mod tests {
         tree.add(
             Blur::new(radius.clone()).child(
                 FixedSize::new()
-                    .bind_width(80.0)
-                    .bind_height(40.0)
+                    .width(80.0)
+                    .height(40.0)
                     .child(RectWidget::new()),
             ),
         );
@@ -300,8 +300,8 @@ mod tests {
         let id = tree.add(
             Blur::new(8.0_f32).child(
                 FixedSize::new()
-                    .bind_width(80.0)
-                    .bind_height(40.0)
+                    .width(80.0)
+                    .height(40.0)
                     .child(RectWidget::new()),
             ),
         );

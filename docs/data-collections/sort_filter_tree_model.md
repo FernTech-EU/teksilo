@@ -64,7 +64,7 @@ assert_eq!(proxy.visible_count(), 3); // src + main.rs + docs
 
 ## Builder methods at a glance
 
-`with_comparator`, `with_predicate`, `filter_mode`, `bind_sort_signal`, `bind_filters_signal`, `set_sort`, `clear_sort`, `set_filter`, `clear_filters`, `visible_count`, `with_entry`, `visible_node_id`, `entry_at`, `flat_index_of`, `is_expanded`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `version_signal`, `first_changed_index`, `tree`
+`with_comparator`, `with_predicate`, `filter_mode`, `sort_signal`, `filters_signal`, `set_sort`, `clear_sort`, `set_filter`, `clear_filters`, `visible_count`, `with_entry`, `visible_node_id`, `entry_at`, `flat_index_of`, `is_expanded`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `version_signal`, `first_changed_index`, `tree`
 
 ## API reference
 
@@ -112,11 +112,11 @@ Register a predicate factory for a column id. Chainable.
 
 Set the filter mode (default `KeepAncestors`). Chainable.
 
-#### `pub fn bind_sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>)`
+#### `pub fn sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>)`
 
 Bind a sort signal — typically `TreeTableView::sort_signal()`.
 
-#### `pub fn bind_filters_signal(&self, signal: Signal<HashMap<String, String>>)`
+#### `pub fn filters_signal(&self, signal: Signal<HashMap<String, String>>)`
 
 Bind a filters signal — typically `TreeTableView::filters_signal()`.
 

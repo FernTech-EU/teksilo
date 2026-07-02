@@ -125,7 +125,7 @@ impl Widget for Root {
 
         let direction_note = ctx.add(
             TextWidget::new(lit!(""))
-                .bind_text(direction_label)
+                .text(direction_label)
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary),
         );
@@ -265,7 +265,7 @@ impl Widget for Root {
             tr_signal!(cart_summary(count = self.count, price = self.price,));
         let cart_summary_text = ctx.add(
             TextWidget::new(lit!(""))
-                .bind_text(cart_summary_signal)
+                .text(cart_summary_signal)
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary),
         );
@@ -396,7 +396,7 @@ fn formatting_row(ctx: &mut BuildContext, label: &'static str, value: Signal<Str
     );
     let value_widget = ctx.add(
         TextWidget::new(lit!(""))
-            .bind_text(value)
+            .text(value)
             .style(TextStyleRole::Body)
             .color(TextRole::Primary),
     );

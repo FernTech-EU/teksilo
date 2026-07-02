@@ -28,8 +28,8 @@ BastydeAppBuilder::new()
         tree.add(
             WebView::new()
                 .url("https://example.com")
-                .bind_title(title_signal.clone())     // window title follows the page
-                .bind_loading(loading_signal.clone())
+                .title_signal(title_signal.clone())     // window title follows the page
+                .loading_signal(loading_signal.clone())
                 .on_message(|msg, _ctx| println!("JS said: {msg}")),
         )
     }))
@@ -184,9 +184,9 @@ WebView::new()
     .user_agent("MyApp/1.0")
     .transparent(true)
     .devtools(cfg!(debug_assertions))
-    .bind_url(url_signal)              // Signal<String> — TWO-WAY (see below)
-    .bind_title(title_signal)         // Signal<String> — updated on title change
-    .bind_loading(loading_signal)     // Signal<bool>   — true between page-load start/finish
+    .url_signal(url_signal)              // Signal<String> — TWO-WAY (see below)
+    .title_signal(title_signal)         // Signal<String> — updated on title change
+    .loading_signal(loading_signal)     // Signal<bool>   — true between page-load start/finish
     .on_message(|msg: String, ctx| { … })       // JS → Rust (window.ipc.postMessage)
     .on_title_changed(|title, ctx| { … })
     .on_navigation(|nav, ctx| { … })             // observer — NavigationInfo (no veto, see below)
@@ -201,12 +201,12 @@ Imperative controls (call via `ctx.with_widget_mut::<WebView>(id, RepaintOnly, |
 `go_forward`, `stop`, `open_devtools` / `close_devtools` (runtime toggle; no-op
 where unsupported). The stable routing identity is `WebView::id() -> WebViewId`.
 
-**Two-way `bind_url`.** The engine writes the resolved URL into the bound signal
+**Two-way `url_signal`.** The engine writes the resolved URL into the bound signal
 on navigation-finish, and an external `url_signal.set("…")` drives programmatic
 navigation (equivalent to `load_url`). The engine's own echo is filtered, so the
 two directions don't loop. The **initial** page comes from `.url()` / `.html()`
 / `.source()`; the signal's value at build time is taken as the baseline and
-does not trigger a navigation — `bind_url` governs navigation *after* the first
+does not trigger a navigation — `url_signal` governs navigation *after* the first
 load. (Don't bind the same signal directly to an editable `TextInput`, or every
 keystroke navigates — drive navigation from a "Go" button / Enter handler that
 sets the signal instead.)
@@ -291,7 +291,7 @@ GPU / window / engine. The headless suite
 ([tests/basic_lifecycle.rs](../crates/bastyde-webview/tests/basic_lifecycle.rs))
 covers open/teardown, bounds tracking, the headline dormancy assertion — a
 `WebView` parked in a real `Switcher` issues `set_visible(false)` on tab-away
-and `set_visible(true)` on tab-back — plus two-way `bind_url` navigation,
+and `set_visible(true)` on tab-back — plus two-way `url_signal` navigation,
 download-event delivery to the callbacks, and the runtime devtools toggle.
 Install it with
 `install_web_view(MemoryWebViewBackend::new().0)` (or the `memory_registry()`

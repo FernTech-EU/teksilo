@@ -47,7 +47,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable_rows`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable_rows`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -90,6 +90,11 @@ across two views of the same source. The view stays `TableView<T>` — the
 index↔key mapping is captured from the concrete source here. Equivalent
 to `from_source(..)` plus an identity-based replacement for
 `selection`.
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole view. A disabled view greys out and stops
+accepting focus / selection / keyboard input (arena-gated).
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
@@ -280,7 +285,7 @@ drive a re-sort of the underlying data:
 ```ignore
 let proxy = SortFilterListModel::new(model)
     .with_comparator("name", |a, b| a.name.cmp(&b.name));
-proxy.bind_sort_signal(table.sort_signal().clone());
+proxy.sort_signal(table.sort_signal().clone());
 ```
 
 #### `pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>>`
@@ -351,7 +356,7 @@ let proxy = SortFilterListModel::new(model)
         let needle = t.to_string();
         Box::new(move |r: &Row| r.name.contains(&needle))
     });
-proxy.bind_filters_signal(table.filters_signal().clone());
+proxy.filters_signal(table.filters_signal().clone());
 ```
 
 #### `pub fn set_filter(&self, col_id: &str, text: &str)`

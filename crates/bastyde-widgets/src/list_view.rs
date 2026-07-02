@@ -57,7 +57,7 @@ use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::drag_payload::DragPayload;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -187,6 +187,13 @@ pub struct ListView<T: 'static> {
 
     /// Stable ID for this ListView instance (used to identify intra-widget reorder).
     model_id: usize,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; `enabled_state` is the single source of truth — a disabled
+    /// view greys out and stops accepting focus / selection / keyboard
+    /// input (arena-gated).
+    enabled: Prop<bool>,
 }
 
 impl<T: 'static> ListView<T> {
@@ -302,7 +309,15 @@ impl<T: 'static> ListView<T> {
             item_entries: Vec::new(),
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
+            enabled: Prop::Static(true),
         }
+    }
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
     }
 
     /// Set the scroll-chaining behavior at the boundary (default
@@ -555,6 +570,9 @@ impl<T: 'static> Widget for ListView<T> {
         // --- Version signal for rebuild triggering ---
         // A persistent field (not `ctx.signal`) so the realization
         // re-check in `place_children` can bump it after measurement.
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
@@ -1122,10 +1140,8 @@ impl<T: 'static> Widget for ListView<T> {
                         crate::data_views::ActivateOn::SingleClick => {
                             HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
                         }
-                        crate::data_views::ActivateOn::DoubleClick => {
-                            HandlerSet::new()
-                                .on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
-                        }
+                        crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
+                            .on_double_tap(move |_tap, ctx| cb(activate_index, ctx)),
                     };
                     ctx.apply_handlers(child_id, handlers);
                 }
@@ -2776,12 +2792,7 @@ mod tests {
         .overscroll_behavior(inner);
         let inner_y = lv.scroll_y_signal().clone();
         let lv_id = tree.add(lv);
-        let viewport = tree.add(
-            FixedSize::new()
-                .bind_width(200.0)
-                .bind_height(100.0)
-                .child_id(lv_id),
-        );
+        let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child_id(lv_id));
         let filler = tree.add(FixedLeaf(200.0, 200.0));
         let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);

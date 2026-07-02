@@ -132,7 +132,7 @@ impl CalendarStyle for RecipeCalendarStyle {
             CalendarDayFill::None => SurfaceRole::Transparent,
         });
         let bg_widget = RectWidget::new()
-            .bind_background(bg_role)
+            .background(bg_role)
             .corner_radius(CornerRadius::uniform(radius));
         let bg_id = ctx.add(bg_widget);
 
@@ -174,7 +174,7 @@ impl CalendarStyle for RecipeCalendarStyle {
         };
         let label = TextWidget::new(lit!(cfg.label.clone()))
             .style(TextStyleRole::Body)
-            .bind_color(text_color)
+            .color(text_color)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
@@ -190,8 +190,8 @@ impl CalendarStyle for RecipeCalendarStyle {
 
         ctx.add(
             FixedSize::new()
-                .bind_width(cfg.cell_size)
-                .bind_height(cfg.cell_size)
+                .width(cfg.cell_size)
+                .height(cfg.cell_size)
                 .child_id(z_id),
         )
     }
@@ -236,8 +236,8 @@ impl CalendarStyle for RecipeCalendarStyle {
         let z_id = ctx.add(ZStack::new().add_child(bg_id).add_child(text_id));
         ctx.add(
             FixedSize::new()
-                .bind_width(cfg.cell_width)
-                .bind_height(cfg.cell_height)
+                .width(cfg.cell_width)
+                .height(cfg.cell_height)
                 .child_id(z_id),
         )
     }

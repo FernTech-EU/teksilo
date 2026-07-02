@@ -15,7 +15,7 @@
 //!
 //! For *explicit* size animation (target is a numeric signal you
 //! already drive, e.g. a sidebar width), use the existing
-//! `FixedSize::new().bind_width(animated_signal)` + `Signal::animate_to`
+//! `FixedSize::new().width(animated_signal)` + `Signal::animate_to`
 //! pattern instead — that path doesn't need to measure the child every
 //! frame.
 //!
@@ -299,7 +299,7 @@ mod tests {
         let id = tree.add(
             SmoothSize::new()
                 .duration(Duration::from_millis(500))
-                .child(FixedSize::new().bind_width(180.0).bind_height(70.0)),
+                .child(FixedSize::new().width(180.0).height(70.0)),
         );
         // Single layout, NO animation tick: the wrapper must already
         // report (180, 70), not 0×0 or anything mid-tween.
@@ -330,11 +330,7 @@ mod tests {
         let id = tree.add(
             SmoothSize::new()
                 .duration(Duration::from_millis(200))
-                .child(
-                    FixedSize::new()
-                        .bind_width(width_signal.clone())
-                        .bind_height(50.0),
-                ),
+                .child(FixedSize::new().width(width_signal.clone()).height(50.0)),
         );
         // Initial snap to 100×50.
         tree.layout(SizeProposal {
@@ -389,8 +385,7 @@ mod tests {
     fn reduced_motion_snaps_to_natural() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
-        let id =
-            tree.add(SmoothSize::new().child(FixedSize::new().bind_width(150.0).bind_height(60.0)));
+        let id = tree.add(SmoothSize::new().child(FixedSize::new().width(150.0).height(60.0)));
         tree.layout(SizeProposal {
             width: None,
             height: None,

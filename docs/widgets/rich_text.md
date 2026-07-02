@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `zoom`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `scroll_policy`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `set_zoom_level`, `get_zoom_level`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `zoom`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `scroll_policy`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `set_zoom_level`, `get_zoom_level`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -272,6 +272,18 @@ engine. Only has effect when the editor is built outside a
 windowed bastyde-app — once `build()` sees a `SharedTypesetter`
 in `app_state`, the private engine is replaced with one that
 shares the app's typesetter and this registrar is ignored.
+
+#### `pub fn on_change(self, f: impl Fn() + 'static) -> Self`
+
+Install a callback fired once per batch of genuine **user content
+edits** (typing, paste, cut, delete) — and *not* on a programmatic
+`set_djot` / `set_markdown` / `set_html` load or a document reset. The
+callback runs on the UI thread during the editor's frame drain, so it
+may touch `Signal`s directly — e.g. flip a "dirty" flag or kick a
+debounced autosave. Replaces any prior change callback on this editor.
+
+For a reactive change *token* (which also bumps on loads/format-only
+changes), observe `document_version` instead.
 
 #### `pub fn document_version(&self) -> Signal<u64>`
 
@@ -771,6 +783,20 @@ Apply underline to the current selection.
 #### `pub fn set_strikethrough(&self, enabled: bool)`
 
 Apply strikethrough to the current selection.
+
+#### `pub fn set_font_family(&self, family: impl Into<String>)`
+
+Set the font family for the current selection (a character-format
+change applied over the selected range). Like the other char-format
+setters (`set_bold`, …), this is a **no-op when there is no
+selection** — the document model has no typing/pending format, so a
+bare caret has no range to format. `family` must be a name resolvable
+by the shared typesetter's font registrar — e.g. a value chosen from
+a `FontPicker`.
+
+#### `pub fn set_font_size(&self, size: u32)`
+
+Set the font size (in points) for the current selection.
 
 #### `pub fn apply_text_format(&self, fmt: TextFormat)`
 

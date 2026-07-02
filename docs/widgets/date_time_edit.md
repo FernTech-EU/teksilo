@@ -63,7 +63,7 @@ let _w = DateTimeEdit::new(datetime.clone())
 
 ## Builder methods at a glance
 
-`style`, `required`, `date_format_pattern`, `time_format`, `seconds`, `min`, `max`, `step_minutes`, `first_day_of_week`, `show_calendar_button`, `separator`, `placeholder`, `enabled`, `read_only`, `label`, `validation_behavior`, `time_width_policy`, `validation_feedback_signal`, `on_value_changed`, `value`
+`style`, `required`, `date_format_pattern`, `time_format`, `seconds`, `min`, `max`, `step_minutes`, `first_day_of_week`, `show_calendar_button`, `separator`, `placeholder`, `enabled`, `read_only`, `label`, `validation_behavior`, `time_width_policy`, `validation_feedback_signal`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
 
 ## API reference
 
@@ -143,9 +143,10 @@ Pass an empty string to suppress the separator entirely.
 
 Placeholder shown when the datetime is `None`.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -180,6 +181,33 @@ Pristine`).
 
 Callback invoked whenever the datetime changes. Receives the new
 `Option<DateTime>` and an `EventContext` for dispatching intents.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Show a plain single-line tooltip after a hover delay. Mutually
+exclusive with `rich_tooltip` / `rich_tooltip_content` /
+`composite_tooltip` — each setter clears the other three so the
+last call wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Show a rich tooltip identified by a registry key. Mutually
+exclusive with `tooltip` / `rich_tooltip_content` /
+`composite_tooltip` — each setter clears the other three so the
+last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Show a rich tooltip with inline content. Mutually exclusive with
+`tooltip` / `rich_tooltip` / `composite_tooltip` — each setter
+clears the other three so the last call wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Show a composite tooltip whose body is an arbitrary widget tree.
+Mutually exclusive with `tooltip` / `rich_tooltip` /
+`rich_tooltip_content` — each setter clears the other three so
+the last call wins.
 
 #### `pub fn value(&self) -> Signal<Option<DateTime>>`
 

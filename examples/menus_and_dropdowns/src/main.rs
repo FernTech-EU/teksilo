@@ -772,7 +772,7 @@ impl Widget for Root {
                             // `word_wrap`.
                             .item(
                                 MenuItem::new(lit!("&Word Wrap"))
-                                    .bind_checked(word_wrap_for_view.clone()),
+                                    .checked(word_wrap_for_view.clone()),
                             )
                             // CHECKABLE — tri-state. Cycles
                             // Unchecked↔Checked on click; Indeterminate
@@ -780,7 +780,7 @@ impl Widget for Root {
                             // (shown as a dash glyph).
                             .item(
                                 MenuItem::new(lit!("Show &Inspector"))
-                                    .bind_check_state(inspector_for_view.clone()),
+                                    .check_state(inspector_for_view.clone()),
                             )
                             .separator()
                             // RADIO GROUP — three items sharing one

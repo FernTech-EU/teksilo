@@ -132,7 +132,7 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // visually float inside the row's full-width hit area.
         let bg_rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg_role)
+                .background(bg_role)
                 .corner_radius(CornerRadius::uniform(self.recipe.item_corner_radius))
                 .border_color(BorderRole::Focused)
                 .border_width(ring_width),

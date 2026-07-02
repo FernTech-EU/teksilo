@@ -40,7 +40,7 @@ let _bar = ScrollBar::new(
 
 ## Builder methods at a glance
 
-`thickness`, `min_thumb_length`, `step_size`, `visual`, `variant`, `style`
+`thickness`, `min_thumb_length`, `step_size`, `visual`, `variant`, `style`, `thumb_color`
 
 ## API reference
 
@@ -92,3 +92,14 @@ Alias for `visual` using the new variant naming.
 #### `pub fn style(mut self, style: impl ScrollBarStyle) -> Self`
 
 Override the active `ScrollBarStyle` for this widget instance only.
+
+#### `pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self`
+
+Tint the thumb with an explicit colour instead of the theme's
+`scrollbar_thumb*` tokens. Accepts anything `impl Into<ColorProp>` —
+a `Color`, a theme role (`TextRole`/`SurfaceRole`/…), or a `Signal`;
+resolved against the live theme at paint, so roles and signals stay
+reactive. The active `ScrollBarStyle` derives the idle/hover/pressed
+states from this tint. Use when the bar sits on a surface the
+surface-relative tokens don't suit — a tooltip's inverse chip, a
+branded panel. Mirrors `Button::text_role`.

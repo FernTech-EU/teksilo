@@ -207,11 +207,11 @@ mod tests {
             DeadZone::new().child(
                 Shrinkable::new()
                     .min_width(20.0)
-                    .child(FixedSize::new().bind_width(100.0).bind_height(20.0)),
+                    .child(FixedSize::new().width(100.0).height(20.0)),
             ),
         );
         // A rigid 100-wide sibling forces the whole deficit onto the dead zone.
-        let rigid = tree.add(FixedSize::new().bind_width(100.0).bind_height(20.0));
+        let rigid = tree.add(FixedSize::new().width(100.0).height(20.0));
         tree.add(HStack::new().add_child(rigid).add_child(dead));
         // 200 px natural, 120 px offered → 80 px deficit; the shrinkable dead
         // zone must absorb it (down toward its 20 px floor).

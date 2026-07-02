@@ -40,7 +40,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
     CheckboxState, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
 };
@@ -129,10 +129,11 @@ pub struct Checkbox {
     label: Option<LocalizedString>,
     caption: Option<LocalizedString>,
     kind: CheckKind,
-    /// Initial enabled-state; forwarded into the arena at build time.
-    /// After build the arena is the single source of truth — see
-    /// `IconButton::initial_enabled` for the architectural rationale.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded into the arena at
+    /// build time. After build the arena is the single source of
+    /// truth — see `IconButton::enabled` for the architectural
+    /// rationale.
+    enabled: Prop<bool>,
     /// When true, the checkbox renders only the box (no visual label /
     /// caption next to it) AND its `accessibility(builder)` skips the
     /// missing-label `debug_assert` — the parent composite is responsible
@@ -155,7 +156,7 @@ impl Checkbox {
             label: None,
             caption: None,
             kind: CheckKind::TwoState(checked),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -178,7 +179,7 @@ impl Checkbox {
             label: None,
             caption: None,
             kind: CheckKind::TriState(state),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -227,13 +228,11 @@ impl Checkbox {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time. For
-    /// reactive enable/disable, call
-    /// `ctx.enabled_when(checkbox_id, signal)` from the composing
-    /// widget.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
+    /// build time — a bound `Signal<bool>` updates live.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -303,7 +302,7 @@ impl std::fmt::Debug for Checkbox {
             .field("label", &self.label)
             .field("caption", &self.caption)
             .field("kind", &self.kind)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -321,13 +320,11 @@ impl Widget for Checkbox {
         let variant = self.variant;
         let self_id = ctx.self_id();
 
-        // Forward initial-enabled into the arena. After this point
+        // Forward the enabled state into the arena. After this point
         // the arena is the single source of truth (same architecture
         // as IconButton — leaves consume `effective_enabled` at paint
         // time, events are gated on `is_enabled`, a11y walker reads it).
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Interaction signal seeded to Idle — the arena's enabled-state

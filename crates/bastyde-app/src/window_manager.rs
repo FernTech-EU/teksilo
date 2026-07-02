@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use bastyde_core::Theme;
 use bastyde_core::event_source::TreeAppContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::Prop;
 use bastyde_core::{
     CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, PlatformTitleBarHost,
     TitleBarHostCallbacks, UserAttentionKind, WidgetTree, WindowCommand, WindowPlacement,
@@ -62,7 +62,7 @@ struct PendingClose {
 /// unit-tested headlessly with a `NoopWindowOps`-backed `EventContext`,
 /// without standing up a winit event loop.
 fn close_verdict(
-    can_close: &Option<Signal<bool>>,
+    can_close: &Option<Prop<bool>>,
     on_close_blocked: &Option<CloseBlockedCallback>,
     close_guard: &Option<CloseGuard>,
     ctx: &mut bastyde_core::widget::EventContext,
@@ -146,7 +146,7 @@ pub(crate) struct ManagedWindow {
     /// When present and `false`, a guarded close is vetoed and
     /// [`on_close_blocked`](Self::on_close_blocked) fires. Evaluated
     /// before [`close_guard`](Self::close_guard).
-    pub can_close: Option<Signal<bool>>,
+    pub can_close: Option<Prop<bool>>,
     /// Optional notification fired when [`can_close`](Self::can_close)
     /// blocks a close, from
     /// [`WindowConfig::on_close_blocked`](bastyde_core::WindowConfig::on_close_blocked).
@@ -1738,6 +1738,7 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
 #[cfg(test)]
 mod close_guard_tests {
     use super::*;
+    use bastyde_core::signal::Signal;
     use bastyde_core::widget::EventContext;
     use bastyde_core::{CloseResponse, NoopWindowOps, WidgetTree};
     use std::cell::Cell;
@@ -1747,7 +1748,7 @@ mod close_guard_tests {
     /// path `process_pending` uses, but with a `NoopWindowOps` sink and
     /// no winit event loop.
     fn verdict(
-        can_close: Option<Signal<bool>>,
+        can_close: Option<Prop<bool>>,
         on_blocked: Option<CloseBlockedCallback>,
         guard: Option<CloseGuard>,
     ) -> bool {
@@ -1782,7 +1783,7 @@ mod close_guard_tests {
         let flag = fired.clone();
         let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
 
-        let should_close = verdict(Some(Signal::new(false)), Some(on_blocked), None);
+        let should_close = verdict(Some(Prop::from(Signal::new(false))), Some(on_blocked), None);
 
         assert!(!should_close, "can_close == false must veto");
         assert!(fired.get(), "on_close_blocked must fire on a vetoed close");
@@ -1799,7 +1800,7 @@ mod close_guard_tests {
             CloseResponse::Close
         });
 
-        let should_close = verdict(Some(Signal::new(false)), None, Some(guard));
+        let should_close = verdict(Some(Prop::from(Signal::new(false))), None, Some(guard));
 
         assert!(!should_close, "can_close == false wins over the guard");
         assert!(
@@ -1813,7 +1814,7 @@ mod close_guard_tests {
         // A permissive sugar signal does not auto-close: the explicit
         // guard still gets the final say (here it vetoes).
         let guard: CloseGuard = Rc::new(|_ctx| CloseResponse::Veto);
-        let should_close = verdict(Some(Signal::new(true)), None, Some(guard));
+        let should_close = verdict(Some(Prop::from(Signal::new(true))), None, Some(guard));
         assert!(!should_close, "can_close == true still consults the guard");
     }
 
@@ -1824,7 +1825,7 @@ mod close_guard_tests {
         let flag = fired.clone();
         let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
 
-        let should_close = verdict(Some(Signal::new(true)), Some(on_blocked), None);
+        let should_close = verdict(Some(Prop::from(Signal::new(true))), Some(on_blocked), None);
 
         assert!(should_close, "a permissive signal with no guard closes");
         assert!(!fired.get(), "on_close_blocked must not fire when allowed");

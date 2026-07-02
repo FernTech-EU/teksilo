@@ -27,7 +27,7 @@ let _w = MaxSize::width(240.0)
 
 ## Builder methods at a glance
 
-`width`, `height`, `bind_max_width`, `bind_max_height`, `child_id`, `child`
+`width`, `height`, `max_width`, `max_height`, `child_id`, `child`
 
 ## API reference
 
@@ -57,11 +57,11 @@ Cap only the width axis; the height axis is unconstrained by this modifier.
 
 Cap only the height axis; the width axis is unconstrained by this modifier.
 
-#### `pub fn bind_max_width(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn max_width(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind max width to a reactive state.
 
-#### `pub fn bind_max_height(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn max_height(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind max height to a reactive state.
 

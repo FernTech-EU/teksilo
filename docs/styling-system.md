@@ -300,7 +300,7 @@ impl ButtonStyle for MaterialFilledButton {
 
         let rect = ctx.add(
             RectWidget::new()
-                .bind_background(bg)
+                .background(bg)
                 .corner_radius(CornerRadius::uniform(20.0)),
         );
 

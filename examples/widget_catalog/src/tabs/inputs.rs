@@ -82,14 +82,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_h = section(
         ctx,
         tr!(inp_heading_slider_h()),
-        FixedSize::new().bind_width(300.0_f32).child(
+        FixedSize::new().width(300.0_f32).child(
             Slider::new(sigs.slider_value.clone(), 0.0, 100.0).label(tr!(inp_slider_volume())),
         ),
     );
     let slider_stepped = section(
         ctx,
         tr!(inp_heading_slider_stepped()),
-        FixedSize::new().bind_width(300.0_f32).child(
+        FixedSize::new().width(300.0_f32).child(
             Slider::new(sigs.slider_stepped.clone(), 0.0, 100.0)
                 .step(25.0)
                 .label(tr!(inp_slider_stepped())),
@@ -98,7 +98,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_v = section(
         ctx,
         tr!(inp_heading_slider_v()),
-        FixedSize::new().bind_height(150.0_f32).child(
+        FixedSize::new().height(150.0_f32).child(
             Slider::new(sigs.slider_v_value.clone(), 0.0, 1.0)
                 .orientation(Orientation::Vertical)
                 .label(tr!(inp_slider_vertical())),
@@ -166,7 +166,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let combo = section(
         ctx,
         lit!("ComboBox"),
-        FixedSize::new().bind_width(220.0_f32).child(
+        FixedSize::new().width(220.0_f32).child(
             ComboBox::from_items(
                 vec![
                     tr!(inp_combo_apple()).resolve_now(),
@@ -359,7 +359,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 300.0_f32
+                    width: 300.0_f32
                     Slider::new(slider_h_val, 0.0, 100.0) {
                         label: tr!(inp_slider_volume())
                     }
@@ -373,7 +373,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 300.0_f32
+                    width: 300.0_f32
                     Slider::new(slider_step, 0.0, 100.0) {
                         step: 25.0
                         label: tr!(inp_slider_stepped())
@@ -388,7 +388,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_height: 150.0_f32
+                    height: 150.0_f32
                     Slider::new(slider_v_val, 0.0, 1.0) {
                         orientation: Orientation::Vertical
                         label: tr!(inp_slider_vertical())
@@ -421,7 +421,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 FixedSize {
-                    bind_width: 220.0_f32
+                    width: 220.0_f32
                     child_id: combo_widget
                 }
             }

@@ -31,7 +31,7 @@ let _w = ScrollArea::new()
 
 ## Builder methods at a glance
 
-`child`, `from_id`, `scroll_bar_style`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `preferred_size`, `overscroll_behavior`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `max_scroll_x_signal`
+`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `preferred_size`, `overscroll_behavior`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `max_scroll_x_signal`
 
 ## API reference
 
@@ -94,6 +94,17 @@ Construct from an already-registered child WidgetId.
 #### `pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self`
 
 Set the scroll bar display mode (`Overlay`, `Permanent`, or `Thin`).
+
+#### `pub fn scroll_bar_thumb_color(mut self, color: impl Into<ColorProp>) -> Self`
+
+Tint the built-in scroll bars' thumb with an explicit colour instead of
+the theme's `scrollbar_thumb*` tokens. Accepts anything
+`impl Into<ColorProp>` — a `Color`, a theme role, or a `Signal` —
+resolved against the live theme at paint, so roles/signals stay
+reactive. Forwarded to both scroll bars via
+`ScrollBar::thumb_color`.
+Use when the area sits on a surface the surface-relative tokens don't
+suit — e.g. a tooltip's inverse chip (`TextRole::TooltipText`).
 
 #### `pub fn vertical_scroll_bar_policy(mut self, policy: ScrollBarPolicy) -> Self`
 

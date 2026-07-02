@@ -65,7 +65,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -142,8 +142,9 @@ pub struct DateEdit {
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
     calendar_popover_placement: OverlayPlacement,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     read_only: bool,
     /// How parse failures are surfaced. Default `AutoCorrect`.
     validation_behavior: ValidationBehavior,
@@ -187,7 +188,7 @@ impl std::fmt::Debug for DateEdit {
         f.debug_struct("DateEdit")
             .field("min", &self.min_date)
             .field("max", &self.max_date)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -205,7 +206,7 @@ impl DateEdit {
             first_day_of_week: None,
             show_calendar_button: true,
             calendar_popover_placement: OverlayPlacement::BelowPreferred,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
             width_policy: WidthPolicy::Default,
@@ -292,10 +293,10 @@ impl DateEdit {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -436,11 +437,9 @@ impl Widget for DateEdit {
         use crate::styles::recipe_date_edit_style as de;
         let _ = &theme;
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
-        let enabled = self.initial_enabled;
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
+        let enabled = self.enabled.get();
         let read_only = self.read_only;
 
         // Resolve pattern: explicit override → locale default.

@@ -14,8 +14,8 @@
 //! | Builder | AT Role | Leading glyph |
 //! |---|---|---|
 //! | (default) | `Role::MenuItem` | icon or blank |
-//! | `.bind_checked(signal)` | `Role::MenuItemCheckBox` | checkmark / blank |
-//! | `.bind_check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
+//! | `.checked(signal)` | `Role::MenuItemCheckBox` | checkmark / blank |
+//! | `.check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
 //! | `.reflect_checked(signal)` | `Role::MenuItemCheckBox` | checkmark (read-only) |
 //! | `.radio(value, selected)` | `Role::MenuItemRadio` | filled dot / blank |
 //!
@@ -124,7 +124,7 @@ enum CheckKind {
     /// The classic "View ▸ Sidebar / Full Screen" pattern, where the check
     /// follows layout state the menu doesn't own. Renders identically to
     /// `TwoState`; differs only in that clicking has no built-in toggle.
-    Reflect(Signal<bool>),
+    Reflect(Prop<bool>),
 }
 
 /// A single command row in a `MenuList` or context menu.
@@ -418,9 +418,9 @@ impl MenuItem {
     /// Windows convention, the leading icon slot becomes a checkmark
     /// when the signal is `true`, blank otherwise.
     ///
-    /// Mutually exclusive with [`bind_check_state`](Self::bind_check_state)
+    /// Mutually exclusive with [`check_state`](Self::check_state)
     /// and [`radio`](Self::radio) — last call wins.
-    pub fn bind_checked(mut self, state: Signal<bool>) -> Self {
+    pub fn checked(mut self, state: Signal<bool>) -> Self {
         self.mode = MenuItemMode::Check(CheckKind::TwoState(state));
         self
     }
@@ -431,11 +431,11 @@ impl MenuItem {
     /// responsible for the change, after which `state` updates the checkmark
     /// reactively. Use for "View ▸ Sidebar / Full Screen"-style commands that
     /// mirror externally-owned state (e.g. `DockingModel::dock_open_signal`),
-    /// where two-way [`bind_checked`](Self::bind_checked) would fight the model.
+    /// where two-way [`checked`](Self::checked) would fight the model.
     ///
     /// Mutually exclusive with the other check / radio binders — last call wins.
-    pub fn reflect_checked(mut self, state: Signal<bool>) -> Self {
-        self.mode = MenuItemMode::Check(CheckKind::Reflect(state));
+    pub fn reflect_checked(mut self, state: impl Into<Prop<bool>>) -> Self {
+        self.mode = MenuItemMode::Check(CheckKind::Reflect(state.into()));
         self
     }
 
@@ -450,9 +450,9 @@ impl MenuItem {
     /// for `Indeterminate`, blank for `Unchecked` — matching the
     /// Windows mixed-state convention.
     ///
-    /// Mutually exclusive with [`bind_checked`](Self::bind_checked)
+    /// Mutually exclusive with [`checked`](Self::checked)
     /// and [`radio`](Self::radio) — last call wins.
-    pub fn bind_check_state(mut self, state: Signal<CheckState>) -> Self {
+    pub fn check_state(mut self, state: Signal<CheckState>) -> Self {
         self.mode = MenuItemMode::Check(CheckKind::TriState(state));
         self
     }
@@ -468,8 +468,8 @@ impl MenuItem {
     /// by selection-signal identity and emits `push_to_radio_group`
     /// relationships automatically — no app-side wiring required.
     ///
-    /// Mutually exclusive with [`bind_checked`](Self::bind_checked)
-    /// and [`bind_check_state`](Self::bind_check_state) — last call
+    /// Mutually exclusive with [`checked`](Self::checked)
+    /// and [`check_state`](Self::check_state) — last call
     /// wins.
     pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self {
         self.mode = MenuItemMode::Radio { value, selected };
@@ -614,16 +614,15 @@ impl Widget for MenuItem {
             let icon_child_id = match &self.mode {
                 MenuItemMode::Plain => {
                     if let Some(icon) = self.icon.take() {
-                        ctx.add(icon.bind_color(text_role.clone()))
+                        ctx.add(icon.color(text_role.clone()))
                     } else {
                         ctx.add(Spacer::new())
                     }
                 }
-                MenuItemMode::Check(CheckKind::TwoState(s))
-                | MenuItemMode::Check(CheckKind::Reflect(s)) => {
+                MenuItemMode::Check(CheckKind::TwoState(s)) => {
                     debug_assert!(
                         self.icon.is_none(),
-                        "MenuItem: .icon() is mutually exclusive with a checkmark (bind_checked / reflect_checked)"
+                        "MenuItem: .icon() is mutually exclusive with a checkmark (checked / reflect_checked)"
                     );
                     self.icon = None;
                     // 0 = checkmark, 1 = spacer.
@@ -632,7 +631,24 @@ impl Widget for MenuItem {
                         Switcher::new(idx)
                             .child(
                                 IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE)
-                                    .bind_color(text_role.clone()),
+                                    .color(text_role.clone()),
+                            )
+                            .child(Spacer::new()),
+                    )
+                }
+                MenuItemMode::Check(CheckKind::Reflect(s)) => {
+                    debug_assert!(
+                        self.icon.is_none(),
+                        "MenuItem: .icon() is mutually exclusive with a checkmark (checked / reflect_checked)"
+                    );
+                    self.icon = None;
+                    // 0 = checkmark, 1 = spacer.
+                    let idx = s.as_signal().map(|b| if *b { 0_usize } else { 1 });
+                    ctx.add(
+                        Switcher::new(idx)
+                            .child(
+                                IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE)
+                                    .color(text_role.clone()),
                             )
                             .child(Spacer::new()),
                     )
@@ -640,7 +656,7 @@ impl Widget for MenuItem {
                 MenuItemMode::Check(CheckKind::TriState(s)) => {
                     debug_assert!(
                         self.icon.is_none(),
-                        "MenuItem: .icon() is mutually exclusive with .bind_check_state()"
+                        "MenuItem: .icon() is mutually exclusive with .check_state()"
                     );
                     self.icon = None;
                     // 0 = checkmark (Checked), 1 = dash (Indeterminate), 2 = spacer (Unchecked).
@@ -653,11 +669,11 @@ impl Widget for MenuItem {
                         Switcher::new(idx)
                             .child(
                                 IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE)
-                                    .bind_color(text_role.clone()),
+                                    .color(text_role.clone()),
                             )
                             .child(
                                 IconWidget::dash(MENU_INDICATOR_GLYPH_SIZE)
-                                    .bind_color(text_role.clone()),
+                                    .color(text_role.clone()),
                             )
                             .child(Spacer::new()),
                     )
@@ -675,7 +691,7 @@ impl Widget for MenuItem {
                         Switcher::new(idx)
                             .child(
                                 IconWidget::radio_dot(MENU_INDICATOR_GLYPH_SIZE)
-                                    .bind_color(text_role.clone()),
+                                    .color(text_role.clone()),
                             )
                             .child(Spacer::new()),
                     )
@@ -683,8 +699,8 @@ impl Widget for MenuItem {
             };
             ctx.add(
                 crate::primitives::FixedSize::new()
-                    .bind_width(menu::MENU_ICON_COLUMN_WIDTH)
-                    .bind_height(menu::MENU_ICON_COLUMN_WIDTH)
+                    .width(menu::MENU_ICON_COLUMN_WIDTH)
+                    .height(menu::MENU_ICON_COLUMN_WIDTH)
                     .child_id(icon_child_id),
             )
         };
@@ -756,7 +772,7 @@ impl Widget for MenuItem {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
                 let shortcut = TextWidget::new(lit!(shortcut_text))
                     .style(TextStyleRole::Body)
-                    .bind_color(shortcut_role)
+                    .color(shortcut_role)
                     .single_line()
                     .a11y_hidden();
                 trailing_row = trailing_row.child(shortcut);
@@ -784,23 +800,19 @@ impl Widget for MenuItem {
                         });
                         ctx.add(
                             Switcher::new(idx)
-                                .child(
-                                    IconWidget::chevron_right(12.0).bind_color(text_role.clone()),
-                                )
-                                .child(
-                                    IconWidget::chevron_left(12.0).bind_color(text_role.clone()),
-                                ),
+                                .child(IconWidget::chevron_right(12.0).color(text_role.clone()))
+                                .child(IconWidget::chevron_left(12.0).color(text_role.clone())),
                         )
                     }
-                    None => ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone())),
+                    None => ctx.add(IconWidget::chevron_right(12.0).color(text_role.clone())),
                 }
             } else {
                 ctx.add(Spacer::new())
             };
             let chevron_column = ctx.add(
                 crate::primitives::FixedSize::new()
-                    .bind_width(menu::MENU_ITEM_PADDING_HORIZONTAL)
-                    .bind_height(menu::MENU_ICON_COLUMN_WIDTH)
+                    .width(menu::MENU_ITEM_PADDING_HORIZONTAL)
+                    .height(menu::MENU_ICON_COLUMN_WIDTH)
                     .child_id(chevron_child_id),
             );
             trailing_row = trailing_row.add_child(chevron_column);
@@ -1289,8 +1301,10 @@ impl Widget for MenuItem {
         // for tri-state Indeterminate.
         match &self.mode {
             MenuItemMode::Plain => {}
-            MenuItemMode::Check(CheckKind::TwoState(s))
-            | MenuItemMode::Check(CheckKind::Reflect(s)) => {
+            MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                builder.set_toggled(s.get());
+            }
+            MenuItemMode::Check(CheckKind::Reflect(s)) => {
                 builder.set_toggled(s.get());
             }
             MenuItemMode::Check(CheckKind::TriState(s)) => match s.get() {
@@ -1401,11 +1415,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_checked_emits_role_menuitemcheckbox() {
+    fn checked_emits_role_menuitemcheckbox() {
         let checked = Signal::new(false);
         let mut t = tree();
         let list_id =
-            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked)));
+            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).checked(checked)));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         let info = t.accessibility_node(item_id);
@@ -1415,12 +1429,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_check_state_emits_role_menuitemcheckbox() {
+    fn check_state_emits_role_menuitemcheckbox() {
         let state = Signal::new(CheckState::Unchecked);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Show Inspector")).bind_check_state(state)),
-        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Show Inspector")).check_state(state)));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         let info = t.accessibility_node(item_id);
@@ -1443,12 +1456,11 @@ mod tests {
     // --- Activation: state mutation ---
 
     #[test]
-    fn bind_checked_click_flips_signal() {
+    fn checked_click_flips_signal() {
         let checked = Signal::new(false);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
-        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).checked(checked.clone())));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         t.click(item_id);
@@ -1457,9 +1469,8 @@ mod tests {
         // already dismissed; rebuild a fresh tree to test the second flip.
         let mut t2 = tree();
         let checked2 = Signal::new(true);
-        let list_id2 = t2.add(
-            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked2.clone())),
-        );
+        let list_id2 = t2
+            .add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).checked(checked2.clone())));
         layout(&mut t2);
         let item_id2 = first_descendant_with_role(&t2, list_id2, Role::MenuItemCheckBox);
         t2.click(item_id2);
@@ -1504,14 +1515,13 @@ mod tests {
     }
 
     #[test]
-    fn bind_check_state_click_cycles_two_states_not_three() {
+    fn check_state_click_cycles_two_states_not_three() {
         // Mirror Checkbox: click toggles Unchecked <-> Checked only.
         // Indeterminate (external) promotes to Checked on click.
         let state = Signal::new(CheckState::Unchecked);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state.clone())),
-        );
+        let list_id = t
+            .add(MenuList::new().item(MenuItem::new(lit!("Inspector")).check_state(state.clone())));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         t.click(item_id);
@@ -1520,7 +1530,7 @@ mod tests {
         let state2 = Signal::new(CheckState::Checked);
         let mut t2 = tree();
         let list_id2 = t2.add(
-            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state2.clone())),
+            MenuList::new().item(MenuItem::new(lit!("Inspector")).check_state(state2.clone())),
         );
         layout(&mut t2);
         let item_id2 = first_descendant_with_role(&t2, list_id2, Role::MenuItemCheckBox);
@@ -1530,7 +1540,7 @@ mod tests {
         let state3 = Signal::new(CheckState::Indeterminate);
         let mut t3 = tree();
         let list_id3 = t3.add(
-            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state3.clone())),
+            MenuList::new().item(MenuItem::new(lit!("Inspector")).check_state(state3.clone())),
         );
         layout(&mut t3);
         let item_id3 = first_descendant_with_role(&t3, list_id3, Role::MenuItemCheckBox);
@@ -1559,12 +1569,11 @@ mod tests {
     }
 
     #[test]
-    fn bind_checked_space_keypress_flips_signal() {
+    fn checked_space_keypress_flips_signal() {
         let checked = Signal::new(false);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
-        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).checked(checked.clone())));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         t.focus(item_id);
@@ -1600,12 +1609,11 @@ mod tests {
     // --- Reactive role state ---
 
     #[test]
-    fn bind_checked_at_state_reflects_signal() {
+    fn checked_at_state_reflects_signal() {
         let checked = Signal::new(true);
         let mut t = tree();
-        let list_id = t.add(
-            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
-        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).checked(checked.clone())));
         layout(&mut t);
         let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
         assert!(t.accessibility_node(item_id).is_toggled());

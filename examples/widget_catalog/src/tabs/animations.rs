@@ -104,14 +104,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .spacing(6.0)
             .child(drive_box(tr!(anim_visible()), slide_visible.clone()))
             .child(
-                FixedSize::new()
-                    .bind_width(280.0_f32)
-                    .bind_height(40.0_f32)
-                    .child(
-                        Slide::new(slide_visible)
-                            .from(SlideEdge::Trailing)
-                            .child(color_cell(SurfaceRole::AltRow, "snackbar")),
-                    ),
+                FixedSize::new().width(280.0_f32).height(40.0_f32).child(
+                    Slide::new(slide_visible)
+                        .from(SlideEdge::Trailing)
+                        .child(color_cell(SurfaceRole::AltRow, "snackbar")),
+                ),
             ),
     );
     let shake_trigger = ctx.signal(0_u32);
@@ -146,8 +143,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         lit!("Rotate"),
         HStack::new().spacing(8.0).child(rotate_btn).child(
             FixedSize::new()
-                .bind_width(60.0_f32)
-                .bind_height(60.0_f32)
+                .width(60.0_f32)
+                .height(60.0_f32)
                 .child(Rotate::new(rotate_angle).child(color_cell(SurfaceRole::Sunken, "↻"))),
         ),
     );
@@ -340,8 +337,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 6.0
                     child: drive_box(tr!(anim_visible()), slide_for_drive)
                     FixedSize {
-                        bind_width: 280.0_f32
-                        bind_height: 40.0_f32
+                        width: 280.0_f32
+                        height: 40.0_f32
                         Slide::new(slide_visible) {
                             from: SlideEdge::Trailing
                             child: color_cell(SurfaceRole::Sunken, "snackbar")
@@ -394,8 +391,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         on_activate_fn: move |_| rotate_for_btn.set(rotate_for_btn.get() + 45.0_f32.to_radians())
                     }
                     FixedSize {
-                        bind_width: 60.0_f32
-                        bind_height: 60.0_f32
+                        width: 60.0_f32
+                        height: 60.0_f32
                         Rotate::new(rotate_angle) {
                             child: color_cell(SurfaceRole::Raised, "↻")
                         }

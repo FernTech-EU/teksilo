@@ -67,7 +67,7 @@ use bastyde_core::ObserverHandle;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -342,6 +342,12 @@ pub struct TableView<T: 'static> {
     /// Stable id used by the column-reorder drag payload to disambiguate
     /// inter-table drops.
     table_id: usize,
+
+    /// Whole-view enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
+    /// time; a disabled view greys out and stops accepting focus /
+    /// selection / keyboard input (arena-gated).
+    enabled: Prop<bool>,
 }
 
 impl<T: 'static> TableView<T> {
@@ -475,10 +481,18 @@ impl<T: 'static> TableView<T> {
             header_strip_width: Rc::new(Cell::new(0.0)),
             resize_state: Rc::new(std::cell::RefCell::new(None)),
             table_id,
+            enabled: Prop::Static(true),
         }
     }
 
     // ── Builder ────────────────────────────────────────────────────────
+
+    /// Enable or disable the whole view. A disabled view greys out and stops
+    /// accepting focus / selection / keyboard input (arena-gated).
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
 
     /// Set the scroll-chaining behavior at the boundary (default
     /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
@@ -746,7 +760,7 @@ impl<T: 'static> TableView<T> {
     /// ```ignore
     /// let proxy = SortFilterListModel::new(model)
     ///     .with_comparator("name", |a, b| a.name.cmp(&b.name));
-    /// proxy.bind_sort_signal(table.sort_signal().clone());
+    /// proxy.sort_signal(table.sort_signal().clone());
     /// ```
     pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>> {
         &self.sort_signal
@@ -838,7 +852,7 @@ impl<T: 'static> TableView<T> {
     ///         let needle = t.to_string();
     ///         Box::new(move |r: &Row| r.name.contains(&needle))
     ///     });
-    /// proxy.bind_filters_signal(table.filters_signal().clone());
+    /// proxy.filters_signal(table.filters_signal().clone());
     /// ```
     pub fn filters_signal(&self) -> &Signal<HashMap<String, String>> {
         &self.filters_signal
@@ -1044,6 +1058,9 @@ impl<T: 'static> std::fmt::Debug for TableView<T> {
 
 impl<T: 'static> Widget for TableView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.enabled.clone());
+
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
 

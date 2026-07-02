@@ -194,7 +194,7 @@ fn pure_a11y_mutation_requests_at_without_visual_change() {
 }
 
 #[test]
-fn bind_view_state_uses_app_owned_signals() {
+fn view_state_uses_app_owned_signals() {
     use bastyde_core::signal::Signal;
     let pan_x = Signal::new_animated(0.0_f32);
     let pan_y = Signal::new_animated(0.0_f32);
@@ -202,7 +202,7 @@ fn bind_view_state_uses_app_owned_signals() {
     let rotation = Signal::new_animated(0.0_f32);
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(SceneView::new(Scene::new()).bind_view_state(
+    let view_id = tree.add(SceneView::new(Scene::new()).view_state(
         pan_x.clone(),
         pan_y.clone(),
         zoom.clone(),
@@ -296,7 +296,7 @@ fn runtime_added_widget_emits_draw_commands() {
 #[test]
 fn pan_via_bound_signal_moves_heavyweight_content() {
     // Both corkboard bugs reduce to "do heavyweight cards follow the view
-    // transform driven by app-owned (bind_view_state) signals?". A pan must
+    // transform driven by app-owned (view_state) signals?". A pan must
     // produce a content-transform PushTransform around the cards in the frame.
     use bastyde_canvas::DrawCommand;
     use bastyde_core::signal::Signal;
@@ -319,7 +319,7 @@ fn pan_via_bound_signal_moves_heavyweight_content() {
     let mut scene = Scene::new();
     scene.add_widget(PaintCard, Rect::new(100.0, 100.0, 50.0, 50.0));
     let mut tree = WidgetTree::new();
-    let _view = tree.add(SceneView::new(scene).bind_view_state(
+    let _view = tree.add(SceneView::new(scene).view_state(
         pan_x.clone(),
         pan_y.clone(),
         zoom.clone(),
@@ -382,7 +382,7 @@ fn heavyweight_child_far_in_scene_renders_when_panned_into_view() {
     // A card far below the 600px-tall viewport.
     scene.add_widget(PaintCard, Rect::new(100.0, 1000.0, 50.0, 50.0));
     let mut tree = WidgetTree::new();
-    let _view = tree.add(SceneView::new(scene).bind_view_state(
+    let _view = tree.add(SceneView::new(scene).view_state(
         Signal::new_animated(0.0),
         pan_y.clone(),
         Signal::new_animated(1.0),
@@ -416,7 +416,7 @@ fn reset_animate_to_overrides_in_flight_pan() {
 
     let pan_x = Signal::new_animated(0.0_f32);
     let mut tree = WidgetTree::new();
-    let _v = tree.add(SceneView::new(Scene::new()).bind_view_state(
+    let _v = tree.add(SceneView::new(Scene::new()).view_state(
         pan_x.clone(),
         Signal::new_animated(0.0),
         Signal::new_animated(1.0),

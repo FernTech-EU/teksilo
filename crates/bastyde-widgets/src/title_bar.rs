@@ -273,11 +273,7 @@ impl Widget for TitleBar {
         let mut row = HStack::new().spacing(0.0);
 
         if leading_inset.width > 0.0 {
-            row = row.child(
-                FixedSize::new()
-                    .bind_width(leading_inset.width)
-                    .bind_height(height),
-            );
+            row = row.child(FixedSize::new().width(leading_inset.width).height(height));
         }
 
         if let Some(leading) = self.leading.take() {
@@ -299,11 +295,7 @@ impl Widget for TitleBar {
         }
 
         if trailing_inset.width > 0.0 {
-            row = row.child(
-                FixedSize::new()
-                    .bind_width(trailing_inset.width)
-                    .bind_height(height),
-            );
+            row = row.child(FixedSize::new().width(trailing_inset.width).height(height));
         }
 
         if let Some(controls) = controls {

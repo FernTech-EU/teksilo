@@ -98,7 +98,7 @@ use bastyde_canvas::{Path, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, ScrollDelta, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -231,8 +231,13 @@ pub struct SpinBox<T: SpinValue> {
     width_policy: WidthPolicy,
     label: Option<LocalizedString>,
     placeholder: LocalizedString,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time. Also captured as a build-time snapshot for the
+    /// several build-time decisions inside `build()` that need a
+    /// plain `bool` (seeding the inner `TextInputField`'s read-only
+    /// mode, deriving the step buttons' enabled signals, and gating
+    /// the key-preview / scroll handlers alongside `read_only`).
+    enabled: Prop<bool>,
     read_only: bool,
     text_from_value: Option<TextFromValue<T>>,
     value_from_text: Option<ValueFromText<T>>,
@@ -314,7 +319,7 @@ impl<T: SpinValue> SpinBox<T> {
             width_policy: WidthPolicy::Pixels(DEFAULT_PREFERRED_WIDTH),
             label: None,
             placeholder: LocalizedString::literal(String::new()),
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             text_from_value: None,
             value_from_text: None,
@@ -491,10 +496,11 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(spinbox_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time via
+    /// `ctx.enabled_when(spinbox_id, self.enabled.clone())`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -642,17 +648,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .unwrap_or_else(|| single_step.saturating_mul_u32(10));
         let on_value_changed = self.on_value_changed.clone();
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         // Snapshot the build-time enabled state into a local for
         // closures that capture it for read-only-style guards on
         // wheel events / step buttons. The framework's event gate
         // already refuses to dispatch to disabled subtrees, so the
         // value here only matters for the few build-time decisions
         // (e.g. seeding the inner TextInputField's read_only mode).
-        let enabled = self.initial_enabled;
+        let enabled = self.enabled.get();
         let read_only = self.read_only;
         let wheel_mode = self.wheel_mode;
 
@@ -919,7 +923,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   • no suffix and no special         → nothing to do.
         //
         // The reactive case uses a mutable intermediate signal
-        // rather than feeding `TextInputField::bind_suffix` a
+        // rather than feeding `TextInputField::suffix` a
         // derived signal directly — `ctx.effect` requires a
         // mutable source, and the field needs to drive a
         // relayout + re-measure when the suffix flips on/off.
@@ -968,7 +972,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         }
                     });
                 }
-                field = field.bind_suffix(suffix_live);
+                field = field.suffix(suffix_live);
             } else {
                 field = field.suffix(suffix_str.clone());
             }

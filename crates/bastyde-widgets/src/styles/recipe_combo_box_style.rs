@@ -157,9 +157,9 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let padding_id = ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
 
         let bg = RectWidget::new()
-            .bind_background(bg_role)
-            .bind_border_color(border_role)
-            .bind_border_width(border_width_signal)
+            .background(bg_role)
+            .border_color(border_role)
+            .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(corner_radius));
         let bg_id = ctx.add(bg);
 
@@ -180,8 +180,8 @@ fn build_inner_row(
     let divider_fill_id = ctx.add(RectWidget::new().background(BorderRole::Default));
     let divider_id = ctx.add(
         FixedSize::new()
-            .bind_width(border_width)
-            .bind_height(divider_height)
+            .width(border_width)
+            .height(divider_height)
             .child_id(divider_fill_id),
     );
 
@@ -191,7 +191,7 @@ fn build_inner_row(
     let chevron_color = ctx
         .theme_signal()
         .map(|t| t.colors.text_primary.with_alpha(0.5));
-    let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
+    let chevron = IconWidget::chevron_down(12.0).color(chevron_color);
     let chevron_id = ctx.add(chevron);
 
     ctx.add(

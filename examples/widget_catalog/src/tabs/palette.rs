@@ -80,7 +80,7 @@ fn editor_line(line_no: &str, code: &str) -> impl Widget + 'static {
     HStack::new()
         .spacing(12.0)
         .child(
-            FixedSize::new().bind_width(24.0_f32).child(
+            FixedSize::new().width(24.0_f32).child(
                 TextWidget::new(lit!(line_no))
                     .style(TextStyleRole::Mono)
                     .color(TextRole::EditorGutterFg),
@@ -304,7 +304,7 @@ fn mock_editor() -> impl Widget + 'static {
     let current_line = HStack::new()
         .spacing(12.0)
         .child(
-            FixedSize::new().bind_width(24.0_f32).child(
+            FixedSize::new().width(24.0_f32).child(
                 TextWidget::new(lit!("2"))
                     .style(TextStyleRole::Mono)
                     .color(TextRole::EditorGutterFg),
@@ -335,17 +335,14 @@ fn mock_editor() -> impl Widget + 'static {
                 .color(TextRole::EditorFg),
         )
         .child(
-            FixedSize::new()
-                .bind_width(1.5_f32)
-                .bind_height(16.0_f32)
-                .child(
-                    Panel::new()
-                        .background(SurfaceRole::EditorCaret)
-                        .corner_radius(0.0)
-                        .border_width(0.0)
-                        .padding(0.0)
-                        .child(Spacer::new()),
-                ),
+            FixedSize::new().width(1.5_f32).height(16.0_f32).child(
+                Panel::new()
+                    .background(SurfaceRole::EditorCaret)
+                    .corner_radius(0.0)
+                    .border_width(0.0)
+                    .padding(0.0)
+                    .child(Spacer::new()),
+            ),
         );
 
     let current_line_bg = Panel::new()
@@ -752,7 +749,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                             HStack {
                                 spacing: 12.0
                                 FixedSize {
-                                    bind_width: 24.0_f32
+                                    width: 24.0_f32
                                     TextWidget::new(lit!("1")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg
@@ -773,7 +770,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 HStack {
                                     spacing: 12.0
                                     FixedSize {
-                                        bind_width: 24.0_f32
+                                        width: 24.0_f32
                                         TextWidget::new(lit!("2")) {
                                             style: TextStyleRole::Mono
                                             color: TextRole::EditorGutterFg
@@ -800,8 +797,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                         color: TextRole::EditorFg
                                     }
                                     FixedSize {
-                                        bind_width: 1.5_f32
-                                        bind_height: 16.0_f32
+                                        width: 1.5_f32
+                                        height: 16.0_f32
                                         Panel {
                                             background: SurfaceRole::EditorCaret
                                             corner_radius: 0.0
@@ -815,7 +812,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                             HStack {
                                 spacing: 12.0
                                 FixedSize {
-                                    bind_width: 24.0_f32
+                                    width: 24.0_f32
                                     TextWidget::new(lit!("3")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg
@@ -829,7 +826,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                             HStack {
                                 spacing: 12.0
                                 FixedSize {
-                                    bind_width: 24.0_f32
+                                    width: 24.0_f32
                                     TextWidget::new(lit!("4")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg

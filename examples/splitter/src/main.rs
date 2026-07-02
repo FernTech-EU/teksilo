@@ -165,7 +165,7 @@ impl Widget for SplitterDemo {
             ));
 
         // A vertical 2-pane split below.
-        let vertical = FixedSize::new().bind_height(260.0_f32).child(
+        let vertical = FixedSize::new().height(260.0_f32).child(
             Splitter::new(self.vsplit.clone())
                 .pane(text_pane(
                     "Console",
@@ -175,7 +175,7 @@ impl Widget for SplitterDemo {
         );
 
         let status_line = TextWidget::new(lit!(""))
-            .bind_text(self.status.clone())
+            .text(self.status.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary);
 

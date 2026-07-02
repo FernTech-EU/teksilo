@@ -145,7 +145,7 @@ impl Widget for Root {
         let demo_collapsed = ctx.signal(false);
         let demo_bar = ctx.add(
             MenuBar::new()
-                .collapsible_bound(demo_collapsed.clone())
+                .collapsed_signal(demo_collapsed.clone())
                 .no_dispatcher_install()
                 .menu(lit!("&File"), Root::file_menu)
                 .menu(lit!("&Edit"), Root::edit_menu)
@@ -158,7 +158,7 @@ impl Widget for Root {
         );
         let demo_bar_slot = ctx.add(
             FixedSize::new()
-                .bind_width(demo_width.clone())
+                .width(demo_width.clone())
                 .child_id(demo_bar),
         );
         let demo_state = demo_collapsed.map(|c| {
@@ -228,7 +228,7 @@ impl Widget for Root {
                             .add_child(demo_bar_slot)
                             .child(
                                 TextWidget::new(lit!(""))
-                                    .bind_text(demo_state)
+                                    .text(demo_state)
                                     .style(TextStyleRole::Small)
                                     .color(TextRole::Secondary),
                             ),

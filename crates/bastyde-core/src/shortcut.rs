@@ -226,7 +226,7 @@ pub struct Shortcut {
     /// `false`, the shortcut is treated **as if not registered** —
     /// the keystroke falls through to the focused widget's normal
     /// `on_key` dispatch and `on_activate` is **not** invoked.
-    pub enabled_when: Option<Signal<bool>>,
+    pub enabled_when: Option<Prop<bool>>,
 }
 
 impl fmt::Debug for Shortcut {
@@ -300,15 +300,10 @@ pub struct ShortcutBuilder {
 }
 
 impl ShortcutBuilder {
-    /// Static user-visible label.
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.inner.name = Prop::Static(name.into());
-        self
-    }
-
-    /// Reactive user-visible label (for localized names driven by a
-    /// `Signal<String>` fed from bastyde-i18n's `LocalizedString`).
-    pub fn bind_name(mut self, name: impl Into<Prop<String>>) -> Self {
+    /// User-visible label. Accepts a static `String`/`&str` or a reactive
+    /// `Signal<String>` / `Prop<String>` (for localized names driven by
+    /// bastyde-i18n's `LocalizedString`).
+    pub fn name(mut self, name: impl Into<Prop<String>>) -> Self {
         self.inner.name = name.into();
         self
     }
@@ -318,12 +313,9 @@ impl ShortcutBuilder {
         self
     }
 
-    pub fn description(mut self, description: impl Into<String>) -> Self {
-        self.inner.description = Some(Prop::Static(description.into()));
-        self
-    }
-
-    pub fn bind_description(mut self, description: impl Into<Prop<String>>) -> Self {
+    /// Description. Accepts a static `String`/`&str` or a reactive
+    /// `Signal<String>` / `Prop<String>`.
+    pub fn description(mut self, description: impl Into<Prop<String>>) -> Self {
         self.inner.description = Some(description.into());
         self
     }
@@ -396,8 +388,8 @@ impl ShortcutBuilder {
     /// Typical use: a rich-text editor registering
     /// `editor.format.bold` with `enabled_when(has_selection)` so
     /// Ctrl+B only fires when there is something to embolden.
-    pub fn enabled_when(mut self, signal: Signal<bool>) -> Self {
-        self.inner.enabled_when = Some(signal);
+    pub fn enabled_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
+        self.inner.enabled_when = Some(signal.into());
         self
     }
 

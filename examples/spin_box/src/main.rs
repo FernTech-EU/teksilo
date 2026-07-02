@@ -258,7 +258,7 @@ impl Widget for Root {
                                     }
                                 }
                                 TextWidget::new(lit!("")) {
-                                    bind_text: self.values.opacity.map(|v| format!("{} %", v))
+                                    text: self.values.opacity.map(|v| format!("{} %", v))
                                 }
                             }
                             // Reset button.
@@ -306,7 +306,7 @@ fn row(
             }
             child: spin
             TextWidget::new(lit!("")) {
-                bind_text: readout
+                text: readout
             }
         }
     )

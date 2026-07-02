@@ -82,7 +82,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::{Action, Live, Role};
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
@@ -210,8 +210,9 @@ pub struct Calendar {
     max_date: Option<Date>,
     disabled_date_filter: Option<DisabledDateFilter>,
     label: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive. Forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     on_selection_changed: Option<OnSelectionChanged>,
     on_range_changed: Option<OnRangeChanged>,
     on_month_changed: Option<OnMonthChanged>,
@@ -231,7 +232,7 @@ pub struct Calendar {
 impl std::fmt::Debug for Calendar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Calendar")
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish_non_exhaustive()
     }
 }
@@ -266,7 +267,7 @@ impl Calendar {
             max_date: None,
             disabled_date_filter: None,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             on_selection_changed: None,
             on_range_changed: None,
             on_month_changed: None,
@@ -329,10 +330,10 @@ impl Calendar {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(calendar_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena at build time — a bound `Signal<bool>` updates live.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -409,14 +410,13 @@ impl Widget for Calendar {
             ctx.binding_registry(),
             bastyde_core::binding::BindingLevel::Rebuild,
         );
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena. After this point the
+        // arena is the single source of truth.
+        ctx.enabled_when(self_id, self.enabled.clone());
         // Inner cell/grid helpers still take an `enabled: bool`
         // snapshot which is fine for build-time decisions (they pass
         // it to the inner widgets which now consult the arena).
-        let enabled = self.initial_enabled;
+        let enabled = self.enabled.get();
         let week_numbers = self.week_numbers;
         let week_number_col_width = match week_numbers {
             WeekNumberDisplay::None => 0.0,
@@ -439,12 +439,7 @@ impl Widget for Calendar {
             ))
         } else {
             // Empty placeholder so layout shape stays consistent.
-            ctx.add(
-                FixedSize::new()
-                    .bind_width(0.0)
-                    .bind_height(0.0)
-                    .child(Spacer::new()),
-            )
+            ctx.add(FixedSize::new().width(0.0).height(0.0).child(Spacer::new()))
         };
 
         // ── Weekday header row ──────────────────────────────────
@@ -749,8 +744,8 @@ fn build_weekday_row(
         // Empty corner cell above the week-number column.
         let spacer = ctx.add(
             FixedSize::new()
-                .bind_width(week_number_col_width)
-                .bind_height(cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT * scale)
+                .width(week_number_col_width)
+                .height(cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT * scale)
                 .child(Spacer::new()),
         );
         row = row.add_child(spacer);
@@ -846,7 +841,7 @@ fn build_footer(
         let status_label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary)
-            .bind_text(range_status.clone())
+            .text(range_status.clone())
             .single_line()
             .a11y_hidden();
         let spacer = ctx.add(Spacer::new());
@@ -980,8 +975,8 @@ impl Widget for CalendarBody {
                 row = row.add_child(
                     ctx.add(
                         FixedSize::new()
-                            .bind_width(week_number_col_width)
-                            .bind_height(cell_height)
+                            .width(week_number_col_width)
+                            .height(cell_height)
                             .child(Center::new().child_id(week_text_id)),
                     ),
                 );

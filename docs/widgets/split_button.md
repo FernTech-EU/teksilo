@@ -162,10 +162,10 @@ Override the main-region label text color. Accepts `Color`, a role,
 or a `Signal` of either. Default (unset) is the variant/interaction
 cascade; setting this replaces it (loses hover/disabled tint).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn initial_selected(mut self, index: usize) -> Self`
 

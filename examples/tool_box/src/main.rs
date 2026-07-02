@@ -87,7 +87,7 @@ impl Widget for Root {
             .show_dividers(false);
 
         let selected_hint = TextWidget::new(lit!("Section index:"))
-            .bind_text(selected.map(|i| format!("Section index: {}", i)));
+            .text(selected.map(|i| format!("Section index: {}", i)));
 
         let header_row = HStack::new()
             .spacing(16.0)

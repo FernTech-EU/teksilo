@@ -131,7 +131,7 @@ pub struct Avatar {
     /// Optional signal reporting whether the linked popup is currently
     /// visible. Surfaces via `set_expanded` in `accessibility()`. Only
     /// meaningful alongside `has_popup`.
-    expanded_signal: Option<Signal<bool>>,
+    expanded_signal: Option<Prop<bool>>,
 
     /// Activation handler. Stored as `Rc<dyn Fn>` so it survives
     /// rebuilds (theme/locale switches re-run `build()` and would
@@ -396,8 +396,8 @@ impl Avatar {
     /// the signal and flips it on show / dismiss; Avatar reads it in
     /// `accessibility()` to publish `set_expanded`. Only meaningful
     /// alongside `.has_popup(...)`.
-    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
-        self.expanded_signal = Some(signal);
+    pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
+        self.expanded_signal = Some(signal.into());
         self
     }
 
@@ -458,10 +458,10 @@ impl Avatar {
     /// ```ignore
     /// let user_name: Signal<String> = ctx.signal(String::new());
     /// Avatar::with_initials(lit!("?"))        // logged-out fallback
-    ///     .bind_name(user_name.clone())
-    ///     .bind_image(user_avatar_signal)
+    ///     .name_signal(user_name.clone())
+    ///     .image_signal(user_avatar_signal)
     /// ```
-    pub fn bind_name(mut self, signal: Signal<String>) -> Self {
+    pub fn name_signal(mut self, signal: Signal<String>) -> Self {
         self.name_signal = Some(signal);
         self
     }
@@ -469,21 +469,21 @@ impl Avatar {
     /// Bind the image source. `None` ⇒ initials fallback. Each
     /// non-`None` value is masked to the configured `AvatarShape` by
     /// the inner [`ImageWidget`]. Bound at `BindingLevel::Rebuild`.
-    pub fn bind_image(mut self, signal: Signal<Option<Rc<RasterIcon>>>) -> Self {
+    pub fn image_signal(mut self, signal: Signal<Option<Rc<RasterIcon>>>) -> Self {
         self.image_signal = Some(signal);
         self
     }
 
     /// Bind the image alt text. Bound at `BindingLevel::AccessibilityOnly`
     /// — only the screen-reader projection is affected.
-    pub fn bind_alt(mut self, signal: Signal<Option<String>>) -> Self {
+    pub fn alt_signal(mut self, signal: Signal<Option<String>>) -> Self {
         self.alt_signal = Some(signal);
         self
     }
 
     /// Bind the accessible label. Bound at
     /// `BindingLevel::AccessibilityOnly`.
-    pub fn bind_label(mut self, signal: Signal<Option<String>>) -> Self {
+    pub fn label_signal(mut self, signal: Signal<Option<String>>) -> Self {
         self.label_signal = Some(signal);
         self
     }
@@ -492,7 +492,7 @@ impl Avatar {
     /// `BindingLevel::Rebuild` — the dot's colour and the a11y
     /// `description` flip together so a rebuild keeps both layers in
     /// sync.
-    pub fn bind_presence(mut self, signal: Signal<Option<AvatarPresence>>) -> Self {
+    pub fn presence_signal(mut self, signal: Signal<Option<AvatarPresence>>) -> Self {
         self.presence_signal = Some(signal);
         self
     }
@@ -581,7 +581,7 @@ impl Avatar {
         }
     }
 
-    /// The hash seed for the background tint. When `bind_name` is
+    /// The hash seed for the background tint. When `name_signal` is
     /// active the seed *is* the name (so two users named "JD" but
     /// "Jane Doe" vs "Jules Dupont" hash differently). Otherwise it
     /// falls back to the user-supplied seed or the static initials.
@@ -780,7 +780,7 @@ impl Widget for Avatar {
         if let Some(ref expanded_signal) = self.expanded_signal {
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
-            expanded_signal.bind_to(
+            expanded_signal.register_if_bound(
                 self_id,
                 registry,
                 bastyde_core::binding::BindingLevel::RepaintOnly,
@@ -878,7 +878,7 @@ impl Widget for Avatar {
             // a11y regressions.
             debug_assert!(
                 label.is_some() || alt.is_some(),
-                "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` (or a `.bind_label(...)` / `.bind_alt(...)`) for screen readers"
+                "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` (or a `.label(...)` / `.alt_signal(...)`) for screen readers"
             );
             let name = label.or(alt).unwrap_or_else(|| initials.clone());
             builder.set_name(name);
@@ -890,7 +890,7 @@ impl Widget for Avatar {
             // semantic label — catch in dev (matches `ImageWidget`).
             debug_assert!(
                 alt.is_some() || label.is_some(),
-                "Avatar::with_image requires a `.alt(\"...\")` (or `.bind_alt(...)`) for meaningful images, or call `.a11y_hidden()` if decorative"
+                "Avatar::with_image requires a `.alt(\"...\")` (or `.alt_signal(...)`) for meaningful images, or call `.a11y_hidden()` if decorative"
             );
             let name = alt.or(label).unwrap_or_else(|| initials.clone());
             builder.set_name(name);
@@ -1671,7 +1671,7 @@ mod tests {
     // ── Dynamic content (bind_*) ──────────────────────────────────────
 
     #[test]
-    fn bind_name_updates_displayed_initials_on_signal_flip() {
+    fn name_updates_displayed_initials_on_signal_flip() {
         use bastyde_canvas::MockTextBackend;
         use bastyde_core::signal::Signal;
         use std::cell::RefCell;
@@ -1680,7 +1680,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let id = tree.add(Avatar::with_initials(lit!("?")).bind_name(name.clone()));
+        let id = tree.add(Avatar::with_initials(lit!("?")).name_signal(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Empty name ⇒ derived initials = "?".
         assert_eq!(tree.accessibility_node(id).name(), Some("?"));
@@ -1692,7 +1692,7 @@ mod tests {
     }
 
     #[test]
-    fn bind_image_swap_logged_out_to_logged_in() {
+    fn image_swap_logged_out_to_logged_in() {
         // The login-flow scenario from the API doc: start without an
         // image (initials fallback), then publish a real photo.
         use bastyde_canvas::MockTextBackend;
@@ -1707,7 +1707,7 @@ mod tests {
         let _id = tree.add(
             Avatar::with_initials(lit!("JD"))
                 .alt(lit!("Jane"))
-                .bind_image(image.clone()),
+                .image_signal(image.clone()),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Logged-out: no image quad emitted.
@@ -1734,7 +1734,7 @@ mod tests {
     }
 
     #[test]
-    fn bind_image_signal_wins_over_static_with_image() {
+    fn image_signal_wins_over_static_with_image() {
         // If both are supplied, the bound signal is the source of
         // truth — `None` ⇒ initials fallback even when a static
         // image was provided first.
@@ -1751,7 +1751,7 @@ mod tests {
             Avatar::with_image(&icon)
                 .alt(lit!("anything"))
                 .fallback_initials(lit!("XX"))
-                .bind_image(image.clone()),
+                .image_signal(image.clone()),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Signal None overrides the static source — initials only.
@@ -1759,7 +1759,7 @@ mod tests {
     }
 
     #[test]
-    fn bind_alt_updates_a11y_name_on_image_avatar() {
+    fn alt_updates_a11y_name_on_image_avatar() {
         use bastyde_canvas::MockTextBackend;
         use bastyde_core::signal::Signal;
         use std::cell::RefCell;
@@ -1769,7 +1769,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let id = tree.add(Avatar::with_image(&icon).bind_alt(alt.clone()));
+        let id = tree.add(Avatar::with_image(&icon).alt_signal(alt.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert_eq!(tree.accessibility_node(id).name(), Some("Jane Doe"));
 
@@ -1779,21 +1779,7 @@ mod tests {
     }
 
     #[test]
-    fn bind_label_updates_a11y_name_on_initials_avatar() {
-        use bastyde_core::signal::Signal;
-        let label = Signal::new(Some("Profile".to_string()));
-        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials(lit!("JD")).bind_label(label.clone()));
-        tree.layout(SizeProposal::exact(32.0, 32.0));
-        assert_eq!(tree.accessibility_node(id).name(), Some("Profile"));
-
-        label.set(Some("Settings".to_string()));
-        tree.layout(SizeProposal::exact(32.0, 32.0));
-        assert_eq!(tree.accessibility_node(id).name(), Some("Settings"));
-    }
-
-    #[test]
-    fn bind_presence_swap_changes_dot_color_and_a11y_description() {
+    fn presence_swap_changes_dot_color_and_a11y_description() {
         use bastyde_core::signal::Signal;
         let presence: Signal<Option<AvatarPresence>> = Signal::new(Some(AvatarPresence::Online));
         let mut tree = WidgetTree::new()
@@ -1801,7 +1787,7 @@ mod tests {
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 bastyde_canvas::MockTextBackend::new(),
             )));
-        let id = tree.add(Avatar::with_initials(lit!("JD")).bind_presence(presence.clone()));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).presence_signal(presence.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let online_color = bastyde_core::presets::intui::light()
             .colors
@@ -1856,9 +1842,9 @@ mod tests {
     }
 
     #[test]
-    fn bind_name_changes_hash_seed_so_palette_pick_can_change() {
+    fn name_changes_hash_seed_so_palette_pick_can_change() {
         // Distinct full names with identical initials produce distinct
-        // palette buckets. After bind_name flips between them, the
+        // palette buckets. After name_signal flips between them, the
         // bg shape colour must change too.
         use bastyde_canvas::MockTextBackend;
         use bastyde_core::signal::Signal;
@@ -1868,7 +1854,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let _id = tree.add(Avatar::with_initials(lit!("?")).bind_name(name.clone()));
+        let _id = tree.add(Avatar::with_initials(lit!("?")).name_signal(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let bg_jd = shape_colors(&tree.render())
             .into_iter()

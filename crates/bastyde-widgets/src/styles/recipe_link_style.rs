@@ -98,19 +98,19 @@ impl LinkStyle for RecipeLinkStyle {
 
         let text_id = ctx.add(
             TextWidget::new(bastyde_i18n::lit!(""))
-                .bind_text(cfg.text.clone())
+                .text(cfg.text.clone())
                 .style(TextStyleRole::Body)
-                .bind_color(text_role.clone())
+                .color(text_role.clone())
                 .single_line()
                 .a11y_hidden(),
         );
 
         // 1 px underline below the text, bound to the same text-role
         // signal as the background colour so the line matches.
-        let underline = ctx.add(RectWidget::new().bind_background(text_role));
+        let underline = ctx.add(RectWidget::new().background(text_role));
         let underline_sized = ctx.add(
             FixedSize::new()
-                .bind_height(self.recipe.underline_thickness)
+                .height(self.recipe.underline_thickness)
                 .child_id(underline),
         );
 
@@ -138,8 +138,8 @@ impl LinkStyle for RecipeLinkStyle {
             .map(move |f| if *f { focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             RectWidget::new()
-                .bind_border_color(focus_border_role)
-                .bind_border_width(focus_border_width)
+                .border_color(focus_border_role)
+                .border_width(focus_border_width)
                 .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
 

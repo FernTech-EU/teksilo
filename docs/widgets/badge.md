@@ -33,7 +33,7 @@ let _badge = Badge::new(lit!("NEW"))
 
 ## Builder methods at a glance
 
-`style`, `background`, `text_role`, `text_style`
+`style`, `background`, `text_role`, `text_style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -74,3 +74,35 @@ Default (unset) is the theme's `status_info_fg`.
 Override the label's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
 (unset) is `TextStyleRole::Tiny`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter called wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter called wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline `TooltipContent`.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`composite_tooltip` — the last setter called wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip with an arbitrary widget tree body.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`rich_tooltip_content` — the last setter called wins.

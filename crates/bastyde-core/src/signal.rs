@@ -998,6 +998,18 @@ impl<T: Clone + 'static> Prop<T> {
             signal.bind_to(widget_id, registry, level);
         }
     }
+
+    /// Return the underlying signal if bound, or wrap a static value in a
+    /// fresh, unshared signal. Use when an existing code path needs a
+    /// `Signal<T>` (e.g. `ctx.effect(&signal, ...)`) but the widget field
+    /// was widened from `Signal<T>` to `Prop<T>` — the derived signal
+    /// preserves reactivity for the `Bound` case with minimal churn.
+    pub fn as_signal(&self) -> Signal<T> {
+        match self {
+            Prop::Static(v) => Signal::new(v.clone()),
+            Prop::Bound(signal) => signal.clone(),
+        }
+    }
 }
 
 impl<T: Clone + 'static> Clone for Prop<T> {
@@ -1027,6 +1039,22 @@ impl<T: Clone + 'static> From<T> for Prop<T> {
 impl<T: Clone + 'static> From<Signal<T>> for Prop<T> {
     fn from(signal: Signal<T>) -> Self {
         Prop::Bound(signal)
+    }
+}
+
+// String ergonomics: let `impl Into<Prop<String>>` setters accept a borrowed
+// string literal / `&String` the same way the old `impl Into<String>` setters
+// did (the blanket `From<T>` only covers an owned `String`). Keeps call sites
+// like `.name("x")` / `.suffix("x")` compiling after the widening.
+impl From<&str> for Prop<String> {
+    fn from(s: &str) -> Self {
+        Prop::Static(s.to_owned())
+    }
+}
+
+impl From<&String> for Prop<String> {
+    fn from(s: &String) -> Self {
+        Prop::Static(s.clone())
     }
 }
 

@@ -15,7 +15,7 @@
 //! (by declaration order) wins.
 
 use crate::intent::{Intent, IntentResponse};
-use crate::signal::Signal;
+use crate::signal::Prop;
 use crate::widget::EventContext;
 
 /// Closure signature for an action handler.
@@ -36,7 +36,7 @@ pub struct Action {
     /// [`Shortcut`](crate::shortcut::Shortcut) has
     /// `propagate_when_disabled == false`, in which case the intent
     /// is consumed (dormant) at this level.
-    pub enabled_when: Option<Signal<bool>>,
+    pub enabled_when: Option<Prop<bool>>,
 }
 
 impl std::fmt::Debug for Action {
@@ -74,14 +74,14 @@ impl Action {
 pub struct ActionBuilder {
     intent: &'static str,
     handler: Option<ActionHandler>,
-    enabled_when: Option<Signal<bool>>,
+    enabled_when: Option<Prop<bool>>,
 }
 
 impl ActionBuilder {
     /// Reactive enabled-predicate. When the signal holds `false` the
     /// action is skipped during dispatch.
-    pub fn enabled_when(mut self, signal: Signal<bool>) -> Self {
-        self.enabled_when = Some(signal);
+    pub fn enabled_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
+        self.enabled_when = Some(signal.into());
         self
     }
 
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn enabled_when_follows_signal() {
-        let enabled = Signal::new(false);
+        let enabled = crate::signal::Signal::new(false);
         let action = Action::new("edit.delete")
             .enabled_when(enabled.clone())
             .on_invoke(|_, _| {});

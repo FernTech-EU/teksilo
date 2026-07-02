@@ -247,19 +247,19 @@ Five primitives constrain what their child can be:
 
 ```rust
 // Static width, child decides height:
-FixedSize::new().bind_width(280.0).child(content)
+FixedSize::new().width(280.0).child(content)
 
 // Reactive — animated sidebar:
 let sidebar_width = ctx.animated_signal(280.0);
 let sidebar = FixedSize::new()
-    .bind_width(sidebar_width.clone())
+    .width(sidebar_width.clone())
     .child(sidebar_content);
 
 // Later, on toggle:
 ctx.animate().normal().standard().to_or_snap(&sidebar_width, 0.0);
 ```
 
-Both `bind_width` and `bind_height` accept `impl Into<Prop<f32>>` — pass an `f32` for static, a `Signal<f32>` for reactive. The bound proposal is **forwarded to the child**, so wrap-aware children (TextWidget in `TextOverflow::Wrap`, ScrollArea, etc.) measure against the right constraint.
+Both `width` and `height` accept `impl Into<Prop<f32>>` — pass an `f32` for static, a `Signal<f32>` for reactive. The bound proposal is **forwarded to the child**, so wrap-aware children (TextWidget in `TextOverflow::Wrap`, ScrollArea, etc.) measure against the right constraint.
 
 **Without** any binding, `FixedSize` just reports the child's natural size and ignores the parent proposal. That's how you opt a widget out of stretching inside an `HStack` where siblings expand.
 
@@ -276,7 +276,7 @@ MinSize::width(120.0).child(label)
 MinSize::height(36.0).child(row)
 
 // Reactive:
-MinSize::width(0.0).bind_min_width(min_w_signal).child(text)
+MinSize::width(0.0).min_width(min_w_signal).child(text)
 ```
 
 The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/bastyde-widgets/src/primitives/min_size.rs#L230-L258).
@@ -293,7 +293,7 @@ MaxSize::width(640.0).child(article_text)
 MaxSize::new(800.0, 600.0).child(dialog_content)
 
 // Reactive — user-resizable panel:
-MaxSize::width(9999.0).bind_max_width(panel_width).child(content)
+MaxSize::width(9999.0).max_width(panel_width).child(content)
 ```
 
 Symmetric to `MinSize`: proposal clamped *downward*, wanted size clamped downward. **Sets `clips_children: true`** when any constraint is active — content that exceeds the cap is scissored, not bled. Hidden from the accessibility tree (`builder.set_hidden()`).
@@ -503,8 +503,8 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Center one child | `Center::new().child(w)` |
 | Force a minimum touch area | `MinSize::new(48.0, 48.0)` |
 | Cap reading width | `MaxSize::width(640.0)` |
-| Dialog with a fixed width | `FixedSize::new().bind_width(w)` |
-| Animated panel width | `FixedSize::bind_width(animated_signal)` |
+| Dialog with a fixed width | `FixedSize::new().width(w)` |
+| Animated panel width | `FixedSize::width(animated_signal)` |
 | Locked aspect ratio (image, video) | `AspectRatio::new(w/h)` |
 | Inner spacing | `Padding` |
 | Tabular data with mixed track sizes | `Grid` |
@@ -513,7 +513,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 
-When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::bind_width(48.0).bind_height(48.0)` when you mean "at least," not "exactly." (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
+When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::width(48.0).height(48.0)` when you mean "at least," not "exactly." (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
 
 ---
 
@@ -527,7 +527,7 @@ Whenever a bound size value changes, the framework dirty-marks the wrapper for *
 // Animated drawer:
 let drawer_w = ctx.animated_signal(0.0);
 let drawer = FixedSize::new()
-    .bind_width(drawer_w.clone())
+    .width(drawer_w.clone())
     .child(drawer_content);
 
 let toggle = Button::new(lit!("Open"))

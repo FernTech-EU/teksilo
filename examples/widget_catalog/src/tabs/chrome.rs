@@ -125,7 +125,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let stepper = section(
         ctx,
         lit!("Stepper (embedded)"),
-        FixedSize::new().bind_height(220.0).child(make_stepper()),
+        FixedSize::new().height(220.0).child(make_stepper()),
     );
 
     ctx.add(
@@ -148,7 +148,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // bati! Type::ctor(args) { method: value }. Wizard takes nested
     // steps with closures — pre-register.
     let wizard_widget = ctx.add(make_wizard());
-    let stepper_widget = ctx.add(FixedSize::new().bind_height(220.0).child(make_stepper()));
+    let stepper_widget = ctx.add(FixedSize::new().height(220.0).child(make_stepper()));
 
     bati!(ctx => VStack {
             spacing: 20.0

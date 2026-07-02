@@ -34,8 +34,8 @@ use bastyde::widgets::{
 fn rigid_block(glyph: &'static str, size: f32) -> impl Widget + 'static {
     Card::new().content(
         FixedSize::new()
-            .bind_width(size)
-            .bind_height(size)
+            .width(size)
+            .height(size)
             .child(Center::new().child(TextWidget::new(lit!(glyph)).no_shrink())),
     )
 }
@@ -141,8 +141,8 @@ fn residual_overflow_row() -> impl Widget + 'static {
     let block = |label: &'static str| {
         Card::new().content(
             FixedSize::new()
-                .bind_width(220.0)
-                .bind_height(44.0)
+                .width(220.0)
+                .height(44.0)
                 .child(Center::new().child(TextWidget::new(lit!(label)).no_shrink())),
         )
     };

@@ -237,12 +237,12 @@ impl PreviewCanvas {
             .style(TextStyleRole::Tiny)
             .color(TextRole::Secondary)
             .single_line()
-            .bind_text(label);
+            .text(label);
         let size_widget = TextWidget::new(lit!(""))
             .style(TextStyleRole::Tiny)
             .color(TextRole::Secondary)
             .single_line()
-            .bind_text(size_readout);
+            .text(size_readout);
         let _ = ctx;
         bastyde_widgets::primitives::Padding::symmetric(4.0, 12.0).child(
             HStack::new()

@@ -98,8 +98,8 @@ pub struct DropTarget {
     accept_predicate: Option<AcceptPredicate>,
     on_drop_callback: Option<DropCallback>,
     on_drag_leave_callback: Option<LeaveCallback>,
-    bind_is_targeted: Option<Signal<bool>>,
-    bind_drag_state: Option<Signal<DropTargetDragState>>,
+    out_targeted: Option<Signal<bool>>,
+    out_drag_state: Option<Signal<DropTargetDragState>>,
     variant: DropTargetVariant,
     style_override: Option<SharedDropTargetStyle>,
     root_child_id: Option<WidgetId>,
@@ -116,8 +116,8 @@ impl DropTarget {
             accept_predicate: None,
             on_drop_callback: None,
             on_drag_leave_callback: None,
-            bind_is_targeted: None,
-            bind_drag_state: None,
+            out_targeted: None,
+            out_drag_state: None,
             variant: DropTargetVariant::Default,
             style_override: None,
             root_child_id: None,
@@ -236,14 +236,14 @@ impl DropTarget {
     /// The widget writes `true` while a drag with an *accepted* payload is over
     /// the target, `false` otherwise — SwiftUI's `isTargeted` pattern. Drive
     /// custom visuals off this signal.
-    pub fn bind_is_targeted(mut self, signal: Signal<bool>) -> Self {
-        self.bind_is_targeted = Some(signal);
+    pub fn targeted_signal(mut self, signal: Signal<bool>) -> Self {
+        self.out_targeted = Some(signal);
         self
     }
 
-    /// Full three-state version of [`Self::bind_is_targeted`].
-    pub fn bind_drag_state(mut self, signal: Signal<DropTargetDragState>) -> Self {
-        self.bind_drag_state = Some(signal);
+    /// Full three-state version of [`Self::targeted_signal`].
+    pub fn drag_state_signal(mut self, signal: Signal<DropTargetDragState>) -> Self {
+        self.out_drag_state = Some(signal);
         self
     }
 
@@ -377,10 +377,10 @@ impl Widget for DropTarget {
         // closure; only the accept predicate (an Rc) is shared.
         let ds_hover = drag_state.clone();
         let ds_leave = drag_state.clone();
-        let tgt_hover = self.bind_is_targeted.clone();
-        let tgt_leave = self.bind_is_targeted.clone();
-        let st_hover = self.bind_drag_state.clone();
-        let st_leave = self.bind_drag_state.clone();
+        let tgt_hover = self.out_targeted.clone();
+        let tgt_leave = self.out_targeted.clone();
+        let st_hover = self.out_drag_state.clone();
+        let st_leave = self.out_drag_state.clone();
         let accept_hover = self.accept_predicate.clone();
         let accept_drop = self.accept_predicate.clone();
         let mut on_leave_cb = self.on_drag_leave_callback.take();
@@ -796,17 +796,17 @@ mod tests {
         assert!(!dropped.get(), "non-png drop must be rejected");
     }
 
-    /// `bind_is_targeted` is written `true` while an accepted drag hovers and
+    /// `out_targeted` is written `true` while an accepted drag hovers and
     /// reset to `false` once the drag ends.
     #[test]
-    fn bind_is_targeted_tracks_accepted_hover() {
+    fn is_targeted_tracks_accepted_hover() {
         let mut tree = themed_tree();
         let targeted = Signal::new(false);
         tree.add(
             DropTarget::new()
                 .child(RectWidget::new())
                 .accept_external_files()
-                .bind_is_targeted(targeted.clone())
+                .targeted_signal(targeted.clone())
                 .on_drop(|_p, _pos, _ctx| true),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -823,17 +823,17 @@ mod tests {
         assert!(!targeted.get(), "drop/leave resets is_targeted");
     }
 
-    /// A rejected drag drives `bind_drag_state` to `HoverReject`, not
+    /// A rejected drag drives `out_drag_state` to `HoverReject`, not
     /// `HoverAccept`.
     #[test]
-    fn bind_drag_state_reports_reject() {
+    fn drag_state_reports_reject() {
         let mut tree = themed_tree();
         let state = Signal::new(DropTargetDragState::Idle);
         tree.add(
             DropTarget::new()
                 .child(RectWidget::new())
                 .accept_external_extensions(["png"])
-                .bind_drag_state(state.clone())
+                .drag_state_signal(state.clone())
                 .on_drop(|_p, _pos, _ctx| true),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));

@@ -190,10 +190,10 @@ keyboard commit, AT marks `disabled`).
 Override the AT label. Default: "Calendar, May 2026" (localized,
 derived from the visible month).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(calendar_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time — a bound `Signal<bool>` updates live.
 
 #### `pub fn on_selection_changed( mut self, f: impl Fn(Option<Date>, &mut EventContext) + 'static, ) -> Self`
 

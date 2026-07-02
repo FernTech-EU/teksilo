@@ -603,7 +603,7 @@ VStack {
         );
     }
     TextWidget("") {
-        bind_text: self.item_label.clone()
+        text: self.item_label.clone()
     }
 }
 ```
@@ -644,7 +644,7 @@ bati!(ctx =>
 
 The second case uses `title` (declared with `name = Element` binding) via `#{ title }` in a Category B slot. The escape pulls the `WidgetId` into the slot position; the macro routes it through `.header_id(title)` automatically.
 
-For bare identifiers at property-value positions, `#{ }` is not required: `bind_text: selected_label` parses as a property with a Rust expression value. The escape is only needed where the parser would otherwise try to interpret the value as something else (an element, a structural form).
+For bare identifiers at property-value positions, `#{ }` is not required: `text: selected_label` parses as a property with a Rust expression value. The escape is only needed where the parser would otherwise try to interpret the value as something else (an element, a structural form).
 
 ---
 
@@ -844,7 +844,7 @@ let trailing = HStack::new()
     .spacing(12.0)
     .child(
         TextWidget::new(lit!(""))
-            .bind_text(selected_label)
+            .text(selected_label)
             .style(theme.typography.small.clone()),
     )
     .child(
@@ -881,7 +881,7 @@ let trailing = bati!(
     HStack {
         spacing: 12.0
         TextWidget::new(lit!("")) {
-            bind_text: selected_label
+            text: selected_label
             style: theme.typography.small.clone()
         }
         Button::new(lit!("Toggle Theme")) {
@@ -1104,7 +1104,7 @@ let root = bati!(ctx =>
                 color: theme.colors.text_primary
             }
             TextWidget::new(lit!("")) {
-                bind_text: direction_label
+                text: direction_label
                 style: theme.typography.small.clone()
                 color: theme.colors.text_secondary
             }
@@ -1177,7 +1177,7 @@ impl Widget for App {
             VStack::new()
                 .child(
                     TextWidget::new(tr!(title()))
-                        .bind_text(label)
+                        .text(label)
                         .style(t.body.clone())
                         .color(c.text_primary),
                 )
@@ -1240,7 +1240,7 @@ impl Widget for App {
                 }
 
                 TextWidget(tr!(title())) {
-                    bind_text: label
+                    text: label
                     style: t.body.clone()
                     color: c.text_primary
                 }
@@ -1272,7 +1272,7 @@ impl Widget for App {
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::AddItem)
                 }
                 TextWidget(tr!(add_item_label())) {
-                    bind_text: item_label_for_bind
+                    text: item_label_for_bind
                     style: t.body.clone()
                     color: c.text_primary
                 }

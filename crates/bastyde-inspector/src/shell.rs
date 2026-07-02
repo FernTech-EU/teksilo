@@ -143,21 +143,21 @@ impl Widget for InspectorShell {
         // is wrapped in `Expand::horizontal().flex(0)` + `FixedSize`
         // so the wrapper claims the parent's full-width proposal
         // (which `FixedSize` alone wouldn't — it reports the child's
-        // natural width when no `bind_width` is set). `flex(0)` opts
+        // natural width when no `width` is set). `flex(0)` opts
         // out of the parent VStack's height-slack distribution so we
         // don't compete with the user-root's `Expand(flex=1)`.
         let panel_block = VStack::new()
             .child(
                 Expand::horizontal().flex(0.0).child(
                     FixedSize::new()
-                        .bind_height(Signal::new(crate::resize_handle::HANDLE_HEIGHT))
+                        .height(Signal::new(crate::resize_handle::HANDLE_HEIGHT))
                         .child(ResizeHandle::new(state.clone())),
                 ),
             )
             .child(
                 Expand::horizontal().flex(0.0).child(
                     FixedSize::new()
-                        .bind_height(state.panel_height.clone())
+                        .height(state.panel_height.clone())
                         .child(build_panel(state.clone())),
                 ),
             );
@@ -185,11 +185,9 @@ impl Widget for InspectorShell {
             .child(bounds_tracker)
             .child(pick_resolver)
             .child(
-                Expand::horizontal().flex(0.0).child(
-                    FixedSize::new()
-                        .bind_height(height_signal)
-                        .child(panel_switcher),
-                ),
+                Expand::horizontal()
+                    .flex(0.0)
+                    .child(FixedSize::new().height(height_signal).child(panel_switcher)),
             );
 
         let root = ctx.add(stack);
@@ -223,8 +221,8 @@ impl Widget for InspectorShell {
 /// Zero-size placeholder used in Switchers when we want "nothing here".
 fn empty_filler() -> impl Widget + 'static {
     FixedSize::new()
-        .bind_width(Signal::new(0.0_f32))
-        .bind_height(Signal::new(0.0_f32))
+        .width(Signal::new(0.0_f32))
+        .height(Signal::new(0.0_f32))
 }
 
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
@@ -298,7 +296,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
 
     let picker_state_for_click = state.picker_mode.clone();
     let pick_button = Button::new(lit!("Pick"))
-        .bind_label(picker_label_signal)
+        .label(picker_label_signal)
         .on_activate_fn(move |_ctx| {
             let next = !picker_state_for_click.get();
             picker_state_for_click.set(next);
@@ -337,7 +335,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     ]);
 
     let opacity_slider = FixedSize::new()
-        .bind_width(Signal::new(120.0_f32))
+        .width(Signal::new(120.0_f32))
         .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
 
     // Overflow-overlay toggle. Independent of the Off/Sel/All segmented
@@ -351,7 +349,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     });
     let overflow_target = state.overflow_overlay.clone();
     let overflow_button = Button::new(lit!("Overflow"))
-        .bind_label(overflow_label)
+        .label(overflow_label)
         .on_activate_fn(move |_ctx| {
             let next = !overflow_target.get();
             overflow_target.set(next);
@@ -432,7 +430,7 @@ fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> Widge
         let visible_signal = chain_signal.map(move |chain| chain.len() > i);
         let state_for_action = state.clone();
         let row = Button::new(lit!(""))
-            .bind_label(label_signal)
+            .label(label_signal)
             .on_activate_fn(move |c| {
                 let chain = state_for_action.pending_pick_chain.get();
                 if let Some(entry) = chain.get(i) {

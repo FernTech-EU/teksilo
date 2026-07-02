@@ -841,7 +841,7 @@ mod tests {
         let mut s2 = ChartSeries::<String>::new("Hidden");
         s2.push("A".into(), 3.0);
         s2.push("B".into(), 4.0);
-        s2.visible.set(false);
+        s2.visible = Prop::Static(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(LineChart::new(vec![s1, s2]));
         tree.layout(SizeProposal::exact(400.0, 200.0));

@@ -70,7 +70,7 @@ the wrapper.
 
 ## Builder methods at a glance
 
-`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `bind_selected`, `enabled`, `bind_enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`
+`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -158,21 +158,15 @@ Optional tri-state checkbox bound to `Signal<CheckState>`.
 Cycles `Unchecked → Checked → Indeterminate`. Mutually
 exclusive with `checkbox` — last call wins.
 
-#### `pub fn selected(mut self, b: bool) -> Self`
+#### `pub fn selected(mut self, selected: impl Into<Prop<bool>>) -> Self`
 
-Set the initial selection state (static value).
+Set the selection state, statically or reactively via a bound
+`Signal<bool>`.
 
-#### `pub fn bind_selected(mut self, s: Signal<bool>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Bind the selection state to a reactive `Signal<bool>`.
-
-#### `pub fn enabled(mut self, b: bool) -> Self`
-
-Set the initial enabled state (static value).
-
-#### `pub fn bind_enabled(mut self, s: Signal<bool>) -> Self`
-
-Bind the enabled state to a reactive `Signal<bool>`.
+Set the enabled state, statically or reactively via a bound
+`Signal<bool>` / `Prop<bool>`.
 
 #### `pub fn label_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
 
@@ -194,6 +188,43 @@ Override the label's text color. Accepts `Color`, a role, or a
 
 Override the subtitle's text color. Default (unset) is
 `TextRole::Secondary`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip shown after the standard hover delay.
+
+Mutually exclusive with `rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter called
+wins and clears the other slots.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up from the global tooltip registry by key.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — the last setter called
+wins and clears the other slots.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline `TooltipContent`
+value (no registry lookup required).
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`composite_tooltip` — the last setter called
+wins and clears the other slots.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with `tooltip`,
+`rich_tooltip`, and
+`rich_tooltip_content` — the last setter
+called wins and clears the other slots.
 
 ## `pub struct StandardTreeItem`
 
@@ -275,21 +306,17 @@ Forwarded to the inner `StandardListItem` — see its
 Forwarded to the inner `StandardListItem` — see its
 `tristate_checkbox`.
 
-#### `pub fn selected(mut self, b: bool) -> Self`
+#### `pub fn selected(mut self, selected: impl Into<Prop<bool>>) -> Self`
 
-Set the initial selection state (static value).
+Set the selection state, statically or reactively via a bound
+`Signal<bool>`. Forwarded to the inner `StandardListItem` — see
+its `selected`.
 
-#### `pub fn bind_selected(mut self, s: Signal<bool>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Bind the selection state to a reactive `Signal<bool>`.
-
-#### `pub fn enabled(mut self, b: bool) -> Self`
-
-Set the initial enabled state (static value).
-
-#### `pub fn bind_enabled(mut self, s: Signal<bool>) -> Self`
-
-Bind the enabled state to a reactive `Signal<bool>`.
+Set the enabled state, statically or reactively via a bound
+`Signal<bool>` / `Prop<bool>`. Forwarded to the inner
+`StandardListItem`.
 
 #### `pub fn label_style( mut self, style: impl Into<bastyde_core::color_prop::TextStyleProp>, ) -> Self`
 
@@ -320,6 +347,31 @@ inner `StandardListItem` — see its `style(...)` for the
 precedence rules (per-call > theme.style_slots.standard_item >
 `RecipeStandardItemStyle`).
 
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain tooltip shown after the standard hover delay.
+Forwarded to the inner `StandardListItem` — see its
+`tooltip`.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up from the global tooltip registry by key.
+Forwarded to the inner `StandardListItem` — see its
+`rich_tooltip`.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from an inline
+`TooltipContent` value.
+Forwarded to the inner `StandardListItem` — see its
+`rich_tooltip_content`.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Forwarded to the inner `StandardListItem` — see its
+`composite_tooltip`.
+
 #### `pub fn depth(mut self, depth: usize) -> Self`
 
 Set the indent depth (0 = root level). Each level adds one
@@ -330,13 +382,10 @@ Set the indent depth (0 = root level). Each level adds one
 Declare whether the node has children, which determines whether the
 chevron column is interactive or decorative-only.
 
-#### `pub fn is_expanded(mut self, b: bool) -> Self`
+#### `pub fn is_expanded(mut self, expanded: impl Into<Prop<bool>>) -> Self`
 
-Set the initial expanded state (static value).
-
-#### `pub fn bind_is_expanded(mut self, s: Signal<bool>) -> Self`
-
-Bind the expanded state to a reactive `Signal<bool>`.
+Set the expanded state, statically or reactively via a bound
+`Signal<bool>`.
 
 #### `pub fn from_entry(self, entry: &FlatEntry) -> Self`
 

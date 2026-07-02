@@ -197,22 +197,15 @@ impl TextWidget {
         self
     }
 
-    /// Bind the text content to a reactive state.
-    pub fn bind_text(mut self, state: impl Into<Prop<String>>) -> Self {
+    /// Set the text content. Accepts a static `String`/`&str` or a reactive
+    /// `Signal<String>` / `Prop<String>` (resolved and re-rendered on change).
+    pub fn text(mut self, state: impl Into<Prop<String>>) -> Self {
         self.text = state.into();
         self
     }
 
-    /// Compatibility shim: `.bind_color(signal)` is equivalent to
-    /// `.color(signal)` now that `.color(...)` accepts `impl Into<ColorProp>`.
-    /// New code should prefer `.color(TextRole::X)` for theme-driven colors
-    /// and `.color(signal)` for reactive state.
-    pub fn bind_color(self, state: impl Into<ColorProp>) -> Self {
-        self.color(state)
-    }
-
     /// Get the current text value (resolves from state if bound).
-    pub fn text(&self) -> String {
+    pub fn resolved_text(&self) -> String {
         self.text.get()
     }
 
@@ -625,10 +618,10 @@ mod tests {
     }
 
     #[test]
-    fn bind_text_renders_state_value() {
+    fn text_renders_state_value() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new(lit!("")).bind_text(text.clone()));
+        let w = tree.add(TextWidget::new(lit!("")).text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),
@@ -640,10 +633,10 @@ mod tests {
     }
 
     #[test]
-    fn bind_text_updates_on_state_change() {
+    fn text_updates_on_state_change() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new(lit!("")).bind_text(text.clone()));
+        let w = tree.add(TextWidget::new(lit!("")).text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),

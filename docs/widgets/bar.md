@@ -47,7 +47,7 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## Builder methods at a glance
 
-`horizontal`, `horizontal_from_source`, `vertical`, `vertical_from_source`, `tab_sizing`, `tab_display`, `min_tab_width`, `tab_bar_height`, `max_tab_width`, `tab_spacing`, `pinned_tab_width`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `style`, `on_pin_toggle`, `bar_leading_slot`, `bar_leading_slot_id`, `bar_trailing_slot`, `bar_trailing_slot_id`, `separator`, `show_scroll_arrows`, `show_overflow_dropdown`, `vertical_wheel_scrolls_horizontally`, `shift_wheel_scrolls_horizontally`, `on_close`, `reorderable`, `on_reorder`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`
+`horizontal`, `horizontal_from_source`, `vertical`, `vertical_from_source`, `tab_sizing`, `tab_display`, `min_tab_width`, `tab_bar_height`, `max_tab_width`, `tab_spacing`, `pinned_tab_width`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `style`, `on_pin_toggle`, `bar_leading_slot`, `bar_leading_slot_id`, `bar_trailing_slot`, `bar_trailing_slot_id`, `separator`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `vertical_wheel_scrolls_horizontally`, `shift_wheel_scrolls_horizontally`, `on_close`, `reorderable`, `on_reorder`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`
 
 ## API reference
 
@@ -333,10 +333,19 @@ auto-show when the headers row overflows the bar's viewport,
 and click animates the scroll position by one tab-width.
 Default: on.
 
+#### `pub fn overflow_button(mut self, mode: TabOverflowButton) -> Self`
+
+When the trailing "show all tabs" overflow dropdown appears — a
+`Popover` with a `MenuList` of every tab. Default:
+`TabOverflowButton::Auto` (shown only when the headers overflow the
+viewport). See `TabOverflowButton` for `Always` / `Never`.
+
 #### `pub fn show_overflow_dropdown(mut self, on: bool) -> Self`
 
-Toggle the trailing "show all tabs" overflow dropdown — a
-`Popover` with a `MenuList` of every tab. Default: on.
+Convenience over `overflow_button`: `true` maps
+to `TabOverflowButton::Always`, `false` to `TabOverflowButton::Never`.
+Prefer `overflow_button(TabOverflowButton::Auto)` for the default
+"only when overflowing" behaviour.
 
 #### `pub fn vertical_wheel_scrolls_horizontally(mut self, on: bool) -> Self`
 

@@ -186,7 +186,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
     }
 
     /// Bind a sort signal — typically `TreeTableView::sort_signal()`.
-    pub fn bind_sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>) {
+    pub fn sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>) {
         self.inner.borrow_mut().sort = signal.get();
         rebuild_and_bump(&self.inner);
         let weak = Rc::downgrade(&self.inner);
@@ -202,7 +202,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
     }
 
     /// Bind a filters signal — typically `TreeTableView::filters_signal()`.
-    pub fn bind_filters_signal(&self, signal: Signal<HashMap<String, String>>) {
+    pub fn filters_signal(&self, signal: Signal<HashMap<String, String>>) {
         self.inner.borrow_mut().filters = signal.get();
         rebuild_and_bump(&self.inner);
         let weak = Rc::downgrade(&self.inner);
@@ -943,7 +943,7 @@ mod tests {
         let proxy =
             SortFilterTreeModel::new(tree).with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
         let sig: Signal<Option<(String, SortDirection)>> = Signal::new(None);
-        proxy.bind_sort_signal(sig.clone());
+        proxy.sort_signal(sig.clone());
         sig.set(Some(("name".to_string(), SortDirection::Ascending)));
         assert_eq!(collect_visible(&proxy), vec!["build.txt", "docs", "src"]);
         sig.set(None);
@@ -960,7 +960,7 @@ mod tests {
                 Box::new(move |row: &&str| row.contains(&needle))
             });
         let sig: Signal<HashMap<String, String>> = Signal::new(HashMap::new());
-        proxy.bind_filters_signal(sig.clone());
+        proxy.filters_signal(sig.clone());
 
         let mut m = HashMap::new();
         m.insert("name".to_string(), "build".to_string());

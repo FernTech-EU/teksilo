@@ -126,9 +126,9 @@ impl ButtonStyle for RecipeButtonStyle {
         let border_position = recipe.border.idle.position;
         let border_sides = recipe.border.idle.sides;
         let mut rect = RectWidget::new()
-            .bind_background(bg_color)
-            .bind_border_color(border_color)
-            .bind_border_width(border_width)
+            .background(bg_color)
+            .border_color(border_color)
+            .border_width(border_width)
             .corner_radius(radius)
             .border_position(border_position);
         if border_sides.is_some() {

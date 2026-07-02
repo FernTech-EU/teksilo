@@ -10,7 +10,7 @@
 
 use std::rc::Rc;
 
-use crate::signal::Signal;
+use crate::signal::Prop;
 use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
 use crate::widget_tree::WidgetTree;
@@ -121,7 +121,7 @@ pub struct WindowConfig {
     /// `on_close_requested`: when present and `false`, a close attempt
     /// is vetoed and [`on_close_blocked`](Self::on_close_blocked) fires
     /// (if set). See [`WindowConfig::can_close`].
-    pub can_close: Option<Signal<bool>>,
+    pub can_close: Option<Prop<bool>>,
     /// Optional notification fired when the [`can_close`](Self::can_close)
     /// signal blocks a close — the hook that presents the confirmation
     /// UI. See [`WindowConfig::on_close_blocked`].
@@ -392,8 +392,8 @@ impl WindowConfig {
     /// `can_close` is evaluated *before* the `on_close_requested` guard:
     /// a `false` signal short-circuits to a veto; a `true` signal (or no
     /// signal) falls through to the guard, then to closing.
-    pub fn can_close(mut self, may_close: Signal<bool>) -> Self {
-        self.can_close = Some(may_close);
+    pub fn can_close(mut self, may_close: impl Into<Prop<bool>>) -> Self {
+        self.can_close = Some(may_close.into());
         self
     }
 
@@ -415,8 +415,8 @@ impl WindowConfig {
         self.on_close_requested.take()
     }
 
-    /// Take the `can_close` signal out of the config.
-    pub fn take_can_close(&mut self) -> Option<Signal<bool>> {
+    /// Take the `can_close` prop out of the config.
+    pub fn take_can_close(&mut self) -> Option<Prop<bool>> {
         self.can_close.take()
     }
 
@@ -447,6 +447,7 @@ impl Default for WindowConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::Signal;
 
     #[test]
     fn window_config_defaults() {
@@ -493,7 +494,7 @@ mod tests {
         assert!(config.on_close_blocked.is_none());
 
         // The taken signal is the same handle the caller passed in.
-        signal.unwrap().set(true);
+        signal.unwrap().as_signal().set(true);
         assert!(may_close.get());
     }
 

@@ -41,7 +41,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::focus::FocusOrigin;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{SegmentedControlStyleConfig, SharedSegmentedControlStyle};
 use bastyde_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -258,7 +258,7 @@ impl Widget for SegmentCell {
             Some(style) => TextWidget::new(self.label.clone()).style(style.clone()),
             None => TextWidget::new(self.label.clone()).style(TextStyleRole::Small),
         };
-        row = row.child(label_widget.bind_color(color).single_line());
+        row = row.child(label_widget.color(color).single_line());
 
         // The cell node owns the AT RadioButton + name; exclude the inner
         // content subtree so a screen reader doesn't double-announce the
@@ -350,8 +350,9 @@ pub struct SegmentedControl {
     /// / `accessibility` can read labels even when measured while dormant.
     segments: Vec<Segment>,
     selected: Signal<usize>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     hovered_segment: Signal<Option<usize>>,
     /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
     /// ring and the focus-driven selected-segment accent fill are derived
@@ -377,7 +378,7 @@ impl SegmentedControl {
         Self {
             segments: Vec::new(),
             selected,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             hovered_segment: Signal::new(None),
             focused: Signal::new(false),
             style_override: None,
@@ -401,11 +402,11 @@ impl SegmentedControl {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. For reactive enable/disable use
-    /// `ctx.enabled_when(segmented_control_id, signal)`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to
+    /// the arena at build time via
+    /// `ctx.enabled_when(segmented_control_id, self.enabled.clone())`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -487,7 +488,7 @@ impl std::fmt::Debug for SegmentedControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SegmentedControl")
             .field("segments", &self.segments.len())
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .finish()
     }
 }
@@ -498,10 +499,8 @@ impl Widget for SegmentedControl {
         ctx: &mut bastyde_core::build_context::BuildContext,
     ) -> Vec<bastyde_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled to the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state to the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         let registry = ctx.binding_registry();

@@ -45,7 +45,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::{ColorProp, TextStyleProp};
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
     RadioStyleConfig, RadioTileStyle, RadioTileStyleConfig, RadioTileVariant, RadioVariant,
     SharedRadioStyle, SharedRadioTileStyle,
@@ -96,7 +96,9 @@ pub struct RadioTile {
     title_color: Option<ColorProp>,
     description_style: Option<TextStyleProp>,
     description_color: Option<ColorProp>,
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at
+    /// build time.
+    enabled: Prop<bool>,
     variant: RadioTileVariant,
     show_indicator: bool,
     indicator_side: RadioTileIndicatorSide,
@@ -118,7 +120,7 @@ impl RadioTile {
     /// Create a tile with no selection binding. The enclosing
     /// [`RadioTileGroup`](crate::radio_tile_group::RadioTileGroup) assigns
     /// this tile's `value` (its position) and shared selection signal. Use
-    /// [`bind_selection`](Self::bind_selection) for a standalone tile.
+    /// [`selection`](Self::selection) for a standalone tile.
     pub fn new() -> Self {
         Self {
             value: 0,
@@ -134,7 +136,7 @@ impl RadioTile {
             title_color: None,
             description_style: None,
             description_color: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             variant: RadioTileVariant::default(),
             show_indicator: true,
             indicator_side: RadioTileIndicatorSide::default(),
@@ -153,7 +155,7 @@ impl RadioTile {
 
     /// Bind this tile to an explicit `value` + shared `Signal<usize>` for use
     /// **outside** a `RadioTileGroup`. Inside a group this is set automatically.
-    pub fn bind_selection(mut self, value: usize, selected: Signal<usize>) -> Self {
+    pub fn selection(mut self, value: usize, selected: Signal<usize>) -> Self {
         self.value = value;
         self.selected = selected;
         self
@@ -249,10 +251,11 @@ impl RadioTile {
         self
     }
 
-    /// Set the initial enabled state. A disabled tile is skipped by the
-    /// group's keyboard navigation and cannot be selected.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. A disabled tile
+    /// is skipped by the group's keyboard navigation and cannot be
+    /// selected.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -336,7 +339,7 @@ impl RadioTile {
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
-        self.initial_enabled
+        self.enabled.get()
     }
 
     /// Switch this tile to the compact vertical-list arrangement with a
@@ -383,9 +386,7 @@ impl Widget for RadioTile {
         let variant = self.variant;
         let self_id = ctx.self_id();
 
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Re-walk the AT tree when selection changes so `set_toggled` (and the
@@ -715,12 +716,12 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let t0 = tree.add(
             RadioTile::new()
-                .bind_selection(0, selected.clone())
+                .selection(0, selected.clone())
                 .title(lit!("A")),
         );
         let t1 = tree.add(
             RadioTile::new()
-                .bind_selection(1, selected.clone())
+                .selection(1, selected.clone())
                 .title(lit!("B")),
         );
         let _root = tree.add(crate::primitives::VStack::new().add_child(t0).add_child(t1));
@@ -742,7 +743,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let t0 = tree.add(
             RadioTile::new()
-                .bind_selection(0, selected.clone())
+                .selection(0, selected.clone())
                 .title(lit!("A"))
                 .description(lit!("first choice")),
         );
@@ -760,18 +761,18 @@ mod tests {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let compact = tree.add(
-            FixedSize::new().bind_width(300.0).child(
+            FixedSize::new().width(300.0).child(
                 RadioTile::new()
-                    .bind_selection(0, selected.clone())
+                    .selection(0, selected.clone())
                     .title(lit!("A"))
                     .description(lit!(long))
                     .compact(true),
             ),
         );
         let card = tree.add(
-            FixedSize::new().bind_width(300.0).child(
+            FixedSize::new().width(300.0).child(
                 RadioTile::new()
-                    .bind_selection(0, selected.clone())
+                    .selection(0, selected.clone())
                     .title(lit!("B"))
                     .description(lit!(long)),
             ),
@@ -813,11 +814,7 @@ mod tests {
             Some(Rc::new(SentinelTile(Color::from_rgba(1.0, 0.0, 1.0, 1.0))));
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(theme);
-        tree.add(
-            RadioTile::new()
-                .bind_selection(0, selected)
-                .title(lit!("X")),
-        );
+        tree.add(RadioTile::new().selection(0, selected).title(lit!("X")));
         assert!(
             renders_color(&mut tree, Color::from_rgba(1.0, 0.0, 1.0, 1.0)),
             "theme slot style should paint the sentinel fill"
@@ -834,7 +831,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(theme);
         tree.add(
             RadioTile::new()
-                .bind_selection(0, selected)
+                .selection(0, selected)
                 .title(lit!("X"))
                 .style(SentinelTile(per_call)),
         );

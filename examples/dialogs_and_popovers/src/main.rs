@@ -172,7 +172,7 @@ impl OverlayDemo {
 
         let result_signal = self.last_message_box_result.clone();
         let result_value = TextWidget::new(lit!(result_signal.get()))
-            .bind_text(result_signal)
+            .text(result_signal)
             .style(TextStyleRole::BodyBold)
             .color(TextRole::Primary);
 

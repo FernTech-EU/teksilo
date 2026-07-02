@@ -432,7 +432,7 @@ fn a11y_name_uses_label() {
 // producing visible "Never s" instead of "Never". The fix lives in
 // two places:
 //
-//   1. `TextInputField::bind_suffix` — lets the composite swap
+//   1. `TextInputField::suffix` — lets the composite swap
 //      the suffix to an empty string reactively.
 //   2. `SpinBox::build` — wires a derived `Signal<String>` that
 //      resolves to `""` exactly when the value equals `min` and

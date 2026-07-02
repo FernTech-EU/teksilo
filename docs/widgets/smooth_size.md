@@ -17,7 +17,7 @@ ctx.add(
 
 For *explicit* size animation (target is a numeric signal you
 already drive, e.g. a sidebar width), use the existing
-`FixedSize::new().bind_width(animated_signal)` + `Signal::animate_to`
+`FixedSize::new().width(animated_signal)` + `Signal::animate_to`
 pattern instead — that path doesn't need to measure the child every
 frame.
 

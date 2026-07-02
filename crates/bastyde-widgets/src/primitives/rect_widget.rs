@@ -110,26 +110,6 @@ impl RectWidget {
         self.corner_radius = radius.into();
         self
     }
-
-    /// Compatibility shim — `.bind_background(signal)` → `.background(signal)`.
-    pub fn bind_background(self, state: impl Into<PaintProp>) -> Self {
-        self.background(state)
-    }
-
-    /// Compatibility shim — `.bind_border_color(signal)` → `.border_color(signal)`.
-    pub fn bind_border_color(self, state: impl Into<ColorProp>) -> Self {
-        self.border_color(state)
-    }
-
-    /// Compatibility shim — `.bind_border_width(signal)` → `.border_width(signal)`.
-    pub fn bind_border_width(self, state: impl Into<Prop<f32>>) -> Self {
-        self.border_width(state)
-    }
-
-    /// Compatibility shim — `.bind_corner_radius(signal)` → `.corner_radius(signal)`.
-    pub fn bind_corner_radius(self, state: impl Into<Prop<CornerRadius>>) -> Self {
-        self.corner_radius(state)
-    }
 }
 
 impl Default for RectWidget {
@@ -329,12 +309,12 @@ mod tests {
     }
 
     #[test]
-    fn bind_background_reads_from_state() {
+    fn background_reads_from_state() {
         let color = Signal::new(Color::BLUE);
         let mut tree = WidgetTree::new();
         let w = tree.add(
             RectWidget::new()
-                .bind_background(color.clone())
+                .background(color.clone())
                 .corner_radius(CornerRadius::uniform(4.0)),
         );
         color.bind_to(
@@ -399,12 +379,12 @@ mod tests {
     }
 
     #[test]
-    fn bind_background_updates_on_state_change() {
+    fn background_updates_on_state_change() {
         let color = Signal::new(Color::RED);
         let mut tree = WidgetTree::new();
         let w = tree.add(
             RectWidget::new()
-                .bind_background(color.clone())
+                .background(color.clone())
                 .corner_radius(CornerRadius::uniform(4.0)),
         );
         color.bind_to(

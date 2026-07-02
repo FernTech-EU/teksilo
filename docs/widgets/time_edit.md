@@ -42,7 +42,7 @@ let _field = TimeEdit::new(value)
 
 ## Builder methods at a glance
 
-`style`, `required`, `format`, `seconds`, `format_pattern`, `min_time`, `max_time`, `step_minutes`, `placeholder`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`
+`style`, `required`, `format`, `seconds`, `format_pattern`, `min_time`, `max_time`, `step_minutes`, `placeholder`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
 
 ## API reference
 
@@ -134,9 +134,10 @@ Set the ArrowUp / ArrowDown step in minutes. Default: 1. Must be ≥ 1.
 
 Text shown when the field is empty (value is `None`).
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -165,6 +166,26 @@ Set the accessible label for the field (announced by screen readers).
 
 Callback invoked on every committed value change with the new
 `Option<Time>` and a live `EventContext`.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay. Clears
+any previously set rich or composite tooltip (last call wins).
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key. Clears any
+previously set plain or composite tooltip (last call wins).
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach an inline rich tooltip from a `crate::tooltip::TooltipContent`
+value. Clears any previously set plain or composite tooltip (last call wins).
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Clears any previously set plain or rich tooltip (last call wins).
 
 #### `pub fn value(&self) -> Signal<Option<Time>>`
 

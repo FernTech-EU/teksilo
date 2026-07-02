@@ -5450,7 +5450,7 @@ fn drag_mode_signal_to_no_drag_disables_dispatch_at_runtime() {
 }
 
 #[test]
-fn bind_drag_mode_shares_app_owned_signal() {
+fn drag_mode_shares_app_owned_signal() {
     // Caller owns a Signal<DragMode>, binds the view to it,
     // toggles it from outside — view picks up the change.
     let app_owned: Signal<crate::DragMode> = Signal::new(crate::DragMode::RubberBand);
@@ -5459,7 +5459,7 @@ fn bind_drag_mode_shares_app_owned_signal() {
     let view_id = tree.add(
         SceneView::new(scene)
             .selection_mode(crate::SceneSelectionMode::Multi)
-            .bind_drag_mode(app_owned.clone()),
+            .drag_mode(app_owned.clone()),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
 

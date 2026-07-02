@@ -34,7 +34,7 @@ PasswordField::new(password.clone())
 
 ## Builder methods at a glance
 
-`placeholder`, `label`, `enabled`, `read_only`, `max_length`, `char_filter`, `validator`, `on_submit_fn`, `on_blur_fn`, `min_width`, `variant`, `style`, `echo_char`, `echo_mode`, `reveal_mode`, `bind_revealed`, `allow_copy`, `caps_lock_warning`, `at_reveal_policy`, `rich_tooltip_key`, `rich_tooltip`, `composite_tooltip`, `revealed_signal`, `text`
+`placeholder`, `label`, `enabled`, `read_only`, `max_length`, `char_filter`, `validator`, `on_submit_fn`, `on_blur_fn`, `min_width`, `variant`, `style`, `echo_char`, `echo_mode`, `reveal_mode`, `revealed`, `allow_copy`, `caps_lock_warning`, `at_reveal_policy`, `tooltip`, `rich_tooltip_key`, `rich_tooltip_content`, `rich_tooltip`, `composite_tooltip`, `revealed_signal`, `text`
 
 ## API reference
 
@@ -78,10 +78,11 @@ Placeholder shown when empty. Never masked.
 Accessible name, applied to the `Role::PasswordInput` field node.
 Strongly recommended for screen-reader users.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Initial enabled state. Use `ctx.enabled_when(id, signal)` for
-reactivity.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time — a bound `Signal<bool>` updates live as it
+changes.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -133,7 +134,7 @@ Set the `EchoMode` (default `EchoMode::Masked`).
 
 Set the `RevealMode` (default `RevealMode::Toggle`).
 
-#### `pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self`
+#### `pub fn revealed(mut self, revealed: Signal<bool>) -> Self`
 
 Bind an external reveal signal (shared with other UI, observed
 for analytics, or driven programmatically). Defaults to an
@@ -155,17 +156,43 @@ live region.
 How a *revealed* field reports to assistive tech (default
 `AtRevealPolicy::SwapRole`).
 
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Plain single-line tooltip shown on hover.
+
+Mutually exclusive with `rich_tooltip_key`,
+`rich_tooltip`,
+`rich_tooltip_content`, and
+`composite_tooltip` — calling any of them
+clears the others.
+
 #### `pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self`
 
 Registry-keyed rich tooltip.
+
+Mutually exclusive with the other tooltip setters.
+
+#### `pub fn rich_tooltip_content(mut self, content: tooltip::TooltipContent) -> Self`
+
+Inline rich tooltip (canonical name: accepts a
+`TooltipContent` directly without a
+registry key).
+
+Mutually exclusive with the other tooltip setters.
 
 #### `pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self`
 
 Inline rich tooltip.
 
+Mutually exclusive with the other tooltip setters.
+Prefer `rich_tooltip_content` for the
+canonical API.
+
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Composite (arbitrary-widget) tooltip.
+
+Mutually exclusive with the other tooltip setters.
 
 #### `pub fn revealed_signal(&self) -> Signal<bool>`
 

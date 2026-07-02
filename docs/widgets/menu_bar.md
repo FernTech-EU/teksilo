@@ -50,7 +50,7 @@ let _w = MenuBar::new()
 
 ## Builder methods at a glance
 
-`from_model`, `native_on_macos`, `collapsible`, `collapsible_bound`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `trailing_slot`
+`from_model`, `native_on_macos`, `collapsible`, `collapsed_signal`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `trailing_slot`
 
 ## API reference
 
@@ -115,14 +115,16 @@ pressing `Escape` hides it again.
 
 Uses `CollapsePolicy::Responsive`. Observe the collapsed state
 via `is_collapsed`, or bind your own signal
-with `collapsible_bound`.
+with `collapsed_signal`.
 
-#### `pub fn collapsible_bound(mut self, collapsed: Signal<bool>) -> Self`
+#### `pub fn collapsed_signal(mut self, collapsed: Signal<bool>) -> Self`
 
 Like `collapsible`, but uses the supplied
 signal as the collapsed-state source so the application can
 observe (and react to) collapse transitions. The responsive
-decision writes this signal.
+decision **writes** this signal (it is not a plain read-only
+input) — kept as a `Signal<bool>` rather than `Prop<bool>` since a
+static value would have nowhere to receive those writes.
 
 #### `pub fn collapse_policy(mut self, policy: CollapsePolicy) -> Self`
 

@@ -202,7 +202,7 @@ impl Widget for Root {
                         .child(Divider::new().thickness(1.0))
                         .child(
                             TextWidget::new(lit!(""))
-                                .bind_text(grid_label)
+                                .text(grid_label)
                                 .style(TextStyleRole::Body)
                                 .color(TextRole::Secondary),
                         )
@@ -226,7 +226,7 @@ impl Widget for Root {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(lit!(""))
-                            .bind_text(status)
+                            .text(status)
                             .style(TextStyleRole::Tiny)
                             .color(TextRole::Primary),
                     ),

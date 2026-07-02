@@ -56,7 +56,7 @@ fn build_header(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         .style(TextStyleRole::Tiny)
         .color(TextRole::Secondary)
         .single_line()
-        .bind_text(state.navigator_filter.clone().map({
+        .text(state.navigator_filter.clone().map({
             move |q| {
                 let total = bastyde_preview::iter_entries().count();
                 if q.is_empty() {
@@ -130,7 +130,7 @@ fn build_entry_row(
             SurfaceRole::Transparent
         }
     });
-    let bg = RectWidget::new().bind_background(bg_role);
+    let bg = RectWidget::new().background(bg_role);
     let bg_id = ctx.add(bg);
     let header_id = ctx.add(header_row);
 
@@ -184,7 +184,7 @@ fn build_variant_row(
             SurfaceRole::Transparent
         }
     });
-    let bg = RectWidget::new().bind_background(bg_role);
+    let bg = RectWidget::new().background(bg_role);
     let bg_id = ctx.add(bg);
     let label_id = ctx.add(row_padding);
 

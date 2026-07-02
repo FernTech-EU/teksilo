@@ -55,7 +55,7 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `bind_suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `echo_char`, `bind_revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
+`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
 
 ## API reference
 
@@ -115,11 +115,11 @@ parent's responsibility (`TextInput` overlays a
 via AccessKit's `placeholder` property so screen readers
 announce it.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Disable input and AccessKit interaction.
-Set the initial enabled state. Forwarded to the arena at build
-time. Use `ctx.enabled_when(field_id, signal)` for reactivity.
+Set the enabled state, statically or reactively. Disabled blocks
+input and AccessKit interaction. Forwarded to the arena at build
+time.
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -154,27 +154,19 @@ strip (filter runs after the strip). Whole-string validity
 (e.g. "at most one decimal point") is a commit-time concern
 for `on_blur` / `on_submit`.
 
-#### `pub fn suffix(mut self, text: impl Into<String>) -> Self`
+#### `pub fn suffix(mut self, text: impl Into<Prop<String>>) -> Self`
 
 Static non-editable trailing string rendered flush-right
 inside the field's bounds (Qt's `QSpinBox::suffix`). The
 caret cannot enter the suffix; clicks past the text end
 position the caret at the last editable character.
 
-For a suffix that changes at runtime (e.g. toggled on/off
-by surrounding widget state), use
-`bind_suffix` with a `Signal<String>`.
-
-#### `pub fn bind_suffix(mut self, signal: Signal<String>) -> Self`
-
-Bind the non-editable trailing string to a reactive
-`Signal<String>`. The field re-measures the suffix glyphs
-and relayouts the editable text viewport each time the
-signal fires, so the transition is seamless.
-
-Typical use: a `SpinBox` with `special_value_text` binds
-an empty string to the suffix whenever the value equals
-`min`, and the configured unit string otherwise.
+Accepts a static `String`/`&str` or a reactive `Signal<String>` /
+`Prop<String>`; when bound, the field re-measures the suffix glyphs
+and relayouts the editable text viewport each time the signal fires.
+Typical use: a `SpinBox` with `special_value_text` binds an empty
+string to the suffix whenever the value equals `min`, and the
+configured unit string otherwise.
 
 #### `pub fn text_height(mut self, height: f32) -> Self`
 
@@ -235,7 +227,7 @@ glyph per source `char`), so the plaintext never reaches the
 shaper or glyph atlas while masked, and caret / selection /
 hit-test stay correct. Also defaults `allow_copy` to `false` and
 opts the focused node out of OS IME composition. Pair with
-`bind_revealed` for a reveal toggle.
+`revealed` for a reveal toggle.
 
 #### `pub fn echo_char(mut self, c: char) -> Self`
 
@@ -243,7 +235,7 @@ Override the masking glyph (default `'•'`, U+2022). Any
 uniform-width character works; the engine emits exactly one per
 source `char`.
 
-#### `pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self`
+#### `pub fn revealed(mut self, revealed: Signal<bool>) -> Self`
 
 Bind the reveal toggle. When the signal is `true` the field
 shows plaintext regardless of `EchoMode`; when `false` it

@@ -346,7 +346,7 @@ impl Widget for DropZone {
         // Live-region status line: empty at rest, narrates hover / drop.
         content = content.child(
             TextWidget::new(lit!(String::new()))
-                .bind_text(announce.clone())
+                .text(announce.clone())
                 .color(TextRole::Secondary)
                 .access_live(Live::Polite),
         );

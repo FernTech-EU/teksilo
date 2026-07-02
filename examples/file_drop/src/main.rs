@@ -191,7 +191,7 @@ fn main() {
                             )
                             .child(
                                 Panel::new().child(
-                                    TextWidget::new(lit!(String::new())).bind_text(log.clone()),
+                                    TextWidget::new(lit!(String::new())).text(log.clone()),
                                 ),
                             ),
                     )

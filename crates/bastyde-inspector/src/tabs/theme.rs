@@ -203,21 +203,21 @@ fn slider_row(name: &'static str, draft: Signal<f32>) -> impl Widget {
         .style(TextStyleRole::Body)
         .color(TextRole::Primary);
     let value_label = TextWidget::new(lit!(""))
-        .bind_text(value_text)
+        .text(value_text)
         .style(TextStyleRole::Body)
         .color(TextRole::Secondary);
     HStack::new()
         .spacing(8.0)
         .child(
             bastyde_widgets::primitives::FixedSize::new()
-                .bind_width(Signal::new(NAME_COLUMN_WIDTH))
+                .width(Signal::new(NAME_COLUMN_WIDTH))
                 .child(name_text),
         )
         .child(Spacer::new())
         .child(Slider::new(draft, 0.0, 1.0).step(0.01))
         .child(
             bastyde_widgets::primitives::FixedSize::new()
-                .bind_width(Signal::new(40.0_f32))
+                .width(Signal::new(40.0_f32))
                 .child(value_label),
         )
 }
@@ -355,7 +355,7 @@ impl Widget for ThemeTab {
                 .spacing(8.0)
                 .child(
                     bastyde_widgets::primitives::FixedSize::new()
-                        .bind_width(Signal::new(NAME_COLUMN_WIDTH))
+                        .width(Signal::new(NAME_COLUMN_WIDTH))
                         .child(name_text),
                 )
                 .child(Spacer::new())

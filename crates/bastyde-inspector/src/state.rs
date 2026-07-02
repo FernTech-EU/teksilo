@@ -103,7 +103,7 @@ pub struct InspectorState {
     pub pick_menu_anchor: Signal<Option<Point>>,
     /// Pre-registered menu panel id. Created once by `InspectorShell`
     /// in `build()` and parked dormant. The picker activates it +
-    /// shows it as an overlay, with each row's `Button::bind_label`
+    /// shows it as an overlay, with each row's `Button::label`
     /// reading from `pending_pick_chain`. Same orphan-dormant pattern
     /// the `PropertiesRows` "Copy value" context menu uses.
     pub(crate) pick_menu_id: Signal<Option<WidgetId>>,
@@ -214,7 +214,7 @@ pub struct InspectorState {
     /// stripes by `HighlightLayer`. Empty when off or when nothing overflows.
     pub(crate) overflow_snapshot: Signal<Vec<bastyde_canvas::Rect>>,
     /// Current panel height in logical pixels. Drives the panel slot's
-    /// `FixedSize::bind_height`. Mutated by the panel resize handle
+    /// `FixedSize::height`. Mutated by the panel resize handle
     /// (top-edge drag) and persisted via `__bastyde_inspector.panel_height`.
     /// Clamped to a sensible range — see `MIN_PANEL_HEIGHT` /
     /// `MAX_PANEL_HEIGHT`.

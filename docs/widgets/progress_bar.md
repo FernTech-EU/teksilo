@@ -32,7 +32,7 @@ let _bar = ProgressBar::new(0.7).thickness(6.0);
 
 // Reactive determinate bar:
 let progress = Signal::new(0.0_f32);
-let _bar = ProgressBar::new(0.0).bind_value(progress);
+let _bar = ProgressBar::new(0.0).value(progress);
 
 // Indeterminate (animated sweep):
 let _spinner_bar = ProgressBar::indeterminate();
@@ -40,7 +40,7 @@ let _spinner_bar = ProgressBar::indeterminate();
 
 ## Builder methods at a glance
 
-`indeterminate`, `bind_value`, `orientation`, `thickness`, `track_color`, `fill_color`, `style`, `label`
+`indeterminate`, `value`, `orientation`, `thickness`, `track_color`, `fill_color`, `style`, `label`
 
 ## API reference
 
@@ -64,7 +64,7 @@ Create a determinate progress bar with a static value (0.0–1.0).
 
 Create an indeterminate progress bar (animated sweep).
 
-#### `pub fn bind_value(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn value(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind the progress value to a reactive state.
 

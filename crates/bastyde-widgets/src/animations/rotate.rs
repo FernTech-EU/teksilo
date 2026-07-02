@@ -373,7 +373,7 @@ mod tests {
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            FixedSize::new().bind_width(80.0).bind_height(80.0).child(
+            FixedSize::new().width(80.0).height(80.0).child(
                 ZStack::new()
                     .child(
                         Rotate::new(angle.clone())
@@ -382,8 +382,8 @@ mod tests {
                     .child(
                         Center::new().child(
                             FixedSize::new()
-                                .bind_width(6.0)
-                                .bind_height(6.0)
+                                .width(6.0)
+                                .height(6.0)
                                 .child(RectWidget::new().background(Color::BLACK)),
                         ),
                     ),
@@ -493,8 +493,8 @@ mod tests {
                                 .child(
                                     Rotate::new(angle.clone()).child(
                                         FixedSize::new()
-                                            .bind_width(28.0)
-                                            .bind_height(28.0)
+                                            .width(28.0)
+                                            .height(28.0)
                                             .child(RectWidget::new().background(Color::RED)),
                                     ),
                                 )
@@ -579,8 +579,8 @@ mod tests {
                             .child(
                                 Rotate::new(angle.clone()).child(
                                     FixedSize::new()
-                                        .bind_width(28.0)
-                                        .bind_height(28.0)
+                                        .width(28.0)
+                                        .height(28.0)
                                         .child(RectWidget::new().background(Color::RED)),
                                 ),
                             )
@@ -677,15 +677,15 @@ mod tests {
                 .child(
                     Rotate::new(angle).child(
                         FixedSize::new()
-                            .bind_width(28.0)
-                            .bind_height(28.0)
+                            .width(28.0)
+                            .height(28.0)
                             .child(RectWidget::new().background(Color::RED)),
                     ),
                 )
                 .child(
                     FixedSize::new()
-                        .bind_width(40.0)
-                        .bind_height(80.0)
+                        .width(40.0)
+                        .height(80.0)
                         .child(RectWidget::new().background(Color::BLUE)),
                 ),
         );

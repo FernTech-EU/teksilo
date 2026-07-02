@@ -50,7 +50,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
 
 ## API reference
 
@@ -91,6 +91,11 @@ stays consistent across two views of the same source. The view stays
 key-less (`ListView<T>`) — the index↔key mapping is captured from the
 concrete source here. Mutually exclusive with
 `selection` (the last one set wins).
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole view. A disabled view greys out and stops
+accepting focus / selection / keyboard input (arena-gated).
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
@@ -156,12 +161,16 @@ hover indicator reflects the source's `can_accept` verdict, so a
 forbidden drop shows no insertion line. Keyboard equivalent:
 Alt+ArrowUp/Down.
 
-#### `pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self`
+#### `pub fn on_activate( mut self, f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
 
-Set the row-**activation** handler — invoked with the flat row index on a
-click (per `activate_on`) or **Enter** on the
-focused row. Distinct from *selection*: arrow-key navigation and
-**Space** move / toggle the selection but do **not** activate.
+Set the row-**activation** handler — invoked with the flat row index and
+the live `EventContext` on a click
+(per `activate_on`) or **Enter** on the focused row.
+The context lets the handler open a modal, toast, or dispatch an intent —
+matching `TableView::on_row_activate`
+/ `GridView::on_tile_activate`.
+Distinct from *selection*: arrow-key navigation and **Space** move /
+toggle the selection but do **not** activate.
 
 #### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
 

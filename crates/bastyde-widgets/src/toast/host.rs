@@ -431,8 +431,8 @@ mod tests {
     fn small_root() -> impl Widget {
         VStack::new().child(
             FixedSize::new()
-                .bind_width(200.0)
-                .bind_height(120.0)
+                .width(200.0)
+                .height(120.0)
                 .child(crate::primitives::Spacer::new()),
         )
     }
@@ -517,22 +517,22 @@ mod tests {
             let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
             let toolbar = tree.add(
                 FixedSize::new()
-                    .bind_width(900.0)
-                    .bind_height(40.0)
+                    .width(900.0)
+                    .height(40.0)
                     .child(Spacer::new()),
             );
             let status = tree.add(
                 FixedSize::new()
-                    .bind_width(900.0)
-                    .bind_height(30.0)
+                    .width(900.0)
+                    .height(30.0)
                     .child(Spacer::new()),
             );
             let mut vstack = VStack::new().spacing(0.0).add_child(toolbar);
             if with_expand {
                 let body = tree.add(
                     FixedSize::new()
-                        .bind_width(900.0)
-                        .bind_height(100.0)
+                        .width(900.0)
+                        .height(100.0)
                         .child(Spacer::new()),
                 );
                 let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(body));
@@ -540,8 +540,8 @@ mod tests {
             } else {
                 let body = tree.add(
                     FixedSize::new()
-                        .bind_width(900.0)
-                        .bind_height(100.0)
+                        .width(900.0)
+                        .height(100.0)
                         .child(Spacer::new()),
                 );
                 vstack = vstack.add_child(body);

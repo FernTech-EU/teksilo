@@ -35,7 +35,7 @@ swatch grid each carry their own appropriate role and value.
 
 ## Builder methods at a glance
 
-`nullable`, `style`, `alpha_enabled`, `show_hsv_canvas`, `show_hue_strip`, `show_alpha_strip`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_preview`, `show_swatches`, `show_footer`, `on_done`, `on_cancel`, `swatches`, `swatches_signal`, `swatch_columns`, `layout`, `label`, `enabled`, `current`
+`nullable`, `style`, `alpha_enabled`, `show_hsv_canvas`, `show_hue_strip`, `show_alpha_strip`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_preview`, `show_swatches`, `show_footer`, `on_done`, `on_cancel`, `swatches`, `swatch_columns`, `layout`, `label`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `current`
 
 ## API reference
 
@@ -160,13 +160,10 @@ callback's typical implementation is
 `value.set(snapshot.get()); ctx.dismiss_self_overlay_chain();`.
 Only meaningful when `show_footer(true)`.
 
-#### `pub fn swatches(mut self, s: Vec<Color>) -> Self`
+#### `pub fn swatches(mut self, s: impl Into<Prop<Vec<Color>>>) -> Self`
 
-Replace the default 12-color `DEFAULT_SWATCHES` with a custom palette.
-
-#### `pub fn swatches_signal(mut self, s: Signal<Vec<Color>>) -> Self`
-
-Bind the preset swatch palette to a reactive `Signal<Vec<Color>>`
+Replace the default 12-color `DEFAULT_SWATCHES` with a custom
+palette — statically, or reactively via a bound `Signal<Vec<Color>>`
 that updates live without rebuilding the picker.
 
 #### `pub fn swatch_columns(mut self, n: usize) -> Self`
@@ -183,9 +180,35 @@ Select the overall layout variant. Defaults to `ColorPickerLayout::Standard`.
 Set the accessible group label for the picker root node.
 Defaults to the localized "Color picker" string.
 
-#### `pub fn enabled(mut self, enabled: bool) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time.
+
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after a hover delay.
+
+Mutually exclusive with `Self::rich_tooltip`, `Self::rich_tooltip_content`,
+and `Self::composite_tooltip` — the last setter called wins.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip looked up from the registry by key.
+
+Mutually exclusive with the other tooltip setters — the last call wins.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach an inline rich tooltip from an already-constructed `crate::tooltip::TooltipContent`.
+
+Mutually exclusive with the other tooltip setters — the last call wins.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+
+Mutually exclusive with the other tooltip setters — the last call wins.
 
 #### `pub fn current(&self) -> Color`
 

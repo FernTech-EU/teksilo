@@ -243,8 +243,8 @@ fn main() {
                     .edit_trigger(EditTrigger::F2OrType);
 
                 // Wire the proxy's sort + filter from the table's signals.
-                proxy.bind_sort_signal(table.sort_signal().clone());
-                proxy.bind_filters_signal(table.filters_signal().clone());
+                proxy.sort_signal(table.sort_signal().clone());
+                proxy.filters_signal(table.filters_signal().clone());
 
                 // Default sort: ascending by id.
                 table.set_sort(Some("id"), SortDirection::Ascending);

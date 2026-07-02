@@ -534,7 +534,7 @@ pub struct SceneView {
     /// the signal at runtime (typically from a toolbar) flips
     /// behaviour on the next pointer event without rebuilding
     /// the view. `.drag_mode(mode)` writes to it directly;
-    /// `.bind_drag_mode(sig)` replaces the inner signal with an
+    /// `.drag_mode(sig)` replaces the inner signal with an
     /// app-owned one so toolbars can share state with the view.
     drag_mode: Signal<crate::item_handlers::DragMode>,
     /// Per-layout snapshot of (id, scene_rect, handlers) for items

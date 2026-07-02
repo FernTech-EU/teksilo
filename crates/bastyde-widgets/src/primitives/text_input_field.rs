@@ -144,8 +144,9 @@ pub enum AtRevealPolicy {
 pub struct TextInputField {
     // ── Configuration (builder methods, consumed in build) ───────────
     text: Signal<String>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at build
+    /// time.
+    enabled: Prop<bool>,
     read_only: bool,
     max_length: Option<usize>,
     placeholder: String,
@@ -224,7 +225,7 @@ impl std::fmt::Debug for TextInputField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextInputField")
             .field("placeholder", &self.placeholder)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
@@ -235,7 +236,7 @@ impl TextInputField {
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             read_only: false,
             max_length: None,
             placeholder: String::new(),
@@ -274,11 +275,11 @@ impl TextInputField {
         self
     }
 
-    /// Disable input and AccessKit interaction.
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. Use `ctx.enabled_when(field_id, signal)` for reactivity.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Disabled blocks
+    /// input and AccessKit interaction. Forwarded to the arena at build
+    /// time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -330,24 +331,14 @@ impl TextInputField {
     /// caret cannot enter the suffix; clicks past the text end
     /// position the caret at the last editable character.
     ///
-    /// For a suffix that changes at runtime (e.g. toggled on/off
-    /// by surrounding widget state), use
-    /// [`bind_suffix`](Self::bind_suffix) with a `Signal<String>`.
-    pub fn suffix(mut self, text: impl Into<String>) -> Self {
-        self.suffix = Prop::Static(text.into());
-        self
-    }
-
-    /// Bind the non-editable trailing string to a reactive
-    /// `Signal<String>`. The field re-measures the suffix glyphs
-    /// and relayouts the editable text viewport each time the
-    /// signal fires, so the transition is seamless.
-    ///
-    /// Typical use: a `SpinBox` with `special_value_text` binds
-    /// an empty string to the suffix whenever the value equals
-    /// `min`, and the configured unit string otherwise.
-    pub fn bind_suffix(mut self, signal: Signal<String>) -> Self {
-        self.suffix = Prop::Bound(signal);
+    /// Accepts a static `String`/`&str` or a reactive `Signal<String>` /
+    /// `Prop<String>`; when bound, the field re-measures the suffix glyphs
+    /// and relayouts the editable text viewport each time the signal fires.
+    /// Typical use: a `SpinBox` with `special_value_text` binds an empty
+    /// string to the suffix whenever the value equals `min`, and the
+    /// configured unit string otherwise.
+    pub fn suffix(mut self, text: impl Into<Prop<String>>) -> Self {
+        self.suffix = text.into();
         self
     }
 
@@ -421,7 +412,7 @@ impl TextInputField {
     /// shaper or glyph atlas while masked, and caret / selection /
     /// hit-test stay correct. Also defaults `allow_copy` to `false` and
     /// opts the focused node out of OS IME composition. Pair with
-    /// [`bind_revealed`](Self::bind_revealed) for a reveal toggle.
+    /// [`revealed`](Self::revealed) for a reveal toggle.
     pub fn secure(mut self, echo_mode: EchoMode) -> Self {
         self.secure = true;
         self.echo_mode = echo_mode;
@@ -442,7 +433,7 @@ impl TextInputField {
     /// masks. Shared with the eye [`IconButton::visibility_toggle`].
     ///
     /// [`IconButton::visibility_toggle`]: crate::IconButton::visibility_toggle
-    pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self {
+    pub fn revealed(mut self, revealed: Signal<bool>) -> Self {
         self.revealed = Some(revealed);
         self
     }
@@ -650,7 +641,7 @@ impl Widget for TextInputField {
         // check `ctx.is_enabled(self_id)` for keystroke gating. The
         // shared state's read_only stays a separate, document-level
         // concept (allows selection / no edits).
-        let read_only_effective = self.read_only || !self.initial_enabled;
+        let read_only_effective = self.read_only || !self.enabled.get();
 
         let initial_suffix = self.suffix.get();
         let shared_state = TextInputState::new(TextInputConfig {
@@ -1043,14 +1034,12 @@ impl Widget for TextInputField {
             });
         }
 
-        // Forward initial-enabled into the arena. Disabled state no
+        // Forward the enabled state into the arena. Disabled state no
         // longer seeded into the interaction signal — the framework's
         // arena enabled-state is the single source of truth (events
         // gated, leaves resolve Disabled role).
         let self_id = ctx.self_id();
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        ctx.enabled_when(self_id, self.enabled.clone());
 
         // Attach handlers. Focus-origin inference mirrors the
         // `Slider` pattern: hover cached, focus event checks hover

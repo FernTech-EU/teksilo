@@ -40,7 +40,7 @@ track the active theme automatically.
 
 ## Builder methods at a glance
 
-`with_initials`, `with_name`, `with_image`, `from_raw_image`, `style`, `size`, `shape`, `fallback_initials`, `image_visible`, `background`, `foreground`, `seed`, `border`, `border_color`, `presence`, `presence_corner`, `label`, `alt`, `a11y_hidden`, `on_activate_fn`, `has_popup`, `expanded_when`, `bind_name`, `bind_image`, `bind_alt`, `bind_label`, `bind_presence`
+`with_initials`, `with_name`, `with_image`, `from_raw_image`, `style`, `size`, `shape`, `fallback_initials`, `image_visible`, `background`, `foreground`, `seed`, `border`, `border_color`, `presence`, `presence_corner`, `label`, `alt`, `a11y_hidden`, `on_activate_fn`, `has_popup`, `expanded_when`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `name_signal`, `image_signal`, `alt_signal`, `label_signal`, `presence_signal`
 
 ## API reference
 
@@ -188,7 +188,7 @@ announce the avatar as "menu button" / "has popup". Only takes
 effect when paired with `.on_activate_fn(...)` — without an
 activation handler the avatar isn't a trigger.
 
-#### `pub fn expanded_when(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
 
 Bind a signal reporting whether this avatar's popup is
 currently visible. The wrapping Popover / overlay manager owns
@@ -196,7 +196,34 @@ the signal and flips it on show / dismiss; Avatar reads it in
 `accessibility()` to publish `set_expanded`. Only meaningful
 alongside `.has_popup(...)`.
 
-#### `pub fn bind_name(mut self, signal: Signal<String>) -> Self`
+#### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Attach a plain single-line tooltip shown after the hover delay.
+Mutually exclusive with `Self::rich_tooltip`,
+`Self::rich_tooltip_content`, and `Self::composite_tooltip` —
+this call clears the other three slots.
+
+#### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
+
+Attach a rich tooltip identified by a registry key. The tooltip
+content is resolved from the application's `TooltipRegistry` at
+hover time. Mutually exclusive with the other tooltip setters —
+this call clears the other three slots.
+
+#### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
+
+Attach a rich tooltip from inline `crate::tooltip::TooltipContent`
+without a registry key. Mutually exclusive with the other tooltip
+setters — this call clears the other three slots.
+
+#### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
+
+Attach a composite tooltip whose body is an arbitrary widget tree.
+Shown after the longer `tooltip_delay_heavy` delay. Mutually
+exclusive with the other tooltip setters — this call clears the
+other three slots.
+
+#### `pub fn name_signal(mut self, signal: Signal<String>) -> Self`
 
 Bind the user's display name to a signal. The displayed
 initials are auto-derived from the current value
@@ -208,27 +235,27 @@ flip — the canonical login-flow pattern:
 ```ignore
 let user_name: Signal<String> = ctx.signal(String::new());
 Avatar::with_initials(lit!("?"))        // logged-out fallback
-    .bind_name(user_name.clone())
-    .bind_image(user_avatar_signal)
+    .name_signal(user_name.clone())
+    .image_signal(user_avatar_signal)
 ```
 
-#### `pub fn bind_image(mut self, signal: Signal<Option<Rc<RasterIcon>>>) -> Self`
+#### `pub fn image_signal(mut self, signal: Signal<Option<Rc<RasterIcon>>>) -> Self`
 
 Bind the image source. `None` ⇒ initials fallback. Each
 non-`None` value is masked to the configured `AvatarShape` by
 the inner `ImageWidget`. Bound at `BindingLevel::Rebuild`.
 
-#### `pub fn bind_alt(mut self, signal: Signal<Option<String>>) -> Self`
+#### `pub fn alt_signal(mut self, signal: Signal<Option<String>>) -> Self`
 
 Bind the image alt text. Bound at `BindingLevel::AccessibilityOnly`
 — only the screen-reader projection is affected.
 
-#### `pub fn bind_label(mut self, signal: Signal<Option<String>>) -> Self`
+#### `pub fn label_signal(mut self, signal: Signal<Option<String>>) -> Self`
 
 Bind the accessible label. Bound at
 `BindingLevel::AccessibilityOnly`.
 
-#### `pub fn bind_presence(mut self, signal: Signal<Option<AvatarPresence>>) -> Self`
+#### `pub fn presence_signal(mut self, signal: Signal<Option<AvatarPresence>>) -> Self`
 
 Bind the presence indicator. `None` hides the dot. Bound at
 `BindingLevel::Rebuild` — the dot's colour and the a11y

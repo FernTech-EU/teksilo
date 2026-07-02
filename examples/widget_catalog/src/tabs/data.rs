@@ -162,8 +162,8 @@ fn table_view_widget() -> impl Widget + 'static {
         .grid_lines(GridLines::Horizontal)
         .selection_mode(TableSelectionMode::MultiRow)
         .selection(SelectionModel::new(SelectionMode::Multi));
-    proxy.bind_sort_signal(table.sort_signal().clone());
-    proxy.bind_filters_signal(table.filters_signal().clone());
+    proxy.sort_signal(table.sort_signal().clone());
+    proxy.filters_signal(table.filters_signal().clone());
     table.set_sort(Some("name"), SortDirection::Ascending);
     table
 }
@@ -247,8 +247,8 @@ fn tree_table_widget() -> impl Widget + 'static {
         .selection_mode(TableSelectionMode::MultiRow)
         .selection(SelectionModel::new(SelectionMode::Multi))
         .tree_column("name");
-    proxy.bind_sort_signal(table.sort_signal().clone());
-    proxy.bind_filters_signal(table.filters_signal().clone());
+    proxy.sort_signal(table.sort_signal().clone());
+    proxy.filters_signal(table.filters_signal().clone());
     table.set_sort(Some("name"), SortDirection::Ascending);
     table
 }
@@ -286,7 +286,7 @@ fn grid_view_widget() -> impl Widget + 'static {
 // ── Sizing helper ─────────────────────────────────────────────────────
 
 fn sized(w: f32, h: f32, body: impl Widget + 'static) -> FixedSize {
-    FixedSize::new().bind_width(w).bind_height(h).child(body)
+    FixedSize::new().width(w).height(h).child(body)
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

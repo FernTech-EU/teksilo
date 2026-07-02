@@ -35,7 +35,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::focus::FocusOrigin;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig};
 use bastyde_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -51,8 +51,9 @@ use bastyde_i18n::LocalizedString;
 pub struct Toggle {
     on: Signal<bool>,
     label: Option<LocalizedString>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled state, static or reactive; forwarded to the arena at build
+    /// time.
+    enabled: Prop<bool>,
     variant: ToggleVariant,
     style: Option<SharedToggleStyle>,
     hovered: Signal<bool>,
@@ -77,7 +78,7 @@ impl Toggle {
         Self {
             on,
             label: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             variant: ToggleVariant::default(),
             style: None,
             hovered: Signal::new(false),
@@ -98,11 +99,11 @@ impl Toggle {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena via
-    /// `ctx.enabled_when(self_id, false)` at build time. Reactive
-    /// enable/disable is supported via `ctx.enabled_when(id, signal)`.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state, statically or reactively. Forwarded to the
+    /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
+    /// build time.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -175,7 +176,7 @@ impl Toggle {
 impl std::fmt::Debug for Toggle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Toggle")
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled.get())
             .field("variant", &self.variant)
             .finish()
     }
@@ -184,10 +185,8 @@ impl std::fmt::Debug for Toggle {
 impl Widget for Toggle {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward the enabled state into the arena; see IconButton.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeToggleStyle` default.
