@@ -243,6 +243,10 @@ pub struct Button {
     /// by `arena.is_enabled()`, the a11y walker reads it for
     /// `set_disabled()`.
     initial_enabled: bool,
+    /// Optional reactive enabled binding — applied via
+    /// `ctx.enabled_when(self_id, ..)` at build time and wins over
+    /// `initial_enabled` (last-write). `None` = use the static state.
+    enabled_binding: Option<bastyde_core::signal::Prop<bool>>,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
     tooltip_text: Option<LocalizedString>,
@@ -325,6 +329,7 @@ impl Button {
             style_override: None,
             action: None,
             initial_enabled: true,
+            enabled_binding: None,
             icon: None,
             icon_location: IconLocation::None,
             tooltip_text: None,
@@ -493,6 +498,15 @@ impl Button {
     /// signal.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.initial_enabled = enabled;
+        self
+    }
+
+    /// Bind the enabled state to a reactive `Signal<bool>` (or `Prop<bool>`):
+    /// the button greys out and blocks activation while `false`, updating live
+    /// as the signal changes. Consistent with `bind_text`/`bind_color`; wins
+    /// over the static [`enabled`](Self::enabled).
+    pub fn bind_enabled(mut self, enabled: impl Into<bastyde_core::signal::Prop<bool>>) -> Self {
+        self.enabled_binding = Some(enabled.into());
         self
     }
 
@@ -691,6 +705,10 @@ impl bastyde_core::widget::Widget for Button {
         // the snapshot duality the architecture refactor removed.
         if !self.initial_enabled {
             ctx.enabled_when(self_id, false);
+        }
+        // A reactive binding wins over the static initial state (last-write).
+        if let Some(binding) = self.enabled_binding.take() {
+            ctx.enabled_when(self_id, binding);
         }
 
         // Reactive view of "is this widget effectively enabled?".

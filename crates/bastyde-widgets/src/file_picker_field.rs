@@ -32,7 +32,7 @@ use bastyde_platform::file_dialog::{
 };
 
 use crate::icon_button::IconButton;
-use crate::text_input::TextInput;
+use crate::text_input::{TextInput, ValidationState};
 use bastyde_i18n::LocalizedString;
 
 /// Which file-dialog kind the trailing button opens.
@@ -61,6 +61,10 @@ pub struct FilePickerField {
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
     placeholder: Option<LocalizedString>,
     label: Option<LocalizedString>,
+    /// Optional external validation state, forwarded to the inner `TextInput`
+    /// (renders the same inline error/warning strip + border tint as a plain
+    /// text field).
+    validation: Option<Signal<ValidationState>>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     root_child_id: Option<WidgetId>,
@@ -88,6 +92,7 @@ impl FilePickerField {
             on_pick: None,
             placeholder: None,
             label: None,
+            validation: None,
             initial_enabled: true,
             root_child_id: None,
             tooltip_text: None,
@@ -151,6 +156,14 @@ impl FilePickerField {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// Bind an external [`ValidationState`] signal — shown as the same inline
+    /// error/warning strip and border tint the inner [`TextInput`] renders (e.g.
+    /// "the chosen folder does not exist / is not writable").
+    pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
+        self.validation = Some(validation);
         self
     }
 
@@ -294,6 +307,9 @@ impl Widget for FilePickerField {
         }
         if let Some(label) = self.label.clone() {
             input = input.label(label);
+        }
+        if let Some(validation) = self.validation.clone() {
+            input = input.validation(validation);
         }
         let root_id = ctx.add(input);
         self.root_child_id = Some(root_id);
