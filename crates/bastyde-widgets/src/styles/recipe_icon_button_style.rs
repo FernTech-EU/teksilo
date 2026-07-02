@@ -27,7 +27,9 @@ use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
 // IntUI design tokens for IconButton. The recipe owns its own dimensions.
 // Sizes follow the IntelliJ IntUI scale (Compact < Default < Toolbar
 // < Large < Hero).
-pub const ICON_BUTTON_SIZE_COMPACT: f32 = 22.0;
+// WCAG 2.5.8 Target Size (Minimum) requires >= 24x24 CSS px. Compact was 22px
+// (below the floor); raised to 24 to match Default. Still the densest size.
+pub const ICON_BUTTON_SIZE_COMPACT: f32 = 24.0;
 pub const ICON_BUTTON_SIZE_DEFAULT: f32 = 24.0;
 pub const ICON_BUTTON_SIZE_TOOLBAR: f32 = 30.0;
 pub const ICON_BUTTON_SIZE_LARGE: f32 = 40.0;
