@@ -1037,6 +1037,39 @@ mod tests {
     }
 
     #[test]
+    fn selected_item_draws_focus_colour_boundary() {
+        // WCAG 1.4.1 / 1.4.11 (audit G13): a selected item draws a
+        // non-color-alone boundary in the focus/accent colour, so selection is
+        // perceivable beyond the low-contrast surface_selected wash.
+        let t = theme();
+        let border = t.colors.border_focused.to_array();
+        // The boundary is a stroked rounded-rect (a ShapeQuad with stroke_width
+        // > 0 in the border colour), not a fill.
+        let has_boundary = |frame: &bastyde_canvas::RenderFrame| {
+            frame
+                .shapes
+                .iter()
+                .any(|s| s.color == border && s.stroke_width > 0.0)
+        };
+
+        let mut sel = WidgetTree::new().with_theme(t.clone());
+        sel.add(StandardListItem::new(lit!("X")).selected(true));
+        sel.layout(SizeProposal::exact(200.0, 40.0));
+        assert!(
+            has_boundary(&sel.render()),
+            "selected item must draw a boundary in the focus/accent colour"
+        );
+
+        let mut plain = WidgetTree::new().with_theme(t);
+        plain.add(StandardListItem::new(lit!("X")).selected(false));
+        plain.layout(SizeProposal::exact(200.0, 40.0));
+        assert!(
+            !has_boundary(&plain.render()),
+            "an unselected item draws no such boundary"
+        );
+    }
+
+    #[test]
     fn list_item_layout_two_line() {
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(StandardListItem::new(lit!("Title")).subtitle(lit!("Subtitle text")));

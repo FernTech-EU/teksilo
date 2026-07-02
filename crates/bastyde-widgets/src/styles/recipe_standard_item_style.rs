@@ -40,6 +40,13 @@ pub const STANDARD_ITEM_ITEM_CORNER_RADIUS: f32 = 8.0;
 pub const STANDARD_ITEM_BG_HORIZONTAL_INSET: f32 = 4.0;
 /// Keyboard-focus ring thickness for the current item while its view is focused.
 pub const STANDARD_ITEM_FOCUS_RING_WIDTH: f32 = 1.5;
+/// Border thickness drawn around a *selected* item (in the `BorderRole::Focused`
+/// accent colour) even without keyboard focus. A non-color-alone, >= 3:1
+/// boundary cue so selection is perceivable beyond the low-contrast
+/// `surface_selected` wash (WCAG 1.4.1 Use of Color / 1.4.11 Non-text
+/// Contrast). Thinner than the keyboard-focus ring so the two stay
+/// distinguishable.
+pub const STANDARD_ITEM_SELECTION_EDGE_WIDTH: f32 = 1.0;
 
 /// Configurable dimensions for [`RecipeStandardItemStyle`].
 ///
@@ -61,6 +68,7 @@ pub struct StandardItemRecipe {
     pub item_corner_radius: f32,
     pub bg_horizontal_inset: f32,
     pub focus_ring_width: f32,
+    pub selection_edge_width: f32,
 }
 
 impl Default for StandardItemRecipe {
@@ -80,6 +88,7 @@ impl Default for StandardItemRecipe {
             item_corner_radius: STANDARD_ITEM_ITEM_CORNER_RADIUS,
             bg_horizontal_inset: STANDARD_ITEM_BG_HORIZONTAL_INSET,
             focus_ring_width: STANDARD_ITEM_FOCUS_RING_WIDTH,
+            selection_edge_width: STANDARD_ITEM_SELECTION_EDGE_WIDTH,
         }
     }
 }
@@ -116,13 +125,20 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // / arrow navigation but NOT on a mouse click, and clears on any pointer
         // input. Width collapses to 0 otherwise. `BorderRole::Focused` is the
         // theme's focus-ring color.
+        // Border width: the strong keyboard-focus ring on the current item
+        // during keyboard navigation, OR a thinner always-on selection boundary
+        // for any selected item (WCAG 1.4.1 / 1.4.11: a non-color, >= 3:1 cue so
+        // selection is perceivable beyond the pale wash), OR none.
         let focus_ring_width = self.recipe.focus_ring_width;
+        let selection_edge_width = self.recipe.selection_edge_width;
         let ring_width = cfg
             .is_selected
             .zip3(&cfg.is_focused, &cfg.is_focus_visible)
             .map(move |(sel, foc, vis)| {
                 if *sel && *foc && *vis {
                     focus_ring_width
+                } else if *sel {
+                    selection_edge_width
                 } else {
                     0.0
                 }
