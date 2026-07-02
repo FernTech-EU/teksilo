@@ -146,6 +146,17 @@ impl Theme {
         }
     }
 
+    /// Project into a high-contrast variant (WCAG 1.4.6 Enhanced / EN 301 549
+    /// §11.7), applied at paint time when the OS "increase contrast" preference
+    /// is set. See
+    /// [`ColorTokens::for_high_contrast`](bastyde_tokens::ColorTokens::for_high_contrast).
+    pub fn for_high_contrast(&self) -> Theme {
+        Theme {
+            colors: self.colors.for_high_contrast(),
+            ..self.clone()
+        }
+    }
+
     /// Look up a typed theme extension. See [`ThemeExtensions`].
     pub fn extension<T: std::any::Any + Send + Sync>(&self) -> Option<&T> {
         self.extensions.get::<T>()

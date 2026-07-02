@@ -130,6 +130,16 @@ impl WidgetTree {
         } else {
             self.effective_theme.for_inactive_window()
         };
+        // When the OS "increase contrast" preference is set, project the
+        // (already active/inactive-adjusted) palette into its high-contrast
+        // variant (WCAG 1.4.6 Enhanced / EN 301 549 11.7). Colours only, so
+        // this stays repaint-only like the inactive-window swap; the HC accent
+        // / focus overrides win over the inactive desaturation while it's on.
+        let base_theme = if self.prefers_high_contrast {
+            base_theme.for_high_contrast()
+        } else {
+            base_theme
+        };
         let text_backend = self.text_backend.clone();
         let a11y_prefs = A11yPaintPrefs {
             high_contrast: self.prefers_high_contrast,

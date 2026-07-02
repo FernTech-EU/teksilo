@@ -188,6 +188,45 @@ impl ColorTokens {
         }
     }
 
+    /// Project this palette into a **high-contrast** variant for the OS
+    /// "increase contrast" preference (WCAG SC 1.4.6 Enhanced tier / EN 301 549
+    /// §11.7). Targets >= 7:1 for text and >= 4.5:1 for non-text UI components —
+    /// beyond the AA floor the default theme already meets. Applied at paint
+    /// time when `prefers_high_contrast` is set (parallel to
+    /// [`for_inactive_window`](Self::for_inactive_window)).
+    ///
+    /// The light and dark bases need different overrides (detected from surface
+    /// luminance): in light mode `accent` and the focus indicator must diverge,
+    /// because no single hue clears >= 7:1 black-text AND >= 4.5:1 ring-on-white
+    /// at once. All values are verified against
+    /// [`Color::contrast_ratio`](crate::color::Color::contrast_ratio).
+    pub fn for_high_contrast(&self) -> ColorTokens {
+        if self.surface_main.relative_luminance() < 0.5 {
+            // Dark base: a brighter accent clears both text-on-accent and
+            // ring-on-surface against the dark surfaces.
+            ColorTokens {
+                accent: Color::from_hex("#4FCCE0"),
+                accent_hover: Color::from_hex("#4FCCE0"),
+                accent_pressed: Color::from_hex("#3FB8CC"),
+                border_focused: Color::from_hex("#4FCCE0"),
+                focus_ring: Color::from_hex("#4FCCE0"),
+                text_on_accent: Color::BLACK,
+                text_secondary: Color::from_hex("#C7CBD1"),
+                ..self.clone()
+            }
+        } else {
+            // Light base: black text on the (unchanged) accent gives 8.5:1; the
+            // focus indicator moves to a much darker teal for >= 4.5:1 on white.
+            ColorTokens {
+                border_focused: Color::from_hex("#0A7B8B"),
+                focus_ring: Color::from_hex("#0A7B8B"),
+                text_on_accent: Color::BLACK,
+                text_secondary: Color::from_hex("#3A3D45"),
+                ..self.clone()
+            }
+        }
+    }
+
     pub fn light_default() -> Self {
         Self {
             // Surfaces
@@ -658,6 +697,30 @@ mod tests {
         let light = ColorTokens::light_default();
         let dark = ColorTokens::dark_default();
         assert_ne!(light.surface_main, dark.surface_main);
+    }
+
+    #[test]
+    fn high_contrast_variant_exceeds_aa_on_both_presets() {
+        // Audit G13 (WCAG 1.4.6 Enhanced / EN 301 549 11.7): the opt-in
+        // high-contrast projection clears >= 7:1 text and >= 4.5:1 non-text on
+        // both the light and dark bases.
+        for (name, base) in [
+            ("light", ColorTokens::light_default()),
+            ("dark", ColorTokens::dark_default()),
+        ] {
+            let hc = base.for_high_contrast();
+            let ta = hc.text_on_accent.contrast_ratio(hc.accent);
+            assert!(ta >= 7.0, "{name} HC: text_on_accent vs accent = {ta:.2}");
+            for (sname, s) in [
+                ("surface_content", hc.surface_content),
+                ("surface_main", hc.surface_main),
+            ] {
+                let ts = hc.text_secondary.contrast_ratio(s);
+                assert!(ts >= 7.0, "{name} HC: text_secondary vs {sname} = {ts:.2}");
+                let fr = hc.focus_ring.contrast_ratio(s);
+                assert!(fr >= 4.5, "{name} HC: focus_ring vs {sname} = {fr:.2}");
+            }
+        }
     }
 
     #[test]
