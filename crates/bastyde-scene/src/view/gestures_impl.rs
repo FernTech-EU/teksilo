@@ -640,13 +640,15 @@ impl SceneView {
             // Magnetism keyboard-connect captures.
             let magnetism_for_keys = self.magnetism.clone();
             let model_for_keys = self.model.clone();
+            // Keyboard item-nudge (WCAG 2.5.7): move the selected item(s).
+            let selection_for_keys = self.selection.clone();
             let connect_mode_keys = self.magnet_connect_mode.clone();
             let magnet_focus_keys = self.magnet_focus.clone();
             let magnet_pending_keys = self.magnet_pending.clone();
             let self_id_for_keys = self.self_widget_id.get();
             handlers = handlers.on_key(move |event, ctx| {
                 use crate::scene::PanAxes;
-                let WidgetEvent::KeyDown { key, .. } = event else {
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
                 // Magnetism keyboard connect flow takes priority over
@@ -665,6 +667,37 @@ impl SceneView {
                     )
                 {
                     return EventResponse::Handled;
+                }
+                // Alt+Arrow nudges the selected scene item(s) — the keyboard
+                // alternative to pointer drag-to-move (WCAG 2.5.7 Dragging
+                // Movements). Moves EVERY selected item so a multi-selection
+                // stays together, matching pointer group-drag. Directly mutates
+                // the model (SceneModel mutators are `&self`); the resulting
+                // ItemChange reconciles the view + AT bounds. Scene-coord step;
+                // Shift = x10. Ignores view rotation (v1).
+                if modifiers.alt() {
+                    let step = if modifiers.shift() { 10.0 } else { 1.0 };
+                    let delta = match key {
+                        Key::ArrowLeft => Some((-step, 0.0)),
+                        Key::ArrowRight => Some((step, 0.0)),
+                        Key::ArrowUp => Some((0.0, -step)),
+                        Key::ArrowDown => Some((0.0, step)),
+                        _ => None,
+                    };
+                    if let Some((dx, dy)) = delta {
+                        let selected = selection_for_keys.selected();
+                        if !selected.is_empty() {
+                            for id in selected {
+                                if let Some(p) = model_for_keys.local_pos(id) {
+                                    model_for_keys.set_local_pos(
+                                        id,
+                                        bastyde_canvas::Point::new(p.x + dx, p.y + dy),
+                                    );
+                                }
+                            }
+                            return EventResponse::Handled;
+                        }
+                    }
                 }
                 let pan_axes_keys = pan_axes_sig_keys.get();
                 let zoomable_keys = zoomable_sig_keys.get() && !adopt_scene_size_keys;

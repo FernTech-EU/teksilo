@@ -965,6 +965,62 @@ fn keyboard_arrow_keys_animate_pan() {
 }
 
 #[test]
+fn alt_arrow_nudges_all_selected_items() {
+    // WCAG 2.5.7 (audit G6): Alt+Arrow is the keyboard alternative to pointer
+    // drag-to-move, and moves EVERY selected item together.
+    use crate::items::RectItem;
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+    let mut scene = Scene::new();
+    let a = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+    let b = scene.add_item(RectItem::new(Rect::new(40.0, 0.0, 10.0, 10.0)), Point::ZERO);
+    let mut tree = WidgetTree::new();
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(view_id);
+
+    // Select both items.
+    {
+        let view = view_handle(&tree, view_id);
+        view.selection().select_one(a);
+        view.selection().toggle(b);
+    }
+    let a_before = view_handle(&tree, view_id).model().local_pos(a).unwrap();
+    let b_before = view_handle(&tree, view_id).model().local_pos(b).unwrap();
+
+    // Alt+ArrowRight nudges +1 in scene x for BOTH selected items.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::ALT,
+        text: None,
+    });
+    let a_mid = view_handle(&tree, view_id).model().local_pos(a).unwrap();
+    let b_mid = view_handle(&tree, view_id).model().local_pos(b).unwrap();
+    assert!(
+        (a_mid.x - a_before.x - 1.0).abs() < 1e-3,
+        "item A nudged +1 x"
+    );
+    assert!(
+        (b_mid.x - b_before.x - 1.0).abs() < 1e-3,
+        "item B nudged +1 x"
+    );
+    assert!((a_mid.y - a_before.y).abs() < 1e-3, "A y unchanged");
+
+    // Shift multiplies the step (x10).
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowDown,
+        modifiers: Modifiers::ALT | Modifiers::SHIFT,
+        text: None,
+    });
+    let a_after = view_handle(&tree, view_id).model().local_pos(a).unwrap();
+    assert!(
+        (a_after.y - a_mid.y - 10.0).abs() < 1e-3,
+        "Alt+Shift+ArrowDown nudges +10 y"
+    );
+}
+
+#[test]
 fn keyboard_plus_minus_animate_zoom() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
 
