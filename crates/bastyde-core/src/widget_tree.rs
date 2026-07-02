@@ -1998,6 +1998,39 @@ impl WidgetTree {
         }
     }
 
+    /// Append an accessibility `labelled_by` relation onto an already-mounted
+    /// node, *preserving* any overrides the widget already carries — unlike
+    /// `apply_external_handler_set`, which replaces the whole override struct.
+    /// Used by container widgets (e.g. `FormLayout`) to name a field after its
+    /// label once both ids are known. Idempotent-ish: re-adding the same target
+    /// pushes a duplicate, so call once per pairing.
+    pub(crate) fn push_access_labelled_by(&mut self, id: WidgetId, label_id: WidgetId) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.access_overrides
+                .get_or_insert_with(|| {
+                    Box::new(crate::widget_builder::AccessibilityOverrides::default())
+                })
+                .labelled_by
+                .push(label_id);
+            self.a11y_dirty = true;
+        }
+    }
+
+    /// Append an accessibility `described_by` relation onto an already-mounted
+    /// node, preserving existing overrides (the `described_by` counterpart of
+    /// [`push_access_labelled_by`](Self::push_access_labelled_by)).
+    pub(crate) fn push_access_described_by(&mut self, id: WidgetId, target_id: WidgetId) {
+        if let Some(node) = self.arena.get_mut(id) {
+            node.access_overrides
+                .get_or_insert_with(|| {
+                    Box::new(crate::widget_builder::AccessibilityOverrides::default())
+                })
+                .described_by
+                .push(target_id);
+            self.a11y_dirty = true;
+        }
+    }
+
     /// Set a per-child alignment override on a widget.
     pub fn set_alignment(&mut self, id: WidgetId, alignment: bastyde_tokens::Alignment) {
         self.arena.set_alignment_override(id, alignment);

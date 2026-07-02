@@ -70,6 +70,49 @@ fn date_edit_value_iso_in_at_tree() {
 }
 
 #[test]
+fn date_edit_collapses_middle_container_node() {
+    // Audit G9: DateEdit must expose exactly DateInput -> TextInput(editable),
+    // not DateInput -> GenericContainer(named) -> TextInput. The label lives
+    // only on the DateInput node; the inner TextInput's now-content-free
+    // GenericContainer is dropped as presentational, so the label never
+    // appears on a duplicated middle node.
+    let mut tree = light_tree();
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let _id =
+        tree.add(DateEdit::new(value).label(LocalizedString::literal("Due date".to_string())));
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: None,
+    });
+    let update = tree.sync_accessibility();
+
+    let date_inputs = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == bastyde_core::accesskit::Role::DateInput)
+        .count();
+    assert_eq!(date_inputs, 1, "exactly one DateInput node");
+
+    let named_due = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.label() == Some("Due date"))
+        .count();
+    assert_eq!(
+        named_due, 1,
+        "label appears only on the DateInput node, not a duplicated middle container"
+    );
+
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == bastyde_core::accesskit::Role::TextInput),
+        "the editable TextInput field node is present"
+    );
+}
+
+#[test]
 fn date_edit_clamp_inside_range_unchanged() {
     let d = Date::constant(2026, 5, 15);
     let clamped = clamp_date(

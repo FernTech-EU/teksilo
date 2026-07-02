@@ -743,9 +743,15 @@ impl Widget for DateEdit {
                 let commit = commit.clone();
                 move |ctx_evt| commit(ctx_evt)
             });
-        if let Some(label) = self.label.clone() {
-            text_input = text_input.label(label);
-        }
+        // NB (audit G9): the label is intentionally NOT forwarded to the inner
+        // TextInput. DateEdit's own accessibility() node (Role::DateInput)
+        // already carries the name; naming the inner TextInput too would both
+        // double-label AND give its GenericContainer semantic content, which
+        // stops the AT walker from dropping it as a presentational node — the
+        // exact cause of the redundant middle node. With no name the container
+        // is content-free and collapses, leaving the 2-node tree
+        // DateEdit(DateInput) -> TextInputField(TextInput + character runs),
+        // matching the SpinBox shape.
         if let Some(trigger) = trigger_widget_opt {
             text_input = text_input.trailing_slot(trigger);
         }
@@ -957,10 +963,13 @@ impl Widget for DateEdit {
             builder.set_read_only();
         }
         builder.add_action(Action::Focus);
-        // SetValue isn't advertised on the wrapper because the inner
-        // field (overridden to Role::DateInput) handles it via
-        // TextInputField semantics. Routing through both nodes would
-        // double-process AT requests.
+        // SetValue isn't advertised on this DateInput node because the inner
+        // TextInputField (Role::TextInput) handles text entry via its own
+        // TextInputField semantics; routing through both nodes would
+        // double-process AT requests. The intermediate TextInput
+        // GenericContainer is dropped by the presentational-node collapse
+        // (its label is no longer forwarded — see build()), so the AT tree is
+        // exactly DateInput -> TextInput(editable) with its character runs.
         builder.set_has_popup(HasPopup::Grid);
         builder.set_expanded(self.popover_open.get());
         // Wire popup-controlled relationship when the calendar

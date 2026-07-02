@@ -517,9 +517,10 @@ impl Widget for DateTimeEdit {
         }
 
         // ── Build each half as a bare TextInputField ───────────
-        let date_field_id =
+        // Each half returns (layout wrapper, inner editable field id).
+        let (date_field_id, date_inner_id) =
             self.build_date_half(ctx, date_pattern_rc.clone(), &date_mask, date_min, date_max);
-        let time_field_id =
+        let (time_field_id, time_inner_id) =
             self.build_time_half(ctx, time_pattern_rc.clone(), &time_mask, time_min, time_max);
 
         // ── Painted (or text) separator ────────────────────────
@@ -720,6 +721,10 @@ impl Widget for DateTimeEdit {
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
             self.feedback.clone(),
         ));
+        // WCAG 3.3.1 / 3.3.3: both editable halves are described by the shared
+        // validation message, announced on either when it gains focus.
+        ctx.access_described_by(date_inner_id, strip_id);
+        ctx.access_described_by(time_inner_id, strip_id);
         // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it
         // claims the VStack's full width (a VStack lays a child out at its own
         // measured width, not stretched). `respect_intrinsic` keeps the frame's
@@ -909,7 +914,7 @@ impl DateTimeEdit {
         mask_string: &str,
         min: Option<Date>,
         max: Option<Date>,
-    ) -> WidgetId {
+    ) -> (WidgetId, WidgetId) {
         let validator =
             build_date_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
@@ -982,7 +987,7 @@ impl DateTimeEdit {
         mask_string: &str,
         min: Option<Time>,
         max: Option<Time>,
-    ) -> WidgetId {
+    ) -> (WidgetId, WidgetId) {
         let validator =
             build_time_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
@@ -1064,7 +1069,7 @@ impl DateTimeEdit {
         a11y_label_key: &str,
         a11y_role: Role,
         kind: DateTimeHalfKind,
-    ) -> WidgetId {
+    ) -> (WidgetId, WidgetId) {
         use crate::styles::recipe_text_input_style as field_dims;
         let inner_height =
             (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
@@ -1219,28 +1224,30 @@ impl DateTimeEdit {
         // `on_key_preview` — runs.
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
-        ctx.add(
-            ZStack::new()
-                .add_child(sized_field_id)
-                .on_key_preview(move |event, ctx_evt| {
-                    if read_only {
-                        return EventResponse::Ignored;
-                    }
-                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
-                        return EventResponse::Ignored;
-                    };
-                    let mult = if modifiers.shift() { 10 } else { 1 };
-                    let delta = match key {
-                        Key::ArrowUp => mult,
-                        Key::ArrowDown => -mult,
-                        Key::PageUp => 10 * mult,
-                        Key::PageDown => -10 * mult,
-                        _ => return EventResponse::Ignored,
-                    };
-                    step_for_key(delta, ctx_evt);
-                    EventResponse::Handled
-                }),
-        )
+        let stepping_id = ctx.add(ZStack::new().add_child(sized_field_id).on_key_preview(
+            move |event, ctx_evt| {
+                if read_only {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let mult = if modifiers.shift() { 10 } else { 1 };
+                let delta = match key {
+                    Key::ArrowUp => mult,
+                    Key::ArrowDown => -mult,
+                    Key::PageUp => 10 * mult,
+                    Key::PageDown => -10 * mult,
+                    _ => return EventResponse::Ignored,
+                };
+                step_for_key(delta, ctx_evt);
+                EventResponse::Handled
+            },
+        ));
+        // Return both the outer stepping wrapper (used for layout) and the
+        // inner editable field id, so the caller can wire `described_by` onto
+        // the node that actually carries `Role::{Date,Time}Input`.
+        (stepping_id, field_id)
     }
 }
 

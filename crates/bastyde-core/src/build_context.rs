@@ -777,6 +777,33 @@ impl<'a> BuildContext<'a> {
         self.tree.apply_external_handler_set(id, handler_set);
     }
 
+    /// Wire an accessibility `labelled_by` relation from an already-mounted
+    /// child (`id`) to its label (`label_id`), so assistive tech announces the
+    /// field by its visible label (WCAG 3.3.2 / EN 301 549 11.5.2.7). Unlike
+    /// the `.access_labelled_by(..)` builder method, this operates *after* the
+    /// child is mounted (so a container like `FormLayout` can pair a label and
+    /// a boxed field once both ids are resolved) and preserves any
+    /// accessibility overrides the child already carries.
+    pub fn access_labelled_by(
+        &mut self,
+        id: crate::widget_id::WidgetId,
+        label_id: crate::widget_id::WidgetId,
+    ) {
+        self.tree.push_access_labelled_by(id, label_id);
+    }
+
+    /// Wire an accessibility `described_by` relation from an already-mounted
+    /// child (`id`) to a description/error node (`target_id`) — the
+    /// post-mount, override-preserving counterpart of the
+    /// `.access_described_by(..)` builder method (WCAG 3.3.1).
+    pub fn access_described_by(
+        &mut self,
+        id: crate::widget_id::WidgetId,
+        target_id: crate::widget_id::WidgetId,
+    ) {
+        self.tree.push_access_described_by(id, target_id);
+    }
+
     /// Subscribe to events from the registered application event source.
     /// The callback runs on the UI thread when the source publishes an
     /// event with a matching origin.

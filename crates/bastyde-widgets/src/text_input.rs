@@ -530,6 +530,11 @@ impl Widget for TextInput {
         let inner_setter = field.caret_setter();
         let inner_feedback = field.validation_feedback_signal();
 
+        // Add the field directly so we can capture its own WidgetId (needed to
+        // wire the validation strip as its `described_by`, below); wrap it by
+        // id instead of moving it into `Padding`.
+        let field_id = ctx.add(field);
+
         // Text editing area, wrapped in vertical padding so slots
         // (IconButton etc.) sit flush against top/bottom of the
         // inner border area and are vertically centered by the HStack.
@@ -539,7 +544,7 @@ impl Widget for TextInput {
             field_dims::TEXT_FIELD_PADDING_VERTICAL,
             0.0,
         )
-        .child(field);
+        .child_id(field_id);
 
         // The placeholder lives in a local ZStack with the text field so
         // it shares the same column in the HStack — no overlap with
@@ -702,6 +707,13 @@ impl Widget for TextInput {
             },
         });
         let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
+
+        // WCAG 3.3.1 / 3.3.3 (EN 301 549 11.5.2.7): associate the inline
+        // validation strip with the field so a screen reader announces the
+        // error / warning / correction message as the field's description when
+        // it gains focus. The strip renders nothing while Pristine, but the
+        // relation is harmless then and live the moment a message appears.
+        ctx.access_described_by(field_id, strip_id);
 
         // Wrap frame + strip in a VStack with the configured gap. The frame is
         // wrapped in `Expand::horizontal().respect_intrinsic()` so it claims

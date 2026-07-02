@@ -410,7 +410,8 @@ impl Widget for DateRangeEdit {
         }
 
         // ── Build each half as a bare TextInputField ───────────
-        let start_field_id = self.build_half(
+        // Each half returns (layout wrapper, inner editable field id).
+        let (start_field_id, start_inner_id) = self.build_half(
             ctx,
             HalfKind::Start,
             pattern_rc.clone(),
@@ -418,7 +419,7 @@ impl Widget for DateRangeEdit {
             min,
             max,
         );
-        let end_field_id = self.build_half(
+        let (end_field_id, end_inner_id) = self.build_half(
             ctx,
             HalfKind::End,
             pattern_rc.clone(),
@@ -572,6 +573,10 @@ impl Widget for DateRangeEdit {
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
             self.feedback.clone(),
         ));
+        // WCAG 3.3.1 / 3.3.3: both editable halves are described by the shared
+        // validation message.
+        ctx.access_described_by(start_inner_id, strip_id);
+        ctx.access_described_by(end_inner_id, strip_id);
         // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it
         // claims the VStack's full width (a VStack doesn't stretch a child),
         // while keeping its natural width as the basis when unconstrained. A
@@ -737,7 +742,7 @@ impl DateRangeEdit {
         mask_string: &str,
         min: Option<Date>,
         max: Option<Date>,
-    ) -> WidgetId {
+    ) -> (WidgetId, WidgetId) {
         use crate::styles::recipe_text_input_style as field_dims;
         let (text_signal, date_signal, placeholder, other_date) = match kind {
             HalfKind::Start => (
@@ -939,28 +944,29 @@ impl DateRangeEdit {
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
 
-        ctx.add(
-            ZStack::new()
-                .add_child(sized_field_id)
-                .on_key_preview(move |event, ctx_evt| {
-                    if read_only {
-                        return EventResponse::Ignored;
-                    }
-                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
-                        return EventResponse::Ignored;
-                    };
-                    let mult = if modifiers.shift() { 10 } else { 1 };
-                    let delta = match key {
-                        Key::ArrowUp => mult,
-                        Key::ArrowDown => -mult,
-                        Key::PageUp => 10 * mult,
-                        Key::PageDown => -10 * mult,
-                        _ => return EventResponse::Ignored,
-                    };
-                    step_for_key(delta, ctx_evt);
-                    EventResponse::Handled
-                }),
-        )
+        let stepping_id = ctx.add(ZStack::new().add_child(sized_field_id).on_key_preview(
+            move |event, ctx_evt| {
+                if read_only {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let mult = if modifiers.shift() { 10 } else { 1 };
+                let delta = match key {
+                    Key::ArrowUp => mult,
+                    Key::ArrowDown => -mult,
+                    Key::PageUp => 10 * mult,
+                    Key::PageDown => -10 * mult,
+                    _ => return EventResponse::Ignored,
+                };
+                step_for_key(delta, ctx_evt);
+                EventResponse::Handled
+            },
+        ));
+        // (layout wrapper, inner editable field) so the caller can wire
+        // `described_by` onto the node carrying Role::DateInput.
+        (stepping_id, field_id)
     }
 }
 

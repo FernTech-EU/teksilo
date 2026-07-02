@@ -573,6 +573,10 @@ impl Widget for PasswordField {
         // ── Inline validation strip ─────────────────────────────────
         let strip_id = ctx.add(ValidationStrip::new(inner_feedback));
 
+        // WCAG 3.3.1 / 3.3.3: announce the validation message as the field's
+        // description when focused (mirrors `TextInput`).
+        ctx.access_described_by(field_id, strip_id);
+
         // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it
         // claims the VStack's full width (a VStack lays a child out at its
         // measured width, not stretched) while keeping the frame's natural

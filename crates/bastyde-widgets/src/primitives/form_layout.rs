@@ -210,6 +210,11 @@ impl Widget for FormLayout {
                     PendingFormRow::Pair(label, field) => {
                         let l = resolve_pending(label, ctx);
                         let f = resolve_pending(field, ctx);
+                        // WCAG 3.3.2 / EN 301 549 11.5.2.7: name the field after
+                        // its visible label so assistive tech reads "<label>,
+                        // edit text" instead of an unlabelled field. Serves both
+                        // `line()` (deferred) and `line_ids()` (pre-registered).
+                        ctx.access_labelled_by(f, l);
                         FormRow::Pair(l, f)
                     }
                     PendingFormRow::FullWidth(child) => {
@@ -469,6 +474,32 @@ mod tests {
         let info = tree.accessibility_node(form);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Form);
         assert_eq!(info.name(), Some("Account"));
+    }
+
+    #[test]
+    fn line_wires_field_labelled_by_label() {
+        // WCAG 3.3.2 (audit G8): a form field is named after its visible label
+        // via a `labelled_by` relation, so assistive tech reads the label as
+        // the field's accessible name.
+        let mut tree = WidgetTree::new();
+        let label = tree.add(FixedLeaf(60.0, 20.0));
+        let field = tree.add(FixedLeaf(100.0, 25.0));
+        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        let update = tree.sync_accessibility();
+        let field_nid = bastyde_core::accessibility::widget_id_to_node_id(field);
+        let label_nid = bastyde_core::accessibility::widget_id_to_node_id(label);
+        let field_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == field_nid)
+            .map(|(_, n)| n)
+            .expect("field node present in AT tree");
+        assert!(
+            field_node.labelled_by().contains(&label_nid),
+            "field must be labelled_by its label node"
+        );
     }
 
     #[test]
