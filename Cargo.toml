@@ -72,7 +72,7 @@ bytemuck = { version = "1", features = ["derive"] }
 # the user's local "today" from the OS.
 jiff = "0.2"
 text-document = { path = "../text-document/crates/public_api", version = "1.7.0" }
-text-typeset = { path = "../text-typeset", version = "1.6.0" }
+text-typeset = { path = "../text-typeset", version = "1.6.1" }
 
 # Internal crates
 bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.6.2" }
