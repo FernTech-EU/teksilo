@@ -454,7 +454,10 @@ impl WidgetTree {
         // walks past the modal (whose content is not a `Dialog`-role widget) and
         // dismisses it too. Same fix that stopped a `TabWidget` overflow menu
         // from closing its hosting composite tooltip, extended to modals.
-        if matches!(overlay.placement, crate::overlay::OverlayPlacement::Centered) {
+        if matches!(
+            overlay.placement,
+            crate::overlay::OverlayPlacement::Centered
+        ) {
             return true;
         }
         let Some(node) = self.arena.get(overlay.content_id) else {
@@ -1274,6 +1277,54 @@ mod tests {
         // ArrowRight is the inline-start ("back toward parent") key in RTL.
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
         assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    /// The back key navigates *menu* cascades only — it must never close a
+    /// dialog/alert/modal on top. A modal is a scrim+panel overlay pair, so two
+    /// stacked modals put two (non-host) scrims in the stack, which inflates the
+    /// "nested menu" count; guard on the *topmost* overlay being back-navigable.
+    #[test]
+    fn back_key_does_not_dismiss_a_dialog_on_top_of_a_modal() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let scrim1 = tree.add(FillWidget::new());
+        let scrim2 = tree.add(FillWidget::new());
+        let dialog = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        // Two non-host "scrim" overlays (as the two modals' scrims would be)…
+        for c in [scrim1, scrim2] {
+            tree.show_overlay(crate::overlay::OverlayRequest {
+                content_id: c,
+                anchor,
+                placement: crate::overlay::OverlayPlacement::Below,
+                dismiss: crate::overlay::DismissBehavior::Manual,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            });
+        }
+        // …with a Centered (host) dialog panel on top.
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: dialog,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Centered,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(tree.active_overlays().len(), 3);
+
+        // The nested-menu count is 2 (the scrims), but the top is a host dialog,
+        // so the back key must leave it alone (Escape / its buttons dismiss it).
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            3,
+            "the back key must not close a dialog sitting on top of a modal"
+        );
     }
 
     #[test]
