@@ -33,19 +33,18 @@ today; the *autofill-token* half is unavailable on this toolkit until AccessKit
 grows such a field. Note the specialised input roles Bastyde does set are
 2.1-only concepts and are outside US Section 508's WCAG-2.0 scope.
 
-## Selection contrast — default vs high-contrast (design decision)
+## Selection contrast (resolved)
 
-The default theme's `surface_selected` is a deliberately subtle pale wash and
-does not reach the 3:1 non-text contrast of WCAG SC 1.4.11 as a flat fill.
-Selection is still conveyed non-visually (AccessKit `selected` state on the
-row) and visually (the wash's lightness difference). Rather than force a
-higher-contrast selection band or an accent edge bar into the default theme —
-which would change the look of every list, tree, table, and menu app-wide, a
-design decision the framework owner should make — Bastyde provides a **strong,
-clearly-visible selection fill in the opt-in high-contrast theme**
-(`ColorTokens::for_high_contrast`), which activates on the OS "increase
-contrast" preference and serves the users who need it without altering the
-default aesthetic. An app that wants a higher-contrast default selection can
-override `surface_selected` (or install a `StandardItemStyle`) itself.
+The default theme's `surface_selected` is a subtle pale wash that does not, on
+its own, reach WCAG SC 1.4.11's 3:1 non-text contrast as a flat fill. This is
+now addressed on two levels: (1) selected `StandardListItem` / `StandardTreeItem`
+rows draw a thin `BorderRole::Focused` boundary (accent teal, >= 3:1) even
+without keyboard focus — a non-color-alone cue satisfying SC 1.4.1 / 1.4.11; and
+(2) the opt-in high-contrast theme (`ColorTokens::for_high_contrast`) also uses
+a stronger `surface_selected` fill.
+
+Residual: the `TableView` / `TreeTableView` selection *band* is painted through a
+separate `TableStyle` path, not the `StandardItemStyle` boundary above, so it
+does not yet carry the same boundary cue — a follow-up for those two widgets.
 
 _Last reviewed: 2026-07-02._
