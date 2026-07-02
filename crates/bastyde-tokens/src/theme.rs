@@ -212,6 +212,10 @@ impl ColorTokens {
                 focus_ring: Color::from_hex("#4FCCE0"),
                 text_on_accent: Color::BLACK,
                 text_secondary: Color::from_hex("#C7CBD1"),
+                // Stronger selection fill than the default pale wash so
+                // low-vision users can clearly see the selection (still keeps
+                // the light `text_primary` readable on top).
+                surface_selected: Color::from_hex("#2E6575"),
                 ..self.clone()
             }
         } else {
@@ -222,6 +226,8 @@ impl ColorTokens {
                 focus_ring: Color::from_hex("#0A7B8B"),
                 text_on_accent: Color::BLACK,
                 text_secondary: Color::from_hex("#3A3D45"),
+                // Stronger selection fill (still light enough for black text).
+                surface_selected: Color::from_hex("#A8DDE5"),
                 ..self.clone()
             }
         }

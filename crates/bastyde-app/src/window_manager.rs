@@ -1290,6 +1290,28 @@ impl WindowManager {
         self.user_text_scale = factor;
     }
 
+    /// Re-query the OS accessibility preferences ("increase contrast", "reduce
+    /// motion", text scale) and, if they changed since startup / the last
+    /// refresh, apply them to every open window's tree. Lets a runtime toggle
+    /// of these settings take effect without restarting the app (WCAG / EN
+    /// 301 549 §11.7). Driven event-first — from `WindowEvent::Focused` when a
+    /// window gains focus — so there is no idle polling wakeup. Returns `true`
+    /// if anything changed (so the caller can request a redraw).
+    pub fn refresh_accessibility_preferences(&mut self) -> bool {
+        let fresh = AccessibilityPreferences::query();
+        if fresh == self.a11y_prefs {
+            return false;
+        }
+        let hc = fresh.high_contrast;
+        let rm = fresh.reduced_motion;
+        let ts = fresh.text_scale_factor;
+        self.a11y_prefs = fresh;
+        for managed in self.windows.values_mut() {
+            managed.tree.set_accessibility_preferences(hc, rm, ts);
+        }
+        true
+    }
+
     /// Broadcast a locale switch to all windows. Updates the i18n manager
     /// (incrementing the version signal) and seeds each tree with the new
     /// locale and layout direction. No-op if no `I18nConfig` was registered.

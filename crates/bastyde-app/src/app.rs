@@ -2081,6 +2081,15 @@ impl BastydeAppHandler {
                         newly_focused = Some(managed.bastyde_id);
                     }
                 }
+                // A window regaining focus is the natural, zero-idle-cost moment
+                // to re-check the OS accessibility preferences (WCAG / EN 301
+                // 549 §11.7): the user may have toggled "increase contrast" /
+                // "reduce motion" / text scale in System Settings and switched
+                // back. `refresh_accessibility_preferences` applies any change
+                // to every window (marking them dirty for repaint).
+                if focused {
+                    self.wm.refresh_accessibility_preferences();
+                }
                 // The global native menu (macOS) follows window focus: make the
                 // focused window's installed menu the visible one.
                 if let Some(bastyde_id) = newly_focused
