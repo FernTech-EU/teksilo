@@ -107,6 +107,32 @@ impl WidgetTree {
         &mut self,
         elapsed_fn: impl Fn(&TooltipEntry) -> Option<std::time::Duration>,
     ) {
+        // Reconcile externally-dismissed overlays (audit G12): a shown tooltip's
+        // overlay may have been removed by the overlay stack's PointerLeave
+        // machinery (pointer left BOTH anchor and tooltip for 100ms). Clear the
+        // now-stale overlay_id + shown state so the tooltip can re-show on the
+        // next dwell, and reset its "shown at" sink.
+        let dismissed_indices: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| match e.overlay_id {
+                Some(oid) if !self.overlay_manager.stack.iter().any(|o| o.id == oid) => Some(i),
+                _ => None,
+            })
+            .collect();
+        for i in dismissed_indices {
+            let e = &mut self.tooltips[i];
+            e.overlay_id = None;
+            e.is_sticky = false;
+            e.promoted_by_focus = false;
+            e.shown_at_sim = None;
+            e.shown_at_real = None;
+            if let Some(sink) = e.shown_at_sink.as_ref() {
+                sink.set(None);
+            }
+        }
+
         let mut to_show = Vec::new();
         for entry in &mut self.tooltips {
             if entry.overlay_id.is_some() {
@@ -727,7 +753,7 @@ impl WidgetTree {
     pub(super) fn tooltip_pointer_leave(
         &mut self,
         widget_id: WidgetId,
-        ops: &mut dyn crate::window::WindowOps,
+        _ops: &mut dyn crate::window::WindowOps,
     ) {
         let matching: Vec<usize> = self
             .tooltips
@@ -736,28 +762,22 @@ impl WidgetTree {
             .filter(|(_, entry)| self.is_descendant_of(widget_id, entry.anchor_id))
             .map(|(index, _)| index)
             .collect();
-        let mut to_dismiss = Vec::new();
         for index in matching {
+            // Cancel any pending (not-yet-shown) dwell so re-hovering restarts
+            // the delay timer.
             self.tooltips[index].hover_start = None;
             self.tooltips[index].real_hover_start = None;
-            // Sticky tooltips (post-dwell-promotion) survive
-            // pointer-leave — the user dismisses them via Escape
-            // or click-outside via the overlay's dismiss behavior.
-            if self.tooltips[index].is_sticky {
-                continue;
-            }
-            if let Some(id) = self.tooltips[index].overlay_id.take() {
-                if let Some(sink) = self.tooltips[index].shown_at_sink.as_ref() {
-                    sink.set(None);
-                }
-                self.tooltips[index].shown_at_sim = None;
-                self.tooltips[index].shown_at_real = None;
-                to_dismiss.push((id, self.tooltips[index].content_id));
-            }
-        }
-        for (overlay_id, _content_id) in to_dismiss {
-            let dismissed = self.overlay_manager.dismiss(overlay_id);
-            self.dormant_dismissed_content(&dismissed, &mut *ops);
+            // Audit G12 (WCAG 1.4.13 Hoverable): do NOT dismiss a *shown*
+            // tooltip here on anchor-leave — that killed it the instant the
+            // pointer crossed the 8px gap toward the tooltip. Dismissal of a
+            // shown (non-sticky) tooltip is owned by the overlay stack's
+            // `PointerLeave { 100ms }` machinery (process_pointer_leave_overlays_real,
+            // run every frame), whose `pointer_inside_overlay_region` keeps the
+            // overlay alive while the pointer is over EITHER the anchor or the
+            // tooltip and dismisses only after 100ms outside both. Sticky
+            // tooltips are dismissed via Escape / click-outside. The stale
+            // overlay_id left when that machinery dismisses the overlay is
+            // reconciled at the top of `process_tooltips_impl`.
         }
     }
 
@@ -936,6 +956,15 @@ impl WidgetTree {
         let opacity = crate::signal::Signal::<f32>::new_animated(0.0);
         self.register_animated_signal(&opacity, content_id);
         self.set_opacity(content_id, opacity.clone());
+        // Audit G16 (WCAG 2.3.3 / EN 301 549 11.7): honour reduced motion —
+        // snap the overlay to fully visible with no fade-in tween, and register
+        // a zero-duration fade so dismissal snaps to 0 as well.
+        if self.prefers_reduced_motion() {
+            opacity.set(1.0);
+            self.overlay_manager
+                .attach_fade(overlay_id, opacity, std::time::Duration::ZERO);
+            return;
+        }
         let _ = opacity.try_animate_with_options(crate::animation::AnimationRequest {
             target: 1.0,
             duration,
@@ -1526,8 +1555,10 @@ mod tests {
             1,
             "tooltip should appear when hovering the anchor itself"
         );
-        let mut noop = crate::window::NoopWindowOps;
-        tree.tooltip_pointer_leave(anchor, &mut noop);
+        // Dismiss the first tooltip before the next scenario: move the pointer
+        // away and let the 100ms hoverable grace (audit G12) expire.
+        tree.pointer_move(Point::new(500.0, 500.0));
+        tree.advance_time(std::time::Duration::from_millis(150));
         assert!(tree.active_overlays().is_empty());
 
         // Open the panel as an overlay anchored to the anchor.
@@ -1604,8 +1635,21 @@ mod tests {
         tree.advance_time(std::time::Duration::from_millis(600));
         assert_eq!(tree.active_overlays().len(), 1);
 
+        // WCAG 1.4.13 (Hoverable, audit G12): leaving the anchor no longer
+        // dismisses instantly — the pointer might be heading toward the
+        // tooltip. The overlay stack's 100ms PointerLeave grace owns dismissal
+        // once the pointer is outside BOTH the anchor and the tooltip.
         tree.pointer_move(Point::new(500.0, 500.0));
-        assert!(tree.active_overlays().is_empty());
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip persists briefly after anchor-leave (hoverable grace)"
+        );
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "tooltip dismissed after the 100ms grace outside anchor+overlay"
+        );
     }
 
     #[test]

@@ -496,7 +496,16 @@ impl HandlerSet {
         self
     }
 
-    /// Set the on_focus handler.
+    /// Set the on_focus handler. `f` is called with `true` on focus gain and
+    /// `false` on focus loss.
+    ///
+    /// **WCAG 3.2.1 (On Focus).** Use this only to update *local* visual or
+    /// reactive state. Do NOT open a window, navigate, submit, or otherwise
+    /// change context from here: a context change triggered merely by a control
+    /// receiving focus is a Success Criterion 3.2.1 failure — keyboard users
+    /// tabbing through the UI would trigger it unexpectedly. (A debug-only guard
+    /// warns if `ctx.open_window(...)` / `ctx.focus_window(...)` is called from
+    /// inside focus dispatch.)
     pub fn on_focus(mut self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self {
         self.handlers.on_focus = Some(Box::new(f));
         self

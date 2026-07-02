@@ -320,6 +320,13 @@ pub struct WidgetTree {
     /// `frame_tick`) can chain-request without needing &mut access
     /// to the tree — see `FrameRequestHandle`.
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Debug-only re-entrancy flag: `true` while a focus-change dispatch
+    /// (`FocusGained` / `FocusLost` handlers) is running. Threaded into each
+    /// `EventContext` so `open_window` / `focus_window` can warn if a handler
+    /// changes context merely because a control gained focus (WCAG 3.2.1). A
+    /// shared `Rc<Cell<bool>>` (like `frame_tick_requested`) so the flag is
+    /// readable from an `EventContext` that holds no `&mut` to the tree.
+    pub(crate) in_focus_dispatch: std::rc::Rc<std::cell::Cell<bool>>,
     /// Shared "accessibility re-walk requested" flag. Set via
     /// [`request_accessibility_update`](Self::request_accessibility_update)
     /// (or its `BuildContext` / `EventContext` wrappers) and drained at the
@@ -539,6 +546,7 @@ impl WidgetTree {
             locale_signal: crate::signal::Signal::new(None),
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            in_focus_dispatch: std::rc::Rc::new(std::cell::Cell::new(false)),
             a11y_update_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             pending_mount_actions: Vec::new(),
@@ -588,6 +596,7 @@ impl WidgetTree {
             .with_query_snapshot(self.last_pointer_position, overlay_snapshot)
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
+            .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
     }
 
     /// Run a closure with a fresh [`EventContext`] anchored at this

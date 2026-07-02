@@ -96,6 +96,9 @@ pub struct TextInput {
     /// widgets like `DateEdit` that need a position-aware filter
     /// + auto-derived placeholder template (`__/__/____`).
     input_mask: Option<String>,
+    /// Semantic input purpose (WCAG 1.3.5) forwarded to the inner
+    /// `TextInputField` to select a specialised AT role.
+    input_purpose: crate::primitives::text_input_field::InputPurpose,
     /// Optional validator closure. Forwarded 1:1 to
     /// `TextInputField::validator`. Runs on commit (Enter, Tab-out,
     /// blur). Set this AND `validation_feedback` together for
@@ -171,6 +174,7 @@ impl TextInput {
             char_filter: None,
             suffix: String::new(),
             input_mask: None,
+            input_purpose: crate::primitives::text_input_field::InputPurpose::Normal,
             validator: None,
             caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -314,6 +318,17 @@ impl TextInput {
     /// onto the editing surface.
     pub fn input_mask(mut self, mask: impl Into<String>) -> Self {
         self.input_mask = Some(mask.into());
+        self
+    }
+
+    /// Declare the field's semantic [`InputPurpose`](crate::primitives::InputPurpose)
+    /// (WCAG 1.3.5), forwarded to the inner `TextInputField` to select a
+    /// specialised AT role (e.g. `Role::EmailInput`).
+    pub fn input_purpose(
+        mut self,
+        purpose: crate::primitives::text_input_field::InputPurpose,
+    ) -> Self {
+        self.input_purpose = purpose;
         self
     }
 
@@ -507,6 +522,7 @@ impl Widget for TextInput {
         if let Some(mask) = self.input_mask.take() {
             field = field.input_mask(mask);
         }
+        field = field.input_purpose(self.input_purpose);
         let validator_installed = self.validator.is_some();
         if let Some(validator) = self.validator.take() {
             // ValidatorFn is `Rc<dyn Fn(&str) -> ValidationOutcome>`.

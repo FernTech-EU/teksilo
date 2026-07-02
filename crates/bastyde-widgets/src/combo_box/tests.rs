@@ -587,9 +587,10 @@ fn tooltip_does_not_leak_onto_open_dropdown_rows() {
         "tooltip should appear when hovering the closed combo trigger"
     );
 
-    // Move the pointer away to dismiss the tooltip, then open the
-    // dropdown.
+    // Move the pointer away; the tooltip dismisses after the 100ms hoverable
+    // grace (WCAG 1.4.13, audit G12), then open the dropdown.
     tree.pointer_move(bastyde_canvas::Point::new(1000.0, 1000.0));
+    tree.advance_time(std::time::Duration::from_millis(150));
     assert!(tree.active_overlays().is_empty());
 
     tree.click(cb);
@@ -640,8 +641,10 @@ fn tooltip_builder_shows_on_trigger_and_does_not_leak() {
         "the tooltip content should be present"
     );
 
-    // Move away to dismiss, then open the dropdown.
+    // Move away; the tooltip dismisses after the 100ms hoverable grace
+    // (WCAG 1.4.13, audit G12), then open the dropdown.
     tree.pointer_move(bastyde_canvas::Point::new(1500.0, 1500.0));
+    tree.advance_time(std::time::Duration::from_millis(150));
     assert!(tree.active_overlays().is_empty());
 
     tree.click(cb);

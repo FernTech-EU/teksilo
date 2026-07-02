@@ -492,3 +492,21 @@ fn composing_field_exposes_the_composition_as_an_at_selection() {
         "the composition is exposed as a non-empty selection so AT tracks it"
     );
 }
+
+#[test]
+fn input_purpose_sets_specialised_at_role() {
+    // WCAG 1.3.5 (audit G10): a field declared with an email purpose exposes
+    // Role::EmailInput to assistive tech instead of a generic TextInput.
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(TextInput::new(text).input_purpose(crate::primitives::InputPurpose::Email));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    let update = tree.sync_accessibility();
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == bastyde_core::accesskit::Role::EmailInput),
+        "input_purpose(Email) must emit a Role::EmailInput node"
+    );
+}

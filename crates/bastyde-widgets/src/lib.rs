@@ -188,7 +188,7 @@ pub use password_field::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
 pub use popover::Popover;
 pub use popover_widget::{PopoverButton, PopoverIconButton, PopoverTrigger, PopoverWidget};
 pub use primitives::TextInputField;
-pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
+pub use primitives::text_input_field::{InputPurpose, ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, DeadZone, Divider, Expand, FixedSize, FormLayout, Grid, HStack,
     IconWidget, ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget,

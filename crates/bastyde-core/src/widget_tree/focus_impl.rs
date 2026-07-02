@@ -8,12 +8,20 @@ impl WidgetTree {
     /// `on_focus_lost` / `on_focus_gained` handlers through the
     /// caller-supplied [`WindowOps`](crate::window::WindowOps) sink.
     ///
-    /// `bastyde-app` drives in-dispatch focus changes through this method
-    /// so that focus-triggered handlers can synchronously call
-    /// `ctx.open_window(...)`. Standalone callers (programmatic
-    /// focus from framework code paths, tests) use
+    /// `bastyde-app` drives in-dispatch focus changes through this method so
+    /// that focus-triggered handlers *can* synchronously call
+    /// `ctx.open_window(...)`. Standalone callers (programmatic focus from
+    /// framework code paths, tests) use
     /// [`focus_with_origin`](Self::focus_with_origin) which wraps with
     /// [`NoopWindowOps`](crate::window::NoopWindowOps).
+    ///
+    /// **WCAG 3.2.1 (On Focus).** The capability above is a footgun: an
+    /// `on_focus` handler that opens a window, navigates, or otherwise changes
+    /// context *merely because a control received focus* is a Success Criterion
+    /// 3.2.1 failure — keyboard users tabbing through the UI would trigger it
+    /// unexpectedly. `on_focus` should only update local visual/reactive state.
+    /// A debug-only guard ([`EventContext::open_window`]) warns if a synchronous
+    /// context change is attempted from inside focus dispatch.
     pub fn focus_with_origin_ops(
         &mut self,
         id: WidgetId,
@@ -23,6 +31,20 @@ impl WidgetTree {
         if self.focused == Some(id) {
             return;
         }
+        // Debug-only WCAG 3.2.1 guard: flag that we're inside focus dispatch so
+        // `EventContext::open_window`/`focus_window` can warn if a focus handler
+        // synchronously changes context. RAII-cleared so a panicking handler
+        // (in tests) still resets the flag; the guard owns an `Rc` clone so it
+        // doesn't borrow `self`.
+        struct ClearOnDrop(std::rc::Rc<std::cell::Cell<bool>>);
+        impl Drop for ClearOnDrop {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        self.in_focus_dispatch.set(true);
+        let _focus_dispatch_guard = ClearOnDrop(self.in_focus_dispatch.clone());
+
         let previously_focused = self.focused;
         if let Some(old) = self.focused {
             let old_overlay = self.overlay_ancestor_for_widget(old);

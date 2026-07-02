@@ -210,6 +210,11 @@ pub struct EventContext<'ops> {
     /// must be read here rather than captured at `build()` time.
     /// Defaults to `LeftToRight` for hand-constructed (test) contexts.
     pub(crate) layout_direction: crate::environment::LayoutDirection,
+    /// Debug-only WCAG 3.2.1 guard: `Some(flag)` where `flag` is set while a
+    /// focus-change dispatch is running. `open_window` / `focus_window` warn if
+    /// invoked while it reads `true` (a focus handler changing context). `None`
+    /// for hand-constructed (test) contexts.
+    pub(crate) in_focus_dispatch: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -308,6 +313,7 @@ impl<'ops> EventContext<'ops> {
             press_claimed_by_interactive_child: false,
             overlay_bounds_snapshot: Vec::new(),
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
+            in_focus_dispatch: None,
         }
     }
 
@@ -371,6 +377,34 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_window_active(mut self, active: bool) -> Self {
         self.tree_window_active = active;
         self
+    }
+
+    /// Attach the tree's shared "inside focus dispatch" flag (WCAG 3.2.1
+    /// debug guard). See [`EventContext::open_window`].
+    pub(crate) fn with_focus_dispatch_flag(
+        mut self,
+        flag: std::rc::Rc<std::cell::Cell<bool>>,
+    ) -> Self {
+        self.in_focus_dispatch = Some(flag);
+        self
+    }
+
+    /// Debug-only: warn (once per call) if a context change is being made from
+    /// inside a focus-change dispatch — a WCAG 3.2.1 (On Focus) anti-pattern.
+    /// Compiled out entirely in release builds.
+    #[inline]
+    fn warn_if_context_change_in_focus_dispatch(&self, what: &str) {
+        #[cfg(debug_assertions)]
+        if self.in_focus_dispatch.as_ref().is_some_and(|f| f.get()) {
+            eprintln!(
+                "[bastyde a11y] WCAG 3.2.1 (On Focus): `{what}` was called from \
+                 inside an on_focus handler. Changing context (opening/focusing a \
+                 window, navigating) merely because a control received focus \
+                 surprises keyboard users tabbing through the UI. Move this to an \
+                 explicit activation handler (on_tap / on_activate / a shortcut)."
+            );
+        }
+        let _ = what;
     }
 
     /// Attach the tree's app-state registry so handlers can look up
@@ -637,6 +671,7 @@ impl<'ops> EventContext<'ops> {
         &mut self,
         config: crate::window::WindowConfig,
     ) -> crate::window::BastydeWindowId {
+        self.warn_if_context_change_in_focus_dispatch("open_window");
         self.window_ops
             .as_deref_mut()
             .expect("open_window called outside of a dispatch")
@@ -669,6 +704,7 @@ impl<'ops> EventContext<'ops> {
 
     /// Raise a window to the front and give it keyboard focus.
     pub fn focus_window(&mut self, id: crate::window::BastydeWindowId) {
+        self.warn_if_context_change_in_focus_dispatch("focus_window");
         if let Some(ops) = self.window_ops.as_deref_mut() {
             ops.focus_window(id);
         }

@@ -105,6 +105,48 @@ const SCROLL_MARGIN: f32 = 4.0;
 /// added to a tree without its composite still looks right.
 const DEFAULT_TEXT_HEIGHT: f32 = 20.0;
 
+/// The semantic purpose of a text field, surfaced to assistive technology as
+/// a specialised AccessKit role (WCAG 1.3.5 Identify Input Purpose / EN 301 549).
+///
+/// This is the in-framework-achievable part of SC 1.3.5: a screen reader
+/// announces "email, edit text" instead of a generic "edit text". The FULL
+/// HTML `autocomplete`-token vocabulary (`given-name`, `postal-code`,
+/// `cc-number`, …) that drives OS/browser autofill has **no representation in
+/// AccessKit 0.24** and therefore cannot be exposed from Bastyde — see
+/// `docs/a11y/a11y_issues.md`. Password entry is configured via
+/// [`TextInputField::secure`], not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputPurpose {
+    /// Ordinary free text (`Role::TextInput`).
+    #[default]
+    Normal,
+    /// Email address (`Role::EmailInput`).
+    Email,
+    /// Telephone number (`Role::PhoneNumberInput`).
+    Phone,
+    /// URL (`Role::UrlInput`).
+    Url,
+    /// Numeric entry — e.g. a quantity or code (`Role::NumberInput`).
+    Number,
+    /// Search query (`Role::SearchInput`).
+    Search,
+}
+
+impl InputPurpose {
+    /// The AccessKit role for a non-secure field with this purpose.
+    pub(crate) fn to_role(self) -> bastyde_core::accesskit::Role {
+        use bastyde_core::accesskit::Role;
+        match self {
+            InputPurpose::Normal => Role::TextInput,
+            InputPurpose::Email => Role::EmailInput,
+            InputPurpose::Phone => Role::PhoneNumberInput,
+            InputPurpose::Url => Role::UrlInput,
+            InputPurpose::Number => Role::NumberInput,
+            InputPurpose::Search => Role::SearchInput,
+        }
+    }
+}
+
 /// How a secure ([`TextInputField::secure`]) field echoes typed
 /// characters. Mirrors Qt's `QLineEdit::EchoMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -189,6 +231,10 @@ pub struct TextInputField {
     at_reveal_policy: AtRevealPolicy,
     allow_copy: bool,
 
+    /// Semantic purpose → specialised AT role (WCAG 1.3.5). Ignored while the
+    /// field is `secure` (password role wins).
+    input_purpose: InputPurpose,
+
     // ── Internal (set during build) ─────────────────────────────────
     state: Option<SharedState>,
     /// Interaction signal actually used at runtime. Either the one
@@ -256,6 +302,7 @@ impl TextInputField {
             revealed: None,
             at_reveal_policy: AtRevealPolicy::SwapRole,
             allow_copy: true,
+            input_purpose: InputPurpose::Normal,
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
@@ -417,6 +464,17 @@ impl TextInputField {
         self.secure = true;
         self.echo_mode = echo_mode;
         self.allow_copy = false;
+        self
+    }
+
+    /// Declare the field's semantic [`InputPurpose`] (WCAG 1.3.5), which
+    /// selects a specialised AccessKit role (`EmailInput`, `PhoneNumberInput`,
+    /// …) so screen readers announce the field's kind. Ignored while `secure`
+    /// (the password role wins). Does not change IME behaviour — winit's
+    /// `ImePurpose` has no email/number/url variants — nor drive OS autofill,
+    /// which AccessKit cannot express (see `docs/a11y/a11y_issues.md`).
+    pub fn input_purpose(mut self, purpose: InputPurpose) -> Self {
+        self.input_purpose = purpose;
         self
     }
 
@@ -1367,9 +1425,11 @@ impl Widget for TextInputField {
             }
         } else {
             // Plain field, or a revealed field under `SwapRole`: report
-            // as a normal text input exposing the real value, mirroring
-            // the web `type=password ↔ type=text` swap.
-            builder.set_role(Role::TextInput);
+            // as a text input exposing the real value, mirroring the web
+            // `type=password ↔ type=text` swap. The specialised role from
+            // `input_purpose` (WCAG 1.3.5) applies here; `Role::TextInput` is
+            // the `Normal` default.
+            builder.set_role(self.input_purpose.to_role());
             // Keep the value on the input node so the focus announcement is
             // unchanged: accesskit resolves `value()` from `data().value()`
             // first, falling back to the TextRun text only when unset.
