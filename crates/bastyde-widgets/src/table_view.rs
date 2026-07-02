@@ -2119,6 +2119,22 @@ impl<T: 'static> Widget for TableView<T> {
         out
     }
 
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        // WCAG 1.3.2 (audit G17): read the column-header row FIRST, then the
+        // body, even though `build()` / `children()` list the body first so it
+        // paints beneath the header. Same id set as `children()`, reordered.
+        let out: Vec<WidgetId> = [
+            self.header_row_id,
+            self.body_pane_id,
+            self.empty_id,
+            self.scrollbar_id,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if out.is_empty() { None } else { Some(out) }
+    }
+
     fn clips_children(&self) -> bool {
         true
     }

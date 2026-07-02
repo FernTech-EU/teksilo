@@ -2306,9 +2306,21 @@ impl Widget for RichTextEditorBody {
                             length,
                             element_id,
                             word_starts,
+                            format,
                             ..
                         } = frag
                         {
+                            // Text attributes for AT (WCAG 1.3.1 / EN 301 549
+                            // 11.5.2.9): bold / italic / underline / strikethrough
+                            // per formatting run. AccessKit has no bold flag, so
+                            // an explicit weight wins, else bold folds to 700.
+                            let attrs = bastyde_core::accessibility::TextRunAttributes {
+                                font_weight: format.font_weight.map(|w| w as u16),
+                                bold: format.font_bold.unwrap_or(false),
+                                italic: format.font_italic.unwrap_or(false),
+                                underline: format.font_underline.unwrap_or(false),
+                                strikethrough: format.font_strikeout.unwrap_or(false),
+                            };
                             // character_lengths: UTF-8 byte length of each char.
                             // AccessKit indexes by char, each entry is byte count.
                             let char_lengths: Vec<u8> =
@@ -2343,6 +2355,7 @@ impl Widget for RichTextEditorBody {
                                 } else {
                                     Some(char_widths)
                                 },
+                                attrs,
                             );
 
                             // Remember where this run lives in the document so

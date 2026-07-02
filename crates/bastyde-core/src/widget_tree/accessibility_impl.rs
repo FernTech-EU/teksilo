@@ -402,7 +402,21 @@ impl WidgetTree {
         }
 
         let subtree_mode = node.access_subtree;
-        let children = self.arena.children(id);
+        // G17: a widget may present a different child ORDER to assistive tech
+        // than its paint / z-order child order — e.g. TableView / TreeTableView
+        // build body rows before the header for correct z-stacking, but the
+        // header must read first in the AT (and Tab) linear order. Honour the
+        // widget's `accessibility_children()` override when it provides one;
+        // otherwise use the arena's paint-order child list. Geometry and paint
+        // are untouched (they keep reading `arena.children`).
+        let at_children_owned;
+        let children: &[WidgetId] = match node.widget.accessibility_children() {
+            Some(v) => {
+                at_children_owned = v;
+                &at_children_owned
+            }
+            None => self.arena.children(id),
+        };
 
         // Subtree dispatch:
         //   Inherit  — push child NodeIds onto the parent and recurse normally
@@ -2020,5 +2034,98 @@ mod tests {
         use std::mem::size_of;
         assert!(size_of::<Option<Box<crate::widget_builder::AccessibilityOverrides>>>() <= 16);
         assert!(size_of::<crate::widget_builder::AccessSubtreeMode>() <= 4);
+    }
+
+    #[test]
+    fn accessibility_children_overrides_at_reading_order() {
+        // Audit G17: a widget can present a different child ORDER to assistive
+        // tech than its layout/paint child order via `accessibility_children()`
+        // — the mechanism TableView/TreeTableView use to read the header before
+        // the body even though they build the body first (z-order).
+        #[derive(Debug)]
+        struct NamedLeaf(&'static str);
+        impl Widget for NamedLeaf {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(10.0, 10.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                // Button keeps `set_name` as the node's label (Role::Label
+                // routes text to `value` instead), so the test can find the
+                // leaves by name.
+                builder.set_role(accesskit::Role::Button);
+                builder.set_name(self.0);
+            }
+        }
+
+        #[derive(Debug, Default)]
+        struct ReorderContainer {
+            a: Option<WidgetId>,
+            b: Option<WidgetId>,
+        }
+        impl Widget for ReorderContainer {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let a = ctx.add(NamedLeaf("A"));
+                let b = ctx.add(NamedLeaf("B"));
+                self.a = Some(a);
+                self.b = Some(b);
+                vec![a, b]
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(100.0, 100.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                // A real role so the container itself isn't dropped as a
+                // presentational node — we need to inspect its child order.
+                builder.set_role(accesskit::Role::Group);
+                builder.set_name("Container");
+            }
+            fn children(&self) -> Vec<WidgetId> {
+                [self.a, self.b].into_iter().flatten().collect()
+            }
+            fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+                // Reverse of build/layout order.
+                Some([self.b, self.a].into_iter().flatten().collect())
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let container = tree.add(ReorderContainer::default());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let update = tree.sync_accessibility();
+
+        let a_nid = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some("A"))
+            .map(|(id, _)| *id)
+            .expect("A node present");
+        let b_nid = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some("B"))
+            .map(|(id, _)| *id)
+            .expect("B node present");
+        let cnid = crate::accessibility::widget_id_to_node_id(container);
+        let cnode = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == cnid)
+            .map(|(_, n)| n)
+            .expect("container node present");
+        let kids = cnode.children();
+        let pa = kids.iter().position(|k| *k == a_nid).expect("A is a child");
+        let pb = kids.iter().position(|k| *k == b_nid).expect("B is a child");
+        assert!(
+            pb < pa,
+            "accessibility_children() must set AT order B-before-A; got {kids:?}"
+        );
     }
 }

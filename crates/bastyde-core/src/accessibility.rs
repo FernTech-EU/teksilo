@@ -144,6 +144,42 @@ fn fnv_mix_u64(a: u64, b: u64, c: u64) -> u64 {
     h
 }
 
+/// Styling attributes surfaced to assistive technology on a synthetic
+/// `Role::TextRun` node (WCAG 1.3.1 Info and Relationships / EN 301 549
+/// 11.5.2.9 "text attributes"). All fields default to "unset"; a rich-text
+/// widget populates them per formatting run so a screen reader can convey
+/// bold / italic / underline / strikethrough spans. AccessKit has no
+/// dedicated `bold` property, so [`bold`](Self::bold) folds into
+/// `set_font_weight(700)` when no explicit [`font_weight`](Self::font_weight)
+/// is given.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TextRunAttributes {
+    /// Explicit numeric font weight (`100..=900`). Takes precedence over
+    /// [`bold`](Self::bold).
+    pub font_weight: Option<u16>,
+    /// Bold flag; folded to weight `700` when `font_weight` is `None`.
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+/// The `TextDecoration` used for underline / strikethrough on a text run.
+/// Screen readers key off the *presence* of a decoration, not its colour,
+/// so a solid neutral (black) decoration is sufficient; the run's own
+/// foreground colour is not plumbed through this synthetic-node path.
+fn default_text_decoration() -> accesskit::TextDecoration {
+    accesskit::TextDecoration {
+        style: accesskit::TextDecorationStyle::Solid,
+        color: accesskit::Color {
+            red: 0,
+            green: 0,
+            blue: 0,
+            alpha: 255,
+        },
+    }
+}
+
 impl AccessNodeBuilder {
     pub fn new() -> Self {
         Self {
@@ -908,6 +944,7 @@ impl AccessNodeBuilder {
         word_starts: Option<Vec<u8>>,
         character_positions: Option<Vec<f32>>,
         character_widths: Option<Vec<f32>>,
+        attrs: TextRunAttributes,
     ) -> NodeId {
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -932,6 +969,22 @@ impl AccessNodeBuilder {
         }
         if let Some(widths) = character_widths {
             node.set_character_widths(widths);
+        }
+        // Text attributes (WCAG 1.3.1 / EN 301 549 11.5.2.9). AccessKit has no
+        // bold flag, so an explicit weight wins, else bold => 700.
+        if let Some(w) = attrs.font_weight {
+            node.set_font_weight(w as f32);
+        } else if attrs.bold {
+            node.set_font_weight(700.0);
+        }
+        if attrs.italic {
+            node.set_italic();
+        }
+        if attrs.underline {
+            node.set_underline(default_text_decoration());
+        }
+        if attrs.strikethrough {
+            node.set_strikethrough(default_text_decoration());
         }
         self.children_collected.push((node_id, node));
         // Attach the text-run to its parent paragraph's child list.
@@ -1236,6 +1289,7 @@ mod tests {
             Some(vec![0]),
             None,
             None,
+            TextRunAttributes::default(),
         );
         assert!(is_synthetic(para));
         assert!(is_synthetic(run));
@@ -1248,6 +1302,77 @@ mod tests {
     }
 
     #[test]
+    fn text_run_attributes_reach_at_node() {
+        // Audit G7 / EN 301 549 11.5.2.9: bold / italic / underline /
+        // strikethrough formatting on a run is exposed on its TextRun node.
+        let owner = fake_widget(9);
+        let mut builder = AccessNodeBuilder::for_widget(owner);
+        builder.set_role(Role::MultilineTextInput);
+        let para = builder.push_paragraph_child(1);
+        let run = builder.push_text_run_child(
+            para,
+            2,
+            0,
+            "ab".to_string(),
+            vec![1, 1],
+            None,
+            None,
+            None,
+            TextRunAttributes {
+                bold: true,
+                italic: true,
+                underline: true,
+                strikethrough: true,
+                ..Default::default()
+            },
+        );
+        let (_nid, _node, children) = builder.build(owner);
+        let (_, run_node) = children
+            .iter()
+            .find(|(id, _)| *id == run)
+            .expect("run node");
+        assert_eq!(
+            run_node.font_weight(),
+            Some(700.0),
+            "bold folds to font weight 700"
+        );
+        assert!(run_node.is_italic(), "italic flag set");
+        assert!(run_node.underline().is_some(), "underline decoration set");
+        assert!(
+            run_node.strikethrough().is_some(),
+            "strikethrough decoration set"
+        );
+
+        // An explicit numeric weight wins over the bold flag.
+        let owner2 = fake_widget(10);
+        let mut b2 = AccessNodeBuilder::for_widget(owner2);
+        b2.set_role(Role::MultilineTextInput);
+        let p2 = b2.push_paragraph_child(1);
+        let r2 = b2.push_text_run_child(
+            p2,
+            2,
+            0,
+            "x".to_string(),
+            vec![1],
+            None,
+            None,
+            None,
+            TextRunAttributes {
+                bold: true,
+                font_weight: Some(300),
+                ..Default::default()
+            },
+        );
+        let (_, _, kids2) = b2.build(owner2);
+        let (_, r2n) = kids2.iter().find(|(id, _)| *id == r2).expect("run2 node");
+        assert_eq!(
+            r2n.font_weight(),
+            Some(300.0),
+            "explicit weight wins over bold"
+        );
+    }
+
+    #[test]
     fn set_text_selection_to_wins_over_self_selection() {
         let owner = fake_widget(3);
         let mut builder = AccessNodeBuilder::for_widget(owner);
@@ -1255,8 +1380,17 @@ mod tests {
         // Emit a paragraph + run so set_text_selection_to has a
         // real synthetic NodeId to target.
         let para = builder.push_paragraph_child(1);
-        let run =
-            builder.push_text_run_child(para, 2, 0, "ab".to_string(), vec![1, 1], None, None, None);
+        let run = builder.push_text_run_child(
+            para,
+            2,
+            0,
+            "ab".to_string(),
+            vec![1, 1],
+            None,
+            None,
+            None,
+            TextRunAttributes::default(),
+        );
         // Both a self-targeted AND an explicit selection are
         // staged — the explicit one must win.
         builder.set_text_selection_on_self(0, 0);

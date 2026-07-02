@@ -396,6 +396,21 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         Vec::new()
     }
 
+    /// Optional override for the child ORDER presented to assistive
+    /// technology, when it must differ from the paint / z-order child
+    /// order returned by [`children`](Self::children).
+    ///
+    /// Return `None` (the default) to let the accessibility walker use the
+    /// arena's child order — correct for almost every widget. Return
+    /// `Some(ids)` to reorder (or restrict) how children appear in the AT
+    /// tree and in the linear Tab reading order, WITHOUT affecting layout or
+    /// paint. `TableView` / `TreeTableView` use this to read the header
+    /// before the body rows even though they build the body first so it
+    /// paints beneath the header (WCAG 1.3.2 Meaningful Sequence).
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        None
+    }
+
     /// Downcast hook. Default implementation returns `None`; concrete
     /// widgets override with `Some(self)` when they want to expose
     /// their concrete type to test-level introspection or reflection.
