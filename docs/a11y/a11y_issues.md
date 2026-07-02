@@ -47,4 +47,27 @@ Residual: the `TableView` / `TreeTableView` selection *band* is painted through 
 separate `TableStyle` path, not the `StandardItemStyle` boundary above, so it
 does not yet carry the same boundary cue — a follow-up for those two widgets.
 
+## WCAG 1.4.12 Text Spacing — Not Applicable (WCAG2ICT)
+
+SC 1.4.12 is a **web** criterion: its premise is that content survives a
+*user-injected* text-spacing override (a browser user stylesheet / bookmarklet
+that forces line-height ≥ 1.5, letter-spacing ≥ 0.12em, etc.). Native desktop
+software exposes **no such injection mechanism**, so — per W3C **WCAG2ICT**,
+which EN 301 549 defers to for applying WCAG to non-web software — the criterion
+**does not apply** where the software provides no text-spacing-override facility.
+
+Bastyde already ships the primary readability adjustment as a first-class
+control — the global **text scale** (`TextScaleControl`, 80–200 %, applied
+app-wide through `effective_theme`) — and its reflow/shrink layout prevents
+clipping or overlap when text enlarges. An *independent* line/letter-spacing
+control (a "reading-comfort" slider, chiefly of benefit to dyslexic readers)
+remains a possible **product feature**, not a conformance requirement; if built
+later it needs a `text-typeset` shaping hook (letter-spacing per glyph +
+line-height multiplier), the tokens threaded through `TypographyTokens` →
+`WidgetTree`, and a settings-bound control parallel to `TextScaleControl`.
+
+**Conformance position:** 1.4.12 → **N/A** for the toolkit (no user
+spacing-override mechanism); text enlargement is covered by the text-scale
+control. Defensible under EN 301 549 / RGAA per WCAG2ICT.
+
 _Last reviewed: 2026-07-02._
