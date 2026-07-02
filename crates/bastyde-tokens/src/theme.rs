@@ -210,10 +210,14 @@ impl ColorTokens {
             //   text.disabled = gray( 8) = #A8ADBD
             // The v2 reference doc listed #6C707E (gray(6)) for
             // text_secondary, which is slightly off — Jewel uses gray(7).
+            // WCAG override: Jewel's gray(7) #818594 only reaches 3.67:1 on
+            // white / 3.46:1 on surface_main, below SC 1.4.3's 4.5:1 floor, so
+            // text_secondary is darkened to #5F636F (6.00:1 / 5.64:1).
             text_primary: Color::from_hex("#000000"),
-            text_secondary: Color::from_hex("#818594"),
+            text_secondary: Color::from_hex("#5F636F"),
             text_disabled: Color::from_hex("#A8ADBD"),
-            text_on_accent: Color::from_hex("#FFFFFF"),
+            // WCAG: black on accent = 8.50:1; white (#FFFFFF) was 2.47:1 (fails 1.4.3).
+            text_on_accent: Color::from_hex("#000000"),
             text_link: Color::from_hex("#0FB5CC"),
             text_link_hover: Color::from_hex("#0E9BB0"),
             text_link_visited: Color::from_hex("#7C4DFF"),
@@ -234,7 +238,10 @@ impl ColorTokens {
             // Borders
             border: Color::from_hex("#EBECF0"),
             border_strong: Color::from_hex("#A8ADBD"),
-            border_focused: Color::from_hex("#0FB5CC"),
+            // WCAG SC 1.4.11: the accent #0FB5CC only reaches 2.47:1 on white,
+            // below the 3:1 non-text floor; the focus indicator reuses the
+            // darker accent_pressed #0C8294 (4.53:1 / 4.26:1).
+            border_focused: Color::from_hex("#0C8294"),
             border_error: Color::from_hex("#DB3B4B"),
             border_warning: Color::from_hex("#E8A33D"),
             divider: Color::from_hex("#EBECF0"),
@@ -287,7 +294,10 @@ impl ColorTokens {
             editor_code_block_fg: Color::from_hex("#1F2024"),
 
             // Misc
-            focus_ring: Color::from_hex("#0FB5CC"),
+            // WCAG SC 1.4.11: matches border_focused — #0C8294 (4.53:1 on
+            // white) clears the 3:1 non-text floor that the accent #0FB5CC
+            // (2.47:1) fails.
+            focus_ring: Color::from_hex("#0C8294"),
             focus_ring_error: Color::from_hex("#DB3B4B"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.32),
 
@@ -336,9 +346,12 @@ impl ColorTokens {
             // The prior #BDBFC5 contradicted the comment above and read like
             // `editor_fg` (#BCBEC4) — noticeably dimmer than the spec.
             text_primary: Color::from_hex("#DFE1E5"),
-            text_secondary: Color::from_hex("#6F737A"),
+            // WCAG SC 1.4.3: #6F737A only reached 3.46:1 / 2.90:1 on the dark
+            // surfaces; lightened to #9198A0 (5.65:1 / 4.74:1).
+            text_secondary: Color::from_hex("#9198A0"),
             text_disabled: Color::from_hex("#5A5D63"),
-            text_on_accent: Color::from_hex("#FDFEFF"),
+            // WCAG: black on the bright dark-mode accent = 9.27:1; #FDFEFF was 2.24:1.
+            text_on_accent: Color::from_hex("#000000"),
             text_link: Color::from_hex("#19BDD4"),
             text_link_hover: Color::from_hex("#3DD0E0"),
             text_link_visited: Color::from_hex("#B49DFF"),
@@ -463,11 +476,9 @@ impl ColorTokens {
                 accent.darken(0.20)
             };
             tokens.accent_disabled = accent.with_alpha(0.4);
-            tokens.text_on_accent = if accent.relative_luminance() > 0.4 {
-                Color::from_hex("#000000")
-            } else {
-                Color::WHITE
-            };
+            // Pick the black/white foreground with the higher WCAG contrast
+            // against the live OS accent (exact ~0.179 crossover, not a cutoff).
+            tokens.text_on_accent = accent.best_contrast_text();
             tokens.focus_ring = accent;
             tokens.border_focused = accent;
             tokens.status_info_fg = accent;
@@ -583,11 +594,7 @@ impl ColorTokens {
                 } else {
                     sel_bg.darken(0.20)
                 };
-                tokens.text_on_accent = if sel_bg.relative_luminance() > 0.4 {
-                    Color::from_hex("#000000")
-                } else {
-                    Color::WHITE
-                };
+                tokens.text_on_accent = sel_bg.best_contrast_text();
                 tokens.focus_ring = sel_bg;
                 tokens.border_focused = sel_bg;
                 tokens.status_info_fg = sel_bg;
@@ -705,9 +712,48 @@ mod tests {
     }
 
     #[test]
-    fn text_on_accent_contrasts_with_accent() {
-        let colors = ColorTokens::light_default();
-        assert_ne!(colors.accent, colors.text_on_accent);
+    fn default_themes_meet_wcag_contrast_minimums() {
+        // WCAG 2.1 SC 1.4.3 (text >= 4.5:1) and SC 1.4.11 (non-text UI
+        // components / focus indicators >= 3:1), enforced on BOTH shipped
+        // presets so a regression in the token hex values fails CI rather
+        // than shipping a non-conformant default theme.
+        for (name, c) in [
+            ("light", ColorTokens::light_default()),
+            ("dark", ColorTokens::dark_default()),
+        ] {
+            // Text on the primary / destructive button fill.
+            let r = c.text_on_accent.contrast_ratio(c.accent);
+            assert!(
+                r >= 4.5,
+                "{name}: text_on_accent vs accent = {r:.2}, need >= 4.5"
+            );
+
+            // Secondary text over both surface levels it renders on.
+            for (sname, surface) in [
+                ("surface_content", c.surface_content),
+                ("surface_main", c.surface_main),
+            ] {
+                let r = c.text_secondary.contrast_ratio(surface);
+                assert!(
+                    r >= 4.5,
+                    "{name}: text_secondary vs {sname} = {r:.2}, need >= 4.5"
+                );
+            }
+
+            // Keyboard focus indicator (border + ring) over both surfaces.
+            for (fname, fg) in [
+                ("border_focused", c.border_focused),
+                ("focus_ring", c.focus_ring),
+            ] {
+                for (sname, surface) in [
+                    ("surface_content", c.surface_content),
+                    ("surface_main", c.surface_main),
+                ] {
+                    let r = fg.contrast_ratio(surface);
+                    assert!(r >= 3.0, "{name}: {fname} vs {sname} = {r:.2}, need >= 3.0");
+                }
+            }
+        }
     }
 
     #[test]

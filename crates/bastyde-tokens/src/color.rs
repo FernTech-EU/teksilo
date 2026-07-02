@@ -262,6 +262,34 @@ impl Color {
         }
         0.2126 * linearize(self.r) + 0.7152 * linearize(self.g) + 0.0722 * linearize(self.b)
     }
+
+    /// WCAG 2.x contrast ratio between two colors, in the range `1.0..=21.0`.
+    ///
+    /// Symmetric in its arguments. Alpha is ignored: the colors are assumed
+    /// already composited over their respective backgrounds. WCAG SC 1.4.3
+    /// requires ≥ 4.5:1 for normal text (≥ 3:1 for large text), and SC 1.4.11
+    /// requires ≥ 3:1 for UI-component and graphical-object boundaries.
+    pub fn contrast_ratio(self, other: Color) -> f32 {
+        let a = self.relative_luminance();
+        let b = other.relative_luminance();
+        let (lighter, darker) = if a >= b { (a, b) } else { (b, a) };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    /// Pick whichever of black or white text yields the higher WCAG contrast
+    /// ratio against `self` used as a background.
+    ///
+    /// This compares the actual ratios rather than thresholding luminance, so
+    /// it lands exactly on the ~0.179 crossover where black and white are
+    /// equally legible — unlike a hand-picked cutoff, which can select the
+    /// lower-contrast foreground for mid-luminance backgrounds.
+    pub fn best_contrast_text(self) -> Color {
+        if self.contrast_ratio(Color::BLACK) >= self.contrast_ratio(Color::WHITE) {
+            Color::BLACK
+        } else {
+            Color::WHITE
+        }
+    }
 }
 
 impl Default for Color {
@@ -453,6 +481,32 @@ mod tests {
         assert!(Color::WHITE.relative_luminance() > light.relative_luminance());
         assert!(light.relative_luminance() > dark.relative_luminance());
         assert!(dark.relative_luminance() > Color::BLACK.relative_luminance());
+    }
+
+    #[test]
+    fn contrast_ratio_black_on_white_is_21() {
+        let r = Color::BLACK.contrast_ratio(Color::WHITE);
+        assert!((r - 21.0).abs() < 0.01, "black/white contrast = {r}");
+        // Symmetric.
+        assert_eq!(
+            Color::WHITE.contrast_ratio(Color::BLACK),
+            Color::BLACK.contrast_ratio(Color::WHITE)
+        );
+        // Identical colors have the minimum ratio of 1.0.
+        assert!((Color::WHITE.contrast_ratio(Color::WHITE) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn best_contrast_text_picks_higher_ratio_foreground() {
+        assert_eq!(Color::WHITE.best_contrast_text(), Color::BLACK);
+        assert_eq!(Color::BLACK.best_contrast_text(), Color::WHITE);
+        // The teal accent (luminance ~0.375) is past the ~0.179 crossover, so
+        // black text (8.50:1) beats white (2.47:1) — the case the old 0.4
+        // luminance threshold got wrong.
+        let accent = Color::from_hex("#0FB5CC");
+        let chosen = accent.best_contrast_text();
+        assert_eq!(chosen, Color::BLACK);
+        assert!(accent.contrast_ratio(chosen) >= accent.contrast_ratio(Color::WHITE));
     }
 
     #[test]
