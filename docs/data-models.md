@@ -67,6 +67,18 @@ Anything that can be presented as "an indexed sequence with change notifications
 
 ## 4. `TreeModel<T>` + `TreeSlice<T>` — hierarchies with independent views
 
+The tree side has grown a small family. They layer as **source → projection → view**: a *source* holds the tree, a *projection* turns it into the flat, expandable, per-view row list a `TreeView` reads (every projection implements `TreeDataSource`), and `TreeRowFilter` is a pre-transform that reshapes the rows before a `TreeDataSlice`. Pick by *where the tree lives* and *what you need on top*:
+
+| Type | Layer | Data from | Key | Reach for it when |
+| --- | --- | --- | --- | --- |
+| **`TreeModel<T>`** (§4.1) | source | you build it in memory | `NodeId` | the tree lives in memory and you own it — the in-memory container |
+| **`TreeSlice<T>`** (§4.2) | projection | wraps a `TreeModel` | `NodeId` | you need per-view expand + flatten over a `TreeModel` (the built-in `TreeView` source) |
+| **`SortFilterTreeModel<T>`** (§13) | projection | wraps a `TreeModel` | `NodeId` | …and sort / tree-aware filter too; it owns *its own* expand state |
+| **`TreeDataSlice<K, T>`** (§4.4) | projection | `Vec<TreeRow>` you supply (indent-ordered) | your domain `K` | the tree lives in an **external** store (Qleany / DB) as an outline — no `TreeModel` mirror |
+| **`TreeRowFilter<K, T>`** (§4.5) | pre-transform | `Vec<TreeRow>` → `Vec<TreeRow>` | — | sort / filter the rows feeding a `TreeDataSlice` (wire into `set_source`; pair with `set_all_expanded` to reveal matches) |
+
+Two orthogonal companions ride *alongside* a tree view rather than being sources themselves — pick the `NodeId` or domain-keyed variant to match your projection: **selection** — `SelectionModel` / `KeyedSelectionModel<K>` (§5); **checkboxes** — `TreeCheckedModel<T>` / `KeyedTreeCheckedModel<K>` (§6, §6.1). Rule of thumb: everything on a `TreeModel` is `NodeId`-keyed; everything on a `TreeDataSlice`/external source is domain-`K`-keyed.
+
 ### 4.1 `TreeModel<T>`
 
 The tree equivalent of `ListModel<T>`. Nodes are stored in a `SlotMap<DefaultKey, TreeNode<T>>`; each node carries its data, a parent reference, and a `Vec<NodeId>` of children. `NodeId` is an opaque handle that is **stable across mutations** — inserting or removing other nodes does not invalidate existing handles. This is what lets a view (see TreeSlice below) remember an expanded-set of node IDs across a model mutation.
