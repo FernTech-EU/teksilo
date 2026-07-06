@@ -80,7 +80,15 @@ impl Widget for TwistArrow {
                 .on_tap(move |_pos, ctx| {
                     cb(ctx);
                 })
-                .focusable(false);
+                .focusable(false)
+                // The chevron lives inside a reorderable tree row that owns a drag
+                // recognizer. Without this, a press here arms the row's ancestor
+                // drag, and the few px of jitter a real click carries (especially
+                // right after a drag) crosses the drag threshold and steals the
+                // gesture — the toggle never fires and a row drag starts instead.
+                // A gesture dead zone stops ancestor drag-arming at this boundary,
+                // exactly as the docking accordion's trailing controls do.
+                .gesture_dead_zone(true);
             ctx.apply_self_handlers(handlers);
         }
         let rect = ctx.add(RectWidget::new().background(SurfaceRole::Transparent));

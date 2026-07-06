@@ -2129,6 +2129,73 @@ mod tests {
         );
     }
 
+    /// Like [`make_standard_tree_view`] (real `StandardTreeItem` chevrons) but
+    /// **reorderable**, so each row also owns a drag recognizer — the exact shape
+    /// where a chevron tap and an ancestor row drag compete.
+    fn make_reorderable_standard_tree_view() -> (WidgetTree, WidgetId) {
+        let tree = sample_tree();
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new_with_context(tree, |item: &&'static str, entry, selected, ctx| {
+                Box::new(
+                    crate::StandardTreeItem::new(lit!((*item).to_string()))
+                        .from_entry(entry)
+                        .selected(selected)
+                        .on_toggle_rc(ctx.toggle_callback()),
+                ) as Box<dyn Widget>
+            })
+            .item_height(28.0)
+            .row_click_expands(false)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        (wtree, tv_id)
+    }
+
+    #[test]
+    fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
+        // Regression: the expand chevron sits inside a reorderable row that owns a
+        // drag recognizer. Tap and drag share a 5px threshold — a tap fails only
+        // once movement is *strictly* past 5px, while a drag arms at exactly 5px.
+        // So a press that drifts to exactly the threshold is still a valid tap,
+        // yet — unless the chevron is a gesture dead zone — that drift arms the
+        // ancestor row drag, which steals the gesture: the toggle never fires and
+        // a row drag starts instead (the "click chevron → new drag" bug). With the
+        // dead zone, the ancestor drag is never armed, so the tap wins and toggles.
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let (mut wtree, tv_id) = make_reorderable_standard_tree_view();
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            3,
+            "precondition: 3 collapsed roots"
+        );
+
+        // Row A is depth 0; the chevron column is x in [0, 16], row y in [0, 28].
+        // Down, drift to exactly 5px (arms an ancestor drag but keeps the tap
+        // alive), then release back within tolerance — a valid tap that the drag
+        // must not steal.
+        wtree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(8.0, 10.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        wtree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(8.0, 15.0), // exactly 5px from down
+        });
+        wtree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(8.0, 13.0), // 3px from down → within tap tolerance
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            5,
+            "the chevron tap must expand A (revealing A1, A2), not start a row drag"
+        );
+    }
+
     // --- Drag-and-drop integration tests ---
 
     /// Run a full drag gesture: PointerDown on source, Move to cross threshold,
