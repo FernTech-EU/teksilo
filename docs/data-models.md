@@ -4,7 +4,7 @@
 # Reactive Data Models
 
 **Companion to:** [architecture.md](architecture.md)
-**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
+**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
 **API reference:** the full rustdoc for every type lives at [`/api/bastyde_data/`](api/bastyde_data/index.html).
 
 ---
@@ -107,6 +107,42 @@ Consumers access entries via `slice.with_entry(index, |data, entry| …)` and ge
 ### 4.3 `TreeSliceHandle` — the consumer API
 
 `TreeView` doesn't re-implement expand/collapse; it holds a `TreeSliceHandle` and calls `toggle_expand(node_id)`, `expand(node_id)`, `collapse(node_id)`. The handle is `Clone` — widgets can share access to the same slice without ambient state. (`expand_all()` and `collapse_all()` are available on the owning `TreeSlice` itself.)
+
+### 4.4 `TreeDataSlice<K, T>` — the same, over an *external* tree
+
+`TreeSlice` needs a `TreeModel` to wrap. When the tree's source of truth lives **outside** bastyde — a Qleany entity store, a database, a virtual filesystem — and you don't want to mirror it into a `TreeModel`, `TreeDataSlice<K, T>` gives the same machinery over your own data. It is the tree counterpart of the `ListDataSource` escape hatch (§3), but *ready-made* rather than a bare trait — it implements `TreeDataSource` for you.
+
+You hand it the tree as a flat, **indent-ordered** row stream — the shape an outline is actually stored in (binders / chapters / scenes, OPML, Markdown headings) — and it derives the hierarchy:
+
+```rust
+use bastyde_data::{TreeDataSlice, TreeRow};
+
+let slice: TreeDataSlice<EntityId, Row> = TreeDataSlice::new();
+slice.set_expand_new_nodes(true);          // new nodes appear expanded
+slice.set_source(move || load_rows());     // your `rows::load` -> Vec<TreeRow>
+slice.reload();
+// let view = TreeView::from_source(slice.clone(), delegate);
+```
+
+Each `TreeRow<K, T>` is `{ key, item, depth }` in document order. The engine derives every row's parent (the nearest preceding row of strictly smaller depth), its children, the roots (depth-0 rows), and its structural depth — then owns, exactly like `TreeSlice`:
+
+- a per-view **expand set keyed by `K`** — so expand state (and keyed selection) survive a full re-source, which a `TreeModel` mirror can't guarantee because `NodeId`s are reassigned on rebuild;
+- the collapse-aware **flatten** into visible rows;
+- the **`version_signal()`** and **`first_changed_index()`** side-channel (§13);
+- the DnD **cycle guard**.
+
+Identity is *your domain key* `K` (an `i64` entity id, a tagged enum) — not a positional `NodeId`. Domain *policy* is injected as closures, so the mechanism stays in the slice and the meaning stays in your code:
+
+| Setter | Purpose |
+| --- | --- |
+| `set_source(\|\| …)` | re-materialise the rows (called by `reload()` and after a drop) |
+| `set_reorder(\|dragged, target, pos\| …)` | apply a move through the backend (with undo); returns whether it took |
+| `set_drag_policy(\|key\| …)` | which rows may be dragged |
+| `set_drop_resolver(\|dragged, target, target_item, pos\| …)` | domain drop rules; receives the hovered target's **item**, so it decides without capturing the slice (no `Rc` cycle). The cycle guard runs first. |
+
+`T: PartialEq` is required: the divergence compares item *content*, so a re-source that changed only a row's text still narrows the height cache to that row.
+
+**When to use which:** `TreeSlice` if the data lives in a `TreeModel`; `TreeDataSlice` if it lives in an external store as an indent-ordered outline. Implement `TreeDataSource` by hand only for a source that *isn't* a resolved indent sequence — a huge/lazy tree that pages children on demand (§14).
 
 ## 5. `SelectionModel` — one rule set, two widgets
 
@@ -315,10 +351,10 @@ Widget-tree tests that want a representative model use `ListModel::from_vec(vec!
 
 ## 13. Divergence reporting — `first_changed_index()`
 
-The three projection layers — `TreeSlice`, `SortFilterTreeModel`, and
-`SortFilterListModel` — rebuild their visible list wholesale on every
-change, and (for the sort/filter proxies) notify observers with a
-blanket `Reset`. That is the safe *notification* contract, but it
+The four projection layers — `TreeSlice`, `TreeDataSlice`,
+`SortFilterTreeModel`, and `SortFilterListModel` — rebuild their visible
+list wholesale on every change, and (for the sort/filter proxies) notify
+observers with a blanket `Reset`. That is the safe *notification* contract, but it
 destroys information a consumer may need: which prefix of the visible
 list is actually unchanged. The canonical consumer is variable-row-height
 virtualization (`ListView` / `TreeView` / `TableView` / `TreeTableView`
@@ -345,6 +381,15 @@ Semantics per type:
   An expand/collapse at flat index *k* reports *k* (the toggled row's
   own entry changed); a `NodeUpdated` with unchanged structure reports
   that node's flat index.
+- **`TreeDataSlice`** — prefix-compare of the old and new visible lists,
+  comparing key, depth, has-children, expand state, **and item content**
+  (hence the `T: PartialEq` bound). Unlike `TreeSlice` it has no
+  `NodeUpdated` event — a whole re-source (`set_rows`) replaces the row
+  stream — so folding the item comparison into the prefix check is what
+  catches a pure rename (structure unchanged, one row's text differs) and
+  reports that row's flat index; an expand/collapse reports the toggled
+  row, an append reports the old length. A stable domain key `K` is
+  required for equality to mean identity.
 - **`SortFilterListModel`** — prefix-compare of the projected
   source-index map, with an *identity floor*: upstream inserts/removes/
   moves renumber source indices, so equal index values are only trusted
@@ -381,6 +426,20 @@ across the refresh. This is the path the designer's outline uses, and the one
 to reach for whenever the data is a tree, lives behind a query, or doesn't fit
 in memory. Full protocol reference: [data-source.md](data-source.md).
 
+**Trees: reach for `TreeDataSlice` before hand-rolling `TreeDataSource`.** For
+the common case — a tree stored as an indent-ordered row sequence (an outline:
+binders/chapters/scenes, OPML, headings) — you rarely implement `TreeDataSource`
+by hand. `TreeDataSlice<K, T>` (§4.4) is the ready-made engine: hand it
+`Vec<TreeRow{ key, item, depth }>` on
+each (re)load via `set_source`, and it derives the tree from the indent depth and
+owns the per-view expand set, the collapse-aware flatten, `version_signal()`,
+`first_changed_index()` (§13), and the DnD cycle guard — exactly what `TreeSlice`
+gives a `TreeModel`, but keyed by your domain id and with no `TreeModel` to
+mirror. Inject only the domain policy (`set_reorder`, `set_drag_policy`,
+`set_drop_resolver`). Implement `TreeDataSource` directly only when the source
+*isn't* a resolved indent sequence — a huge/lazy tree that pages children on
+demand, where the eager flatten doesn't fit.
+
 A bounded, fully-resident, flat list is the one case where a `ListModel`
 projection can still be simpler than a source impl. There is no `reconcile`
 helper for it — keep the projection in sync by emitting the minimal `insert` /
@@ -400,6 +459,6 @@ configuration, not data.
 - [architecture.md §6 UI Construction Patterns](architecture.md) — `Repeater` in context, static-vs-dynamic children.
 - [architecture.md §14 Drag and Drop](architecture.md) — `DragPayload`, cross-widget reorder.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — typed intents, ancestor `Action`s, how the MVVM command layer lands in Rust.
-- [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs).
+- [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/bastyde-data/src/tree_data_slice.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs), [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs).
 - [crates/bastyde-data/src/data_change.rs](../crates/bastyde-data/src/data_change.rs), [tree_change.rs](../crates/bastyde-data/src/tree_change.rs).
 - [examples/data_collections](../examples/data_collections/) — runnable demonstration of ListView, TreeView, Repeater, SelectionModel, and intra-widget DnD.
