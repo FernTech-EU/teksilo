@@ -151,19 +151,37 @@ impl<T: 'static> TreeCheckedModel<T> {
 
     /// Writable `Signal<CheckState>` for `node`. Cached: repeat calls
     /// return the same root. External writes (e.g. from a `Checkbox`)
-    /// trigger the configured aggregation pass.
+    /// trigger the configured aggregation pass. The cascade observer is
+    /// wired **idempotently** — including for a signal first materialised by
+    /// a cascade (`write_state`) before its own `signal_for` was ever called
+    /// (a lazily/virtualized-realised row) — so a later external write to it
+    /// still cascades.
     pub fn signal_for(&self, node: NodeId) -> Signal<CheckState> {
-        if let Some(sig) = self.inner.borrow().state.get(&node) {
-            return sig.clone();
+        // Get or create the signal (a cascade may have created it observer-less).
+        let sig = self
+            .inner
+            .borrow_mut()
+            .state
+            .entry(node)
+            .or_insert_with(|| Signal::new(CheckState::Unchecked))
+            .clone();
+        // Wire the cascade observer once, if this node doesn't have one yet.
+        if !self.inner.borrow().observers.contains_key(&node) {
+            let handle = self.make_cascade_observer(&sig, node);
+            self.inner.borrow_mut().observers.insert(node, handle);
         }
-        let sig = Signal::new(CheckState::Unchecked);
+        sig
+    }
 
-        // Set up the propagation observer. It's a no-op while the
-        // model is performing its own cascade pass (suppress = true).
+    /// Build the cascade observer for `node`'s signal: on any write, cascade
+    /// Checked/Unchecked to descendants and recompute ancestors, guarded
+    /// against re-entry. It's a no-op while the model is performing its own
+    /// cascade pass (suppress = true).
+    fn make_cascade_observer(&self, sig: &Signal<CheckState>, node: NodeId) -> ObserverHandle {
         let inner_w = Rc::downgrade(&self.inner);
         let mode_w = Rc::downgrade(&self.mode);
         let tree = self.tree.clone();
-        let handle = sig.observe(move |new_state| {
+        sig.observe(move |new_state| {
             let inner_rc = match inner_w.upgrade() {
                 Some(rc) => rc,
                 None => return,
@@ -179,7 +197,9 @@ impl<T: 'static> TreeCheckedModel<T> {
             if mode_rc.get() != AggregateMode::DescendantsDriveAncestors {
                 return;
             }
-            inner_rc.borrow_mut().suppress = true;
+            // RAII: suppress re-entrant observers for the whole cascade and
+            // clear the flag on every exit path (even a panic mid-cascade).
+            let _guard = SuppressGuard::new(&inner_rc);
             // Cascade Checked / Unchecked to all descendants;
             // Indeterminate is a parent-only state and doesn't propagate.
             if *new_state != CheckState::Indeterminate {
@@ -191,13 +211,7 @@ impl<T: 'static> TreeCheckedModel<T> {
                 recompute_from_children(&tree, &inner_rc, p);
                 cur = tree.parent(p);
             }
-            inner_rc.borrow_mut().suppress = false;
-        });
-
-        let mut inner = self.inner.borrow_mut();
-        inner.state.insert(node, sig.clone());
-        inner.observers.insert(node, handle);
-        sig
+        })
     }
 
     /// Two-state projection of `signal_for` for callers that want
@@ -335,6 +349,30 @@ impl<T: 'static> TreeCheckedModel<T> {
 
     fn is_leaf(&self, node: NodeId) -> bool {
         self.tree.children(node).is_empty()
+    }
+}
+
+/// RAII guard: sets `suppress = true` on creation, clears it on drop — so a
+/// panic during a cascade can't leave the model permanently unable to cascade.
+struct SuppressGuard {
+    inner: Rc<RefCell<Inner>>,
+}
+
+impl SuppressGuard {
+    fn new(inner: &Rc<RefCell<Inner>>) -> Self {
+        inner.borrow_mut().suppress = true;
+        Self {
+            inner: inner.clone(),
+        }
+    }
+}
+
+impl Drop for SuppressGuard {
+    fn drop(&mut self) {
+        // A borrow may still be held during a panic unwind; best-effort clear.
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
+            inner.suppress = false;
+        }
     }
 }
 
@@ -497,6 +535,23 @@ mod tests {
         parent_sig.set(CheckState::Checked);
         assert_eq!(m.check_state(a), CheckState::Checked);
         assert_eq!(m.check_state(b), CheckState::Checked);
+    }
+
+    #[test]
+    fn lazy_signal_still_cascades() {
+        // Regression: a signal first materialised by a cascade (write_state)
+        // must still cascade when its own signal_for is called later (a
+        // virtualized row realizing after its parent was checked).
+        let (t, root1, a, _b, _r2, _c) = sample_tree();
+        let m = TreeCheckedModel::new(t);
+        let _ = m.signal_for(root1); // only the parent is realized
+        m.check(root1); // cascades Checked to a, b via observer-less signals
+        assert_eq!(m.check_state(a), CheckState::Checked);
+
+        let a_sig = m.signal_for(a); // leaf a's row finally realizes + binds
+        a_sig.set(CheckState::Unchecked); // user unchecks it
+        // root1 must recompute (b still Checked, a now Unchecked → mixed).
+        assert_eq!(m.check_state(root1), CheckState::Indeterminate);
     }
 
     #[test]
