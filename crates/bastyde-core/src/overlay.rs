@@ -953,10 +953,28 @@ impl OverlayManager {
             return (Vec::new(), None, Vec::new());
         }
 
-        // Check if the point is inside any overlay
-        if self.hit_test(point).is_some() {
-            return (Vec::new(), None, Vec::new());
-        }
+        // Dismissal is *layered*, not stack-wide. A press that lands inside
+        // overlay `k` is still *outside* every overlay stacked above `k`, so
+        // those upper overlays with a click-outside policy must close — e.g. a
+        // sticky tooltip (or a combo dropdown) floating above a modal is
+        // dismissed when the user clicks elsewhere in the modal. Overlays at
+        // or below `k` keep their content: the press landed within the stack,
+        // not outside it.
+        //
+        // `hit_index` is the topmost non-fading overlay containing the point,
+        // or `None` for a press on the bare background (then nothing is
+        // "below" the press and every dismissable overlay closes — the
+        // classic outside-click). This replaces an earlier stack-wide
+        // short-circuit that returned as soon as the press hit *any* overlay:
+        // once a modal — or its full-viewport scrim — was open, that guard
+        // made *no* click-outside overlay dismissable at all.
+        let hit_index = self.stack.iter().enumerate().rev().find_map(|(i, o)| {
+            let fading_out = o
+                .fade
+                .as_ref()
+                .is_some_and(|f| f.dismissing_started_real.is_some());
+            (!fading_out && o.bounds.contains(point)).then_some(i)
+        });
 
         // Collect the overlays this outside-click should close, and — for
         // the *click-opened* ones — their anchor widgets. The anchors let
@@ -968,7 +986,12 @@ impl OverlayManager {
         // anchors are omitted and a press there falls through.
         let mut to_dismiss: Vec<OverlayId> = Vec::new();
         let mut toggle_anchors: Vec<WidgetId> = Vec::new();
-        for o in &self.stack {
+        for (i, o) in self.stack.iter().enumerate() {
+            // Skip the hit overlay and everything beneath it — the press
+            // landed inside them (or was covered by them), so they survive.
+            if hit_index.is_some_and(|k| i <= k) {
+                continue;
+            }
             match o.dismiss {
                 DismissBehavior::ClickOutside | DismissBehavior::EscapeOrClickOutside => {
                     to_dismiss.push(o.id);
@@ -1718,6 +1741,74 @@ mod tests {
         let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn click_outside_is_layered_over_a_modal() {
+        // A modal card with a sticky tooltip floating above it (as a rich
+        // tooltip becomes after it dwells). Regression for: while any modal
+        // (or its full-viewport scrim) was open, the old stack-wide `hit_test`
+        // short-circuit made *no* click-outside overlay dismissable, so the
+        // sticky tooltip never closed on a click elsewhere in the modal.
+        fn set_bounds(mgr: &mut OverlayManager, id: OverlayId, r: Rect) {
+            mgr.stack.iter_mut().find(|o| o.id == id).unwrap().bounds = r;
+        }
+        // Build a fresh [modal, tooltip] stack. The modal card spans
+        // x∈[300,900], y∈[60,740]; the sticky tooltip sits near the card's
+        // bottom and *overflows* below it (y∈[620,760]).
+        fn build() -> (OverlayManager, OverlayId, OverlayId) {
+            let mut mgr = OverlayManager::new();
+            let modal = mgr.show(OverlayRequest {
+                content_id: fake_id(10),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Centered,
+                dismiss: DismissBehavior::EscapeOrClickOutside,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            });
+            set_bounds(&mut mgr, modal, Rect::new(300.0, 60.0, 600.0, 680.0));
+            let tooltip = mgr.show(OverlayRequest {
+                content_id: fake_id(11),
+                anchor: fake_id(2),
+                placement: OverlayPlacement::Below,
+                // A promoted sticky rich tooltip: EscapeOrClickOutside.
+                dismiss: DismissBehavior::EscapeOrClickOutside,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            });
+            set_bounds(&mut mgr, tooltip, Rect::new(400.0, 620.0, 200.0, 140.0));
+            (mgr, modal, tooltip)
+        }
+
+        // 1. Click elsewhere inside the modal card (outside the tooltip) →
+        //    the tooltip (stacked above) dismisses; the modal stays up.
+        let (mut mgr, modal, _tooltip) = build();
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(350.0, 100.0));
+        assert!(dismissed.contains(&fake_id(11)), "tooltip should dismiss");
+        assert!(
+            mgr.active_ids().contains(&modal),
+            "modal must survive a click inside itself"
+        );
+
+        // 2. Click inside the tooltip — even the part overflowing below the
+        //    card — leaves BOTH standing (nothing is stacked above the hit).
+        let (mut mgr, modal, tooltip) = build();
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(450.0, 750.0));
+        assert!(dismissed.is_empty(), "clicking the tooltip dismisses nothing");
+        assert!(mgr.active_ids().contains(&modal));
+        assert!(mgr.active_ids().contains(&tooltip));
+
+        // 3. Click the bare background (outside both) → both dismiss, as
+        //    before (each per its own click-outside policy).
+        let (mut mgr, _modal, _tooltip) = build();
+        let (dismissed, _, _) = mgr.handle_click_outside(Point::new(10.0, 10.0));
+        assert!(dismissed.contains(&fake_id(10)));
+        assert!(dismissed.contains(&fake_id(11)));
+        assert!(mgr.is_empty());
     }
 
     #[test]
