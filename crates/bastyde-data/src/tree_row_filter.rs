@@ -31,6 +31,22 @@
 //!   match unless its full ancestor path is visible — which defeats the mode's
 //!   "keep the match and its subtree" intent.
 //!
+//! ## Revealing the matches
+//!
+//! `TreeRowFilter` reshapes the *rows*; it does not touch the slice's per-view
+//! **expand state**. So `KeepAncestors` keeps the ancestor rows, but a
+//! freshly-collapsed `TreeDataSlice` still hides the matches under them. While a
+//! filter is active, flip the slice's reveal override so the whole narrowed
+//! result shows; turn it off when the filter clears (the user's real collapse
+//! state is preserved underneath):
+//!
+//! ```ignore
+//! let filtered = !query.is_empty();
+//! slice.set_source(move || if filtered { sieve.apply(load()) } else { load() });
+//! slice.reload();
+//! slice.set_all_expanded(filtered);   // reveal while searching, restore after
+//! ```
+//!
 //! ## Example
 //!
 //! ```

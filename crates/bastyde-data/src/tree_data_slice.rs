@@ -148,6 +148,9 @@ struct Inner<K: ItemKey, T> {
     /// appearing nodes while preserving the user's later collapses.
     seen: RefCell<HashSet<K>>,
     expand_new: Cell<bool>,
+    /// Reveal override: when `true`, the flatten treats every node as expanded,
+    /// ignoring `expanded` (which is preserved). Drives "reveal while filtering".
+    all_expanded: Cell<bool>,
     version: Signal<u64>,
     version_counter: Cell<u64>,
     divergence: Cell<Option<usize>>,
@@ -193,6 +196,7 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
                 expanded: RefCell::new(HashSet::new()),
                 seen: RefCell::new(HashSet::new()),
                 expand_new: Cell::new(false),
+                all_expanded: Cell::new(false),
                 version: Signal::new(0),
                 version_counter: Cell::new(0),
                 divergence: Cell::new(None),
@@ -278,6 +282,7 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
         T: PartialEq,
     {
         let built = self.build(rows);
+        let all = self.inner.all_expanded.get();
         let div = {
             let old_rows = self.inner.rows.borrow();
             let old_visible = self.inner.visible.borrow();
@@ -286,9 +291,11 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
                 &old_rows,
                 &old_visible,
                 &old_expanded,
+                all,
                 &built.rows,
                 &built.visible,
                 &built.expanded,
+                all,
             )
         };
         self.commit(built);
@@ -317,7 +324,8 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
             node_id: row.key.clone(),
             depth: row.depth,
             has_children: row.has_children,
-            is_expanded: self.inner.expanded.borrow().contains(&row.key),
+            is_expanded: self.inner.all_expanded.get()
+                || self.inner.expanded.borrow().contains(&row.key),
         };
         Some(f(&row.item, &entry))
     }
@@ -350,7 +358,8 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
             node_id: row.key.clone(),
             depth: row.depth,
             has_children: row.has_children,
-            is_expanded: self.inner.expanded.borrow().contains(&row.key),
+            is_expanded: self.inner.all_expanded.get()
+                || self.inner.expanded.borrow().contains(&row.key),
         })
     }
 
@@ -400,9 +409,12 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
 
     // ── Expand / collapse (per-view) ──────────────────────────────────────
 
-    /// Whether the node is expanded.
+    /// Whether the node is *effectively* expanded (its children shown) — `true`
+    /// for every branch while the [`set_all_expanded`](Self::set_all_expanded)
+    /// reveal override is on, otherwise its per-view expand state. Use
+    /// [`expanded_keys`](Self::expanded_keys) for the persistent set.
     pub fn is_expanded(&self, key: &K) -> bool {
-        self.inner.expanded.borrow().contains(key)
+        self.inner.all_expanded.get() || self.inner.expanded.borrow().contains(key)
     }
 
     /// Expand a node (make its children visible).
@@ -426,7 +438,8 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
     where
         T: PartialEq,
     {
-        let expanded = self.is_expanded(key);
+        // Toggle the persistent per-view state (not the reveal override).
+        let expanded = self.inner.expanded.borrow().contains(key);
         self.set_expanded_flag(key, !expanded);
     }
 
@@ -508,23 +521,79 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
     where
         T: PartialEq,
     {
+        let all = self.inner.all_expanded.get();
         let (visible, vis_pos) = {
             let rows = self.inner.rows.borrow();
             let children = self.inner.children.borrow();
             let roots = self.inner.roots.borrow();
-            flatten(&rows, &children, &roots, &target)
+            flatten(&rows, &children, &roots, &target, all)
         };
         let div = {
             let rows = self.inner.rows.borrow();
             let old_visible = self.inner.visible.borrow();
             let old_expanded = self.inner.expanded.borrow();
-            common_prefix(&rows, &old_visible, &old_expanded, &rows, &visible, &target)
+            common_prefix(
+                &rows,
+                &old_visible,
+                &old_expanded,
+                all,
+                &rows,
+                &visible,
+                &target,
+                all,
+            )
         };
         *self.inner.visible.borrow_mut() = visible;
         *self.inner.vis_pos.borrow_mut() = vis_pos;
         *self.inner.expanded.borrow_mut() = target;
         self.inner.divergence.set(Some(div));
         self.bump();
+    }
+
+    /// Reveal override for a filtered view: when `on`, the flatten treats every
+    /// node as expanded, so all rows in the (already sort/filter-narrowed) stream
+    /// are visible — the ancestors `TreeRowFilter::KeepAncestors` keeps no longer
+    /// hide their matching descendants. The per-view expand set is **preserved**
+    /// underneath, so turning it off restores the user's real collapse state.
+    /// Flip it on with the filter and off when it clears. No-op if unchanged.
+    pub fn set_all_expanded(&self, on: bool)
+    where
+        T: PartialEq,
+    {
+        if self.inner.all_expanded.get() == on {
+            return;
+        }
+        let expanded = self.inner.expanded.borrow().clone();
+        let (visible, vis_pos) = {
+            let rows = self.inner.rows.borrow();
+            let children = self.inner.children.borrow();
+            let roots = self.inner.roots.borrow();
+            flatten(&rows, &children, &roots, &expanded, on)
+        };
+        let div = {
+            let rows = self.inner.rows.borrow();
+            let old_visible = self.inner.visible.borrow();
+            common_prefix(
+                &rows,
+                &old_visible,
+                &expanded,
+                !on, // the previous flag value
+                &rows,
+                &visible,
+                &expanded,
+                on,
+            )
+        };
+        self.inner.all_expanded.set(on);
+        *self.inner.visible.borrow_mut() = visible;
+        *self.inner.vis_pos.borrow_mut() = vis_pos;
+        self.inner.divergence.set(Some(div));
+        self.bump();
+    }
+
+    /// Whether the reveal-all override is on (see [`set_all_expanded`](Self::set_all_expanded)).
+    pub fn all_expanded(&self) -> bool {
+        self.inner.all_expanded.get()
     }
 
     /// Derive the full structure + projection from a raw row stream, seeding the
@@ -599,7 +668,13 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
         expanded.retain(|k| row_pos.contains_key(k));
 
         // 4. Flatten to the visible projection.
-        let (visible, vis_pos) = flatten(&rows, &children, &roots, &expanded);
+        let (visible, vis_pos) = flatten(
+            &rows,
+            &children,
+            &roots,
+            &expanded,
+            self.inner.all_expanded.get(),
+        );
 
         Built {
             rows,
@@ -687,11 +762,20 @@ fn flatten<K: ItemKey, T>(
     children: &HashMap<K, Vec<usize>>,
     roots: &[usize],
     expanded: &HashSet<K>,
+    all_expanded: bool,
 ) -> (Vec<usize>, HashMap<K, usize>) {
     let mut visible = Vec::with_capacity(rows.len());
     let mut vis_pos = HashMap::with_capacity(rows.len());
     for &root in roots {
-        flatten_node(root, rows, children, expanded, &mut visible, &mut vis_pos);
+        flatten_node(
+            root,
+            rows,
+            children,
+            expanded,
+            all_expanded,
+            &mut visible,
+            &mut vis_pos,
+        );
     }
     (visible, vis_pos)
 }
@@ -701,6 +785,7 @@ fn flatten_node<K: ItemKey, T>(
     rows: &[Row<K, T>],
     children: &HashMap<K, Vec<usize>>,
     expanded: &HashSet<K>,
+    all_expanded: bool,
     visible: &mut Vec<usize>,
     vis_pos: &mut HashMap<K, usize>,
 ) {
@@ -708,11 +793,19 @@ fn flatten_node<K: ItemKey, T>(
     vis_pos.insert(row.key.clone(), visible.len());
     visible.push(idx);
     if row.has_children
-        && expanded.contains(&row.key)
+        && (all_expanded || expanded.contains(&row.key))
         && let Some(kids) = children.get(&row.key)
     {
         for &child in kids {
-            flatten_node(child, rows, children, expanded, visible, vis_pos);
+            flatten_node(
+                child,
+                rows,
+                children,
+                expanded,
+                all_expanded,
+                visible,
+                vis_pos,
+            );
         }
     }
 }
@@ -721,22 +814,27 @@ fn flatten_node<K: ItemKey, T>(
 /// depth + has-children + expand state + **item content**. The first index at
 /// which the projection diverges; equals `min(len)` when the shorter list is a
 /// prefix of the longer.
+#[allow(clippy::too_many_arguments)]
 fn common_prefix<K: ItemKey, T: PartialEq>(
     old_rows: &[Row<K, T>],
     old_visible: &[usize],
     old_expanded: &HashSet<K>,
+    old_all: bool,
     new_rows: &[Row<K, T>],
     new_visible: &[usize],
     new_expanded: &HashSet<K>,
+    new_all: bool,
 ) -> usize {
     let n = old_visible.len().min(new_visible.len());
     for i in 0..n {
         let o = &old_rows[old_visible[i]];
         let m = &new_rows[new_visible[i]];
+        let o_exp = old_all || old_expanded.contains(&o.key);
+        let m_exp = new_all || new_expanded.contains(&m.key);
         if o.key != m.key
             || o.depth != m.depth
             || o.has_children != m.has_children
-            || old_expanded.contains(&o.key) != new_expanded.contains(&m.key)
+            || o_exp != m_exp
             || o.item != m.item
         {
             return i;
@@ -945,6 +1043,58 @@ mod tests {
         assert_eq!(slice.visible_count(), 8);
         slice.collapse_all();
         assert_eq!(slice.visible_count(), 2);
+    }
+
+    #[test]
+    fn set_all_expanded_reveals_then_restores() {
+        let slice = TreeDataSlice::from_rows(sample()); // collapsed → 2 roots
+        assert_eq!(slice.visible_count(), 2);
+        assert!(!slice.all_expanded());
+
+        slice.set_all_expanded(true);
+        assert_eq!(slice.visible_count(), 8); // everything revealed
+        assert!(slice.all_expanded());
+        assert!(slice.is_expanded(&1)); // effective: shown open
+
+        slice.set_all_expanded(false);
+        assert_eq!(slice.visible_count(), 2); // back to collapsed
+        assert!(!slice.all_expanded());
+    }
+
+    #[test]
+    fn reveal_preserves_raw_expand_set() {
+        let slice = TreeDataSlice::from_rows(sample());
+        slice.expand(&1); // M expanded (persistent) → M, Book, Ch2, N
+        assert_eq!(slice.visible_count(), 4);
+
+        slice.set_all_expanded(true);
+        assert_eq!(slice.visible_count(), 8);
+
+        slice.set_all_expanded(false);
+        // M's persistent expand survived the reveal round-trip; N still collapsed.
+        assert_eq!(slice.visible_count(), 4);
+        assert_eq!(slice.expanded_keys(), vec![1]);
+    }
+
+    #[test]
+    fn filter_keepancestors_reveal_shows_matches() {
+        // The gap this closes: KeepAncestors keeps the ancestor rows, but a
+        // freshly-collapsed slice hides the match under them — set_all_expanded
+        // reveals the whole filtered result without touching the persistent set.
+        use crate::{TreeFilterMode, TreeRowFilter};
+        let sieve = TreeRowFilter::new()
+            .filter_mode(TreeFilterMode::KeepAncestors)
+            .filter(|t: &&str| *t == "Dawn");
+        let slice = TreeDataSlice::from_rows(sieve.apply(sample()));
+        // Filtered stream = M → Book → Dawn; collapsed shows only the root M.
+        assert_eq!(slice.visible_count(), 1);
+
+        slice.set_all_expanded(true);
+        assert_eq!(slice.visible_count(), 3);
+        let titles: Vec<&str> = (0..3)
+            .map(|i| slice.with_entry(i, |it, _| *it).unwrap())
+            .collect();
+        assert_eq!(titles, vec!["M", "Book", "Dawn"]);
     }
 
     #[test]

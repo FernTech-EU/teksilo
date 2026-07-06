@@ -155,7 +155,10 @@ bastyde-data            Reactive data models, designed as a *peer* of the GUI, n
                          via `set_source`, so there's one projection — not two stacked expand states like
                          a `SortFilterTreeModel`-over-`TreeDataSlice` would be. `KeepDescendants` surfaces
                          a matching subtree even under non-matching ancestors (intent-correct; differs
-                         from `SortFilterTreeModel`'s flatten). See docs/data-models.md §4.5.
+                         from `SortFilterTreeModel`'s flatten). It reshapes rows only, NOT expand state,
+                         so while filtering call `slice.set_all_expanded(true)` (a reveal override that
+                         preserves the persistent per-view expand set) so `KeepAncestors`' kept ancestors
+                         don't hide the matches; `false` restores. See docs/data-models.md §4.5.
                        • `CheckedModel` + `TreeCheckedModel<T>` — per-row checkbox state parallel to
                          `SelectionModel`. Tree variant aggregates **descendant → ancestor**: 3 of 5
                          children checked = parent `Indeterminate`; all 5 = parent `Checked`. The

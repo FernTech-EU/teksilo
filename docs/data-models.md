@@ -161,7 +161,11 @@ let sieve = TreeRowFilter::new()
     .filter(move |item: &Row| item.title.contains(&query))   // outline search
     .sort(|a: &Row, b: &Row| a.title.cmp(&b.title));
 slice.set_source(move || sieve.apply(rows::load()));
+slice.reload();
+slice.set_all_expanded(true);   // reveal the whole filtered result (see below)
 ```
+
+`TreeRowFilter` reshapes the *rows* but not the slice's per-view expand state, so `KeepAncestors` keeps the ancestor rows without expanding them — the matches would sit hidden under collapsed ancestors. While a filter is active, call **`slice.set_all_expanded(true)`** to reveal the narrowed result, and `set_all_expanded(false)` when it clears; the user's persistent collapse state is preserved underneath (it's a display override, not a mutation of the expand set).
 
 It reuses the three `TreeFilterMode` strategies and sorts siblings per parent, then re-emits a valid indent-ordered stream (survivors' depths compact onto their nearest surviving ancestor, which `TreeDataSlice` re-derives). Two mode details worth knowing: **`HideNonMatching`** keeps a node only if it *and every ancestor* match (children of a hidden parent stay hidden), and **`KeepDescendants`** surfaces a matching subtree even when the match's own ancestors don't match — deliberately unlike `SortFilterTreeModel`'s flatten, which drops such a match. **`KeepAncestors`** (show the path to each match) is the usual outline-search mode.
 
