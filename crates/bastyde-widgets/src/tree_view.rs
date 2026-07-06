@@ -1337,9 +1337,9 @@ impl<T: 'static> Widget for TreeView<T> {
                                 if ctx.press_claimed_by_interactive_child() {
                                     return bastyde_core::event::EventResponse::Ignored;
                                 }
-                                // Selection lands on press — snappy, and the
-                                // modifier information is only in the event
-                                // stream (TapRecognizer strips it).
+                                // Selection lands on press — snappy — reading the
+                                // modifiers straight off the PointerDown (the tap
+                                // gesture fires later, on release).
                                 if let Some(ref sel) = sel_click {
                                     if modifiers.ctrl() {
                                         sel.toggle(click_index);
@@ -1388,7 +1388,19 @@ impl<T: 'static> Widget for TreeView<T> {
                         let activate_index = i;
                         let handlers = match self.activate_on {
                             crate::data_views::ActivateOn::SingleClick => {
-                                HandlerSet::new().on_tap(move |_tap, _ctx| cb(activate_index))
+                                HandlerSet::new().on_tap(move |tap, _ctx| {
+                                    // A Ctrl/Shift click is a selection-extension
+                                    // gesture (applied on PointerDown), not an
+                                    // activation — suppress open/commit so a
+                                    // multi-select click doesn't also fire the
+                                    // activate callback. Mirrors the PointerDown
+                                    // selection condition (`ctrl` toggles, `shift`
+                                    // extends) so the two stay in lock-step.
+                                    if tap.modifiers.ctrl() || tap.modifiers.shift() {
+                                        return;
+                                    }
+                                    cb(activate_index)
+                                })
                             }
                             crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
                                 .on_double_tap(move |_tap, _ctx| cb(activate_index)),
