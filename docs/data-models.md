@@ -4,7 +4,7 @@
 # Reactive Data Models
 
 **Companion to:** [architecture.md](architecture.md)
-**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
+**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `TreeRowFilter`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `KeyedTreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
 **API reference:** the full rustdoc for every type lives at [`/api/bastyde_data/`](api/bastyde_data/index.html).
 
 ---
@@ -144,6 +144,27 @@ Identity is *your domain key* `K` (an `i64` entity id, a tagged enum) — not a 
 
 **When to use which:** `TreeSlice` if the data lives in a `TreeModel`; `TreeDataSlice` if it lives in an external store as an indent-ordered outline. Implement `TreeDataSource` by hand only for a source that *isn't* a resolved indent sequence — a huge/lazy tree that pages children on demand (§14).
 
+### 4.5 `TreeRowFilter<K, T>` — sort + filter for the `TreeDataSlice` pipeline
+
+`SortFilterTreeModel` (§below, the `TreeModel`-backed sort/filter projection) owns its *own* expand state, so stacking it on a `TreeDataSlice` — which already has one — would give you two projections and two expand states. For an external tree, sort/filter belongs **below** the slice, on its raw indent-ordered input:
+
+```text
+rows::load()  →  TreeRowFilter::apply  →  TreeDataSlice::set_source  →  TreeView
+              \___ Vec<TreeRow> → Vec<TreeRow> ___/     \___ the one projection ___/
+```
+
+`TreeRowFilter` is a pure `Vec<TreeRow<K, T>>` → `Vec<TreeRow<K, T>>` transform you build once and apply to each freshly-sourced stream (usually inside the `set_source` closure; re-apply to cached rows on a filter change to avoid re-querying the backend):
+
+```rust
+let sieve = TreeRowFilter::new()
+    .filter_mode(TreeFilterMode::KeepAncestors)
+    .filter(move |item: &Row| item.title.contains(&query))   // outline search
+    .sort(|a: &Row, b: &Row| a.title.cmp(&b.title));
+slice.set_source(move || sieve.apply(rows::load()));
+```
+
+It reuses the three `TreeFilterMode` strategies and sorts siblings per parent, then re-emits a valid indent-ordered stream (survivors' depths compact onto their nearest surviving ancestor, which `TreeDataSlice` re-derives). Two mode details worth knowing: **`HideNonMatching`** keeps a node only if it *and every ancestor* match (children of a hidden parent stay hidden), and **`KeepDescendants`** surfaces a matching subtree even when the match's own ancestors don't match — deliberately unlike `SortFilterTreeModel`'s flatten, which drops such a match. **`KeepAncestors`** (show the path to each match) is the usual outline-search mode.
+
 ## 5. `SelectionModel` — one rule set, two widgets
 
 Both `ListView` and `TreeView` share selection semantics, so selection lives in its own type in bastyde-data:
@@ -238,6 +259,18 @@ TreeView::new_with_context(tree, move |item, entry, _sel, ctx| {
 ```
 
 Path A (ad-hoc `Signal<bool>` stored on each row's view-model item) remains valid — it's the right answer for fixed dialog lists and small settings panels. Reach for `CheckedModel` / `TreeCheckedModel` once item types are domain models you don't want to retrofit a signal field onto.
+
+### 6.1 `KeyedTreeCheckedModel<K>` — the same, for an external tree
+
+`TreeCheckedModel` is bound to a `TreeModel` and keyed by `NodeId`. `KeyedTreeCheckedModel<K>` is its **domain-keyed** twin — the checkbox counterpart of `KeyedSelectionModel` (§5) — for the "select scenes to export" tristate over a `TreeDataSlice` / any `TreeDataSource`. It takes the tree *shape* as two injected closures (`children` + `parent`), so `from_source(slice.clone())` wires it to a slice with no `TreeModel` to mirror:
+
+```rust
+let checked = KeyedTreeCheckedModel::from_source(outline_slice.clone());
+// bind each row's checkbox to `checked.signal_for(key)` / `.bool_signal_for(key)`;
+// read the result with `checked.checked_keys()`.
+```
+
+Because state is keyed by your stable domain id, a checked node survives a full re-source. After a reload call **`prune_missing(|k| source.contains_key(k))`** (drops deleted nodes' state *and* recomputes the ancestors they affected) or **`reaggregate()`** (recompute every parent from the new shape) so the tristates stay correct across structural changes. Same cascade / `Signal<CheckState>` ↔ `Signal<bool>` bridge / `AggregateMode` as `TreeCheckedModel`.
 
 ## 7. MVVM flow
 
@@ -438,7 +471,10 @@ gives a `TreeModel`, but keyed by your domain id and with no `TreeModel` to
 mirror. Inject only the domain policy (`set_reorder`, `set_drag_policy`,
 `set_drop_resolver`). Implement `TreeDataSource` directly only when the source
 *isn't* a resolved indent sequence — a huge/lazy tree that pages children on
-demand, where the eager flatten doesn't fit.
+demand, where the eager flatten doesn't fit. Add view-layer sort/filter with a
+`TreeRowFilter` on the row stream (§4.5), and tree checkboxes with a
+`KeyedTreeCheckedModel` beside it (§6.1) — both compose without a second
+projection.
 
 A bounded, fully-resident, flat list is the one case where a `ListModel`
 projection can still be simpler than a source impl. There is no `reconcile`
@@ -459,6 +495,6 @@ configuration, not data.
 - [architecture.md §6 UI Construction Patterns](architecture.md) — `Repeater` in context, static-vs-dynamic children.
 - [architecture.md §14 Drag and Drop](architecture.md) — `DragPayload`, cross-widget reorder.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — typed intents, ancestor `Action`s, how the MVVM command layer lands in Rust.
-- [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/bastyde-data/src/tree_data_slice.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs), [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs).
+- [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/bastyde-data/src/tree_data_slice.rs), [tree_row_filter.rs](../crates/bastyde-data/src/tree_row_filter.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs), [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs), [keyed_tree_checked_model.rs](../crates/bastyde-data/src/keyed_tree_checked_model.rs).
 - [crates/bastyde-data/src/data_change.rs](../crates/bastyde-data/src/data_change.rs), [tree_change.rs](../crates/bastyde-data/src/tree_change.rs).
 - [examples/data_collections](../examples/data_collections/) — runnable demonstration of ListView, TreeView, Repeater, SelectionModel, and intra-widget DnD.

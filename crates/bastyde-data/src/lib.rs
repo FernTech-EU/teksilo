@@ -25,6 +25,7 @@ pub mod data_change;
 pub mod debug_registry;
 pub mod dnd_types;
 pub mod keyed_selection_model;
+pub mod keyed_tree_checked_model;
 pub mod list_data_source;
 pub mod list_model;
 pub mod selection_model;
@@ -35,6 +36,7 @@ pub mod tree_checked_model;
 pub mod tree_data_slice;
 pub mod tree_data_source;
 pub mod tree_model;
+pub mod tree_row_filter;
 pub mod tree_slice;
 
 pub use check_state::CheckState;
@@ -45,6 +47,7 @@ pub use dnd_types::{
     RowState,
 };
 pub use keyed_selection_model::KeyedSelectionModel;
+pub use keyed_tree_checked_model::KeyedTreeCheckedModel;
 pub use list_data_source::ListDataSource;
 pub use list_model::ListModel;
 pub use selection_model::{SelectionMode, SelectionModel};
@@ -55,4 +58,5 @@ pub use tree_checked_model::{AggregateMode, TreeCheckedModel};
 pub use tree_data_slice::{TreeDataSlice, TreeRow};
 pub use tree_data_source::{FlatEntry, TreeDataSource};
 pub use tree_model::TreeModel;
+pub use tree_row_filter::TreeRowFilter;
 pub use tree_slice::{TreeSlice, TreeSliceHandle};
