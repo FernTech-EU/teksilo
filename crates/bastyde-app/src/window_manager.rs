@@ -886,6 +886,13 @@ impl WindowManager {
         {
             handle.purge_window(bastyde_id);
         }
+        // Drop any context-bearing subscription callbacks (subscribe_event_with_ctx)
+        // owned by the closing window, so the shared TreeAppContext map doesn't
+        // retain inert closures per closed window (the tree is dropped without a
+        // per-widget destroy pass). A late backend event then finds nothing.
+        if let Some(template) = self.app_context_template.as_ref() {
+            template.purge_ctx_subscriptions_for_window(bastyde_id);
+        }
         // Revoke the window's OS drop-target registration (drops the platform
         // guard — RevokeDragDrop / removeFromSuperview / data-device teardown).
         if let Some(handle) = self

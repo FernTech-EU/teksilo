@@ -156,6 +156,17 @@ struct AnimatedQuadEntry {
 pub struct AnimatedQuadRegistry {
     entries: HashMap<u32, AnimatedQuadEntry>,
     owners: HashMap<WidgetId, Vec<u32>>,
+    /// Shared phase reference for every quad: the instant the *first* quad was
+    /// registered (rebased by pause offsets like `started_at`). Every slot seeds
+    /// its `started_at` from this instead of its own registration `now`, so a
+    /// quad **recreated mid-animation** — a rebuilt widget: a toast surface
+    /// updating its text, a recycled list row — picks up the *same* phase the
+    /// destroyed one had, and looping animations (spinners, sweeps) never
+    /// visibly restart. All periodic quads therefore share one phase clock (they
+    /// run in unison, which is fine — and desirable — for spinners/sweeps). All
+    /// current `AnimatedQuadKind`s are periodic (`looping_phase`), so this is
+    /// always safe. `None` until the first `register`.
+    epoch: Option<Instant>,
     free_slots: Vec<u32>,
     next_slot: u32,
     /// Cached `AnimParams` buffer, sized to `next_slot`. Recomputed
@@ -200,6 +211,7 @@ impl AnimatedQuadRegistry {
         Self {
             entries: HashMap::new(),
             owners: HashMap::new(),
+            epoch: None,
             free_slots: Vec::new(),
             next_slot: 0,
             scratch: Vec::new(),
@@ -226,12 +238,16 @@ impl AnimatedQuadRegistry {
             self.next_slot = self.next_slot.saturating_add(1);
             s
         });
+        // Seed from the shared epoch (set to the first-ever registration `now`),
+        // NOT this call's `now`, so a quad recreated mid-animation continues at
+        // the destroyed one's phase instead of snapping back to 0.
+        let started_at = *self.epoch.get_or_insert(now);
         self.entries.insert(
             slot,
             AnimatedQuadEntry {
                 owner,
                 kind,
-                started_at: now,
+                started_at,
                 paused_at: None,
             },
         );
@@ -274,6 +290,11 @@ impl AnimatedQuadRegistry {
                 let offset = now.saturating_duration_since(paused_at);
                 for entry in self.entries.values_mut() {
                     entry.started_at += offset;
+                }
+                // Rebase the shared epoch too, so a quad registered *after* the
+                // resume seeds a `started_at` in phase with the rebased entries.
+                if let Some(epoch) = self.epoch.as_mut() {
+                    *epoch += offset;
                 }
             }
         } else {
@@ -880,5 +901,34 @@ mod tests {
         assert_eq!(h0.slot(), h1.slot(), "slot should be reused from free list");
         assert_eq!(reg.params_capacity(), cap_before);
         assert_eq!(reg.active_count(), 1);
+    }
+
+    #[test]
+    fn recreated_quad_continues_phase_from_shared_epoch() {
+        // A quad recreated mid-animation (a rebuilt widget — e.g. a toast
+        // surface updating its text every progress tick) must pick up the phase
+        // the destroyed one had, not snap back to 0. Both seed `started_at` from
+        // the shared epoch, so a quad registered a quarter-period later reads the
+        // current phase (~0.25), identical to a quad registered at the start.
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(2);
+        let theme = crate::presets::intui::light();
+        let start = Instant::now();
+
+        let h0 = reg.register(ids[0], sweep_kind(), start); // sets epoch = start
+        let later = start + Duration::from_millis(25); // 100 ms period → phase 0.25
+        let h1 = reg.register(ids[1], sweep_kind(), later); // seeds from epoch, not `later`
+
+        let params = reg.tick(later, &arena, 0, &theme);
+        let p0 = params[h0.slot() as usize].phase;
+        let p1 = params[h1.slot() as usize].phase;
+        assert!(
+            (p1 - 0.25).abs() < 0.02,
+            "recreated quad must read the current phase ~0.25, got {p1}"
+        );
+        assert!(
+            (p0 - p1).abs() < 0.001,
+            "both quads share the epoch phase clock ({p0} vs {p1})"
+        );
     }
 }

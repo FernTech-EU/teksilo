@@ -890,6 +890,114 @@ impl<'a> BuildContext<'a> {
         let handle = (adapter.subscribe_fn)(Box::new(origin), wrapper);
         self.subscription_handles.push((sub_id, handle));
     }
+
+    /// Like [`subscribe_event`](Self::subscribe_event), but the UI-side
+    /// callback additionally receives a fresh
+    /// [`EventContext`](crate::widget::EventContext) bound to this widget's
+    /// window. That lets it react to a backend event *imperatively* — update /
+    /// replace / dismiss a toast, present a modal, `send_intent`, navigate —
+    /// none of which a plain (context-free) `subscribe_event` callback can do
+    /// (it can only poke `Signal`s).
+    ///
+    /// This is the supported bridge for **long-operation progress**: a Qleany
+    /// `Origin::LongOperation(Progress | Completed | Cancelled | Failed)` event
+    /// crosses from the operation's background thread to the UI thread and the
+    /// callback drives an evolving progress toast (percentage in the body, a
+    /// Cancel action, a success/error replacement on completion) — see the
+    /// `toast_demo` example.
+    ///
+    /// The event is delivered on the UI thread through the same
+    /// `AppEvent::SubscriptionEvent` path as `subscribe_event`; bastyde-app
+    /// mints the `EventContext` from this widget's window tree just before the
+    /// call (mirroring `bastyde-async`'s `spawn_local_with` completion path).
+    /// The subscription is torn down with the widget, exactly like
+    /// `subscribe_event`.
+    ///
+    /// The `<O, E>` type match against the registered event source is a
+    /// `debug_assert` (as in [`subscribe_event`](Self::subscribe_event)); a
+    /// mismatched call site in a release build is not caught here but panics
+    /// later at the payload downcast.
+    ///
+    /// Registering from a windowless tree (headless / tests) is allowed but
+    /// records `None` for the window — the app-side router then has no tree to
+    /// mint an `EventContext` from and cannot deliver it, so such a subscription
+    /// never fires in a running app. Ordinary application widgets always have a
+    /// window; headless code that wants to observe events should use
+    /// [`subscribe_event`](Self::subscribe_event) and drive `Signal`s instead.
+    pub fn subscribe_event_with_ctx<O, E, F>(&mut self, origin: O, callback: F)
+    where
+        O: 'static,
+        E: 'static,
+        F: Fn(&E, &mut crate::widget::EventContext) + 'static,
+    {
+        use std::any::{Any, TypeId};
+        use std::rc::Rc;
+        use std::sync::Arc;
+
+        let window_id = self.window().map(|w| w.id());
+
+        let app_context = self.tree.app_context.clone();
+
+        let adapter = app_context.event_source.as_ref().expect(
+            "BuildContext::subscribe_event_with_ctx called but no event source was registered \
+             on BastydeAppBuilder. Call .event_source(source) on the builder first.",
+        );
+
+        debug_assert_eq!(
+            adapter.origin_type,
+            TypeId::of::<O>(),
+            "subscribe_event_with_ctx origin type mismatch: source uses {}, subscribe call used {}",
+            adapter.origin_type_name,
+            std::any::type_name::<O>(),
+        );
+        debug_assert_eq!(
+            adapter.event_type,
+            TypeId::of::<E>(),
+            "subscribe_event_with_ctx event type mismatch: source uses {}, subscribe call used {}",
+            adapter.event_type_name,
+            std::any::type_name::<E>(),
+        );
+
+        let sub_id = app_context.allocate_subscription_id();
+
+        // The UI-side callback, invoked after an event posted from the source
+        // thread is delivered back to the UI thread and a fresh `EventContext`
+        // has been minted. Downcasts the type-erased payload back to `&E` and
+        // forwards it plus the context to the user's `F`. Stored behind `Rc` so
+        // dispatch can drop the map borrow before invoking it (re-entrancy).
+        let stored_callback: Rc<dyn Fn(&dyn Any, &mut crate::widget::EventContext)> =
+            Rc::new(move |event_any, ctx| {
+                let event = event_any
+                    .downcast_ref::<E>()
+                    .expect("subscription event downcast failed — framework bug");
+                callback(event, ctx);
+            });
+        app_context
+            .subscription_ctx_callbacks
+            .borrow_mut()
+            .insert(sub_id, (window_id, stored_callback));
+
+        // Same publisher-thread wrapper as `subscribe_event`: carry only the
+        // sub_id (Copy) + an Arc-clone of the poster, box the typed event, and
+        // post an `AppEvent::SubscriptionEvent`. The dispatch side (bastyde-app)
+        // routes context-bearing sub_ids through the fresh-`EventContext` path.
+        let poster = app_context
+            .poster
+            .as_ref()
+            .expect(
+                "BuildContext::subscribe_event_with_ctx called but no AppEventPoster \
+                 is installed on the tree. bastyde-app installs one when an \
+                 event source is registered on the builder.",
+            )
+            .clone();
+        let wrapper: Arc<dyn Fn(Box<dyn Any + Send>) + Send + Sync> =
+            Arc::new(move |erased_event| {
+                poster.post_subscription_event(sub_id, erased_event);
+            });
+
+        let handle = (adapter.subscribe_fn)(Box::new(origin), wrapper);
+        self.subscription_handles.push((sub_id, handle));
+    }
 }
 
 #[cfg(test)]

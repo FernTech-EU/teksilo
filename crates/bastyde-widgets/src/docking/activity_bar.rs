@@ -84,7 +84,7 @@ fn item_extent(size: IconButtonSize) -> f32 {
 }
 
 /// Map an [`IconButtonSize`] to the glyph (icon) dimension (dp) drawn inside a
-/// rail item's square box. Mirrors [`IconButton`](crate::IconButton)'s own
+/// rail item's square box. Mirrors [`IconButton`]'s own
 /// size → glyph scaling so a caller's rail icon tracks the rail size instead of
 /// staying a fixed dp — a 40 dp `Large` box gets a 24 dp glyph, not a tiny one.
 fn item_glyph_size(size: IconButtonSize) -> f32 {

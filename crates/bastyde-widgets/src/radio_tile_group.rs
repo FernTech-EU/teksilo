@@ -95,7 +95,7 @@ pub struct RadioTileGroup {
     spacing: Option<f32>,
     line_spacing: f32,
     /// Fixed row height for [`TileLayout::Vertical`]; `None` uses
-    /// [`VERTICAL_ROW_HEIGHT`].
+    /// `VERTICAL_ROW_HEIGHT`.
     row_height: Option<f32>,
     /// Enabled state for the whole group, static or reactive; forwarded
     /// to the arena at build time.

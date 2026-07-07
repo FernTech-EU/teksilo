@@ -18,7 +18,11 @@
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
+
+use crate::widget::EventContext;
+use crate::window::BastydeWindowId;
 
 /// An external source of events that widgets can subscribe to.
 ///
@@ -170,6 +174,22 @@ impl EventSourceAdapter {
     }
 }
 
+/// UI-side callback for a *context-bearing* subscription
+/// ([`BuildContext::subscribe_event_with_ctx`](crate::build_context::BuildContext::subscribe_event_with_ctx)):
+/// it receives the downcast event **and** a fresh [`EventContext`], so it can
+/// imperatively drive toasts, modals, intents and navigation in reaction to a
+/// backend event — the things a plain, context-free `subscribe_event` callback
+/// cannot. bastyde-app invokes it from inside
+/// [`WidgetTree::run_with_event_context`](crate::WidgetTree::run_with_event_context),
+/// keyed by the originating window so the context binds to the right tree.
+///
+/// Stored behind `Rc` (not `Box`) so dispatch can **clone the handle and release
+/// the map borrow before invoking** — the callback runs arbitrary UI code (it
+/// may `open_window`, which synchronously builds a new tree whose widgets can
+/// register *their own* context-bearing subscriptions, i.e. re-enter this very
+/// map). Holding the borrow across the call would `BorrowMutError`-panic there.
+type CtxSubscriptionCallback = Rc<dyn Fn(&dyn Any, &mut EventContext)>;
+
 /// Per-tree app-level subscription state.
 ///
 /// Held by `WidgetTree` as `Rc<TreeAppContext>` so that `BuildContext` can
@@ -182,6 +202,19 @@ pub struct TreeAppContext {
     pub(crate) event_source: Option<EventSourceAdapter>,
     #[allow(clippy::type_complexity)]
     pub(crate) subscription_callbacks: RefCell<HashMap<SubscriptionId, Box<dyn Fn(&dyn Any)>>>,
+    /// Context-bearing subscription callbacks + the window they target.
+    /// Populated by [`BuildContext::subscribe_event_with_ctx`](crate::build_context::BuildContext::subscribe_event_with_ctx);
+    /// dispatched by bastyde-app with a freshly-minted [`EventContext`]. A given
+    /// `SubscriptionId` lives in exactly one of the two callback maps.
+    ///
+    /// The window is `Option` because a subscription registered from a windowless
+    /// tree (headless / tests) has no tree to mint an `EventContext` from — the
+    /// app-side router then can't deliver it (real app widgets always have a
+    /// window). Direct [`dispatch_subscription_event_with_ctx`](Self::dispatch_subscription_event_with_ctx)
+    /// is window-agnostic, which is what unit tests drive.
+    #[allow(clippy::type_complexity)]
+    pub(crate) subscription_ctx_callbacks:
+        RefCell<HashMap<SubscriptionId, (Option<BastydeWindowId>, CtxSubscriptionCallback)>>,
     pub(crate) next_subscription_id: Cell<u64>,
     /// Application-scoped values keyed by `TypeId`.
     /// Populated at builder time, read-only after the tree starts running.
@@ -196,6 +229,7 @@ impl TreeAppContext {
             poster: None,
             event_source: None,
             subscription_callbacks: RefCell::new(HashMap::new()),
+            subscription_ctx_callbacks: RefCell::new(HashMap::new()),
             next_subscription_id: Cell::new(1),
             app_state: HashMap::new(),
         }
@@ -212,6 +246,7 @@ impl TreeAppContext {
             poster: Some(poster),
             event_source: Some(event_source),
             subscription_callbacks: RefCell::new(HashMap::new()),
+            subscription_ctx_callbacks: RefCell::new(HashMap::new()),
             next_subscription_id: Cell::new(1),
             app_state: HashMap::new(),
         }
@@ -269,6 +304,65 @@ impl TreeAppContext {
         } else {
             false
         }
+    }
+
+    /// The window a *context-bearing* subscription targets, if `sub_id` names one
+    /// **and** it was registered from a window (always true in a real app).
+    /// bastyde-app peeks this to know which window's tree to mint the
+    /// [`EventContext`] from before dispatching.
+    pub fn ctx_subscription_window(&self, sub_id: SubscriptionId) -> Option<BastydeWindowId> {
+        self.subscription_ctx_callbacks
+            .borrow()
+            .get(&sub_id)
+            .and_then(|(window_id, _)| *window_id)
+    }
+
+    /// Invoke the *context-bearing* UI-side callback for a posted subscription
+    /// event, passing the freshly-minted [`EventContext`]. Returns `true` if a
+    /// callback was found and invoked. Called by bastyde-app from inside
+    /// [`WidgetTree::run_with_event_context`](crate::WidgetTree::run_with_event_context).
+    ///
+    /// The `Rc` handle is **cloned and the map borrow released before the call**,
+    /// so the callback may freely re-enter this map — e.g. `ctx.open_window(...)`
+    /// synchronously builds a new tree whose widgets register their own
+    /// context-bearing subscriptions. (Holding the borrow across the call would
+    /// panic there; hence `Rc`, not `Box`.)
+    pub fn dispatch_subscription_event_with_ctx(
+        &self,
+        sub_id: SubscriptionId,
+        event: &dyn Any,
+        ctx: &mut EventContext,
+    ) -> bool {
+        let callback = self
+            .subscription_ctx_callbacks
+            .borrow()
+            .get(&sub_id)
+            .map(|(_window_id, callback)| Rc::clone(callback));
+        match callback {
+            Some(callback) => {
+                callback(event, ctx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Number of context-bearing subscription callbacks currently installed.
+    /// Companion to [`subscription_count`](Self::subscription_count); used by
+    /// lifecycle tests to assert the ctx-map teardown ran.
+    pub fn ctx_subscription_count(&self) -> usize {
+        self.subscription_ctx_callbacks.borrow().len()
+    }
+
+    /// Drop every context-bearing subscription targeting `window_id`. Called by
+    /// bastyde-app when a window closes, so the shared, longer-lived
+    /// `TreeAppContext` map doesn't retain inert callbacks for a torn-down tree
+    /// (a window's tree is dropped without a per-widget `destroy_subtree` pass).
+    /// Mirrors [`AsyncCompletionHandle::purge_window`](crate::AsyncCompletionHandle::purge_window).
+    pub fn purge_ctx_subscriptions_for_window(&self, window_id: BastydeWindowId) {
+        self.subscription_ctx_callbacks
+            .borrow_mut()
+            .retain(|_, (win, _)| *win != Some(window_id));
     }
 
     /// Number of UI-side subscription callbacks currently installed.
@@ -387,6 +481,32 @@ mod tests {
         }
     }
 
+    /// Subscribes via the *context-bearing* API in `build()` — headless, so the
+    /// registration records `None` for the window but still lands in the ctx map
+    /// and is torn down on destroy.
+    #[derive(Debug)]
+    struct CtxSubscribingWidget {
+        origin: TestOrigin,
+    }
+
+    impl Widget for CtxSubscribingWidget {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            ctx.subscribe_event_with_ctx(
+                self.origin.clone(),
+                |_event: &TestEvent, _ctx: &mut crate::widget::EventContext| {},
+            );
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
     // --- Helpers ---
 
     fn install_source(
@@ -456,6 +576,140 @@ mod tests {
         drain_and_dispatch(&tree, &poster);
 
         assert_eq!(signal.get(), "hello");
+    }
+
+    #[test]
+    fn subscribe_event_with_ctx_dispatches_inside_fresh_context() {
+        use crate::window::{BastydeWindowId, NoopWindowOps};
+
+        let mut tree = WidgetTree::new();
+        // Register a context-bearing callback the way
+        // `BuildContext::subscribe_event_with_ctx` does — but directly, so the
+        // test needs no real window (that routing is covered end-to-end by the
+        // `toast_demo` example and the Skribisto importer).
+        let app_ctx = tree.app_context().clone();
+        let sub_id = app_ctx.allocate_subscription_id();
+        let win = BastydeWindowId::new(1);
+        let seen = Signal::new(String::new());
+        let seen_cb = seen.clone();
+        let stored: std::rc::Rc<dyn Fn(&dyn Any, &mut crate::widget::EventContext)> =
+            std::rc::Rc::new(move |event_any, _ctx: &mut crate::widget::EventContext| {
+                let ev = event_any
+                    .downcast_ref::<TestEvent>()
+                    .expect("subscription event downcast failed");
+                seen_cb.set(ev.message.clone());
+            });
+        app_ctx
+            .subscription_ctx_callbacks
+            .borrow_mut()
+            .insert(sub_id, (Some(win), stored));
+
+        // The target window is peekable (bastyde-app reads it to pick the tree
+        // whose `EventContext` it mints).
+        assert_eq!(app_ctx.ctx_subscription_window(sub_id), Some(win));
+        assert_eq!(app_ctx.ctx_subscription_window(SubscriptionId(9999)), None);
+
+        // Dispatch inside a fresh `EventContext`, exactly like bastyde-app's
+        // `try_dispatch_subscription_with_ctx`.
+        let event = TestEvent {
+            id: 9,
+            message: "progress-42".to_string(),
+        };
+        let handled = std::cell::Cell::new(false);
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            handled.set(app_ctx.dispatch_subscription_event_with_ctx(sub_id, &event, ctx));
+        });
+        assert!(
+            handled.get(),
+            "context-bearing dispatch must find the callback"
+        );
+        assert_eq!(seen.get(), "progress-42");
+
+        // An unknown sub_id is not consumed (so the caller falls back to the
+        // plain, context-free path).
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            assert!(!app_ctx.dispatch_subscription_event_with_ctx(
+                SubscriptionId(9999),
+                &event,
+                ctx
+            ));
+        });
+    }
+
+    /// Regression for the re-entrancy panic: dispatch must clone the `Rc` and
+    /// **release the map borrow before invoking** the callback, so a callback
+    /// that re-enters the same map — as `ctx.open_window(...)` does via a nested
+    /// `build()` calling `subscribe_event_with_ctx` — does not `BorrowMutError`.
+    #[test]
+    fn ctx_dispatch_releases_borrow_before_invoking_callback() {
+        use crate::window::{BastydeWindowId, NoopWindowOps};
+
+        let mut tree = WidgetTree::new();
+        let app_ctx = tree.app_context().clone();
+        let sub_id = app_ctx.allocate_subscription_id();
+
+        let reenter_ctx = app_ctx.clone();
+        let reentered = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = reentered.clone();
+        let cb: std::rc::Rc<dyn Fn(&dyn Any, &mut crate::widget::EventContext)> =
+            std::rc::Rc::new(move |_ev, _ctx| {
+                // Simulate open_window → build() → subscribe_event_with_ctx: a
+                // fresh registration into the SAME map while this callback runs.
+                reenter_ctx.subscription_ctx_callbacks.borrow_mut().insert(
+                    SubscriptionId(4242),
+                    (
+                        Some(BastydeWindowId::new(2)),
+                        std::rc::Rc::new(|_e: &dyn Any, _c: &mut crate::widget::EventContext| {}),
+                    ),
+                );
+                flag.set(true);
+            });
+        app_ctx
+            .subscription_ctx_callbacks
+            .borrow_mut()
+            .insert(sub_id, (Some(BastydeWindowId::new(1)), cb));
+
+        let event = TestEvent {
+            id: 1,
+            message: String::new(),
+        };
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            assert!(app_ctx.dispatch_subscription_event_with_ctx(sub_id, &event, ctx));
+        });
+
+        assert!(
+            reentered.get(),
+            "callback ran and its re-entrant map insert did not panic"
+        );
+        assert_eq!(
+            app_ctx.ctx_subscription_count(),
+            2,
+            "original + the re-entrant insert both present"
+        );
+    }
+
+    /// Exercises the real `BuildContext::subscribe_event_with_ctx` (headless →
+    /// window `None`) end-to-end: registration lands in the ctx map, and
+    /// destroying the widget tears it back down (covers the widget-destroy path's
+    /// removal from the ctx map).
+    #[test]
+    fn subscribe_event_with_ctx_registers_and_tears_down() {
+        let mut tree = WidgetTree::new();
+        let (_source, _poster) = install_source(&mut tree, MockEventSource::default());
+
+        let id = tree.add(CtxSubscribingWidget {
+            origin: TestOrigin::Created,
+        });
+        // The ctx path uses the OTHER map — the plain count stays 0.
+        assert_eq!(tree.app_context().ctx_subscription_count(), 1);
+        assert_eq!(tree.app_context().subscription_count(), 0);
+
+        tree.destroy_subtree(id);
+        assert_eq!(
+            tree.app_context().ctx_subscription_count(),
+            0,
+            "destroying the widget must remove its context-bearing subscription"
+        );
     }
 
     #[test]

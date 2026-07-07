@@ -1691,6 +1691,10 @@ impl WidgetTree {
                 .subscription_callbacks
                 .borrow_mut()
                 .remove(&sub_id);
+            self.app_context
+                .subscription_ctx_callbacks
+                .borrow_mut()
+                .remove(&sub_id);
         }
 
         // Decide how to treat the existing children. Two modes:
@@ -1815,6 +1819,10 @@ impl WidgetTree {
             drop(handle);
             self.app_context
                 .subscription_callbacks
+                .borrow_mut()
+                .remove(&sub_id);
+            self.app_context
+                .subscription_ctx_callbacks
                 .borrow_mut()
                 .remove(&sub_id);
         }

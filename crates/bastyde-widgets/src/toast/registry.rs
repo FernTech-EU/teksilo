@@ -198,6 +198,7 @@ impl ToastRegistry {
                 .iter_mut()
                 .find(|e| e.id.as_deref() == Some(dedup_id.as_str()))
         {
+            let severity_changed = existing.severity != toast.severity;
             existing.severity = toast.severity;
             existing.priority = toast.priority;
             existing.title = toast.title;
@@ -220,12 +221,17 @@ impl ToastRegistry {
             }
             existing.style_override = toast.style_override;
             existing.time_left = toast.auto_dismiss_after;
-            // Same preservation semantic for the leading widget:
-            // only replace when the update sets one. Otherwise the
-            // original leading (typically a Spinner from
-            // `Toast::loading`) survives the mutation.
+            // Leading widget: replace when the update sets one. Otherwise
+            // *keep* the original (typically a Spinner from `Toast::loading`)
+            // for a same-severity text-only update — EXCEPT when the severity
+            // changed (e.g. a loading toast is updated to `success`): then the
+            // stale custom leading (the spinner) must be dropped so the surface
+            // shows the new severity's glyph (the ✓/✕/… icon), not a spinner
+            // that keeps spinning under a "success" title.
             if toast.leading.is_some() {
                 existing.leading = toast.leading;
+            } else if severity_changed {
+                existing.leading = None;
             }
             // `archive` flag tracks the latest call's intent. If
             // the update sets `archive(false)` after an initial
@@ -575,5 +581,56 @@ impl std::fmt::Debug for ToastRegistry {
             )
             .field("hover_count", &self.hover_count.get())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::toast::Toast;
+    use crate::toast::host::ToastInstallOptions;
+    use bastyde_i18n::lit;
+
+    fn registry() -> ToastRegistry {
+        ToastRegistry::new(ToastInstallOptions {
+            archive: None,
+            ..ToastInstallOptions::default()
+        })
+    }
+
+    #[test]
+    fn severity_change_drops_stale_custom_leading() {
+        let r = registry();
+        // A loading toast carries a Spinner as its custom leading.
+        let _ = r.enqueue(Toast::loading(lit!("Working")).id("op"));
+        let eid = r.live_entry_ids()[0];
+        assert!(
+            r.with_entry(eid, |e| e.leading.is_some()).unwrap(),
+            "loading toast starts with a spinner leading"
+        );
+
+        // Update-in-place to a success toast (different severity, no custom
+        // leading) → the stale spinner must be cleared so the surface shows the
+        // success glyph, not a spinner spinning under a "success" title.
+        let _ = r.enqueue(Toast::success(lit!("Done")).id("op"));
+        assert!(
+            !r.with_entry(eid, |e| e.leading.is_some()).unwrap(),
+            "a severity change without a new leading drops the stale spinner"
+        );
+    }
+
+    #[test]
+    fn same_severity_text_update_keeps_leading() {
+        let r = registry();
+        // `loading` = Info severity + Spinner.
+        let _ = r.enqueue(Toast::loading(lit!("0%")).id("op"));
+        let eid = r.live_entry_ids()[0];
+        // A same-severity (Info) text-only update with no custom leading keeps
+        // the spinner — so a progress toast's spinner survives its text updates.
+        let _ = r.enqueue(Toast::info(lit!("50%")).id("op"));
+        assert!(
+            r.with_entry(eid, |e| e.leading.is_some()).unwrap(),
+            "a same-severity text update preserves the existing spinner"
+        );
     }
 }

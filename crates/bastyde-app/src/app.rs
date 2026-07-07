@@ -1336,6 +1336,72 @@ impl BastydeAppHandler {
         Ok(())
     }
 
+    /// Deliver a backend `AppEvent::SubscriptionEvent` to a *context-bearing*
+    /// subscription registered via
+    /// [`BuildContext::subscribe_event_with_ctx`](bastyde_core::BuildContext::subscribe_event_with_ctx):
+    /// mint a fresh [`EventContext`](bastyde_core::EventContext) from the
+    /// subscriber's window tree and invoke the stored callback inside it.
+    ///
+    /// Returns `true` iff `sub_id` names a context-bearing subscription — the
+    /// caller then skips the plain, context-free dispatch (a `sub_id` lives in
+    /// exactly one callback map). A `true` return with the window torn down (or
+    /// mid-teardown) drops the event, exactly like the async-completion path;
+    /// it still returns `true` so the stale event never falls through to the
+    /// plain map.
+    ///
+    /// Mirrors [`try_route_async_completion_payload`](Self::try_route_async_completion_payload)'s
+    /// take / run-with-context / reinsert dance — the one supported way to run
+    /// application code with a fresh `EventContext` from the event loop.
+    fn try_dispatch_subscription_with_ctx(
+        &mut self,
+        sub_id: SubscriptionId,
+        event: &dyn std::any::Any,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let Some(template) = self.wm.app_context_template().cloned() else {
+            return false;
+        };
+        let Some(window_id) = template.ctx_subscription_window(sub_id) else {
+            return false;
+        };
+        // From here `sub_id` IS a context-bearing subscription: consume it
+        // (return `true`) even if the window is gone, so a late event never
+        // falls back to the plain, context-free map.
+        let Some(winit_id) = self.wm.bastyde_to_winit_map().get(&window_id).copied() else {
+            return true;
+        };
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return true;
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            current.tree.run_with_event_context(&mut ops, |ctx| {
+                template.dispatch_subscription_event_with_ctx(sub_id, event, ctx);
+            });
+        }
+
+        self.wm.reinsert_managed(winit_id, current);
+        true
+    }
+
     /// Try to route an `AppEvent::External` payload as a
     /// [`NativeMenuEventPayload`](bastyde_platform::native_menu::NativeMenuEventPayload)
     /// posted when the user chose an item in the platform's native menu bar.
@@ -2187,7 +2253,15 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
             // the same Rc held by every window's tree, so we don't need to
             // route by window.
             AppEvent::SubscriptionEvent { sub_id, event } => {
-                if let Some(template) = self.wm.app_context_template() {
+                // A context-bearing subscription (`subscribe_event_with_ctx`)
+                // needs a fresh `EventContext` minted from its window's tree;
+                // a plain one dispatches against the shared template with no
+                // context. `try_dispatch_subscription_with_ctx` returns `true`
+                // when `sub_id` names a context-bearing subscription (so we
+                // skip the plain path — a sub_id lives in exactly one map).
+                if !self.try_dispatch_subscription_with_ctx(sub_id, &*event, event_loop)
+                    && let Some(template) = self.wm.app_context_template()
+                {
                     template.dispatch_subscription_event(sub_id, &*event);
                 }
             }
