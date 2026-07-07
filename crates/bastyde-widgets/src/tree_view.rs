@@ -1321,6 +1321,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     let sel_click = self.row_selection.clone();
                     let click_index = i;
                     let source_click = self.source.clone();
+                    let fi_click = self.focused_index.clone();
                     let has_children = item_has_children && self.row_click_expands;
 
                     ctx.apply_handlers(
@@ -1337,6 +1338,16 @@ impl<T: 'static> Widget for TreeView<T> {
                                 if ctx.press_claimed_by_interactive_child() {
                                     return bastyde_core::event::EventResponse::Ignored;
                                 }
+                                // Move the keyboard-navigation cursor to the clicked
+                                // row so a subsequent Arrow keypress steps from here
+                                // — `focused_index` is the arrow-nav origin
+                                // (`fi.get().unwrap_or(0)`) and is otherwise only
+                                // written by the keyboard handler, so without this a
+                                // click would select a row yet leave arrows stepping
+                                // from the stale keyboard cursor. Set for every
+                                // modifier (plain / Ctrl / Shift): the lead follows
+                                // the press in all three.
+                                fi_click.set(Some(click_index));
                                 // Selection lands on press — snappy — reading the
                                 // modifiers straight off the PointerDown (the tap
                                 // gesture fires later, on release).
@@ -1915,6 +1926,38 @@ mod tests {
             vec![2],
             "Second ArrowDown should select index 2 (third root)"
         );
+    }
+
+    #[test]
+    fn arrow_nav_resumes_from_the_clicked_row() {
+        // Regression: a row click must move the keyboard-navigation cursor
+        // (`focused_index`) to the clicked row, so the next Arrow step continues
+        // from there — not from the stale keyboard cursor / index 0. Rows are
+        // 20px tall; row 3's body is at y≈70, x=100 (past any chevron column).
+        use bastyde_core::event::{Key, Modifiers};
+        let (mut wtree, tv, selection) = flat_tree_view(10, bastyde_data::SelectionMode::Single);
+        wtree.layout(SizeProposal::exact(400.0, 300.0)); // 10 rows × 20px all visible
+        wtree.focus(tv);
+
+        // Click row 3 (selects it AND should set the nav cursor to 3).
+        press_at(&mut wtree, 100.0, 70.0);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![3],
+            "precondition: body click selects row 3"
+        );
+
+        // ArrowDown must step to 4 (from the clicked row), not to 1 (from index 0).
+        wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![4],
+            "ArrowDown after a click resumes from the clicked row (3 → 4)"
+        );
+
+        // And ArrowUp steps back above the clicked row (4 → 3).
+        wtree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![3], "ArrowUp resumes (4 → 3)");
     }
 
     /// A flat tree of `n` roots labelled "Node {i}", with a single-select model.

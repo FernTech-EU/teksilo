@@ -1800,6 +1800,61 @@ mod tests {
     }
 
     #[test]
+    fn row_click_moves_focus_so_arrow_nav_resumes_there() {
+        // Regression: in row-selection mode a row click set the selection but
+        // NOT `focused_cell` (the arrow-nav origin, `unwrap_or((0,0))`), so the
+        // next Arrow stepped from row 0 rather than the clicked row. Click flat
+        // row 1 with ≥3 visible rows so the fall-back-to-0 bug is observable
+        // (buggy: 0 → 1; fixed: 1 → 2).
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+        use bastyde_data::{SelectionMode, SelectionModel};
+        let t = TreeModel::new();
+        t.insert_root(0, "a");
+        t.insert_root(1, "b");
+        t.insert_root(2, "c");
+        t.insert_root(3, "d");
+        let proxy = SortFilterTreeModel::new(t);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        assert_eq!(proxy.visible_count(), 4, "four flat roots");
+
+        // Click flat row 1 ("b"): 20px rows starting below the header.
+        let click_y = cp::HEADER_HEIGHT + 1.0 * 20.0 + 10.0;
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(40.0, click_y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(40.0, click_y),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(selection.selected_indices(), vec![1], "click selects flat row 1");
+
+        // ArrowDown must resume from the clicked row (1 → 2), not from row 0.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "ArrowDown after a click resumes from the clicked row (1 → 2)"
+        );
+    }
+
+    #[test]
     fn role_is_treegrid() {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());

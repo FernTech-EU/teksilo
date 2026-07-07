@@ -1097,6 +1097,7 @@ impl<T: 'static> Widget for ListView<T> {
                 if let Some(ref sel) = self.row_selection {
                     let sel_click = sel.clone();
                     let click_index = i;
+                    let fi_click = self.focused_index.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_pointer_event(move |event, ctx| match event {
@@ -1111,6 +1112,12 @@ impl<T: 'static> Widget for ListView<T> {
                                 if ctx.press_claimed_by_interactive_child() {
                                     return bastyde_core::event::EventResponse::Ignored;
                                 }
+                                // Move the keyboard-navigation cursor to the clicked
+                                // row so a subsequent Arrow steps from here, not from
+                                // the stale keyboard cursor / index 0 (`focused_index`
+                                // is the nav origin, `fi.get().unwrap_or(0)`, and is
+                                // otherwise only written by the keyboard handler).
+                                fi_click.set(Some(click_index));
                                 if modifiers.ctrl() {
                                     sel_click.toggle(click_index);
                                 } else if modifiers.shift() {
@@ -1462,6 +1469,53 @@ mod tests {
             .item_height(item_height),
         );
         (tree, lv_id, model)
+    }
+
+    #[test]
+    fn arrow_nav_resumes_from_the_clicked_row() {
+        // Regression: a row click must move the keyboard-navigation cursor
+        // (`focused_index`) to the clicked row, so the next Arrow step continues
+        // from there — not from the stale keyboard cursor / index 0.
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0)); // 10 rows × 20px all visible
+        tree.focus(lv_id);
+
+        // Click row 3 (rows are 20px tall, so y≈70; x past any leading control).
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            selection.selected_indices(),
+            vec![3],
+            "precondition: body click selects row 3"
+        );
+
+        // ArrowDown must step to 4 (from the clicked row), not to 1 (from index 0).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![4],
+            "ArrowDown after a click resumes from the clicked row (3 → 4)"
+        );
     }
 
     #[test]

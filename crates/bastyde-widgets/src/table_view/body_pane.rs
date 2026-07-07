@@ -388,6 +388,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                             if editing_for_click.get().is_some() {
                                 return bastyde_core::event::EventResponse::Ignored;
                             }
+                            // Nav-cursor sync (`focused_cell`) is handled by the
+                            // per-cell pointer handler above, which fires on any
+                            // cell click in every mode — so a row click here already
+                            // moves the arrow-nav origin. (TreeTableView has no such
+                            // per-cell handler, so it syncs in its row handler.)
                             if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
                                 sel_for_click.toggle(row_index_for_click);
                             } else if modifiers.shift()

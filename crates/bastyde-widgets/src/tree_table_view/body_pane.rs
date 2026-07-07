@@ -350,6 +350,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             {
                 let sel_for_click = sel.clone();
                 let row_index_for_click = flat_idx;
+                let focused_for_click = self.focused_cell.clone();
                 row_handlers = row_handlers.on_pointer_event(move |event, _ctx| {
                     if let WidgetEvent::PointerDown {
                         button: PointerButton::Primary,
@@ -357,6 +358,14 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         ..
                     } = event
                     {
+                        // Move the keyboard-navigation cursor to the clicked row so a
+                        // subsequent Arrow steps from here — the row-nav origin is
+                        // `focused_cell.get().unwrap_or((0,0))`, which nothing else
+                        // writes on a click. Keep the existing column; the ring stays
+                        // hidden (gated on the pointer/keyboard `focus_visible`
+                        // modality).
+                        let col = focused_for_click.get().map(|(_, c)| c).unwrap_or(0);
+                        focused_for_click.set(Some((row_index_for_click, col)));
                         if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
                             sel_for_click.toggle(row_index_for_click);
                         } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi

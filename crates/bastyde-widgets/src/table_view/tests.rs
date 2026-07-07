@@ -812,6 +812,62 @@ fn arrow_keys_clamp_at_edges() {
 }
 
 #[test]
+fn row_click_moves_focus_so_arrow_nav_resumes_there() {
+    // Guards that a click moves the keyboard-navigation cursor (`focused_cell`,
+    // the arrow-nav origin) to the clicked row, so the next Arrow resumes from
+    // there and not from the stale cursor / row 0. In TableView this is provided
+    // by the per-cell pointer handler (fires on every cell click, all modes) —
+    // unlike TreeTableView, whose row handler must sync it explicitly.
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{PointerButton, WidgetEvent};
+    use crate::styles::recipe_table_style as cp;
+
+    let model = rows(10);
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.focus(table);
+
+    // Click row 3's body: rows are 20px tall and start below the header.
+    let click_y = cp::HEADER_HEIGHT + 3.0 * 20.0 + 10.0;
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(100.0, click_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(100.0, click_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    assert_eq!(sel.selected_indices(), vec![3], "click selects row 3");
+    assert_eq!(
+        read_focused_cell(&tree, table).map(|(r, _)| r),
+        Some(3),
+        "click must move the nav cursor to the clicked row"
+    );
+
+    // ArrowDown resumes from the clicked row (3 → 4), not from row 0 → 1.
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        sel.selected_indices(),
+        vec![4],
+        "ArrowDown after a click resumes from the clicked row (3 → 4)"
+    );
+}
+
+#[test]
 fn home_end_jump_within_row() {
     let (mut tree, table, _) = build_table(5);
     focus_at(&mut tree, table, 1, 0);
