@@ -1798,7 +1798,10 @@ mod tests {
         //    card — leaves BOTH standing (nothing is stacked above the hit).
         let (mut mgr, modal, tooltip) = build();
         let (dismissed, _, _) = mgr.handle_click_outside(Point::new(450.0, 750.0));
-        assert!(dismissed.is_empty(), "clicking the tooltip dismisses nothing");
+        assert!(
+            dismissed.is_empty(),
+            "clicking the tooltip dismisses nothing"
+        );
         assert!(mgr.active_ids().contains(&modal));
         assert!(mgr.active_ids().contains(&tooltip));
 

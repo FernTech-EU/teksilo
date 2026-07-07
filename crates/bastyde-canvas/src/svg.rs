@@ -1564,7 +1564,11 @@ mod tests {
             <circle cx="8" cy="8" r="2.3"/>
         </svg>"##;
         let icon = SvgIcon::parse(svg).unwrap();
-        assert_eq!(icon.strokes.len(), 1, "the stroked circle should yield one stroke");
+        assert_eq!(
+            icon.strokes.len(),
+            1,
+            "the stroked circle should yield one stroke"
+        );
         assert!(
             matches!(
                 icon.strokes[0].path.commands.first(),

@@ -1843,7 +1843,11 @@ mod tests {
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
-        assert_eq!(selection.selected_indices(), vec![1], "click selects flat row 1");
+        assert_eq!(
+            selection.selected_indices(),
+            vec![1],
+            "click selects flat row 1"
+        );
 
         // ArrowDown must resume from the clicked row (1 → 2), not from row 0.
         tree.press_key(Key::ArrowDown, Modifiers::NONE);

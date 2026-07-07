@@ -818,9 +818,9 @@ fn row_click_moves_focus_so_arrow_nav_resumes_there() {
     // there and not from the stale cursor / row 0. In TableView this is provided
     // by the per-cell pointer handler (fires on every cell click, all modes) —
     // unlike TreeTableView, whose row handler must sync it explicitly.
+    use crate::styles::recipe_table_style as cp;
     use bastyde_canvas::Point;
     use bastyde_core::event::{PointerButton, WidgetEvent};
-    use crate::styles::recipe_table_style as cp;
 
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Single);

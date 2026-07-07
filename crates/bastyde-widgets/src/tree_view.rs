@@ -1957,7 +1957,11 @@ mod tests {
 
         // And ArrowUp steps back above the clicked row (4 → 3).
         wtree.press_key(Key::ArrowUp, Modifiers::NONE);
-        assert_eq!(selection.selected_indices(), vec![3], "ArrowUp resumes (4 → 3)");
+        assert_eq!(
+            selection.selected_indices(),
+            vec![3],
+            "ArrowUp resumes (4 → 3)"
+        );
     }
 
     /// A flat tree of `n` roots labelled "Node {i}", with a single-select model.
