@@ -594,7 +594,14 @@ mod tests {
     fn uri_list_parses_files_and_urls() {
         let list = "#comment\r\nfile:///tmp/My%20File.txt\r\nhttps://example.com/a%2Bb\r\n";
         let data = ExternalDropData::from_uri_list(list);
-        assert_eq!(data.files, vec![PathBuf::from("/tmp/My File.txt")]);
+        // `file://` local-path decoding is OS-specific (see `uri_path_to_pathbuf`):
+        // on Windows a driveless `/tmp/…` loses its leading slash and uses `\`
+        // separators, so it lands as a relative `tmp\…`.
+        #[cfg(windows)]
+        let expected_file = PathBuf::from(r"tmp\My File.txt");
+        #[cfg(not(windows))]
+        let expected_file = PathBuf::from("/tmp/My File.txt");
+        assert_eq!(data.files, vec![expected_file]);
         assert_eq!(data.uris, vec!["https://example.com/a+b".to_string()]);
         assert!(data.mime.contains_key("text/uri-list"));
     }
