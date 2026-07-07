@@ -38,6 +38,14 @@ accesskit = "0.24.1"
 tiny-skia = "0.12.0"
 wgpu = "29.0.3"
 winit = "0.30"
+# Windows platform bindings. Only consumed by `bastyde-platform` (target-gated to
+# `cfg(target_os = "windows")`), but the version is pinned here per the workspace
+# dependency convention; the crate selects its Win32 feature modules locally.
+# `windows-core` is a *direct* dep there because the `#[implement]` COM macro emits
+# a crate-root `::windows_core` path. Both pinned to 0.62 to unify with the
+# windows-core 0.62 that accesskit_winit pulls in transitively.
+windows = "0.62"
+windows-core = "0.62"
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12"
 unic-langid = "0.9"

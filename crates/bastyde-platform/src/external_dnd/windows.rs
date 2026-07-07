@@ -69,8 +69,9 @@ impl DropTarget {
     /// Convert a screen-space `POINTL` to window-logical coordinates.
     fn logical_position(&self, pt: &POINTL) -> Point {
         let mut p = POINT { x: pt.x, y: pt.y };
-        // `ScreenToClient` mutates `p` into client (physical) pixels.
-        unsafe { ScreenToClient(self.hwnd, &mut p) };
+        // `ScreenToClient` mutates `p` into client (physical) pixels; its BOOL
+        // return (success flag) is not actionable here.
+        let _ = unsafe { ScreenToClient(self.hwnd, &mut p) };
         let dpi = unsafe { GetDpiForWindow(self.hwnd) };
         let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
         Point::new(p.x as f32 / scale, p.y as f32 / scale)
