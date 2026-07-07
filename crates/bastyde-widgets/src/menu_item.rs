@@ -945,6 +945,48 @@ impl Widget for MenuItem {
             })
         };
 
+        // Shared activation for assistive-tech / automation (AccessKit `Click`).
+        // Mirrors the Enter/Space `on_key` path exactly: a regular item flips its
+        // bound mode, runs the user action, and dismisses the chain; a submenu
+        // trigger opens its nested overlay. The item already advertises
+        // `Action::Click` in `accessibility()`, but without a handler that
+        // advertised action is inert — this makes it activatable.
+        let activate_item: std::rc::Rc<dyn Fn(&mut EventContext)> = {
+            let mode_activate = mode_activate.clone();
+            let action = action_rc.clone();
+            let sub_id = submenu_content_id;
+            let open = submenu_open_signal.clone();
+            let dismiss = submenu_dismiss_callback.clone();
+            std::rc::Rc::new(move |ctx: &mut EventContext| {
+                if let Some(ref activate) = mode_activate {
+                    activate();
+                }
+                if let Some(ref action) = *action {
+                    action(ctx);
+                    ctx.dismiss_self_overlay_chain();
+                } else if mode_activate.is_some() {
+                    ctx.dismiss_self_overlay_chain();
+                } else if let Some(sub_id) = sub_id {
+                    ctx.dismiss_child_overlays_except(sub_id);
+                    ctx.activate(sub_id);
+                    open.set(true);
+                    ctx.show_overlay(OverlayRequest {
+                        content_id: sub_id,
+                        anchor: self_id,
+                        placement: OverlayPlacement::TrailingEdge,
+                        dismiss: DismissBehavior::PointerLeave {
+                            delay: DEFAULT_SUBMENU_CLOSE_DELAY,
+                        },
+                        layer: OverlayLayer::InTree,
+                        parent_overlay: None,
+                        on_dismiss: Some(dismiss.clone()),
+                        fade_duration: None,
+                    });
+                    ctx.request_focus(sub_id);
+                }
+            })
+        };
+
         let mut handler_set = HandlerSet::new();
 
         if is_submenu {
@@ -1219,6 +1261,21 @@ impl Widget for MenuItem {
             }
         });
 
+        // Assistive-tech / automation activation. Click (the default action)
+        // and Expand (submenu triggers) both run the shared activation.
+        handler_set = handler_set.on_access_action({
+            let activate = activate_item.clone();
+            move |action, ctx: &mut EventContext| -> EventResponse {
+                use bastyde_core::accesskit::Action;
+                if matches!(action, Action::Click | Action::Expand) {
+                    activate(ctx);
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            }
+        });
+
         // Cursor: NotAllowed when effectively disabled (the original
         // intent), Pointer otherwise. Sourced from the arena via the
         // reactive effective_enabled signal so it reacts to
@@ -1343,7 +1400,15 @@ impl Widget for MenuItem {
         // but the content id survives.
         if self.submenu_content_id.is_some() {
             builder.set_has_popup(HasPopup::Menu);
-            builder.set_expanded(self.submenu_open.get());
+            let open = self.submenu_open.get();
+            builder.set_expanded(open);
+            // State-appropriate Expand/Collapse (Click, advertised below, opens
+            // it too). Handled by the `on_access_action` handler in `build()`.
+            if open {
+                builder.add_action(bastyde_core::accesskit::Action::Collapse);
+            } else {
+                builder.add_action(bastyde_core::accesskit::Action::Expand);
+            }
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Click);

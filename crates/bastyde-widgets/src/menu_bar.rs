@@ -698,6 +698,34 @@ impl Widget for MenuBarTrigger {
                     }
                 }
             })
+            .on_access_action({
+                // Assistive-tech / automation activation. Click toggles the
+                // dropdown (matching `on_tap`); Expand opens it, Collapse closes
+                // it. Without this the trigger's advertised actions are inert.
+                let menu_ctx = menu_ctx.clone();
+                move |action, ctx: &mut EventContext| -> EventResponse {
+                    use bastyde_core::accesskit::Action;
+                    match action {
+                        Action::Click => {
+                            if menu_ctx.open_index.get() == Some(index) {
+                                menu_ctx.close(ctx);
+                            } else {
+                                menu_ctx.open_at(index, ctx);
+                            }
+                            EventResponse::Handled
+                        }
+                        Action::Expand => {
+                            menu_ctx.open_at(index, ctx);
+                            EventResponse::Handled
+                        }
+                        Action::Collapse => {
+                            menu_ctx.close(ctx);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
             .focusable(true)
             .cursor(CursorIcon::Pointer);
 
@@ -755,7 +783,18 @@ impl Widget for MenuBarTrigger {
         }
         // Every top-level menu bar entry opens a dropdown Menu.
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);
-        builder.set_expanded(self.menu_ctx.open_index.get() == Some(self.index));
+        let is_open = self.menu_ctx.open_index.get() == Some(self.index);
+        builder.set_expanded(is_open);
+        // Advertise the default action (Click) plus the state-appropriate
+        // Expand/Collapse so assistive tech (and automation) can open/close the
+        // dropdown — the `on_access_action` handler in `build()` drives them.
+        // Without this a screen-reader user cannot open any menu.
+        builder.add_action(bastyde_core::accesskit::Action::Click);
+        if is_open {
+            builder.add_action(bastyde_core::accesskit::Action::Collapse);
+        } else {
+            builder.add_action(bastyde_core::accesskit::Action::Expand);
+        }
         // Mnemonic — announced by Windows Narrator as "Access key: F".
         if let Some(k) = self.mnemonic_key {
             builder
