@@ -1448,6 +1448,30 @@ impl WindowManager {
         }
     }
 
+    /// Request redraw only on windows whose next frame deadline has been
+    /// reached (`<= now`). Used at the animation `ResumeTimeReached` wake so
+    /// that a single animating window (e.g. a blinking caret) does NOT force a
+    /// redraw of every other window.
+    ///
+    /// The blanket `request_redraw_all()` here was a cross-window over-redraw:
+    /// a wasted-power bug on every platform (an inactive, non-animating window
+    /// repainted at 60 Hz), and on Windows a *correctness* bug — winit services
+    /// only one window's `RedrawRequested` per event-loop iteration, so an
+    /// inactive window flooded with redraws it never wins is starved of its own
+    /// pending repaint and freezes on its last active frame (caret stuck,
+    /// colours not desaturated). Targeting only due windows removes both.
+    pub fn request_redraw_due(&self, now: std::time::Instant) {
+        for managed in self.windows.values() {
+            if managed
+                .tree
+                .next_timer_deadline()
+                .is_some_and(|deadline| deadline <= now)
+            {
+                managed.platform_window.request_redraw();
+            }
+        }
+    }
+
     /// Drain pending modal requests from all windows.
     pub fn drain_pending_modal_requests(
         &mut self,

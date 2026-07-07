@@ -295,7 +295,7 @@ struct IdleTrace {
 
 impl IdleTrace {
     fn from_env() -> Option<Self> {
-        match std::env::var("Bastyde_IDLE_TRACE") {
+        match std::env::var("BASTYDE_IDLE_TRACE") {
             Ok(value) if value != "0" && !value.is_empty() => Some(Self {
                 last_report: Instant::now(),
                 resume_time_reached: 0,
@@ -2249,7 +2249,13 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                 trace.note_resume_time_reached();
                 trace.note_request_redraw_all();
             }
-            self.wm.request_redraw_all();
+            // Redraw only the windows whose frame deadline is actually due —
+            // NOT every window. A blanket redraw here pins non-animating
+            // windows at the animation frame rate and, on Windows (one
+            // RedrawRequested serviced per loop iteration), starves an inactive
+            // window's own pending repaint so it freezes. See
+            // `WindowManager::request_redraw_due`.
+            self.wm.request_redraw_due(Instant::now());
         }
         self.update_control_flow(event_loop);
     }
