@@ -119,6 +119,21 @@ pub struct ExternalDndEventPayload {
     pub event: ExternalDragEvent,
 }
 
+/// Posted by a backend whose outbound (app → OS) drag is **blocking** (Windows
+/// OLE `DoDragDrop` runs its own modal message loop) so it can be run OUTSIDE
+/// the in-app event dispatch that started it. [`ExternalDndGuard::begin_drag`]
+/// stashes the payload, posts this, and returns `true`; `bastyde-app`'s
+/// `AppEvent::External` arm downcasts it and calls
+/// [`ExternalDndHandle::run_pending_outbound_drag`] on the next loop turn — a
+/// point where no window is borrowed out of the manager, mirroring how inbound
+/// drag events route through the poster rather than re-entrantly inside a
+/// platform callback. Non-blocking backends (macOS / Wayland) never post this.
+#[derive(Debug)]
+pub struct OutboundOsDragRequest {
+    /// The window whose guard stashed the outbound payload to export.
+    pub window_id: BastydeWindowId,
+}
+
 // ============================================================
 // ExternalDndBackend trait + registration guard
 // ============================================================
@@ -146,6 +161,16 @@ pub trait ExternalDndGuard {
     fn begin_drag(&self, _data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
         false
     }
+
+    /// Run a previously-requested **blocking** outbound drag for this window,
+    /// synchronously. Called by [`ExternalDndHandle::run_pending_outbound_drag`]
+    /// from a `bastyde-app` event-loop turn AFTER [`Self::begin_drag`] returned
+    /// `true` and stashed the payload — so a blocking platform drag loop (Windows
+    /// OLE `DoDragDrop`) runs outside the dispatch that started it. When it
+    /// finishes, this MUST post [`ExternalDragEvent::DragEnded`] through the
+    /// captured poster. Default no-op: non-blocking backends (macOS / Wayland)
+    /// start the session directly in `begin_drag` and never stash.
+    fn run_pending_outbound_drag(&self) {}
 }
 
 /// A guard that does nothing on drop. Used by [`NoopExternalDndBackend`] and
@@ -263,6 +288,20 @@ impl ExternalDndHandle {
             .get(&window_id)
             .map(|g| g.begin_drag(data, image))
             .unwrap_or(false)
+    }
+
+    /// Run the deferred blocking outbound OS drag for `window_id` (Windows OLE
+    /// `DoDragDrop`), if its guard stashed one via `begin_drag`. Called from
+    /// `bastyde-app` when it receives an [`OutboundOsDragRequest`]. No-op if the
+    /// window isn't attached.
+    ///
+    /// The `guards` borrow is deliberately held across the (blocking) drag loop:
+    /// the only re-entrant `guards` mutation is attach / detach (window create /
+    /// close), which cannot happen while the user is mid-drag on this window.
+    pub fn run_pending_outbound_drag(&self, window_id: BastydeWindowId) {
+        if let Some(guard) = self.inner.guards.borrow().get(&window_id) {
+            guard.run_pending_outbound_drag();
+        }
     }
 }
 

@@ -1511,7 +1511,27 @@ impl BastydeAppHandler {
         payload: Box<dyn std::any::Any + Send>,
         event_loop: &ActiveEventLoop,
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
-        use bastyde_platform::external_dnd::{ExternalDndEventPayload, ExternalDragEvent};
+        use bastyde_platform::external_dnd::{
+            ExternalDndEventPayload, ExternalDndHandle, ExternalDragEvent, OutboundOsDragRequest,
+        };
+
+        // Deferred blocking outbound (app → OS) drag: run OLE DoDragDrop here,
+        // outside the in-app dispatch that started it (Windows). No window is
+        // taken out of the manager at this point, so the drag's modal message
+        // loop can't strand a borrowed window.
+        let payload = match payload.downcast::<OutboundOsDragRequest>() {
+            Ok(req) => {
+                if let Some(handle) = self
+                    .wm
+                    .app_context_template()
+                    .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+                {
+                    handle.run_pending_outbound_drag(req.window_id);
+                }
+                return Ok(());
+            }
+            Err(other) => other,
+        };
 
         let payload = match payload.downcast::<ExternalDndEventPayload>() {
             Ok(boxed) => *boxed,
