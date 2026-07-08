@@ -115,8 +115,8 @@ pub use widget_tree::WidgetTree;
 pub use window::state::WindowStateInit;
 pub use window::{
     BastydeWindowId, CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig,
-    NoopWindowOps, PostRootBuilder, RootBuilder, UserAttentionKind, WindowCommand, WindowConfig,
-    WindowIcon, WindowOps, WindowPlacement, WindowState,
+    NoopWindowOps, PostRootBuilder, RootBuilder, SizeToContent, UserAttentionKind, WindowCommand,
+    WindowConfig, WindowIcon, WindowOps, WindowPlacement, WindowState,
 };
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,

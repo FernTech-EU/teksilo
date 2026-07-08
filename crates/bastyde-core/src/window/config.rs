@@ -307,10 +307,14 @@ impl WindowConfig {
     }
 
     /// Make this window resize itself to fit its content's intrinsic size.
-    /// See [`SizeToContent`]. Typically paired with `.resizable(false)`; the
-    /// configured [`size`](Self::size) / [`min_size`](Self::min_size) act as a
-    /// floor. Used for native modal dialogs (e.g. `MessageBox`) so the OS
-    /// window grows when the content does — matching the in-tree overlay path.
+    /// See [`SizeToContent`]. The configured [`size`](Self::size) /
+    /// [`min_size`](Self::min_size) act as a floor. Used for native modal dialogs
+    /// (e.g. `MessageBox`) so the OS window grows when the content does —
+    /// matching the in-tree overlay path.
+    ///
+    /// Do NOT also call `.resizable(false)`: winit encodes non-resizable as
+    /// equal min/max size hints (notably on X11), which would clamp away the
+    /// programmatic growth this relies on.
     pub fn size_to_content(mut self, mode: SizeToContent) -> Self {
         self.size_to_content = mode;
         self

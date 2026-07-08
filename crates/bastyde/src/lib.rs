@@ -200,8 +200,8 @@ pub mod prelude {
 
     // Multi-window API
     pub use bastyde_core::{
-        BastydeWindowId, CloseResponse, DecorationsMode, ModalConfig, UserAttentionKind,
-        WindowCommand, WindowConfig, WindowPlacement, WindowState,
+        BastydeWindowId, CloseResponse, DecorationsMode, ModalConfig, SizeToContent,
+        UserAttentionKind, WindowCommand, WindowConfig, WindowPlacement, WindowState,
     };
 
     // i18n (architecture §12)

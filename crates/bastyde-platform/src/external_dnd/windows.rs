@@ -14,10 +14,10 @@
 //! [`AppEventPoster`]; `bastyde-app` routes it to the window's `WidgetTree`.
 //! The registration is revoked when the guard drops (window close).
 //!
-//! **Verification status:** written against the `windows` crate 0.61 API but
-//! compiled and exercised only on a Windows host — it is `cfg(target_os =
-//! "windows")` and is not built on the macOS development machine. Treat a first
-//! Windows build as the verification pass.
+//! **Verification status:** written against the `windows` crate 0.62 API and
+//! exercised on a Windows host — inbound drops plus outbound `DoDragDrop`
+//! export. It is `cfg(target_os = "windows")`, so it is not built on the macOS
+//! development machine; re-verify on Windows after any change here.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -320,12 +320,11 @@ impl Drop for WindowsDndGuard {
     }
 }
 
-/// Windows external-drag backend. See the module docs.
+/// Windows external-drag backend. See the module docs. OLE is initialised
+/// lazily per window in [`ExternalDndBackend::attach`] (repeat calls return
+/// `S_FALSE`, harmless), so the backend itself is stateless.
 #[derive(Default)]
-pub struct WindowsExternalDndBackend {
-    // OLE must be initialised once per thread; cheap to repeat (returns S_FALSE).
-    _private: RefCell<()>,
-}
+pub struct WindowsExternalDndBackend;
 
 impl WindowsExternalDndBackend {
     pub fn new() -> Self {
