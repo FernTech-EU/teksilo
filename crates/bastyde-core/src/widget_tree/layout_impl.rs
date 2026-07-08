@@ -235,6 +235,65 @@ impl WidgetTree {
         self.layout_with_ops(proposal, &mut noop);
     }
 
+    /// Measure the intrinsic size of the primary (non-overlay) content root(s)
+    /// at `proposal` — e.g. `{ width: Some(w), height: None }` for the natural
+    /// height at a fixed width. Mirrors the overlay intrinsic pass below: it
+    /// calls the root's `layout_response` *directly* — NOT the
+    /// activation-ignoring [`WidgetArena::measure_intrinsic`] — so a
+    /// `visible_when(false)` / parked-`Switcher` descendant is excluded exactly
+    /// as the real layout excludes it. A size-to-content window is therefore
+    /// sized to what is actually shown. Computes sizes only (never writes
+    /// bounds), so it is safe to call right after a layout pass.
+    ///
+    /// Drives size-to-content windows (see
+    /// [`WindowConfig::size_to_content`](crate::window::WindowConfig::size_to_content)):
+    /// the native-window path has no in-tree overlay to size to content, so
+    /// `bastyde-app` measures the root here and resizes the OS window to fit.
+    /// Returns `None` if there is no active primary root; with more than one
+    /// active primary root the per-axis maximum is returned (size-to-content is
+    /// intended for single-primary-root windows).
+    pub fn measure_root_intrinsic(&self, proposal: SizeProposal) -> Option<bastyde_canvas::Size> {
+        let overlay_content_ids = self.overlay_manager.active_content_ids();
+        let base_theme = self.effective_theme.clone();
+        let mut result: Option<bastyde_canvas::Size> = None;
+        for root_id in self.arena.roots() {
+            if overlay_content_ids.contains(&root_id) || !self.arena.is_active(root_id) {
+                continue;
+            }
+            let resolved_theme = self.arena.resolve_theme(root_id, &base_theme);
+            let extras = crate::widget::LayoutExtras {
+                focused: self.focused,
+                shortcut_registry: Some(&self.shortcut_registry),
+                overlay_manager: Some(&self.overlay_manager),
+            };
+            let ctx = LayoutContext {
+                theme: &resolved_theme,
+                layout_direction: self.layout_direction,
+                scale_factor: self.device_scale_factor,
+                text_scale: self.effective_text_scale,
+                text_backend: self.text_backend.as_ref(),
+                arena: Some(&self.arena),
+                extras: Some(extras),
+                stack_main_axis: None,
+            };
+            let Some(node) = self.arena.get(root_id) else {
+                continue;
+            };
+            // Direct `layout_response` (activation-respecting), like the overlay
+            // pass — dormant descendants fall out via `child_size` returning
+            // `None`, so we measure only what is actually shown.
+            let size = node.widget.layout_response(proposal, &ctx).size;
+            result = Some(match result {
+                Some(acc) => bastyde_canvas::Size::new(
+                    acc.width.max(size.width),
+                    acc.height.max(size.height),
+                ),
+                None => size,
+            });
+        }
+        result
+    }
+
     /// Run the layout pass with the given size proposal, threading
     /// the app's [`WindowOps`](crate::window::WindowOps) sink
     /// through to drag_tick / tooltip / delayed-overlay handlers.
@@ -834,6 +893,141 @@ mod tests {
             active.get(),
             -1.0,
             "child_size must stay None for a dormant widget (no cache pollution)"
+        );
+    }
+
+    /// A box whose height is driven by a signal and whose width echoes the
+    /// proposed width (height-for-width) — models a widget (e.g. a `MessageBox`
+    /// "Show details" expander) whose intrinsic height changes with content.
+    /// Echoing the width lets a fixed-width intrinsic measurement be exercised.
+    #[derive(Debug)]
+    struct SignalBox {
+        h: crate::signal::Signal<f32>,
+    }
+    impl Widget for SignalBox {
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            bastyde_canvas::Size::new(p.width.unwrap_or(0.0), self.h.get()).into()
+        }
+        fn cacheable_layout(&self) -> bool {
+            false
+        }
+    }
+
+    /// Sums the ACTIVE children's heights via `child_size` (which returns
+    /// `None` for a dormant child, so a hidden child contributes nothing) —
+    /// lets a test assert size-to-content excludes dormant subtrees.
+    #[derive(Debug)]
+    struct VSumBox {
+        children: Vec<WidgetId>,
+    }
+    impl Widget for VSumBox {
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            let h: f32 = self
+                .children
+                .iter()
+                .filter_map(|&c| ctx.child_size(c, p))
+                .map(|s| s.height)
+                .sum();
+            bastyde_canvas::Size::new(p.width.unwrap_or(0.0), h).into()
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
+    }
+
+    #[test]
+    fn measure_root_intrinsic_honors_fixed_width_and_tracks_content() {
+        let h = crate::signal::Signal::new(140.0);
+        let mut tree = WidgetTree::new();
+        let _root = tree.add(SignalBox { h: h.clone() });
+        // Lay the root out constrained to a fixed native-modal size.
+        tree.layout(SizeProposal::exact(460.0, 140.0));
+
+        // Intrinsic measurement at a fixed width / unbounded height reports the
+        // proposed width and the content's natural height — the size a
+        // size-to-content window grows to, independent of the constrained pass.
+        let m = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(460.0),
+                height: None,
+            })
+            .expect("one active primary root");
+        assert!(
+            (m.width - 460.0).abs() < 0.01,
+            "fixed width honored, got {}",
+            m.width
+        );
+        assert!(
+            (m.height - 140.0).abs() < 0.01,
+            "natural height, got {}",
+            m.height
+        );
+
+        // A different fixed width flows through (the proposal really is used).
+        let narrow = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(300.0),
+                height: None,
+            })
+            .expect("root active");
+        assert!(
+            (narrow.width - 300.0).abs() < 0.01,
+            "proposal width, got {}",
+            narrow.width
+        );
+
+        // Content growth (a "Show details" expander) is reflected.
+        h.set(300.0);
+        let grown = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(460.0),
+                height: None,
+            })
+            .expect("root active");
+        assert!(
+            (grown.height - 300.0).abs() < 0.01,
+            "grows with content, got {}",
+            grown.height
+        );
+    }
+
+    #[test]
+    fn measure_root_intrinsic_excludes_dormant_content() {
+        let mut tree = WidgetTree::new();
+        let shown = tree.add(SignalBox {
+            h: crate::signal::Signal::new(200.0),
+        });
+        let hidden = tree.add(SignalBox {
+            h: crate::signal::Signal::new(1000.0),
+        });
+        tree.set_dormant(hidden);
+        let _root = tree.add(VSumBox {
+            children: vec![shown, hidden],
+        });
+        tree.layout(SizeProposal::exact(460.0, 200.0));
+
+        // The dormant child must NOT contribute — a size-to-content window is
+        // sized to what is actually shown. Regression guard for measuring via
+        // `layout_response` (activation-respecting) rather than the
+        // activation-ignoring `measure_intrinsic` (which would return 1200).
+        let m = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(460.0),
+                height: None,
+            })
+            .expect("one active primary root");
+        assert!(
+            (m.height - 200.0).abs() < 0.01,
+            "dormant child must be excluded, got {}",
+            m.height
         );
     }
 

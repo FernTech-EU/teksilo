@@ -40,7 +40,7 @@ pub enum ThemeMode {
 #[cfg(feature = "text")]
 use bastyde_text::SharedTypesetter;
 
-use crate::window_config::{BastydeWindowId, WindowConfig};
+use crate::window_config::{BastydeWindowId, SizeToContent, WindowConfig};
 use crate::window_manager::WindowManager;
 use bastyde_core::WindowPlacement;
 
@@ -535,7 +535,20 @@ impl BastydeAppHandler {
                             config = config.title(title);
                         }
                         if let Some((width, height)) = size {
-                            config = config.size(width, height).min_size(width, height);
+                            // Native modals size their height to content: the
+                            // requested (width, height) is the floor and the OS
+                            // window grows to fit taller content (e.g. a
+                            // MessageBox "Show details" expander). Without this
+                            // the fixed height clips content that exceeds it —
+                            // the footer buttons fall below the client edge and
+                            // stop receiving clicks. NOTE: deliberately NOT
+                            // `resizable(false)` — winit encodes that as
+                            // min==max size hints on X11, which would clamp away
+                            // the programmatic growth this relies on.
+                            config = config
+                                .size(width, height)
+                                .min_size(width, height)
+                                .size_to_content(SizeToContent::Height);
                         }
                         self.wm.create_window(
                             config.root(move |tree, _state| builder(tree)),
@@ -1682,6 +1695,33 @@ impl BastydeAppHandler {
                 current_arc.clone(),
             );
             current.tree.layout_with_ops(proposal, &mut ops);
+        }
+
+        // Size-to-content: after layout, measure the content's intrinsic height
+        // at the fixed width and grow/shrink the OS window to fit. The native-
+        // window modal path lays the tree out at the window's *exact* size, so
+        // (unlike the in-tree overlay) the content's natural height never
+        // reaches the OS window on its own — a `MessageBox` taller than its
+        // fixed height clips, dropping the footer buttons below the client edge.
+        // Drive the size through the reactive `WindowState::size()` → `SetSize`
+        // path (drained in `post_event`); `last_autosize_height` guards against
+        // a measure → resize → re-measure oscillation.
+        if current.size_to_content.sizes_height() {
+            let width_logical = size.0 as f32 / sf;
+            if let Some(intrinsic) = current.tree.measure_root_intrinsic(SizeProposal {
+                width: Some(width_logical),
+                height: None,
+            }) {
+                let target_h = intrinsic.height.ceil().max(1.0) as u32;
+                let cur_h = (size.1 as f32 / sf).round() as u32;
+                if target_h != cur_h && current.last_autosize_height != Some(target_h) {
+                    current.last_autosize_height = Some(target_h);
+                    current
+                        .state
+                        .size()
+                        .set((width_logical.round() as u32, target_h));
+                }
+            }
         }
 
         let a11y_update = current.tree.sync_accessibility();

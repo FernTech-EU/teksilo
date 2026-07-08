@@ -104,6 +104,9 @@ pub struct WindowConfig {
     pub initial_placement: WindowPlacement,
     pub decorations: DecorationsMode,
     pub resizable: bool,
+    /// Whether the OS window resizes itself to fit its content's intrinsic
+    /// size. See [`SizeToContent`]. Default [`SizeToContent::Off`].
+    pub size_to_content: SizeToContent,
     pub always_on_top: bool,
     pub skip_taskbar: bool,
     /// When set, this window consumes an `xdg_activation_v1` startup token from
@@ -145,6 +148,7 @@ impl std::fmt::Debug for WindowConfig {
             .field("initial_placement", &self.initial_placement)
             .field("decorations", &self.decorations)
             .field("resizable", &self.resizable)
+            .field("size_to_content", &self.size_to_content)
             .field("always_on_top", &self.always_on_top)
             .field("skip_taskbar", &self.skip_taskbar)
             .field("activate_from_env", &self.activate_from_env)
@@ -171,6 +175,39 @@ impl std::fmt::Debug for WindowConfig {
     }
 }
 
+/// Whether an OS window resizes itself to fit its content's intrinsic height.
+///
+/// `Off` (default) keeps the window at its configured
+/// [`size`](WindowConfig::size). `Height` fixes the width and grows or shrinks
+/// the height to the content's natural height — the modal-dialog case, e.g. a
+/// `MessageBox` whose "Show details" expander adds text.
+///
+/// The window never shrinks below its [`min_size`](WindowConfig::min_size)
+/// floor, and its width is left untouched. Intended for a window with a single
+/// primary content root (a dialog). The content's height must NOT depend on the
+/// window's own height (e.g. a signal bound to the window size), or the
+/// measure → resize loop may fail to converge. On Wayland only the size
+/// round-trips (position is compositor-owned), which is fine — size-to-content
+/// changes only size.
+///
+/// (A width / both-axes mode is intentionally not offered: no consumer needs
+/// it, and a half-wired variant would silently behave like `Height`.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SizeToContent {
+    /// The window keeps its configured size (the default).
+    #[default]
+    Off,
+    /// Width is fixed; height follows the content's intrinsic height.
+    Height,
+}
+
+impl SizeToContent {
+    /// The window sizes its height to the content.
+    pub fn sizes_height(self) -> bool {
+        matches!(self, Self::Height)
+    }
+}
+
 impl WindowConfig {
     /// Start a config with sensible defaults.
     ///
@@ -188,6 +225,7 @@ impl WindowConfig {
             initial_placement: WindowPlacement::Floating,
             decorations: DecorationsMode::Native,
             resizable: true,
+            size_to_content: SizeToContent::Off,
             always_on_top: false,
             skip_taskbar: false,
             activate_from_env: false,
@@ -265,6 +303,16 @@ impl WindowConfig {
     /// platforms.
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
+        self
+    }
+
+    /// Make this window resize itself to fit its content's intrinsic size.
+    /// See [`SizeToContent`]. Typically paired with `.resizable(false)`; the
+    /// configured [`size`](Self::size) / [`min_size`](Self::min_size) act as a
+    /// floor. Used for native modal dialogs (e.g. `MessageBox`) so the OS
+    /// window grows when the content does — matching the in-tree overlay path.
+    pub fn size_to_content(mut self, mode: SizeToContent) -> Self {
+        self.size_to_content = mode;
         self
     }
 

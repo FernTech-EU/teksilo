@@ -94,6 +94,15 @@ pub(crate) struct ManagedWindow {
     pub current_modifiers: winit::keyboard::ModifiersState,
     pub modal: bool,
     pub parent: Option<BastydeWindowId>,
+    /// Size-to-content mode from `WindowConfig::size_to_content`. When not
+    /// `Off`, the redraw path measures the content's intrinsic size after
+    /// layout and resizes the OS window to fit — the native-modal analogue of
+    /// the in-tree overlay's size-to-content (used for dialogs / MessageBox).
+    pub size_to_content: bastyde_core::window::SizeToContent,
+    /// Last height (logical px) applied by the size-to-content auto-resize.
+    /// Guards against a measure → resize → re-measure oscillation: a resize is
+    /// only issued when the freshly-measured target differs from this.
+    pub last_autosize_height: Option<u32>,
     /// Custom-chrome host, if the window opted in via
     /// `WindowConfig::custom_chrome(true)` and the platform supports it.
     /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
@@ -840,6 +849,8 @@ impl WindowManager {
             current_modifiers: winit::keyboard::ModifiersState::empty(),
             modal: is_modal,
             parent: modal_parent,
+            size_to_content: config.size_to_content,
+            last_autosize_height: None,
             title_bar_host,
             focused: true,
             occluded: false,

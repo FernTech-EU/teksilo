@@ -8,4 +8,5 @@
 //! `use bastyde_app::WindowConfig` / `bastyde_app::BastydeWindowId` imports
 //! continue to work unchanged.
 
+pub use bastyde_core::window::SizeToContent;
 pub use bastyde_core::{BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
