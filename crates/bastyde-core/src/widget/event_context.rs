@@ -727,6 +727,19 @@ impl<'ops> EventContext<'ops> {
         }
     }
 
+    /// Request an activation token for the **current** window (see
+    /// [`WindowOps::request_activation_token_self`](crate::window::WindowOps::request_activation_token_self)).
+    /// Use this from a widget handler to mint a token from *this* focused window
+    /// to hand to another window or process — it works mid-dispatch, unlike the
+    /// id-based variant.
+    pub fn request_activation_token_self(&mut self, cb: Box<dyn FnOnce(Option<String>)>) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.request_activation_token_self(cb);
+        } else {
+            cb(None);
+        }
+    }
+
     /// Close a specific window by id. Equivalent to
     /// [`close_window`](Self::close_window) when `id` is the current
     /// window's id.

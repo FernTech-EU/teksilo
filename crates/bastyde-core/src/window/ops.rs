@@ -58,6 +58,16 @@ pub trait WindowOps {
         cb(None);
     }
 
+    /// Like [`request_activation_token`](Self::request_activation_token) but for
+    /// the **current dispatching** window — the one whose handler is running.
+    /// Works even mid-dispatch, when that window is temporarily out of the
+    /// manager's map, because it uses the captured window handle instead of an id
+    /// lookup. Use this when a focused widget needs a token to hand to another
+    /// window or process. Default implementation: immediate `None`.
+    fn request_activation_token_self(&mut self, cb: Box<dyn FnOnce(Option<String>)>) {
+        cb(None);
+    }
+
     /// Close a specific window by id. The window is fully torn down
     /// before the next event-loop tick.
     fn close_window_by_id(&mut self, id: BastydeWindowId);

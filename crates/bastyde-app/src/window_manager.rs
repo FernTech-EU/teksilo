@@ -1775,6 +1775,20 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
         }
     }
 
+    fn request_activation_token_self(&mut self, cb: Box<dyn FnOnce(Option<String>)>) {
+        // The current window is temporarily out of `wm.windows` during its own
+        // dispatch, so use the captured Arc rather than an id lookup.
+        let Some(arc) = self.current_window_arc.clone() else {
+            cb(None);
+            return;
+        };
+        if bastyde_platform::window_activation::request_activation_token(&arc) {
+            self.wm.store_activation_token_callback(arc.id(), cb);
+        } else {
+            cb(None);
+        }
+    }
+
     fn close_window_by_id(&mut self, id: BastydeWindowId) {
         self.wm.queue_close(id);
     }
