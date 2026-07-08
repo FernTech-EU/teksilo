@@ -71,6 +71,14 @@ enum MenuEntry {
         visible: Option<bastyde_core::signal::Prop<bool>>,
     },
     Separator,
+    /// A non-interactive section caption (e.g. a `GroupHeader`). Excluded from
+    /// keyboard navigation and type-ahead exactly like `Separator` — it never
+    /// occupies a slot in `item_widget_ids`/`resolved_labels`, so no runtime
+    /// "skip if header" branch is needed anywhere. Still reachable by assistive
+    /// technology: the wrapped widget declares its own name/role (`GroupHeader`
+    /// sets `Role::Label` + the caption), which survives a11y-tree pruning as a
+    /// flat sibling under the menu, exactly like `MenuSeparator`'s `Role::Splitter`.
+    Header(PendingChild),
 }
 
 /// A 1 dp horizontal divider line between groups of menu items.
@@ -352,6 +360,18 @@ impl MenuList {
         self
     }
 
+    /// Add a non-interactive section caption (typically a [`crate::GroupHeader`]).
+    /// Skipped by Arrow/Home/End navigation and type-ahead, exactly like
+    /// [`separator`](Self::separator). The caller passes any `impl Widget`, but it
+    /// must expose its own accessible name/role via `accessibility()` (as
+    /// `GroupHeader` does) or it is silently pruned from the AT tree as a
+    /// content-free container.
+    pub fn header(mut self, widget: impl Widget + 'static) -> Self {
+        self.entries
+            .push(MenuEntry::Header(PendingChild::Deferred(Box::new(widget))));
+        self
+    }
+
     /// Derive the `OverlayPlacement` the `PopoverStyle` needs from the
     /// caller-supplied `attached_side`. `PopoverSurface` re-resolves the
     /// concrete suppressed shadow edge from this placement plus the live
@@ -524,6 +544,18 @@ impl Widget for MenuList {
                 }
                 MenuEntry::Separator => {
                     vstack = vstack.child(MenuSeparator);
+                }
+                MenuEntry::Header(pending) => {
+                    // Rendered as a plain child — never pushed into
+                    // `item_widget_ids`/`resolved_labels`/`item_counter`, so it is
+                    // structurally excluded from keyboard nav + type-ahead (same
+                    // mechanism as `Separator`). Its own `accessibility()` carries
+                    // the section name for screen readers.
+                    let header_id = match pending {
+                        PendingChild::Id(id) => id,
+                        PendingChild::Deferred(w) => ctx.add_boxed(w),
+                    };
+                    vstack = vstack.add_child(header_id);
                 }
             }
         }
@@ -1266,6 +1298,34 @@ mod tests {
         tree.layout(SizeProposal::with_width(300.0));
         tree.focus(menu_id);
         // Type-ahead should still find "Open" — separator skipped.
+        tree.press_key(Key::O, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1));
+    }
+
+    #[test]
+    fn header_does_not_interfere_with_navigation() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = {
+            let mut menu = MenuList::new();
+            for (i, label) in ["Save", "Open", "Quit"].iter().enumerate() {
+                let fired_for_this = fired.clone();
+                menu = menu.item(
+                    MenuItem::new(lit!(*label))
+                        .on_activate_fn(move |_| fired_for_this.set(Some(i))),
+                );
+                if i == 0 {
+                    // A non-navigable section caption between item 0 and item 1.
+                    menu = menu.header(crate::GroupHeader::new(lit!("Recent")));
+                }
+            }
+            tree.add(menu)
+        };
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        // Type-ahead resolves "Open" at item index 1 — the header occupies no
+        // slot in the item/label index space, exactly like a separator.
         tree.press_key(Key::O, Modifiers::NONE);
         tree.press_key(Key::Enter, Modifiers::NONE);
         assert_eq!(fired.get(), Some(1));
