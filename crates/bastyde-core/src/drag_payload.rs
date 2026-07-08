@@ -155,7 +155,7 @@ impl ExternalDropData {
 ///
 /// Handles the optional `//host` authority (UNC on Windows, dropped on Unix
 /// for the local host), strips it, percent-decodes the path, and on Windows
-/// turns a leading `/C:/…` into `C:\…`.
+/// turns any leading drive letter into a native `C:\…` path.
 fn uri_path_to_pathbuf(after_scheme: &str) -> PathBuf {
     // `after_scheme` is what followed `file://`. A leading authority segment
     // ends at the next `/`. The common local form is `file:///path` →
@@ -168,6 +168,20 @@ fn uri_path_to_pathbuf(after_scheme: &str) -> PathBuf {
 
     #[cfg(windows)]
     {
+        // Windows `file://` URIs come in several shapes: the RFC-correct
+        // `file:///C:/path` (empty authority), plus the common naive forms
+        // `file://C:/path` / `file://C:\path` — produced by apps that just
+        // splice a native path after `file://` — which put the drive letter
+        // where a UNC authority would go. Detect a leading drive letter (`X:`),
+        // after an optional slash, and treat the whole tail as a drive path,
+        // never a UNC host. Otherwise a naive `file://C:\dir\f` would decode to
+        // the invalid `\\C:\dir\f`.
+        let whole = percent_decode(after_scheme);
+        let candidate = whole.strip_prefix('/').unwrap_or(&whole);
+        let b = candidate.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+            return PathBuf::from(candidate.replace('/', r"\"));
+        }
         // UNC share: file://server/share → \\server\share
         if !authority.is_empty() {
             let mut s = String::from(r"\\");
@@ -175,9 +189,9 @@ fn uri_path_to_pathbuf(after_scheme: &str) -> PathBuf {
             s.push_str(&decoded.replace('/', r"\"));
             return PathBuf::from(s);
         }
-        // Drive path: /C:/Users → C:\Users
+        // Local absolute: file:///path → strip the leading slash.
         let trimmed = decoded.strip_prefix('/').unwrap_or(&decoded);
-        return PathBuf::from(trimmed.replace('/', r"\"));
+        PathBuf::from(trimmed.replace('/', r"\"))
     }
     #[cfg(not(windows))]
     {
@@ -618,5 +632,31 @@ mod tests {
     #[test]
     fn file_uri_to_pathbuf_unix() {
         assert_eq!(uri_path_to_pathbuf("/tmp/a%20b"), PathBuf::from("/tmp/a b"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn file_uri_to_pathbuf_windows_drive_letters() {
+        // RFC-correct, plus the naive forms apps actually produce — all must
+        // resolve to the drive path, never a UNC host.
+        assert_eq!(
+            uri_path_to_pathbuf("/C:/Users/a/main.rs"),
+            PathBuf::from(r"C:\Users\a\main.rs")
+        );
+        assert_eq!(
+            uri_path_to_pathbuf("C:/Users/a/main.rs"),
+            PathBuf::from(r"C:\Users\a\main.rs")
+        );
+        // Native separators + mixed — what `file://{CARGO_MANIFEST_DIR}/src/main.rs`
+        // yields on Windows (the file-drop demo's outbound file drag).
+        assert_eq!(
+            uri_path_to_pathbuf(r"C:\Users\a\proj/src/main.rs"),
+            PathBuf::from(r"C:\Users\a\proj\src\main.rs")
+        );
+        // A genuine UNC path still parses as UNC.
+        assert_eq!(
+            uri_path_to_pathbuf("server/share/f.txt"),
+            PathBuf::from(r"\\server\share\f.txt")
+        );
     }
 }
