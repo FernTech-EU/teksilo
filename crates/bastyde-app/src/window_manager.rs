@@ -26,7 +26,6 @@ use bastyde_platform::event_translation::TranslationState;
 use bastyde_tokens::{ColorSchemePreference, ColorTokens};
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
-use winit::window::UserAttentionType;
 use winit::window::WindowLevel;
 
 use crate::app::{AppEventProxy, CloseWindowRequest, ThemeMode};
@@ -206,6 +205,12 @@ pub struct WindowManager {
     /// tests or the headless path, in which case the host's `close()`
     /// callback is a no-op (`TitleBarHostCallbacks::noop`).
     event_proxy: Option<AppEventProxy>,
+    /// One-shot callbacks awaiting a `request_activation_token` result, keyed by
+    /// the requesting window. Fired (and removed) when the matching
+    /// `WindowEvent::ActivationTokenDone` arrives — hands a freshly-minted
+    /// xdg-activation token to a child process or an IPC peer. Run on the UI
+    /// thread.
+    pending_token_callbacks: HashMap<winit::window::WindowId, Box<dyn FnOnce(Option<String>)>>,
 }
 
 impl WindowManager {
@@ -226,7 +231,26 @@ impl WindowManager {
             theme_mode: ThemeMode::Manual,
             app_context_template: None,
             event_proxy: None,
+            pending_token_callbacks: HashMap::new(),
         }
+    }
+
+    /// Store a one-shot callback fired when this window's pending
+    /// `request_activation_token` resolves via `WindowEvent::ActivationTokenDone`.
+    pub(crate) fn store_activation_token_callback(
+        &mut self,
+        id: winit::window::WindowId,
+        cb: Box<dyn FnOnce(Option<String>)>,
+    ) {
+        self.pending_token_callbacks.insert(id, cb);
+    }
+
+    /// Take the pending activation-token callback for `id`, if any.
+    pub(crate) fn take_activation_token_callback(
+        &mut self,
+        id: winit::window::WindowId,
+    ) -> Option<Box<dyn FnOnce(Option<String>)>> {
+        self.pending_token_callbacks.remove(&id)
     }
 
     /// Set the theme mode (called by BastydeAppHandler during initialization).
@@ -545,6 +569,14 @@ impl WindowManager {
             window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
+        // Opt-in: consume a startup activation token from the environment so a
+        // window spawned by another instance's "open in new window" comes up
+        // focused on Wayland. No-op off Wayland/X11 or when the env is unset.
+        if config.activate_from_env {
+            window_attrs =
+                bastyde_platform::window_activation::apply_creation_token(window_attrs, target);
+        }
+
         let window = target
             .create_window(window_attrs)
             .expect("winit window creation failed");
@@ -605,7 +637,7 @@ impl WindowManager {
             // No `set_window_level(AlwaysOnTop)` here — see the comment
             // on `with_window_level` above. The owner relationship
             // already keeps the modal ordered above its parent.
-            pw.window().focus_window();
+            bastyde_platform::window_activation::raise(pw.window(), None);
         }
 
         // Construct the platform title bar host if custom chrome was
@@ -1250,19 +1282,17 @@ impl WindowManager {
             return;
         };
 
-        // Re-surface the modal relative to its owner via focus alone —
-        // `focus_window` raises + focuses on every platform. Do NOT call
-        // `set_window_level(AlwaysOnTop)`: it floats the modal above *all*
+        // Re-surface the modal relative to its owner via focus alone. The
+        // cross-platform `window_activation::raise` helper raises on
+        // X11/Windows/macOS and degrades to an attention request on Wayland
+        // (where raising an existing window without a token is a no-op). Do NOT
+        // call `set_window_level(AlwaysOnTop)`: it floats the modal above *all*
         // windows (every app) for its lifetime, and on a Win32 owned window it
         // also stalls the message pump (paint events stop until a focus/resize
         // forces a redraw) — exactly the failure the creation path documents
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
-        child.platform_window.window().focus_window();
-        child
-            .platform_window
-            .window()
-            .request_user_attention(Some(UserAttentionType::Informational));
+        bastyde_platform::window_activation::raise(child.platform_window.window(), None);
         child.platform_window.request_redraw();
     }
 
@@ -1625,7 +1655,9 @@ fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
             };
             win.request_user_attention(Some(winit_kind));
         }
-        WindowCommand::Focus => win.focus_window(),
+        WindowCommand::Focus { activation_token } => {
+            bastyde_platform::window_activation::raise(win, activation_token.as_deref());
+        }
         WindowCommand::Close => {
             // Handled in drain_window_commands; unreachable here.
         }
@@ -1715,7 +1747,31 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
         if let Some(winit_id) = self.wm.bastyde_to_winit_map().get(&id).copied()
             && let Some(managed) = self.wm.windows_map().get(&winit_id)
         {
-            managed.platform_window.window().focus_window();
+            bastyde_platform::window_activation::raise(managed.platform_window.window(), None);
+        }
+    }
+
+    fn request_activation_token(
+        &mut self,
+        id: BastydeWindowId,
+        cb: Box<dyn FnOnce(Option<String>)>,
+    ) {
+        let Some(winit_id) = self.wm.bastyde_to_winit_map().get(&id).copied() else {
+            cb(None);
+            return;
+        };
+        // Immutable borrow to issue the request, released before we mutate the
+        // callback map below.
+        let issued = match self.wm.windows_map().get(&winit_id) {
+            Some(managed) => bastyde_platform::window_activation::request_activation_token(
+                managed.platform_window.window(),
+            ),
+            None => false,
+        };
+        if issued {
+            self.wm.store_activation_token_callback(winit_id, cb);
+        } else {
+            cb(None);
         }
     }
 

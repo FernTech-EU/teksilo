@@ -14,6 +14,7 @@ pub mod native_menu;
 pub mod os_theme;
 pub mod title_bar_host;
 pub mod window;
+pub mod window_activation;
 pub mod window_system;
 
 pub use accessibility_prefs::AccessibilityPreferences;

@@ -39,6 +39,12 @@ pub enum WindowCommand {
     SetResizable(bool),
     SetAlwaysOnTop(bool),
     RequestAttention(UserAttentionKind),
-    Focus,
+    /// Raise + focus this window. `activation_token` is an opaque
+    /// `xdg_activation_v1` token carried across a process boundary for a Wayland
+    /// cross-process raise; `None` everywhere else, where `focus_window`
+    /// already suffices.
+    Focus {
+        activation_token: Option<String>,
+    },
     Close,
 }

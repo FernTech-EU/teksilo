@@ -46,6 +46,18 @@ pub trait WindowOps {
     /// Raise a window and give it keyboard focus.
     fn focus_window(&mut self, id: BastydeWindowId);
 
+    /// Request an `xdg_activation_v1` token for `id` — to hand to another window
+    /// or a child process so it can raise itself on Wayland. `cb` fires once with
+    /// the token string, or with `None` where unsupported (everything but
+    /// Wayland/X11). Default implementation: immediate `None`.
+    fn request_activation_token(
+        &mut self,
+        _id: BastydeWindowId,
+        cb: Box<dyn FnOnce(Option<String>)>,
+    ) {
+        cb(None);
+    }
+
     /// Close a specific window by id. The window is fully torn down
     /// before the next event-loop tick.
     fn close_window_by_id(&mut self, id: BastydeWindowId);

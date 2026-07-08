@@ -139,6 +139,13 @@ pub(crate) struct WindowStateInner {
     /// by the app-level window manager once per tick.
     pending_os_commands: RefCell<Vec<WindowCommand>>,
 
+    /// A pending `xdg_activation_v1` token stashed by
+    /// [`WindowState::set_activation_token`] and consumed by the next
+    /// [`WindowState::focus`], which carries it on the emitted
+    /// [`WindowCommand::Focus`]. Only meaningful for Wayland cross-process
+    /// raises; ignored on every other platform.
+    pending_activation_token: RefCell<Option<String>>,
+
     /// `true` while a `set_*_from_os` call is in progress. The
     /// observers installed in [`WindowState::new`] check this flag and
     /// do nothing when it is set — the OS already knows, there is no
@@ -174,6 +181,7 @@ impl WindowState {
             other_key_pressed_during_alt: Cell::new(false),
             menubar_dispatcher: Rc::new(RefCell::new(None)),
             pending_os_commands: RefCell::new(Vec::new()),
+            pending_activation_token: RefCell::new(None),
             applying_from_os: Cell::new(false),
             _observer_handles: RefCell::new(Vec::new()),
         });
@@ -373,12 +381,22 @@ impl WindowState {
 
     /// Focus this window — raise it above others and give it keyboard
     /// focus. Queues a [`WindowCommand::Focus`] command for the next
-    /// drain.
+    /// drain, carrying (and clearing) any token set via
+    /// [`WindowState::set_activation_token`].
     pub fn focus(&self) {
+        let activation_token = self.inner.pending_activation_token.borrow_mut().take();
         self.inner
             .pending_os_commands
             .borrow_mut()
-            .push(WindowCommand::Focus);
+            .push(WindowCommand::Focus { activation_token });
+    }
+
+    /// Stash an `xdg_activation_v1` token — an opaque string minted by the
+    /// focused requester and handed across a process boundary — to be consumed
+    /// by the next [`WindowState::focus`]. Only affects a Wayland raise;
+    /// ignored on every other platform, where `focus()` raises on its own.
+    pub fn set_activation_token(&self, token: String) {
+        *self.inner.pending_activation_token.borrow_mut() = Some(token);
     }
 
     /// Close this window. Queues a [`WindowCommand::Close`] command
@@ -571,7 +589,9 @@ mod tests {
         assert_eq!(
             cmds,
             vec![
-                WindowCommand::Focus,
+                WindowCommand::Focus {
+                    activation_token: None
+                },
                 WindowCommand::Close,
                 WindowCommand::RequestAttention(UserAttentionKind::Critical),
             ]

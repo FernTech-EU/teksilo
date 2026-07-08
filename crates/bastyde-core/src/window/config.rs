@@ -106,6 +106,11 @@ pub struct WindowConfig {
     pub resizable: bool,
     pub always_on_top: bool,
     pub skip_taskbar: bool,
+    /// When set, this window consumes an `xdg_activation_v1` startup token from
+    /// the environment at creation so it comes up focused on Wayland (the
+    /// launching process set it via `set_child_activation_env`). No effect off
+    /// Wayland/X11.
+    pub activate_from_env: bool,
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
     pub root_builder: Option<RootBuilder>,
@@ -142,6 +147,7 @@ impl std::fmt::Debug for WindowConfig {
             .field("resizable", &self.resizable)
             .field("always_on_top", &self.always_on_top)
             .field("skip_taskbar", &self.skip_taskbar)
+            .field("activate_from_env", &self.activate_from_env)
             .field("icon", &self.icon.as_ref().map(|i| (i.width, i.height)))
             .field("modal", &self.modal)
             .field(
@@ -184,6 +190,7 @@ impl WindowConfig {
             resizable: true,
             always_on_top: false,
             skip_taskbar: false,
+            activate_from_env: false,
             icon: None,
             modal: None,
             root_builder: None,
@@ -271,6 +278,14 @@ impl WindowConfig {
     /// palettes and secondary overlays.
     pub fn skip_taskbar(mut self, skip: bool) -> Self {
         self.skip_taskbar = skip;
+        self
+    }
+
+    /// Consume an `xdg_activation_v1` startup token from the environment at
+    /// creation so this window comes up focused on Wayland. Set on the initial
+    /// window of a process spawned by another instance's "open in new window".
+    pub fn activate_from_env(mut self, on: bool) -> Self {
+        self.activate_from_env = on;
         self
     }
 

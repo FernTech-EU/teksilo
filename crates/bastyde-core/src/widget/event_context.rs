@@ -710,6 +710,23 @@ impl<'ops> EventContext<'ops> {
         }
     }
 
+    /// Request an xdg-activation token for `id` (see
+    /// [`WindowOps::request_activation_token`](crate::window::WindowOps::request_activation_token)).
+    /// `cb` fires once with the token string, or `None` where the platform can't
+    /// provide one — used to hand a token to a child process ("open in new
+    /// window") or an IPC peer that will raise itself on Wayland.
+    pub fn request_activation_token(
+        &mut self,
+        id: crate::window::BastydeWindowId,
+        cb: Box<dyn FnOnce(Option<String>)>,
+    ) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.request_activation_token(id, cb);
+        } else {
+            cb(None);
+        }
+    }
+
     /// Close a specific window by id. Equivalent to
     /// [`close_window`](Self::close_window) when `id` is the current
     /// window's id.

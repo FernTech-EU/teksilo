@@ -1845,7 +1845,10 @@ impl BastydeAppHandler {
 
         if let Some(fid) = bastyde_id
             && self.wm.is_blocked(fid)
-            && !matches!(event, WindowEvent::CloseRequested)
+            && !matches!(
+                event,
+                WindowEvent::CloseRequested | WindowEvent::ActivationTokenDone { .. }
+            )
         {
             self.wm.refocus_modal_child(fid);
             self.update_control_flow(event_loop);
@@ -2184,6 +2187,15 @@ impl BastydeAppHandler {
                     // paint pass so the caret hides / selection desaturates
                     // before the window is hidden behind another.
                     managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::ActivationTokenDone { token, .. } => {
+                // A `request_activation_token` we issued resolved — hand the
+                // freshly-minted token to whoever asked (child-process spawn or
+                // an IPC peer). One request outstanding per window, so key by
+                // window id and ignore the serial.
+                if let Some(cb) = self.wm.take_activation_token_callback(window_id) {
+                    cb(Some(token.into_raw()));
                 }
             }
             _ => {}
