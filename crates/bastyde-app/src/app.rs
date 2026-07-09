@@ -2160,19 +2160,40 @@ impl BastydeAppHandler {
                 }
             }
             WindowEvent::Ime(ime) => {
-                let maybe_evt = if self.wm.get_by_winit_mut(window_id).is_some() {
-                    event_translation::translate_ime(ime)
+                // Dedup consecutive empty preedits at the funnel. Some Linux IME
+                // backends (ibus / fcitx via winit) flood empty `Ime::Preedit("")`
+                // events while a field is focused. The first is meaningful (it
+                // clears any active composition); every consecutive repeat is a
+                // no-op that would still translate + dispatch through the tree AND
+                // wake a full unconditional layout+render pass here. Skip the
+                // repeats entirely — neither dispatch nor redraw. Any non-empty
+                // preedit (or a Commit / Enabled / Disabled) resets the flag so
+                // the next empty preedit is again treated as meaningful.
+                let empty_preedit =
+                    matches!(&ime, winit::event::Ime::Preedit(t, _) if t.is_empty());
+                let skip = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    crate::window_manager::ime_should_skip_empty_preedit(
+                        &mut managed.last_ime_preedit_empty,
+                        empty_preedit,
+                    )
                 } else {
-                    None
+                    false
                 };
-                if let Some(evt) = maybe_evt {
-                    self.dispatch_in_window(window_id, evt, event_loop);
-                }
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(trace) = &mut self.idle_trace {
-                        trace.note_redraw_request("ime");
+                if !skip {
+                    let maybe_evt = if self.wm.get_by_winit_mut(window_id).is_some() {
+                        event_translation::translate_ime(ime)
+                    } else {
+                        None
+                    };
+                    if let Some(evt) = maybe_evt {
+                        self.dispatch_in_window(window_id, evt, event_loop);
                     }
-                    managed.platform_window.request_redraw();
+                    if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                        if let Some(trace) = &mut self.idle_trace {
+                            trace.note_redraw_request("ime");
+                        }
+                        managed.platform_window.request_redraw();
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {

@@ -4883,4 +4883,35 @@ mod affinity_tests {
             outer_y.get()
         );
     }
+
+    #[test]
+    fn blur_clears_ime_area_cache() {
+        // Regression for the dedup's blur-staleness: the OS IME candidate area is
+        // a single *per-window* resource. With two editors A/B, focusing B
+        // re-points it; refocusing A (caret unmoved) would recompute A's old area
+        // and, if A's `last_ime_area` were still cached, the dedup would swallow
+        // the re-seed, leaving the candidate popup at B. Blur must drop the cache.
+        let doc_a = TextDocument::new();
+        doc_a.set_plain_text("a").unwrap();
+        let doc_b = TextDocument::new();
+        doc_b.set_plain_text("b").unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let ed_a = RichTextEditor::editor(doc_a);
+        let st_a = ed_a.state_handle();
+        let a_id = tree.add(ed_a);
+        let b_id = tree.add(RichTextEditor::editor(doc_b));
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+
+        tree.focus(a_id);
+        // Simulate a prior IME-area report on A having cached an area.
+        st_a.borrow_mut().last_ime_area = Some(bastyde_canvas::Rect::new(1.0, 2.0, 2.0, 14.0));
+
+        // Focus B → A blurs → A's IME-area cache must be dropped.
+        tree.focus(b_id);
+        assert!(
+            st_a.borrow().last_ime_area.is_none(),
+            "blur must clear the IME-area dedup cache so a refocus re-seeds the OS"
+        );
+    }
 }

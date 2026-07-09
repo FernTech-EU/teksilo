@@ -262,6 +262,46 @@ fn ime_composition_cancelled_leaves_field_clean() {
 }
 
 #[test]
+fn empty_ime_composition_flood_is_inert() {
+    // Some Linux IME backends (ibus / fcitx via winit) flood empty
+    // `Ime::Preedit("")` events while a field is focused. With no active preedit
+    // each is a genuine no-op: it must not alter the document, and (per the
+    // widget-level short-circuit) must not churn an undo block or re-report the
+    // IME area every event. The field must remain fully usable afterwards.
+    let (mut tree, text, id) = setup("ab");
+    focus_field(&mut tree, id);
+
+    for _ in 0..20 {
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: String::new(),
+            cursor: None,
+        });
+        tick(&mut tree);
+    }
+    assert_eq!(
+        text.get(),
+        "ab",
+        "empty IME flood must not alter the document"
+    );
+
+    // Still functional: a real composition + commit lands text.
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "c".to_string(),
+        cursor: Some(1..1),
+    });
+    tick(&mut tree);
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "c".to_string(),
+    });
+    tick(&mut tree);
+    assert!(
+        text.get().contains('c'),
+        "field must still accept IME input after the flood; got {:?}",
+        text.get()
+    );
+}
+
+#[test]
 fn ime_preedit_removed_on_focus_loss() {
     let text = Signal::new(String::new());
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());

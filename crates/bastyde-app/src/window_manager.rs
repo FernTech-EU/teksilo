@@ -80,6 +80,19 @@ fn close_verdict(
     true
 }
 
+/// Decide whether a `WindowEvent::Ime` carrying an (already-classified) preedit
+/// is a redundant *consecutive* empty preedit that the event loop should drop
+/// without dispatching or redrawing, updating the per-window `last_empty` flag
+/// in the process. The first empty preedit after any non-empty IME activity is
+/// meaningful (it clears an active composition); only the second-and-later
+/// consecutive empties are skipped. Extracted from the `WindowEvent::Ime` arm so
+/// the state machine is unit-testable without a winit event loop.
+pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit: bool) -> bool {
+    let repeat = empty_preedit && *last_empty;
+    *last_empty = empty_preedit;
+    repeat
+}
+
 /// Per-window state managed by the WindowManager.
 pub(crate) struct ManagedWindow {
     pub bastyde_id: BastydeWindowId,
@@ -136,6 +149,13 @@ pub(crate) struct ManagedWindow {
     /// Last OS-IME purpose applied to the winit window. Re-applied whenever
     /// it changes while IME is enabled.
     pub ime_purpose: Option<bastyde_core::ImePurpose>,
+    /// Whether the previous `WindowEvent::Ime` was an empty `Preedit("")`.
+    /// Some Linux IME backends (ibus / fcitx via winit) flood empty preedits
+    /// while a field is focused; the first clears any active composition, but
+    /// every consecutive repeat is a no-op that would still wake a full
+    /// layout+render pass. This lets the event loop skip the repeats entirely
+    /// (neither dispatch nor redraw). Reset by any non-empty-preedit IME event.
+    pub last_ime_preedit_empty: bool,
     /// RAII handles for the auto-save observers wired to
     /// `state.{size, position, placement}` when a
     /// `WindowStateService` is registered. Dropped when the window
@@ -857,6 +877,7 @@ impl WindowManager {
             caps_lock_active: false,
             ime_allowed: None,
             ime_purpose: None,
+            last_ime_preedit_empty: false,
             _persist_handles: persist_handles,
             close_guard,
             can_close,
@@ -1978,5 +1999,36 @@ mod close_guard_tests {
         let guarded = wm.pending_closes.iter().find(|p| p.id == b).unwrap();
         assert!(forced.force, "queue_close must enqueue a forced close");
         assert!(!guarded.force, "request_close must enqueue a guarded close");
+    }
+}
+
+#[cfg(test)]
+mod ime_dedup_tests {
+    use super::ime_should_skip_empty_preedit;
+
+    #[test]
+    fn consecutive_empty_preedits_are_skipped_after_the_first() {
+        let mut last_empty = false;
+
+        // A real composition: non-empty preedits never skip and keep the flag low.
+        assert!(!ime_should_skip_empty_preedit(&mut last_empty, false));
+        assert!(!ime_should_skip_empty_preedit(&mut last_empty, false));
+        assert!(!last_empty);
+
+        // First empty preedit (winit's synthetic clear before commit, or the
+        // start of a flood) is meaningful — dispatched, not skipped.
+        assert!(!ime_should_skip_empty_preedit(&mut last_empty, true));
+        assert!(last_empty);
+
+        // Every consecutive empty preedit after it is a redundant no-op — skipped.
+        assert!(ime_should_skip_empty_preedit(&mut last_empty, true));
+        assert!(ime_should_skip_empty_preedit(&mut last_empty, true));
+
+        // A non-empty preedit (or any non-empty IME event) resets the run, so the
+        // NEXT empty preedit is again treated as meaningful.
+        assert!(!ime_should_skip_empty_preedit(&mut last_empty, false));
+        assert!(!last_empty);
+        assert!(!ime_should_skip_empty_preedit(&mut last_empty, true));
+        assert!(ime_should_skip_empty_preedit(&mut last_empty, true));
     }
 }

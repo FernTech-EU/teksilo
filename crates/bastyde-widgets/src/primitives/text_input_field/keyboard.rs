@@ -34,6 +34,18 @@ pub(crate) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
             caret[3],
         )
     };
+    // Dedup against the last reported area. The platform-side
+    // `WindowOps::set_ime_cursor_area` does not dedup; re-forwarding an
+    // unchanged area is wasted work and, on some winit IME backends (ibus /
+    // fcitx), echoes back a fresh empty `Ime::Preedit`, sustaining a feedback
+    // loop. Only forward a genuinely new position.
+    {
+        let mut st = state.borrow_mut();
+        if st.last_ime_area == Some(area) {
+            return;
+        }
+        st.last_ime_area = Some(area);
+    }
     ctx.set_ime_cursor_area(area);
 }
 
@@ -274,6 +286,20 @@ fn handle_ime_composition(
 ) -> EventResponse {
     if state.borrow().read_only {
         return EventResponse::Handled;
+    }
+    // A composition carrying no insertable text while there is no active preedit
+    // is a genuine no-op. Some Linux IME backends (ibus / fcitx via winit) flood
+    // empty `Ime::Preedit("")` events while a field is focused; processing each
+    // one — an undo block, a signal sync, an un-deduped IME-area report that
+    // re-arms that very loop, a repaint — is pure waste. Bail before any of it.
+    {
+        let st = state.borrow();
+        let empty = text
+            .chars()
+            .all(|c| c.is_control() || c == '\n' || c == '\r');
+        if empty && st.ime_preedit_range.is_none() {
+            return EventResponse::Ignored;
+        }
     }
     {
         let mut st = state.borrow_mut();

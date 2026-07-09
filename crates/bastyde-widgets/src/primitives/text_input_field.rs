@@ -1175,6 +1175,11 @@ impl Widget for TextInputField {
                     st.scroll_x = 0.0;
                     st.caret_visible.set(false);
                     st.drag_state = state::DragState::Idle;
+                    // Drop the IME-area dedup cache. The OS candidate area is a
+                    // single per-window resource a sibling field may re-point
+                    // while we are unfocused; clearing this forces the next
+                    // focus-gain report to re-seed it instead of being deduped.
+                    st.last_ime_area = None;
                     blur_callback = st.on_blur.clone();
                     drop(st);
                     // Abandon any in-progress composition on blur — remove

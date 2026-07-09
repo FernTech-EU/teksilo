@@ -2586,8 +2586,18 @@ impl Widget for RichTextEditor {
                         // Seed the OS IME candidate area at the caret.
                         self::keyboard::report_ime_cursor_area(&state, ctx);
                     } else {
-                        // Abandon any in-progress composition on blur.
+                        // Abandon any in-progress composition on blur, and drop
+                        // the IME-area / caret-chase caches. The OS IME candidate
+                        // area is a single *per-window* resource a sibling field
+                        // may have re-pointed while we were unfocused; clearing
+                        // `last_ime_area` forces the next focus-gain report to
+                        // re-seed it (the dedup must not swallow that re-seed).
+                        // Clearing `last_chase_pos` lets a refocus re-reveal the
+                        // caret even if it has not moved since we lost focus.
                         self::keyboard::clear_ime_preedit(&state);
+                        let mut st = state.borrow_mut();
+                        st.last_ime_area = None;
+                        st.last_chase_pos = None;
                     }
                     ctx.request_frame();
                 }

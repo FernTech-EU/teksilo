@@ -175,6 +175,12 @@ pub(crate) struct TextInputState {
     /// Character range in `document` currently occupied by the live
     /// preedit, so a follow-up composition event can remove and replace it.
     pub ime_preedit_range: Option<std::ops::Range<usize>>,
+    /// Last IME candidate-window rectangle reported to the platform. Reporting
+    /// is deduped against this: re-sending an unchanged area is wasted work and,
+    /// on some winit IME backends (ibus / fcitx), echoes back a fresh empty
+    /// `Ime::Preedit`, a self-sustaining feedback loop. Cleared on blur so a
+    /// refocus re-seeds the (per-window) OS area a sibling field may have moved.
+    pub last_ime_area: Option<bastyde_canvas::Rect>,
 }
 
 /// Configuration bundle passed from `TextInput::build()` to
@@ -289,6 +295,7 @@ impl TextInputState {
             field_widget_id: None,
             ime_preedit: None,
             ime_preedit_range: None,
+            last_ime_area: None,
         }))
     }
 
