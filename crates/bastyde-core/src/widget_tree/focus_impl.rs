@@ -76,7 +76,15 @@ impl WidgetTree {
         // the full rationale.
         self.tooltip_focus_leave_outside(Some(id), &mut *ops);
         self.tooltip_focus_enter(id);
-        self.scroll_focused_into_view(id, &mut *ops);
+        // A pointer press focuses a widget the user just clicked — it is already
+        // visible, so auto-scrolling is wrong: it yanks a tall, own-scroll-
+        // suppressed editor to its far end on the stale pre-click caret (the
+        // pointer sets the real caret *after* focus, and the widget's own
+        // caret-chase then keeps it visible). Reveal only for keyboard /
+        // programmatic focus, where the newly-focused target may be off-screen.
+        if origin != crate::focus::FocusOrigin::Pointer {
+            self.scroll_focused_into_view(id, &mut *ops);
+        }
     }
 
     /// Set focus using [`NoopWindowOps`](crate::window::NoopWindowOps).
