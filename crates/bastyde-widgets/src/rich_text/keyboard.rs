@@ -487,11 +487,7 @@ pub(super) fn handle_key(
                 // placement.
                 st.cursor_affinity = CursorAffinity::Downstream;
             }
-            ensure_caret_visible(state);
-            sync_cursor_signals(state);
-            report_ime_cursor_area(state, ctx);
-            ctx.request_frame();
-            EventResponse::Handled
+            caret_moved_epilogue(state, ctx)
         }
         KeyAction::LineEdgeMotion => {
             // Home/End went through `move_cursor_to_line_edge`, which
@@ -501,23 +497,52 @@ pub(super) fn handle_key(
                 let mut st = state.borrow_mut();
                 st.preferred_x = None;
             }
-            ensure_caret_visible(state);
-            sync_cursor_signals(state);
-            report_ime_cursor_area(state, ctx);
-            ctx.request_frame();
-            EventResponse::Handled
+            caret_moved_epilogue(state, ctx)
         }
         KeyAction::KeepPreferredX => {
             // Up/Down/PageUp/PageDown's helpers already set affinity
             // from hit-test; Ctrl+A didn't move the caret. Preserve
             // both `preferred_x` and `cursor_affinity` unchanged.
-            ensure_caret_visible(state);
-            sync_cursor_signals(state);
-            report_ime_cursor_area(state, ctx);
-            ctx.request_frame();
-            EventResponse::Handled
+            caret_moved_epilogue(state, ctx)
         }
     }
+}
+
+/// Shared tail for the caret-moving key actions. Keeps the caret inside the
+/// editor's own viewport ([`ensure_caret_visible`]), publishes the new cursor
+/// position to observers, updates the OS-IME candidate area, chases the caret
+/// into any enclosing scroll area ([`chase_caret_into_view`]), and requests a
+/// frame. Always returns [`EventResponse::Handled`].
+fn caret_moved_epilogue(state: &SharedState, ctx: &mut EventContext) -> EventResponse {
+    ensure_caret_visible(state);
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
+    chase_caret_into_view(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// The caret's rectangle in **absolute window (tree) coordinates**, or `None`
+/// when the editor is unfocused or the engine has not been laid out yet.
+///
+/// `caret_rect` returns engine/content-local coordinates; add the body's
+/// window origin (`viewport_origin`) and subtract the current scroll offset to
+/// land in the same absolute space the arena stores bounds in — matching what
+/// `paint` does for the on-screen caret. Shared by the OS-IME cursor report
+/// and the enclosing-scroll-area follow so both track the exact same rect.
+fn caret_window_rect(st: &EditorState) -> Option<bastyde_canvas::Rect> {
+    if !st.has_focus || !st.engine.has_full_layout() {
+        return None;
+    }
+    let caret = st
+        .engine
+        .caret_rect(st.cursor.position(), st.cursor_affinity);
+    Some(bastyde_canvas::Rect::new(
+        st.viewport_origin.x + caret[0] - st.scroll_x.get(),
+        st.viewport_origin.y + caret[1] - st.scroll_y.get(),
+        caret[2].max(1.0),
+        caret[3],
+    ))
 }
 
 /// Report the caret's window-space rectangle to the platform so the OS IME
@@ -526,20 +551,80 @@ pub(super) fn handle_key(
 pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext) {
     let area = {
         let st = state.borrow();
-        if !st.has_focus || !st.engine.has_full_layout() {
+        match caret_window_rect(&st) {
+            Some(a) => a,
+            None => return,
+        }
+    };
+    // Dedup against the last reported area. The platform-side
+    // `WindowOps::set_ime_cursor_area` does *not* dedup (it assumes text
+    // widgets only report on caret moves); re-forwarding an unchanged area is
+    // wasted work and, on some winit IME backends (ibus / fcitx), echoes back
+    // a fresh empty `Ime::Preedit`, sustaining a feedback loop. Only forward a
+    // genuinely new position.
+    {
+        let mut st = state.borrow_mut();
+        if st.last_ime_area == Some(area) {
             return;
         }
-        let caret = st
-            .engine
-            .caret_rect(st.cursor.position(), st.cursor_affinity);
-        bastyde_canvas::Rect::new(
-            st.viewport_origin.x + caret[0] - st.scroll_x.get(),
-            st.viewport_origin.y + caret[1] - st.scroll_y.get(),
-            caret[2].max(1.0),
-            caret[3],
-        )
-    };
+        st.last_ime_area = Some(area);
+    }
     ctx.set_ime_cursor_area(area);
+}
+
+/// After the caret moves, ask any enclosing scroll area (a form/page the
+/// editor is embedded in) to reveal the caret. The editor already keeps the
+/// caret inside its *own* viewport via [`ensure_caret_visible`]; this adds the
+/// outer chaining so that when the editor **grows** inside a scrolling page
+/// (its own scroll suppressed) the page follows the caret. Framework-side,
+/// `ctx.ensure_visible` walks only the editor's ancestors (never the editor
+/// itself), so this never fights the internal follow.
+///
+/// Fires only on a caret *move* — a plain wheel / scrollbar scroll never
+/// triggers it, so the reader can scroll away from the caret and the view
+/// stays put until the caret next moves. A zero margin means it scrolls only
+/// when the caret is genuinely off-screen (no nudging when it is already
+/// visible). Off entirely when [`follow_caret_in_page`](EditorState::follow_caret_in_page)
+/// is disabled, unfocused, not yet laid out, or with no enclosing scroll area.
+///
+/// The revealed rect is the caret line **plus one line below it**. Beyond a
+/// mild always-a-line-of-context-under-the-caret scroll-off, this proactively
+/// reveals the line a wrapping character lands on: typed input is applied to
+/// the document a frame later by `frame_loop::tick` (which has no
+/// `EventContext` to re-chase), so this chase sees the caret's *pre-insert*
+/// line — the look-ahead keeps the post-wrap line on screen without waiting for
+/// the next keystroke. Structural edits (Enter/Backspace/Delete) mutate the
+/// cursor synchronously and are exact.
+pub(super) fn chase_caret_into_view(state: &SharedState, ctx: &mut EventContext) {
+    let area = {
+        let mut st = state.borrow_mut();
+        if !st.follow_caret_in_page {
+            return;
+        }
+        // Reveal the caret only when it actually MOVES. A repeat call at the
+        // same document position — IME preedit churn (Linux ibus/fcitx floods
+        // empty `Ime::Preedit` events), a no-op nav key, a redundant click —
+        // must not scroll: once the user has deliberately scrolled the caret
+        // off-screen, a same-position chase would yank the page straight back,
+        // fighting the scroll. `frame_loop::tick` applies typed input a frame
+        // later, so within a fast burst several keystrokes share one pre-insert
+        // position; the one-line look-ahead below covers that batch, and the
+        // next real move re-chases.
+        let pos = st.cursor.position();
+        if st.last_chase_pos == Some(pos) {
+            return;
+        }
+        st.last_chase_pos = Some(pos);
+        match caret_window_rect(&st) {
+            Some(a) => a,
+            None => return,
+        }
+    };
+    // Extend downward by one line so the line a wrapping character would land
+    // on is revealed together with the current caret line.
+    let line = area.height.max(1.0);
+    let area = bastyde_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
+    ctx.ensure_visible(area);
 }
 
 /// Ctrl+A escalation ladder. Mirrors godot rich_text_edit.rs:690-727.
@@ -681,6 +766,17 @@ fn handle_ime_composition(
         return EventResponse::Ignored;
     }
     let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+    // A composition event carrying no text while there is no active preedit is
+    // a genuine no-op. Some Linux IME backends (ibus / fcitx via winit) emit a
+    // continuous stream of empty `Ime::Preedit("")` events while the field is
+    // focused; processing each one — an empty undo block, an IME-cursor-area
+    // report, a caret chase — is pure waste. Worse, the report re-arms the very
+    // loop that produced the event (see `report_ime_cursor_area`), and the
+    // chase fights the user's scroll. Bail before touching the document, the
+    // platform, or the scroll.
+    if clean.is_empty() && state.borrow().ime_preedit_range.is_none() {
+        return EventResponse::Ignored;
+    }
     {
         let mut st = state.borrow_mut();
         // Group the remove+reinsert as a single undo step so a user
@@ -715,6 +811,7 @@ fn handle_ime_composition(
         st.pending_text_changed = true;
     }
     report_ime_cursor_area(state, ctx);
+    chase_caret_into_view(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
 }
@@ -765,6 +862,12 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
         st.cursor_affinity = CursorAffinity::Downstream;
     }
     report_ime_cursor_area(state, ctx);
+    // Printable input is batched into `pending_chars` and applied by
+    // `frame_loop::tick` next frame, so this chase sees the caret at its
+    // PRE-insert position; `chase_caret_into_view`'s one-line look-ahead
+    // reveals the line a wrap would land on so the page keeps up without
+    // waiting for the next keystroke.
+    chase_caret_into_view(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
 }

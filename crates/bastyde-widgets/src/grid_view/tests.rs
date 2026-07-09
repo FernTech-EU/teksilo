@@ -168,6 +168,59 @@ fn arrow_keys_move_focus_and_selection() {
 }
 
 #[test]
+fn keyboard_selection_chases_outer_scroll_area() {
+    // A single-column grid (20 × 50px tiles → 1000px) in a 200px grid box whose
+    // lower half is below a 100px outer ScrollArea's fold. Tiles are virtualized
+    // and not focusable (the grid holds focus with active_descendant), so the
+    // focus-driven follow can't reveal the focused tile — ctx.ensure_visible must.
+    use crate::ScrollArea;
+    use crate::primitives::{FixedSize, VStack};
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+    let model = ListModel::from_vec((0..20).collect());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    // Box width 120 fits exactly one 100px tile → a tall single column.
+    let grid = GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+        .tile_size(100.0, 50.0)
+        .selection(sel);
+    let grid_id = tree.add(grid);
+    let grid_box = tree.add(
+        FixedSize::new()
+            .width(120.0)
+            .height(200.0)
+            .child_id(grid_id),
+    );
+    let filler = tree.add(FixedLeaf(120.0, 200.0));
+    let outer_content = tree.add(VStack::new().add_child(grid_box).add_child(filler));
+    let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    let _outer = tree.add(outer);
+    tree.layout(SizeProposal::exact(120.0, 100.0));
+
+    tree.focus(grid_id);
+    tree.layout(SizeProposal::exact(120.0, 100.0));
+    outer_y.set(0.0);
+    tree.layout(SizeProposal::exact(120.0, 100.0));
+    assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+    for _ in 0..20 {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::default(),
+            text: None,
+        });
+    }
+    tree.layout(SizeProposal::exact(120.0, 100.0));
+    assert!(
+        outer_y.get() > 0.01,
+        "navigating to a tile below the fold must scroll the enclosing ScrollArea (got {})",
+        outer_y.get()
+    );
+}
+
+#[test]
 fn ctrl_a_selects_all() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     let model = ListModel::from_vec((0..12).collect());

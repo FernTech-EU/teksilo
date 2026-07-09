@@ -820,12 +820,21 @@ impl Widget for TabHeader {
             .on_access_action_request({
                 let selected = self.selected.clone();
                 let on_reorder_to = self.on_reorder_to.clone();
-                let header_count_signal = self.shared.header_ids.clone();
+                let header_ids_for_action = self.shared.header_ids.clone();
                 move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
                     use bastyde_core::accesskit::{Action, ActionData};
                     match action {
                         Action::Click => {
                             selected.set(index);
+                            // AT-invoked click doesn't move keyboard focus, so
+                            // the framework's focus-driven follow won't reveal
+                            // this header. Explicitly chase it into the strip's
+                            // scroll area (and any enclosing scroller). Keyboard
+                            // nav and pointer clicks already move focus, so they
+                            // get the reveal for free.
+                            if let Some(&hid) = header_ids_for_action.borrow().get(index) {
+                                ctx.ensure_widget_visible(hid);
+                            }
                             EventResponse::Handled
                         }
                         Action::CustomAction => {
@@ -838,7 +847,7 @@ impl Widget for TabHeader {
                             let Some(ActionData::CustomAction(idx)) = data else {
                                 return EventResponse::Ignored;
                             };
-                            let total = header_count_signal.borrow().len();
+                            let total = header_ids_for_action.borrow().len();
                             match idx {
                                 0 if index > 0 => {
                                     reorder(index - 1, ctx);

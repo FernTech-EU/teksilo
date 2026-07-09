@@ -92,6 +92,29 @@ pub struct EventContext<'ops> {
     /// header → into the tab panel), distinct from `focus_requests` which
     /// focuses the container itself as a last resort.
     pub(crate) focus_into_requests: Vec<crate::widget_id::WidgetId>,
+    /// Rect-based "scroll this into view" requests, in **absolute tree
+    /// (window) coordinates**. Queued by [`ensure_visible`](EventContext::ensure_visible)
+    /// / [`ensure_visible_with_margin`](EventContext::ensure_visible_with_margin).
+    /// Drained in `collect_from_ctx`, which walks the ancestors of the widget
+    /// whose handler queued the request and dispatches
+    /// [`WidgetEvent::ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView)
+    /// to every `clips_children` scroll container that doesn't already fully
+    /// contain the rect — the same ancestor-walk the focus path uses, but
+    /// with a caller-supplied rectangle instead of a widget's own bounds
+    /// (so a caret, a virtualized row, or a scrolled-off tab header can be
+    /// revealed even though it is not itself a distinct focused node).
+    pub(crate) scroll_into_view_requests: Vec<(bastyde_canvas::Rect, f32)>,
+    /// Widget-id-based "scroll this into view" requests, queued by
+    /// [`ensure_widget_visible`](EventContext::ensure_widget_visible) /
+    /// [`ensure_widget_visible_with_margin`](EventContext::ensure_widget_visible_with_margin).
+    /// Drained in `collect_from_ctx`, which resolves each id to its current
+    /// absolute arena bounds and walks *that widget's* ancestors (the target
+    /// widget itself excluded) dispatching
+    /// [`WidgetEvent::ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView).
+    /// The convenience form of the rect API for a target that is a real
+    /// mounted, non-virtualized child (a radio tile, a tab header) whose bounds
+    /// the framework already knows — the caller need not compute the rect.
+    pub(crate) scroll_widget_into_view_requests: Vec<(crate::widget_id::WidgetId, f32)>,
     /// Drag start request: (source_widget_id, payload, optional_preview_widget).
     pub(crate) drag_start_request: Option<(
         crate::widget_id::WidgetId,
@@ -289,6 +312,8 @@ impl<'ops> EventContext<'ops> {
             synthetic_clicks: Vec::new(),
             focus_requests: Vec::new(),
             focus_into_requests: Vec::new(),
+            scroll_into_view_requests: Vec::new(),
+            scroll_widget_into_view_requests: Vec::new(),
             drag_start_request: None,
             cancel_drag: false,
             drag_is_external: false,
@@ -1090,6 +1115,73 @@ impl<'ops> EventContext<'ops> {
     /// panel with neither leaves focus where it was.
     pub fn request_focus_into(&mut self, id: crate::widget_id::WidgetId) {
         self.focus_into_requests.push(id);
+    }
+
+    /// Scroll the given rectangle into view inside every enclosing scroll
+    /// container, walking outward from the widget whose handler is running.
+    ///
+    /// `rect` is in **absolute tree (window) coordinates** — the same space
+    /// the arena stores widget bounds in. After the handler returns, the
+    /// framework walks the current widget's ancestors and, for each
+    /// `clips_children` scroll container whose viewport does not already
+    /// fully contain `rect`, dispatches
+    /// [`WidgetEvent::ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView)
+    /// so the container adjusts its offset. Nested scroll areas each get a
+    /// turn (outermost included), exactly like the focus-driven path.
+    ///
+    /// Unlike the automatic focus follow — which can only reveal a *focused
+    /// widget's own bounds* — this lets a widget reveal an arbitrary interior
+    /// rectangle it computed itself: a text caret, a virtualized list/table
+    /// row (which is not a distinct focusable node), or a scrolled-off tab
+    /// header. The widget remains responsible for scrolling its *own* interior
+    /// viewport; `ensure_visible` handles the enclosing containers. It is a
+    /// no-op when there is no scroll container above the widget, or when every
+    /// container already shows the rect.
+    ///
+    /// See [`ensure_visible_with_margin`](Self::ensure_visible_with_margin) to
+    /// keep breathing room around the target.
+    pub fn ensure_visible(&mut self, rect: bastyde_canvas::Rect) {
+        self.scroll_into_view_requests.push((rect, 0.0));
+    }
+
+    /// Like [`ensure_visible`](Self::ensure_visible), but keeps `margin`
+    /// logical pixels of breathing room around `rect` on every edge, so the
+    /// target does not sit flush against the viewport boundary (the caret at
+    /// the bottom line, the selected row at the fold). `rect` is in absolute
+    /// tree (window) coordinates.
+    pub fn ensure_visible_with_margin(&mut self, rect: bastyde_canvas::Rect, margin: f32) {
+        self.scroll_into_view_requests.push((rect, margin.max(0.0)));
+    }
+
+    /// Scroll a specific mounted widget into view inside every enclosing
+    /// scroll container — the id-based companion to
+    /// [`ensure_visible`](Self::ensure_visible).
+    ///
+    /// The framework resolves `id` to its current absolute bounds after the
+    /// handler returns and walks *that widget's* ancestors (never `id`
+    /// itself), dispatching
+    /// [`WidgetEvent::ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView)
+    /// to each `clips_children` container that doesn't already show it.
+    ///
+    /// Use this when the target you want revealed is a real, non-virtualized
+    /// child whose bounds the arena already knows — a selected radio tile, a
+    /// tab header — so you don't have to compute a rect. For a target that has
+    /// no distinct node (a text caret) or that may not be realized (a
+    /// virtualized list/table row), use [`ensure_visible`](Self::ensure_visible)
+    /// with an analytic rect instead. No-op if `id` is not currently mounted.
+    pub fn ensure_widget_visible(&mut self, id: crate::widget_id::WidgetId) {
+        self.scroll_widget_into_view_requests.push((id, 0.0));
+    }
+
+    /// Like [`ensure_widget_visible`](Self::ensure_widget_visible), but keeps
+    /// `margin` logical pixels of breathing room around the widget.
+    pub fn ensure_widget_visible_with_margin(
+        &mut self,
+        id: crate::widget_id::WidgetId,
+        margin: f32,
+    ) {
+        self.scroll_widget_into_view_requests
+            .push((id, margin.max(0.0)));
     }
 
     /// Cancel a pending delayed overlay by its content widget ID.

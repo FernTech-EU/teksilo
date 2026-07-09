@@ -273,6 +273,11 @@ pub struct GridView<T: 'static> {
     // Geometry (synchronous cells, read within the layout pass)
     viewport_width: Rc<Cell<f32>>,
     viewport_height: Rc<Cell<f32>>,
+    /// The grid body pane's absolute (window) origin, published by
+    /// `GridBodyPane::place_children` (`None` until laid out). Shared into the
+    /// keyboard handler so it can chase the focused tile into any enclosing
+    /// scroll area (`ctx.ensure_visible`).
+    viewport_origin: Rc<Cell<Option<Point>>>,
     /// Remembered scrollbar decision so each layout queries the strategy at a
     /// single, stable body width — querying at two widths per frame would
     /// thrash a variable strategy's per-row measurement cache.
@@ -367,6 +372,7 @@ impl<T: 'static> GridView<T> {
             style: None,
             viewport_width: Rc::new(Cell::new(400.0)),
             viewport_height: Rc::new(Cell::new(400.0)),
+            viewport_origin: Rc::new(Cell::new(None)),
             last_needs_scrollbar: Cell::new(false),
             body_pane_id: None,
             empty_id: None,
@@ -947,6 +953,7 @@ impl<T: 'static> Widget for GridView<T> {
             max_scroll_y: self.max_scroll_y.clone(),
             viewport_height: self.viewport_height.clone(),
             viewport_width: self.viewport_width.clone(),
+            viewport_origin: self.viewport_origin.clone(),
             strategy: strategy.clone(),
             wrap_navigation: self.wrap_navigation,
             tab_traversal: self.tab_traversal,
@@ -1097,6 +1104,7 @@ impl<T: 'static> Widget for GridView<T> {
                 strategy: strategy.clone(),
                 viewport_width: self.viewport_width.clone(),
                 viewport_height: self.viewport_height.clone(),
+                viewport_origin: self.viewport_origin.clone(),
                 column_count: self.column_count.clone(),
                 scroll_y: self.scroll_y.clone(),
                 selection: self.selection.clone(),

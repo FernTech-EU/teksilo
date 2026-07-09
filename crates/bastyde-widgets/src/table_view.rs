@@ -328,6 +328,11 @@ pub struct TableView<T: 'static> {
     /// to classify a drop position.
     pane_boundaries: Rc<RefCell<PaneBoundaries>>,
     viewport_height: Rc<Cell<f32>>,
+    /// The row-area's absolute (window) rect (below the header), cached by
+    /// `place_children`. Threaded into the keyboard handler so it can chase the
+    /// focused row into any *enclosing* scroll area via
+    /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
+    body_bounds: Rc<Cell<Rect>>,
     /// Width of the header strip (= the column band) snapshotted by
     /// `place_children`. The reorder-drop handler needs it to mirror the
     /// drop x under RTL, where the column content is right-anchored in
@@ -478,6 +483,7 @@ impl<T: 'static> TableView<T> {
             display_indices: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
             viewport_height: Rc::new(Cell::new(600.0)),
+            body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             header_strip_width: Rc::new(Cell::new(0.0)),
             resize_state: Rc::new(std::cell::RefCell::new(None)),
             table_id,
@@ -1356,6 +1362,7 @@ impl<T: 'static> Widget for TableView<T> {
             scroll_y: self.scroll_y.clone(),
             max_scroll_y: self.max_scroll_y.clone(),
             viewport_height: self.viewport_height.clone(),
+            body_bounds: self.body_bounds.clone(),
             row_metrics: self.row_metrics.clone(),
             tab_traversal: self.tab_traversal,
             editing_cell: self.editing_cell.clone(),
@@ -1823,6 +1830,9 @@ impl<T: 'static> Widget for TableView<T> {
         );
         *self.column_widths.borrow_mut() = widths;
         let body_origin_y = bounds.y + header_h;
+        // Cache the row-area rect for the keyboard handler's outer-scroll chase.
+        self.body_bounds
+            .set(Rect::new(band_left, body_origin_y, body_width, body_height));
 
         let mut next = 0;
 

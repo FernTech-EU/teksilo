@@ -29,12 +29,50 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use bastyde_canvas::Rect;
+use bastyde_core::widget::EventContext;
+
 use super::row_offsets::PrefixSumOffsets;
 
 /// Shared handle to a widget's row metrics — cloned into scroll
 /// observers, DnD handlers, keyboard configs, and (for `TableView` /
 /// `TreeTableView`) the body pane. Same idiom as `SharedColumnWidths`.
 pub(crate) type SharedRowMetrics = Rc<RefCell<RowMetrics>>;
+
+/// Reveal row `idx` of a virtualizing row widget inside every ENCLOSING
+/// scroll container, chaining outward from the view.
+///
+/// The view is expected to have already brought the row into its OWN viewport
+/// (via [`RowMetrics::scroll_for_ensure_visible`]); this then computes the
+/// row's absolute window rect from the view's own absolute row-area `viewport`
+/// (row 0's top sits at `viewport.y` when `scroll_y == 0`), the row-offset
+/// table, and the just-applied `scroll_y`, and queues an
+/// [`EventContext::ensure_visible`] so an ancestor `ScrollArea` / tab panel /
+/// splitter pane follows the keyboard selection too. The row itself is not a
+/// distinct focusable node (the container holds focus), so the framework's
+/// focus-driven follow never fires for it — this is what closes that gap.
+///
+/// `viewport` and the produced rect are in absolute tree (window) coordinates.
+/// A no-op at the framework level when no ancestor needs to move.
+pub(crate) fn chase_row_into_outer_view(
+    ctx: &mut EventContext,
+    metrics: &SharedRowMetrics,
+    viewport: Rect,
+    idx: usize,
+    scroll_y: f32,
+) {
+    let (top, height) = {
+        let mut m = metrics.borrow_mut();
+        (m.row_top(idx), m.row_height(idx))
+    };
+    let rect = Rect::new(
+        viewport.x,
+        viewport.y + top - scroll_y,
+        viewport.width,
+        height,
+    );
+    ctx.ensure_visible(rect);
+}
 
 /// Height source for [`RowMetrics`].
 pub(crate) enum RowMode {

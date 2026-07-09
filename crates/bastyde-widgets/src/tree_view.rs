@@ -243,6 +243,13 @@ pub struct TreeView<T: 'static> {
     item_entries: Vec<(usize, WidgetId)>, // (flat_index, widget_id)
     scrollbar_id: Option<WidgetId>,
     viewport_height: Rc<Cell<f32>>,
+    /// The TreeView's own absolute (window) bounds, cached from
+    /// `place_children` so the keyboard handler can chase the selected row
+    /// into enclosing scroll areas via
+    /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
+    /// Rows are not distinct focusable nodes, so the focus-driven follow never
+    /// reveals the selected row in an outer scroller — this closes that gap.
+    viewport_bounds: Rc<Cell<Rect>>,
     tree_id: usize,
 
     /// Whole-view enabled state, statically or reactively. Forwarded to the
@@ -428,6 +435,7 @@ impl<T: 'static> TreeView<T> {
             item_entries: Vec::new(),
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
+            viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
             tree_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             enabled: Prop::Static(true),
         }
@@ -876,11 +884,12 @@ impl<T: 'static> Widget for TreeView<T> {
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
+            let vb_for_nav = self.viewport_bounds.clone();
             let ta_state = self.type_ahead.clone();
             let ta_label = self.type_ahead_label.clone();
             let ta_timeout = self.type_ahead_timeout;
 
-            handlers = handlers.on_key(move |event, _ctx| {
+            handlers = handlers.on_key(move |event, ctx| {
                 if let bastyde_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     use bastyde_core::event::Key;
                     let visible_count = source.visible_count();
@@ -890,8 +899,10 @@ impl<T: 'static> Widget for TreeView<T> {
 
                     let current = fi.get().unwrap_or(0).min(visible_count - 1);
 
-                    // Helper: scroll so flat row `idx` is visible.
-                    let ensure_visible = |idx: usize| {
+                    // Helper: scroll so flat row `idx` is visible in the tree's
+                    // OWN viewport; returns the resulting scroll offset so the
+                    // caller can chain the reveal to enclosing scroll areas.
+                    let ensure_visible = |idx: usize| -> f32 {
                         let scroll = scroll_for_nav.get();
                         let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
                             idx,
@@ -902,6 +913,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         if (new_scroll - scroll).abs() > f32::EPSILON {
                             scroll_for_nav.set(new_scroll);
                         }
+                        new_scroll
                     };
 
                     // Ctrl+A: select all visible rows (Multi only).
@@ -935,7 +947,14 @@ impl<T: 'static> Widget for TreeView<T> {
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(idx);
                             }
-                            ensure_visible(idx);
+                            let new_scroll = ensure_visible(idx);
+                            crate::common::row_metrics::chase_row_into_outer_view(
+                                ctx,
+                                &metrics_for_nav,
+                                vb_for_nav.get(),
+                                idx,
+                                new_scroll,
+                            );
                             return bastyde_core::event::EventResponse::Handled;
                         }
                         return bastyde_core::event::EventResponse::Ignored;
@@ -988,6 +1007,17 @@ impl<T: 'static> Widget for TreeView<T> {
                                     if let Some(ref sel) = sel_for_key {
                                         sel.select(parent_idx);
                                     }
+                                    // Reveal the parent row (own viewport, then
+                                    // any enclosing scroll area) like every
+                                    // other focus-moving key.
+                                    let new_scroll = ensure_visible(parent_idx);
+                                    crate::common::row_metrics::chase_row_into_outer_view(
+                                        ctx,
+                                        &metrics_for_nav,
+                                        vb_for_nav.get(),
+                                        parent_idx,
+                                        new_scroll,
+                                    );
                                     return bastyde_core::event::EventResponse::Handled;
                                 }
                             }
@@ -1067,7 +1097,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                 sel.select(idx);
                             }
                         }
-                        ensure_visible(idx);
+                        let new_scroll = ensure_visible(idx);
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics_for_nav,
+                            vb_for_nav.get(),
+                            idx,
+                            new_scroll,
+                        );
                         return bastyde_core::event::EventResponse::Handled;
                     }
                 }
@@ -1504,6 +1541,10 @@ impl<T: 'static> Widget for TreeView<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // Cache our own absolute bounds for the keyboard handler's
+        // outer-scroll chase (`ensure_visible`), before the empty-children bail.
+        self.viewport_bounds.set(bounds);
+
         if children.is_empty() {
             return;
         }
@@ -2941,6 +2982,51 @@ mod tests {
         assert!(
             outer_y.get() < 0.01,
             "Contain must prevent chaining: outer stays put"
+        );
+    }
+
+    #[test]
+    fn keyboard_selection_chases_outer_scroll_area() {
+        // A 200px TreeView (20px rows) whose lower half is below a 100px outer
+        // ScrollArea's fold. Arrow-key navigation keeps focus on the container
+        // (rows aren't focusable), so the focus-driven follow can't reveal the
+        // selected row — ctx.ensure_visible must.
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        use bastyde_core::event::{Key, Modifiers};
+
+        let model = TreeModel::new();
+        for i in 0..20 {
+            model.insert_root(i, i as i32);
+        }
+        let mut tree = WidgetTree::new();
+        let tv = TreeView::new(model, |_item: &i32, _entry, _sel| {
+            Box::new(FixedLeaf(180.0, 20.0))
+        })
+        .item_height(20.0);
+        let tv_id = tree.add(tv);
+        let tv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child_id(tv_id));
+        let filler = tree.add(FixedLeaf(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(tv_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(tv_id);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+        for _ in 0..20 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(
+            outer_y.get() > 0.01,
+            "arrow-navigating below the fold must scroll the enclosing ScrollArea (got {})",
+            outer_y.get()
         );
     }
 

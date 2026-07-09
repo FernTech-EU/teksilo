@@ -60,6 +60,11 @@ pub(crate) struct GridBodyPane<T: 'static> {
     pub(crate) strategy: Rc<dyn GridLayoutStrategy>,
     pub(crate) viewport_width: Rc<Cell<f32>>,
     pub(crate) viewport_height: Rc<Cell<f32>>,
+    /// The pane's absolute (window) origin, published each `place_children`
+    /// pass so `GridView`'s keyboard handler can chase the focused tile into
+    /// enclosing scroll areas. Shares the `GridView`'s `viewport_origin` cell
+    /// (`None` until this pane lays out at least once).
+    pub(crate) viewport_origin: Rc<Cell<Option<bastyde_canvas::Point>>>,
     /// Live column count, written by `GridView::place_children`. Drives a
     /// rebuild when the window resize changes how many columns fit.
     pub(crate) column_count: Signal<usize>,
@@ -412,6 +417,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // Publish our absolute origin so GridView's keyboard handler can build
+        // the focused tile's window rect for the outer-scroll chase.
+        self.viewport_origin
+            .set(Some(bastyde_canvas::Point::new(bounds.x, bounds.y)));
+
         let scroll_y = self.scroll_y.get();
         let vp_w = bounds.width;
         let measures = self.strategy.measures_tiles();

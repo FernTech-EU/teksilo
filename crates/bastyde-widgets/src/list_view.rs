@@ -184,6 +184,14 @@ pub struct ListView<T: 'static> {
     /// clones by value, which would leave the tick closure reading the
     /// 600 px default forever.
     viewport_height: Rc<Cell<f32>>,
+    /// The ListView's own absolute (window) bounds, cached from
+    /// `place_children`. The keyboard handler reads it to build the selected
+    /// row's absolute rect and chase it into any *enclosing* scroll area via
+    /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
+    /// Rows are not distinct focusable nodes (the view holds focus), so the
+    /// framework's focus-driven follow never reveals the selected row in an
+    /// outer scroller — this closes that gap.
+    viewport_bounds: Rc<Cell<Rect>>,
 
     /// Stable ID for this ListView instance (used to identify intra-widget reorder).
     model_id: usize,
@@ -309,6 +317,7 @@ impl<T: 'static> ListView<T> {
             item_entries: Vec::new(),
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
+            viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
             enabled: Prop::Static(true),
         }
     }
@@ -758,6 +767,7 @@ impl<T: 'static> Widget for ListView<T> {
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
+            let vb_for_nav = self.viewport_bounds.clone();
             // Type-ahead state + label resolver (reads row text via the
             // source's string accessor, so lazy/unloaded rows are skipped).
             let ta_state = self.type_ahead.clone();
@@ -814,6 +824,13 @@ impl<T: 'static> Widget for ListView<T> {
                             if (new_scroll - scroll).abs() > f32::EPSILON {
                                 scroll_for_nav.set(new_scroll);
                             }
+                            crate::common::row_metrics::chase_row_into_outer_view(
+                                ctx,
+                                &metrics_for_nav,
+                                vb_for_nav.get(),
+                                idx,
+                                new_scroll,
+                            );
                             return bastyde_core::event::EventResponse::Handled;
                         }
                         return bastyde_core::event::EventResponse::Ignored;
@@ -852,6 +869,26 @@ impl<T: 'static> Widget for ListView<T> {
                                         sel.select(dest);
                                     }
                                     fi.set(Some(dest));
+                                    // Reveal the moved row (own viewport first,
+                                    // then chain to any enclosing scroll area).
+                                    let scroll = scroll_for_nav.get();
+                                    let new_scroll =
+                                        metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
+                                            dest,
+                                            scroll,
+                                            vh_for_nav.get(),
+                                            max_for_nav.get(),
+                                        );
+                                    if (new_scroll - scroll).abs() > f32::EPSILON {
+                                        scroll_for_nav.set(new_scroll);
+                                    }
+                                    crate::common::row_metrics::chase_row_into_outer_view(
+                                        ctx,
+                                        &metrics_for_nav,
+                                        vb_for_nav.get(),
+                                        dest,
+                                        new_scroll,
+                                    );
                                 }
                                 return bastyde_core::event::EventResponse::Handled;
                             }
@@ -934,7 +971,8 @@ impl<T: 'static> Widget for ListView<T> {
                                 sel.select(idx);
                             }
                         }
-                        // Scroll into view
+                        // Scroll into view — the ListView's own viewport first,
+                        // then chain to any enclosing scroll area.
                         let scroll = scroll_for_nav.get();
                         let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
                             idx,
@@ -945,6 +983,13 @@ impl<T: 'static> Widget for ListView<T> {
                         if (new_scroll - scroll).abs() > f32::EPSILON {
                             scroll_for_nav.set(new_scroll);
                         }
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics_for_nav,
+                            vb_for_nav.get(),
+                            idx,
+                            new_scroll,
+                        );
                         return bastyde_core::event::EventResponse::Handled;
                     }
                 }
@@ -1260,6 +1305,11 @@ impl<T: 'static> Widget for ListView<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // Cache our own absolute bounds for the keyboard handler's
+        // outer-scroll chase (`ensure_visible`). Done before the empty-children
+        // bail so the rect stays fresh even for an empty list that later fills.
+        self.viewport_bounds.set(bounds);
+
         if children.is_empty() {
             return;
         }
@@ -2911,6 +2961,55 @@ mod tests {
         assert!(
             outer_y.get() < 0.01,
             "Contain must prevent chaining: outer stays put"
+        );
+    }
+
+    #[test]
+    fn keyboard_selection_chases_outer_scroll_area() {
+        // A 200px ListView (20 × 20px rows → scrolls internally) whose lower
+        // half sits below a 100px outer ScrollArea's fold. Arrow-key selection
+        // is not a focus change (the list keeps focus, `active_descendant`
+        // style), so the framework's focus-driven follow never reveals the
+        // selected row — `ctx.ensure_visible` must.
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let mut tree = WidgetTree::new();
+        let model = ListModel::from_vec((0..20_usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let lv = ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(180.0, 20.0)))
+            .item_height(20.0)
+            .selection(selection);
+        let lv_id = tree.add(lv);
+        let lv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child_id(lv_id));
+        let filler = tree.add(FixedLeaf(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(lv_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Focus scrolls the outer to reveal the tall list; reset so any further
+        // scroll is attributable to the row-selection chase.
+        tree.focus(lv_id);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+        // Select down toward the bottom rows (below the outer fold).
+        for _ in 0..20 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!(
+            outer_y.get() > 0.01,
+            "selecting a row below the outer fold must scroll the enclosing \
+             ScrollArea (got {})",
+            outer_y.get()
         );
     }
 

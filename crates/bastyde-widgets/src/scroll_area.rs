@@ -497,6 +497,7 @@ impl Widget for ScrollArea {
                 WidgetEvent::ScrollIntoView {
                     target_bounds,
                     margin,
+                    applied_scroll,
                 } => {
                     // `target_bounds` is in absolute tree coordinates (the
                     // arena stores screen-space rects). Convert to the
@@ -509,16 +510,25 @@ impl Widget for ScrollArea {
                     let sy = scroll_y.get();
                     let sx = scroll_x.get();
 
+                    // Reveal on each axis independently, but leave an axis
+                    // untouched when the (margin-expanded) target already spans
+                    // the viewport on it: a target larger than the viewport is
+                    // "as visible as it can be", and aligning one of its edges
+                    // would spuriously move that axis — e.g. a full-width row
+                    // (or any target as wide as the content) resetting a
+                    // horizontally-scrolled ancestor on a vertical-only nav.
                     let viewport_top = sy;
                     let viewport_bottom = viewport_top + vp.height;
                     let target_top = target_bounds.y - vo.y + sy - margin;
                     let target_bottom = target_top + target_bounds.height + margin * 2.0;
 
                     let mut new_y = sy;
-                    if target_top < viewport_top {
-                        new_y = target_top;
-                    } else if target_bottom > viewport_bottom {
-                        new_y = target_bottom - vp.height;
+                    if !(target_top <= viewport_top && target_bottom >= viewport_bottom) {
+                        if target_top < viewport_top {
+                            new_y = target_top;
+                        } else if target_bottom > viewport_bottom {
+                            new_y = target_bottom - vp.height;
+                        }
                     }
 
                     let viewport_left = sx;
@@ -527,15 +537,24 @@ impl Widget for ScrollArea {
                     let target_right = target_left + target_bounds.width + margin * 2.0;
 
                     let mut new_x = sx;
-                    if target_left < viewport_left {
-                        new_x = target_left;
-                    } else if target_right > viewport_right {
-                        new_x = target_right - vp.width;
+                    if !(target_left <= viewport_left && target_right >= viewport_right) {
+                        if target_left < viewport_left {
+                            new_x = target_left;
+                        } else if target_right > viewport_right {
+                            new_x = target_right - vp.width;
+                        }
                     }
 
                     scroll_y.set(new_y);
                     scroll_x.set(new_x);
                     clamp_and_set();
+                    // Report the actually-applied (post-clamp) scroll delta so a
+                    // nested outer container can re-target the same rect.
+                    if let Some(cell) = applied_scroll
+                        && let Ok(mut d) = cell.lock()
+                    {
+                        *d = bastyde_canvas::Point::new(scroll_x.get() - sx, scroll_y.get() - sy);
+                    }
                     EventResponse::Handled
                 }
                 _ => EventResponse::Ignored,
@@ -1738,6 +1757,67 @@ mod tests {
             target_after.bottom(),
             viewport_top,
             viewport_bottom
+        );
+    }
+
+    #[test]
+    fn scroll_into_view_reveals_target_through_two_nested_scroll_areas() {
+        // A focusable target sits deep inside an INNER ScrollArea, which is
+        // itself below the fold of an OUTER ScrollArea — both must scroll to
+        // reveal it. The inner reports its applied scroll through the
+        // `applied_scroll` back-channel so the outer targets where the child
+        // *lands* (post-inner-scroll), not its stale pre-scroll position. The
+        // end-to-end check is that the target is actually visible after one pass.
+        use crate::primitives::FixedSize;
+
+        let mut tree = WidgetTree::new();
+        // Inner content: 200px spacer, the 20px target, 100px tail → 320px.
+        let target = tree.add(TallLeaf::new(200.0, 20.0).focusable(true));
+        let inner_spacer = tree.add(TallLeaf::new(200.0, 200.0));
+        let inner_tail = tree.add(TallLeaf::new(200.0, 100.0));
+        let inner_content = tree.add(
+            VStack::new()
+                .add_child(inner_spacer)
+                .add_child(target)
+                .add_child(inner_tail),
+        );
+        let inner_sa = tree.add(ScrollArea::from_id(inner_content).smooth_scrolling(false));
+        // Bound the inner ScrollArea to an 80px viewport.
+        let inner_box = tree.add(
+            FixedSize::new()
+                .width(200.0)
+                .height(80.0)
+                .child_id(inner_sa),
+        );
+        // Outer content: 200px spacer, the inner box (below the fold), 200px tail.
+        let outer_spacer = tree.add(TallLeaf::new(200.0, 200.0));
+        let outer_tail = tree.add(TallLeaf::new(200.0, 200.0));
+        let outer_content = tree.add(
+            VStack::new()
+                .add_child(outer_spacer)
+                .add_child(inner_box)
+                .add_child(outer_tail),
+        );
+        let outer_sa = tree.add(ScrollArea::from_id(outer_content).smooth_scrolling(false));
+
+        // Outer viewport is 100px tall; the inner box starts at y≈200 → below it.
+        let sz = SizeProposal::exact(200.0, 100.0);
+        tree.layout(sz);
+
+        // Focus the deeply-nested target → walks both ScrollAreas.
+        tree.focus(target);
+        tree.layout(sz);
+
+        let outer_bounds = tree.bounds(outer_sa);
+        let t = tree.bounds(target);
+        assert!(
+            t.y >= outer_bounds.y - 1.0 && t.bottom() <= outer_bounds.bottom() + 1.0,
+            "target must be visible in the outer window after both scroll: target y={}..{}, \
+             outer viewport {}..{}",
+            t.y,
+            t.bottom(),
+            outer_bounds.y,
+            outer_bounds.bottom()
         );
     }
 

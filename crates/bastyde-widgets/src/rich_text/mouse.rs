@@ -142,6 +142,10 @@ pub(super) fn handle_pointer_event(
                 st.select_all_anchor_cell = None;
             }
             sync_cursor_signals(state);
+            // Reveal the placed caret in any enclosing scroll area, so
+            // click-placement is consistent with keyboard caret motion (no-op
+            // when the caret is already visible / follow disabled).
+            super::keyboard::chase_caret_into_view(state, ctx);
             ctx.request_frame();
             // Return Ignored so the gesture arena (DoubleTap /
             // TripleTap) also sees this PointerDown. Returning
@@ -224,6 +228,7 @@ pub(super) fn handle_pointer_event(
 
 pub(super) fn handle_scroll(
     state: &SharedState,
+    overscroll: crate::common::scroll::OverscrollBehavior,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
@@ -241,18 +246,41 @@ pub(super) fn handle_scroll(
         ScrollDelta::Pixels { x, y } => (*x, *y),
     };
     let st = state.borrow();
-    let new_y = (st.scroll_y.get() + dy).clamp(0.0, st.max_scroll_y.get());
-    let new_x = (st.scroll_x.get() + dx).clamp(0.0, st.max_scroll_x.get());
-    st.scroll_y.set(new_y);
-    st.scroll_x.set(new_x);
+    // Clamp each axis and learn whether it could absorb any of the delta.
+    // Using the shared helper keeps the editor's boundary behaviour bit-for-bit
+    // identical to `ScrollArea` / `ListView` / `TableView`.
+    let (new_x, moved_x) =
+        crate::common::scroll::scroll_clamp_axis(st.scroll_x.get(), dx, st.max_scroll_x.get());
+    let (new_y, moved_y) =
+        crate::common::scroll::scroll_clamp_axis(st.scroll_y.get(), dy, st.max_scroll_y.get());
+    // Guard each `set` on an actual change: `Signal::set` fans out to every
+    // observer unconditionally, so skipping the no-op write matters.
+    if moved_x {
+        st.scroll_x.set(new_x);
+    }
+    if moved_y {
+        st.scroll_y.set(new_y);
+    }
     drop(st);
-    ctx.request_frame();
-    EventResponse::Handled
+    if moved_x || moved_y {
+        ctx.request_frame();
+    }
+    // Decline (`Ignored`) when the editor is fully clamped on both axes so the
+    // wheel chains to an ancestor scrollable — the editor embedded in a
+    // scrolling form/page hands the leftover scroll to the page. Absorbing any
+    // movement (`Handled`) keeps the event. `OverscrollBehavior::Contain`
+    // always keeps the event at the editor. Shared boundary rule with every
+    // other scrollable via `scroll_response`.
+    crate::common::scroll::scroll_response(
+        moved_x || moved_y,
+        overscroll == crate::common::scroll::OverscrollBehavior::Contain,
+    )
 }
 
 /// Select word under the caret on double-click.
 pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
     tap_select(state, pos, SelectionType::WordUnderCursor);
+    super::keyboard::chase_caret_into_view(state, ctx);
     ctx.request_frame();
 }
 
@@ -260,6 +288,7 @@ pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut Event
 /// rich_text_edit.rs:782.
 pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
     tap_select(state, pos, SelectionType::BlockUnderCursor);
+    super::keyboard::chase_caret_into_view(state, ctx);
     ctx.request_frame();
 }
 

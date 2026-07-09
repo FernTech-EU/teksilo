@@ -173,6 +173,23 @@ pub(crate) struct EditorState {
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
+    /// When `true` (**the default**), moving the caret reveals it inside any
+    /// *enclosing* scroll area (via `EventContext::ensure_visible`) — the
+    /// standard editor "caret stays on screen while you type / navigate"
+    /// behaviour. It fires only on a caret *move*, never on a plain wheel /
+    /// scrollbar scroll, so the reader can still scroll freely away from the
+    /// caret and the view stays put until the caret next moves.
+    ///
+    /// This matters most for a document editor that **grows** to its content
+    /// with its own scroll suppressed (a flowing page inside an outer
+    /// `ScrollArea`): there the editor's *internal* caret-visibility is a no-op
+    /// (it shows all its content), so the enclosing page-follow is the only
+    /// thing that keeps the caret visible. Set
+    /// [`RichTextEditor::follow_caret_in_page(false)`](crate::rich_text::RichTextEditor::follow_caret_in_page)
+    /// for the rare case where the surrounding page must never move on a caret
+    /// change. See `chase_caret_into_view`.
+    pub follow_caret_in_page: bool,
+
     /// Whether the host window is currently active (`focused AND not
     /// occluded`). Mirrored from `BuildContext::window_active_signal` by an
     /// effect in `RichTextEditor::build` (the frame-loop `tick` has no context,
@@ -266,6 +283,21 @@ pub(crate) struct EditorState {
     /// next preedit string so the document always reflects the
     /// current IME state.
     pub ime_preedit_range: Option<std::ops::Range<usize>>,
+
+    /// Document position (scalar-indexed caret offset) of the most recent
+    /// [`chase_caret_into_view`](super::keyboard::chase_caret_into_view). The
+    /// page-follow chase reveals the caret only when it actually *moves*: a
+    /// repeat call at the same position (IME preedit churn on Linux, a no-op
+    /// nav key, a redundant click) is skipped so it can't yank the page back
+    /// after the user has deliberately scrolled the caret off-screen.
+    pub last_chase_pos: Option<usize>,
+
+    /// Last IME candidate-window rectangle reported to the platform via
+    /// [`report_ime_cursor_area`](super::keyboard::report_ime_cursor_area).
+    /// Reporting is deduped against this: re-sending an unchanged area is not
+    /// only wasted work but, on some winit IME backends (ibus/fcitx), echoes
+    /// back a fresh empty `Ime::Preedit` — a self-sustaining feedback loop.
+    pub last_ime_area: Option<bastyde_canvas::Rect>,
 
     /// Seconds since the last debounce drain. Starts at `1.0`
     /// (already expired) so the very first frame after construction
@@ -482,6 +514,7 @@ impl EditorState {
             last_code_block_bg: None,
             last_code_block_fg: None,
             has_focus: false,
+            follow_caret_in_page: true,
             window_active: true,
             focus_signal: Signal::new(false),
             event_queue,
@@ -495,6 +528,8 @@ impl EditorState {
             pending_chars: String::new(),
             ime_preedit: None,
             ime_preedit_range: None,
+            last_chase_pos: None,
+            last_ime_area: None,
             // Godot reference starts `debounce_timer` at 1.0 (already
             // expired, > 0.15 s window) so the first tick flushes the
             // initial state immediately instead of waiting 150 ms for

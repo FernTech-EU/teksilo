@@ -2211,6 +2211,59 @@ fn nested_table_chains_to_outer_at_boundary() {
 }
 
 #[test]
+fn keyboard_selection_chases_outer_scroll_area() {
+    // A 200px TableView (20px rows, 20 rows) whose lower rows are below a 100px
+    // outer ScrollArea's fold. Keyboard row nav keeps focus on the container
+    // (rows/cells aren't focusable), so the focus-driven follow can't reveal the
+    // focused row — ctx.ensure_visible must.
+    use crate::ScrollArea;
+    use crate::primitives::{FixedSize, VStack};
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Key, Modifiers};
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let tv = TableView::new(rows(20))
+        .add_column(id_col())
+        .add_column(name_col())
+        .row_height(20.0);
+    let tv_id = tree.add(tv);
+    let tv_box = tree.add(FixedSize::new().width(220.0).height(200.0).child_id(tv_id));
+    let filler = tree.add(
+        FixedSize::new()
+            .width(220.0)
+            .height(200.0)
+            .child(TextWidget::new(lit!(""))),
+    );
+    let outer_content = tree.add(VStack::new().add_child(tv_box).add_child(filler));
+    let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    let _outer = tree.add(outer);
+    let sz = SizeProposal {
+        width: Some(220.0),
+        height: Some(100.0),
+    };
+    tree.layout(sz);
+
+    tree.focus(tv_id);
+    tree.layout(sz);
+    outer_y.set(0.0);
+    tree.layout(sz);
+    assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+    // Place the pointer so the table's own focus/hover state is sane.
+    tree.pointer_move(Point::new(110.0, 50.0));
+
+    for _ in 0..20 {
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+    tree.layout(sz);
+    assert!(
+        outer_y.get() > 0.01,
+        "row nav below the fold must scroll the enclosing ScrollArea (got {})",
+        outer_y.get()
+    );
+}
+
+#[test]
 fn nested_table_contain_blocks_chaining() {
     use bastyde_canvas::Point;
     use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};

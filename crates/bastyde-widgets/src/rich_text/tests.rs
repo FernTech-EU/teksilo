@@ -4306,4 +4306,581 @@ mod affinity_tests {
             "bare viewer must drop the highlight even for a metric highlighter"
         );
     }
+
+    // -----------------------------------------------------------------
+    // Wheel scroll-chaining: an editor that can no longer scroll hands
+    // the wheel to an enclosing ScrollArea (mirrors the ListView /
+    // TableView / TreeTableView `nested_*_chains_to_outer_at_boundary`
+    // tests). Also the caret-follow outer-scroll behaviour.
+    // -----------------------------------------------------------------
+
+    /// Pump the editor's frame loop a few times at `(w, h)` so its
+    /// `max_scroll_y` is populated from the laid-out content before we drive
+    /// scroll / caret events.
+    fn pump(tree: &mut WidgetTree, w: f32, h: f32) {
+        for _ in 0..4 {
+            tree.request_frame();
+            tree.tick_animations(std::time::Duration::from_millis(16));
+            tree.layout(SizeProposal::exact(w, h));
+        }
+    }
+
+    /// Outer `ScrollArea { VStack[ fixed 48px editor (tall document), 300px
+    /// filler ] }` in a 150px viewport. The editor is wrapped in a `FixedSize`
+    /// so it has a well-defined viewport headlessly (an intrinsic `max_lines`
+    /// editor can't bootstrap its content layout without a paint pass). Returns
+    /// `(tree, editor_scroll_y, outer_scroll_y)`.
+    fn nested_rich_text_fixture(
+        inner: crate::OverscrollBehavior,
+    ) -> (
+        WidgetTree,
+        bastyde_core::signal::Signal<f32>,
+        bastyde_core::signal::Signal<f32>,
+    ) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+
+        let doc = TextDocument::new();
+        // 20 short lines → content far taller than the 48px editor viewport.
+        let text: String = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc).overscroll_behavior(inner);
+        let editor_y = editor.scroll_y();
+        // Seed the engine viewport the way a real paint pass would — headless
+        // tests never paint, and the text engine only lays out (and so only
+        // reports a non-zero `max_scroll_y`) once its viewport is set. Without
+        // this the editor is a 0-content stub and can't demonstrate boundary
+        // chaining. Everything downstream (handle_scroll, the bubble to the
+        // outer ScrollArea) is the real code path.
+        {
+            let handle = editor.state_handle();
+            let mut s = handle.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 48.0;
+            s.engine.set_viewport(208.0, 48.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(48.0)
+                .child_id(editor_id),
+        );
+        let filler = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(300.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(220.0, 150.0));
+        pump(&mut tree, 220.0, 150.0);
+        (tree, editor_y, outer_y)
+    }
+
+    #[test]
+    fn nested_rich_text_chains_to_outer_at_boundary() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, editor_y, outer_y) =
+            nested_rich_text_fixture(crate::OverscrollBehavior::Chain);
+
+        assert!(
+            editor_y.get().abs() < 0.01 && outer_y.get().abs() < 0.01,
+            "fixture starts unscrolled"
+        );
+
+        // Pointer over the editor (top of the outer content), scroll it to the
+        // bottom of its own content.
+        tree.pointer_move(Point::new(50.0, 12.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(220.0, 150.0));
+
+        let editor_bottom = editor_y.get();
+        assert!(
+            editor_bottom > 0.0,
+            "the editor should have scrolled its own content down; got {editor_bottom}"
+        );
+        assert!(
+            outer_y.get().abs() < 0.01,
+            "outer must not move while the editor still absorbs the scroll"
+        );
+
+        // A second downward wheel at the editor's boundary chains to the outer.
+        tree.pointer_move(Point::new(50.0, 12.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 120.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(220.0, 150.0));
+
+        assert!(
+            (editor_y.get() - editor_bottom).abs() < 0.01,
+            "editor stays clamped at its bottom"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "outer must scroll because the editor chained the boundary wheel"
+        );
+    }
+
+    #[test]
+    fn nested_rich_text_contain_blocks_chaining() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, _editor_y, outer_y) =
+            nested_rich_text_fixture(crate::OverscrollBehavior::Contain);
+
+        // Scroll the editor to its bottom, then again — Contain must swallow
+        // the boundary wheel so the outer never moves.
+        for _ in 0..2 {
+            tree.pointer_move(Point::new(50.0, 12.0));
+            tree.dispatch_event(WidgetEvent::Scroll {
+                delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+                modifiers: Modifiers::NONE,
+            });
+            tree.layout(SizeProposal::exact(220.0, 150.0));
+        }
+        assert!(
+            outer_y.get().abs() < 0.01,
+            "Contain must keep the wheel at the editor; outer stayed put"
+        );
+    }
+
+    #[test]
+    fn caret_move_chases_outer_scroll_area() {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+        use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+        // A 150px editor (30-line document → scrolls internally) at the top of
+        // an outer ScrollArea whose viewport is only 90px, so the editor's
+        // lower half sits below the fold.
+        let doc = TextDocument::new();
+        let text: String = (0..30)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        // Caret-follow into the enclosing page is on by default.
+        let editor = RichTextEditor::editor(doc);
+        {
+            let handle = editor.state_handle();
+            let mut s = handle.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 150.0;
+            s.engine.set_viewport(208.0, 150.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(150.0)
+                .child_id(editor_id),
+        );
+        let filler = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(200.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(220.0, 90.0));
+        pump(&mut tree, 220.0, 90.0);
+
+        // Focusing the editor makes the focus-driven follow scroll the outer to
+        // reveal the whole editor. Reset it so we can attribute any *further*
+        // scroll purely to caret movement (the thing under test).
+        tree.focus(editor_id);
+        tree.layout(SizeProposal::exact(220.0, 90.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(220.0, 90.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer scroll to top");
+
+        // Walk the caret to the bottom of the document. Each ArrowDown keeps the
+        // caret inside the editor's own 150px viewport AND chases it into the
+        // 90px outer viewport — the caret line ends up well below the fold, so
+        // the outer must scroll to keep it visible.
+        for _ in 0..30 {
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::ArrowDown,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+        }
+        tree.layout(SizeProposal::exact(220.0, 90.0));
+
+        assert!(
+            outer_y.get() > 0.01,
+            "moving the caret below the outer fold must scroll the enclosing \
+             ScrollArea (got outer scroll {})",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn caret_follow_disabled_leaves_enclosing_page_alone() {
+        // With follow_caret_in_page(false) a caret move must NOT scroll the
+        // enclosing page — the opt-out for a layout that wants the surrounding
+        // page to never move on a caret change.
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+        let doc = TextDocument::new();
+        let text: String = (0..40)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        // Grow editor with the page-follow explicitly disabled.
+        let editor = RichTextEditor::editor(doc).follow_caret_in_page(false);
+        {
+            let handle = editor.state_handle();
+            let mut s = handle.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 900.0;
+            s.engine.set_viewport(208.0, 900.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(900.0)
+                .child_id(editor_id),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(220.0, 150.0));
+        tree.focus(editor_id);
+        pump(&mut tree, 220.0, 150.0);
+        // Baseline after focus settles — a caret move must not change it when
+        // the follow is disabled.
+        let baseline = outer_y.get();
+
+        // Move the caret far down (well past the 150px fold).
+        for _ in 0..30 {
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::ArrowDown,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+        }
+        tree.layout(SizeProposal::exact(220.0, 150.0));
+        pump(&mut tree, 220.0, 150.0);
+        assert!(
+            (outer_y.get() - baseline).abs() < 0.5,
+            "follow disabled: caret movement must not scroll the enclosing \
+             page; baseline={baseline} now={}",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn standalone_wheel_scroll_away_from_caret_stays() {
+        // Standalone editor (internal scroll), caret at top. Wheel-scroll down
+        // and confirm the view does NOT snap back to the caret on subsequent
+        // frames — scrolling past the caret must work.
+        use crate::primitives::FixedSize;
+        use bastyde_core::event::{Key, Modifiers, ScrollDelta, WidgetEvent};
+
+        let doc = TextDocument::new();
+        let text: String = (0..40)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc);
+        let editor_y = editor.scroll_y();
+        {
+            let handle = editor.state_handle();
+            let mut s = handle.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 100.0;
+            s.engine.set_viewport(208.0, 100.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let _box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(100.0)
+                .child_id(editor_id),
+        );
+        tree.layout(SizeProposal::exact(220.0, 100.0));
+        pump(&mut tree, 220.0, 100.0);
+
+        tree.focus(editor_id);
+        // Caret to document start.
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Home,
+            modifiers: Modifiers::CTRL,
+            text: None,
+        });
+        pump(&mut tree, 220.0, 100.0);
+        assert!(editor_y.get().abs() < 0.5, "caret at top → scroll 0");
+
+        // Wheel down, away from the caret.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 200.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(220.0, 100.0));
+        let after_scroll = editor_y.get();
+        assert!(
+            after_scroll > 0.5,
+            "wheel scrolled the editor down; got {after_scroll}"
+        );
+
+        // Let several frames pass — the view must NOT snap back to the caret.
+        pump(&mut tree, 220.0, 100.0);
+        assert!(
+            editor_y.get() > 0.5,
+            "view snapped back to caret after scrolling! scroll_y={} (was {after_scroll})",
+            editor_y.get()
+        );
+    }
+
+    #[test]
+    fn smooth_scroll_away_from_caret_stays() {
+        // Skribisto's exact config: grow editor (scroll suppressed) inside an
+        // outer ScrollArea with SMOOTH scrolling (the default — the other repros
+        // force it off). Wheel the page away from the caret and confirm the
+        // smooth animation lands there and STAYS (no snap back to the caret).
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+
+        let doc = TextDocument::new();
+        let text: String = (0..40)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc);
+        {
+            let handle = editor.state_handle();
+            let mut s = handle.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 900.0; // > content → grow, editor can't scroll
+            s.engine.set_viewport(208.0, 900.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(900.0)
+                .child_id(editor_id),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        // SMOOTH scrolling ON (default) — this is the untested path.
+        let outer = ScrollArea::from_id(outer_content);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+
+        let sz = SizeProposal::exact(220.0, 150.0);
+        tree.layout(sz);
+        tree.focus(editor_id);
+        pump(&mut tree, 220.0, 150.0);
+        // Reset to the top so any later scroll is our own doing.
+        outer_y.set(0.0);
+        tree.layout(sz);
+
+        // Wheel the page DOWN. Caret is at the top (position 0) and does NOT
+        // move, so nothing should ever pull the page back up to it.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 300.0 },
+            modifiers: Modifiers::NONE,
+        });
+        // Drive the smooth animation to completion.
+        for _ in 0..40 {
+            tree.request_frame();
+            tree.tick_animations(std::time::Duration::from_millis(16));
+            tree.layout(sz);
+        }
+
+        assert!(
+            outer_y.get() > 0.5,
+            "page must stay scrolled away from the caret; ended at {}",
+            outer_y.get()
+        );
+    }
+
+    /// A grow editor inside a page `ScrollArea`, with its caret seeded
+    /// **off-screen below** the page viewport (as if the reader had scrolled it
+    /// away). `viewport_origin` is paint-set; headless tests don't paint, so we
+    /// seed it directly. Returns `(tree, editor_id, state_handle, outer_scroll_y,
+    /// proposal)`; the caller seeds `viewport_origin` and drives IME / key
+    /// events, then asserts on `outer_scroll_y`.
+    fn ime_flood_fixture() -> (
+        WidgetTree,
+        bastyde_core::widget_id::WidgetId,
+        super::super::state::SharedState,
+        bastyde_core::signal::Signal<f32>,
+        SizeProposal,
+    ) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+
+        let doc = TextDocument::new();
+        let text: String = (0..40)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc);
+        let st = editor.state_handle();
+        {
+            let mut s = st.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 2000.0; // > content → grow, editor can't scroll itself
+            s.engine.set_viewport(208.0, 2000.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(2000.0)
+                .child_id(editor_id),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        let outer = ScrollArea::from_id(outer_content);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+
+        let sz = SizeProposal::exact(220.0, 150.0);
+        tree.layout(sz);
+        tree.focus(editor_id);
+        pump(&mut tree, 220.0, 150.0);
+        (tree, editor_id, st, outer_y, sz)
+    }
+
+    #[test]
+    fn empty_ime_composition_flood_does_not_follow_caret() {
+        // THE Skribisto bug. On some Linux IME backends winit floods empty
+        // `Ime::Preedit("")` events while a field is focused. Each one used to
+        // run the page-follow caret chase, so once the reader scrolled the
+        // caret off-screen the very next empty event snapped the page straight
+        // back to it (~800 events/sec). The flood must now be completely inert.
+        use bastyde_core::event::WidgetEvent;
+
+        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
+        // Caret at document start, seeded off-screen below the 150px page
+        // viewport, with the page at rest at the top.
+        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        outer_y.set(0.0);
+        tree.layout(sz);
+
+        for _ in 0..20 {
+            tree.dispatch_event(WidgetEvent::ImeComposition {
+                text: String::new(),
+                cursor: None,
+            });
+            tree.tick_animations(std::time::Duration::from_millis(16));
+            tree.layout(sz);
+        }
+
+        assert!(
+            outer_y.get().abs() < 0.5,
+            "an empty IME composition flood must not scroll the page to the caret; \
+             page moved to {}",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn real_caret_move_still_follows_after_scroll_away() {
+        // Positive control / feature-intact check: the page-follow must still
+        // fire on a genuine caret MOVE even after the reader scrolled away — the
+        // position gate suppresses only no-op repeats, never real motion.
+        use bastyde_core::event::{Key, Modifiers};
+
+        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
+        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        outer_y.set(0.0);
+        tree.layout(sz);
+
+        press_key(&mut tree, Key::ArrowDown, Modifiers::NONE);
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(sz);
+
+        assert!(
+            outer_y.get() > 0.5,
+            "a real caret move must reveal the caret (page-follow intact); page at {}",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn repeated_same_preedit_does_not_re_follow_caret() {
+        // Position gate (Fix 2), exercised on a path Fix 1 does NOT short-circuit:
+        // a non-empty composition re-sent with identical text lands the caret at
+        // the same document position, and must not re-snap the page after the
+        // reader scrolled it away.
+        use bastyde_core::event::WidgetEvent;
+
+        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
+        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        tree.layout(sz);
+
+        // First preedit "x": caret advances to 1, the page follows it into view.
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: "x".to_string(),
+            cursor: None,
+        });
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(sz);
+        assert!(
+            outer_y.get() > 0.5,
+            "first preedit should follow the caret into view; page at {}",
+            outer_y.get()
+        );
+
+        // Reader scrolls the page away again.
+        outer_y.set(0.0);
+        tree.layout(sz);
+
+        // Same preedit re-sent → caret lands at the same position 1 → no re-follow.
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: "x".to_string(),
+            cursor: None,
+        });
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(sz);
+        assert!(
+            outer_y.get().abs() < 0.5,
+            "re-sending the same preedit must not snap the page back; page at {}",
+            outer_y.get()
+        );
+    }
 }

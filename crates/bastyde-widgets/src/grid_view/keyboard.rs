@@ -46,6 +46,17 @@ pub(crate) struct GridKeyConfig {
     pub(crate) max_scroll_y: Signal<f32>,
     pub(crate) viewport_height: Rc<Cell<f32>>,
     pub(crate) viewport_width: Rc<Cell<f32>>,
+    /// The grid body pane's absolute (window) origin, published each layout
+    /// pass by `GridBodyPane::place_children` (`None` until the pane has laid
+    /// out at least once). Lets the handler compute the focused tile's absolute
+    /// rect (`origin + tile_rect - scroll`) and chase it into any *enclosing*
+    /// scroll area via
+    /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
+    /// Tiles are virtualized and not focusable, so the focus-driven follow
+    /// never reveals the focused tile in an outer scroller. Left as `None`, the
+    /// chase is skipped so a nav dispatched before the first layout can't anchor
+    /// the rect at (0, 0).
+    pub(crate) viewport_origin: Rc<Cell<Option<bastyde_canvas::Point>>>,
     pub(crate) strategy: Rc<dyn GridLayoutStrategy>,
     pub(crate) wrap_navigation: bool,
     pub(crate) tab_traversal: GridTabTraversal,
@@ -131,7 +142,7 @@ pub(crate) fn build_grid_key_handler(
                     if let Some(ref sel) = cfg.selection {
                         sel.select(t);
                     }
-                    ensure_visible(&cfg, t);
+                    ensure_visible(&cfg, t, ctx);
                 }
                 return EventResponse::Handled;
             }
@@ -151,7 +162,7 @@ pub(crate) fn build_grid_key_handler(
                 if let Some(ref sel) = cfg.selection {
                     sel.select(idx);
                 }
-                ensure_visible(&cfg, idx);
+                ensure_visible(&cfg, idx, ctx);
                 return EventResponse::Handled;
             }
         }
@@ -246,7 +257,7 @@ pub(crate) fn build_grid_key_handler(
                 sel.select(idx);
             }
         }
-        ensure_visible(&cfg, idx);
+        ensure_visible(&cfg, idx, ctx);
         EventResponse::Handled
     }
 }
@@ -302,7 +313,7 @@ fn page_scroll(cfg: &GridKeyConfig, rows: f32) {
     cfg.scroll_y.set(new_y);
 }
 
-fn ensure_visible(cfg: &GridKeyConfig, idx: usize) {
+fn ensure_visible(cfg: &GridKeyConfig, idx: usize, ctx: &mut EventContext) {
     let delta = cfg.strategy.scroll_delta_to_reveal(
         idx,
         cfg.scroll_y.get(),
@@ -315,4 +326,19 @@ fn ensure_visible(cfg: &GridKeyConfig, idx: usize) {
         let new_y = (cfg.scroll_y.get() + delta).clamp(0.0, max);
         cfg.scroll_y.set(new_y);
     }
+    // After keeping the tile in the grid's OWN viewport, chase it into any
+    // enclosing scroll area. Computed analytically from the layout strategy —
+    // the tile may be virtualized (not realized as a live widget) — using the
+    // post-scroll offset so the rect is the tile's resting on-screen position.
+    // Skip when the body pane hasn't published its origin yet (a nav before the
+    // first layout), so the rect is never anchored at a stale (0, 0).
+    let Some(origin) = cfg.viewport_origin.get() else {
+        return;
+    };
+    let vp_w = cfg.viewport_width.get();
+    let r = cfg.strategy.tile_rect(idx, vp_w);
+    let scroll_y = cfg.scroll_y.get();
+    let rect =
+        bastyde_canvas::Rect::new(origin.x + r.x, origin.y + r.y - scroll_y, r.width, r.height);
+    ctx.ensure_visible(rect);
 }

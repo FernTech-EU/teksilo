@@ -95,27 +95,79 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         let focused_bounds = self.arena.bounds(focused_id);
+        self.scroll_rect_into_view(focused_id, focused_bounds, 0.0, &mut *ops);
+    }
 
-        let mut current = self.arena.parent(focused_id);
+    /// Reveal `rect` (in **absolute tree coordinates**) inside every
+    /// `clips_children` scroll container above `from`, walking strictly
+    /// outward (`from` itself is excluded). For each such container whose
+    /// viewport does not already contain the margin-expanded rect, dispatch
+    /// [`WidgetEvent::ScrollIntoView`] so it adjusts its offset; nested scroll
+    /// areas each get a turn (outermost included).
+    ///
+    /// This is the shared engine behind both the focus follow
+    /// ([`scroll_focused_into_view`](Self::scroll_focused_into_view), which
+    /// passes the focused widget's own bounds and a zero margin) and the
+    /// caller-driven [`EventContext::ensure_visible`](crate::widget::EventContext::ensure_visible),
+    /// which passes an arbitrary interior rectangle (a caret, a virtualized
+    /// row, a scrolled-off tab header) queued from a handler and drained in
+    /// `collect_from_ctx`. Excluding `from` is deliberate: a scrollable widget
+    /// is responsible for revealing an interior rect inside its *own*
+    /// viewport, so `ensure_visible` only touches the containers enclosing it
+    /// — no double-scroll, no feedback loop with the widget's internal follow.
+    ///
+    /// **Nested scroll areas.** Each handling container reports how far it
+    /// scrolled through the `applied_scroll` back-channel on the
+    /// [`ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView) event; the
+    /// walk shifts `rect` by the negated delta before asking the next (outer)
+    /// container, so the outer targets where the child will land once the
+    /// inner's deferred scroll applies — not its pre-scroll position. A handler
+    /// that doesn't report a delta (leaves the cell zero) simply gets no
+    /// re-targeting, which is exact for the common single-enclosing-scroller
+    /// case.
+    pub(super) fn scroll_rect_into_view(
+        &mut self,
+        from: WidgetId,
+        rect: Rect,
+        margin: f32,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // Shared back-channel: each handling scroll container reports how far it
+        // scrolled, so we can shift `rect` for the next (outer) ancestor to
+        // where the target will land once the inner's deferred scroll applies.
+        // `Arc<Mutex>` (not `Rc<Cell>`) keeps `WidgetEvent: Send`; always
+        // uncontended (single-threaded dispatch).
+        let applied = std::sync::Arc::new(std::sync::Mutex::new(Point::ZERO));
+        let mut rect = rect;
+        let mut current = self.arena.parent(from);
         while let Some(ancestor_id) = current {
             if let Some(node) = self.arena.get(ancestor_id)
                 && node.clips_children
             {
                 let viewport = node.bounds;
-                let needs_scroll = focused_bounds.y < viewport.y
-                    || focused_bounds.bottom() > viewport.bottom()
-                    || focused_bounds.x < viewport.x
-                    || focused_bounds.right() > viewport.right();
+                let needs_scroll = rect.y - margin < viewport.y
+                    || rect.bottom() + margin > viewport.bottom()
+                    || rect.x - margin < viewport.x
+                    || rect.right() + margin > viewport.right();
 
                 if needs_scroll {
+                    *applied.lock().unwrap() = Point::ZERO;
                     self.dispatch_to_widget(
                         ancestor_id,
                         &WidgetEvent::ScrollIntoView {
-                            target_bounds: focused_bounds,
-                            margin: 0.0,
+                            target_bounds: rect,
+                            margin,
+                            applied_scroll: Some(applied.clone()),
                         },
                         &mut *ops,
                     );
+                    // The container scrolled its content by `+delta`, moving the
+                    // target `-delta` in window space; carry that to the outer.
+                    let delta = *applied.lock().unwrap();
+                    if delta != Point::ZERO {
+                        rect =
+                            Rect::new(rect.x - delta.x, rect.y - delta.y, rect.width, rect.height);
+                    }
                 }
             }
             current = self.arena.parent(ancestor_id);

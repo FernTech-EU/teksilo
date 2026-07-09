@@ -37,6 +37,15 @@ pub(crate) struct KeyHandlerConfig {
     pub scroll_y: Signal<f32>,
     pub max_scroll_y: Signal<f32>,
     pub viewport_height: Rc<std::cell::Cell<f32>>,
+    /// The row-area's absolute (window) rect: row 0's top sits at
+    /// `body_bounds.y` when `scroll_y == 0`. Read to chase the keyboard-focused
+    /// row into any *enclosing* scroll area via
+    /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible)
+    /// — the table's own viewport follow is handled by `scroll_y`. Rows are not
+    /// distinct focusable nodes, so the framework's focus-driven follow never
+    /// reveals the selected row in an outer scroller. Populated by each widget's
+    /// `place_children`.
+    pub body_bounds: Rc<std::cell::Cell<bastyde_canvas::Rect>>,
     /// Row geometry (uniform / exact / auto-measure) — drives the
     /// PageUp/PageDown focus-row math.
     pub row_metrics: SharedRowMetrics,
@@ -296,7 +305,7 @@ pub(crate) fn build_key_handler(
                 {
                     cfg.focused_cell.set(Some((nr, col)));
                     apply_selection_extension(&cfg, nr, col, false);
-                    ensure_row_visible(&cfg, nr, row_count);
+                    ensure_row_visible(&cfg, nr, row_count, ctx);
                     return EventResponse::Handled;
                 }
                 return EventResponse::Ignored;
@@ -319,7 +328,7 @@ pub(crate) fn build_key_handler(
         if let Some((nr, nc)) = new_pos {
             cfg.focused_cell.set(Some((nr, nc)));
             apply_selection_extension(&cfg, nr, nc, modifiers.shift());
-            ensure_row_visible(&cfg, nr, row_count);
+            ensure_row_visible(&cfg, nr, row_count, ctx);
             return EventResponse::Handled;
         }
 
@@ -337,7 +346,12 @@ pub(crate) fn build_key_handler(
 /// pick a focus row at the new viewport edge, so calling this for them
 /// only refines the offset (the chosen row is visible by construction —
 /// no extra jump).
-fn ensure_row_visible(cfg: &KeyHandlerConfig, row: usize, row_count: usize) {
+fn ensure_row_visible(
+    cfg: &KeyHandlerConfig,
+    row: usize,
+    row_count: usize,
+    ctx: &mut EventContext,
+) {
     let scroll = cfg.scroll_y.get();
     let new_scroll = {
         let mut m = cfg.row_metrics.borrow_mut();
@@ -352,6 +366,15 @@ fn ensure_row_visible(cfg: &KeyHandlerConfig, row: usize, row_count: usize) {
     if (new_scroll - scroll).abs() > f32::EPSILON {
         cfg.scroll_y.set(new_scroll);
     }
+    // After keeping the row in the table's OWN viewport, chain the reveal to
+    // any enclosing scroll area (a form/page the table is embedded in).
+    crate::common::row_metrics::chase_row_into_outer_view(
+        ctx,
+        &cfg.row_metrics,
+        cfg.body_bounds.get(),
+        row,
+        new_scroll,
+    );
 }
 
 fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {

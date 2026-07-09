@@ -452,6 +452,21 @@ pub enum WidgetEvent {
         /// Extra margin (in logical pixels) to keep around the target
         /// when scrolling it into view. Defaults to 0.0.
         margin: f32,
+        /// Optional back-channel for the handling scroll container to report
+        /// how far it actually scrolled (`(dx, dy)` in content pixels). When
+        /// several nested scroll containers must each reveal the same target,
+        /// the ancestor walk (`scroll_rect_into_view`) reads this after
+        /// dispatching to an inner container and shifts `target_bounds` by the
+        /// negated delta before asking the next (outer) one — so the outer sees
+        /// where the target will land once the inner's (deferred) scroll
+        /// applies, not its pre-scroll position. `None` disables reporting (the
+        /// nested-reveal refinement is unavailable). A handler that ignores it
+        /// still works for the common single-container case.
+        ///
+        /// `Arc<Mutex<..>>` (not `Rc<Cell<..>>`) so `WidgetEvent` stays `Send`
+        /// — some events are posted across threads. This one is only ever
+        /// touched on the dispatch thread, so the lock is always uncontended.
+        applied_scroll: Option<std::sync::Arc<std::sync::Mutex<bastyde_canvas::Point>>>,
     },
     /// A recognized gesture event, routed through the same preview/bubble system.
     Gesture {

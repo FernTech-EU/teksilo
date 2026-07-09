@@ -72,6 +72,7 @@ use bastyde_text::{FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode};
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use crate::styles::RecipeRichTextEditorStyle;
 
@@ -155,6 +156,15 @@ pub struct RichTextEditor {
     /// [`content_padding_symmetric`](Self::content_padding_symmetric) /
     /// [`content_padding_each`](Self::content_padding_each).
     content_padding: Option<(f32, f32, f32, f32)>,
+    /// Wheel scroll-chaining behavior at the editor's scroll boundary.
+    /// [`OverscrollBehavior::Chain`] (the default) declines a wheel event the
+    /// editor can no longer absorb so it bubbles to an ancestor scrollable —
+    /// the editor embedded in a scrolling form/page hands the leftover scroll
+    /// to the page. [`OverscrollBehavior::Contain`] absorbs the event at the
+    /// boundary instead. Mirrors the identical knob on `ScrollArea` /
+    /// `ListView` / `TableView` / `GridView`. See
+    /// [`overscroll_behavior`](Self::overscroll_behavior).
+    overscroll_behavior: OverscrollBehavior,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -216,6 +226,7 @@ impl RichTextEditor {
             v_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             h_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
             content_padding: None,
+            overscroll_behavior: OverscrollBehavior::default(),
         }
     }
 
@@ -382,6 +393,37 @@ impl RichTextEditor {
     pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.v_scroll_policy = policy;
         self.h_scroll_policy = policy;
+        self
+    }
+
+    /// Whether moving the caret also scrolls any *enclosing* scroll area to
+    /// keep the caret on screen — the standard editor "caret stays visible as
+    /// you type / navigate" behaviour. **On by default.**
+    ///
+    /// It fires only on a caret *move*, never on a plain wheel / scrollbar
+    /// scroll, so the reader can still scroll freely away from the caret and the
+    /// view holds until the caret next moves. This is what makes an editor that
+    /// **grows** to its content with its own scroll suppressed (a flowing page
+    /// inside an outer `ScrollArea`) track the caret at all — there the editor's
+    /// internal caret-visibility is a no-op, so the enclosing-page follow is the
+    /// only mechanism that reveals the caret. Pass `false` for the rare layout
+    /// where a caret change must never move the surrounding page.
+    pub fn follow_caret_in_page(self, follow: bool) -> Self {
+        self.state.borrow_mut().follow_caret_in_page = follow;
+        self
+    }
+
+    /// Set the wheel scroll-chaining behavior at the editor's boundary
+    /// (default [`OverscrollBehavior::Chain`]). With `Chain`, a wheel event the
+    /// editor can no longer absorb (already at the top/bottom, or content that
+    /// fits so there is nothing to scroll) is declined so it bubbles to an
+    /// ancestor scrollable — an editor embedded in a scrolling form/page lets
+    /// the page scroll once the editor reaches its edge.
+    /// [`OverscrollBehavior::Contain`] keeps the event at the editor instead.
+    /// Mirrors the identical knob on `ScrollArea` / `ListView` / `TableView` /
+    /// `GridView`.
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
         self
     }
 
@@ -2560,7 +2602,8 @@ impl Widget for RichTextEditor {
             })
             .on_scroll({
                 let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_scroll(&state, event, ctx)
+                let overscroll = self.overscroll_behavior;
+                move |event, ctx| self::mouse::handle_scroll(&state, overscroll, event, ctx)
             })
             .on_key({
                 let state = self.state.clone();

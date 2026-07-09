@@ -1718,6 +1718,30 @@ impl WidgetTree {
             }
         }
 
+        // Rect-based "scroll this into view" requests (`ctx.ensure_visible`).
+        // Walk outward from the widget whose handler queued the request and
+        // reveal the rect inside every enclosing scroll container. Run after
+        // focus so that if the same handler also moved focus, both follows
+        // settle against the same (pre-relayout) bounds; each dispatch is
+        // gated on the container not already showing the rect, so ordering is
+        // harmless. The source widget itself is excluded from the walk — it
+        // owns revealing an interior rect inside its own viewport.
+        for (rect, margin) in ctx.scroll_into_view_requests {
+            self.scroll_rect_into_view(source_widget, rect, margin, &mut *ops);
+        }
+        // Id-based `ctx.ensure_widget_visible`: resolve to the target's current
+        // absolute bounds and walk *its* ancestors (skip if it was destroyed
+        // before the drain). Walking from the target — not `source_widget` —
+        // means the request reveals that widget wherever it sits, even when the
+        // handler runs on a different node (a group's roving-key handler
+        // revealing the child tile it just selected).
+        for (id, margin) in ctx.scroll_widget_into_view_requests {
+            if self.arena.get(id).is_some() {
+                let bounds = self.arena.bounds(id);
+                self.scroll_rect_into_view(id, bounds, margin, &mut *ops);
+            }
+        }
+
         // --- Drag and drop ---
         if let Some((source_widget, payload, preview_widget)) = ctx.drag_start_request {
             let (preview_content_id, preview_overlay_id) = if let Some(preview) = preview_widget {
@@ -4150,6 +4174,208 @@ mod tests {
             tree.arena.len(),
             total0,
             "dropped wrappers reaped — no per-rebuild leak"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // EventContext::ensure_visible / ensure_widget_visible — the
+    // rect/id-based outer-scroll chase drained in `collect_from_ctx`.
+    // -----------------------------------------------------------------
+
+    /// A `clips_children` container that places its single child at a fixed
+    /// vertical offset — used to give a child arena bounds *outside* the
+    /// container's viewport so the id-based `ensure_widget_visible` walk has a
+    /// reason to dispatch `ScrollIntoView`.
+    #[derive(Debug)]
+    struct BelowContainer {
+        child: Option<WidgetId>,
+        offset: f32,
+    }
+
+    impl crate::widget::Widget for BelowContainer {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            for c in children.iter_mut() {
+                c.origin = Point::new(bounds.x, bounds.y + self.offset);
+                c.size = bounds.size();
+            }
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            self.child.into_iter().collect()
+        }
+    }
+
+    /// A `clips_children` container that records the `ScrollIntoView` it
+    /// receives, so a test can assert what the framework dispatched to it.
+    fn recording_scroll_container(
+        tree: &mut WidgetTree,
+        child: WidgetId,
+        recorded: std::rc::Rc<std::cell::Cell<Option<Rect>>>,
+    ) -> WidgetId {
+        use crate::test_widgets::StackWidget;
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_scroll(move |ev, _ctx| match ev {
+                    WidgetEvent::ScrollIntoView { target_bounds, .. } => {
+                        recorded.set(Some(*target_bounds));
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                })
+                .clips_children(true),
+        )
+    }
+
+    #[test]
+    fn ensure_visible_dispatches_scroll_into_view_to_clipping_ancestor() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_scroll_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // A rect well below the 100px viewport — the container must be asked to
+        // reveal it.
+        let target = Rect::new(10.0, 500.0, 20.0, 15.0);
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible(target);
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            Some(target),
+            "ensure_visible(rect) must dispatch ScrollIntoView with the exact rect \
+             to the clips_children ancestor"
+        );
+    }
+
+    #[test]
+    fn ensure_visible_is_noop_when_rect_already_visible() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_scroll_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Fully inside the viewport → the ancestor already shows it, so no
+        // ScrollIntoView is dispatched.
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible(Rect::new(10.0, 10.0, 20.0, 15.0));
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            None,
+            "a rect already inside the viewport must not trigger a scroll"
+        );
+    }
+
+    #[test]
+    fn ensure_visible_margin_forces_scroll_near_edge() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_scroll_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Rect at y=95..99 is visible at margin 0, but with a 10px margin its
+        // padded bottom (109) spills past the 100px viewport → scroll.
+        let rect = Rect::new(10.0, 95.0, 20.0, 4.0);
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_with_margin(rect, 10.0);
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            Some(rect),
+            "the margin must widen the visibility test so a near-edge rect scrolls"
+        );
+    }
+
+    #[test]
+    fn ensure_widget_visible_uses_target_arena_bounds() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        // Target lives 500px below the container's top — off the viewport.
+        let target = tree.add(FillWidget::new());
+        let rec = recorded.clone();
+        let container = tree.add(
+            BelowContainer {
+                child: Some(target),
+                offset: 500.0,
+            }
+            .on_scroll(move |ev, _ctx| match ev {
+                WidgetEvent::ScrollIntoView { target_bounds, .. } => {
+                    rec.set(Some(*target_bounds));
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            })
+            .clips_children(true),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let expected = tree.bounds(target);
+        assert!(
+            expected.y > 100.0,
+            "fixture sanity: the target must sit below the viewport (y={})",
+            expected.y
+        );
+
+        // The source widget is irrelevant for the id-based walk — it starts
+        // from the *target's* parent — so pass the container itself.
+        let mut ctx = EventContext::new();
+        ctx.ensure_widget_visible(target);
+        tree.collect_from_ctx(ctx, container);
+
+        assert_eq!(
+            recorded.get(),
+            Some(expected),
+            "ensure_widget_visible(id) must dispatch ScrollIntoView with the \
+             target's current arena bounds"
+        );
+    }
+
+    #[test]
+    fn ensure_widget_visible_ignores_missing_widget() {
+        // A never-mounted id must neither panic nor dispatch a spurious scroll.
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_scroll_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ctx = EventContext::new();
+        ctx.ensure_widget_visible(WidgetId::default());
+        tree.collect_from_ctx(ctx, actor); // must not panic
+
+        assert_eq!(
+            recorded.get(),
+            None,
+            "an unmounted id must not trigger a scroll"
         );
     }
 }

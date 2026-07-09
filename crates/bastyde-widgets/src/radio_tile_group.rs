@@ -445,7 +445,13 @@ impl Widget for RadioTileGroup {
             let selected = self.selected.clone();
             let disabled = disabled.clone();
             let col_count = col_count.clone();
-            handlers = handlers.on_key(move |event, _ctx: &mut EventContext| {
+            // Tile widget ids (already populated above), so the roving handler
+            // can reveal the newly-selected tile in an enclosing scroll area.
+            // The group holds focus (tiles aren't focusable when grouped), so
+            // the framework's focus-driven follow never reveals the tile — it
+            // only ever chases the group's own bounds.
+            let tile_ids = self.tile_ids.clone();
+            handlers = handlers.on_key(move |event, ctx: &mut EventContext| {
                 if n == 0 {
                     return EventResponse::Ignored;
                 }
@@ -472,6 +478,12 @@ impl Widget for RadioTileGroup {
                 };
                 if next != cur {
                     selected.set(next);
+                    // Reveal the newly-selected tile in any enclosing scroll
+                    // area — the vertical-column group inside a scrolling form
+                    // is the case this exists for.
+                    if let Some(&id) = tile_ids.get(next) {
+                        ctx.ensure_widget_visible(id);
+                    }
                 }
                 EventResponse::Handled
             });
@@ -485,24 +497,33 @@ impl Widget for RadioTileGroup {
             });
         }
 
-        // Increment / Decrement AT actions mirror the arrow keys.
+        // Increment / Decrement AT actions mirror the arrow keys — including
+        // revealing the newly-selected tile in an enclosing scroll area, since
+        // an AT action moves selection without moving focus (the focus-driven
+        // follow can't compensate), exactly like the on_key path above.
         {
             let selected = self.selected.clone();
             let disabled = disabled.clone();
-            handlers = handlers.on_access_action(move |action, _ctx: &mut EventContext| {
+            let tile_ids = self.tile_ids.clone();
+            handlers = handlers.on_access_action(move |action, ctx: &mut EventContext| {
                 if n == 0 {
                     return EventResponse::Ignored;
                 }
                 let cur = selected.get().min(n - 1);
-                if action == bastyde_core::accesskit::Action::Increment {
-                    selected.set(Self::step(cur, true, &disabled));
-                    EventResponse::Handled
+                let next = if action == bastyde_core::accesskit::Action::Increment {
+                    Self::step(cur, true, &disabled)
                 } else if action == bastyde_core::accesskit::Action::Decrement {
-                    selected.set(Self::step(cur, false, &disabled));
-                    EventResponse::Handled
+                    Self::step(cur, false, &disabled)
                 } else {
-                    EventResponse::Ignored
+                    return EventResponse::Ignored;
+                };
+                if next != cur {
+                    selected.set(next);
+                    if let Some(&id) = tile_ids.get(next) {
+                        ctx.ensure_widget_visible(id);
+                    }
                 }
+                EventResponse::Handled
             });
         }
 
@@ -889,5 +910,100 @@ mod tests {
         // AccessibilityOnly binding must have re-walked the AT tree.
         assert!(!tree.accessibility_node(ids[0]).is_toggled());
         assert!(tree.accessibility_node(ids[1]).is_toggled());
+    }
+
+    #[test]
+    fn roving_selection_chases_outer_scroll_area() {
+        // A tall Vertical group inside a short outer ScrollArea. Selection roves
+        // on the group (individual tiles are NOT focusable when grouped), so the
+        // framework's focus-driven follow never reveals the selected tile — the
+        // group's `ctx.ensure_widget_visible(tile)` must scroll the enclosing
+        // area to keep the moving selection on screen.
+        use crate::ScrollArea;
+
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let g = tree.add(group_with(
+            selected.clone(),
+            TileLayout::Vertical,
+            &["a", "b", "c", "d", "e", "f"],
+        ));
+        let outer = ScrollArea::from_id(g).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        // Outer viewport far shorter than the 6-tile column.
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+
+        // Focus reveals the group; reset so any further scroll is attributable
+        // to the roving selection.
+        tree.focus(g);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+        // Rove to the last tile (below the fold).
+        for _ in 0..5 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+
+        assert_eq!(
+            selected.get(),
+            5,
+            "arrows moved the selection to the last tile"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "selecting a tile below the fold must scroll the enclosing ScrollArea \
+             (got {})",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn at_increment_chases_outer_scroll_area() {
+        // Same as above, but driven by an assistive-technology Increment action
+        // instead of a physical arrow key. The AT path moves selection without
+        // moving focus, so it must reveal the tile itself.
+        use crate::ScrollArea;
+        use bastyde_core::accessibility::widget_id_to_node_id;
+        use bastyde_core::accesskit::Action;
+
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let g = tree.add(group_with(
+            selected.clone(),
+            TileLayout::Vertical,
+            &["a", "b", "c", "d", "e", "f"],
+        ));
+        let outer = ScrollArea::from_id(g).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        tree.focus(g);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+        let node = widget_id_to_node_id(g);
+        let mut ops = bastyde_core::window::NoopWindowOps;
+        for _ in 0..5 {
+            tree.dispatch_access_action(node, Action::Increment, None, &mut ops);
+        }
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+
+        assert_eq!(
+            selected.get(),
+            5,
+            "AT Increment moved selection to the last tile"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "AT-driven selection below the fold must scroll the enclosing \
+             ScrollArea (got {})",
+            outer_y.get()
+        );
     }
 }
