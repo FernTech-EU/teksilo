@@ -4914,4 +4914,74 @@ mod affinity_tests {
             "blur must clear the IME-area dedup cache so a refocus re-seeds the OS"
         );
     }
+
+    #[test]
+    fn focus_reveals_caret_not_whole_editor_box() {
+        // The Skribisto "click the main editor and it jumps to the end of the
+        // scene" bug: a grow editor (own scroll suppressed) sits BELOW some
+        // content inside a page ScrollArea and is far taller than the viewport.
+        // Focusing it must reveal the CARET (near the top), not the whole
+        // ~2000px box — which the old `scroll_focused_into_view` did, scrolling
+        // the page to the editor's bottom.
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+
+        let doc = TextDocument::new();
+        let text: String = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc);
+        let st = editor.state_handle();
+        {
+            let mut s = st.borrow_mut();
+            s.viewport_width = 208.0;
+            s.viewport_height = 2000.0; // grow: own scroll suppressed
+            s.engine.set_viewport(208.0, 2000.0);
+            s.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        // Content ABOVE the editor so its top sits below the page-viewport top
+        // (as in the scene tab): the editor does NOT span the viewport, so the
+        // old whole-bounds reveal genuinely scrolls to its bottom.
+        let header = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(80.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(2000.0)
+                .child_id(editor_id),
+        );
+        let outer_content = tree.add(VStack::new().add_child(header).add_child(editor_box));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+
+        let sz = SizeProposal::exact(220.0, 150.0);
+        tree.layout(sz);
+        pump(&mut tree, 220.0, 150.0);
+        // Seed viewport_origin to the editor's laid-out window origin (paint's
+        // job) so the caret rect is consistent.
+        {
+            let b = tree.bounds(editor_id);
+            st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(b.x, b.y);
+        }
+
+        // Focus the editor (caret at document start). Must reveal the caret near
+        // the top, NOT jump to the editor's ~1900px bottom.
+        tree.focus(editor_id);
+        tree.layout(sz);
+        assert!(
+            outer_y.get() < 60.0,
+            "focus must reveal the caret near the top, not scroll to the editor's bottom; page at {}",
+            outer_y.get()
+        );
+    }
 }

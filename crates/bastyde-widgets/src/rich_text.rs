@@ -2902,6 +2902,19 @@ impl Widget for RichTextEditor {
         true
     }
 
+    fn focus_reveal_rect(&self, _bounds: Rect) -> Option<Rect> {
+        // On focus gain the framework reveals the focused widget into any
+        // enclosing ScrollArea. Reveal the caret *line*, not the (potentially
+        // page-tall, own-scroll-suppressed) whole editor: a click that only
+        // placed the caret near the top must not jump the page to the editor's
+        // bottom. Returns the exact absolute caret rect the in-page caret-follow
+        // uses (viewport_origin + caret − scroll); `scroll_rect_into_view`
+        // excludes the editor itself, so this targets the enclosing ScrollArea
+        // with no double-scroll. `None` (→ reveal whole bounds) before the first
+        // layout or while unfocused.
+        self::keyboard::caret_window_rect(&self.state.borrow())
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Transparent container in the AT tree — the inner
         // `RichTextEditorBody` carries the real role

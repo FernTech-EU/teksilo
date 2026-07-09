@@ -95,7 +95,16 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         let focused_bounds = self.arena.bounds(focused_id);
-        self.scroll_rect_into_view(focused_id, focused_bounds, 0.0, &mut *ops);
+        // Let the focused widget nominate a sub-rectangle to reveal instead of
+        // its whole box (a caret line, a selected row). A tall widget — e.g. a
+        // `RichTextEditor` grown inside a page `ScrollArea` — would otherwise
+        // scroll the page to its bottom on a click that only placed the caret.
+        let reveal = self
+            .arena
+            .get(focused_id)
+            .and_then(|node| node.widget.focus_reveal_rect(focused_bounds))
+            .unwrap_or(focused_bounds);
+        self.scroll_rect_into_view(focused_id, reveal, 0.0, &mut *ops);
     }
 
     /// Reveal `rect` (in **absolute tree coordinates**) inside every

@@ -530,7 +530,7 @@ fn caret_moved_epilogue(state: &SharedState, ctx: &mut EventContext) -> EventRes
 /// land in the same absolute space the arena stores bounds in — matching what
 /// `paint` does for the on-screen caret. Shared by the OS-IME cursor report
 /// and the enclosing-scroll-area follow so both track the exact same rect.
-fn caret_window_rect(st: &EditorState) -> Option<bastyde_canvas::Rect> {
+pub(super) fn caret_window_rect(st: &EditorState) -> Option<bastyde_canvas::Rect> {
     if !st.has_focus || !st.engine.has_full_layout() {
         return None;
     }

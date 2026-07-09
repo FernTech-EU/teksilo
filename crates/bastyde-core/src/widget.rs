@@ -435,6 +435,29 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// The rectangle (in **absolute tree coordinates**) that best *represents*
+    /// this widget when the framework reveals it into an ancestor scroll area on
+    /// focus gain. Returning `None` (the default) reveals the widget's whole
+    /// bounds — correct for most controls.
+    ///
+    /// A widget that can be much taller than a viewport — a `RichTextEditor`
+    /// grown inside a page `ScrollArea`, a `ListView` / `TreeView` taller than
+    /// its scroller — should override this to return the sub-rectangle the user
+    /// actually cares about (the caret line, the selected row). Otherwise
+    /// [`scroll_focused_into_view`](crate::widget_tree::WidgetTree) reveals the
+    /// *entire* box, which for a tall widget scrolls the page to its bottom on a
+    /// click that only meant to place the caret near the top. The returned rect
+    /// feeds the same ancestor-only `scroll_rect_into_view` engine the caret /
+    /// selection follow uses (the focused widget itself is excluded), so it
+    /// never double-scrolls against the widget's own internal follow.
+    ///
+    /// `bounds` is this widget's current absolute rectangle as the arena stores
+    /// it, so an override can place its interior rect without depending on a
+    /// paint-set origin.
+    fn focus_reveal_rect(&self, _bounds: Rect) -> Option<Rect> {
+        None
+    }
+
     /// Whether the point lies inside this widget's *actual* shape, not
     /// just its rectangular bounds. Consulted by hit-testing right after
     /// the bounds check: returning `false` for a point that *is* inside
