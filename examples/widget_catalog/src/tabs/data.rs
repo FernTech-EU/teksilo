@@ -49,7 +49,7 @@ fn make_list_model() -> ListModel<String> {
 }
 
 fn repeater_widget() -> Repeater<String> {
-    Repeater::new(make_repeater_model(), |_idx, item: &String| {
+    Repeater::new(make_repeater_model(), |item: &String| {
         Box::new(
             TextWidget::new(lit!(format!("• {item}")))
                 .style(TextStyleRole::Body)

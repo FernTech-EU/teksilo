@@ -160,7 +160,7 @@ impl Root {
                             }),
                     )
                     .child(
-                        Repeater::new(tags, move |i, tag| {
+                        Repeater::indexed(tags, move |i, tag| {
                             Box::new(
                                 Padding::uniform(2.0).child(
                                     Card::new().content(

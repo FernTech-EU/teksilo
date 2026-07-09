@@ -2834,7 +2834,7 @@ impl WidgetCatalog for crate::Repeater<String> {
                 "Delta".to_string(),
             ]);
             Box::new(
-                crate::Repeater::new(model, |_idx, item| {
+                crate::Repeater::new(model, |item| {
                     Box::new(
                         Padding::symmetric(4.0, 8.0).child(
                             TextWidget::new(lit!(item.clone()))

@@ -284,7 +284,7 @@ impl Widget for Root {
         // ----- Recents list (Repeater) -------------------------------
         let theme_for_factory = theme.clone();
         let show_paths_for_factory = show_paths.clone();
-        let repeater = Repeater::new(recents_model, move |_idx, project: &RecentProject| {
+        let repeater = Repeater::new(recents_model, move |project: &RecentProject| {
             let path_str = project.path.display().to_string();
             let display_name = project.display_name.clone();
             let pinned = project.pinned;
