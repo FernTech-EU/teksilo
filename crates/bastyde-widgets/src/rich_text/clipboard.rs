@@ -203,6 +203,27 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     state.pending_text_changed = true;
 }
 
+/// Whether a [`paste`] would insert anything — `true` iff the system
+/// clipboard carries text **or** an HTML payload.
+///
+/// This is the union of the shapes `paste` can actually consume: its
+/// self-round-trip (step 1) and external-HTML (step 2) branches insert
+/// from `get_html()` independently of any plain-text companion, and the
+/// plain-text branch (step 3) handles the rest. Probing only
+/// `has_text()` would wrongly report an HTML-only clipboard — an app
+/// that published `text/html` without a `text/plain` alternative — as
+/// un-pasteable, greying out a Paste command that would in fact succeed.
+///
+/// Returns `false` when no clipboard backend is installed (headless /
+/// feature-off builds), matching `paste`'s own silent no-op. `has_html`
+/// can round-trip to the X11 selection owner, so this is a
+/// menu-build-time query, never a per-frame one.
+pub(crate) fn can_paste(ctx: &EventContext) -> bool {
+    ctx.app_state::<ClipboardHandle>()
+        .map(|cb| cb.has_text() || cb.has_html())
+        .unwrap_or(false)
+}
+
 /// Insert plain text that may contain line breaks, splitting on
 /// `\n` into separate blocks. `text-document::TextCursor::insert_text`
 /// treats `\n` as a literal scalar inside one block, so pasting a

@@ -1275,6 +1275,23 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Whether a paste would insert anything — `true` iff the system
+    /// clipboard carries text **or** an HTML payload (the shapes
+    /// [`paste`](Self::paste) can consume; an HTML-only clipboard pastes
+    /// fine, so probing plain text alone would under-report).
+    ///
+    /// Clipboard contents are not reactively observable, so this is a
+    /// **point-in-time query** rather than a `Signal`: pass the active
+    /// [`EventContext`](bastyde_core::widget::EventContext). It probes
+    /// the clipboard (an X11 HTML probe can round-trip to the selection
+    /// owner), so a menu / toolbar builder should re-query when the menu
+    /// opens, not per frame. Returns `false` when no clipboard backend
+    /// is installed (headless or feature-off builds) — the same
+    /// "silently no-op" degradation the paste path itself uses.
+    pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool {
+        clipboard::can_paste(ctx)
+    }
+
     // --- Runtime zoom -----------------------------------------------------
 
     /// Set the editor's zoom level. Re-lays out immediately; triggers
@@ -1375,6 +1392,15 @@ impl RichTextEditor {
 ///   per-column / remove operations, plus [`is_in_table`](Self::is_in_table)
 ///   for contextual UI enable state.
 /// * History — [`undo`](Self::undo) / [`redo`](Self::redo).
+/// * Clipboard — [`copy`](Self::copy) / [`cut`](Self::cut) /
+///   [`paste`](Self::paste) /
+///   [`paste_unformatted`](Self::paste_unformatted), plus
+///   [`can_paste`](Self::can_paste) for Paste enable-state — so a
+///   context-menu factory (which can only capture a handle, never the
+///   editor that owns it) can rebuild Cut / Copy / Paste /
+///   Paste-Unformatted.
+/// * Selection — [`select_all`](Self::select_all) /
+///   [`delete_selection`](Self::delete_selection).
 /// * Reactive signal accessors —
 ///   [`format_version`](Self::format_version),
 ///   [`cursor_position_signal`](Self::cursor_position_signal),
@@ -1751,6 +1777,93 @@ impl EditorHandle {
     /// is empty.
     pub fn redo(&self) {
         let _ = self.state.borrow().document.redo();
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Clipboard ---------------------------------------------------------
+    //
+    // Programmatic counterparts of Ctrl+C / Ctrl+X / Ctrl+V /
+    // Ctrl+Shift+V, mirroring [`RichTextEditor::copy`] / `cut` / `paste` /
+    // `paste_unformatted` body-for-body. Each takes the active
+    // [`EventContext`](bastyde_core::widget::EventContext) because the
+    // clipboard handle is looked up via `ctx.app_state::<ClipboardHandle>()`,
+    // which only has a value during event dispatch — so these are callable
+    // from an `on_activate_fn` / context-menu closure that captured just a
+    // handle. A call site holding `&mut EventContext` can pass `&ctx`
+    // directly; Rust reborrows automatically.
+
+    /// Copy the current selection to the system clipboard (plain + HTML
+    /// payloads). No-op when there is no selection. See
+    /// [`RichTextEditor::copy`].
+    pub fn copy(&self, ctx: &bastyde_core::widget::EventContext) {
+        let mut st = self.state.borrow_mut();
+        clipboard::copy(&mut st, ctx);
+    }
+
+    /// Cut the current selection: copy first, then remove. See
+    /// [`RichTextEditor::cut`].
+    pub fn cut(&self, ctx: &bastyde_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::cut(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Paste from the system clipboard. Prefers an in-process fragment
+    /// over HTML over plain text. See [`RichTextEditor::paste`].
+    pub fn paste(&self, ctx: &bastyde_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::paste(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Paste plain text only, stripping any rich payload. See
+    /// [`RichTextEditor::paste_unformatted`].
+    pub fn paste_unformatted(&self, ctx: &bastyde_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::paste_unformatted(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Whether a paste would insert anything — `true` iff the system
+    /// clipboard carries text **or** an HTML payload. A point-in-time
+    /// query (clipboard contents are not reactively observable), taking
+    /// the active [`EventContext`](bastyde_core::widget::EventContext).
+    /// Use it to drive a context-menu / toolbar Paste enable-state,
+    /// re-querying on menu-open. Mirrors [`RichTextEditor::can_paste`].
+    pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool {
+        clipboard::can_paste(ctx)
+    }
+
+    // --- Selection ---------------------------------------------------------
+
+    /// Select the entire document programmatically. Resets the Ctrl+A
+    /// ladder so a subsequent Ctrl+A starts fresh at level 1. Mirrors
+    /// [`RichTextEditor::select_all`].
+    pub fn select_all(&self) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.cursor.select(SelectionType::Document);
+            st.select_all_level = 0;
+            st.select_all_anchor_cell = None;
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Delete the current selection. No-op when nothing is selected.
+    /// Mirrors [`RichTextEditor::delete_selection`].
+    pub fn delete_selection(&self) {
+        {
+            let st = self.state.borrow();
+            if st.cursor.has_selection() {
+                let _ = st.cursor.remove_selected_text();
+            }
+        }
         sync_cursor_signals(&self.state);
     }
 

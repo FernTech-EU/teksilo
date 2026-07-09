@@ -1689,6 +1689,306 @@ fn editor_paste_unformatted_strips_html_to_plain() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// EditorHandle clipboard + selection — the detached-handle counterparts of
+// the editor-owned methods above. A context-menu factory can only capture an
+// `EditorHandle` (never the move-only `RichTextEditor` that owns it), so
+// these must work purely through the shared state. Each mirrors the
+// `RichTextEditor` body and is exercised end-to-end through a handle.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn handle_copy_sets_system_clipboard_plain_text() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Select everything, then copy through the handle.
+    handle.select_all();
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.copy(ctx));
+
+    assert_eq!(
+        clipboard.get_text().unwrap_or_default(),
+        "Hello world",
+        "EditorHandle::copy must push the selection's plain text into the clipboard"
+    );
+}
+
+#[test]
+fn handle_copy_without_selection_is_noop() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // No selection: copy must capture nothing (mirrors the editor / Ctrl+C
+    // "stay silent on an empty selection" convention).
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.copy(ctx));
+
+    assert!(
+        clipboard.get_text().unwrap_or_default().is_empty(),
+        "EditorHandle::copy with no selection must not write the clipboard"
+    );
+}
+
+#[test]
+fn handle_cut_removes_selection_and_fills_clipboard() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    handle.select_all();
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.cut(ctx));
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        clipboard.get_text().unwrap_or_default(),
+        "Hello world",
+        "EditorHandle::cut must copy the selection before removing"
+    );
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "",
+        "EditorHandle::cut must remove the selection from the document"
+    );
+}
+
+#[test]
+fn handle_paste_inserts_system_clipboard_text() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("start ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_text("pasted").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Deterministically place the caret at the document end, then paste
+    // through the handle.
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::End,
+        bastyde_core::event::Modifiers::CTRL,
+    );
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.paste(ctx));
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "start pasted");
+}
+
+#[test]
+fn handle_paste_unformatted_strips_html_to_plain() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("before ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_html("<p><b>BOLD</b></p>", "BOLD").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::End,
+        bastyde_core::event::Modifiers::CTRL,
+    );
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.paste_unformatted(ctx));
+    tick_past_debounce(&mut tree);
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("BOLD"),
+        "EditorHandle::paste_unformatted must insert the plain text verbatim, got {:?}",
+        plain
+    );
+    // The rich payload must be dropped — no bold format applied.
+    let b_pos = plain.find("BOLD").expect("BOLD substring");
+    let probe = doc.cursor();
+    probe.set_position(b_pos, bastyde_text::text_document::MoveMode::MoveAnchor);
+    let fmt = probe.char_format().unwrap_or_default();
+    assert!(
+        !matches!(fmt.font_bold, Some(true)),
+        "EditorHandle::paste_unformatted must not apply bold formatting — got font_bold = {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
+fn handle_select_all_then_delete_selection_empties_document() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        !handle.has_selection().get(),
+        "a freshly built editor must start with no selection"
+    );
+
+    handle.select_all();
+    assert!(
+        handle.has_selection().get(),
+        "EditorHandle::select_all must produce a non-empty selection"
+    );
+
+    handle.delete_selection();
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "",
+        "EditorHandle::delete_selection must remove the selected range"
+    );
+    assert!(
+        !handle.has_selection().get(),
+        "the selection must be cleared once the range is deleted"
+    );
+}
+
+#[test]
+fn handle_delete_selection_without_selection_is_noop() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // No selection active — must leave the document untouched.
+    handle.delete_selection();
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "Hello",
+        "EditorHandle::delete_selection with no selection must be a no-op"
+    );
+}
+
+#[test]
+fn handle_can_paste_reflects_clipboard_contents() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Empty clipboard → nothing to paste.
+    let empty = std::cell::Cell::new(true);
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| empty.set(handle.can_paste(ctx)));
+    assert!(
+        !empty.get(),
+        "can_paste must be false while the clipboard is empty"
+    );
+
+    // Populate the clipboard → paste becomes available.
+    clipboard.set_text("something").unwrap();
+    let filled = std::cell::Cell::new(false);
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| filled.set(handle.can_paste(ctx)));
+    assert!(
+        filled.get(),
+        "can_paste must be true once the clipboard holds text"
+    );
+}
+
+#[test]
+fn handle_can_paste_true_for_html_only_clipboard() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    // An HTML-only clipboard: `text/html` with NO `text/plain` companion
+    // (the empty plain fallback leaves has_text() false while has_html()
+    // is true). `paste()` inserts this via its external-HTML branch, so
+    // `can_paste` must report it as pasteable — probing has_text() alone
+    // would wrongly grey out the Paste command.
+    clipboard.set_html("<p><b>rich</b></p>", "").unwrap();
+    assert!(
+        !clipboard.has_text(),
+        "precondition: the HTML-only clipboard must have no plain text"
+    );
+    assert!(clipboard.has_html(), "precondition: HTML payload present");
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let can = std::cell::Cell::new(false);
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| can.set(handle.can_paste(ctx)));
+    assert!(
+        can.get(),
+        "can_paste must be true for an HTML-only clipboard — paste() would insert the HTML"
+    );
+}
+
+#[test]
+fn handle_can_paste_false_without_clipboard_backend() {
+    use bastyde_core::window::NoopWindowOps;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    // No `ctx_with_memory_clipboard` — the tree has no ClipboardHandle in
+    // app-state, exactly like a headless / feature-off build.
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let can = std::cell::Cell::new(true);
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| can.set(handle.can_paste(ctx)));
+    assert!(
+        !can.get(),
+        "can_paste must degrade to false when no clipboard backend is installed"
+    );
+}
+
 #[test]
 fn editor_ime_composition_then_commit_inserts_finalised_text() {
     // A CJK-style composition: two intermediate compositions before
