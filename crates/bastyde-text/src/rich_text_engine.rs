@@ -544,17 +544,19 @@ mod tests {
             engine.content_height()
         };
         // Default (no fill) and an explicit 1.0 fill must match to the pixel.
-        assert!((layout_at(1.0) - {
-            let mut engine = RichTextEngine::private_default();
-            engine.set_viewport(400.0, 300.0);
-            engine.set_wrap_mode(WrapMode::Word);
-            let doc = TextDocument::new();
-            doc.set_plain_text("Hello, world!\nSecond line.").unwrap();
-            engine.layout_full(&doc.snapshot_flow());
-            engine.content_height()
-        })
-        .abs()
-            < 0.01);
+        assert!(
+            (layout_at(1.0) - {
+                let mut engine = RichTextEngine::private_default();
+                engine.set_viewport(400.0, 300.0);
+                engine.set_wrap_mode(WrapMode::Word);
+                let doc = TextDocument::new();
+                doc.set_plain_text("Hello, world!\nSecond line.").unwrap();
+                engine.layout_full(&doc.snapshot_flow());
+                engine.content_height()
+            })
+            .abs()
+                < 0.01
+        );
         let h1 = layout_at(1.0);
         let h2 = layout_at(2.0);
         assert!(
