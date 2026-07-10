@@ -468,21 +468,65 @@ still routes the drop to the target).
 `HoverReject`) let the surrounding UI drive its own visuals. `on_drop_typed::<T>`
 implicitly sets `accept_typed::<T>()` and hands the extracted `T` to the callback.
 
+#### Multi-zone drops
+
+Beyond one whole-bounds target, a `DropTarget` can expose up to five
+independently enable-able **regions** — `DropRegion::{Center, Top, Bottom,
+Leading, Trailing}` — each with its own optional hint, and route the drop by
+*where* the pointer released. This is the reusable form of `DockingLayout`'s
+hand-computed five-zone drag-to-dock overlay (its `compute_drop_zone` /
+`DockDropOverlay`); the pure hit-test (`region_at`) and geometry (`region_rect`)
+live in `bastyde-core::styles`.
+
+```rust
+DropTarget::new()
+    .child(editor_pane)
+    // The four SIDE zones share one factor (0.1..=1.0): the fraction of the
+    // axis each edge strip occupies. 0.2 = fifth (default), 0.5 = bisect.
+    .zone_size_factor(0.25)
+    .region(DropRegion::Center,   |z| z.hint(TextWidget::new(lit!("Add as tab"))))
+    .region(DropRegion::Leading,  |z| z.hint(TextWidget::new(lit!("Split left"))))
+    .region(DropRegion::Trailing, |z| z.hint(TextWidget::new(lit!("Split right"))))
+    // Region-aware drop (wins over on_drop); also `.active_region_signal(..)`.
+    .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
+```
+
+- Declaring **any** region switches the target to exactly the declared regions;
+  declaring none keeps the `Center`-only whole-bounds default (`.hint(w)` is
+  sugar for `.region(DropRegion::Center, |z| z.hint(w))`).
+- Each zone takes a reactive `z.enabled(signal)` (default `true`): a bound
+  `Signal<bool>` disables the zone **live, without a rebuild** — it stops
+  hit-testing (its strip falls through to the next-priority enabled zone, or
+  `Center`, or rejects), never highlights, and never shows its hint.
+- `region_at` classifies the *target-local* pointer (§4.1) against the currently
+  **enabled** zones — side zones are `size_factor`-thick strips tested in
+  leading→trailing→top→bottom priority; a middle covered by no enabled zone
+  resolves to `Center` when enabled, else the drop is **rejected** (the hover
+  never engages there, and `on_region_drop` only ever receives an enabled region).
+- The active zone highlights (**centre → frame only** so the wrapped content
+  shows through; an **edge strip → translucent fill + accent frame**) and only
+  that zone's hint appears, centered within the zone rect. Accept uses this
+  per-zone overlay; a reject paints a full-bounds error border.
+- `Leading` / `Trailing` map to left / right — the framework surfaces no writing
+  direction on the layout context yet, so RTL mirroring is a follow-up.
+
 **Styling.** Tier-3 `DropTargetStyle` (default `RecipeDropTargetStyle`); per-call
 `DropTarget::style(…)` or theme-wide `theme.style_slots.drop_target`.
 `DropTargetVariant` (`Default` 2 px / `Prominent` 3 px / `Subtle` 1 px / `None`)
-sets the highlight-border weight. The hint is gated with `visible_when` on a derived
-"accepted-hover?" signal, so it is culled from paint **and** the accessibility tree
-while idle; `Live::Polite` on the hint card announces it appearing.
+sets the highlight-frame weight. Each hint is gated with `visible_when` on a
+derived "is *this* region the active accepted-hover?" signal, so an inactive
+zone's hint is culled from paint **and** the accessibility tree; `Live::Polite`
+on the card announces it appearing.
 
 **Accessibility.** `Role::Group`. Unlike `DropZone`, `Live` is *not* placed on the
 group itself (that would announce every change to the wrapped child) — it is scoped
-to the hint card. There is no Browse fallback: `DropTarget` wraps arbitrary content,
+to each hint card. There is no Browse fallback: `DropTarget` wraps arbitrary content,
 which provides its own keyboard affordances.
 
-Demo: the "Internal drop target" panel in `cargo run -p file-drop` is a `DropTarget`
-recovering a typed `String` (drop a row on it directly, or drag a row out to the OS
-and back).
+Demo: the "Internal drop target" panel in `cargo run -p file-drop` is a single-zone
+`DropTarget` recovering a typed `String`; `cargo run -p drag-and-drop` adds a
+multi-zone target (leading = play next / centre = add / trailing = favourite, each
+with its own hint).
 
 ## 12. Dragging rows OUT of a data view — cross-widget export
 

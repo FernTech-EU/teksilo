@@ -10,7 +10,10 @@
 //!   playlist (a *copy*); Alt+↑/↓ reorders the selected row.
 //! - **Playlist** `ListView` — `.accept_foreign_rows(true)`: receives songs
 //!   dragged from the library. It is itself `.exportable(Move)`, so dragging a
-//!   playlist row onto the **Trash** `DropTarget` removes it.
+//!   playlist row onto the **Trash** `DropTarget` removes it. Below it, a
+//!   **multi-zone** `DropTarget` routes a dropped song by *where* it lands into
+//!   an **Up Next** queue — leading = play next, centre = add, trailing =
+//!   favourite (★) — each zone showing its own hint while hovering.
 //! - **Folders** `TreeView` — drag a row onto another's top third to drop
 //!   *before*, middle third to drop *into* (reparent), bottom third *after*.
 //!
@@ -24,9 +27,9 @@ use bastyde::core::WidgetPlacement;
 use bastyde::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Divider, DragTransferMode, DropTarget, DropTargetVariant, Expand, HStack, ListView, Padding,
-    Panel, RowDragData, Spacer, StandardListItem, StandardTreeItem, TextWidget, Toolbar, TreeView,
-    VStack,
+    Divider, DragTransferMode, DropRegion, DropTarget, DropTargetVariant, Expand, FixedSize,
+    HStack, ListView, Padding, Panel, RowDragData, Spacer, StandardListItem, StandardTreeItem,
+    TextWidget, Toolbar, TreeView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -100,6 +103,12 @@ struct Root {
     song_selection: SelectionModel,
     playlist_selection: SelectionModel,
     folder_selection: SelectionModel,
+    /// Destination for the multi-zone drop target. Deliberately a SEPARATE model
+    /// from `playlist` (which is `.exportable(Move)`): routing into a different
+    /// model means a song dropped here — whether a Library Copy or a Playlist
+    /// Move — never aliases the drag's own source model, so a Move can't
+    /// double-mutate. Leading = play next (front), centre/trailing = queue.
+    up_next: ListModel<String>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -112,6 +121,7 @@ impl Root {
             song_selection: SelectionModel::new(SelectionMode::Multi),
             playlist_selection: SelectionModel::new(SelectionMode::Multi),
             folder_selection: SelectionModel::new(SelectionMode::Single),
+            up_next: ListModel::from_vec(Vec::new()),
             root_child_id: None,
         }
     }
@@ -175,6 +185,8 @@ impl Root {
     fn build_playlist_panel(&self, theme: &Theme) -> impl Widget + 'static {
         let playlist = self.playlist.clone();
         let playlist_for_recv = self.playlist.clone();
+        let up_next_for_zone = self.up_next.clone();
+        let up_next_for_view = self.up_next.clone();
         let selection = self.playlist_selection.clone();
         let body_bold = theme.typography.body_bold.clone();
         let small = theme.typography.small.clone();
@@ -196,7 +208,7 @@ impl Root {
                             TextWidget::new(lit!(
                                 "Drop songs here from the Library. Drag a row onto Trash to remove it."
                             ))
-                            .style(small)
+                            .style(small.clone())
                             .color(text_muted),
                         ),
                 ),
@@ -218,6 +230,105 @@ impl Root {
                     })
                     // … and let a playlist row be *moved* out (e.g. to Trash).
                     .exportable(DragTransferMode::Move),
+                ),
+            )
+            // Multi-zone drop target: a song dragged from the Library (a Copy
+            // export) routes by *where* it lands into the separate "Up Next"
+            // queue — leading = play next (front), centre = add to end, trailing =
+            // favourite (★). Each zone shows its own hint while hovering;
+            // `zone_size_factor(0.34)` splits the width in ~thirds.
+            .child(
+                Padding::symmetric(6.0, 12.0).child(
+                    VStack::new()
+                        .spacing(6.0)
+                        .child(
+                            DropTarget::new()
+                                .variant(DropTargetVariant::Prominent)
+                                .zone_size_factor(0.34)
+                                .accept_when(|p| {
+                                    p.get_typed::<RowDragData<String>>()
+                                        .is_some_and(|d| d.is_export())
+                                })
+                                .region(DropRegion::Leading, |z| {
+                                    z.hint(
+                                        TextWidget::new(lit!("\u{25C0}  Play next"))
+                                            .color(TextRole::Primary),
+                                    )
+                                })
+                                .region(DropRegion::Center, |z| {
+                                    z.hint(
+                                        TextWidget::new(lit!("\u{FF0B}  Add to end"))
+                                            .color(TextRole::Primary),
+                                    )
+                                })
+                                .region(DropRegion::Trailing, |z| {
+                                    z.hint(
+                                        TextWidget::new(lit!("\u{2605}  Favourite"))
+                                            .color(TextRole::Primary),
+                                    )
+                                })
+                                .on_region_drop(move |region, mut p, _pos, _ctx| {
+                                    let Some(data) = p.take_typed::<RowDragData<String>>() else {
+                                        return false;
+                                    };
+                                    let items = data.items.unwrap_or_default();
+                                    if items.is_empty() {
+                                        return false;
+                                    }
+                                    // Route into the SEPARATE `up_next` queue — never
+                                    // the drag's own source model — so a Move export
+                                    // can't double-mutate.
+                                    match region {
+                                        DropRegion::Leading => {
+                                            for song in items.iter().rev() {
+                                                up_next_for_zone
+                                                    .insert(0, format!("\u{25B6} {song}"));
+                                            }
+                                        }
+                                        DropRegion::Trailing => {
+                                            for song in &items {
+                                                up_next_for_zone.push(format!("\u{2605} {song}"));
+                                            }
+                                        }
+                                        _ => {
+                                            for song in &items {
+                                                up_next_for_zone.push(song.clone());
+                                            }
+                                        }
+                                    }
+                                    true
+                                })
+                                .child(
+                                    Padding::uniform(16.0).child(
+                                        VStack::new()
+                                            .spacing(2.0)
+                                            .child(
+                                                TextWidget::new(lit!("Drop a song here"))
+                                                    .color(TextRole::Primary),
+                                            )
+                                            .child(
+                                                TextWidget::new(lit!(
+                                                    "\u{25C0} play next   \u{FF0B} add   \u{2605} favourite"
+                                                ))
+                                                .style(small.clone())
+                                                .color(TextRole::Secondary),
+                                            ),
+                                    ),
+                                ),
+                        )
+                        // The queue the zones feed — a separate model, so cross-model
+                        // moves stay coherent.
+                        .child(
+                            FixedSize::new().height(96.0_f32).child(
+                                ListView::new(up_next_for_view, move |_i, title, selected| {
+                                    Box::new(
+                                        StandardListItem::new(lit!(title.clone()))
+                                            .selected(selected),
+                                    )
+                                })
+                                .item_height(28.0),
+                            ),
+                        ),
                 ),
             )
             .child(

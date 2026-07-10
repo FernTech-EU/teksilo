@@ -123,9 +123,9 @@ pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use banner::{Banner, BannerSeverity};
 pub use bastyde_core::styles::{
-    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant, RadioTileStyle,
-    RadioTileStyleConfig, RadioTileVariant, SharedDropTargetStyle, SharedRadioTileStyle,
-    TabIndicatorPosition,
+    DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,
+    DropTargetVariant, RadioTileStyle, RadioTileStyleConfig, RadioTileVariant,
+    SharedDropTargetStyle, SharedRadioTileStyle, TabIndicatorPosition,
 };
 pub use bastyde_data::CheckState;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
@@ -147,7 +147,7 @@ pub use docking::{
     DockRail, DockRailItemSize, DockRailSlot, DockSide, DockTabDisplay, DockTabId, DockWidget,
     DockWidgetId, DockingLayout, DockingModel, TabPresentation,
 };
-pub use drop_target::DropTarget;
+pub use drop_target::{DropRegionSpec, DropTarget};
 pub use drop_zone::DropZone;
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use focus_scope::FocusScope;

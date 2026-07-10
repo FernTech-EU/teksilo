@@ -33,20 +33,57 @@
 //!     });
 //! ```
 //!
+//! # Multi-zone drops
+//!
+//! Beyond the single whole-bounds target, a `DropTarget` can expose up to five
+//! independently enable-able [`DropRegion`]s — `Center` / `Top` / `Bottom` /
+//! `Leading` / `Trailing` — each with its own optional hint, and route the drop
+//! by which zone the pointer released over. This is the VS Code-style
+//! "drop on the centre to add, drop on an edge to split" affordance
+//! (`DockingLayout` computes the same five zones by hand). Declare regions with
+//! [`DropTarget::region`]; the side zones share one [`DropTarget::zone_size_factor`]
+//! (`0.1..=1.0`, the fraction of the axis each edge strip occupies — `0.2` is the
+//! default fifth, `0.5` bisects) so you size them to the context. Route with
+//! [`DropTarget::on_region_drop`] (or observe [`DropTarget::active_region_signal`]).
+//!
+//! ```ignore
+//! DropTarget::new()
+//!     .child(editor_pane)
+//!     .zone_size_factor(0.25)
+//!     .region(DropRegion::Center,   |z| z.hint(TextWidget::new(lit!("Add as tab"))))
+//!     .region(DropRegion::Leading,  |z| z.hint(TextWidget::new(lit!("Split left"))))
+//!     .region(DropRegion::Trailing, |z| z.hint(TextWidget::new(lit!("Split right"))))
+//!     .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
+//! ```
+//!
+//! Declaring **any** region switches the target to exactly the declared regions;
+//! declaring none keeps the `Center`-only whole-bounds default (`.hint(w)` is
+//! sugar for `.region(DropRegion::Center, |z| z.hint(w))`). `Leading` / `Trailing`
+//! map to left / right — the framework surfaces no writing direction on the
+//! layout context yet, so RTL mirroring is a follow-up.
+//!
+//! Each zone can be **reactively enabled** with `z.enabled(signal)` (default
+//! `true`): a bound `Signal<bool>` disables the zone live — no rebuild — and its
+//! strip then falls through to the next-priority enabled zone (or `Center`, or
+//! rejects). A drop landing in a middle covered by no *enabled* zone is rejected;
+//! `on_region_drop` therefore only ever receives an enabled region.
+//!
 //! # Styling
 //!
-//! The highlight overlay + popup chrome is a Tier-3 [`DropTargetStyle`]; the
-//! default [`RecipeDropTargetStyle`](crate::styles::RecipeDropTargetStyle)
-//! tracks the interaction state. Override per-call with [`DropTarget::style`] or
+//! The per-zone highlight overlay + hint chrome is a Tier-3 [`DropTargetStyle`];
+//! the default [`RecipeDropTargetStyle`](crate::styles::RecipeDropTargetStyle)
+//! paints the active zone (centre → frame only, so the wrapped content shows
+//! through; an edge strip → translucent fill + accent frame) and a full-bounds
+//! error border on reject. Override per-call with [`DropTarget::style`] or
 //! theme-wide via `theme.style_slots.drop_target`.
 //!
 //! # Accessibility
 //!
 //! The wrapper is a `Role::Group`. `Live` is intentionally **not** set on the
 //! group (that would announce every change to the wrapped child); instead the
-//! recipe scopes `Live::Polite` to the hint card so a screen reader announces
-//! the hint *appearing*. The hint is gated by `visible_when`, so it leaves the
-//! AT tree entirely while idle.
+//! recipe scopes `Live::Polite` to each hint card so a screen reader announces
+//! the active zone's hint *appearing*. Each hint is gated by `visible_when`, so a
+//! non-active zone's hint leaves the AT tree entirely.
 //!
 //! ## Keyboard accessibility is the caller's responsibility
 //!
@@ -66,16 +103,19 @@
 //! drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 //! *is* the primary action.
 
+pub(crate) mod overlay;
+
+use std::cell::Cell;
 use std::rc::Rc;
 
-use bastyde_canvas::{Point, Rect, SizeProposal};
+use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::Role;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{
-    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
-    SharedDropTargetStyle,
+    DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,
+    DropTargetVariant, SharedDropTargetStyle, region_at,
 };
 use bastyde_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
@@ -86,22 +126,109 @@ use bastyde_core::{DragPayload, DropFeedback};
 
 type AcceptPredicate = Rc<dyn Fn(&DragPayload) -> bool>;
 type DropCallback = Box<dyn FnMut(DragPayload, Point, &mut EventContext) -> bool>;
+type RegionDropCallback = Box<dyn FnMut(DropRegion, DragPayload, Point, &mut EventContext) -> bool>;
 type LeaveCallback = Box<dyn FnMut(&mut EventContext)>;
+
+/// Default side-zone size factor (fraction of the axis each edge zone occupies)
+/// when the caller doesn't set one — matches docking's historical 20 %.
+const DEFAULT_ZONE_SIZE_FACTOR: f32 = 0.2;
+
+/// Per-region configuration for a multi-zone [`DropTarget`]: an optional hint
+/// plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
+/// land without a signature churn.
+pub struct DropRegionSpec {
+    hint: Option<PendingChild>,
+    enabled: Prop<bool>,
+}
+
+impl DropRegionSpec {
+    /// An enabled spec with no hint.
+    pub fn new() -> Self {
+        Self {
+            hint: None,
+            enabled: Prop::Static(true),
+        }
+    }
+
+    /// Widget shown (centered in this region's rect, inside a popup card) while
+    /// a drag with an accepted payload hovers **this** region.
+    pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
+        self.hint = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// This region's hint content by pre-registered `WidgetId`.
+    pub fn hint_id(mut self, id: WidgetId) -> Self {
+        self.hint = Some(PendingChild::Id(id));
+        self
+    }
+
+    /// Whether this zone is active — static or signal-bound (default `true`). A
+    /// bound `Signal<bool>` enables/disables the zone **live, without a rebuild**:
+    /// while disabled the zone stops hit-testing (its area falls through to the
+    /// next-priority enabled zone, or `Center`, or rejects), never highlights,
+    /// and never shows its hint. The enabled state is resolved on every drag
+    /// tick, so a `.set(false)` mid-drag takes effect on the next hover.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
+}
+
+impl Default for DropRegionSpec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for DropRegionSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DropRegionSpec")
+            .field("has_hint", &self.hint.is_some())
+            .finish()
+    }
+}
+
+/// Resolve the currently-**enabled** [`DropRegionSet`] from the declared
+/// per-region enable props (evaluated live each drag tick). An empty list means
+/// no `.region(...)` was declared → the implicit `Center`-only default.
+fn resolve_region_set(specs: &[(DropRegion, Prop<bool>)]) -> DropRegionSet {
+    if specs.is_empty() {
+        DropRegionSet::default()
+    } else {
+        specs
+            .iter()
+            .fold(DropRegionSet::none(), |set, (region, enabled)| {
+                if enabled.get() {
+                    set.with(*region)
+                } else {
+                    set
+                }
+            })
+    }
+}
 
 /// A transparent container that turns its child into a drop target. See the
 /// module docs.
 pub struct DropTarget {
     pending_child: Option<PendingChild>,
     child_id: Option<WidgetId>,
-    pending_hint: Option<PendingChild>,
-    hint_id: Option<WidgetId>,
+    /// Declared regions in call order (each with its optional per-zone hint).
+    /// Empty → the implicit `Center`-only whole-bounds default.
+    regions: Vec<(DropRegion, DropRegionSpec)>,
+    size_factor: f32,
     accept_predicate: Option<AcceptPredicate>,
     on_drop_callback: Option<DropCallback>,
+    on_region_drop_callback: Option<RegionDropCallback>,
     on_drag_leave_callback: Option<LeaveCallback>,
     out_targeted: Option<Signal<bool>>,
     out_drag_state: Option<Signal<DropTargetDragState>>,
+    out_active_region: Option<Signal<Option<DropRegion>>>,
     variant: DropTargetVariant,
     style_override: Option<SharedDropTargetStyle>,
+    /// Written every layout pass so the hover/drop handlers can classify the
+    /// target-local pointer into a region (the `DockPanePane` idiom).
+    self_size: Rc<Cell<Size>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -111,16 +238,28 @@ impl DropTarget {
         Self {
             pending_child: None,
             child_id: None,
-            pending_hint: None,
-            hint_id: None,
+            regions: Vec::new(),
+            size_factor: DEFAULT_ZONE_SIZE_FACTOR,
             accept_predicate: None,
             on_drop_callback: None,
+            on_region_drop_callback: None,
             on_drag_leave_callback: None,
             out_targeted: None,
             out_drag_state: None,
+            out_active_region: None,
             variant: DropTargetVariant::Default,
             style_override: None,
+            self_size: Rc::new(Cell::new(Size::ZERO)),
             root_child_id: None,
+        }
+    }
+
+    /// Upsert a region's spec (last-call-wins per region).
+    fn set_region(&mut self, region: DropRegion, spec: DropRegionSpec) {
+        if let Some(slot) = self.regions.iter_mut().find(|(r, _)| *r == region) {
+            slot.1 = spec;
+        } else {
+            self.regions.push((region, spec));
         }
     }
 
@@ -138,18 +277,52 @@ impl DropTarget {
         self
     }
 
-    // ── Hint slot (optional) ──────────────────────────────────────────────────
+    // ── Zones (optional multi-region) ────────────────────────────────────────
 
-    /// Widget shown centered inside a popup card while a drag with an accepted
-    /// payload hovers. Simple use: `TextWidget::new(lit!("Drop here"))`.
-    pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_hint = Some(PendingChild::Deferred(Box::new(widget)));
+    /// Enable and configure a drop [`DropRegion`]. Declaring **any** region
+    /// switches the target to exactly the declared regions; declaring none
+    /// leaves the implicit `Center`-only whole-bounds default. The spec closure
+    /// configures the region (currently: an optional hint).
+    ///
+    /// ```ignore
+    /// DropTarget::new()
+    ///     .child(editor)
+    ///     .zone_size_factor(0.25)
+    ///     .region(DropRegion::Center,   |z| z.hint(TextWidget::new(lit!("Add tab"))))
+    ///     .region(DropRegion::Leading,  |z| z.hint(TextWidget::new(lit!("Split left"))))
+    ///     .region(DropRegion::Trailing, |z| z.hint(TextWidget::new(lit!("Split right"))))
+    ///     .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
+    /// ```
+    pub fn region(
+        mut self,
+        region: DropRegion,
+        f: impl FnOnce(DropRegionSpec) -> DropRegionSpec,
+    ) -> Self {
+        self.set_region(region, f(DropRegionSpec::new()));
         self
     }
 
-    /// Hint content by pre-registered `WidgetId`.
+    /// The fraction of the axis each **side** zone occupies (clamped to
+    /// `0.1..=1.0`). `0.2` is the default fifth; `0.5` bisects. Applies to all
+    /// four edge zones in common; `Center` takes the leftover middle.
+    pub fn zone_size_factor(mut self, factor: f32) -> Self {
+        self.size_factor = factor.clamp(0.1, 1.0);
+        self
+    }
+
+    // ── Hint slot (single-zone sugar) ─────────────────────────────────────────
+
+    /// Widget shown centered inside a popup card while a drag with an accepted
+    /// payload hovers. Sugar for `.region(DropRegion::Center, |z| z.hint(w))` —
+    /// the classic whole-bounds single-zone case.
+    pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
+        self.set_region(DropRegion::Center, DropRegionSpec::new().hint(widget));
+        self
+    }
+
+    /// Hint content by pre-registered `WidgetId` (Center region).
     pub fn hint_id(mut self, id: WidgetId) -> Self {
-        self.pending_hint = Some(PendingChild::Id(id));
+        self.set_region(DropRegion::Center, DropRegionSpec::new().hint_id(id));
         self
     }
 
@@ -247,6 +420,14 @@ impl DropTarget {
         self
     }
 
+    /// The widget writes which [`DropRegion`] an *accepted* drag is currently
+    /// over (`None` when idle, rejecting, or over a disabled middle). Drive
+    /// custom per-zone visuals off this.
+    pub fn active_region_signal(mut self, signal: Signal<Option<DropRegion>>) -> Self {
+        self.out_active_region = Some(signal);
+        self
+    }
+
     // ── Callbacks ──────────────────────────────────────────────────────────────
 
     /// Handle a drop. Return `true` to accept, `false` to reject. Invoked only
@@ -272,6 +453,18 @@ impl DropTarget {
                 None => false,
             }
         }));
+        self
+    }
+
+    /// Region-aware drop: receives which [`DropRegion`] the pointer released
+    /// over, plus the payload. Last-call-wins with [`Self::on_drop`] — when set,
+    /// it is used instead of the plain `on_drop`. Invoked only when the accept
+    /// filter passes; return `true` to accept.
+    pub fn on_region_drop(
+        mut self,
+        f: impl FnMut(DropRegion, DragPayload, Point, &mut EventContext) -> bool + 'static,
+    ) -> Self {
+        self.on_region_drop_callback = Some(Box::new(f));
         self
     }
 
@@ -308,10 +501,8 @@ impl std::fmt::Debug for DropTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DropTarget")
             .field("variant", &self.variant)
-            .field(
-                "has_hint",
-                &(self.pending_hint.is_some() || self.hint_id.is_some()),
-            )
+            .field("regions", &self.regions.len())
+            .field("size_factor", &self.size_factor)
             .field("has_accept_filter", &self.accept_predicate.is_some())
             .finish()
     }
@@ -339,6 +530,7 @@ fn offers_text(p: &DragPayload) -> bool {
 impl Widget for DropTarget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let drag_state = ctx.signal(DropTargetDragState::Idle);
+        let active_region = ctx.signal(None::<DropRegion>);
 
         // Resolve the (required) child slot.
         let content_id = match self.pending_child.take() {
@@ -348,13 +540,31 @@ impl Widget for DropTarget {
         };
         self.child_id = Some(content_id);
 
-        // Resolve the optional hint slot.
-        let hint_id = match self.pending_hint.take() {
-            Some(PendingChild::Id(id)) => Some(id),
-            Some(PendingChild::Deferred(w)) => Some(ctx.add_boxed(w)),
-            None => None,
+        // Declared set (structural — which zones this target exposes), for the
+        // style config. The *live enabled* set (honouring each zone's reactive
+        // `.enabled` prop) is resolved per drag tick in the handlers below.
+        let declared_set = if self.regions.is_empty() {
+            DropRegionSet::default()
+        } else {
+            self.regions
+                .iter()
+                .fold(DropRegionSet::none(), |set, (r, _)| set.with(*r))
         };
-        self.hint_id = hint_id;
+
+        // Resolve each region's optional hint into a WidgetId, and keep its
+        // reactive enable prop for the live hit-test.
+        let mut region_hints: Vec<(DropRegion, WidgetId)> = Vec::new();
+        let mut enable_specs: Vec<(DropRegion, Prop<bool>)> = Vec::new();
+        for (region, spec) in std::mem::take(&mut self.regions) {
+            if let Some(hint) = spec.hint {
+                let id = match hint {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                };
+                region_hints.push((region, id));
+            }
+            enable_specs.push((region, spec.enabled));
+        }
 
         // Tier-3 chrome: per-call > theme slot > default recipe.
         let style: SharedDropTargetStyle = self
@@ -365,8 +575,11 @@ impl Widget for DropTarget {
 
         let cfg = DropTargetStyleConfig {
             content_id,
-            hint_id,
             drag_state: drag_state.clone(),
+            active_region: active_region.clone(),
+            regions: declared_set,
+            region_hints,
+            size_factor: self.size_factor,
             variant: self.variant,
         };
         let root_id = style.make_body(&cfg, ctx);
@@ -377,42 +590,83 @@ impl Widget for DropTarget {
         // closure; only the accept predicate (an Rc) is shared.
         let ds_hover = drag_state.clone();
         let ds_leave = drag_state.clone();
+        let ar_hover = active_region.clone();
+        let ar_leave = active_region.clone();
         let tgt_hover = self.out_targeted.clone();
         let tgt_leave = self.out_targeted.clone();
         let st_hover = self.out_drag_state.clone();
         let st_leave = self.out_drag_state.clone();
+        let out_ar_hover = self.out_active_region.clone();
+        let out_ar_leave = self.out_active_region.clone();
         let accept_hover = self.accept_predicate.clone();
         let accept_drop = self.accept_predicate.clone();
+        let size_hover = self.self_size.clone();
+        let size_drop = self.self_size.clone();
+        let specs_hover = enable_specs.clone();
+        let specs_drop = enable_specs;
+        let factor = self.size_factor;
         let mut on_leave_cb = self.on_drag_leave_callback.take();
         let mut on_drop_cb = self.on_drop_callback.take();
+        let mut on_region_drop_cb = self.on_region_drop_callback.take();
 
         let handlers = HandlerSet::new()
             .clips_children(true)
-            .on_drag_hover(move |payload, _pos, _ctx| {
+            .on_drag_hover(move |payload, pos, _ctx| {
                 let accepts = accept_hover.as_ref().is_none_or(|p| p(payload));
-                let new = if accepts {
+                // Which zone is under the pointer (only meaningful on accept).
+                // `None` = the payload is rejected, OR it is accepted but the
+                // pointer is over a middle with no enabled zone (a "dead middle"
+                // when only side zones are declared with a small size_factor).
+                let new_region = if accepts {
+                    region_at(
+                        pos,
+                        size_hover.get(),
+                        resolve_region_set(&specs_hover),
+                        factor,
+                    )
+                } else {
+                    None
+                };
+                // This target only *engages* (is a real drop target) when the
+                // payload is accepted AND the pointer is over an enabled zone —
+                // so a drop in a dead middle bubbles to an ancestor and is never
+                // delivered here (honouring region_at's documented "no zone →
+                // reject" contract). A rejected payload shows the reject tint; an
+                // accepted-but-zoneless hover is treated as idle for this target.
+                let engaged = accepts && new_region.is_some();
+                let new_state = if !accepts {
+                    DropTargetDragState::HoverReject
+                } else if engaged {
                     DropTargetDragState::HoverAccept
                 } else {
-                    DropTargetDragState::HoverReject
+                    DropTargetDragState::Idle
                 };
                 // GUARD: Signal::set always notifies (no dirty-check), and
-                // on_drag_hover fires every tick. `new` drives the hint Fade
-                // tween — re-issuing the same target each tick would restart
-                // it. Only write on a real change.
-                if ds_hover.get() != new {
-                    ds_hover.set(new);
+                // on_drag_hover fires every tick. Re-issuing the same target
+                // each tick would restart hint tweens. Only write on a real
+                // change of (state, region) — moving *within* a zone is a no-op,
+                // crossing into a new zone repaints the overlay + swaps hints.
+                if ds_hover.get() != new_state {
+                    ds_hover.set(new_state);
                     if let Some(s) = &tgt_hover {
-                        s.set(accepts);
+                        s.set(engaged);
                     }
                     if let Some(s) = &st_hover {
-                        s.set(new);
+                        s.set(new_state);
+                    }
+                }
+                if ar_hover.get() != new_region {
+                    ar_hover.set(new_region);
+                    if let Some(s) = &out_ar_hover {
+                        s.set(new_region);
                     }
                 }
                 // Visuals are signal-driven, so engage with `Accept` (no
-                // framework-drawn feedback) when this target accepts; otherwise
-                // `NoFeedback` so the drag bubbles to the next drop target up
-                // (e.g. a reorderable list behind a per-row DropTarget).
-                if accepts {
+                // framework-drawn feedback) when this target accepts AND a zone is
+                // under the pointer; otherwise `NoFeedback` so the drag bubbles to
+                // the next drop target up (e.g. a reorderable list behind a
+                // per-row DropTarget, or an ancestor for a dead-middle hover).
+                if engaged {
                     DropFeedback::Accept
                 } else {
                     DropFeedback::NoFeedback
@@ -428,6 +682,12 @@ impl Widget for DropTarget {
                         s.set(DropTargetDragState::Idle);
                     }
                 }
+                if ar_leave.get().is_some() {
+                    ar_leave.set(None);
+                    if let Some(s) = &out_ar_leave {
+                        s.set(None);
+                    }
+                }
                 if let Some(cb) = &mut on_leave_cb {
                     cb(ctx);
                 }
@@ -439,9 +699,26 @@ impl Widget for DropTarget {
                 if !accepts {
                     return false;
                 }
-                match &mut on_drop_cb {
-                    Some(cb) => cb(payload, pos, ctx),
-                    None => false,
+                // Region-aware callback wins over the plain one. A drop that
+                // classifies to no enabled zone (a dead middle with no `Center`)
+                // is REJECTED — `on_region_drop` only ever receives an enabled
+                // region, matching region_at's contract and the hover path (which
+                // never engages there). Normally the hover gate means such a drop
+                // never routes here at all; this is the belt-and-suspenders.
+                if let Some(cb) = &mut on_region_drop_cb {
+                    match region_at(
+                        pos,
+                        size_drop.get(),
+                        resolve_region_set(&specs_drop),
+                        factor,
+                    ) {
+                        Some(region) => cb(region, payload, pos, ctx),
+                        None => false,
+                    }
+                } else if let Some(cb) = &mut on_drop_cb {
+                    cb(payload, pos, ctx)
+                } else {
+                    false
                 }
             });
         ctx.apply_self_handlers(handlers);
@@ -470,6 +747,9 @@ impl Widget for DropTarget {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Cache our own size so the hover/drop handlers can classify the
+        // target-local pointer into a region.
+        self.self_size.set(bounds.size());
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -901,5 +1181,330 @@ mod tests {
         let _ = tree.render();
         let b = tree.bounds(target);
         assert!(b.width > 0.0 && b.height > 0.0);
+    }
+
+    // ── Multi-zone ────────────────────────────────────────────────────────────
+
+    fn png_drop(tree: &mut WidgetTree, p: Point) {
+        let mut noop = NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png")],
+            ..Default::default()
+        };
+        tree.begin_external_drag(p, data.clone(), &mut noop);
+        tree.end_external_drag(p, data, &mut noop);
+    }
+
+    /// A drop landing in the leading edge strip reports `DropRegion::Leading`.
+    #[test]
+    fn region_drop_reports_leading() {
+        let mut tree = themed_tree();
+        let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .region(DropRegion::Center, |z| z)
+                .region(DropRegion::Leading, |z| z)
+                .accept_external_files()
+                .on_region_drop(move |region, _p, _pos, _ctx| {
+                    *g.borrow_mut() = Some(region);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // 400 wide, factor 0.2 → leading strip is x < 80.
+        png_drop(&mut tree, Point::new(20.0, 150.0));
+        assert_eq!(*got.borrow(), Some(DropRegion::Leading));
+    }
+
+    /// A drop in the middle of a five-ish-zone target reports `Center`.
+    #[test]
+    fn region_drop_reports_center_in_middle() {
+        let mut tree = themed_tree();
+        let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .region(DropRegion::Center, |z| z)
+                .region(DropRegion::Leading, |z| z)
+                .region(DropRegion::Trailing, |z| z)
+                .accept_external_files()
+                .on_region_drop(move |region, _p, _pos, _ctx| {
+                    *g.borrow_mut() = Some(region);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        png_drop(&mut tree, Point::new(200.0, 150.0));
+        assert_eq!(*got.borrow(), Some(DropRegion::Center));
+    }
+
+    /// The `size_factor` widens the side zones: at 0.5 the leading strip spans
+    /// the left half, so a point that was `Center` at the default fifth is now
+    /// `Leading`.
+    #[test]
+    fn zone_size_factor_widens_side_zones() {
+        let mut tree = themed_tree();
+        let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .zone_size_factor(0.5)
+                .region(DropRegion::Center, |z| z)
+                .region(DropRegion::Leading, |z| z)
+                .accept_external_files()
+                .on_region_drop(move |region, _p, _pos, _ctx| {
+                    *g.borrow_mut() = Some(region);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // x = 150 is > 80 (Center at 0.2) but < 200 (Leading at 0.5).
+        png_drop(&mut tree, Point::new(150.0, 150.0));
+        assert_eq!(*got.borrow(), Some(DropRegion::Leading));
+    }
+
+    /// Regression: with no region declared and no `on_region_drop`, the plain
+    /// `on_drop` still fires (classic single-zone behaviour).
+    #[test]
+    fn center_only_default_uses_plain_on_drop() {
+        let mut tree = themed_tree();
+        let dropped = Rc::new(Cell::new(false));
+        let d = dropped.clone();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .accept_external_files()
+                .on_drop(move |_p, _pos, _ctx| {
+                    d.set(true);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        png_drop(&mut tree, Point::new(20.0, 150.0));
+        assert!(
+            dropped.get(),
+            "center-only default must route to plain on_drop"
+        );
+    }
+
+    /// `active_region_signal` tracks the hovered zone and resets on leave.
+    #[test]
+    fn active_region_signal_tracks_and_resets() {
+        let mut tree = themed_tree();
+        let region = Signal::new(None);
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .region(DropRegion::Center, |z| z)
+                .region(DropRegion::Leading, |z| z)
+                .accept_external_files()
+                .active_region_signal(region.clone())
+                .on_drop(|_p, _pos, _ctx| true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let mut noop = NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png")],
+            ..Default::default()
+        };
+        let p = Point::new(20.0, 150.0);
+        tree.begin_external_drag(p, data.clone(), &mut noop);
+        assert_eq!(region.get(), Some(DropRegion::Leading));
+        tree.end_external_drag(p, data, &mut noop);
+        assert_eq!(region.get(), None, "leave resets the active region");
+    }
+
+    /// A per-region hint paints only while *its* region is the active hover:
+    /// a Leading hint stays hidden over the centre and appears over the edge.
+    #[test]
+    fn per_region_hint_paints_only_for_its_zone() {
+        let mut tree = themed_tree();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .region(DropRegion::Center, |z| z)
+                .region(DropRegion::Leading, |z| z.hint(Marker))
+                .accept_external_files()
+                .on_drop(|_p, _pos, _ctx| true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let red = bastyde_tokens::Color::RED.to_array();
+
+        let mut noop = NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png")],
+            ..Default::default()
+        };
+
+        // Hover the centre: the Leading hint must stay hidden.
+        let center = Point::new(200.0, 150.0);
+        tree.begin_external_drag(center, data.clone(), &mut noop);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            !tree.render().shapes.iter().any(|s| s.color == red),
+            "Leading hint must not paint while hovering the centre"
+        );
+        tree.end_external_drag(center, data.clone(), &mut noop);
+
+        // Hover the leading edge: the Leading hint appears.
+        let lead = Point::new(20.0, 150.0);
+        tree.begin_external_drag(lead, data.clone(), &mut noop);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.render().shapes.iter().any(|s| s.color == red),
+            "Leading hint must paint while hovering the leading zone"
+        );
+        tree.end_external_drag(lead, data, &mut noop);
+    }
+
+    /// A target with only side zones (no `Center`): a drop in the dead middle is
+    /// **rejected** — `on_region_drop` is never invoked with a fabricated
+    /// `Center`, the hover disengages (targeted → false), and the reported region
+    /// clears to `None`. Regression for the `unwrap_or(Center)` contract bug.
+    #[test]
+    fn side_only_dead_middle_rejects_drop_and_hover() {
+        let mut tree = themed_tree();
+        let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        let region = Signal::new(None);
+        let targeted = Signal::new(false);
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .zone_size_factor(0.2)
+                .region(DropRegion::Leading, |z| z)
+                .region(DropRegion::Trailing, |z| z)
+                .accept_external_files()
+                .active_region_signal(region.clone())
+                .targeted_signal(targeted.clone())
+                .on_region_drop(move |r, _p, _pos, _ctx| {
+                    *g.borrow_mut() = Some(r);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let mut noop = NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png")],
+            ..Default::default()
+        };
+        // Hover an enabled zone first (leading, x < 80) → engages.
+        tree.begin_external_drag(Point::new(20.0, 150.0), data.clone(), &mut noop);
+        assert_eq!(region.get(), Some(DropRegion::Leading));
+        assert!(targeted.get(), "hovering an enabled zone engages");
+        // Move to the dead middle (x = 200, between the 80px side strips) → disengages.
+        tree.update_external_drag(Point::new(200.0, 150.0), &mut noop);
+        assert_eq!(region.get(), None, "dead middle reports no zone");
+        assert!(!targeted.get(), "dead middle must not engage this target");
+        // Drop in the dead middle → rejected, never delivered as a phantom Center.
+        tree.end_external_drag(Point::new(200.0, 150.0), data, &mut noop);
+        assert_eq!(
+            *got.borrow(),
+            None,
+            "a dead-middle drop must be rejected, not fabricated as Center"
+        );
+    }
+
+    /// The vertical axis routes too: `Top` / `Bottom` strips deliver their own
+    /// region (only `Leading` / `Center` were widget-tested before).
+    #[test]
+    fn top_and_bottom_zones_route() {
+        for (y, expected) in [(10.0_f32, DropRegion::Top), (290.0_f32, DropRegion::Bottom)] {
+            let mut tree = themed_tree();
+            let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+            let g = got.clone();
+            tree.add(
+                DropTarget::new()
+                    .child(RectWidget::new())
+                    .region(DropRegion::Top, |z| z)
+                    .region(DropRegion::Bottom, |z| z)
+                    .region(DropRegion::Center, |z| z)
+                    .accept_external_files()
+                    .on_region_drop(move |r, _p, _pos, _ctx| {
+                        *g.borrow_mut() = Some(r);
+                        true
+                    }),
+            );
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            // 300 tall, factor 0.2 → ey = 60: y=10 → top strip, y=290 → bottom strip.
+            png_drop(&mut tree, Point::new(200.0, y));
+            assert_eq!(*got.borrow(), Some(expected));
+        }
+    }
+
+    /// A **rejected** drag reports no active region even over a would-be zone
+    /// strip (region is only meaningful for an accepted payload).
+    #[test]
+    fn rejected_hover_reports_no_region() {
+        let mut tree = themed_tree();
+        let region = Signal::new(None);
+        let state = Signal::new(DropTargetDragState::Idle);
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .region(DropRegion::Leading, |z| z)
+                .region(DropRegion::Center, |z| z)
+                .accept_external_extensions(["png"])
+                .active_region_signal(region.clone())
+                .drag_state_signal(state.clone())
+                .on_drop(|_p, _pos, _ctx| true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let mut noop = NoopWindowOps;
+        // A .txt over the leading strip: payload rejected by the extension filter.
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/notes.txt")],
+            ..Default::default()
+        };
+        tree.begin_external_drag(Point::new(20.0, 150.0), data, &mut noop);
+        assert_eq!(state.get(), DropTargetDragState::HoverReject);
+        assert_eq!(
+            region.get(),
+            None,
+            "a rejected hover must report no zone even inside a would-be strip"
+        );
+    }
+
+    /// A zone's `.enabled(signal)` gates hit-testing **live**: disabling the
+    /// leading zone makes its strip fall through to the next-priority enabled
+    /// zone (`Center`) — no rebuild.
+    #[test]
+    fn reactive_zone_enabled_gates_hit_testing() {
+        let mut tree = themed_tree();
+        let leading_on = Signal::new(true);
+        let got: Rc<RefCell<Option<DropRegion>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        tree.add(
+            DropTarget::new()
+                .child(RectWidget::new())
+                .zone_size_factor(0.2)
+                .region(DropRegion::Leading, |z| z.enabled(leading_on.clone()))
+                .region(DropRegion::Center, |z| z)
+                .accept_external_files()
+                .on_region_drop(move |r, _p, _pos, _ctx| {
+                    *g.borrow_mut() = Some(r);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // Leading enabled: a drop in the leading strip (x < 80) → Leading.
+        png_drop(&mut tree, Point::new(20.0, 150.0));
+        assert_eq!(*got.borrow(), Some(DropRegion::Leading));
+        // Disable leading live (no rebuild): the same position falls through to Center.
+        leading_on.set(false);
+        *got.borrow_mut() = None;
+        png_drop(&mut tree, Point::new(20.0, 150.0));
+        assert_eq!(
+            *got.borrow(),
+            Some(DropRegion::Center),
+            "a live-disabled zone falls through to the next enabled zone"
+        );
     }
 }

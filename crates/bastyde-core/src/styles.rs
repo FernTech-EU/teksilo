@@ -125,8 +125,8 @@ pub use component_style_slots::ComponentStyleSlots;
 pub use date_edit_style::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
 pub use dialog_style::{DialogStyle, DialogStyleConfig, SharedDialogStyle};
 pub use drop_target_style::{
-    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
-    SharedDropTargetStyle,
+    DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,
+    DropTargetVariant, SharedDropTargetStyle, region_at, region_rect,
 };
 pub use drop_zone_style::{
     DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,

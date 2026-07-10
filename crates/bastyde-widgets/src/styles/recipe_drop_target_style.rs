@@ -4,22 +4,25 @@
 //! Default `DropTargetStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeDropTargetStyle` ships the IntUI drop-target chrome: the wrapped
-//! child fills the bounds and stays fully visible, a full-bleed `RectWidget`
-//! overlay strokes a reactive highlight **border** (no fill — an opaque tint
-//! would hide the child), and, when a hint slot is set, a popup `Card` holding
-//! the hint is centered over the child while a drag with an accepted payload
-//! hovers.
+//! child fills the bounds and stays fully visible; a full-bleed `RectWidget`
+//! strokes a reactive rounded **whole-bounds** border (error on reject, accent
+//! on a `Center` accept — no fill, an opaque tint would hide the child); a
+//! `DropRegionOverlay` paints the active **side** zone's highlight (an edge
+//! strip → translucent fill + accent frame) and hosts the per-region hint cards;
+//! and each hint is a popup `Card` centered within its region's rect, shown only
+//! while that zone is the active accepted-hover.
 //!
-//! The overlay layout (a `ZStack` of child + border-rect + centered hint) never
-//! inflates the stack's intrinsic size: both `RectWidget` and `Center` report
-//! 0×0 for an unspecified proposal and fill an exact one, so the target sizes
-//! to exactly the wrapped child. The `DropTarget` widget sets `clips_children`,
-//! keeping an oversized hint card inside the zone.
+//! The overlay layout (a `ZStack` of child + reject-rect + region-overlay) never
+//! inflates the stack's intrinsic size: `RectWidget` and `DropRegionOverlay`
+//! report 0×0 for an unspecified proposal and fill an exact one, so the target
+//! sizes to exactly the wrapped child. The `DropTarget` widget sets
+//! `clips_children`, keeping an oversized hint card inside its zone.
 //!
-//! The hint is gated with [`BuildContext::visible_when`] on a derived
-//! "is the drag accepted-hovering?" signal: it culls both paint **and** the
-//! accessibility node when idle, so a screen reader never meets the hint
-//! prompt while at rest. `Live::Polite` on the card announces it appearing.
+//! Each hint is gated with [`BuildContext::visible_when`] on a derived
+//! "is *this* region the active accepted-hover?" signal: it culls both paint
+//! **and** the accessibility node when its zone isn't active, so a screen reader
+//! never meets an inactive zone's prompt. `Live::Polite` on the card announces
+//! it appearing.
 //!
 //! Apps wanting a different look (dashed border, translucent wash, glow, no
 //! popup) write their own `impl DropTargetStyle` block and install it per-call
@@ -31,14 +34,15 @@
 use bastyde_core::accesskit::Live;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::styles::{
-    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
+    DropRegion, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
 };
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::CornerRadius;
+use bastyde_tokens::{BorderRole, CornerRadius};
 
 use crate::card::Card;
-use crate::primitives::{Center, RectWidget, ZStack};
+use crate::drop_target::overlay::DropRegionOverlay;
+use crate::primitives::{RectWidget, ZStack};
 
 /// Corner radius of the overlay's rounded border.
 pub const DROP_TARGET_CORNER_RADIUS: f32 = 8.0;
@@ -99,15 +103,24 @@ impl DropTargetStyle for RecipeDropTargetStyle {
         // The wrapped child fills the bounds and is always visible.
         let mut zstack = ZStack::new().add_child(cfg.content_id);
 
-        // Reactive highlight border over the child (skipped for `None`). Only a
-        // stroke — no fill — so the child is never hidden. The border color
-        // tracks the drag state (Idle → transparent, so nothing shows at rest).
-        // It is `event_pass_through` so this decorative overlay never steals
-        // pointer events from the wrapped child — otherwise wrapping interactive
-        // content (a tree row's expand chevron, a button) in a `DropTarget`
-        // would silently break it, since the full-bounds rect sits on top.
+        // Full-bounds rounded border for the whole-bounds states: a reject error
+        // border, and the `Center` accept border (so single-zone accept keeps its
+        // rounded corners — the overlay paints only the *side* zones). Side-zone
+        // accept and idle leave it transparent. Only a stroke — no fill — so the
+        // child is never hidden, and `event_pass_through` so this decorative
+        // overlay never steals pointer events from the wrapped content. Skipped
+        // for `None`.
         if cfg.variant != DropTargetVariant::None {
-            let border = cfg.drag_state.map(|s| s.border_role());
+            let border = cfg
+                .drag_state
+                .zip(&cfg.active_region)
+                .map(|(s, r)| match s {
+                    DropTargetDragState::HoverReject => BorderRole::Error,
+                    DropTargetDragState::HoverAccept if *r == Some(DropRegion::Center) => {
+                        BorderRole::Accent
+                    }
+                    _ => BorderRole::Transparent,
+                });
             let rect = ctx.add(
                 RectWidget::new()
                     .border_color(border)
@@ -118,19 +131,32 @@ impl DropTargetStyle for RecipeDropTargetStyle {
             zstack = zstack.add_child(rect);
         }
 
-        // Centered popup hint, shown only while an accepted payload hovers.
-        if let Some(hint_id) = cfg.hint_id {
-            // Derived (read-only) bool — `visible_when` accepts it and culls
-            // both paint and the AT node when false.
-            let hint_visible = cfg
-                .drag_state
-                .map(|s| *s == DropTargetDragState::HoverAccept);
-            // Live::Polite on the card → announce the hint *appearing*, not
-            // arbitrary changes to the wrapped child's content.
+        // Per-region hint cards, each shown only while *its* region is the
+        // active accepted-hover. `visible_when` culls both paint and the AT
+        // node when a region isn't active; `Live::Polite` announces the hint
+        // *appearing*. The cards are hosted (and placed inside their region
+        // rect) by the `DropRegionOverlay` below — so we pass their ids on.
+        let mut hint_cards: Vec<(DropRegion, WidgetId)> = Vec::new();
+        for &(region, hint_id) in &cfg.region_hints {
             let card = ctx.add(Card::new().content_id(hint_id).access_live(Live::Polite));
-            let center = ctx.add(Center::new().child_id(card));
-            ctx.visible_when(center, hint_visible);
-            zstack = zstack.add_child(center);
+            let visible = cfg.active_region.map(move |r| *r == Some(region));
+            ctx.visible_when(card, visible);
+            hint_cards.push((region, card));
+        }
+
+        // The reactive zone highlight + hint host. It paints the active region's
+        // affordance (frame over the child — `event_pass_through`, so it never
+        // steals pointer events from the wrapped interactive content) and places
+        // each hint card centered within its zone. Skipped entirely only when
+        // there's nothing for it to do (no border and no hints).
+        if border_width > 0.0 || !hint_cards.is_empty() {
+            let overlay = ctx.add(DropRegionOverlay::new(
+                cfg.active_region.clone(),
+                cfg.size_factor,
+                border_width,
+                hint_cards,
+            ));
+            zstack = zstack.add_child(overlay);
         }
 
         ctx.add(zstack)
