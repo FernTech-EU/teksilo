@@ -2232,3 +2232,80 @@ fn pane_droptarget_chrome_is_at_hidden_and_highlights() {
         "a dock-widget hover must paint a translucent highlight at the leading 20% strip"
     );
 }
+
+/// The migration changed `DockPanePane::layout_response` to forward the content's
+/// full `LayoutResponse` (incl. `flex`) via the DropTarget, instead of just its
+/// `Size`. This proves that change is **inert**: the enclosing Splitter sizes
+/// panes from its own model (`stretch`), never from a pane's flex — so pane 0's
+/// width is identical whether its content is flexible or rigid, and the slack
+/// goes to pane 1 via `stretch`, not to pane 0 via `flex`.
+#[test]
+fn splitter_pane_size_is_invariant_to_content_flex() {
+    use super::panel::DockPanePane;
+    use crate::splitter::{PaneDescriptor, Splitter, SplitterModel};
+    use bastyde_core::widget::LayoutResponse as LR;
+    use bastyde_tokens::Orientation;
+
+    #[derive(Debug)]
+    struct FlexLeaf;
+    impl Widget for FlexLeaf {
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            LR::flexible(Size::new(50.0, 50.0), 1.0)
+        }
+    }
+
+    // Pane 0 has stretch 0 (must NOT grow); pane 1 stretch 1 (absorbs slack).
+    // Container (600) exceeds the summed sizes (400), so there IS slack to place.
+    let make = |flex_content: bool| -> (f32, f32) {
+        let model = SplitterModel::from_panes(
+            vec![
+                PaneDescriptor::new().size(200.0).min_size(0.0).stretch(0.0),
+                PaneDescriptor::new().size(200.0).min_size(0.0).stretch(1.0),
+            ],
+            Orientation::Horizontal,
+        );
+        let dm = DockingModel::new();
+        let mut t = tree();
+        let inner0: WidgetId = if flex_content {
+            t.add(FlexLeaf)
+        } else {
+            t.add(FixedLeaf(50.0, 50.0))
+        };
+        let inner1 = t.add(FixedLeaf(50.0, 50.0));
+        let p0 = t.add(DockPanePane::new(
+            DockSide::Leading,
+            0,
+            0,
+            dm.clone(),
+            inner0,
+        ));
+        let p1 = t.add(DockPanePane::new(
+            DockSide::Leading,
+            0,
+            1,
+            dm.clone(),
+            inner1,
+        ));
+        t.add(Splitter::new(model).pane_id(p0).pane_id(p1));
+        t.layout(SizeProposal::exact(600.0, 200.0));
+        (t.bounds(p0).width, t.bounds(p1).width)
+    };
+
+    let (w0_flex, w1_flex) = make(true);
+    let (w0_rigid, w1_rigid) = make(false);
+
+    // Flex-invariant: pane 0's width is the same regardless of its content's flex.
+    assert!(
+        (w0_flex - w0_rigid).abs() < 0.01,
+        "pane 0 width must be invariant to content flex (flex={w0_flex}, rigid={w0_rigid})"
+    );
+    assert!(
+        (w1_flex - w1_rigid).abs() < 0.01,
+        "pane 1 width must be invariant to content flex (flex={w1_flex}, rigid={w1_rigid})"
+    );
+    // And the slack went to pane 1 (stretch), not pane 0 (flex): pane 0 stays ~200.
+    assert!(
+        (w0_flex - 200.0).abs() < 20.0 && w1_flex > w0_flex + 100.0,
+        "slack must follow the model's stretch (pane 1), not the content's flex (pane 0): w0={w0_flex}, w1={w1_flex}"
+    );
+}
