@@ -2141,3 +2141,94 @@ fn dock_dropped_on_a_pane_centre_stacks_into_its_tab() {
         "D stacked into Leading's existing tab (a new pane, not a new tab)"
     );
 }
+
+/// Regression for the migration's AT-noise: a dock pane's `DropTarget` chrome
+/// (the decorative reject-border `RectWidget` and the hint-less
+/// `DropRegionOverlay`) must be **hidden** from the accessibility tree — the
+/// hand-rolled overlay it replaced was `set_hidden()`. Also confirms the
+/// per-zone highlight actually paints at the proportional edge strip.
+#[test]
+fn pane_droptarget_chrome_is_at_hidden_and_highlights() {
+    use super::drag::DockDragData;
+    use super::panel::DockPanePane;
+    use crate::primitives::{Expand, HStack};
+    use bastyde_core::DragPayload;
+    use bastyde_core::build_context::BuildContext;
+    use bastyde_core::event::PointerButton;
+    use bastyde_core::gesture::DragPhase;
+    use bastyde_core::widget_builder::HandlerSet;
+
+    #[derive(Debug)]
+    struct DockSource(DockWidgetId);
+    impl Widget for DockSource {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let self_id = ctx.self_id();
+            let dock_id = self.0;
+            let hs = HandlerSet::new().on_drag(move |phase, ctx| {
+                if let DragPhase::Started { .. } = phase {
+                    ctx.start_drag(self_id, DragPayload::typed(DockDragData { dock_id }));
+                }
+            });
+            ctx.apply_self_handlers(hs);
+            Vec::new()
+        }
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            Size::new(100.0, 100.0).into()
+        }
+    }
+
+    let model = DockingModel::new();
+    let mut t = tree();
+    let inner = t.add(FixedLeaf(100.0, 100.0));
+    let pane = t.add(DockPanePane::new(
+        DockSide::Leading,
+        0,
+        0,
+        model.clone(),
+        inner,
+    ));
+    let src = t.add(DockSource(DockWidgetId::fresh()));
+    let es = t.add(Expand::new().flex(1.0).child_id(src));
+    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
+    t.add(HStack::new().add_child(es).add_child(ep));
+    t.layout(SizeProposal::exact(400.0, 300.0));
+    t.sync_accessibility();
+
+    // The decorative reject-border + zone overlay must be AT-hidden (the old
+    // hand-rolled overlay was `set_hidden()`), so a screen reader doesn't meet
+    // empty containers per pane.
+    fn count_hidden(t: &WidgetTree, id: WidgetId) -> usize {
+        let here = usize::from(t.accessibility_node(id).is_hidden());
+        here + t
+            .children(id)
+            .iter()
+            .map(|&c| count_hidden(t, c))
+            .sum::<usize>()
+    }
+    assert!(
+        count_hidden(&t, pane) >= 2,
+        "the pane's decorative reject-border and zone overlay must be AT-hidden"
+    );
+
+    // A dock-widget hover over the leading edge paints a translucent highlight
+    // at exactly the proportional (20%) leading strip of the pane.
+    let pb = t.bounds(pane);
+    let sc = t.bounds(src).center();
+    let edge = Point::new(pb.x + pb.width * 0.1, pb.y + pb.height * 0.5);
+    t.pointer_down_button(sc, PointerButton::Primary);
+    t.pointer_move(Point::new(sc.x + 30.0, sc.y)); // arm the drag
+    t.pointer_move(edge); // hover the leading zone
+    let frame = t.render();
+    let strip_w = pb.width * 0.2;
+    let painted = frame.decorations.iter().any(|d| {
+        (d.rect[0] - pb.x).abs() < 1.0
+            && (d.rect[2] - strip_w).abs() < 1.0
+            && d.color[3] > 0.05
+            && d.color[3] < 0.95
+    });
+    t.pointer_up_button(edge, PointerButton::Primary);
+    assert!(
+        painted,
+        "a dock-widget hover must paint a translucent highlight at the leading 20% strip"
+    );
+}

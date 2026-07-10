@@ -24,6 +24,11 @@
 //! never meets an inactive zone's prompt. `Live::Polite` on the card announces
 //! it appearing.
 //!
+//! The decorative chrome (the reject-border `RectWidget` and, when the target
+//! declares no hints, the `DropRegionOverlay`) is **hidden from the AT tree** —
+//! a hint-less multi-zone target (e.g. a docking pane) adds no empty container
+//! per drop target.
+//!
 //! Apps wanting a different look (dashed border, translucent wash, glow, no
 //! popup) write their own `impl DropTargetStyle` block and install it per-call
 //! (`DropTarget::style(...)`) or theme-wide
@@ -126,7 +131,9 @@ impl DropTargetStyle for RecipeDropTargetStyle {
                     .border_color(border)
                     .border_width(border_width)
                     .corner_radius(CornerRadius::uniform(self.recipe.corner_radius))
-                    .event_pass_through(true),
+                    .event_pass_through(true)
+                    // Decorative highlight border — keep it out of the AT tree.
+                    .access_hidden(true),
             );
             zstack = zstack.add_child(rect);
         }

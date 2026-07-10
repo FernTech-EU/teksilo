@@ -170,9 +170,18 @@ impl Widget for DropRegionOverlay {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // A transparent container: NOT hidden, so the hosted hint cards keep
-        // their Live::Polite announcement when their region becomes active.
-        builder.set_role(Role::GenericContainer);
+        if self.hints.is_empty() {
+            // Pure decoration (no hosted hint cards) — hide it from AT so a
+            // hint-less multi-zone target (e.g. a docking pane) doesn't add an
+            // empty container per drop target. Matches the old hand-rolled
+            // docking overlay, which was `set_hidden()`.
+            builder.set_hidden();
+        } else {
+            // Hosts hint cards: stay a transparent container so their
+            // `Live::Polite` announcement survives (a hidden node prunes its
+            // subtree from AT).
+            builder.set_role(Role::GenericContainer);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
