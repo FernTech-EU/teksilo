@@ -20,24 +20,24 @@ use bastyde_tokens::Orientation;
 
 use crate::primitives::IconWidget;
 use crate::splitter::{PaneDescriptor, SplitterModel};
-use crate::toolbar::ToolbarAction;
+use crate::toolbar::ToolbarItem;
 
 pub use super::geometry::{CornerOwners, DockCorner, DockSide};
 
 /// Builds an icon for a dock widget's tab / rail item on demand.
 pub type DockIconFactory = Rc<dyn Fn() -> IconWidget>;
 
-/// Builds a dock's inline header-action widget (typically a row of
-/// `IconButton`s such as "New File" / "Collapse All") on demand. Shown inside
-/// the dock header, before the framework options (`⋮`) button — the VS Code
-/// "view actions" pattern. See [`DockWidget::header_actions`](super::DockWidget::header_actions).
-/// Builds a dock's inline header actions on demand: a flat list of
-/// [`ToolbarAction`]s. The framework hosts them in a [`Toolbar`](crate::toolbar::Toolbar)
-/// in the dock header, so they gain **overflow** (excess actions collapse into a
-/// `⌄` menu) and the correct **axis** for free — a horizontal row on leading /
-/// trailing sides, a vertical column on the rotated top / bottom strip — and an
-/// app never repeats the orientation or overflow logic.
-pub type DockHeaderActionsFactory = Rc<dyn Fn(DockWidgetId) -> Vec<ToolbarAction>>;
+/// Builds a dock's inline header items on demand: a flat list of
+/// [`ToolbarItem`]s — collapsible
+/// [`ToolbarAction`](crate::toolbar::ToolbarAction)s (the VS Code "view actions"
+/// pattern, e.g. "New File" / "Collapse All") and/or pinned custom widgets via
+/// [`ToolbarItem::custom`]. Shown inside the dock header, before the framework
+/// options (`⋮`) button. The framework hosts them in a
+/// [`Toolbar`](crate::toolbar::Toolbar), so they gain **overflow** (excess actions
+/// collapse into a `⌄` menu) and the correct **axis** for free — a horizontal row
+/// on leading / trailing sides, a vertical column on the rotated top / bottom
+/// strip — and an app never repeats the orientation or overflow logic.
+pub type DockHeaderActionsFactory = Rc<dyn Fn(DockWidgetId) -> Vec<ToolbarItem>>;
 
 /// Process-unique identity for a registered dock widget (the atomic unit).
 #[derive(

@@ -22,7 +22,7 @@ use bastyde::widgets::{
     Badge, Button, DockCorner, DockOpenLocation, DockPolicy, DockRail, DockRailItemSize, DockSide,
     DockWidget, DockWidgetId, DockingLayout, DockingModel, Expand, HStack, IconButton,
     IconButtonSize, IconWidget, MenuItem, MenuList, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
-    ToolbarAction, VStack,
+    ToolbarAction, ToolbarItem, VStack,
 };
 
 #[derive(Debug)]
@@ -162,7 +162,7 @@ fn plus_icon(size: f32) -> IconWidget {
 /// `Toolbar`, so they collapse into a `⌄` menu when the header is tight and lay
 /// out along the header's axis (vertical in a rotated top / bottom strip) with
 /// no orientation or overflow logic here.
-fn dock_header_actions(status: Signal<String>, what: &'static str) -> Vec<ToolbarAction> {
+fn dock_header_actions(status: Signal<String>, what: &'static str) -> Vec<ToolbarItem> {
     let status_new = status.clone();
     let status_filter = status.clone();
     let status_refresh = status.clone();
@@ -198,6 +198,9 @@ fn dock_header_actions(status: Signal<String>, what: &'static str) -> Vec<Toolba
             .priority(-2)
             .on_activate(move |_| status_refresh.set(String::from("Refresh (demo action)"))),
     ]
+    .into_iter()
+    .map(ToolbarItem::action)
+    .collect()
 }
 
 fn list_panel(title: &str, items: &[&str]) -> impl Widget {

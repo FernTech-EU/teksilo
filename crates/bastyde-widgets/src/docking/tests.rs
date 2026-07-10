@@ -1901,7 +1901,7 @@ fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
     // app actions must lay out along the same axis as the ⋮ — they must not stay
     // horizontal inside the narrow vertical strip.
     use crate::primitives::IconWidget;
-    use crate::toolbar::ToolbarAction;
+    use crate::toolbar::{ToolbarAction, ToolbarItem};
 
     // Returns the centers of (action #1, action #2, ⋮) for a two-pane split dock
     // opened on `side`, the first pane carrying two findable header actions.
@@ -1913,8 +1913,12 @@ fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
             .header_actions(|_| {
                 // Icon-only toolbar actions: the label becomes the AT name.
                 vec![
-                    ToolbarAction::new(lit!("ActX"), || IconWidget::chevron_up(12.0)),
-                    ToolbarAction::new(lit!("ActY"), || IconWidget::chevron_up(12.0)),
+                    ToolbarItem::action(ToolbarAction::new(lit!("ActX"), || {
+                        IconWidget::chevron_up(12.0)
+                    })),
+                    ToolbarItem::action(ToolbarAction::new(lit!("ActY"), || {
+                        IconWidget::chevron_up(12.0)
+                    })),
                 ]
             });
         let b = DockWidget::new(id_b, lit!("Search"), |_| FixedLeaf(120.0, 120.0));

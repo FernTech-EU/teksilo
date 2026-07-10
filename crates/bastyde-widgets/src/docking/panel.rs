@@ -35,7 +35,7 @@ use crate::primitives::{
     VStack, ZStack,
 };
 use crate::splitter::Splitter;
-use crate::toolbar::{Toolbar, ToolbarAction, ToolbarOrientation};
+use crate::toolbar::{Toolbar, ToolbarItem, ToolbarOrientation};
 use bastyde_core::overlay::OverlayPlacement;
 
 use super::context_menu::{
@@ -103,15 +103,20 @@ impl DockWidget {
     /// header always, and the sole-pane (bare) header when
     /// [`show_header(true)`](Self::show_header) is set.
     ///
+    /// Each item is a [`ToolbarItem`] — a collapsible
+    /// [`ToolbarAction`](crate::toolbar::ToolbarAction) via
+    /// [`ToolbarItem::action`], or a pinned arbitrary widget (a `SplitButton`, a
+    /// search field, …) via [`ToolbarItem::custom`].
+    ///
     /// ```ignore
     /// DockWidget::new(id, lit!("Explorer"), build).header_actions(|_| vec![
-    ///     ToolbarAction::new(lit!("New File"), new_icon).on_activate(..),
-    ///     ToolbarAction::new(lit!("Collapse All"), collapse_icon).on_activate(..),
+    ///     ToolbarItem::action(ToolbarAction::new(lit!("New File"), new_icon).on_activate(..)),
+    ///     ToolbarItem::custom(CreateSplitButton::new(..)),
     /// ])
     /// ```
     pub fn header_actions(
         mut self,
-        f: impl Fn(DockWidgetId) -> Vec<ToolbarAction> + 'static,
+        f: impl Fn(DockWidgetId) -> Vec<ToolbarItem> + 'static,
     ) -> Self {
         self.header_actions = Some(Rc::new(f));
         self
@@ -819,8 +824,8 @@ impl DockTabContentWidget {
                 .compact(true)
                 .spacing(2.0)
                 .label(lit!(format!("{} actions", title.resolve_now())));
-            for action in factory(dock) {
-                bar = bar.action(action);
+            for item in factory(dock) {
+                bar = bar.item(item);
             }
             ctx.add(bar)
         });

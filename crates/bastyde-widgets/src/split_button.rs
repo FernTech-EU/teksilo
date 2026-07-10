@@ -72,6 +72,8 @@ pub const SPLIT_BUTTON_BORDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
 pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
+/// Gap between an optional main-region leading icon and the label.
+pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
 
 /// A button split into a default-action region and a chevron dropdown region.
 ///
@@ -88,6 +90,10 @@ pub struct SplitButton {
     /// Per-call override for the main-region label text color. `None` ⇒ the
     /// variant/interaction-derived cascade; setting this replaces it.
     text_role_override: Option<bastyde_core::color_prop::ColorProp>,
+    /// Optional leading icon for the main (default-action) region, rendered
+    /// before the label (mirrors `Button`'s `IconLocation::Leading`). The
+    /// dropdown rows carry their own `MenuItem::icon`s independently.
+    icon: Option<IconWidget>,
     /// Enabled state, static or reactive; forwarded to the arena at build
     /// time.
     enabled: Prop<bool>,
@@ -141,6 +147,7 @@ impl SplitButton {
             style_override: None,
             label_style: None,
             text_role_override: None,
+            icon: None,
             enabled: Prop::Static(true),
             initial_selected: 0,
             promote_on_select: true,
@@ -195,6 +202,16 @@ impl SplitButton {
     /// [`Button::variant`](crate::button::Button::variant).
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
+        self
+    }
+
+    /// Set a leading icon for the main (default-action) region, rendered before
+    /// the label (mirrors [`Button::icon`](crate::button::Button::icon) with
+    /// `IconLocation::Leading`). Unlike the per-row `MenuItem::icon`s, this glyph
+    /// is fixed regardless of which item is the current default — use it for a
+    /// stable action affordance (e.g. a "＋" add glyph).
+    pub fn icon(mut self, icon: IconWidget) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -548,12 +565,27 @@ impl Widget for SplitButton {
         }
         let label_id = ctx.add(label_widget);
 
+        // Optional leading icon in the main region: `[icon, gap, label]` inside
+        // the padding (mirrors Button's `IconLocation::Leading`). When no icon is
+        // set, the label goes straight into the padding — node count unchanged.
+        let main_inner_id = if let Some(icon) = self.icon.take() {
+            let icon_id = ctx.add(icon);
+            ctx.add(
+                HStack::new()
+                    .spacing(SPLIT_BUTTON_ICON_LABEL_GAP)
+                    .add_child(icon_id)
+                    .add_child(label_id),
+            )
+        } else {
+            label_id
+        };
+
         let main_padding_id = ctx.add(
             Padding::symmetric(
                 SPLIT_BUTTON_PADDING_VERTICAL,
                 SPLIT_BUTTON_PADDING_HORIZONTAL,
             )
-            .child_id(label_id),
+            .child_id(main_inner_id),
         );
         // ZStack (default CENTER alignment) centers the padded label within
         // the MinSize bounds when the region is wider than the text — same
