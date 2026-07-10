@@ -988,13 +988,24 @@ impl WidgetTree {
             .filter_map(|entry| entry.real_hover_start.map(|start| start + entry.delay))
             .min();
 
-        // Sticky-on-dwell wake-ups: once a rich tooltip has been
-        // shown, the dwell-promotion timer needs to keep ticking
-        // every 500 ms so the visible step indicator advances and the
-        // 2 s promotion eventually fires. Without these deadlines the
-        // framework would only wake on user input, leaving the dwell
-        // counter stuck at 0.
-        let now = std::time::Instant::now();
+        // Sticky-on-dwell wake-ups: once a rich tooltip is shown, wake every
+        // 500 ms so the step indicator advances and the 2 s promotion fires,
+        // even with the pointer held still. Without these deadlines the loop
+        // would only wake on user input, freezing the dwell counter.
+        //
+        // The step boundary is rounded off `last_frame_time` (the last rendered
+        // frame) — NOT `Instant::now()`. The app's `request_redraw_due`
+        // re-derives this deadline at each timer wake and only redraws windows
+        // whose `deadline <= now`. If we rounded off `now`, then at the instant
+        // a 500 ms boundary's wake fires, `elapsed` has just crossed it and the
+        // boundary would already have rolled forward to the NEXT step (a future
+        // instant) — so `deadline <= now` would never hold and the window would
+        // never redraw. The dwell then only advanced when some unrelated input
+        // event happened to redraw the window (the "only updates on mouse move"
+        // bug). Pinning the boundary to `last_frame_time` keeps the deadline
+        // `<= now` at its own wake until a render actually advances the frame
+        // time to the next step — one redraw per 500 ms boundary, no free-run.
+        let ref_time = self.last_frame_time.unwrap_or_else(std::time::Instant::now);
         let dwell_step = std::time::Duration::from_millis(500);
         let dwell_tooltip_deadline = self
             .tooltips
@@ -1005,12 +1016,12 @@ impl WidgetTree {
                 if entry.overlay_id.is_none() || entry.is_sticky {
                     return None;
                 }
-                let elapsed = now.saturating_duration_since(shown_at);
+                let elapsed = ref_time.saturating_duration_since(shown_at);
                 if elapsed >= sticky_after {
                     return None;
                 }
-                // Round up to the next step boundary so each
-                // wake-up lands on a 500 ms / 1 s / 1.5 s / 2 s mark.
+                // Round up to the next step boundary so each wake-up lands on a
+                // 500 ms / 1 s / 1.5 s / 2 s mark (measured at the last frame).
                 let steps_passed = (elapsed.as_millis() / dwell_step.as_millis()) as u32;
                 let next_step_at = shown_at + dwell_step * (steps_passed + 1);
                 Some(next_step_at.min(shown_at + sticky_after))

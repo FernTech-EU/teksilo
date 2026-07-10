@@ -631,4 +631,76 @@ mod tests {
 
         _reset_tooltip_registry();
     }
+
+    // ---- dwell indicator: continuous update while the pointer is still -----
+
+    #[test]
+    fn dwelling_tooltip_wake_deadline_is_due_at_its_wake() {
+        // Regression for "the dwell indicator only updates when the mouse
+        // moves": the 500 ms dwell wake deadline must be rounded off the LAST
+        // RENDERED FRAME (`last_frame_time`), not off `Instant::now()`.
+        //
+        // The app's `request_redraw_due` only redraws a window whose
+        // `next_timer_deadline() <= now`. A `now`-rounded deadline rolls to the
+        // NEXT (future) step the instant its own wake fires, so `<= now` never
+        // holds, the window is never redrawn, and the dwell freezes until an
+        // unrelated input event nudges the loop. Rounding off `last_frame_time`
+        // keeps the deadline `<= now` at its wake — one redraw per boundary.
+        //
+        // Here: show the tooltip, freeze `last_frame_time` at the show render,
+        // then let real time cross the first 500 ms boundary WITHOUT another
+        // render (the stationary-pointer case) and assert the deadline is due.
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![TooltipContent::new("k", lit!("Body"))]);
+        let mut tree = tree_with_backend();
+        // Reduced motion removes the fade animation, so `next_timer_deadline`
+        // below reflects ONLY the dwell wake — not a fade deadline that would
+        // pass the assert regardless of the dwell fix.
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let btn = tree.add(Button::new(lit!("Hover")).rich_tooltip("k"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.pointer_move(tree.bounds(btn).center());
+        tree.advance_time(Duration::from_millis(250)); // past the hover delay → shown
+        // A render pins `last_frame_time` at ~= the show instant.
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1, "rich tooltip shown");
+
+        // Real time crosses the first 500 ms step boundary with NO further
+        // render (last_frame_time stays frozen) — exactly what a still pointer
+        // gives the event loop.
+        std::thread::sleep(Duration::from_millis(600));
+
+        let deadline = tree
+            .next_timer_deadline()
+            .expect("a dwelling tooltip must schedule a wake deadline");
+        assert!(
+            deadline <= std::time::Instant::now(),
+            "the dwell wake deadline must be DUE at its own wake (pinned to \
+             last_frame_time); a still-future deadline is the freeze bug"
+        );
+
+        _reset_tooltip_registry();
+    }
+
+    #[test]
+    fn plain_tooltip_schedules_no_dwell_wake() {
+        // A plain (non-sticky) tooltip has no dwell timer, so once shown it must
+        // NOT keep scheduling wake deadlines — the dwell wake is scoped to
+        // rich/composite tooltips only. (`next_timer_deadline` may still be
+        // Some for other reasons, but not from a dwell; here nothing else is
+        // active, so it must be None once the tooltip is shown and settled.)
+        let mut tree = tree_with_backend();
+        tree.set_accessibility_preferences(false, true, 1.0); // reduced motion → no fade deadline
+        let btn = tree.add(Button::new(lit!("Hover")).tooltip(lit!("Plain")));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.pointer_move(tree.bounds(btn).center());
+        tree.advance_time(Duration::from_millis(250));
+        assert_eq!(tree.active_overlays().len(), 1, "plain tooltip shown");
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert!(
+            tree.next_timer_deadline().is_none(),
+            "a plain tooltip must not schedule a dwell wake deadline"
+        );
+    }
 }
