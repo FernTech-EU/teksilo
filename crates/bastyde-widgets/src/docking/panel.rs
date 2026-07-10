@@ -6,11 +6,11 @@
 //! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →
 //! draggable dock panels (with five-zone drop targets).
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use bastyde_canvas::{Rect, Size, SizeProposal};
+use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::WidgetBuilder;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
@@ -23,6 +23,7 @@ use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_i18n::{LocalizedString, lit};
 use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
+use crate::DropRegion;
 use crate::accordion::{
     ACCORDION_FILL_HEADER_EXTENT, ACCORDION_HEADER_PADDING_HORIZONTAL, Accordion,
     AccordionOrientation,
@@ -32,7 +33,7 @@ use crate::icon_button::{IconButton, IconButtonSize};
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::{
     Center, Divider, Expand, HStack, IconWidget, MinSize, Padding, RectWidget, Spacer, TextWidget,
-    VStack, ZStack,
+    VStack,
 };
 use crate::splitter::Splitter;
 use crate::toolbar::{Toolbar, ToolbarItem, ToolbarOrientation};
@@ -41,10 +42,7 @@ use bastyde_core::overlay::OverlayPlacement;
 use super::context_menu::{
     DockMenuKind, activity_context_menu, background_menu, dock_has_options, dock_options_menu,
 };
-use super::drag::{
-    DockDragData, DockDropOverlay, DropZone, compute_drop_zone, dropped_dock_tab,
-    dropped_dock_widget,
-};
+use super::drag::{DockDragData, dropped_dock_tab, dropped_dock_widget};
 use super::geometry::DockSide;
 use super::model::{
     DockHeaderActionsFactory, DockIconFactory, DockOpenLocation, DockTabId, DockTabView,
@@ -92,11 +90,11 @@ impl DockWidget {
     }
 
     /// Attach a factory for the dock's **inline header actions** — a flat list
-    /// of [`ToolbarAction`]s shown before the `⋮` options button, the VS Code
+    /// of [`ToolbarAction`](crate::toolbar::ToolbarAction)s shown before the `⋮` options button, the VS Code
     /// "view actions" pattern ("New File", "Collapse All", …). Built on demand
     /// each time the dock is placed into a header. The framework hosts them in a
     /// [`Toolbar`], so the actions gain **overflow** (when the header is tight,
-    /// the lowest-[`priority`](ToolbarAction::priority) actions collapse into a
+    /// the lowest-[`priority`](crate::toolbar::ToolbarAction::priority) actions collapse into a
     /// `⌄` menu) and the correct **axis** for free — a horizontal row on leading
     /// / trailing sides, a vertical column on the rotated top / bottom strip. The
     /// actions appear in any header the dock has: the multi-pane [`Accordion`]
@@ -920,20 +918,27 @@ impl DockTabContentWidget {
 // DockPanePane — a Splitter pane that is a five-zone drop target.
 // ───────────────────────────────────────────────────────────────────────
 
+/// A Splitter pane wrapped as a drop target. The five split/stack zones for a
+/// **single dock** are the reusable [`DropTarget`] (centre = stack, edge zones =
+/// split before/after — `zone_size_factor` proportional, no per-pane px cap). A
+/// whole-**tab** drag never splits a pane, so the DropTarget doesn't accept it;
+/// instead `DockPanePane` itself engages for a tab (this handler sits one level
+/// *above* the DropTarget in the tree) and relocates it to the side — a local
+/// bubble (DropTarget → DockPanePane) that shows no per-zone overlay for a tab,
+/// exactly as before. A drop landing on non-pane chrome bubbles further to
+/// [`DockSidePanel`] / the tab bar, unchanged.
 #[derive(Debug)]
-struct DockPanePane {
+pub(crate) struct DockPanePane {
     side: DockSide,
     tab_idx: usize,
     pane_idx: usize,
     model: DockingModel,
     inner: WidgetId,
-    zone: Signal<Option<DropZone>>,
-    self_size: Rc<Cell<Size>>,
     root: Option<WidgetId>,
 }
 
 impl DockPanePane {
-    fn new(
+    pub(crate) fn new(
         side: DockSide,
         tab_idx: usize,
         pane_idx: usize,
@@ -946,8 +951,6 @@ impl DockPanePane {
             pane_idx,
             model,
             inner,
-            zone: Signal::new(None),
-            self_size: Rc::new(Cell::new(Size::ZERO)),
             root: None,
         }
     }
@@ -955,59 +958,64 @@ impl DockPanePane {
 
 impl Widget for DockPanePane {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let overlay = ctx.add(DockDropOverlay::new(self.zone.clone()));
-        let root = ctx.add(ZStack::new().add_child(self.inner).add_child(overlay));
-        self.root = Some(root);
-
         let side = self.side;
         let tab_idx = self.tab_idx;
         let pane_idx = self.pane_idx;
-        let model = self.model.clone();
-        let zone_hover = self.zone.clone();
-        let zone_leave = self.zone.clone();
-        let zone_drop = self.zone.clone();
-        let size_hover = self.self_size.clone();
-        let size_drop = self.self_size.clone();
 
+        // The single-dock split/stack zones — the reusable multi-zone DropTarget.
+        // It accepts only a single DockWidget, so a whole-tab drag falls through
+        // (NoFeedback) to this pane's own tab handler below and shows no zones.
+        let split_model = self.model.clone();
+        let target = DropTarget::new()
+            .child_id(self.inner)
+            .zone_size_factor(0.2)
+            .region(DropRegion::Center, |z| z)
+            .region(DropRegion::Leading, |z| z)
+            .region(DropRegion::Trailing, |z| z)
+            .region(DropRegion::Top, |z| z)
+            .region(DropRegion::Bottom, |z| z)
+            .accept_when(|p| dropped_dock_widget(p).is_some())
+            .on_region_drop(move |region, payload, _pos, ctx| {
+                let Some(dock) = dropped_dock_widget(&payload) else {
+                    return false;
+                };
+                match region {
+                    // Centre = join this tab as another Splitter pane; an edge =
+                    // split before / after the target pane.
+                    DropRegion::Center => split_model.stack_into_tab(dock, side, tab_idx),
+                    DropRegion::Leading | DropRegion::Top => {
+                        split_model.split_into_tab(dock, side, tab_idx, pane_idx, true)
+                    }
+                    DropRegion::Trailing | DropRegion::Bottom => {
+                        split_model.split_into_tab(dock, side, tab_idx, pane_idx, false)
+                    }
+                }
+                ctx.request_accessibility_update();
+                true
+            });
+        let root = ctx.add(target);
+        self.root = Some(root);
+
+        // A whole-tab drag: engage here (one level above the DropTarget) so the
+        // drop routes locally and relocates the tab to this side — no zones. The
+        // DropTarget already engaged for a single dock, so this only ever fires
+        // for a tab. (Dock-widget drops never reach this handler.)
+        let tab_model = self.model.clone();
         ctx.apply_self_handlers(
             HandlerSet::new()
-                .on_drag_hover(move |payload, pos, _ctx| {
-                    // Only a single DockWidget splits/stacks a pane (the
-                    // five-zone overlay: centre = stack, edge fifths = split). A
-                    // whole tab always relocates to the side regardless of where
-                    // it lands, so it shows no per-zone overlay.
-                    if dropped_dock_widget(payload).is_some() {
-                        let z = compute_drop_zone(pos, size_hover.get());
-                        zone_hover.set(Some(z));
+                .on_drag_hover(move |payload, _pos, _ctx| {
+                    if dropped_dock_tab(payload).is_some() {
+                        DropFeedback::Accept
+                    } else {
+                        DropFeedback::NoFeedback
                     }
-                    DropFeedback::NoFeedback
                 })
-                .on_drag_leave(move |_ctx| zone_leave.set(None))
-                .on_drop(move |payload, pos, ctx| {
-                    if let Some(dock) = dropped_dock_widget(&payload) {
-                        let z = compute_drop_zone(pos, size_drop.get());
-                        match z {
-                            // Centre = join this tab as another Splitter pane;
-                            // an edge = split before / after the target pane.
-                            DropZone::Center => model.stack_into_tab(dock, side, tab_idx),
-                            DropZone::SplitLeading | DropZone::SplitTop => {
-                                model.split_into_tab(dock, side, tab_idx, pane_idx, true)
-                            }
-                            DropZone::SplitTrailing | DropZone::SplitBottom => {
-                                model.split_into_tab(dock, side, tab_idx, pane_idx, false)
-                            }
-                        }
-                        zone_drop.set(None);
-                        ctx.request_accessibility_update();
-                        true
-                    } else if let Some(tab_id) = dropped_dock_tab(&payload) {
-                        // A whole tab always relocates to this side (it never
-                        // splits a pane — only a single DockWidget does). Append
-                        // after the last *visible* tab (not past trailing hidden
-                        // ones).
-                        let at = model.side_append_index(side);
-                        model.move_tab(tab_id, side, at);
-                        zone_drop.set(None);
+                .on_drop(move |payload, _pos, ctx| {
+                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                        // Append after the last *visible* tab (not past trailing
+                        // hidden ones).
+                        let at = tab_model.side_append_index(side);
+                        tab_model.move_tab(tab_id, side, at);
                         ctx.request_accessibility_update();
                         true
                     } else {
@@ -1019,9 +1027,11 @@ impl Widget for DockPanePane {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        ctx.child_size(self.inner, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+        // Delegate to the DropTarget (which forwards the wrapped content's
+        // grow/shrink/floor) so a flexible pane stays flexible inside the Splitter.
+        self.root
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
     }
 
     fn place_children(
@@ -1031,7 +1041,6 @@ impl Widget for DockPanePane {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        self.self_size.set(bounds.size());
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();

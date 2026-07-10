@@ -59,6 +59,25 @@ fn dock(title: &'static str) -> (DockWidgetId, DockWidget) {
     )
 }
 
+/// Register a dock's metadata directly (no `DockingLayout` render needed) so
+/// `open_dock` works in a standalone model test.
+fn reg(m: &DockingModel, side: DockSide) -> DockWidgetId {
+    use super::model::DockWidgetMeta;
+    let id = DockWidgetId::fresh();
+    m.register_meta(
+        id,
+        DockWidgetMeta {
+            title: lit!("Dock"),
+            icon: None,
+            min_size: None,
+            default: DockOpenLocation::side(side),
+            header_actions: None,
+            show_header: false,
+        },
+    );
+    id
+}
+
 /// Find a node with `role` + `name` that is actually laid out (non-zero
 /// bounds) — skips stale/dormant duplicates.
 fn find_role_name(tree: &WidgetTree, id: WidgetId, role: Role, name: &str) -> Option<WidgetId> {
@@ -1966,5 +1985,159 @@ fn split_pane_trailing_cluster_stacks_with_the_header_axis() {
     assert!(
         ty > tx,
         "top-side cluster (both actions + ⋮) is a vertical column (y-span {ty} > x-span {tx})"
+    );
+}
+
+// ── Pane drop targets (migrated to the reusable DropTarget) ─────────────────
+
+/// A whole-tab drag dropped anywhere on a pane relocates the tab to the pane's
+/// side. The pane's DropTarget accepts only a single dock, so the tab bubbles
+/// one level up to `DockPanePane`'s own tab handler (a local bubble) — no per-
+/// zone overlay shows, and the tab moves. This is the new mechanism introduced
+/// by the migration off the hand-rolled five-zone overlay.
+#[test]
+fn tab_dropped_on_a_pane_relocates_to_its_side() {
+    use super::DockTabId;
+    use super::drag::DockTabDragData;
+    use super::panel::DockPanePane;
+    use crate::primitives::{Expand, HStack};
+    use bastyde_core::DragPayload;
+    use bastyde_core::build_context::BuildContext;
+    use bastyde_core::gesture::DragPhase;
+    use bastyde_core::widget_builder::HandlerSet;
+
+    let model = DockingModel::new();
+    let c = reg(&model, DockSide::Trailing);
+    model.open_dock(c, DockOpenLocation::side(DockSide::Trailing));
+    assert_eq!(
+        model.tab_count(DockSide::Trailing),
+        1,
+        "C opens on Trailing"
+    );
+    let tab_id = model.side_tabs(DockSide::Trailing)[0].id;
+
+    #[derive(Debug)]
+    struct TabSource(DockTabId);
+    impl Widget for TabSource {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let self_id = ctx.self_id();
+            let tab = self.0;
+            let hs = HandlerSet::new().on_drag(move |phase, ctx| {
+                if let DragPhase::Started { .. } = phase {
+                    ctx.start_drag(
+                        self_id,
+                        DragPayload::typed(DockTabDragData {
+                            tab_id: tab,
+                            source_side: DockSide::Trailing,
+                        }),
+                    );
+                }
+            });
+            ctx.apply_self_handlers(hs);
+            Vec::new()
+        }
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            Size::new(100.0, 100.0).into()
+        }
+    }
+
+    let mut t = tree();
+    let inner = t.add(FixedLeaf(100.0, 100.0));
+    let pane = t.add(DockPanePane::new(
+        DockSide::Leading,
+        0,
+        0,
+        model.clone(),
+        inner,
+    ));
+    let src = t.add(TabSource(tab_id));
+    let es = t.add(Expand::new().flex(1.0).child_id(src));
+    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
+    t.add(HStack::new().add_child(es).add_child(ep));
+    t.layout(SizeProposal::exact(400.0, 200.0));
+
+    let from = t.bounds(src).center();
+    let to = t.bounds(pane).center();
+    t.drag(from, to);
+
+    assert_eq!(
+        model.tab_count(DockSide::Leading),
+        1,
+        "tab relocated to Leading"
+    );
+    assert_eq!(model.tab_count(DockSide::Trailing), 0, "tab left Trailing");
+}
+
+/// A single-dock drag dropped on a pane's **centre** stacks it into that pane's
+/// tab (`Center` → `stack_into_tab`) — validating the DropTarget's per-zone
+/// routing reaches the docking model. The dropped dock joins the existing tab
+/// (still one tab on the side) rather than creating a new one.
+#[test]
+fn dock_dropped_on_a_pane_centre_stacks_into_its_tab() {
+    use super::drag::DockDragData;
+    use super::panel::DockPanePane;
+    use crate::primitives::{Expand, HStack};
+    use bastyde_core::DragPayload;
+    use bastyde_core::build_context::BuildContext;
+    use bastyde_core::gesture::DragPhase;
+    use bastyde_core::widget_builder::HandlerSet;
+
+    let model = DockingModel::new();
+    let a = reg(&model, DockSide::Leading);
+    let b = reg(&model, DockSide::Leading);
+    let d = reg(&model, DockSide::Bottom);
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+    model.open_dock(d, DockOpenLocation::side(DockSide::Bottom));
+    assert_eq!(
+        model.tab_count(DockSide::Leading),
+        1,
+        "A+B share one Leading tab"
+    );
+    assert_eq!(model.tab_count(DockSide::Bottom), 1, "D opens on Bottom");
+
+    #[derive(Debug)]
+    struct DockSource(DockWidgetId);
+    impl Widget for DockSource {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let self_id = ctx.self_id();
+            let dock_id = self.0;
+            let hs = HandlerSet::new().on_drag(move |phase, ctx| {
+                if let DragPhase::Started { .. } = phase {
+                    ctx.start_drag(self_id, DragPayload::typed(DockDragData { dock_id }));
+                }
+            });
+            ctx.apply_self_handlers(hs);
+            Vec::new()
+        }
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            Size::new(100.0, 100.0).into()
+        }
+    }
+
+    let mut t = tree();
+    let inner = t.add(FixedLeaf(100.0, 100.0));
+    let pane = t.add(DockPanePane::new(
+        DockSide::Leading,
+        0,
+        0,
+        model.clone(),
+        inner,
+    ));
+    let src = t.add(DockSource(d));
+    let es = t.add(Expand::new().flex(1.0).child_id(src));
+    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
+    t.add(HStack::new().add_child(es).add_child(ep));
+    t.layout(SizeProposal::exact(400.0, 200.0));
+
+    let from = t.bounds(src).center();
+    let to = t.bounds(pane).center();
+    t.drag(from, to);
+
+    assert_eq!(model.tab_count(DockSide::Bottom), 0, "D left Bottom");
+    assert_eq!(
+        model.tab_count(DockSide::Leading),
+        1,
+        "D stacked into Leading's existing tab (a new pane, not a new tab)"
     );
 }
