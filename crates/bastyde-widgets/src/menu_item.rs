@@ -746,9 +746,7 @@ impl Widget for MenuItem {
         // *any* shortcut-registry activity anywhere, dropping the click on
         // menu items that show a shortcut. The item is now never rebuilt
         // for shortcut changes; only its trailing label repaints.
-        self.shortcut_signal = self
-            .shortcut_id
-            .map(|id| ctx.effective_shortcut_signal(id));
+        self.shortcut_signal = self.shortcut_id.map(|id| ctx.effective_shortcut_signal(id));
 
         // Pre-create submenu content if this is a submenu trigger. Kept
         // dormant until hover opens the overlay.
@@ -775,12 +773,11 @@ impl Widget for MenuItem {
             // manual label it's a static string.
             let shortcut: Option<TextWidget> = if let Some(label) = self.shortcut_label.clone() {
                 Some(TextWidget::new(lit!(label)))
-            } else if let Some(sig) = self.shortcut_signal.clone() {
-                Some(TextWidget::new(lit!("")).text(
-                    sig.map(|ks| (*ks).map(format_keystroke).unwrap_or_default()),
-                ))
             } else {
-                None
+                self.shortcut_signal.clone().map(|sig| {
+                    TextWidget::new(lit!(""))
+                        .text(sig.map(|ks| (*ks).map(format_keystroke).unwrap_or_default()))
+                })
             };
             if let Some(shortcut) = shortcut {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
