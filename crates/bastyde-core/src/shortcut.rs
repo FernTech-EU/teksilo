@@ -510,6 +510,16 @@ pub struct ShortcutRegistry {
     /// but the indices must stay consistent).
     owner_by_id: HashMap<&'static str, WidgetId>,
     version: Signal<u64>,
+    /// Per-id reactive resolved *primary* keystroke, created lazily the
+    /// first time a widget asks to observe an id (see
+    /// [`ShortcutRegistry::effective_primary_signal`]). Each mutation
+    /// refreshes only the ids it actually touched (with an equality
+    /// guard), so registering or rebinding one shortcut never notifies
+    /// the observers of an unrelated id. This is what lets a menu item
+    /// bind its accelerator as a *leaf* value that repaints in place,
+    /// instead of hard-rebuilding on the coarse global [`Self::version`]
+    /// signal (which would tear down the item and drop clicks).
+    resolved: HashMap<&'static str, Signal<Option<KeyStroke>>>,
 }
 
 impl Default for ShortcutRegistry {
@@ -537,6 +547,7 @@ impl ShortcutRegistry {
             by_owner: HashMap::new(),
             owner_by_id: HashMap::new(),
             version: Signal::new(0),
+            resolved: HashMap::new(),
         }
     }
 
@@ -545,6 +556,29 @@ impl ShortcutRegistry {
     /// observe it to refresh derived state.
     pub fn version(&self) -> &Signal<u64> {
         &self.version
+    }
+
+    /// A reactive handle to the **effective primary keystroke** for a
+    /// single shortcut `id`, created lazily and seeded with the current
+    /// value. It ticks only when *that* id's resolved primary actually
+    /// changes — registering, unregistering or rebinding any *other*
+    /// shortcut leaves it untouched.
+    ///
+    /// This is the granular counterpart to [`Self::version`]: a widget
+    /// that displays one shortcut's accelerator (a menu item, a
+    /// tooltip) should bind this and update its label as a leaf value,
+    /// rather than observing the coarse global version and rebuilding.
+    pub fn effective_primary_signal(&mut self, id: &'static str) -> Signal<Option<KeyStroke>> {
+        if let Some(sig) = self.resolved.get(id) {
+            return sig.clone();
+        }
+        let current = self
+            .defaults
+            .get(id)
+            .and_then(|s| self.resolved_keystrokes(id, s).0);
+        let sig = Signal::new(current);
+        self.resolved.insert(id, sig.clone());
+        sig
     }
 
     /// Upsert a shortcut default without an owner. If `id` already
@@ -562,6 +596,7 @@ impl ShortcutRegistry {
         // index entry so `unregister_all_for_owner` stays accurate.
         self.detach_owner_index(id);
         self.bump_version();
+        self.refresh_resolved(id);
         previous
     }
 
@@ -577,6 +612,7 @@ impl ShortcutRegistry {
         self.by_owner.entry(owner).or_default().push(id);
         self.owner_by_id.insert(id, owner);
         self.bump_version();
+        self.refresh_resolved(id);
         previous
     }
 
@@ -588,6 +624,7 @@ impl ShortcutRegistry {
         if removed.is_some() {
             self.detach_owner_index(id);
             self.bump_version();
+            self.refresh_resolved(id);
         }
         removed
     }
@@ -606,6 +643,8 @@ impl ShortcutRegistry {
                 any = true;
             }
             self.owner_by_id.remove(id);
+            // Its effective primary is now gone — push that to any observer.
+            self.refresh_resolved(id);
         }
         if any {
             self.bump_version();
@@ -668,8 +707,10 @@ impl ShortcutRegistry {
     /// Set the full override for `id`. Intended for loading persisted
     /// user preferences at app startup.
     pub fn put_override(&mut self, id: impl Into<String>, override_: KeyStrokeOverride) {
-        self.overrides.insert(id.into(), override_);
+        let id = id.into();
+        self.overrides.insert(id.clone(), override_);
         self.bump_version();
+        self.refresh_resolved(&id);
     }
 
     /// Set the primary slot of the override for `id`. The secondary
@@ -678,30 +719,35 @@ impl ShortcutRegistry {
     /// whatever default the shortcut currently declares.
     pub fn rebind_primary(&mut self, id: impl Into<String>, keystroke: Option<KeyStroke>) {
         let id = id.into();
-        let entry = self.overrides.entry(id).or_default();
+        let entry = self.overrides.entry(id.clone()).or_default();
         entry.primary = match keystroke {
             Some(ks) => SlotOverride::Bound(ks),
             None => SlotOverride::Unbound,
         };
         self.bump_version();
+        self.refresh_resolved(&id);
     }
 
     /// Set the secondary slot of the override for `id`. The primary
     /// slot stays in whatever state it was (`Default` or user-set).
     pub fn rebind_secondary(&mut self, id: impl Into<String>, keystroke: Option<KeyStroke>) {
         let id = id.into();
-        let entry = self.overrides.entry(id).or_default();
+        let entry = self.overrides.entry(id.clone()).or_default();
         entry.secondary = match keystroke {
             Some(ks) => SlotOverride::Bound(ks),
             None => SlotOverride::Unbound,
         };
         self.bump_version();
+        // Secondary-only change: the primary signal is guarded, so this
+        // is a no-op for primary observers — kept for uniformity.
+        self.refresh_resolved(&id);
     }
 
     /// Drop the user override for `id`, restoring the declared defaults.
     pub fn clear_override(&mut self, id: &str) {
         if self.overrides.remove(id).is_some() {
             self.bump_version();
+            self.refresh_resolved(id);
         }
     }
 
@@ -711,6 +757,7 @@ impl ShortcutRegistry {
         if !self.overrides.is_empty() {
             self.overrides.clear();
             self.bump_version();
+            self.refresh_all_resolved();
         }
     }
 
@@ -729,6 +776,7 @@ impl ShortcutRegistry {
     pub fn import_overrides(&mut self, overrides: HashMap<String, KeyStrokeOverride>) {
         self.overrides = overrides;
         self.bump_version();
+        self.refresh_all_resolved();
     }
 
     /// Effective (defaults + overrides) view of `id`. `None` when the
@@ -867,6 +915,34 @@ impl ShortcutRegistry {
 
     fn bump_version(&self) {
         self.version.set(self.version.get().wrapping_add(1));
+    }
+
+    /// Push the current effective primary keystroke for `id` into its
+    /// per-id signal, if one is being observed. Guarded by equality so
+    /// a no-op re-registration (e.g. a widget re-declaring the same
+    /// shortcut on rebuild) doesn't notify observers. A `&str` is
+    /// accepted so the override-keyed (`String`) mutators can call it.
+    fn refresh_resolved(&self, id: &str) {
+        if let Some(sig) = self.resolved.get(id) {
+            let current = self
+                .defaults
+                .get(id)
+                .and_then(|s| self.resolved_keystrokes(id, s).0);
+            if sig.get() != current {
+                sig.set(current);
+            }
+        }
+    }
+
+    /// Refresh every observed id — for the "reset everything" mutators
+    /// (`clear_all_overrides`, `import_overrides`) that can change many
+    /// resolutions at once. The per-id equality guard keeps unchanged
+    /// ids from notifying.
+    fn refresh_all_resolved(&self) {
+        let ids: Vec<&'static str> = self.resolved.keys().copied().collect();
+        for id in ids {
+            self.refresh_resolved(id);
+        }
     }
 
     /// Drop the owner index entries for `id`. Idempotent — safe to call
@@ -1056,6 +1132,80 @@ mod tests {
         reg.unregister("a");
         let v5 = reg.version().get();
         assert!(v5 > v4);
+    }
+
+    // --- Registry: per-id resolved signal (granular reactivity) --------
+
+    #[test]
+    fn per_id_signal_seeds_isolates_and_tracks() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("work.new")
+                .primary(KeyStroke::ctrl(Key::N))
+                .build(),
+        );
+
+        // Seeded with the current effective primary.
+        let sig = reg.effective_primary_signal("work.new");
+        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::N)));
+
+        // Count notifications to prove *isolation* from unrelated churn.
+        let hits = Rc::new(Cell::new(0usize));
+        let _h = {
+            let hits = hits.clone();
+            sig.observe(move |_| hits.set(hits.get() + 1))
+        };
+
+        // Registering / unregistering an UNRELATED id must not notify us —
+        // this is the whole point: a scoped shortcut registered in some
+        // other widget's build() no longer disturbs this menu item.
+        reg.register(
+            Shortcut::new("outline.open_to_side")
+                .primary(KeyStroke::ctrl(Key::Enter))
+                .build(),
+        );
+        reg.unregister("outline.open_to_side");
+        assert_eq!(
+            hits.get(),
+            0,
+            "unrelated shortcut churn must not notify a per-id observer"
+        );
+        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::N)));
+
+        // Rebinding OUR id updates the signal (and notifies exactly once).
+        reg.rebind_primary("work.new", Some(KeyStroke::ctrl_shift(Key::N)));
+        assert_eq!(sig.get(), Some(KeyStroke::ctrl_shift(Key::N)));
+        assert_eq!(hits.get(), 1);
+
+        // Unregistering OUR id resolves to None.
+        reg.unregister("work.new");
+        assert_eq!(sig.get(), None);
+        assert_eq!(hits.get(), 2);
+    }
+
+    #[test]
+    fn per_id_signal_observed_before_registration_goes_live_on_register() {
+        // The menu-open scenario: a widget observes an id whose default is
+        // not registered yet; when it later registers, the signal updates —
+        // so the accelerator is current whenever the menu next appears,
+        // even though the item is never rebuilt for shortcut changes.
+        let mut reg = ShortcutRegistry::new();
+        let sig = reg.effective_primary_signal("late.cmd");
+        assert_eq!(sig.get(), None);
+
+        reg.register(
+            Shortcut::new("late.cmd")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        assert_eq!(sig.get(), Some(KeyStroke::ctrl(Key::S)));
+
+        // A user override on top is reflected too.
+        reg.rebind_primary("late.cmd", Some(KeyStroke::ctrl_shift(Key::S)));
+        assert_eq!(sig.get(), Some(KeyStroke::ctrl_shift(Key::S)));
     }
 
     // --- Registry: find_by_keystroke honors overrides -----------------

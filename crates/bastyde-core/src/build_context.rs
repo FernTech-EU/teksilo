@@ -802,6 +802,23 @@ impl<'a> BuildContext<'a> {
         self.shortcut_registry().version()
     }
 
+    /// A reactive, **per-id** handle to a shortcut's effective primary
+    /// keystroke — the granular alternative to [`Self::shortcut_version`].
+    /// Bind this to render one shortcut's accelerator as a *leaf* value
+    /// (a menu item's trailing label, a tooltip) that refreshes in place
+    /// when the user rebinds *that* id, without observing — and rebuilding
+    /// on — every unrelated registry mutation. The signal is created on
+    /// first request, seeded with the current value, and kept live by the
+    /// registry across register / unregister / rebind of that id.
+    pub fn effective_shortcut_signal(
+        &mut self,
+        id: &'static str,
+    ) -> Signal<Option<crate::shortcut::KeyStroke>> {
+        self.tree
+            .shortcut_registry_mut()
+            .effective_primary_signal(id)
+    }
+
     /// Apply a `HandlerSet` to a child widget created during this build.
     /// Use this to attach event handlers to children without wrapping them
     /// in `WidgetWithHandlers`.

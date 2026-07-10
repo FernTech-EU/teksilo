@@ -45,6 +45,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use bastyde_core::shortcut::KeyStroke;
 use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{MenuItemStyleConfig, SharedMenuItemStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
@@ -135,11 +136,12 @@ pub struct MenuItem {
     label: LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
-    /// Optional shortcut id. When set and `shortcut_label` is not,
-    /// the rendered trailing label is pulled from the tree's
+    /// Optional shortcut id. When set and `shortcut_label` is not, the
+    /// rendered trailing label is pulled from the tree's
     /// [`ShortcutRegistry`](bastyde_core::shortcut::ShortcutRegistry) and
-    /// tracks user rebindings automatically (the build registers the
-    /// registry's version signal as a Relayout binding on self).
+    /// tracks user rebindings automatically — reactively, via a *per-id*
+    /// signal (see `shortcut_signal`), so a rebind refreshes the chord in
+    /// place instead of rebuilding the whole item.
     shortcut_id: Option<&'static str>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
@@ -171,11 +173,14 @@ pub struct MenuItem {
     /// path. `accessibility()` reads this for `set_expanded`.
     /// Only meaningful when `submenu_factory.is_some()`.
     submenu_open: Signal<bool>,
-    /// Shortcut text after resolving `shortcut_label` / `shortcut_id`.
-    /// Captured during `build()` and read by `accessibility()` for
-    /// `set_keyboard_shortcut`, so screen readers announce the chord
-    /// that the visual trailing label shows.
-    resolved_shortcut: Option<String>,
+    /// Live per-id handle to the effective primary keystroke for
+    /// `shortcut_id`, obtained in `build()` from
+    /// [`BuildContext::effective_shortcut_signal`]. The trailing label
+    /// binds it (leaf-level, so a rebind repaints in place and the item
+    /// is never rebuilt on registry churn), and `accessibility()` reads
+    /// it live so screen readers announce the current chord. `None` for
+    /// items with a manual `shortcut_label` or no shortcut at all.
+    shortcut_signal: Option<Signal<Option<KeyStroke>>>,
     /// Per-call override for the label's text style (font, size, weight).
     /// `None` ⇒ the default `TextStyleRole::Body`.
     label_style: Option<bastyde_core::color_prop::TextStyleProp>,
@@ -225,7 +230,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
-            resolved_shortcut: None,
+            shortcut_signal: None,
             label_style: None,
             text_role_override: None,
             style_override: None,
@@ -391,7 +396,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
-            resolved_shortcut: None,
+            shortcut_signal: None,
             label_style: None,
             text_role_override: None,
             style_override: None,
@@ -732,23 +737,18 @@ impl Widget for MenuItem {
             label_style,
         ));
 
-        // Resolve the trailing shortcut text — manual label wins;
-        // otherwise pull from the registry by id. Bind the registry's
-        // version signal so a rebind triggers a Rebuild on this widget.
-        let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
-            self.shortcut_id.and_then(|id| {
-                ctx.effective_shortcut(id)
-                    .and_then(|eff| eff.primary.map(format_keystroke))
-            })
-        });
-        self.resolved_shortcut = resolved_shortcut.clone();
-        if self.shortcut_id.is_some() {
-            ctx.shortcut_version().bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                bastyde_core::binding::BindingLevel::Rebuild,
-            );
-        }
+        // Resolve the trailing accelerator *reactively*. A manual
+        // `shortcut_label` is a static string; a `shortcut_id` binds a
+        // per-id registry signal (built into the trailing slot below), so
+        // a rebind of *that* id refreshes the chord in place. Crucially we
+        // do NOT observe the coarse global `shortcut_version` at `Rebuild`
+        // here — doing so tore the whole item (its gesture arena) down on
+        // *any* shortcut-registry activity anywhere, dropping the click on
+        // menu items that show a shortcut. The item is now never rebuilt
+        // for shortcut changes; only its trailing label repaints.
+        self.shortcut_signal = self
+            .shortcut_id
+            .map(|id| ctx.effective_shortcut_signal(id));
 
         // Pre-create submenu content if this is a submenu trigger. Kept
         // dormant until hover opens the overlay.
@@ -768,14 +768,29 @@ impl Widget for MenuItem {
         // regular items share the same trailing edge.
         let trailing = {
             let mut trailing_row = HStack::new().spacing(0.0);
-            if let Some(ref shortcut_text) = resolved_shortcut {
+            // Trailing accelerator. Present whenever this item references a
+            // shortcut (manual `shortcut_label`, or a `shortcut_id`). For an
+            // id it binds the per-id signal reactively (empty ⇒ zero-width,
+            // so a shortcut appearing/disappearing needs no rebuild); for a
+            // manual label it's a static string.
+            let shortcut: Option<TextWidget> = if let Some(label) = self.shortcut_label.clone() {
+                Some(TextWidget::new(lit!(label)))
+            } else if let Some(sig) = self.shortcut_signal.clone() {
+                Some(TextWidget::new(lit!("")).text(
+                    sig.map(|ks| (*ks).map(format_keystroke).unwrap_or_default()),
+                ))
+            } else {
+                None
+            };
+            if let Some(shortcut) = shortcut {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
-                let shortcut = TextWidget::new(lit!(shortcut_text))
-                    .style(TextStyleRole::Body)
-                    .color(shortcut_role)
-                    .single_line()
-                    .a11y_hidden();
-                trailing_row = trailing_row.child(shortcut);
+                trailing_row = trailing_row.child(
+                    shortcut
+                        .style(TextStyleRole::Body)
+                        .color(shortcut_role)
+                        .single_line()
+                        .a11y_hidden(),
+                );
             }
             // Chevron column. Always reserved (Spacer when no submenu)
             // so the row's right edge sits at exactly the same X
@@ -1427,8 +1442,16 @@ impl Widget for MenuItem {
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Click);
-        if let Some(ref shortcut) = self.resolved_shortcut {
-            builder.set_keyboard_shortcut(shortcut.clone());
+        // Announce the current chord *live*: a manual label, else the
+        // per-id signal's present value — so AT reflects a rebind even
+        // though the item itself is never rebuilt for shortcut changes.
+        let accel = self.shortcut_label.clone().or_else(|| {
+            self.shortcut_signal
+                .as_ref()
+                .and_then(|sig| sig.get().map(format_keystroke))
+        });
+        if let Some(accel) = accel {
+            builder.set_keyboard_shortcut(accel);
         }
 
         // Mnemonic — populates AccessKit's `access_key` field, which
@@ -1743,5 +1766,63 @@ mod tests {
             }
         }
         panic!("no descendant of {from:?} has role {role:?}");
+    }
+
+    // --- Regression: shortcut-registry churn must not rebuild a
+    //     shortcut-bearing menu item (which would drop its click) ---
+
+    /// Every widget id in the subtree rooted at `from`, breadth-first.
+    fn subtree(t: &WidgetTree, from: WidgetId) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(from);
+        while let Some(id) = queue.pop_front() {
+            out.push(id);
+            for child in t.children(id) {
+                queue.push_back(child);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn menu_item_with_shortcut_not_rebuilt_on_unrelated_shortcut_churn() {
+        use bastyde_core::event::Key;
+        use bastyde_core::shortcut::Shortcut;
+
+        let mut t = tree();
+        t.shortcut_registry_mut().register(
+            Shortcut::new("test.cmd")
+                .primary(KeyStroke::ctrl(Key::K))
+                .build(),
+        );
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("New")).for_shortcut("test.cmd")));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+
+        // Snapshot the item's subtree identity. A rebuild re-creates the
+        // item's children (label / accelerator / chevron) with fresh ids.
+        let before = subtree(&t, item_id);
+
+        // Register an UNRELATED shortcut — exactly what a widget that
+        // declares a scoped shortcut in build() does on every rebuild —
+        // and flush pending rebuilds via layout. The old code bound the
+        // GLOBAL shortcut version at `Rebuild` on every shortcut-bearing
+        // item, so this bump rebuilt the item, tearing down its gesture
+        // arena and dropping in-flight clicks (the reported regression).
+        t.shortcut_registry_mut().register(
+            Shortcut::new("unrelated.cmd")
+                .primary(KeyStroke::ctrl(Key::J))
+                .build(),
+        );
+        layout(&mut t);
+
+        let after = subtree(&t, item_id);
+        assert_eq!(
+            before, after,
+            "a shortcut-bearing menu item must NOT rebuild when an unrelated \
+             shortcut is registered; its accelerator now updates as a leaf"
+        );
     }
 }
