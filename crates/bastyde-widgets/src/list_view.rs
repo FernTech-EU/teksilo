@@ -56,7 +56,7 @@ use bastyde_tokens::{BorderRole, Easing};
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
-use bastyde_core::drag_payload::{DragPayload, DropOutcome};
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -199,37 +199,11 @@ pub struct ListView<T: 'static> {
     /// reorder vs. a foreign drop, even across widget kinds / windows).
     model_id: ViewId,
 
-    /// Export: when `Some`, dragged rows carry clones of their items in the
-    /// payload so a foreign `DropTarget` / another view / the OS can consume
-    /// them, and rows become a drag source even without `reorderable`. The
-    /// mode chooses whether the origin removes moved rows on a foreign accept.
-    export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload — captured only
-    /// by `.exportable(..)` / `.export_external(..)` (each `where T: Clone`),
-    /// so `ListView::new` stays unconstrained.
-    clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export (`.export_external(..)`).
-    #[allow(clippy::type_complexity)]
-    export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
-    /// App override for removing rows moved out to a foreign target; default is
-    /// the source's `on_drag_out`.
-    #[allow(clippy::type_complexity)]
-    on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut bastyde_core::widget::EventContext)>>,
-    /// Accept exported rows dropped from a *different* view / source (the
-    /// zero-custom-`ListDataSource` receive path).
-    accept_foreign_rows: bool,
-    /// Handler for foreign rows received via `accept_foreign_rows` —
-    /// `(items, insertion_index, ctx)`.
-    #[allow(clippy::type_complexity)]
-    on_rows_received: Option<Rc<dyn Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext)>>,
-    /// Set by our own `on_drop` when it handled a same-view reorder, so
-    /// `on_drag_ended` can tell "I applied this myself" from "a foreign target
-    /// took it" (and skip the move-out). The TabBar completion pattern.
-    self_reorder_flag: Rc<Cell<bool>>,
-    /// The rows carried by the in-flight drag, captured at drag-start so
-    /// `on_drag_ended` (which gets only a `DropOutcome`) can remove them.
-    dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Cross-widget export / foreign-receive machinery — the builders
+    /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
+    /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start payload
+    /// build, and the move-out completion, shared by all five data views.
+    export: crate::data_views::RowExport<T>,
 
     /// Whole-view enabled state, statically or reactively. Forwarded to the
     /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
@@ -317,14 +291,7 @@ impl<T: 'static> ListView<T> {
         let model_id = ViewId::next(ViewKind::List);
         Self {
             model_id,
-            export_mode: None,
-            clone_item_fn: None,
-            export_mime_fn: None,
-            on_rows_transferred_out: None,
-            accept_foreign_rows: false,
-            on_rows_received: None,
-            self_reorder_flag: Rc::new(Cell::new(false)),
-            dragged_rows: Rc::new(RefCell::new(Vec::new())),
+            export: crate::data_views::RowExport::default(),
             source,
             delegate: Rc::new(delegate),
             item_height: DEFAULT_ITEM_HEIGHT,
@@ -498,10 +465,7 @@ impl<T: 'static> ListView<T> {
     where
         T: Clone,
     {
-        self.export_mode = Some(mode);
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
+        self.export.set_exportable(mode);
         self
     }
 
@@ -516,13 +480,7 @@ impl<T: 'static> ListView<T> {
     where
         T: Clone,
     {
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
-        if self.export_mode.is_none() {
-            self.export_mode = Some(DragTransferMode::default());
-        }
-        self.export_mime_fn = Some(Rc::new(f));
+        self.export.set_export_external(f);
         self
     }
 
@@ -535,7 +493,7 @@ impl<T: 'static> ListView<T> {
         mut self,
         f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_transferred_out = Some(Rc::new(f));
+        self.export.set_on_rows_transferred_out(f);
         self
     }
 
@@ -546,7 +504,7 @@ impl<T: 'static> ListView<T> {
     /// [`reorderable`](Self::reorderable); a custom `ListDataSource` can still
     /// accept foreign drops through its `can_accept`/`accept_drop` instead.)
     pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
-        self.accept_foreign_rows = accept;
+        self.export.accept_foreign_rows = accept;
         self
     }
 
@@ -557,7 +515,7 @@ impl<T: 'static> ListView<T> {
         mut self,
         f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_received = Some(Rc::new(f));
+        self.export.set_on_rows_received(f);
         self
     }
 
@@ -1136,7 +1094,7 @@ impl<T: 'static> Widget for ListView<T> {
         // --- DnD: register self as a drop target when it can reorder OR accept
         // foreign rows. The source's `can_accept` decides per-hover whether the
         // drop is allowed (and a forbidden verdict shows no insertion line). ---
-        if self.reorderable || self.accept_foreign_rows {
+        if self.export.is_drop_target(self.reorderable) {
             let metrics_for_hover = self.metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
             let len_for_hover = self.source.len_fn.clone();
@@ -1145,7 +1103,7 @@ impl<T: 'static> Widget for ListView<T> {
 
             let feedback_for_hover = self.drop_feedback.clone();
             let width_for_hover = self.placed_content_width.clone();
-            let accept_foreign_for_hover = self.accept_foreign_rows;
+            let export_for_hover = self.export.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y + scroll;
@@ -1162,15 +1120,10 @@ impl<T: 'static> Widget for ListView<T> {
                 // allowed when `accept_foreign_rows` is on even though a bare
                 // `ListModel`'s `can_accept` rejects the `Foreign` branch.
                 let allowed = flat_insertion_target(ins, len).is_some_and(|(target, pos)| {
-                    let src_ok = !matches!(
+                    !matches!(
                         (can_accept_for_hover)(payload, target, pos, my_view_id),
                         DropResponse::Reject
-                    );
-                    src_ok
-                        || (accept_foreign_for_hover
-                            && payload
-                                .get_typed::<RowDragData<T>>()
-                                .is_some_and(|rd| rd.source != my_view_id && rd.is_export()))
+                    ) || export_for_hover.accepts_foreign_export(payload, my_view_id)
                 });
                 if allowed {
                     feedback_for_hover.set(Some((insertion_y, line_width)));
@@ -1189,9 +1142,7 @@ impl<T: 'static> Widget for ListView<T> {
             let drop_view_id = self.model_id;
             let scroll_for_drop = self.scroll_y.clone();
             let metrics_for_drop = self.metrics.clone();
-            let flag_for_drop = self.self_reorder_flag.clone();
-            let accept_foreign_for_drop = self.accept_foreign_rows;
-            let on_received_for_drop = self.on_rows_received.clone();
+            let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
 
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
@@ -1206,36 +1157,20 @@ impl<T: 'static> Widget for ListView<T> {
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_view_id);
-                // Route the drop to the source's accept_drop. A same-view
-                // reorder only happens when the view is `reorderable`; a foreign
-                // payload is the source's call (a bare ListModel rejects it).
+                // A same-view reorder only happens when the view is
+                // `reorderable`; a foreign payload is the source's call (a bare
+                // ListModel rejects it).
                 if (reorderable_for_drop || !is_same_view)
                     && let Some((target, position_kind)) = flat_insertion_target(ins, len)
                     && (accept_drop_for_drop)(&payload, target, position_kind, drop_view_id)
                 {
-                    // Only suppress our OWN move-out for a genuine same-view drop.
                     if is_same_view {
-                        flag_for_drop.set(true);
+                        export_for_drop.note_self_reorder();
                     }
                     return true;
                 }
-                // Otherwise, accept exported rows from a different view/source
-                // without a custom ListDataSource. Peek before taking so a
-                // non-matching payload is left intact.
-                let foreign_export = accept_foreign_for_drop
-                    && on_received_for_drop.is_some()
-                    && payload
-                        .get_typed::<RowDragData<T>>()
-                        .is_some_and(|rd| rd.source != drop_view_id && rd.is_export());
-                if foreign_export
-                    && let Some(cb) = on_received_for_drop.as_ref()
-                    && let Some(rd) = payload.take_typed::<RowDragData<T>>()
-                    && let Some(items) = rd.items
-                {
-                    cb(items, ins, ctx);
-                    return true;
-                }
-                false
+                // Otherwise, the shared foreign-receive sugar (peek-before-take).
+                export_for_drop.foreign_receive(&mut payload, drop_view_id, ins, ctx)
             });
 
             // Clear the insertion line whenever the drag leaves this
@@ -1275,42 +1210,9 @@ impl<T: 'static> Widget for ListView<T> {
             });
         }
 
-        // --- Export completion: remove rows moved out to a FOREIGN target. The
-        // handler fires on the drag source (this view's root id, the stable id
-        // start_drag was given). A same-view reorder set `self_reorder_flag`, so
-        // it is skipped here (already applied). ---
-        if let Some(mode) = self.export_mode {
-            let flag = self.self_reorder_flag.clone();
-            let stash = self.dragged_rows.clone();
-            let on_out = self.on_rows_transferred_out.clone();
-            let on_drag_out_fn = self.source.dnd.on_drag_out_fn.clone();
-            handlers = handlers.on_drag_ended(move |outcome, ctx| {
-                if flag.replace(false) {
-                    stash.borrow_mut().clear();
-                    return;
-                }
-                let accepted_elsewhere = matches!(
-                    outcome,
-                    DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
-                );
-                let rows = std::mem::take(&mut *stash.borrow_mut());
-                if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
-                    return;
-                }
-                if let Some(cb) = on_out.as_ref() {
-                    // Deliver descending so a caller that removes by index one
-                    // at a time stays valid across the batch.
-                    let mut desc = rows;
-                    desc.sort_unstable();
-                    desc.reverse();
-                    cb(&desc, ctx);
-                } else {
-                    // The erasure resolves stable keys before mutating and
-                    // removes in a key-safe order.
-                    (on_drag_out_fn)(&rows);
-                }
-            });
-        }
+        // Export completion (move-out): fires on the drag source — this view's
+        // root id, the stable id start_drag was given.
+        handlers = self.export.install_completion(handlers);
 
         ctx.apply_self_handlers(handlers);
 
@@ -1324,7 +1226,7 @@ impl<T: 'static> Widget for ListView<T> {
             (self.source.dnd.fetch_more_fn)();
         }
         let selection = &self.row_selection;
-        let is_drag_source = self.reorderable || self.export_mode.is_some();
+        let is_drag_source = self.export.is_drag_source(self.reorderable);
         let model_id = self.model_id;
         let self_id = ctx.self_id();
         let row_state_fn = self.source.dnd.row_state_fn.clone();
@@ -1364,59 +1266,34 @@ impl<T: 'static> Widget for ListView<T> {
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                // The press belongs to an interactive child (an
-                                // embedded checkbox, button, …) — let it handle the
-                                // tap; don't also select the row. Clear any stale
-                                // deferred-collapse (left by a prior drag whose
-                                // PointerUp the drag machinery consumed) so it can't
-                                // fire on this unrelated interaction.
-                                if ctx.press_claimed_by_interactive_child() {
-                                    pending_collapse.set(false);
-                                    return bastyde_core::event::EventResponse::Ignored;
+                                // The shared deferred-select helper owns the
+                                // press-claimed guard, Ctrl/Shift handling, and
+                                // the defer-collapse-on-already-selected rule; it
+                                // returns false (skip the nav-cursor move) when an
+                                // interactive child claimed the press.
+                                if crate::data_views::deferred_select::on_down(
+                                    &sel_click,
+                                    click_index,
+                                    *modifiers,
+                                    &pending_collapse,
+                                    ctx,
+                                ) {
+                                    fi_click.set(Some(click_index));
                                 }
-                                // Move the keyboard-navigation cursor to the clicked
-                                // row so a subsequent Arrow steps from here, not from
-                                // the stale keyboard cursor / index 0 (`focused_index`
-                                // is the nav origin, `fi.get().unwrap_or(0)`, and is
-                                // otherwise only written by the keyboard handler).
-                                fi_click.set(Some(click_index));
-                                if modifiers.ctrl() {
-                                    sel_click.toggle(click_index);
-                                    pending_collapse.set(false);
-                                } else if modifiers.shift() {
-                                    sel_click.extend_to(click_index);
-                                    pending_collapse.set(false);
-                                } else if sel_click.is_selected(click_index) {
-                                    // Defer: a following drag preserves the whole
-                                    // selection; a plain click collapses on release.
-                                    pending_collapse.set(true);
-                                } else {
-                                    sel_click.select(click_index);
-                                    pending_collapse.set(false);
-                                }
-                                // Ignored so the gesture arena on this
-                                // widget still sees the PointerDown and
-                                // can arm the DragRecognizer for
-                                // drag-to-reorder alongside selection.
+                                // Ignored so the gesture arena still arms the
+                                // DragRecognizer for drag-to-reorder.
                                 bastyde_core::event::EventResponse::Ignored
                             }
                             bastyde_core::event::WidgetEvent::PointerUp {
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                // A release on an interactive child is that
-                                // child's tap — never collapse the row from it
-                                // (guards against a `pending_collapse` a prior
-                                // drag left stuck true).
-                                if ctx.press_claimed_by_interactive_child() {
-                                    return bastyde_core::event::EventResponse::Ignored;
-                                }
-                                // Reached only on a click WITHOUT a drag (an
-                                // active drag consumes PointerUp). Collapse the
-                                // deferred multi-selection to the clicked row.
-                                if pending_collapse.replace(false) {
-                                    sel_click.select(click_index);
-                                }
+                                crate::data_views::deferred_select::on_up(
+                                    &sel_click,
+                                    click_index,
+                                    &pending_collapse,
+                                    ctx,
+                                );
                                 bastyde_core::event::EventResponse::Ignored
                             }
                             _ => bastyde_core::event::EventResponse::Ignored,
@@ -1457,13 +1334,13 @@ impl<T: 'static> Widget for ListView<T> {
                     let metrics_for_preview = self.metrics.clone();
                     let width_for_preview = self.placed_content_width.clone();
                     let drag_gate = self.source.dnd.drag_fn.clone();
-                    // Export capture: the dragged set is selection-aware, and
-                    // clones/MIME are built only when the view opted in.
+                    // Export capture: the dragged set is selection-aware; the
+                    // shared `RowExport` builds the payload (clones / MIME /
+                    // Loading-filter / stash) when the view opted in.
                     let sel_for_drag = self.row_selection.clone();
-                    let clone_for_drag = self.clone_item_fn.clone();
-                    let mime_for_drag = self.export_mime_fn.clone();
+                    let export_for_drag = self.export.clone();
                     let read_for_drag = self.source.read_item_fn.clone();
-                    let stash_for_drag = self.dragged_rows.clone();
+                    let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
@@ -1475,7 +1352,7 @@ impl<T: 'static> Widget for ListView<T> {
                                 // Selection-aware dragged set: the whole
                                 // selection when the pressed row is part of a
                                 // multi-selection, else just the pressed row.
-                                let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                                let rows: Vec<usize> = match sel_for_drag.as_ref() {
                                     Some(s) if s.is_selected(drag_index) => {
                                         let mut v = s.selected_indices();
                                         v.sort_unstable();
@@ -1483,48 +1360,12 @@ impl<T: 'static> Widget for ListView<T> {
                                     }
                                     _ => vec![drag_index],
                                 };
-                                // Export clones, if opted in. Drop any row whose
-                                // item isn't resident (a lazy `Loading` row) so
-                                // `rows` and `items` stay index-aligned and a
-                                // Move never removes a row whose data was never
-                                // transferred.
-                                let items: Option<Vec<T>> =
-                                    if let Some(cf) = clone_for_drag.as_ref() {
-                                        let mut out = Vec::with_capacity(rows.len());
-                                        rows.retain(|&r| {
-                                            let mut got = None;
-                                            (read_for_drag)(r, &mut |t| got = Some(cf(t)));
-                                            match got {
-                                                Some(v) => {
-                                                    out.push(v);
-                                                    true
-                                                }
-                                                None => false,
-                                            }
-                                        });
-                                        Some(out)
-                                    } else {
-                                        None
-                                    };
-                                // MIME reps for OS / DropZone export.
-                                let mime_pairs: Vec<(String, Vec<u8>)> =
-                                    match (mime_for_drag.as_ref(), items.as_ref()) {
-                                        (Some(mf), Some(its)) => mf(its),
-                                        _ => Vec::new(),
-                                    };
-                                let mut payload = DragPayload::typed(RowDragData::<T> {
-                                    source: drag_model_id,
-                                    rows: rows.clone(),
-                                    items,
-                                });
-                                let has_mime = !mime_pairs.is_empty();
-                                for (mime, bytes) in mime_pairs {
-                                    payload = payload.with_mime(&mime, bytes);
-                                }
-                                if has_mime {
-                                    payload.enrich_external_from_mime();
-                                }
-                                *stash_for_drag.borrow_mut() = rows;
+                                let payload = export_for_drag.build_payload(
+                                    drag_model_id,
+                                    rows,
+                                    &*read_for_drag,
+                                    &snapshot_for_drag,
+                                );
                                 let delegate = delegate_for_preview.clone();
                                 let w = width_for_preview.get().max(120.0);
                                 let h = metrics_for_preview.borrow_mut().row_height(drag_index);

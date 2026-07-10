@@ -35,7 +35,7 @@ pub(crate) mod selection;
 #[cfg(test)]
 mod tests;
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -104,19 +104,14 @@ fn drop_allowed<T: 'static>(
     len: usize,
     view_id: ViewId,
     has_drop_cb: bool,
-    accept_foreign_rows: bool,
+    export: &crate::data_views::RowExport<T>,
 ) -> bool {
     match flat_insertion_target(idx, len) {
         Some((target, position)) => match (can_accept)(payload, target, position, view_id) {
             DropResponse::Accept | DropResponse::Redirect(_) => true,
             DropResponse::Reject => {
                 let foreign = is_foreign::<T>(payload, view_id);
-                foreign
-                    && (has_drop_cb
-                        || (accept_foreign_rows
-                            && payload
-                                .get_typed::<RowDragData<T>>()
-                                .is_some_and(|rd| rd.is_export())))
+                foreign && (has_drop_cb || export.accepts_foreign_export(payload, view_id))
             }
         },
         None => false,
@@ -228,37 +223,11 @@ pub struct GridView<T: 'static> {
     /// reorder vs. a foreign drop, even across widget kinds / windows).
     model_id: ViewId,
 
-    /// Export: when `Some`, dragged tiles carry clones of their items in the
-    /// payload so a foreign `DropTarget` / another view / the OS can consume
-    /// them, and tiles become a drag source even without `reorderable`. The
-    /// mode chooses whether the origin removes moved rows on a foreign accept.
-    export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload — captured only
-    /// by `.exportable(..)` / `.export_external(..)` (each `where T: Clone`),
-    /// so `GridView::new` stays unconstrained.
-    clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export (`.export_external(..)`).
-    #[allow(clippy::type_complexity)]
-    export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
-    /// App override for removing rows moved out to a foreign target; default is
-    /// the source's `on_drag_out`.
-    #[allow(clippy::type_complexity)]
-    on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut bastyde_core::widget::EventContext)>>,
-    /// Accept exported rows dropped from a *different* view / source (the
-    /// zero-custom-`ListDataSource` receive path).
-    accept_foreign_rows: bool,
-    /// Handler for foreign rows received via `accept_foreign_rows` —
-    /// `(items, insertion_index, ctx)`.
-    #[allow(clippy::type_complexity)]
-    on_rows_received: Option<Rc<dyn Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext)>>,
-    /// Set by our own `on_drop` when it handled a same-view reorder, so
-    /// `on_drag_ended` can tell "I applied this myself" from "a foreign target
-    /// took it" (and skip the move-out). The TabBar completion pattern.
-    self_reorder_flag: Rc<Cell<bool>>,
-    /// The rows carried by the in-flight drag, captured at drag-start so
-    /// `on_drag_ended` (which gets only a `DropOutcome`) can remove them.
-    dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Cross-widget export / foreign-receive machinery — the builders
+    /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
+    /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start payload
+    /// build, and the move-out completion, shared by all five data views.
+    export: crate::data_views::RowExport<T>,
 
     // Activation / context menu / type-ahead
     #[allow(clippy::type_complexity)]
@@ -389,14 +358,7 @@ impl<T: 'static> GridView<T> {
             on_item_drop: None,
             insertion: Signal::new(None),
             model_id: ViewId::next(ViewKind::Grid),
-            export_mode: None,
-            clone_item_fn: None,
-            export_mime_fn: None,
-            on_rows_transferred_out: None,
-            accept_foreign_rows: false,
-            on_rows_received: None,
-            self_reorder_flag: Rc::new(Cell::new(false)),
-            dragged_rows: Rc::new(RefCell::new(Vec::new())),
+            export: crate::data_views::RowExport::default(),
             on_tile_activate: None,
             activate_on: crate::data_views::ActivateOn::default(),
             tile_context_menu: None,
@@ -751,10 +713,7 @@ impl<T: 'static> GridView<T> {
     where
         T: Clone,
     {
-        self.export_mode = Some(mode);
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
+        self.export.set_exportable(mode);
         self
     }
 
@@ -769,13 +728,7 @@ impl<T: 'static> GridView<T> {
     where
         T: Clone,
     {
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
-        if self.export_mode.is_none() {
-            self.export_mode = Some(DragTransferMode::default());
-        }
-        self.export_mime_fn = Some(Rc::new(f));
+        self.export.set_export_external(f);
         self
     }
 
@@ -788,7 +741,7 @@ impl<T: 'static> GridView<T> {
         mut self,
         f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_transferred_out = Some(Rc::new(f));
+        self.export.set_on_rows_transferred_out(f);
         self
     }
 
@@ -799,7 +752,7 @@ impl<T: 'static> GridView<T> {
     /// [`reorderable`](Self::reorderable); a custom `ListDataSource` can still
     /// accept foreign drops through its `can_accept`/`accept_drop` instead.)
     pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
-        self.accept_foreign_rows = accept;
+        self.export.accept_foreign_rows = accept;
         self
     }
 
@@ -810,7 +763,7 @@ impl<T: 'static> GridView<T> {
         mut self,
         f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_received = Some(Rc::new(f));
+        self.export.set_on_rows_received(f);
         self
     }
 
@@ -1140,10 +1093,9 @@ impl<T: 'static> Widget for GridView<T> {
         // `RowDragData<T>` reorders and a foreign payload is the source's
         // call — falling back to the zero-custom-source `accept_foreign_rows`
         // sugar, then the app-level `on_item_drop` escape hatch.
-        if self.reorderable || self.on_item_drop.is_some() || self.accept_foreign_rows {
+        if self.export.is_drop_target(self.reorderable) || self.on_item_drop.is_some() {
             let has_drop_cb = self.on_item_drop.is_some();
             let my_id = self.model_id;
-            let accept_foreign = self.accept_foreign_rows;
 
             let strategy_h = strategy.clone();
             let scroll_h = self.scroll_y.clone();
@@ -1151,6 +1103,7 @@ impl<T: 'static> Widget for GridView<T> {
             let len_h = self.source.len_fn.clone();
             let can_accept_h = self.source.dnd.can_accept_fn.clone();
             let insertion_h = self.insertion.clone();
+            let export_for_hover = self.export.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let len = (len_h)();
                 let idx = drag::insertion_index(
@@ -1167,7 +1120,7 @@ impl<T: 'static> Widget for GridView<T> {
                     len,
                     my_id,
                     has_drop_cb,
-                    accept_foreign,
+                    &export_for_hover,
                 );
                 if allowed {
                     insertion_h.set(Some(idx));
@@ -1192,8 +1145,7 @@ impl<T: 'static> Widget for GridView<T> {
             let accept_drop_d = self.source.dnd.accept_drop_fn.clone();
             let drop_cb = self.on_item_drop.clone();
             let insertion_d = self.insertion.clone();
-            let flag_for_drop = self.self_reorder_flag.clone();
-            let on_received_for_drop = self.on_rows_received.clone();
+            let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 insertion_d.set(None);
@@ -1219,25 +1171,16 @@ impl<T: 'static> Widget for GridView<T> {
                     // Only suppress our OWN move-out for a genuine same-view
                     // drop.
                     if is_same_view {
-                        flag_for_drop.set(true);
+                        export_for_drop.note_self_reorder();
                     }
                     return true;
                 }
-                // (b) Accept exported rows from a different view/source without
-                // a custom ListDataSource. PEEK before taking, so a payload
-                // that doesn't match (same-view, or reorder-only) still reaches
-                // the raw escape hatch (c) with its typed data intact.
-                let foreign_export = accept_foreign
-                    && on_received_for_drop.is_some()
-                    && payload
-                        .get_typed::<RowDragData<T>>()
-                        .is_some_and(|rd| rd.source != my_id && rd.is_export());
-                if foreign_export
-                    && let Some(cb) = on_received_for_drop.as_ref()
-                    && let Some(rd) = payload.take_typed::<RowDragData<T>>()
-                    && let Some(items) = rd.items
-                {
-                    cb(items, to, ctx);
+                // (b) Shared foreign-receive sugar: accept exported rows from
+                // a different view/source without a custom ListDataSource.
+                // Peeks before taking, so a payload that doesn't match
+                // (same-view, or reorder-only) still reaches the raw escape
+                // hatch (c) with its typed data intact.
+                if export_for_drop.foreign_receive(&mut payload, my_id, to, ctx) {
                     return true;
                 }
                 // (c) Raw escape hatch for any other payload the app wants to
@@ -1300,14 +1243,9 @@ impl<T: 'static> Widget for GridView<T> {
                 request_window_fn: self.source.dnd.request_window_fn.clone(),
                 can_fetch_more_fn: self.source.dnd.can_fetch_more_fn.clone(),
                 fetch_more_fn: self.source.dnd.fetch_more_fn.clone(),
-                export_mode: self.export_mode,
-                clone_item_fn: self.clone_item_fn.clone(),
-                export_mime_fn: self.export_mime_fn.clone(),
+                export: self.export.clone(),
                 read_item_fn: self.source.read_item_fn.clone(),
-                on_rows_transferred_out: self.on_rows_transferred_out.clone(),
-                on_drag_out_fn: self.source.dnd.on_drag_out_fn.clone(),
-                self_reorder_flag: self.self_reorder_flag.clone(),
-                dragged_rows: self.dragged_rows.clone(),
+                snapshot_out_fn: self.source.dnd.snapshot_out_fn.clone(),
                 tile_map: self.tile_map.clone(),
                 header_factory: self.header_factory(),
                 header_title: self.section_data.as_ref().map(|d| d.title_fn.clone()),

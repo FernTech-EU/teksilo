@@ -40,7 +40,7 @@ use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId, default_placeholder};
+use crate::data_views::{RowSelection, ViewId, default_placeholder};
 
 const BUFFER_ROWS: usize = 5;
 
@@ -78,22 +78,16 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) focused_cell: Signal<Option<(usize, usize)>>,
 
     pub(crate) reorderable_rows: bool,
-    /// Export: when `Some`, dragged rows carry clones of their items in the
-    /// payload so a foreign `DropTarget` / another view / the OS can consume
-    /// them, and rows become a drag source even without `reorderable_rows`.
-    pub(crate) export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload — set only
-    /// when the owning `TableView` opted in via `.exportable(..)` /
-    /// `.export_external(..)`.
-    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export (`.export_external(..)`).
-    #[allow(clippy::type_complexity)]
-    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
-    /// The rows carried by the in-flight drag, captured at drag-start so
-    /// the owning `TableView`'s `on_drag_ended` (which gets only a
-    /// `DropOutcome`) can remove them.
-    pub(crate) dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Cross-widget export / foreign-receive machinery, cloned in from the
+    /// owning `TableView` — builds the drag-start payload here; the
+    /// self-reorder flag and removal-thunk stash are Rc-backed, so mutations
+    /// made through this clone are visible to the root's `on_drag_ended`
+    /// completion (installed on the owning `TableView`'s own clone).
+    pub(crate) export: crate::data_views::RowExport<T>,
+    /// Source-side move-out completion: resolves stable keys at drag-start
+    /// and returns a removal thunk. Threaded straight from the owning
+    /// `TableView`'s `dnd` bundle.
+    pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
     /// Stable, kind-tagged id of the owning `TableView` instance — stamped
     /// into the `RowDragData` payload so the source can tell a same-view
     /// reorder from a foreign drop.
@@ -237,7 +231,7 @@ impl<T: 'static> Widget for BodyPane<T> {
         // Rows become a drag source when reorderable OR exportable — the
         // export path makes a row draggable-out even when same-view
         // reordering is disabled.
-        let is_drag_source = self.reorderable_rows || self.export_mode.is_some();
+        let is_drag_source = self.export.is_drag_source(self.reorderable_rows);
 
         // Key the row focus scope on the table's focusable root (`drag_anchor`),
         // not this pane — keyboard focus lands on the root, so a `StandardItem`
@@ -483,13 +477,13 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let display_for_preview = self.display_indices.clone();
                 let widths_for_preview = self.column_widths.clone();
                 let metrics_for_preview = self.row_metrics.clone();
-                // Export capture: the dragged set is selection-aware, and
-                // clones/MIME are built only when the view opted in.
+                // Export capture: the dragged set is selection-aware; the
+                // shared `RowExport` builds the payload (clones / MIME /
+                // Loading-filter / stash) when the view opted in.
                 let sel_for_drag = self.selection.clone();
-                let clone_for_drag = self.clone_item_fn.clone();
-                let mime_for_drag = self.export_mime_fn.clone();
+                let export_for_drag = self.export.clone();
                 let with_item_for_drag = self.with_item_fn.clone();
-                let stash_for_drag = self.dragged_rows.clone();
+                let snapshot_for_drag = self.snapshot_out_fn.clone();
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
                         // The source's per-row transferable gate.
@@ -499,7 +493,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                         // Selection-aware dragged set: the whole selection
                         // when the pressed row is part of a multi-selection,
                         // else just the pressed row.
-                        let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
                             Some(s) if s.is_selected(drag_row) => {
                                 let mut v = s.selected_indices();
                                 v.sort_unstable();
@@ -507,46 +501,14 @@ impl<T: 'static> Widget for BodyPane<T> {
                             }
                             _ => vec![drag_row],
                         };
-                        // Export clones, if opted in. Drop any row whose
-                        // item isn't resident (a lazy `Loading` row) so
-                        // `rows` and `items` stay index-aligned and a
-                        // Move never removes a row whose data was never
-                        // transferred.
-                        let items: Option<Vec<T>> = if let Some(cf) = clone_for_drag.as_ref() {
-                            let mut out = Vec::with_capacity(rows.len());
-                            rows.retain(|&r| {
-                                match read_item_local(&with_item_for_drag, r, |item| cf(item)) {
-                                    Some(v) => {
-                                        out.push(v);
-                                        true
-                                    }
-                                    None => false,
-                                }
-                            });
-                            Some(out)
-                        } else {
-                            None
+                        // Adapt the side-effect `with_item_fn` reader to the
+                        // `RowExport::build_payload` signature (which needs a
+                        // bool-returning "did it resolve" reader).
+                        let read = |i: usize, f: &mut dyn FnMut(&T)| -> bool {
+                            read_item_local(&with_item_for_drag, i, |t| f(t)).is_some()
                         };
-                        // MIME reps for OS / DropZone export.
-                        let mime_pairs: Vec<(String, Vec<u8>)> =
-                            match (mime_for_drag.as_ref(), items.as_ref()) {
-                                (Some(mf), Some(its)) => mf(its),
-                                _ => Vec::new(),
-                            };
-                        let mut payload =
-                            bastyde_core::drag_payload::DragPayload::typed(RowDragData::<T> {
-                                source: view_id,
-                                rows: rows.clone(),
-                                items,
-                            });
-                        let has_mime = !mime_pairs.is_empty();
-                        for (mime, bytes) in mime_pairs {
-                            payload = payload.with_mime(&mime, bytes);
-                        }
-                        if has_mime {
-                            payload.enrich_external_from_mime();
-                        }
-                        *stash_for_drag.borrow_mut() = rows;
+                        let payload =
+                            export_for_drag.build_payload(view_id, rows, &read, &snapshot_for_drag);
                         // Build a full-width preview from the PRESSED row's
                         // cells so the floating widget reads as the picked-up
                         // row. Cells are built eagerly here (no arena), then a

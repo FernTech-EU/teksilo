@@ -35,12 +35,13 @@ pub(crate) struct DndLazy {
     pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
     pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
-    /// Source-side completion: the rows at these indices were accepted
-    /// elsewhere (a foreign move-out). Resolves stable keys BEFORE any
-    /// mutation and removes in descending-index order, so an index-keyed model
-    /// (`ListModel`, whose key *is* the index) stays valid across the batch and
-    /// a stable-key source is unaffected by the order.
-    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
+    /// Source-side completion: resolve stable keys for these rows NOW
+    /// (drag-start) and return a thunk that removes exactly them (a foreign
+    /// move-out). Resolving eagerly — rather than re-reading flat indices at
+    /// completion — keeps a Move correct even if the view's flat indices
+    /// reshuffle mid-drag; removal runs in descending-index order so an
+    /// index-keyed model (`ListModel`, whose key *is* the index) stays valid.
+    pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -127,17 +128,20 @@ impl DndLazy {
                     position,
                 })
             }),
-            on_drag_out_fn: Rc::new(move |indices: &[usize]| {
-                // Resolve stable keys BEFORE mutating, then remove in
-                // descending-index order.
+            snapshot_out_fn: Rc::new(move |indices: &[usize]| {
+                // Resolve stable keys NOW (descending index order for the
+                // index-keyed case); the returned thunk removes them later.
                 let mut pairs: Vec<(usize, S::Key)> = indices
                     .iter()
                     .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
                     .collect();
                 pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
-                for (_, k) in pairs {
-                    s4.on_drag_out(&k);
-                }
+                let s = s4.clone();
+                Box::new(move || {
+                    for (_, k) in &pairs {
+                        s.on_drag_out(k);
+                    }
+                }) as Box<dyn Fn()>
             }),
             row_state_fn: Rc::new(move |index| s5.row_state(index)),
             request_window_fn: Rc::new(move |range| s6.request_window(range)),
@@ -153,7 +157,7 @@ impl DndLazy {
             drag_fn: Rc::new(|_| DragEligibility::NoDrag),
             can_accept_fn: Rc::new(|_, _, _, _| DropResponse::Reject),
             accept_drop_fn: Rc::new(|_, _, _, _| false),
-            on_drag_out_fn: Rc::new(|_: &[usize]| {}),
+            snapshot_out_fn: Rc::new(|_: &[usize]| Box::new(|| {}) as Box<dyn Fn()>),
             row_state_fn: Rc::new(|_| RowState::Ready),
             request_window_fn: Rc::new(|_| {}),
             can_fetch_more_fn: Rc::new(|| false),

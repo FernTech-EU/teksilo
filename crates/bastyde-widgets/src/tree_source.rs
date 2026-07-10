@@ -74,12 +74,12 @@ pub(crate) struct TreeDndLazy {
     pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
     pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
-    /// Source-side completion: the rows at these indices were accepted
-    /// elsewhere (a foreign move-out). Resolves stable node keys BEFORE any
-    /// mutation and removes in descending-index order (safe for the tree's
-    /// stable `NodeId` keys regardless of the flat-index shifts a removal
-    /// causes).
-    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
+    /// Source-side completion: resolve stable node keys for these rows NOW
+    /// (drag-start) and return a thunk that removes them (a foreign move-out).
+    /// Resolving eagerly keeps a Move correct even when the tree's flat indices
+    /// reshuffle mid-drag (spring-load auto-expand), since the stable `NodeId`s
+    /// were already captured.
+    pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -156,15 +156,18 @@ impl TreeDndLazy {
                     position,
                 })
             }),
-            on_drag_out_fn: Rc::new(move |indices: &[usize]| {
+            snapshot_out_fn: Rc::new(move |indices: &[usize]| {
                 let mut pairs: Vec<(usize, S::Key)> = indices
                     .iter()
                     .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
                     .collect();
                 pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
-                for (_, k) in pairs {
-                    s4.on_drag_out(&k);
-                }
+                let s = s4.clone();
+                Box::new(move || {
+                    for (_, k) in &pairs {
+                        s.on_drag_out(k);
+                    }
+                }) as Box<dyn Fn()>
             }),
             row_state_fn: Rc::new(move |index| s5.row_state(index)),
             request_window_fn: Rc::new(move |range| s6.request_window(range)),

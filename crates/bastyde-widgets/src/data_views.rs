@@ -21,11 +21,14 @@
 //!   `(target, position)` pair `can_accept` / `accept_drop` expect.
 //! - [`default_placeholder`] — the skeleton for a `Loading` row.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bastyde_core::ObserverHandle;
-use bastyde_core::widget::Widget;
+use bastyde_core::drag_payload::{DragPayload, DropOutcome};
+use bastyde_core::widget::{EventContext, Widget};
+use bastyde_core::widget_builder::HandlerSet;
 use bastyde_data::{
     DataChange, DropPosition, ItemKey, KeyedSelectionModel, SelectionMode, SelectionModel,
 };
@@ -389,5 +392,322 @@ impl RowSelection {
     /// model.
     pub(crate) fn prune(&self) {
         (self.prune_fn)()
+    }
+}
+
+/// Resolves a set of the origin view's flat indices to a **removal thunk** at
+/// drag-start. Invoked at completion, the thunk removes exactly those rows from
+/// the source. Resolving eagerly (rather than re-reading flat indices at
+/// completion) keeps a Move correct even if the origin's flat indices reshuffle
+/// mid-drag — e.g. a `TreeView` spring-load auto-expand — since the stable keys
+/// were already captured. The source erasure supplies it.
+pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
+
+/// The reusable export / foreign-drop machinery shared by all five data views:
+/// the config fields, the drag-start payload build (selection set already
+/// resolved by the caller), the foreign-receive sugar, and the `on_drag_ended`
+/// move-out completion. Each view holds ONE of these instead of duplicating the
+/// logic five ways (the drift that a code review caught). See
+/// [docs/drag-and-drop.md §12](https://github.com/ferntech-eu/bastyde/blob/main/docs/drag-and-drop.md).
+pub(crate) struct RowExport<T: 'static> {
+    /// `Some` once `.exportable(..)` was called; the transfer mode also drives
+    /// the move-out completion.
+    pub(crate) mode: Option<DragTransferMode>,
+    /// Clones `&T` → `T` for the payload (set by `.exportable`/`.export_external`,
+    /// each `where T: Clone`, so the view constructor stays unconstrained).
+    #[allow(clippy::type_complexity)]
+    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
+    /// Builds MIME reps of the dragged items for OS / `DropZone` export.
+    #[allow(clippy::type_complexity)]
+    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
+    /// App override for removing rows moved out to a foreign target.
+    #[allow(clippy::type_complexity)]
+    pub(crate) on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut EventContext)>>,
+    /// Accept exported rows from a different view/source (zero-custom-source).
+    pub(crate) accept_foreign_rows: bool,
+    /// Handler for rows accepted via `accept_foreign_rows`.
+    #[allow(clippy::type_complexity)]
+    pub(crate) on_rows_received: Option<Rc<dyn Fn(Vec<T>, usize, &mut EventContext)>>,
+    /// Set by the view's own `on_drop` when it applied a same-view reorder, so
+    /// the completion skips the move-out (already applied). The TabBar pattern.
+    pub(crate) self_reorder_flag: Rc<Cell<bool>>,
+    /// The rows carried by the in-flight drag (for the app move-out callback).
+    dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Stable-key removal thunk for the default move-out, resolved at drag-start.
+    #[allow(clippy::type_complexity)]
+    removal: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+}
+
+impl<T: 'static> Clone for RowExport<T> {
+    // Hand-written (not derived) so cloning does NOT require `T: Clone` — every
+    // field is an `Rc` / `Copy`, so a clone shares the same drag stash + flags,
+    // which is exactly what the per-row drag closure needs.
+    fn clone(&self) -> Self {
+        Self {
+            mode: self.mode,
+            clone_item_fn: self.clone_item_fn.clone(),
+            export_mime_fn: self.export_mime_fn.clone(),
+            on_rows_transferred_out: self.on_rows_transferred_out.clone(),
+            accept_foreign_rows: self.accept_foreign_rows,
+            on_rows_received: self.on_rows_received.clone(),
+            self_reorder_flag: self.self_reorder_flag.clone(),
+            dragged_rows: self.dragged_rows.clone(),
+            removal: self.removal.clone(),
+        }
+    }
+}
+
+impl<T: 'static> Default for RowExport<T> {
+    fn default() -> Self {
+        Self {
+            mode: None,
+            clone_item_fn: None,
+            export_mime_fn: None,
+            on_rows_transferred_out: None,
+            accept_foreign_rows: false,
+            on_rows_received: None,
+            self_reorder_flag: Rc::new(Cell::new(false)),
+            dragged_rows: Rc::new(RefCell::new(Vec::new())),
+            removal: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
+impl<T: 'static> RowExport<T> {
+    /// `.exportable(mode)` — carry item clones; `where T: Clone` at the call.
+    pub(crate) fn set_exportable(&mut self, mode: DragTransferMode)
+    where
+        T: Clone,
+    {
+        self.mode = Some(mode);
+        if self.clone_item_fn.is_none() {
+            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
+        }
+    }
+
+    /// `.export_external(f)` — attach MIME; implies exportable.
+    pub(crate) fn set_export_external(
+        &mut self,
+        f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static,
+    ) where
+        T: Clone,
+    {
+        if self.clone_item_fn.is_none() {
+            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
+        }
+        if self.mode.is_none() {
+            self.mode = Some(DragTransferMode::default());
+        }
+        self.export_mime_fn = Some(Rc::new(f));
+    }
+
+    pub(crate) fn set_on_rows_transferred_out(
+        &mut self,
+        f: impl Fn(&[usize], &mut EventContext) + 'static,
+    ) {
+        self.on_rows_transferred_out = Some(Rc::new(f));
+    }
+
+    pub(crate) fn set_on_rows_received(
+        &mut self,
+        f: impl Fn(Vec<T>, usize, &mut EventContext) + 'static,
+    ) {
+        self.on_rows_received = Some(Rc::new(f));
+    }
+
+    /// Rows are a drag source when the view reorders OR exports.
+    pub(crate) fn is_drag_source(&self, reorderable: bool) -> bool {
+        reorderable || self.mode.is_some()
+    }
+
+    /// The view is a drop target when it reorders OR accepts foreign rows.
+    pub(crate) fn is_drop_target(&self, reorderable: bool) -> bool {
+        reorderable || self.accept_foreign_rows
+    }
+
+    /// Build the drag payload for the (already selection-resolved) `rows`. Drops
+    /// any non-resident row (a lazy `Loading` row `read` can't serve) so `rows`
+    /// and `items` stay index-aligned and a Move never deletes a row whose data
+    /// wasn't transferred. Attaches MIME, and stashes the rows + a stable-key
+    /// removal thunk for the completion.
+    pub(crate) fn build_payload(
+        &self,
+        source: ViewId,
+        mut rows: Vec<usize>,
+        read: &dyn Fn(usize, &mut dyn FnMut(&T)) -> bool,
+        snapshot_out: &SnapshotOutFn,
+    ) -> DragPayload {
+        let items: Option<Vec<T>> = if let Some(cf) = self.clone_item_fn.as_ref() {
+            let mut out = Vec::with_capacity(rows.len());
+            rows.retain(|&r| {
+                let mut got = None;
+                read(r, &mut |t| got = Some(cf(t)));
+                match got {
+                    Some(v) => {
+                        out.push(v);
+                        true
+                    }
+                    None => false,
+                }
+            });
+            Some(out)
+        } else {
+            None
+        };
+        let mime_pairs: Vec<(String, Vec<u8>)> =
+            match (self.export_mime_fn.as_ref(), items.as_ref()) {
+                (Some(mf), Some(its)) => mf(its),
+                _ => Vec::new(),
+            };
+        let mut payload = DragPayload::typed(RowDragData::<T> {
+            source,
+            rows: rows.clone(),
+            items,
+        });
+        let has_mime = !mime_pairs.is_empty();
+        for (mime, bytes) in mime_pairs {
+            payload = payload.with_mime(&mime, bytes);
+        }
+        if has_mime {
+            payload.enrich_external_from_mime();
+        }
+        *self.removal.borrow_mut() = Some((snapshot_out)(&rows));
+        *self.dragged_rows.borrow_mut() = rows;
+        payload
+    }
+
+    /// Whether a **foreign** exported payload would be accepted here — for the
+    /// hover affordance. (Same-view / reorder-only payloads return `false`.)
+    pub(crate) fn accepts_foreign_export(&self, payload: &DragPayload, source: ViewId) -> bool {
+        self.accept_foreign_rows
+            && self.on_rows_received.is_some()
+            && payload
+                .get_typed::<RowDragData<T>>()
+                .is_some_and(|rd| rd.source != source && rd.is_export())
+    }
+
+    /// Foreign-receive sugar for a view's `on_drop`. Peeks before taking, so a
+    /// non-matching payload is left intact for any further fallback.
+    pub(crate) fn foreign_receive(
+        &self,
+        payload: &mut DragPayload,
+        source: ViewId,
+        insertion: usize,
+        ctx: &mut EventContext,
+    ) -> bool {
+        if self.accepts_foreign_export(payload, source)
+            && let Some(cb) = self.on_rows_received.as_ref()
+            && let Some(rd) = payload.take_typed::<RowDragData<T>>()
+            && let Some(items) = rd.items
+        {
+            cb(items, insertion, ctx);
+            return true;
+        }
+        false
+    }
+
+    /// The view's own `on_drop` calls this after applying a genuine SAME-VIEW
+    /// reorder, so the completion knows the change was already applied.
+    pub(crate) fn note_self_reorder(&self) {
+        self.self_reorder_flag.set(true);
+    }
+
+    /// Install the `on_drag_ended` move-out completion. A same-view reorder set
+    /// `self_reorder_flag` (skipped here); on `Move` + accepted-elsewhere the
+    /// origin rows are removed via the app override (delivered **descending** so
+    /// index-by-index removal stays valid) or the stable-key removal thunk.
+    pub(crate) fn install_completion(&self, handlers: HandlerSet) -> HandlerSet {
+        let Some(mode) = self.mode else {
+            return handlers;
+        };
+        let flag = self.self_reorder_flag.clone();
+        let dragged = self.dragged_rows.clone();
+        let removal = self.removal.clone();
+        let on_out = self.on_rows_transferred_out.clone();
+        handlers.on_drag_ended(move |outcome, ctx| {
+            let handled_by_us = flag.replace(false);
+            let rows = std::mem::take(&mut *dragged.borrow_mut());
+            let thunk = removal.borrow_mut().take();
+            if handled_by_us {
+                return;
+            }
+            let accepted_elsewhere = matches!(
+                outcome,
+                DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
+            );
+            if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
+                return;
+            }
+            if let Some(cb) = on_out.as_ref() {
+                let mut desc = rows;
+                desc.sort_unstable();
+                desc.reverse();
+                cb(&desc, ctx);
+            } else if let Some(thunk) = thunk {
+                thunk();
+            }
+        })
+    }
+}
+
+/// Shared deferred-selection press logic for a data-view row (the drift a code
+/// review caught: the `press_claimed` guard was missing in one view). Pressing
+/// an already-selected row DEFERS the collapse-to-single to a release WITHOUT a
+/// drag (an active drag consumes `PointerUp`), so grabbing a multi-selection
+/// drags the whole set. `pending` is a per-row cell shared by the two calls.
+pub(crate) mod deferred_select {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use bastyde_core::event::Modifiers;
+    use bastyde_core::widget::EventContext;
+
+    use super::RowSelection;
+
+    /// Handle a primary `PointerDown` on row `index`. Returns without selecting
+    /// if the press was claimed by an interactive child (also clearing a stale
+    /// `pending`). Ctrl/Shift select immediately; a plain press on an
+    /// already-selected row defers; otherwise selects.
+    pub(crate) fn on_down(
+        sel: &RowSelection,
+        index: usize,
+        modifiers: Modifiers,
+        pending: &Rc<Cell<bool>>,
+        ctx: &mut EventContext,
+    ) -> bool {
+        if ctx.press_claimed_by_interactive_child() {
+            pending.set(false);
+            return false;
+        }
+        if modifiers.ctrl() {
+            sel.toggle(index);
+            pending.set(false);
+        } else if modifiers.shift() {
+            sel.extend_to(index);
+            pending.set(false);
+        } else if sel.is_selected(index) {
+            pending.set(true);
+        } else {
+            sel.select(index);
+            pending.set(false);
+        }
+        true
+    }
+
+    /// Handle a primary `PointerUp` on row `index` — reached only on a click
+    /// WITHOUT a drag. Collapses the deferred multi-selection, unless the
+    /// release belongs to an interactive child.
+    pub(crate) fn on_up(
+        sel: &RowSelection,
+        index: usize,
+        pending: &Rc<Cell<bool>>,
+        ctx: &mut EventContext,
+    ) {
+        if ctx.press_claimed_by_interactive_child() {
+            return;
+        }
+        if pending.replace(false) {
+            sel.select(index);
+        }
     }
 }

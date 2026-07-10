@@ -44,7 +44,6 @@ use bastyde_tokens::{BorderRole, Easing};
 use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
-use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -179,37 +178,11 @@ pub struct TreeView<T: 'static> {
     /// Enable intra-widget drag reordering.
     reorderable: bool,
 
-    /// Export: when `Some`, dragged rows carry clones of their items in the
-    /// payload so a foreign `DropTarget` / another view / the OS can consume
-    /// them, and rows become a drag source even without `reorderable`. The
-    /// mode chooses whether the origin removes moved rows on a foreign accept.
-    export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload — captured only
-    /// by `.exportable(..)` / `.export_external(..)` (each `where T: Clone`),
-    /// so `TreeView::new` stays unconstrained.
-    clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export (`.export_external(..)`).
-    #[allow(clippy::type_complexity)]
-    export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
-    /// App override for removing rows moved out to a foreign target; default is
-    /// the source's `on_drag_out`.
-    #[allow(clippy::type_complexity)]
-    on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut bastyde_core::widget::EventContext)>>,
-    /// Accept exported rows dropped from a *different* view / source (the
-    /// zero-custom-`TreeDataSource` receive path).
-    accept_foreign_rows: bool,
-    /// Handler for foreign rows received via `accept_foreign_rows` —
-    /// `(items, insertion_index, ctx)`.
-    #[allow(clippy::type_complexity)]
-    on_rows_received: Option<Rc<dyn Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext)>>,
-    /// Set by our own `on_drop` when it handled a same-view reorder, so
-    /// `on_drag_ended` can tell "I applied this myself" from "a foreign target
-    /// took it" (and skip the move-out). The TabBar completion pattern.
-    self_reorder_flag: Rc<Cell<bool>>,
-    /// The rows carried by the in-flight drag, captured at drag-start so
-    /// `on_drag_ended` (which gets only a `DropOutcome`) can remove them.
-    dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Cross-widget export / foreign-receive machinery — the builders
+    /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
+    /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start payload
+    /// build, and the move-out completion, shared by all five data views.
+    export: crate::data_views::RowExport<T>,
 
     /// Whether a row-body PointerUp on a branch row auto-toggles its
     /// expansion. Defaults to `true` (legacy behavior — convenient
@@ -446,14 +419,7 @@ impl<T: 'static> TreeView<T> {
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             reorderable: false,
-            export_mode: None,
-            clone_item_fn: None,
-            export_mime_fn: None,
-            on_rows_transferred_out: None,
-            accept_foreign_rows: false,
-            on_rows_received: None,
-            self_reorder_flag: Rc::new(Cell::new(false)),
-            dragged_rows: Rc::new(RefCell::new(Vec::new())),
+            export: crate::data_views::RowExport::default(),
             row_click_expands: true,
             drop_feedback: Signal::new(None),
             // Replaced at build with the live tree signals.
@@ -635,10 +601,7 @@ impl<T: 'static> TreeView<T> {
     where
         T: Clone,
     {
-        self.export_mode = Some(mode);
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
+        self.export.set_exportable(mode);
         self
     }
 
@@ -653,13 +616,7 @@ impl<T: 'static> TreeView<T> {
     where
         T: Clone,
     {
-        if self.clone_item_fn.is_none() {
-            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
-        }
-        if self.export_mode.is_none() {
-            self.export_mode = Some(DragTransferMode::default());
-        }
-        self.export_mime_fn = Some(Rc::new(f));
+        self.export.set_export_external(f);
         self
     }
 
@@ -672,7 +629,7 @@ impl<T: 'static> TreeView<T> {
         mut self,
         f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_transferred_out = Some(Rc::new(f));
+        self.export.set_on_rows_transferred_out(f);
         self
     }
 
@@ -683,7 +640,7 @@ impl<T: 'static> TreeView<T> {
     /// [`reorderable`](Self::reorderable); a custom `TreeDataSource` can still
     /// accept foreign drops through its `can_accept`/`accept_drop` instead.)
     pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
-        self.accept_foreign_rows = accept;
+        self.export.accept_foreign_rows = accept;
         self
     }
 
@@ -694,7 +651,7 @@ impl<T: 'static> TreeView<T> {
         mut self,
         f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.on_rows_received = Some(Rc::new(f));
+        self.export.set_on_rows_received(f);
         self
     }
 
@@ -1240,7 +1197,7 @@ impl<T: 'static> Widget for TreeView<T> {
         // accepted via the `accept_foreign_rows` sugar (shown as a plain
         // between-rows insertion — a foreign source has no Into/reparent
         // semantics). ---
-        if self.reorderable || self.accept_foreign_rows {
+        if self.export.is_drop_target(self.reorderable) {
             let my_view_id = self.tree_id;
 
             // Shared across hover / tick / leave: the visible row index under the
@@ -1255,7 +1212,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let source_for_hover = self.source.clone();
             let feedback_for_hover = self.drop_feedback.clone();
             let hr_for_hover = hovered_row.clone();
-            let accept_foreign_for_hover = self.accept_foreign_rows;
+            let export_for_hover = self.export.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let vc = source_for_hover.visible_count();
                 if vc == 0 {
@@ -1302,10 +1259,8 @@ impl<T: 'static> Widget for TreeView<T> {
                         // the foreign-export sugar, shown as a plain between-rows
                         // insertion (a foreign source has no Into/reparent
                         // semantics to honor).
-                        let foreign_ok = accept_foreign_for_hover
-                            && payload
-                                .get_typed::<RowDragData<T>>()
-                                .is_some_and(|rd| rd.source != my_view_id && rd.is_export());
+                        let foreign_ok =
+                            export_for_hover.accepts_foreign_export(payload, my_view_id);
                         if !foreign_ok {
                             feedback_for_hover.set(None);
                             return DropFeedback::NoFeedback;
@@ -1345,9 +1300,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let scroll_for_drop = self.scroll_y.clone();
             let source_for_drop = self.source.clone();
             let feedback_for_drop = self.drop_feedback.clone();
-            let flag_for_drop = self.self_reorder_flag.clone();
-            let accept_foreign_for_drop = self.accept_foreign_rows;
-            let on_received_for_drop = self.on_rows_received.clone();
+            let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 feedback_for_drop.set(None);
@@ -1385,27 +1338,14 @@ impl<T: 'static> Widget for TreeView<T> {
                 {
                     // Only suppress our OWN move-out for a genuine same-view drop.
                     if is_same_view {
-                        flag_for_drop.set(true);
+                        export_for_drop.note_self_reorder();
                     }
                     return true;
                 }
-                // Otherwise, accept exported rows from a different view/source
-                // without a custom TreeDataSource, at the flat insertion index.
-                // Peek before taking so a non-matching payload is left intact.
-                let foreign_export = accept_foreign_for_drop
-                    && on_received_for_drop.is_some()
-                    && payload
-                        .get_typed::<RowDragData<T>>()
-                        .is_some_and(|rd| rd.source != my_view_id && rd.is_export());
-                if foreign_export
-                    && let Some(cb) = on_received_for_drop.as_ref()
-                    && let Some(rd) = payload.take_typed::<RowDragData<T>>()
-                    && let Some(items) = rd.items
-                {
-                    cb(items, ins, ctx);
-                    return true;
-                }
-                false
+                // Otherwise, the shared foreign-receive sugar (peek-before-take):
+                // accept exported rows from a different view/source without a
+                // custom TreeDataSource, at the flat insertion index.
+                export_for_drop.foreign_receive(&mut payload, my_view_id, ins, ctx)
             });
 
             // Clear insertion line + spring-load timer whenever the drag leaves.
@@ -1467,47 +1407,16 @@ impl<T: 'static> Widget for TreeView<T> {
 
         // --- Export completion: remove rows moved out to a FOREIGN target. The
         // handler fires on the drag source (this view's root id, the stable id
-        // start_drag was given). A same-view reorder set `self_reorder_flag`, so
-        // it is skipped here (already applied).
+        // start_drag was given). A same-view reorder called
+        // `export.note_self_reorder()`, so it is skipped here (already applied).
         //
-        // KNOWN LIMITATION (not fixed here): Move-out resolves the dragged rows
-        // from flat indices captured at drag-start; TreeView's spring-load
-        // auto-expand can reshuffle flat indices mid-drag, so a Move that
-        // dwelled over a collapsing/expanding folder may remove the wrong node.
-        // A follow-up should stash stable node keys at drag-start (as
-        // TreeTableView does). ---
-        if let Some(mode) = self.export_mode {
-            let flag = self.self_reorder_flag.clone();
-            let stash = self.dragged_rows.clone();
-            let on_out = self.on_rows_transferred_out.clone();
-            let on_drag_out_fn = self.source.dnd.on_drag_out_fn.clone();
-            handlers = handlers.on_drag_ended(move |outcome, ctx| {
-                if flag.replace(false) {
-                    stash.borrow_mut().clear();
-                    return;
-                }
-                let accepted_elsewhere = matches!(
-                    outcome,
-                    DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
-                );
-                let rows = std::mem::take(&mut *stash.borrow_mut());
-                if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
-                    return;
-                }
-                if let Some(cb) = on_out.as_ref() {
-                    // Deliver descending so a caller that removes by index one
-                    // at a time stays valid across the batch.
-                    let mut desc = rows;
-                    desc.sort_unstable();
-                    desc.reverse();
-                    cb(&desc, ctx);
-                } else {
-                    // The erasure resolves stable keys before mutating and
-                    // removes in a key-safe order.
-                    (on_drag_out_fn)(&rows);
-                }
-            });
-        }
+        // FIXED (was a known limitation): move-out no longer resolves the
+        // dragged rows from flat indices at completion time. `build_payload`
+        // captures a stable-key removal thunk via `source.dnd.snapshot_out_fn`
+        // at drag-start, so a Move that dwelled over a collapsing/expanding
+        // folder mid-drag (spring-load auto-expand reshuffling flat indices)
+        // still removes the correct node.
+        handlers = self.export.install_completion(handlers);
 
         ctx.apply_self_handlers(handlers);
 
@@ -1522,7 +1431,7 @@ impl<T: 'static> Widget for TreeView<T> {
         {
             (self.source.dnd.fetch_more_fn)();
         }
-        let is_drag_source = self.reorderable || self.export_mode.is_some();
+        let is_drag_source = self.export.is_drag_source(self.reorderable);
         let tree_id = self.tree_id;
         let self_id = ctx.self_id();
         let row_state_fn = self.source.dnd.row_state_fn.clone();
@@ -1598,40 +1507,41 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // is its job; don't also select the row. Clear any
                                 // stale deferred-collapse (left by a prior drag
                                 // whose PointerUp the drag machinery consumed) so
-                                // it can't fire on this unrelated interaction.
+                                // it can't fire on this unrelated interaction. (This
+                                // guards the no-selection-model branch below — the
+                                // shared helper does the equivalent for its own
+                                // branch.)
                                 if ctx.press_claimed_by_interactive_child() {
                                     pending_collapse.set(false);
                                     return bastyde_core::event::EventResponse::Ignored;
                                 }
-                                // Move the keyboard-navigation cursor to the clicked
-                                // row so a subsequent Arrow keypress steps from here
-                                // — `focused_index` is the arrow-nav origin
-                                // (`fi.get().unwrap_or(0)`) and is otherwise only
-                                // written by the keyboard handler, so without this a
-                                // click would select a row yet leave arrows stepping
-                                // from the stale keyboard cursor. Set for every
-                                // modifier (plain / Ctrl / Shift): the lead follows
-                                // the press in all three.
-                                fi_click.set(Some(click_index));
-                                // Selection lands on press — snappy — reading the
-                                // modifiers straight off the PointerDown (the tap
-                                // gesture fires later, on release).
-                                if let Some(ref sel) = sel_click {
-                                    if modifiers.ctrl() {
-                                        sel.toggle(click_index);
-                                        pending_collapse.set(false);
-                                    } else if modifiers.shift() {
-                                        sel.extend_to(click_index);
-                                        pending_collapse.set(false);
-                                    } else if sel.is_selected(click_index) {
-                                        // Defer: a following drag preserves the
-                                        // whole selection; a plain click
-                                        // collapses on release.
-                                        pending_collapse.set(true);
-                                    } else {
-                                        sel.select(click_index);
-                                        pending_collapse.set(false);
-                                    }
+                                // The shared deferred-select helper owns the
+                                // press-claimed guard, Ctrl/Shift handling, and
+                                // the defer-collapse-on-already-selected rule; it
+                                // returns false (skip the nav-cursor move) when an
+                                // interactive child claimed the press. Without a
+                                // selection model there's nothing to defer — a
+                                // plain click still moves the nav cursor.
+                                let moved = match sel_click.as_ref() {
+                                    Some(sel) => crate::data_views::deferred_select::on_down(
+                                        sel,
+                                        click_index,
+                                        *modifiers,
+                                        &pending_collapse,
+                                        ctx,
+                                    ),
+                                    None => true,
+                                };
+                                if moved {
+                                    // Move the keyboard-navigation cursor to the
+                                    // clicked row so a subsequent Arrow keypress
+                                    // steps from here — `focused_index` is the
+                                    // arrow-nav origin (`fi.get().unwrap_or(0)`)
+                                    // and is otherwise only written by the
+                                    // keyboard handler, so without this a click
+                                    // would select a row yet leave arrows
+                                    // stepping from the stale keyboard cursor.
+                                    fi_click.set(Some(click_index));
                                 }
                                 // Ignored lets the gesture arena also see the
                                 // PointerDown so DragRecognizer can capture the
@@ -1651,10 +1561,13 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // Reached only on a click WITHOUT a drag (an
                                 // active drag consumes PointerUp). Collapse the
                                 // deferred multi-selection to the clicked row.
-                                if pending_collapse.replace(false)
-                                    && let Some(ref sel) = sel_click
-                                {
-                                    sel.select(click_index);
+                                if let Some(ref sel) = sel_click {
+                                    crate::data_views::deferred_select::on_up(
+                                        sel,
+                                        click_index,
+                                        &pending_collapse,
+                                        ctx,
+                                    );
                                 }
                                 // Expand/collapse fires on release so a drag
                                 // gesture pre-empts it (once active_drag is
@@ -1712,13 +1625,13 @@ impl<T: 'static> Widget for TreeView<T> {
                     let source_for_preview = self.source.clone();
                     let flat_idx = i;
                     let metrics_for_preview = self.metrics.clone();
-                    // Export capture: the dragged set is selection-aware, and
-                    // clones/MIME are built only when the view opted in.
+                    // Export capture: the dragged set is selection-aware; the
+                    // shared `RowExport` builds the payload (clones / MIME /
+                    // Loading-filter / stash) when the view opted in.
                     let sel_for_drag = self.row_selection.clone();
-                    let clone_for_drag = self.clone_item_fn.clone();
-                    let mime_for_drag = self.export_mime_fn.clone();
+                    let export_for_drag = self.export.clone();
                     let read_for_drag = self.source.read_item_fn.clone();
-                    let stash_for_drag = self.dragged_rows.clone();
+                    let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
@@ -1726,7 +1639,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // Selection-aware dragged set: the whole
                                 // selection when the pressed row is part of a
                                 // multi-selection, else just the pressed row.
-                                let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                                let rows: Vec<usize> = match sel_for_drag.as_ref() {
                                     Some(s) if s.is_selected(flat_idx) => {
                                         let mut v = s.selected_indices();
                                         v.sort_unstable();
@@ -1734,48 +1647,12 @@ impl<T: 'static> Widget for TreeView<T> {
                                     }
                                     _ => vec![flat_idx],
                                 };
-                                // Export clones, if opted in. Drop any row whose
-                                // item isn't resident (a lazy `Loading` row) so
-                                // `rows` and `items` stay index-aligned and a
-                                // Move never removes a row whose data was never
-                                // transferred.
-                                let items: Option<Vec<T>> =
-                                    if let Some(cf) = clone_for_drag.as_ref() {
-                                        let mut out = Vec::with_capacity(rows.len());
-                                        rows.retain(|&r| {
-                                            let mut got = None;
-                                            (read_for_drag)(r, &mut |t| got = Some(cf(t)));
-                                            match got {
-                                                Some(v) => {
-                                                    out.push(v);
-                                                    true
-                                                }
-                                                None => false,
-                                            }
-                                        });
-                                        Some(out)
-                                    } else {
-                                        None
-                                    };
-                                // MIME reps for OS / DropZone export.
-                                let mime_pairs: Vec<(String, Vec<u8>)> =
-                                    match (mime_for_drag.as_ref(), items.as_ref()) {
-                                        (Some(mf), Some(its)) => mf(its),
-                                        _ => Vec::new(),
-                                    };
-                                let mut payload = DragPayload::typed(RowDragData::<T> {
-                                    source: drag_view_id,
-                                    rows: rows.clone(),
-                                    items,
-                                });
-                                let has_mime = !mime_pairs.is_empty();
-                                for (mime, bytes) in mime_pairs {
-                                    payload = payload.with_mime(&mime, bytes);
-                                }
-                                if has_mime {
-                                    payload.enrich_external_from_mime();
-                                }
-                                *stash_for_drag.borrow_mut() = rows;
+                                let payload = export_for_drag.build_payload(
+                                    drag_view_id,
+                                    rows,
+                                    &*read_for_drag,
+                                    &snapshot_for_drag,
+                                );
                                 const PREVIEW_WIDTH: f32 = 240.0;
                                 let h = metrics_for_preview.borrow_mut().row_height(flat_idx);
                                 let rd = row_delegate.clone();
@@ -4249,5 +4126,47 @@ mod tests {
         let (rows, items) = cap.borrow().clone().expect("sink received a RowDragData");
         assert_eq!(rows, vec![0]);
         assert_eq!(items, Some(vec!["A"]));
+    }
+
+    #[test]
+    fn treeview_exportable_move_removes_source_node_via_stable_key() {
+        use crate::primitives::{FixedSize, VStack};
+        use bastyde_core::widget_builder::WidgetBuilder as _;
+        // A Move-export drops the origin node once accepted elsewhere. The
+        // move-out resolves a STABLE NodeId at drag-start (not a flat index at
+        // completion), so it removes exactly the dragged node.
+        let model = sample_tree(); // roots A, B, C
+        let a = model.root(0);
+        let accepted: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
+        let acc2 = accepted.clone();
+        let tv = TreeView::new(model.clone(), |_item, entry, _sel| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .exportable(DragTransferMode::Move);
+        let sink = FixedLeaf(180.0, 80.0).on_drop(move |mut payload, _pos, _ctx| {
+            if payload.take_typed::<RowDragData<&'static str>>().is_some() {
+                *acc2.borrow_mut() = true;
+                true
+            } else {
+                false
+            }
+        });
+        let mut tree = WidgetTree::new();
+        tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .child(FixedSize::new().height(84.0).child(tv))
+                .child(sink),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        drag_item(&mut tree, Point::new(50.0, 14.0), Point::new(50.0, 120.0));
+        assert!(*accepted.borrow(), "sink accepted the Move drop");
+        // The exact node A (stable id captured at drag-start) was removed.
+        assert_eq!(
+            model.with_item(a, |v| *v),
+            None,
+            "node A was removed on Move"
+        );
     }
 }

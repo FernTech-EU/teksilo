@@ -38,7 +38,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{NodeId, SelectionMode, SortFilterTreeModel};
 
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId};
+use crate::data_views::{RowSelection, ViewId};
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
@@ -84,25 +84,12 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// resize/reorder identity `TreeTableView` keeps to itself).
     pub(crate) model_id: ViewId,
 
-    /// Export: when `Some`, dragged rows carry clones of their items so a
-    /// foreign `DropTarget` / another view / the OS can consume them, and
-    /// rows become a drag source even without `reorderable`. Mirrors
-    /// `TreeTableView::export_mode`; only `.is_some()` matters here (the
-    /// transfer-mode value itself is consulted on completion, at the root).
-    pub(crate) export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload.
-    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export.
-    #[allow(clippy::type_complexity)]
-    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
-    /// The rows (flat visible indices at drag-start) carried by the
-    /// in-flight drag — owned by the root so its `on_drag_ended` can read
-    /// them on completion.
-    pub(crate) dragged_rows: Rc<RefCell<Vec<usize>>>,
-    /// The `NodeId`s (at drag-start) carried by the in-flight drag — used by
-    /// the root's default move-out removal.
-    pub(crate) dragged_nodes: Rc<RefCell<Vec<NodeId>>>,
+    /// Cross-widget export / foreign-receive machinery, shared with the
+    /// root (`TreeTableView::export`). The pane builds the reader +
+    /// stable-`NodeId` removal-thunk closures inline at drag-start (see
+    /// `on_drag` below), since a `SortFilterTreeModel<T>`-backed view has no
+    /// pluggable source to supply them.
+    pub(crate) export: crate::data_views::RowExport<T>,
 
     /// Optional row-activation callback (a click per `activate_on`, or
     /// Enter/Space on the focused row) — distinct from *selection*, which also
@@ -445,7 +432,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             // pressed row is part of a multi-selection, else just the
             // pressed row. Export clones/MIME are built only when the view
             // opted in via `.exportable(..)` / `.export_external(..)`.
-            let is_drag_source = self.reorderable || self.export_mode.is_some();
+            let is_drag_source = self.export.is_drag_source(self.reorderable);
             if is_drag_source {
                 let drag_model_id = self.model_id;
                 let anchor = self.drag_anchor;
@@ -457,17 +444,14 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let metrics_for_preview = self.row_metrics.clone();
                 let tree_pos_for_preview = tree_display_pos;
                 let sel_for_drag = selection.clone();
-                let clone_for_drag = self.clone_item_fn.clone();
-                let mime_for_drag = self.export_mime_fn.clone();
+                let export_for_drag = self.export.clone();
                 let proxy_for_drag = proxy.clone();
-                let stash_rows_for_drag = self.dragged_rows.clone();
-                let stash_nodes_for_drag = self.dragged_nodes.clone();
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
                         // Selection-aware dragged set: the whole selection
                         // when the pressed row is part of a
                         // multi-selection, else just the pressed row.
-                        let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
                             Some(s) if s.is_selected(preview_flat) => {
                                 let mut v = s.selected_indices();
                                 v.sort_unstable();
@@ -475,50 +459,49 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                             }
                             _ => vec![preview_flat],
                         };
-                        // Export clones, if opted in. Drop any row whose
-                        // item isn't resident so `rows` and `items` stay
-                        // index-aligned (a mismatch here would let a Move
-                        // remove a row whose data was never transferred).
-                        let items: Option<Vec<T>> = if let Some(cf) = clone_for_drag.as_ref() {
-                            let mut out = Vec::with_capacity(rows.len());
-                            rows.retain(|&r| {
-                                if let Some(cloned) =
-                                    proxy_for_drag.with_entry(r, |item, _entry| cf(item))
-                                {
-                                    out.push(cloned);
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
-                            Some(out)
-                        } else {
-                            None
+
+                        // Reader: pulls the item at a flat visible index
+                        // through the projection (skips a row that isn't
+                        // currently resident — the shared `build_payload`
+                        // drops it so `rows`/`items` stay index-aligned).
+                        let proxy_r = proxy_for_drag.clone();
+                        let read = move |i: usize, f: &mut dyn FnMut(&T)| {
+                            proxy_r.with_entry(i, |item, _entry| f(item)).is_some()
                         };
-                        // MIME reps for OS / DropZone export.
-                        let mime_pairs: Vec<(String, Vec<u8>)> =
-                            match (mime_for_drag.as_ref(), items.as_ref()) {
-                                (Some(mf), Some(its)) => mf(its),
-                                _ => Vec::new(),
-                            };
-                        let mut payload =
-                            bastyde_core::drag_payload::DragPayload::typed(RowDragData::<T> {
-                                source: drag_model_id,
-                                rows: rows.clone(),
-                                items,
+
+                        // Snapshot-out: resolve the dragged flat indices to
+                        // stable `NodeId`s NOW, at drag-start, so the
+                        // default move-out removal stays correct even if
+                        // the tree reshuffles before the drag ends.
+                        // Re-checks existence right before each removal, so
+                        // a descendant already removed by its ancestor's
+                        // subtree removal (`nodes` is in ascending
+                        // pre-order — an ancestor always precedes its
+                        // descendants) is safely skipped instead of the
+                        // stale-key panic `TreeModel::remove` would raise.
+                        let proxy_s = proxy_for_drag.clone();
+                        let snapshot_out: crate::data_views::SnapshotOutFn =
+                            Rc::new(move |indices: &[usize]| {
+                                let nodes: Vec<NodeId> = indices
+                                    .iter()
+                                    .filter_map(|&i| proxy_s.visible_node_id(i))
+                                    .collect();
+                                let proxy2 = proxy_s.clone();
+                                Box::new(move || {
+                                    for n in &nodes {
+                                        if proxy2.tree().with_item(*n, |_| ()).is_some() {
+                                            proxy2.tree().remove(*n);
+                                        }
+                                    }
+                                }) as Box<dyn Fn()>
                             });
-                        let has_mime = !mime_pairs.is_empty();
-                        for (mime, bytes) in mime_pairs {
-                            payload = payload.with_mime(&mime, bytes);
-                        }
-                        if has_mime {
-                            payload.enrich_external_from_mime();
-                        }
-                        *stash_rows_for_drag.borrow_mut() = rows.clone();
-                        *stash_nodes_for_drag.borrow_mut() = rows
-                            .iter()
-                            .filter_map(|&r| proxy_for_drag.visible_node_id(r))
-                            .collect();
+
+                        let payload = export_for_drag.build_payload(
+                            drag_model_id,
+                            rows,
+                            &read,
+                            &snapshot_out,
+                        );
 
                         // Flat multi-cell preview of the PRESSED row (indent
                         // is dropped in the floating preview — it reads as

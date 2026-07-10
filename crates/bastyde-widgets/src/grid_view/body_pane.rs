@@ -22,10 +22,9 @@ use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::{EventResponse, PointerButton, WidgetEvent};
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{DragEligibility, RowState, SelectionModel};
@@ -33,7 +32,7 @@ use bastyde_data::{DragEligibility, RowState, SelectionModel};
 use super::TileContext;
 use super::a11y::TileA11y;
 use super::layout::GridLayoutStrategy;
-use crate::data_views::{DragTransferMode, RowDragData, ViewId, default_placeholder};
+use crate::data_views::{ViewId, default_placeholder};
 
 pub(crate) type LenFn = Rc<dyn Fn() -> usize>;
 pub(crate) type WithItemFn<T> =
@@ -97,34 +96,16 @@ pub(crate) struct GridBodyPane<T: 'static> {
     >,
     pub(crate) reorderable: bool,
     pub(crate) model_id: ViewId,
-    /// Export: when `Some`, dragged tiles carry clones of their items in the
-    /// payload (source-shared with `GridView`, which is the single source of
-    /// truth for the setting).
-    pub(crate) export_mode: Option<DragTransferMode>,
-    /// Clones a `&T` into an owned `T` for the export payload.
-    #[allow(clippy::type_complexity)]
-    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
-    /// Builds MIME representations of the dragged items for OS / `DropZone`
-    /// export.
-    #[allow(clippy::type_complexity)]
-    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
+    /// Cross-widget export / foreign-receive machinery, shared with
+    /// `GridView` (the single source of truth for the setting) — the
+    /// drag-start payload build and the move-out completion.
+    pub(crate) export: crate::data_views::RowExport<T>,
     /// Read `&T` from the resident row at `index` (source-owned), used to
     /// clone dragged items for export.
     pub(crate) read_item_fn: ReadItemFn<T>,
-    /// App override for removing rows moved out to a foreign target; default
-    /// is the source's `on_drag_out`.
-    #[allow(clippy::type_complexity)]
-    pub(crate) on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut EventContext)>>,
-    /// Source-side completion for a plain (non-custom) move-out.
-    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
-    /// Shared with `GridView`'s root `on_drop`: set when a drop was applied as
-    /// a same-view reorder, so `on_drag_ended` skips the move-out (already
-    /// applied).
-    pub(crate) self_reorder_flag: Rc<Cell<bool>>,
-    /// The rows carried by the in-flight drag (shared with `GridView`, which
-    /// captures them at drag-start since `on_drag_ended` gets only a
-    /// `DropOutcome`).
-    pub(crate) dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// Stable-key removal thunk resolver for the default move-out
+    /// (source-owned), invoked at drag-start via `RowExport::build_payload`.
+    pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
     /// The GridView root's focusable `WidgetId`. The focus scope this pane
     /// opens for its tiles is keyed on the root (where keyboard focus lands),
     /// not on the pane itself (a non-focusable child), so a `StandardItem`
@@ -251,43 +232,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             });
         }
 
-        // Export completion: remove rows moved out to a FOREIGN target. The
-        // handler fires on the drag source — THIS pane's own id, the stable
-        // id `start_drag` is anchored on below. A same-view reorder is
-        // applied by `GridView`'s root `on_drop`, which sets
-        // `self_reorder_flag`, so it is skipped here (already applied).
-        if let Some(mode) = self.export_mode {
-            let flag = self.self_reorder_flag.clone();
-            let stash = self.dragged_rows.clone();
-            let on_out = self.on_rows_transferred_out.clone();
-            let on_drag_out_fn = self.on_drag_out_fn.clone();
-            ctx.apply_self_handlers(HandlerSet::new().on_drag_ended(move |outcome, ctx| {
-                if flag.replace(false) {
-                    stash.borrow_mut().clear();
-                    return;
-                }
-                let accepted_elsewhere = matches!(
-                    outcome,
-                    DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
-                );
-                let rows = std::mem::take(&mut *stash.borrow_mut());
-                if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
-                    return;
-                }
-                if let Some(cb) = on_out.as_ref() {
-                    // Deliver descending so a caller that removes by index
-                    // one at a time stays valid across the batch.
-                    let mut desc = rows;
-                    desc.sort_unstable();
-                    desc.reverse();
-                    cb(&desc, ctx);
-                } else {
-                    // The erasure resolves stable keys before mutating and
-                    // removes in a key-safe order.
-                    (on_drag_out_fn)(&rows);
-                }
-            }));
-        }
+        // Export completion (move-out): fires on the drag source — THIS
+        // pane's own id, the stable id `start_drag` is anchored on below. A
+        // same-view reorder is applied by `GridView`'s root `on_drop`, which
+        // calls `note_self_reorder`, so it is skipped here (already applied).
+        ctx.apply_self_handlers(self.export.install_completion(HandlerSet::new()));
 
         // Realize the visible tiles.
         self.tile_entries.clear();
@@ -434,7 +383,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 extra = extra.context_menu(move |pos, ctx| factory(idx, pos, ctx));
                 has_extra = true;
             }
-            if self.reorderable || self.export_mode.is_some() {
+            if self.export.is_drag_source(self.reorderable) {
                 let idx = i;
                 let model_id = self.model_id;
                 let anchor = ctx.self_id();
@@ -443,13 +392,13 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let strategy = self.strategy.clone();
                 let vp_w = self.viewport_width.clone();
                 let drag_gate = self.drag_fn.clone();
-                // Export capture: the dragged set is selection-aware, and
-                // clones/MIME are built only when the view opted in.
+                // Export capture: the dragged set is selection-aware; the
+                // shared `RowExport` builds the payload (clones / MIME /
+                // Loading-filter / stash) when the view opted in.
                 let sel_for_drag = self.selection.clone();
-                let clone_for_drag = self.clone_item_fn.clone();
-                let mime_for_drag = self.export_mime_fn.clone();
+                let export_for_drag = self.export.clone();
                 let read_for_drag = self.read_item_fn.clone();
-                let stash_for_drag = self.dragged_rows.clone();
+                let snapshot_for_drag = self.snapshot_out_fn.clone();
                 extra = extra.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
                         // The source's per-tile transferable gate.
@@ -459,7 +408,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                         // Selection-aware dragged set: the whole selection
                         // when the pressed tile is part of a
                         // multi-selection, else just the pressed tile.
-                        let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
                             Some(s) if s.is_selected(idx) => {
                                 let mut v = s.selected_indices();
                                 v.sort_unstable();
@@ -467,47 +416,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             }
                             _ => vec![idx],
                         };
-                        // Export clones, if opted in. Drop any row whose
-                        // item isn't resident (a lazy `Loading` tile) so
-                        // `rows` and `items` stay index-aligned and a Move
-                        // never removes a tile whose data was never
-                        // transferred.
-                        let items: Option<Vec<T>> = if let Some(cf) = clone_for_drag.as_ref() {
-                            let mut out = Vec::with_capacity(rows.len());
-                            rows.retain(|&r| {
-                                let mut got = None;
-                                (read_for_drag)(r, &mut |t| got = Some(cf(t)));
-                                match got {
-                                    Some(v) => {
-                                        out.push(v);
-                                        true
-                                    }
-                                    None => false,
-                                }
-                            });
-                            Some(out)
-                        } else {
-                            None
-                        };
-                        // MIME reps for OS / DropZone export.
-                        let mime_pairs: Vec<(String, Vec<u8>)> =
-                            match (mime_for_drag.as_ref(), items.as_ref()) {
-                                (Some(mf), Some(its)) => mf(its),
-                                _ => Vec::new(),
-                            };
-                        let mut payload = DragPayload::typed(RowDragData::<T> {
-                            source: model_id,
-                            rows: rows.clone(),
-                            items,
-                        });
-                        let has_mime = !mime_pairs.is_empty();
-                        for (mime, bytes) in mime_pairs {
-                            payload = payload.with_mime(&mime, bytes);
-                        }
-                        if has_mime {
-                            payload.enrich_external_from_mime();
-                        }
-                        *stash_for_drag.borrow_mut() = rows;
+                        let payload = export_for_drag.build_payload(
+                            model_id,
+                            rows,
+                            &*read_for_drag,
+                            &snapshot_for_drag,
+                        );
                         let r = strategy.tile_rect(idx, vp_w.get());
                         let (w, h) = (r.width.max(40.0), r.height.max(40.0));
                         let delegate = delegate.clone();
