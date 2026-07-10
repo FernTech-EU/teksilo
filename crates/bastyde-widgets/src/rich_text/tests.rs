@@ -3065,6 +3065,45 @@ fn widget_runtime_zoom_setter_roundtrips() {
 }
 
 #[test]
+fn widget_runtime_typography_defaults_roundtrip_via_editor_and_handle() {
+    use bastyde_text::EditorTypographyDefaults;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("typeset me").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let defaults = EditorTypographyDefaults {
+        font_family: Some("Literata".into()),
+        line_height: 1.5,
+        first_line_indent: 28.0,
+        paragraph_spacing_before: 12.0,
+        paragraph_spacing_after: 6.0,
+    };
+    editor.set_typography_defaults(defaults.clone());
+    assert_eq!(editor.get_typography_defaults(), defaults);
+
+    // The handle shares the same state — reads back and drives it too.
+    let handle = editor.handle();
+    assert_eq!(handle.get_typography_defaults(), defaults);
+
+    let other = EditorTypographyDefaults {
+        font_family: None,
+        line_height: 2.0,
+        first_line_indent: 0.0,
+        paragraph_spacing_before: 0.0,
+        paragraph_spacing_after: 0.0,
+    };
+    handle.set_typography_defaults(other.clone());
+    assert_eq!(editor.get_typography_defaults(), other);
+
+    // The handle's zoom mirror clamps like the editor's.
+    handle.set_zoom_level(1.4);
+    assert!((editor.get_zoom_level() - 1.4).abs() < 1e-4);
+    handle.set_zoom_level(50.0);
+    assert!(handle.get_zoom_level() <= 10.0);
+}
+
+#[test]
 fn editor_ctrl_enter_always_inserts_block_in_table() {
     // Ctrl+Enter inside a table cell inserts a new block (same cell)
     // — bypasses the Enter-navigates-to-next-cell-row behaviour.

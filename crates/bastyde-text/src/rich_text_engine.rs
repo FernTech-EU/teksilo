@@ -35,6 +35,7 @@ use text_typeset::{CursorDisplay, DocumentFlow, FontFaceId, HitTestResult, Rende
 use crate::font_registrar::{EmbeddedInterRegistrar, FontRegistrar};
 use crate::shared_typesetter::SharedTypesetter;
 use crate::typesetter_bridge::TypesetterBridge;
+use crate::typography_defaults::{self, EditorTypographyDefaults};
 
 /// Wrap mode chosen at construction; forwarded to the owned
 /// [`DocumentFlow`] via `set_content_width_auto()` or
@@ -58,6 +59,9 @@ pub struct RichTextEngine {
     flow: DocumentFlow,
     default_face: Option<FontFaceId>,
     wrap_mode: WrapMode,
+    /// Non-destructive default typography filled onto the layout snapshot for
+    /// runs / blocks with no explicit override. Never touches the document.
+    typography_defaults: EditorTypographyDefaults,
 }
 
 impl std::fmt::Debug for RichTextEngine {
@@ -82,6 +86,7 @@ impl RichTextEngine {
             flow: DocumentFlow::new(),
             default_face: None,
             wrap_mode: WrapMode::Word,
+            typography_defaults: EditorTypographyDefaults::default(),
         };
         engine.flow.set_content_width_auto();
         engine
@@ -106,6 +111,7 @@ impl RichTextEngine {
             flow: DocumentFlow::new(),
             default_face,
             wrap_mode: WrapMode::Word,
+            typography_defaults: EditorTypographyDefaults::default(),
         };
         engine.flow.set_content_width_auto();
         engine
@@ -156,6 +162,20 @@ impl RichTextEngine {
     /// Current logical font-scale factor.
     pub fn font_scale(&self) -> f32 {
         self.flow.font_scale()
+    }
+
+    /// Set the non-destructive default typography (font family / line height /
+    /// first-line indent) filled onto runs / blocks with no explicit override at
+    /// layout time. Never mutates the bound document (no undo entry, no
+    /// `modified`). Takes effect on the next `layout_full` /
+    /// `relayout_block_snapshot`; the caller forces a relayout.
+    pub fn set_typography_defaults(&mut self, defaults: EditorTypographyDefaults) {
+        self.typography_defaults = defaults;
+    }
+
+    /// The current default typography (see [`set_typography_defaults`](Self::set_typography_defaults)).
+    pub fn typography_defaults(&self) -> &EditorTypographyDefaults {
+        &self.typography_defaults
     }
 
     /// Current HiDPI display scale factor, read from the shared
@@ -274,6 +294,18 @@ impl RichTextEngine {
     // --- Layout ----------------------------------------------------------
 
     pub fn layout_full(&mut self, flow: &FlowSnapshot) {
+        // Fill any per-editor default typography onto a disposable copy of the
+        // snapshot (never the live document). When no defaults are set this is a
+        // zero-cost borrow of the caller's snapshot.
+        let filled: std::borrow::Cow<FlowSnapshot> =
+            if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
+                let mut owned = flow.clone();
+                typography_defaults::apply_to_flow(&mut owned, &self.typography_defaults);
+                std::borrow::Cow::Owned(owned)
+            } else {
+                std::borrow::Cow::Borrowed(flow)
+            };
+        let flow: &FlowSnapshot = &filled;
         {
             let bridge = self.shared.borrow();
             self.flow.layout_full(bridge.service(), flow);
@@ -329,12 +361,18 @@ impl RichTextEngine {
             self.layout_full(&flow);
             return Ok(0);
         }
-        let snap = if show_highlights {
+        let mut snap = if show_highlights {
             doc.snapshot_block_at_position(block_position)
         } else {
             doc.snapshot_block_at_position_without_highlights(block_position)
         }
         .ok_or_else(|| "no block at position".to_string())?;
+        // Fill per-editor default typography onto the (already-detached) block
+        // snapshot before it reaches the typesetter — same non-destructive path
+        // as `layout_full`.
+        if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
+            typography_defaults::apply_to_block(&mut snap, &self.typography_defaults);
+        }
         let block_id = snap.block_id;
         let opts = text_typeset::bridge::BridgeOptions {
             code_block_background: self.flow.code_block_background(),
@@ -487,6 +525,101 @@ mod tests {
         assert!(
             (h2 - h1 * 2.0).abs() < h1 * 0.1,
             "2x font scale should ~double content height: {h1} vs {h2}"
+        );
+    }
+
+    #[test]
+    fn typography_default_line_height_grows_content_height() {
+        let layout_at = |line_height: f32| {
+            let mut engine = RichTextEngine::private_default();
+            engine.set_viewport(400.0, 300.0);
+            engine.set_wrap_mode(WrapMode::Word);
+            engine.set_typography_defaults(EditorTypographyDefaults {
+                line_height,
+                ..Default::default()
+            });
+            let doc = TextDocument::new();
+            doc.set_plain_text("Hello, world!\nSecond line.").unwrap();
+            engine.layout_full(&doc.snapshot_flow());
+            engine.content_height()
+        };
+        // Default (no fill) and an explicit 1.0 fill must match to the pixel.
+        assert!((layout_at(1.0) - {
+            let mut engine = RichTextEngine::private_default();
+            engine.set_viewport(400.0, 300.0);
+            engine.set_wrap_mode(WrapMode::Word);
+            let doc = TextDocument::new();
+            doc.set_plain_text("Hello, world!\nSecond line.").unwrap();
+            engine.layout_full(&doc.snapshot_flow());
+            engine.content_height()
+        })
+        .abs()
+            < 0.01);
+        let h1 = layout_at(1.0);
+        let h2 = layout_at(2.0);
+        assert!(
+            h2 > h1 * 1.5,
+            "2x default line-height should markedly grow content height: {h1} vs {h2}"
+        );
+    }
+
+    #[test]
+    fn typography_default_indent_offsets_first_line_but_never_mutates_document() {
+        use text_typeset::CursorAffinity::Downstream;
+        let caret_x = |indent: f32| {
+            let mut engine = RichTextEngine::private_default();
+            engine.set_viewport(600.0, 300.0);
+            engine.set_wrap_mode(WrapMode::None);
+            engine.set_typography_defaults(EditorTypographyDefaults {
+                first_line_indent: indent,
+                ..Default::default()
+            });
+            let doc = TextDocument::new();
+            doc.set_plain_text("Hello").unwrap();
+            engine.layout_full(&doc.snapshot_flow());
+            engine.with_render_frame(|_| {});
+            // The live document keeps its unset block format — the fill only
+            // touched the disposable snapshot.
+            let snap = doc.snapshot_block_at_position(0).unwrap();
+            assert_eq!(snap.block_format.text_indent, None);
+            assert!(!doc.can_undo());
+            assert!(!doc.is_modified());
+            engine.caret_rect(0, Downstream)[0]
+        };
+        let x0 = caret_x(0.0);
+        let x40 = caret_x(40.0);
+        assert!(
+            x40 - x0 > 30.0,
+            "40px default indent should push the first-line caret right: {x0} vs {x40}"
+        );
+    }
+
+    #[test]
+    fn caret_height_is_independent_of_line_height_default() {
+        use text_typeset::CursorAffinity::Downstream;
+        let caret_h = |line_height: f32| {
+            let mut engine = RichTextEngine::private_default();
+            engine.set_viewport(400.0, 300.0);
+            engine.set_wrap_mode(WrapMode::Word);
+            engine.set_typography_defaults(EditorTypographyDefaults {
+                line_height,
+                ..Default::default()
+            });
+            let doc = TextDocument::new();
+            doc.set_plain_text("Hello world").unwrap();
+            engine.layout_full(&doc.snapshot_flow());
+            engine.with_render_frame(|_| {});
+            engine.caret_rect(1, Downstream)[3]
+        };
+        // The caret tracks the glyph box, so doubling the default line-height
+        // leaves the caret height essentially unchanged (before the fix it would
+        // have doubled, overshooting far past the text).
+        let h1 = caret_h(1.0);
+        let h2 = caret_h(2.0);
+        assert!(h1 > 0.0);
+        assert!(
+            (h1 - h2).abs() < h1 * 0.15,
+            "caret height must not scale with line-height: {h1} vs {h2}"
         );
     }
 

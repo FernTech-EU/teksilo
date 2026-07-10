@@ -68,7 +68,9 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
     Alignment, BlockFormat, ListStyle, MoveMode, SelectionType, TextDocument, TextFormat,
 };
-use bastyde_text::{FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode};
+use bastyde_text::{
+    EditorTypographyDefaults, FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode,
+};
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
@@ -336,6 +338,21 @@ impl RichTextEditor {
         {
             let mut st = self.state.borrow_mut();
             st.engine.set_zoom(zoom);
+            st.needs_full_layout = true;
+        }
+        self
+    }
+
+    /// Set the initial non-destructive default typography (font family / line
+    /// height / first-line indent) applied to runs and blocks that carry no
+    /// explicit override. Applied before the first layout. These are display
+    /// defaults — they never mutate the bound document (no undo entry, no
+    /// `modified`); use [`set_typography_defaults`](Self::set_typography_defaults)
+    /// or [`EditorHandle::set_typography_defaults`] to change them after mount.
+    pub fn typography_defaults(self, defaults: EditorTypographyDefaults) -> Self {
+        {
+            let mut st = self.state.borrow_mut();
+            st.engine.set_typography_defaults(defaults);
             st.needs_full_layout = true;
         }
         self
@@ -1308,6 +1325,23 @@ impl RichTextEditor {
         self.state.borrow().engine.zoom()
     }
 
+    /// Set the non-destructive default typography at runtime. Re-lays out and
+    /// schedules a repaint. Never mutates the document.
+    pub fn set_typography_defaults(&self, defaults: EditorTypographyDefaults) {
+        let mut st = self.state.borrow_mut();
+        st.engine.set_typography_defaults(defaults);
+        st.needs_full_layout = true;
+        st.content_dirty = true;
+        if let Some(handle) = &st.frame_request {
+            handle.set(true);
+        }
+    }
+
+    /// Current default typography (see [`typography_defaults`](Self::typography_defaults)).
+    pub fn get_typography_defaults(&self) -> EditorTypographyDefaults {
+        self.state.borrow().engine.typography_defaults().clone()
+    }
+
     // --- Observability: reactive version counters -------------------------
 
     /// Signal that bumps on every format-only document event (bold /
@@ -1502,6 +1536,48 @@ impl EditorHandle {
             font_point_size: Some(size),
             ..Default::default()
         });
+    }
+
+    // --- Default typography / zoom (non-destructive, whole editor) ---------
+
+    /// Set the non-destructive default typography (font family / line height /
+    /// first-line indent) filled onto runs and blocks with no explicit
+    /// override. Unlike [`set_font_family`](Self::set_font_family) /
+    /// [`set_font_size`](Self::set_font_size) — which mutate the selected text —
+    /// this is a display-time default: it never touches the document, undo
+    /// stack, or `modified` flag. Schedules a relayout + repaint.
+    pub fn set_typography_defaults(&self, defaults: EditorTypographyDefaults) {
+        let mut st = self.state.borrow_mut();
+        st.engine.set_typography_defaults(defaults);
+        st.needs_full_layout = true;
+        st.content_dirty = true;
+        if let Some(handle) = &st.frame_request {
+            handle.set(true);
+        }
+    }
+
+    /// Current default typography.
+    pub fn get_typography_defaults(&self) -> EditorTypographyDefaults {
+        self.state.borrow().engine.typography_defaults().clone()
+    }
+
+    /// Set the whole-editor zoom (`1.0` = 100 %), clamped to `[0.1, 10.0]`. A
+    /// pure display transform (no document mutation). Schedules a relayout +
+    /// repaint. The [`EditorHandle`] counterpart of
+    /// [`RichTextEditor::set_zoom_level`].
+    pub fn set_zoom_level(&self, zoom: f32) {
+        let mut st = self.state.borrow_mut();
+        st.engine.set_zoom(zoom.clamp(0.1, 10.0));
+        st.needs_full_layout = true;
+        st.content_dirty = true;
+        if let Some(handle) = &st.frame_request {
+            handle.set(true);
+        }
+    }
+
+    /// Current zoom level.
+    pub fn get_zoom_level(&self) -> f32 {
+        self.state.borrow().engine.zoom()
     }
 
     /// Apply an arbitrary [`TextFormat`] (escape hatch for fields not
@@ -2583,9 +2659,19 @@ impl Widget for RichTextEditor {
         if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
             let mut st = self.state.borrow_mut();
             let wrap = st.wrap_mode;
+            // Carry over builder-set engine config that the swap would otherwise
+            // drop — `.typography_defaults()`, `.zoom()`, `.echo_char()` are set
+            // on the private engine before mount, and this runs on every rebuild.
+            // (Theme colours / font-scale re-derive themselves in `paint()`.)
+            let typography = st.engine.typography_defaults().clone();
+            let zoom = st.engine.zoom();
+            let echo = st.engine.echo_char();
             let mut engine = RichTextEngine::from_shared(shared.clone());
             engine.set_wrap_mode(wrap);
             engine.set_hyphenate_justified(true);
+            engine.set_typography_defaults(typography);
+            engine.set_zoom(zoom);
+            engine.set_echo_char(echo);
             st.engine = engine;
             st.needs_full_layout = true;
         }
