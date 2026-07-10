@@ -115,6 +115,11 @@ pub struct EventContext<'ops> {
     /// mounted, non-virtualized child (a radio tile, a tab header) whose bounds
     /// the framework already knows — the caller need not compute the rect.
     pub(crate) scroll_widget_into_view_requests: Vec<(crate::widget_id::WidgetId, f32)>,
+    /// Keyboard-highlight tooltip requests: surface the tooltip of the given
+    /// (menu) item immediately and dismiss the previously-highlighted one.
+    /// Drained after the handler (see `event_dispatch_impl`). Only the last
+    /// entry per handler is honoured — a handler sets one highlight per key.
+    pub(crate) highlight_tooltip_requests: Vec<crate::widget_id::WidgetId>,
     /// Drag start request: (source_widget_id, payload, optional_preview_widget).
     pub(crate) drag_start_request: Option<(
         crate::widget_id::WidgetId,
@@ -314,6 +319,7 @@ impl<'ops> EventContext<'ops> {
             focus_into_requests: Vec::new(),
             scroll_into_view_requests: Vec::new(),
             scroll_widget_into_view_requests: Vec::new(),
+            highlight_tooltip_requests: Vec::new(),
             drag_start_request: None,
             cancel_drag: false,
             drag_is_external: false,
@@ -1182,6 +1188,16 @@ impl<'ops> EventContext<'ops> {
     ) {
         self.scroll_widget_into_view_requests
             .push((id, margin.max(0.0)));
+    }
+
+    /// Surface the tooltip of a keyboard-highlighted item immediately (no
+    /// dwell), dismissing the previously-highlighted item's tooltip. Used by
+    /// `MenuList` on arrow-key navigation so a menu item's rich/composite
+    /// tooltip is reachable by keyboard — real focus stays on the menu panel,
+    /// so this is keyed on the item id rather than on focus. Pass the item's
+    /// own widget id; a tooltip-less item simply dismisses the previous one.
+    pub fn show_highlight_tooltip(&mut self, id: crate::widget_id::WidgetId) {
+        self.highlight_tooltip_requests.push(id);
     }
 
     /// Cancel a pending delayed overlay by its content widget ID.

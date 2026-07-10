@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::overlay::TooltipPlacement;
 use bastyde_core::widget::Widget;
 use bastyde_core::widget_id::WidgetId;
 
@@ -66,6 +67,19 @@ pub fn attach_rich_tooltip(
     key: impl Into<String>,
     delay: Duration,
 ) -> WidgetId {
+    attach_rich_tooltip_with_placement(ctx, anchor_id, key, delay, TooltipPlacement::Below)
+}
+
+/// [`attach_rich_tooltip`] with an explicit [`TooltipPlacement`] — pass
+/// `Side` for anchors stacked vertically (menu items, a vertical tab
+/// strip, list/tree rows) so the tooltip opens beside the anchor.
+pub fn attach_rich_tooltip_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    key: impl Into<String>,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
     let tooltip = RichTooltipWidget::from_key(key);
     // Grab the sink BEFORE handing the widget to the arena — after
     // `ctx.add(tooltip)` we can't borrow the widget back. The sink is
@@ -73,7 +87,14 @@ pub fn attach_rich_tooltip(
     // widget reads from `paint()` to drive its dwell indicator.
     let sink = tooltip.shown_at_sink();
     let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
+    ctx.attach_tooltip_with_sticky_sink_placement(
+        anchor_id,
+        tooltip_id,
+        delay,
+        Some(DWELL_PROMOTION),
+        sink,
+        placement,
+    );
     tooltip_id
 }
 
@@ -87,10 +108,34 @@ pub fn attach_rich_tooltip_content(
     content: TooltipContent,
     delay: Duration,
 ) -> WidgetId {
+    attach_rich_tooltip_content_with_placement(
+        ctx,
+        anchor_id,
+        content,
+        delay,
+        TooltipPlacement::Below,
+    )
+}
+
+/// [`attach_rich_tooltip_content`] with an explicit [`TooltipPlacement`].
+pub fn attach_rich_tooltip_content_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    content: TooltipContent,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
     let tooltip = RichTooltipWidget::new(content);
     let sink = tooltip.shown_at_sink();
     let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
+    ctx.attach_tooltip_with_sticky_sink_placement(
+        anchor_id,
+        tooltip_id,
+        delay,
+        Some(DWELL_PROMOTION),
+        sink,
+        placement,
+    );
     tooltip_id
 }
 
@@ -105,9 +150,32 @@ pub fn attach_rich_tooltip_source(
     source: RichTooltipSource,
     delay: Duration,
 ) -> WidgetId {
+    attach_rich_tooltip_source_with_placement(
+        ctx,
+        anchor_id,
+        source,
+        delay,
+        TooltipPlacement::Below,
+    )
+}
+
+/// [`attach_rich_tooltip_source`] with an explicit [`TooltipPlacement`] —
+/// the placement-aware entry point used by widgets that live in a vertical
+/// list (menu items, list/tree rows, activity-rail items) and want `Side`.
+pub fn attach_rich_tooltip_source_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    source: RichTooltipSource,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
     match source {
-        RichTooltipSource::Key(k) => attach_rich_tooltip(ctx, anchor_id, k, delay),
-        RichTooltipSource::Content(c) => attach_rich_tooltip_content(ctx, anchor_id, c, delay),
+        RichTooltipSource::Key(k) => {
+            attach_rich_tooltip_with_placement(ctx, anchor_id, k, delay, placement)
+        }
+        RichTooltipSource::Content(c) => {
+            attach_rich_tooltip_content_with_placement(ctx, anchor_id, c, delay, placement)
+        }
     }
 }
 
@@ -134,10 +202,34 @@ pub fn attach_composite_tooltip_boxed(
     content: Box<dyn Widget>,
     delay: Duration,
 ) -> WidgetId {
+    attach_composite_tooltip_boxed_with_placement(
+        ctx,
+        anchor_id,
+        content,
+        delay,
+        TooltipPlacement::Below,
+    )
+}
+
+/// [`attach_composite_tooltip_boxed`] with an explicit [`TooltipPlacement`].
+pub fn attach_composite_tooltip_boxed_with_placement(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    content: Box<dyn Widget>,
+    delay: Duration,
+    placement: TooltipPlacement,
+) -> WidgetId {
     let tooltip = CompositeTooltipWidget::new().content_boxed(content);
     let sink = tooltip.shown_at_sink();
     let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
+    ctx.attach_tooltip_with_sticky_sink_placement(
+        anchor_id,
+        tooltip_id,
+        delay,
+        Some(DWELL_PROMOTION),
+        sink,
+        placement,
+    );
     tooltip_id
 }
 
@@ -145,10 +237,15 @@ pub fn attach_composite_tooltip_boxed(
 mod tests {
     use super::*;
     use crate::button::Button;
+    use crate::menu_item::MenuItem;
+    use crate::menu_list::MenuList;
+    use crate::primitives::VStack;
+    use crate::tooltip::TooltipWidget;
     use crate::tooltip::registry::{
         _reset_tooltip_registry, TooltipContent, install_tooltip_registry,
     };
     use bastyde_canvas::{MockTextBackend, SizeProposal};
+    use bastyde_core::event::{Key, Modifiers};
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
     use std::cell::RefCell;
@@ -302,6 +399,235 @@ mod tests {
         tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
+
+        _reset_tooltip_registry();
+    }
+
+    // ---- Part A: the "wall of tooltips" fix ------------------------------
+
+    #[test]
+    fn menu_container_focus_does_not_fan_out_item_tooltips() {
+        // The reported bug: opening a context menu focuses the whole
+        // `MenuList` panel, which — before the fix — promoted EVERY item's
+        // rich tooltip at once (a wall). The container-fan-out guard
+        // (`reverse.len() == 1`) suppresses it.
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            TooltipContent::new("a", lit!("Tip A")),
+            TooltipContent::new("b", lit!("Tip B")),
+            TooltipContent::new("c", lit!("Tip C")),
+        ]);
+
+        let mut tree = tree_with_backend();
+        let menu = tree.add(
+            MenuList::new()
+                .item(MenuItem::new(lit!("A")).rich_tooltip("a"))
+                .item(MenuItem::new(lit!("B")).rich_tooltip("b"))
+                .item(MenuItem::new(lit!("C")).rich_tooltip("c")),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.focus(menu);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "focusing the menu container must not fan out item tooltips (the wall)"
+        );
+
+        _reset_tooltip_registry();
+    }
+
+    #[test]
+    fn self_anchored_focusable_tooltip_shows_exactly_one_overlay() {
+        // A widget that anchors its own sticky tooltip to its *own* id
+        // (the `TabHeader` / `ColorSwatch` shape) matches BOTH the direct and
+        // reverse predicates, because `is_descendant_of` is reflexive. The
+        // mutually-exclusive `if / else if` routing must promote it exactly
+        // once — two independent filters would double-`show_overlay` and leak
+        // an orphaned overlay.
+        let mut tree = tree_with_backend();
+        let anchor = tree.add(Button::new(lit!("Self")));
+        let content = tree.add(TooltipWidget::new(lit!("Tip")));
+        tree.attach_tooltip_with_sticky(
+            anchor,
+            content,
+            Duration::from_millis(200),
+            Some(Duration::from_secs(2)),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.focus(anchor);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "self-anchored focus promotes exactly one overlay (no reflexive dup)"
+        );
+    }
+
+    #[test]
+    fn single_button_rich_tooltip_still_promotes_on_focus() {
+        // Regression guard for the composing-widget case: `Button` keeps focus
+        // on its outer node but anchors the tooltip on an inner root (the sole
+        // reverse match). It must still promote on focus after the fix.
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![TooltipContent::new("k", lit!("Body"))]);
+        let mut tree = tree_with_backend();
+        let btn = tree.add(Button::new(lit!("Focus me")).rich_tooltip("k"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.focus(btn);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "a single composing control still auto-shows its rich tooltip on focus"
+        );
+        _reset_tooltip_registry();
+    }
+
+    #[test]
+    fn segmented_control_focus_does_not_fan_out_segment_tooltips() {
+        // A `SegmentedControl` is a single focus stop owning many segment
+        // tooltips (the segments anchor to their own ids, and the control is
+        // their focusable ancestor) — the same fan-out shape as a menu. The
+        // `reverse.len() == 1` guard protects it for free.
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            TooltipContent::new("s0", lit!("Seg 0")),
+            TooltipContent::new("s1", lit!("Seg 1")),
+        ]);
+        let mut tree = tree_with_backend();
+        let selected = bastyde_core::signal::Signal::new(0usize);
+        let sc = tree.add(
+            crate::segmented_control::SegmentedControl::new(selected)
+                .segment(crate::segmented_control::Segment::new(lit!("A")).rich_tooltip("s0"))
+                .segment(crate::segmented_control::Segment::new(lit!("B")).rich_tooltip("s1")),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.focus(sc);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "focusing a SegmentedControl must not fan out its segment tooltips"
+        );
+        _reset_tooltip_registry();
+    }
+
+    // ---- Part B: side placement ------------------------------------------
+
+    #[test]
+    fn side_placement_opens_to_the_trailing_side() {
+        let mut tree = tree_with_backend();
+        // Anchor nested at top-leading of a VStack so it stays small (sized to
+        // content, not stretched) with room to its trailing side and below.
+        let anchor = tree.add(Button::new(lit!("Anchor")));
+        let content = tree.add(TooltipWidget::new(lit!("Tip")));
+        tree.attach_tooltip_with_placement(
+            anchor,
+            content,
+            Duration::from_millis(200),
+            TooltipPlacement::Side,
+        );
+        let _root = tree.add(VStack::new().add_child(anchor));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(Duration::from_millis(250));
+        // Re-layout so the overlay positioner runs on the freshly-shown tooltip.
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        let a = tree.bounds(anchor);
+        let t = tree
+            .overlay_manager()
+            .bounds_for_content(content)
+            .expect("Side tooltip overlay shown");
+        assert!(
+            t.x >= a.x + a.width,
+            "Side tooltip opens to the trailing side: t.x {} >= anchor right {}",
+            t.x,
+            a.x + a.width
+        );
+        assert!(
+            t.y < a.y + a.height,
+            "Side tooltip is aligned to the anchor top, not below it"
+        );
+    }
+
+    #[test]
+    fn below_placement_opens_under_the_anchor() {
+        let mut tree = tree_with_backend();
+        let anchor = tree.add(Button::new(lit!("Anchor")));
+        let content = tree.add(TooltipWidget::new(lit!("Tip")));
+        // Default placement is Below.
+        tree.attach_tooltip(anchor, content, Duration::from_millis(200));
+        let _root = tree.add(VStack::new().add_child(anchor));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(Duration::from_millis(250));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        let a = tree.bounds(anchor);
+        let t = tree
+            .overlay_manager()
+            .bounds_for_content(content)
+            .expect("Below tooltip overlay shown");
+        assert!(
+            t.y >= a.y + a.height,
+            "Below tooltip opens under the anchor: t.y {} >= anchor bottom {}",
+            t.y,
+            a.y + a.height
+        );
+    }
+
+    // ---- Part C: keyboard reachability of menu item tooltips -------------
+
+    #[test]
+    fn keyboard_menu_navigation_surfaces_highlighted_item_tooltip() {
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            TooltipContent::new("a", lit!("Tip A")),
+            TooltipContent::new("b", lit!("Tip B")),
+        ]);
+
+        let mut tree = tree_with_backend();
+        // Third item has NO tooltip — highlighting it must dismiss the prior
+        // one and show nothing.
+        let menu = tree.add(
+            MenuList::new()
+                .item(MenuItem::new(lit!("A")).rich_tooltip("a"))
+                .item(MenuItem::new(lit!("B")).rich_tooltip("b"))
+                .item(MenuItem::new(lit!("C"))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Focus the menu panel (as the open path does): no wall.
+        tree.focus(menu);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "no tooltip on menu focus (Part A)"
+        );
+
+        // Arrow-key highlight surfaces exactly the highlighted item's tooltip.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "ArrowDown surfaces the highlighted item's tooltip (Part C)"
+        );
+
+        // Moving the highlight dismisses the previous tooltip and shows the
+        // next — still exactly one, never a growing stack.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "moving the highlight replaces the tooltip (still exactly one)"
+        );
+
+        // Highlighting a tooltip-less item dismisses the prior tooltip and
+        // shows nothing.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "highlighting a tooltip-less item clears the previous tooltip"
+        );
 
         _reset_tooltip_registry();
     }

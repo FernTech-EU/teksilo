@@ -425,6 +425,16 @@ impl Widget for RadioTileGroup {
             if self.layout == TileLayout::Vertical {
                 tile.set_vertical_arrangement();
             }
+            // Vertical layouts (`Column` / `Vertical`) stack tiles top-to-
+            // bottom, so a tile's tooltip opens to the trailing side; `Row`
+            // (horizontal) and `Grid` (2-D) keep the default `Below`.
+            let tip_placement = match self.layout {
+                TileLayout::Column | TileLayout::Vertical => crate::tooltip::TooltipPlacement::Side,
+                TileLayout::Row | TileLayout::Grid { .. } => {
+                    crate::tooltip::TooltipPlacement::Below
+                }
+            };
+            tile.set_tooltip_placement(tip_placement);
             if let Some(style) = &self.style_override {
                 tile.set_style_if_unset(style.clone());
             }

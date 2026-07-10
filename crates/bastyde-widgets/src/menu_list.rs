@@ -668,6 +668,7 @@ impl Widget for MenuList {
                                 None => visible_indices[0],
                             };
                             focused_index.set(Some(next));
+                            ctx.show_highlight_tooltip(item_ids[next]);
                             EventResponse::Handled
                         }
                         Key::ArrowUp => {
@@ -683,6 +684,7 @@ impl Widget for MenuList {
                                 None => visible_indices[n - 1],
                             };
                             focused_index.set(Some(next));
+                            ctx.show_highlight_tooltip(item_ids[next]);
                             EventResponse::Handled
                         }
                         Key::Home => {
@@ -690,6 +692,7 @@ impl Widget for MenuList {
                                 return EventResponse::Ignored;
                             };
                             focused_index.set(Some(first));
+                            ctx.show_highlight_tooltip(item_ids[first]);
                             EventResponse::Handled
                         }
                         Key::End => {
@@ -697,6 +700,7 @@ impl Widget for MenuList {
                                 return EventResponse::Ignored;
                             };
                             focused_index.set(Some(last));
+                            ctx.show_highlight_tooltip(item_ids[last]);
                             EventResponse::Handled
                         }
                         Key::Enter | Key::Space => {
@@ -791,6 +795,7 @@ impl Widget for MenuList {
                                     && label.starts_with(buf.as_str())
                                 {
                                     focused_index.set(Some(i));
+                                    ctx.show_highlight_tooltip(item_ids[i]);
                                     return EventResponse::Handled;
                                 }
                             }
@@ -798,6 +803,7 @@ impl Widget for MenuList {
                                 && label.starts_with(buf.as_str())
                             {
                                 focused_index.set(Some(start));
+                                ctx.show_highlight_tooltip(item_ids[start]);
                                 return EventResponse::Handled;
                             }
                             EventResponse::Ignored

@@ -1165,9 +1165,17 @@ impl Widget for DockRailItem {
         self.root = Some(root);
 
         if !self.labeled {
+            // The activity rail is vertical-only; its icon-only items stack
+            // top-to-bottom, so the title tooltip opens to the trailing `Side`
+            // (a `Below` tooltip would drop onto the next rail item).
             let tip = ctx.add(crate::tooltip::TooltipWidget::new(self.label.clone()));
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root, tip, delay);
+            ctx.attach_tooltip_with_placement(
+                root,
+                tip,
+                delay,
+                crate::tooltip::TooltipPlacement::Side,
+            );
         }
 
         let self_id = ctx.self_id();

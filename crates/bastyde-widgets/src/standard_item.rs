@@ -561,17 +561,33 @@ impl Widget for StandardListItem {
         self.root_child_id = Some(root_id);
 
         // Attach tooltip — mutually exclusive slots, composite wins.
+        // Standard rows stack vertically in a `ListView`/`TreeView`, so the
+        // tooltip opens to the trailing `Side` — a `Below` tooltip would
+        // cover the next row down.
+        let tip_placement = crate::tooltip::TooltipPlacement::Side;
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+            crate::tooltip::attach_composite_tooltip_boxed_with_placement(
+                ctx,
+                root_id,
+                content,
+                delay,
+                tip_placement,
+            );
         } else if let Some(source) = self.rich_tooltip_source.clone() {
             let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+            crate::tooltip::attach_rich_tooltip_source_with_placement(
+                ctx,
+                root_id,
+                source,
+                delay,
+                tip_placement,
+            );
         } else if let Some(text) = self.tooltip_text.clone() {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, tip_placement);
         }
 
         vec![root_id]
@@ -968,17 +984,32 @@ impl Widget for StandardTreeItem {
         self.inner.root_child_id = Some(root_id);
 
         // Attach tooltip — forwarded from the inner item's tooltip slots.
+        // Tree rows stack vertically, so the tooltip opens to the trailing
+        // `Side` — a `Below` tooltip would cover the next row down.
+        let tip_placement = crate::tooltip::TooltipPlacement::Side;
         if let Some(content) = self.inner.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+            crate::tooltip::attach_composite_tooltip_boxed_with_placement(
+                ctx,
+                root_id,
+                content,
+                delay,
+                tip_placement,
+            );
         } else if let Some(source) = self.inner.rich_tooltip_source.clone() {
             let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+            crate::tooltip::attach_rich_tooltip_source_with_placement(
+                ctx,
+                root_id,
+                source,
+                delay,
+                tip_placement,
+            );
         } else if let Some(text) = self.inner.tooltip_text.clone() {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, tip_placement);
         }
 
         vec![root_id]

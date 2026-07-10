@@ -537,6 +537,22 @@ impl<'a> BuildContext<'a> {
         self.tree.attach_tooltip(anchor_id, content_id, delay);
     }
 
+    /// Attach a tooltip with an explicit
+    /// [`TooltipPlacement`](crate::overlay::TooltipPlacement) — use `Side`
+    /// for anchors stacked vertically (menu items, a vertical tab strip,
+    /// list/tree rows) so the tooltip opens beside the anchor instead of
+    /// covering the next sibling.
+    pub fn attach_tooltip_with_placement(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        placement: crate::overlay::TooltipPlacement,
+    ) {
+        self.tree
+            .attach_tooltip_with_placement(anchor_id, content_id, delay, placement);
+    }
+
     /// Attach a tooltip that auto-promotes to sticky after a dwell
     /// timer. Non-None `sticky_after` enables the sticky-on-dwell UX:
     /// once the tooltip has been shown for `sticky_after`, the tree
@@ -572,6 +588,29 @@ impl<'a> BuildContext<'a> {
             delay,
             sticky_after,
             shown_at_sink,
+        );
+    }
+
+    /// Variant of [`attach_tooltip_with_sticky_sink`](Self::attach_tooltip_with_sticky_sink)
+    /// that also carries a [`TooltipPlacement`](crate::overlay::TooltipPlacement).
+    /// The full-featured path used by rich + composite tooltips that want
+    /// `Side` placement in a vertical context (menu items, list/tree rows).
+    pub fn attach_tooltip_with_sticky_sink_placement(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+        shown_at_sink: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
+        placement: crate::overlay::TooltipPlacement,
+    ) {
+        self.tree.attach_tooltip_with_sticky_sink_placement(
+            anchor_id,
+            content_id,
+            delay,
+            sticky_after,
+            shown_at_sink,
+            placement,
         );
     }
 

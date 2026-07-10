@@ -75,6 +75,25 @@ pub enum OverlayPlacement {
     FullViewport,
 }
 
+/// Placement preference for a tooltip relative to its anchor. Resolved to
+/// a concrete [`OverlayPlacement`] at show time (see
+/// `WidgetTree::tooltip_overlay_placement`).
+///
+/// `Below` is the default (drop below the anchor, flip above near the
+/// viewport edge). `Side` opens to the anchor's trailing side (RTL-aware,
+/// with a leading fallback) — for anchors stacked **vertically** (menu
+/// items, a vertical tab strip, list/tree rows, a docking activity rail,
+/// a vertical `RadioTileGroup`) where a `Below` tooltip would cover the
+/// next sibling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TooltipPlacement {
+    /// Below the anchor (flips above near the viewport edge). The default.
+    #[default]
+    Below,
+    /// To the anchor's trailing side (RTL-aware, leading fallback).
+    Side,
+}
+
 /// When an overlay is dismissed.
 #[derive(Debug, Clone)]
 pub enum DismissBehavior {

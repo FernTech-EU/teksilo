@@ -14,7 +14,28 @@ impl WidgetTree {
         content_id: WidgetId,
         delay: std::time::Duration,
     ) {
-        self.attach_tooltip_inner(anchor_id, content_id, delay, None, None);
+        self.attach_tooltip_inner(
+            anchor_id,
+            content_id,
+            delay,
+            None,
+            None,
+            crate::overlay::TooltipPlacement::Below,
+        );
+    }
+
+    /// Variant of [`attach_tooltip`](Self::attach_tooltip) that opens the
+    /// tooltip at the given [`TooltipPlacement`](crate::overlay::TooltipPlacement)
+    /// — `Side` for anchors stacked vertically (menu items, a vertical tab
+    /// strip, list/tree rows) where `Below` would cover the next sibling.
+    pub fn attach_tooltip_with_placement(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        placement: crate::overlay::TooltipPlacement,
+    ) {
+        self.attach_tooltip_inner(anchor_id, content_id, delay, None, None, placement);
     }
 
     /// Attach a tooltip that auto-promotes to "sticky" after
@@ -35,7 +56,14 @@ impl WidgetTree {
         delay: std::time::Duration,
         sticky_after: Option<std::time::Duration>,
     ) {
-        self.attach_tooltip_inner(anchor_id, content_id, delay, sticky_after, None);
+        self.attach_tooltip_inner(
+            anchor_id,
+            content_id,
+            delay,
+            sticky_after,
+            None,
+            crate::overlay::TooltipPlacement::Below,
+        );
     }
 
     /// Variant of [`attach_tooltip_with_sticky`](Self::attach_tooltip_with_sticky)
@@ -57,6 +85,30 @@ impl WidgetTree {
             delay,
             sticky_after,
             Some(shown_at_sink),
+            crate::overlay::TooltipPlacement::Below,
+        );
+    }
+
+    /// Variant of [`attach_tooltip_with_sticky_sink`](Self::attach_tooltip_with_sticky_sink)
+    /// that also carries a [`TooltipPlacement`](crate::overlay::TooltipPlacement)
+    /// — the full-featured path used by `MenuItem` / `TabHeader` /
+    /// `StandardItem` rich + composite tooltips that want `Side` placement.
+    pub fn attach_tooltip_with_sticky_sink_placement(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+        shown_at_sink: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
+        placement: crate::overlay::TooltipPlacement,
+    ) {
+        self.attach_tooltip_inner(
+            anchor_id,
+            content_id,
+            delay,
+            sticky_after,
+            Some(shown_at_sink),
+            placement,
         );
     }
 
@@ -67,6 +119,7 @@ impl WidgetTree {
         delay: std::time::Duration,
         sticky_after: Option<std::time::Duration>,
         shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
+        placement: crate::overlay::TooltipPlacement,
     ) {
         self.arena.set_dormant(content_id);
         self.tooltips.push(TooltipEntry {
@@ -82,7 +135,29 @@ impl WidgetTree {
             shown_at_real: None,
             shown_at_sink,
             promoted_by_focus: false,
+            placement,
         });
+    }
+
+    /// Resolve a [`TooltipPlacement`](crate::overlay::TooltipPlacement) to
+    /// the concrete [`OverlayPlacement`] used to position the tooltip
+    /// overlay. `Below` keeps the historic tooltip offset; `Side` reuses
+    /// the submenu-style `TrailingEdge` (RTL-aware, leading fallback,
+    /// viewport-clamped) so the tooltip opens beside — not over — the next
+    /// vertically-stacked sibling.
+    fn tooltip_overlay_placement(
+        placement: crate::overlay::TooltipPlacement,
+    ) -> crate::overlay::OverlayPlacement {
+        match placement {
+            crate::overlay::TooltipPlacement::Below => {
+                crate::overlay::OverlayPlacement::NearAnchor {
+                    offset: bastyde_canvas::Vec2::new(0.0, 8.0),
+                }
+            }
+            crate::overlay::TooltipPlacement::Side => {
+                crate::overlay::OverlayPlacement::TrailingEdge
+            }
+        }
     }
 
     pub(super) fn process_tooltips(&mut self) {
@@ -144,7 +219,7 @@ impl WidgetTree {
             if let Some(elapsed) = elapsed_fn(entry)
                 && elapsed >= entry.delay
             {
-                to_show.push((entry.anchor_id, entry.content_id));
+                to_show.push((entry.anchor_id, entry.content_id, entry.placement));
                 entry.hover_start = None;
                 entry.real_hover_start = None;
             }
@@ -159,14 +234,12 @@ impl WidgetTree {
         } else {
             Some(self.theme.motion.duration_fast)
         };
-        for (anchor_id, content_id) in to_show {
+        for (anchor_id, content_id, placement) in to_show {
             self.arena.activate(content_id);
             let oid = self.show_overlay(crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
-                placement: crate::overlay::OverlayPlacement::NearAnchor {
-                    offset: bastyde_canvas::Vec2::new(0.0, 8.0),
-                },
+                placement: Self::tooltip_overlay_placement(placement),
                 dismiss: crate::overlay::DismissBehavior::PointerLeave {
                     delay: std::time::Duration::from_millis(100),
                 },
@@ -549,6 +622,16 @@ impl WidgetTree {
         false
     }
 
+    /// Whether `widget_id` is the root content node of an active overlay
+    /// (an open menu, popover, dialog, …). Menus and popovers move keyboard
+    /// focus onto their whole content container while navigating items via
+    /// an internal highlight index, so the focus-tooltip path must not treat
+    /// that container's focus as a per-item trigger (it would surface every
+    /// descendant's rich tooltip at once).
+    fn is_overlay_content_root(&self, widget_id: WidgetId) -> bool {
+        self.overlay_manager.find_by_content(widget_id).is_some()
+    }
+
     /// Called when a widget gains keyboard focus. For any *rich*
     /// tooltip (one with `sticky_after` set) whose anchor contains
     /// `widget_id`, show the tooltip immediately and promote it to
@@ -562,23 +645,48 @@ impl WidgetTree {
     /// a11y tree pass, which is the W3C-recommended pattern for
     /// supplementary hints.
     pub(super) fn tooltip_focus_enter(&mut self, widget_id: WidgetId) {
-        // Composite widgets (e.g. `Button`) attach their tooltip to an
-        // *inner* subtree root, then keep focus on the outer widget
-        // itself. Accept either direction of the ancestor relationship
-        // so "focus landed anywhere inside the anchor's scope" fires
-        // correctly regardless of whether the anchor is the focusable
-        // node or one of its descendants.
-        let to_show: Vec<(WidgetId, WidgetId)> = self
-            .tooltips
-            .iter()
-            .filter(|e| {
-                e.sticky_after.is_some()
-                    && e.overlay_id.is_none()
-                    && (self.is_descendant_of(widget_id, e.anchor_id)
-                        || self.is_descendant_of(e.anchor_id, widget_id))
-            })
-            .map(|e| (e.anchor_id, e.content_id))
-            .collect();
+        // Two ways a registered rich/composite tooltip can relate to the
+        // focus target:
+        //   • direct  — focus landed ON the anchor or somewhere inside it
+        //     (an ordinary focusable control, a self-anchored focusable
+        //     widget, and composites whose focus sinks into an inner field).
+        //     Always promote.
+        //   • reverse — the anchor sits strictly *inside* the focused widget.
+        //     This exists for composing controls (e.g. `Button`) that keep
+        //     focus on their outer node but anchor the tooltip on an inner
+        //     body root. Promote ONLY when the focused widget is a single
+        //     such control — never when it is a *container* that merely
+        //     happens to be focusable and owns many tooltip-bearing
+        //     descendants (an open `MenuList`, whose whole panel receives
+        //     focus while items are navigated by an internal highlight
+        //     index), or every descendant's rich tooltip fires at once — the
+        //     "wall of tooltips".
+        //
+        // The two arms are mutually exclusive (`if` / `else if`): a widget
+        // that anchors its own tooltip to its `self_id` (`TabHeader`,
+        // `ColorSwatch`) satisfies BOTH predicates because `is_descendant_of`
+        // is reflexive — routing it to `direct` only avoids a duplicate
+        // `show_overlay` (which would leak the first overlay).
+        type ToShow = (WidgetId, WidgetId, crate::overlay::TooltipPlacement);
+        let mut direct: Vec<ToShow> = Vec::new();
+        let mut reverse: Vec<ToShow> = Vec::new();
+        for e in &self.tooltips {
+            if e.sticky_after.is_none() || e.overlay_id.is_some() {
+                continue;
+            }
+            if self.is_descendant_of(widget_id, e.anchor_id) {
+                direct.push((e.anchor_id, e.content_id, e.placement));
+            } else if self.is_descendant_of(e.anchor_id, widget_id) {
+                reverse.push((e.anchor_id, e.content_id, e.placement));
+            }
+        }
+        let mut to_show = direct;
+        // A reverse match is a single composing control only when it resolves
+        // to exactly one anchor and the focused node is not itself a menu /
+        // popover content root. Otherwise it is a container fan-out — skip it.
+        if reverse.len() == 1 && !self.is_overlay_content_root(widget_id) {
+            to_show.extend(reverse);
+        }
 
         let sim_now = self.sim_clock;
         let real_now = std::time::Instant::now();
@@ -588,14 +696,12 @@ impl WidgetTree {
         } else {
             Some(self.theme.motion.duration_fast)
         };
-        for (anchor_id, content_id) in to_show {
+        for (anchor_id, content_id, placement) in to_show {
             self.arena.activate(content_id);
             let oid = self.show_overlay(crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
-                placement: crate::overlay::OverlayPlacement::NearAnchor {
-                    offset: bastyde_canvas::Vec2::new(0.0, 8.0),
-                },
+                placement: Self::tooltip_overlay_placement(placement),
                 dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
@@ -616,6 +722,98 @@ impl WidgetTree {
                 }
             }
             self.promote_tooltip_to_sticky(content_id);
+        }
+    }
+
+    /// Surface the tooltip of a keyboard-highlighted menu item immediately
+    /// (no dwell), positioned per its own `TooltipPlacement`, and dismiss the
+    /// previously-highlighted item's tooltip. Real keyboard focus stays on the
+    /// enclosing `MenuList` (for key handling); this is keyed on `item_id`.
+    ///
+    /// The tooltip is shown as a `Manual`-dismiss **child overlay of the
+    /// enclosing menu**, so closing the menu (Escape / click-outside / the
+    /// opener) cascades the tooltip away automatically, and a single Escape
+    /// reaches the menu rather than only clearing the tooltip.
+    pub(super) fn show_highlight_tooltip(
+        &mut self,
+        item_id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // Clear (and reconcile) any currently-shown highlight tooltip first —
+        // moving the highlight replaces it; a tooltip-less target clears it.
+        self.clear_highlight_tooltip(&mut *ops);
+
+        // Find the single tooltip anchored within the highlighted item's
+        // subtree (a `MenuItem` anchors to its inner body root). Skip if it is
+        // already shown or the item carries no tooltip.
+        let found = self.tooltips.iter().find_map(|e| {
+            if e.overlay_id.is_none() && self.is_descendant_of(e.anchor_id, item_id) {
+                Some((e.anchor_id, e.content_id, e.placement))
+            } else {
+                None
+            }
+        });
+        let Some((anchor_id, content_id, placement)) = found else {
+            return;
+        };
+
+        let parent_overlay = self.overlay_ancestor_for_widget(item_id);
+        self.arena.activate(content_id);
+        let fade_duration = if self.prefers_reduced_motion {
+            None
+        } else {
+            Some(self.theme.motion.duration_fast)
+        };
+        let oid = self.show_overlay(crate::overlay::OverlayRequest {
+            content_id,
+            anchor: anchor_id,
+            placement: Self::tooltip_overlay_placement(placement),
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay,
+            on_dismiss: None,
+            fade_duration,
+        });
+        let real_now = std::time::Instant::now();
+        let sim_now = self.sim_clock;
+        if let Some(entry) = self
+            .tooltips
+            .iter_mut()
+            .find(|e| e.content_id == content_id)
+        {
+            entry.overlay_id = Some(oid);
+            entry.shown_at_sim = Some(sim_now);
+            entry.shown_at_real = Some(real_now);
+            if let Some(sink) = entry.shown_at_sink.as_ref() {
+                sink.set(Some(real_now));
+            }
+        }
+        self.highlight_tooltip = Some((oid, content_id));
+    }
+
+    /// Dismiss the keyboard-highlight tooltip if one is showing, resetting its
+    /// entry so it can re-show later. Safe to call when none is active or when
+    /// the overlay was already cascade-dismissed by a menu close (the tracked
+    /// id is simply no longer in the stack).
+    pub(super) fn clear_highlight_tooltip(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let Some((oid, content_id)) = self.highlight_tooltip.take() else {
+            return;
+        };
+        if self.overlay_manager.stack.iter().any(|o| o.id == oid) {
+            let dismissed = self.overlay_manager.dismiss(oid);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+        }
+        if let Some(entry) = self
+            .tooltips
+            .iter_mut()
+            .find(|e| e.content_id == content_id)
+        {
+            entry.overlay_id = None;
+            entry.shown_at_sim = None;
+            entry.shown_at_real = None;
+            if let Some(sink) = entry.shown_at_sink.as_ref() {
+                sink.set(None);
+            }
         }
     }
 

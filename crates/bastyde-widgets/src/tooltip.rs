@@ -45,8 +45,15 @@ pub mod rich;
 
 pub use attach::{
     RichTooltipSource, attach_composite_tooltip, attach_composite_tooltip_boxed,
-    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_source,
+    attach_composite_tooltip_boxed_with_placement, attach_rich_tooltip,
+    attach_rich_tooltip_content, attach_rich_tooltip_content_with_placement,
+    attach_rich_tooltip_source, attach_rich_tooltip_source_with_placement,
+    attach_rich_tooltip_with_placement,
 };
+/// Where a tooltip opens relative to its anchor — re-exported from
+/// `bastyde-core` so widgets can request `Side` placement in a vertical
+/// list without naming the core path.
+pub use bastyde_core::overlay::TooltipPlacement;
 pub use composite::CompositeTooltipWidget;
 pub use registry::{
     TooltipContent, TooltipRegistry, install_tooltip_registry, with_tooltip_registry,

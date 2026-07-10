@@ -932,17 +932,39 @@ impl Widget for TabHeader {
 
         // Attach tooltip via the framework helper. Three
         // mutually-exclusive sources (composite > rich > plain).
+        // A vertical tab strip stacks its tabs top-to-bottom, so the
+        // tooltip opens to the trailing `Side` (over the content area) —
+        // a `Below` tooltip would cover the next tab down. A horizontal
+        // strip keeps the default `Below`.
+        let tip_placement = match self.orientation {
+            super::delegate::TabBarOrientation::Vertical => crate::tooltip::TooltipPlacement::Side,
+            super::delegate::TabBarOrientation::Horizontal => {
+                crate::tooltip::TooltipPlacement::Below
+            }
+        };
         if let Some(content) = self.composite_tooltip.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
+            crate::tooltip::attach_composite_tooltip_boxed_with_placement(
+                ctx,
+                self_id,
+                content,
+                delay,
+                tip_placement,
+            );
         } else if let Some(source) = self.rich_tooltip.take() {
             let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
+            crate::tooltip::attach_rich_tooltip_source_with_placement(
+                ctx,
+                self_id,
+                source,
+                delay,
+                tip_placement,
+            );
         } else if let Some(tip) = self.tooltip.take() {
             let tip_widget = crate::tooltip::TooltipWidget::new(tip);
             let tip_id = ctx.add(tip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(self_id, tip_id, delay);
+            ctx.attach_tooltip_with_placement(self_id, tip_id, delay, tip_placement);
         }
 
         vec![root_id]

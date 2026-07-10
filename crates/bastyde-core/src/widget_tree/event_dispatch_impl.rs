@@ -1742,6 +1742,14 @@ impl WidgetTree {
             }
         }
 
+        // Keyboard-highlight tooltip: surface the highlighted (menu) item's
+        // tooltip immediately and dismiss the previously-highlighted one. Keyed
+        // on the item id, NOT real focus (which stays on the menu panel for key
+        // handling). Only the last request per handler is honoured.
+        if let Some(&id) = ctx.highlight_tooltip_requests.last() {
+            self.show_highlight_tooltip(id, &mut *ops);
+        }
+
         // --- Drag and drop ---
         if let Some((source_widget, payload, preview_widget)) = ctx.drag_start_request {
             let (preview_content_id, preview_overlay_id) = if let Some(preview) = preview_widget {

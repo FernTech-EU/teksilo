@@ -105,6 +105,12 @@ pub struct RadioTile {
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn Widget>>,
+    /// Where the tooltip opens relative to the tile. `Below` (default) suits
+    /// horizontal (`Row`) and 2-D (`Grid`) group layouts; a vertical group
+    /// (`Column` / `Vertical`) sets this to `Side` via
+    /// [`set_tooltip_placement`](Self::set_tooltip_placement) so the tooltip
+    /// doesn't cover the tile below.
+    tooltip_placement: crate::tooltip::TooltipPlacement,
     style_override: Option<SharedRadioTileStyle>,
     /// Set by `RadioTileGroup`: the tile is part of a roving radiogroup, so it
     /// is not individually focusable and its focus ring follows the group.
@@ -143,6 +149,7 @@ impl RadioTile {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
+            tooltip_placement: crate::tooltip::TooltipPlacement::Below,
             style_override: None,
             grouped: false,
             group_focused: None,
@@ -350,6 +357,13 @@ impl RadioTile {
         self.indicator_side = RadioTileIndicatorSide::Leading;
     }
 
+    /// Set where this tile's tooltip opens. Called by `RadioTileGroup` — a
+    /// vertical group (`Column` / `Vertical`) passes `Side` so the tooltip
+    /// opens beside the tile instead of covering the tile below.
+    pub(crate) fn set_tooltip_placement(&mut self, placement: crate::tooltip::TooltipPlacement) {
+        self.tooltip_placement = placement;
+    }
+
     /// Apply a group-level style only when this tile has no per-call style of
     /// its own (the tile's own `.style(...)` wins). Called by `RadioTileGroup`.
     pub(crate) fn set_style_if_unset(&mut self, style: SharedRadioTileStyle) {
@@ -545,17 +559,33 @@ impl Widget for RadioTile {
         };
         let root_id = style.make_body(&cfg, ctx);
 
+        // Placement is `Below` by default; a vertical group (`Column` /
+        // `Vertical`) injects `Side` via `set_tooltip_placement` so a tile's
+        // tooltip doesn't cover the tile below.
+        let tip_placement = self.tooltip_placement;
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+            crate::tooltip::attach_composite_tooltip_boxed_with_placement(
+                ctx,
+                root_id,
+                content,
+                delay,
+                tip_placement,
+            );
         } else if let Some(source) = self.rich_tooltip_source.take() {
             let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+            crate::tooltip::attach_rich_tooltip_source_with_placement(
+                ctx,
+                root_id,
+                source,
+                delay,
+                tip_placement,
+            );
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
             let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tid = ctx.add(tw);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tid, delay);
+            ctx.attach_tooltip_with_placement(root_id, tid, delay, tip_placement);
         }
 
         self.root_child_id = Some(root_id);

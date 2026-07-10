@@ -155,6 +155,13 @@ pub struct WidgetTree {
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
     tooltips: Vec<TooltipEntry>,
+    /// The tooltip currently surfaced by keyboard menu navigation
+    /// (`show_highlight_tooltip`): `(overlay_id, content_id)`. At most one
+    /// is shown at a time; moving the highlight or closing the menu clears
+    /// it. Distinct from the hover/focus tooltip paths — this one is a
+    /// `Manual`-dismiss child of the menu overlay so a single Escape closes
+    /// the menu (and cascades the tooltip) rather than only the tooltip.
+    highlight_tooltip: Option<(crate::overlay::OverlayId, WidgetId)>,
     /// How the currently focused widget gained focus.
     focus_origin: Option<crate::focus::FocusOrigin>,
     /// Input-modality "focus-visible" state: `true` after keyboard input,
@@ -466,6 +473,13 @@ struct TooltipEntry {
     /// Tabs through a form); pointer-dwelled stickies survive
     /// focus changes and only dismiss via Escape or click-outside.
     promoted_by_focus: bool,
+    /// Where the tooltip opens relative to its anchor. `Below` (default)
+    /// for the common case; `Side` for anchors stacked vertically (menu
+    /// items, a vertical tab strip, list/tree rows) so the tooltip does
+    /// not cover the next sibling. Consulted at show time in both the
+    /// hover (`process_tooltips_impl`) and focus (`tooltip_focus_enter`)
+    /// paths.
+    placement: crate::overlay::TooltipPlacement,
 }
 
 /// A delayed overlay request (e.g., submenu hover-open delay).
@@ -515,6 +529,7 @@ impl WidgetTree {
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
+            highlight_tooltip: None,
             layout_direction: crate::environment::LayoutDirection::default(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),

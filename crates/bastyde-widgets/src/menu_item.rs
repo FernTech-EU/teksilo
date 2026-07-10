@@ -854,18 +854,33 @@ impl Widget for MenuItem {
         // Attach tooltip if configured. The three setters
         // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are
         // mutually exclusive — setters clear the other two so at most
-        // one branch runs.
+        // one branch runs. A `MenuItem` only ever lives in a vertical
+        // `MenuList`, so the tooltip opens to the trailing `Side` — a
+        // `Below` tooltip would cover the next item down.
+        use crate::tooltip::TooltipPlacement;
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
-            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
+            crate::tooltip::attach_composite_tooltip_boxed_with_placement(
+                ctx,
+                root_id,
+                content,
+                delay,
+                TooltipPlacement::Side,
+            );
         } else if let Some(source) = self.rich_tooltip_source.take() {
             let delay = ctx.theme().motion.tooltip_delay;
-            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+            crate::tooltip::attach_rich_tooltip_source_with_placement(
+                ctx,
+                root_id,
+                source,
+                delay,
+                TooltipPlacement::Side,
+            );
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = ctx.theme().motion.tooltip_delay;
-            ctx.attach_tooltip(root_id, tooltip_id, delay);
+            ctx.attach_tooltip_with_placement(root_id, tooltip_id, delay, TooltipPlacement::Side);
         }
 
         // --- Handlers ---
