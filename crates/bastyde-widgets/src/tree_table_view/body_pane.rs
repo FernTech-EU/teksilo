@@ -35,11 +35,10 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{SelectionMode, SortFilterTreeModel};
+use bastyde_data::{NodeId, SelectionMode, SortFilterTreeModel};
 
-use super::TreeTableRowDragData;
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::data_views::RowSelection;
+use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId};
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
@@ -79,9 +78,31 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// Enable per-row drag-to-reorder (the root owns the drop validation +
     /// commit + sort gate; the pane only emits the drag).
     pub(crate) reorderable: bool,
-    /// Owning `TreeTableView` id — stamped into the drag payload so a drop
-    /// into a sibling table is rejected.
-    pub(crate) table_id: usize,
+    /// Owning `TreeTableView`'s ROW-drag identity — stamped into the drag
+    /// payload so same-view reorder vs. a foreign drop can be told apart.
+    /// Distinct from the column-header `table_id: usize` (an unrelated
+    /// resize/reorder identity `TreeTableView` keeps to itself).
+    pub(crate) model_id: ViewId,
+
+    /// Export: when `Some`, dragged rows carry clones of their items so a
+    /// foreign `DropTarget` / another view / the OS can consume them, and
+    /// rows become a drag source even without `reorderable`. Mirrors
+    /// `TreeTableView::export_mode`; only `.is_some()` matters here (the
+    /// transfer-mode value itself is consulted on completion, at the root).
+    pub(crate) export_mode: Option<DragTransferMode>,
+    /// Clones a `&T` into an owned `T` for the export payload.
+    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
+    /// Builds MIME representations of the dragged items for OS / `DropZone`
+    /// export.
+    #[allow(clippy::type_complexity)]
+    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
+    /// The rows (flat visible indices at drag-start) carried by the
+    /// in-flight drag — owned by the root so its `on_drag_ended` can read
+    /// them on completion.
+    pub(crate) dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// The `NodeId`s (at drag-start) carried by the in-flight drag — used by
+    /// the root's default move-out removal.
+    pub(crate) dragged_nodes: Rc<RefCell<Vec<NodeId>>>,
 
     /// Optional row-activation callback (a click per `activate_on`, or
     /// Enter/Space on the focused row) — distinct from *selection*, which also
@@ -351,13 +372,27 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let sel_for_click = sel.clone();
                 let row_index_for_click = flat_idx;
                 let focused_for_click = self.focused_cell.clone();
-                row_handlers = row_handlers.on_pointer_event(move |event, _ctx| {
-                    if let WidgetEvent::PointerDown {
+                // Deferred collapse: pressing an ALREADY-selected row (no
+                // modifiers) keeps the whole (multi-)selection so it can be
+                // dragged; the collapse-to-single happens on release WITHOUT
+                // a drag (mirrors `ListView`).
+                let pending_collapse = Rc::new(Cell::new(false));
+                row_handlers = row_handlers.on_pointer_event(move |event, ctx| match event {
+                    WidgetEvent::PointerDown {
                         button: PointerButton::Primary,
                         modifiers,
                         ..
-                    } = event
-                    {
+                    } => {
+                        // The press belongs to an interactive child (an
+                        // embedded checkbox, twist arrow, …) — let it handle
+                        // the tap; don't also select the row. Clear any stale
+                        // deferred-collapse (left by a prior drag whose
+                        // PointerUp the drag machinery consumed) so it can't
+                        // fire on this unrelated interaction.
+                        if ctx.press_claimed_by_interactive_child() {
+                            pending_collapse.set(false);
+                            return EventResponse::Ignored;
+                        }
                         // Move the keyboard-navigation cursor to the clicked row so a
                         // subsequent Arrow steps from here — the row-nav origin is
                         // `focused_cell.get().unwrap_or((0,0))`, which nothing else
@@ -368,19 +403,51 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         focused_for_click.set(Some((row_index_for_click, col)));
                         if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
                             sel_for_click.toggle(row_index_for_click);
+                            pending_collapse.set(false);
                         } else if modifiers.shift() && sel_for_click.mode() == SelectionMode::Multi
                         {
                             sel_for_click.extend_to(row_index_for_click);
+                            pending_collapse.set(false);
+                        } else if sel_for_click.is_selected(row_index_for_click) {
+                            // Defer: a following drag preserves the whole
+                            // selection; a plain click collapses on release.
+                            pending_collapse.set(true);
                         } else {
                             sel_for_click.select(row_index_for_click);
+                            pending_collapse.set(false);
                         }
+                        EventResponse::Ignored
                     }
-                    EventResponse::Ignored
+                    WidgetEvent::PointerUp {
+                        button: PointerButton::Primary,
+                        ..
+                    } => {
+                        // A release on an interactive child is that child's
+                        // own tap — never collapse the row from it (guards
+                        // against a `pending_collapse` a prior drag left
+                        // stuck true).
+                        if ctx.press_claimed_by_interactive_child() {
+                            return EventResponse::Ignored;
+                        }
+                        // Reached only on a click WITHOUT a drag (an active
+                        // drag consumes PointerUp). Collapse the deferred
+                        // multi-selection to the clicked row.
+                        if pending_collapse.replace(false) {
+                            sel_for_click.select(row_index_for_click);
+                        }
+                        EventResponse::Ignored
+                    }
+                    _ => EventResponse::Ignored,
                 });
             }
-            if self.reorderable {
-                let source_node = entry.node_id;
-                let table_id = self.table_id;
+            // When reorderable OR exportable, attach an on_drag handler to
+            // start the drag. Selection-aware: the whole selection when the
+            // pressed row is part of a multi-selection, else just the
+            // pressed row. Export clones/MIME are built only when the view
+            // opted in via `.exportable(..)` / `.export_external(..)`.
+            let is_drag_source = self.reorderable || self.export_mode.is_some();
+            if is_drag_source {
+                let drag_model_id = self.model_id;
                 let anchor = self.drag_anchor;
                 let preview_flat = flat_idx;
                 let proxy_for_preview = proxy.clone();
@@ -389,16 +456,74 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let widths_for_preview = self.column_widths.clone();
                 let metrics_for_preview = self.row_metrics.clone();
                 let tree_pos_for_preview = tree_display_pos;
+                let sel_for_drag = selection.clone();
+                let clone_for_drag = self.clone_item_fn.clone();
+                let mime_for_drag = self.export_mime_fn.clone();
+                let proxy_for_drag = proxy.clone();
+                let stash_rows_for_drag = self.dragged_rows.clone();
+                let stash_nodes_for_drag = self.dragged_nodes.clone();
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                        let payload =
-                            bastyde_core::drag_payload::DragPayload::typed(TreeTableRowDragData {
-                                source_node,
-                                source_table_id: table_id,
+                        // Selection-aware dragged set: the whole selection
+                        // when the pressed row is part of a
+                        // multi-selection, else just the pressed row.
+                        let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                            Some(s) if s.is_selected(preview_flat) => {
+                                let mut v = s.selected_indices();
+                                v.sort_unstable();
+                                if v.len() <= 1 { vec![preview_flat] } else { v }
+                            }
+                            _ => vec![preview_flat],
+                        };
+                        // Export clones, if opted in. Drop any row whose
+                        // item isn't resident so `rows` and `items` stay
+                        // index-aligned (a mismatch here would let a Move
+                        // remove a row whose data was never transferred).
+                        let items: Option<Vec<T>> = if let Some(cf) = clone_for_drag.as_ref() {
+                            let mut out = Vec::with_capacity(rows.len());
+                            rows.retain(|&r| {
+                                if let Some(cloned) =
+                                    proxy_for_drag.with_entry(r, |item, _entry| cf(item))
+                                {
+                                    out.push(cloned);
+                                    true
+                                } else {
+                                    false
+                                }
                             });
-                        // Flat multi-cell preview of the dragged row (indent is
-                        // dropped in the floating preview — it reads as the
-                        // row's content picked up).
+                            Some(out)
+                        } else {
+                            None
+                        };
+                        // MIME reps for OS / DropZone export.
+                        let mime_pairs: Vec<(String, Vec<u8>)> =
+                            match (mime_for_drag.as_ref(), items.as_ref()) {
+                                (Some(mf), Some(its)) => mf(its),
+                                _ => Vec::new(),
+                            };
+                        let mut payload =
+                            bastyde_core::drag_payload::DragPayload::typed(RowDragData::<T> {
+                                source: drag_model_id,
+                                rows: rows.clone(),
+                                items,
+                            });
+                        let has_mime = !mime_pairs.is_empty();
+                        for (mime, bytes) in mime_pairs {
+                            payload = payload.with_mime(&mime, bytes);
+                        }
+                        if has_mime {
+                            payload.enrich_external_from_mime();
+                        }
+                        *stash_rows_for_drag.borrow_mut() = rows.clone();
+                        *stash_nodes_for_drag.borrow_mut() = rows
+                            .iter()
+                            .filter_map(|&r| proxy_for_drag.visible_node_id(r))
+                            .collect();
+
+                        // Flat multi-cell preview of the PRESSED row (indent
+                        // is dropped in the floating preview — it reads as
+                        // the row's content picked up, even when a
+                        // multi-row selection is being dragged).
                         let widths = widths_for_preview.borrow().clone();
                         let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
                         let total_w = widths.iter().sum::<f32>().max(120.0);

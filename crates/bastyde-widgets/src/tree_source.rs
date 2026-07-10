@@ -27,7 +27,7 @@ use bastyde_data::{
     TreeDataSource,
 };
 
-use crate::data_views::RowDrag;
+use crate::data_views::{RowDragData, ViewId};
 
 /// Key-erased per-row flat metadata, derived from the source's `FlatEntry`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,11 +71,15 @@ pub(crate) struct TreeDndLazy {
     /// Whether the row at `index` may begin a drag.
     pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
     /// `(payload, target_index, position, this_view_id) -> verdict`.
-    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
+    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
-    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
-    /// Source-side completion: row at `index` was accepted elsewhere.
-    pub(crate) on_drag_out_fn: Rc<dyn Fn(usize)>,
+    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
+    /// Source-side completion: the rows at these indices were accepted
+    /// elsewhere (a foreign move-out). Resolves stable node keys BEFORE any
+    /// mutation and removes in descending-index order (safe for the tree's
+    /// stable `NodeId` keys regardless of the flat-index shifts a removal
+    /// causes).
+    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -107,10 +111,13 @@ impl TreeDndLazy {
                 let Some(target_key) = s2.key_at(target_index) else {
                     return DropResponse::Reject;
                 };
-                if let Some(rd) = payload.get_typed::<RowDrag>()
-                    && rd.source_view_id == view_id
+                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                    && rd.source == view_id
                 {
-                    let Some(source_key) = s2.key_at(rd.source_index) else {
+                    if rd.rows.contains(&target_index) {
+                        return DropResponse::Reject;
+                    }
+                    let Some(source_key) = rd.rows.first().and_then(|&i| s2.key_at(i)) else {
                         return DropResponse::Reject;
                     };
                     return s2.can_accept(&DropQuery {
@@ -129,17 +136,19 @@ impl TreeDndLazy {
                 let Some(target_key) = s3.key_at(target_index) else {
                     return false;
                 };
-                if let Some(rd) = payload.get_typed::<RowDrag>()
-                    && rd.source_view_id == view_id
+                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                    && rd.source == view_id
                 {
-                    let Some(source_key) = s3.key_at(rd.source_index) else {
+                    if rd.rows.contains(&target_index) {
                         return false;
-                    };
-                    return s3.accept_drop(DropCommit {
-                        source: DragSource::SameView { key: source_key },
-                        target: target_key,
-                        position,
-                    });
+                    }
+                    let keys: Vec<S::Key> = rd.rows.iter().filter_map(|&i| s3.key_at(i)).collect();
+                    if keys.is_empty() {
+                        return false;
+                    }
+                    // `reorder_within` drops descendants-of-selected and keeps
+                    // the remaining nodes contiguous (single- or multi-row).
+                    return s3.reorder_within(&keys, &target_key, position);
                 }
                 s3.accept_drop(DropCommit {
                     source: DragSource::Foreign { payload },
@@ -147,8 +156,13 @@ impl TreeDndLazy {
                     position,
                 })
             }),
-            on_drag_out_fn: Rc::new(move |index| {
-                if let Some(k) = s4.key_at(index) {
+            on_drag_out_fn: Rc::new(move |indices: &[usize]| {
+                let mut pairs: Vec<(usize, S::Key)> = indices
+                    .iter()
+                    .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
+                    .collect();
+                pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
+                for (_, k) in pairs {
                     s4.on_drag_out(&k);
                 }
             }),
@@ -173,6 +187,10 @@ pub(crate) struct TreeSource<T: 'static> {
     /// an arbitrary `String` from a resident row's item, for type-ahead label
     /// extraction. `None` when out of range or still loading.
     with_row_str_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> String) -> Option<String>>,
+    /// Read `&T` from the resident row at `index` via a side-effecting
+    /// callback, returning whether it ran. Powers export item-cloning
+    /// (`.exportable(..)`) without the delegate's widget-building path.
+    pub(crate) read_item_fn: Rc<dyn Fn(usize, &mut dyn FnMut(&T)) -> bool>,
     /// Flat metadata for `index` without building a widget (a11y, keyboard).
     meta_fn: Rc<dyn Fn(usize) -> Option<TreeRowMeta>>,
     /// Expand (`true`) / collapse (`false`) the row at `index` (index → key).
@@ -196,7 +214,8 @@ impl<T: 'static> TreeSource<T> {
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let dnd = TreeDndLazy::from_source(s.clone());
-        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11) = (
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -222,6 +241,9 @@ impl<T: 'static> TreeSource<T> {
                 })
             }),
             with_row_str_fn: Rc::new(move |index, f| s11.with_entry(index, |item, _entry| f(item))),
+            read_item_fn: Rc::new(move |index, f| {
+                s12.with_entry(index, |item, _entry| f(item)).is_some()
+            }),
             meta_fn: Rc::new(move |index| {
                 s3.with_entry(index, |_item, entry| TreeRowMeta {
                     depth: entry.depth,

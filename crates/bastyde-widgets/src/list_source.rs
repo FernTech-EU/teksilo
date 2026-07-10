@@ -24,7 +24,7 @@ use bastyde_data::{
     ListDataSource, ListModel, RowState,
 };
 
-use crate::data_views::RowDrag;
+use crate::data_views::{RowDragData, ViewId};
 
 /// The erased DnD + lazy capability closures for a list source. View-facing
 /// arguments are indices + the view's id; the closures resolve keys internally.
@@ -32,11 +32,15 @@ pub(crate) struct DndLazy {
     /// Whether the row at `index` may begin a drag.
     pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
     /// `(payload, target_index, position, this_view_id) -> verdict`.
-    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> DropResponse>,
+    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>,
     /// `(payload, target_index, position, this_view_id) -> applied`.
-    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, usize) -> bool>,
-    /// Source-side completion: row at `index` was accepted elsewhere.
-    pub(crate) on_drag_out_fn: Rc<dyn Fn(usize)>,
+    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
+    /// Source-side completion: the rows at these indices were accepted
+    /// elsewhere (a foreign move-out). Resolves stable keys BEFORE any
+    /// mutation and removes in descending-index order, so an index-keyed model
+    /// (`ListModel`, whose key *is* the index) stays valid across the batch and
+    /// a stable-key source is unaffected by the order.
+    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -75,10 +79,16 @@ impl DndLazy {
                 let Some(target_key) = s2.key_at(target_index) else {
                     return DropResponse::Reject;
                 };
-                if let Some(rd) = payload.get_typed::<RowDrag>()
-                    && rd.source_view_id == view_id
+                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                    && rd.source == view_id
                 {
-                    let Some(source_key) = s2.key_at(rd.source_index) else {
+                    // Can't drop a selection onto one of its own rows.
+                    if rd.rows.contains(&target_index) {
+                        return DropResponse::Reject;
+                    }
+                    // Homogeneous flat reorder: the first dragged row is a fair
+                    // representative for the hover verdict (all move as a block).
+                    let Some(source_key) = rd.rows.first().and_then(|&i| s2.key_at(i)) else {
                         return DropResponse::Reject;
                     };
                     return s2.can_accept(&DropQuery {
@@ -97,17 +107,19 @@ impl DndLazy {
                 let Some(target_key) = s3.key_at(target_index) else {
                     return false;
                 };
-                if let Some(rd) = payload.get_typed::<RowDrag>()
-                    && rd.source_view_id == view_id
+                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                    && rd.source == view_id
                 {
-                    let Some(source_key) = s3.key_at(rd.source_index) else {
+                    if rd.rows.contains(&target_index) {
                         return false;
-                    };
-                    return s3.accept_drop(DropCommit {
-                        source: DragSource::SameView { key: source_key },
-                        target: target_key,
-                        position,
-                    });
+                    }
+                    let keys: Vec<S::Key> = rd.rows.iter().filter_map(|&i| s3.key_at(i)).collect();
+                    if keys.is_empty() {
+                        return false;
+                    }
+                    // One call handles both single- and multi-row reorder; the
+                    // source's `reorder_within` keeps the block contiguous.
+                    return s3.reorder_within(&keys, &target_key, position);
                 }
                 s3.accept_drop(DropCommit {
                     source: DragSource::Foreign { payload },
@@ -115,8 +127,15 @@ impl DndLazy {
                     position,
                 })
             }),
-            on_drag_out_fn: Rc::new(move |index| {
-                if let Some(k) = s4.key_at(index) {
+            on_drag_out_fn: Rc::new(move |indices: &[usize]| {
+                // Resolve stable keys BEFORE mutating, then remove in
+                // descending-index order.
+                let mut pairs: Vec<(usize, S::Key)> = indices
+                    .iter()
+                    .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
+                    .collect();
+                pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
+                for (_, k) in pairs {
                     s4.on_drag_out(&k);
                 }
             }),
@@ -134,7 +153,7 @@ impl DndLazy {
             drag_fn: Rc::new(|_| DragEligibility::NoDrag),
             can_accept_fn: Rc::new(|_, _, _, _| DropResponse::Reject),
             accept_drop_fn: Rc::new(|_, _, _, _| false),
-            on_drag_out_fn: Rc::new(|_| {}),
+            on_drag_out_fn: Rc::new(|_: &[usize]| {}),
             row_state_fn: Rc::new(|_| RowState::Ready),
             request_window_fn: Rc::new(|_| {}),
             can_fetch_more_fn: Rc::new(|| false),
@@ -152,6 +171,11 @@ pub(crate) struct ListSource<T: 'static> {
     /// row isn't loaded). Powers type-ahead label extraction without
     /// forcing the delegate's widget-building path.
     pub(crate) with_item_str_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> String) -> Option<String>>,
+    /// Read `&T` from the resident row at `index` via a side-effecting
+    /// callback, returning whether it ran (row present + loaded). Powers
+    /// export item-cloning (`.exportable(..)`) without the delegate's
+    /// widget-building path.
+    pub(crate) read_item_fn: Rc<dyn Fn(usize, &mut dyn FnMut(&T)) -> bool>,
     pub(crate) observe_fn: Rc<dyn Fn(Box<dyn Fn(&DataChange)>) -> ObserverHandle>,
     /// Only populated when backed by `ListModel` — external sources can't
     /// reorder in place.
@@ -180,10 +204,12 @@ impl<T: 'static> ListSource<T> {
         let m4 = model.clone();
         let m5 = model.clone();
         let m6 = model.clone();
+        let m7 = model.clone();
         Self {
             len_fn: Rc::new(move || m1.len()),
             with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
             with_item_str_fn: Rc::new(move |index, f| m6.with_item(index, |item| f(item))),
+            read_item_fn: Rc::new(move |index, f| m7.with_item(index, |item| f(item)).is_some()),
             observe_fn: Rc::new(move |f| m3.observe_changes(move |c| f(c))),
             move_item_fn: Some(Rc::new(move |from, to| m4.move_item(from, to))),
             remove_item_fn: Some(Rc::new(move |index| {
@@ -210,10 +236,12 @@ impl<T: 'static> ListSource<T> {
         let s3 = s.clone();
         let s4 = s.clone();
         let s5 = s.clone();
+        let s6 = s.clone();
         Self {
             len_fn: Rc::new(move || s1.len()),
             with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
             with_item_str_fn: Rc::new(move |index, f| s5.with_item(index, |item| f(item))),
+            read_item_fn: Rc::new(move |index, f| s6.with_item(index, |item| f(item)).is_some()),
             observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
             move_item_fn: None,
             remove_item_fn: None,
@@ -238,10 +266,19 @@ impl<T: 'static> ListSource<T> {
         T: Clone,
     {
         let item_at_str = item_at.clone();
+        let item_at_read = item_at.clone();
         Self {
             len_fn,
             with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(f)),
             with_item_str_fn: Rc::new(move |index, f| item_at_str(index).as_ref().map(f)),
+            read_item_fn: Rc::new(move |index, f| {
+                if let Some(item) = item_at_read(index).as_ref() {
+                    f(item);
+                    true
+                } else {
+                    false
+                }
+            }),
             observe_fn,
             move_item_fn: None,
             remove_item_fn: None,

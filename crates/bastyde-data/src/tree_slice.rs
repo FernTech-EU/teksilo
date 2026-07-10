@@ -578,6 +578,17 @@ impl<T: 'static> TreeDataSource for TreeSlice<T> {
             DragSource::Foreign { .. } => false,
         }
     }
+
+    fn on_drag_out(&self, key: &NodeId) {
+        // Source-side completion for a foreign move: drop the node (and its
+        // subtree) that was accepted elsewhere. Re-check existence first — a
+        // reactive observer reacting to an earlier removal in the same batch
+        // (or any unrelated mutation) could have already freed this node, and
+        // `TreeModel::remove` panics on a stale key.
+        if self.tree().with_item(*key, |_| ()).is_some() {
+            self.tree().remove(*key);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -969,5 +980,34 @@ mod tests {
         assert_eq!(slice.with_entry(0, |v, _| *v), Some("C"));
         assert_eq!(slice.with_entry(1, |v, _| *v), Some("A"));
         assert_eq!(slice.with_entry(2, |v, _| *v), Some("B"));
+    }
+
+    #[test]
+    fn tree_reorder_within_filters_descendants_of_selected() {
+        // Dragging {A, A1} (A1 is A's child) after C must move only A — A1
+        // rides along inside A's subtree, it is not relocated independently.
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let c = tree.root(2);
+        let slice = TreeSlice::new(tree.clone());
+        let a1 = slice.child_keys(&a)[0];
+        assert!(slice.reorder_within(&[a, a1], &c, DropPosition::After));
+        assert_eq!(slice.with_entry(0, |v, _| *v), Some("B"));
+        assert_eq!(slice.with_entry(1, |v, _| *v), Some("C"));
+        assert_eq!(slice.with_entry(2, |v, _| *v), Some("A"));
+        // A still owns both its children (A1 stayed put under A).
+        assert_eq!(slice.child_keys(&a).len(), 2);
+    }
+
+    #[test]
+    fn tree_on_drag_out_removes_node_and_subtree() {
+        let tree = sample_tree();
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree.clone());
+        slice.on_drag_out(&b);
+        // B (and B1) gone → roots A, C remain.
+        assert_eq!(slice.visible_count(), 2);
+        assert_eq!(slice.with_entry(0, |v, _| *v), Some("A"));
+        assert_eq!(slice.with_entry(1, |v, _| *v), Some("C"));
     }
 }

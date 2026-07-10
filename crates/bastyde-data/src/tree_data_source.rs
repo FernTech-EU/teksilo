@@ -49,7 +49,7 @@ use bastyde_core::signal::Signal;
 
 use crate::dnd_types::ItemKey;
 use crate::dnd_types::{
-    DragEligibility, DropCommit, DropPosition, DropQuery, DropResponse, RowState,
+    DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse, RowState,
 };
 use crate::tree_change::NodeId;
 use crate::tree_model::TreeModel;
@@ -145,6 +145,66 @@ pub trait TreeDataSource: 'static {
     /// Apply a committed drop. Returns whether it was applied.
     fn accept_drop(&self, _commit: DropCommit<'_, Self::Key>) -> bool {
         false
+    }
+    /// Reorder a whole set of this source's OWN nodes so they land contiguously
+    /// at a drop gap — the multi-row same-view reorder commit. `sources` are the
+    /// dragged nodes' keys in visible order; `target` / `position` name the drop
+    /// gap. Returns whether anything moved.
+    ///
+    /// The default first drops any `sources` node that is a **descendant of
+    /// another** `sources` node (moving an ancestor already carries its
+    /// subtree), then moves the remaining top-level nodes one at a time,
+    /// re-anchoring each after the previous. Tree keys are stable, so the
+    /// re-anchoring is correct without index bookkeeping.
+    fn reorder_within(
+        &self,
+        sources: &[Self::Key],
+        target: &Self::Key,
+        position: DropPosition,
+    ) -> bool {
+        // Dropping INTO one of the dragged subtrees (target is a dragged node
+        // or a descendant of one) is invalid for the whole gesture — reject
+        // rather than partially apply, matching what the hover verdict shows.
+        let mut t = Some(target.clone());
+        while let Some(node) = t {
+            if sources.iter().any(|s| s == &node) {
+                return false;
+            }
+            t = self.parent(&node);
+        }
+        // Keep only nodes that are not a descendant of another selected node.
+        let top: Vec<Self::Key> = sources
+            .iter()
+            .filter(|k| {
+                let mut p = self.parent(k);
+                while let Some(ancestor) = p {
+                    if sources.iter().any(|s| s == &ancestor) {
+                        return false;
+                    }
+                    p = self.parent(&ancestor);
+                }
+                true
+            })
+            .cloned()
+            .collect();
+        let mut anchor = target.clone();
+        let mut pos = position;
+        let mut moved = false;
+        for key in &top {
+            if key == &anchor {
+                continue;
+            }
+            if self.accept_drop(DropCommit {
+                source: DragSource::SameView { key: key.clone() },
+                target: anchor.clone(),
+                position: pos,
+            }) {
+                moved = true;
+                anchor = key.clone();
+                pos = DropPosition::After;
+            }
+        }
+        moved
     }
     /// Called on the *origin* source after one of its rows was accepted by a
     /// different view (source-side completion). Sources backed by a shared /

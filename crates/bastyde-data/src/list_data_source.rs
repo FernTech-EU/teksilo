@@ -41,7 +41,10 @@ use std::ops::Range;
 use bastyde_core::ObserverHandle;
 
 use crate::data_change::DataChange;
-use crate::dnd_types::{DragEligibility, DropCommit, DropQuery, DropResponse, ItemKey, RowState};
+use crate::dnd_types::{
+    DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse, ItemKey,
+    RowState,
+};
 
 /// A data source for a flat collection viewed by `ListView`, `TableView`, and `GridView`.
 ///
@@ -106,6 +109,42 @@ pub trait ListDataSource: 'static {
     /// Apply a committed drop. Returns whether it was applied.
     fn accept_drop(&self, _commit: DropCommit<'_, Self::Key>) -> bool {
         false
+    }
+    /// Reorder a whole set of this source's OWN rows so they land contiguously
+    /// at a drop gap — the multi-row same-view reorder commit. `sources` are the
+    /// dragged rows' keys in the origin's visible order; `target` / `position`
+    /// name the drop gap. Returns whether anything moved.
+    ///
+    /// The default moves them one at a time, re-anchoring each after the
+    /// previous so they stay contiguous and keep their relative order — correct
+    /// for a source with **stable** keys. [`ListModel`](crate::ListModel), whose
+    /// key *is* the index (so a single move renumbers everything), overrides
+    /// this with a direct block move; a single-row drag needs neither and just
+    /// falls through to one [`accept_drop`](Self::accept_drop).
+    fn reorder_within(
+        &self,
+        sources: &[Self::Key],
+        target: &Self::Key,
+        position: DropPosition,
+    ) -> bool {
+        let mut anchor = target.clone();
+        let mut pos = position;
+        let mut moved = false;
+        for key in sources {
+            if key == &anchor {
+                continue;
+            }
+            if self.accept_drop(DropCommit {
+                source: DragSource::SameView { key: key.clone() },
+                target: anchor.clone(),
+                position: pos,
+            }) {
+                moved = true;
+                anchor = key.clone();
+                pos = DropPosition::After;
+            }
+        }
+        moved
     }
     /// Called on the *origin* source after one of its rows was accepted by a
     /// different view (source-side completion). Shared/command-backed sources

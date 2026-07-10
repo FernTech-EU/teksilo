@@ -41,11 +41,13 @@ use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::EventResponse;
 use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_data::tree_data_source::{tree_apply_reorder, tree_is_desc_or_self};
 use bastyde_data::{
     DropPosition, KeyedSelectionModel, NodeId, SelectionModel, SortDirection, SortFilterTreeModel,
     TreeFilterMode, TreeModel,
@@ -57,7 +59,7 @@ use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::RowSelection;
+use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId, ViewKind};
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::table_view::body::SharedColumnWidths;
@@ -72,15 +74,6 @@ use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
 
 const BUFFER_ROWS: usize = 5;
 const SCROLLBAR_THICKNESS: f32 = 12.0;
-
-/// Drag payload for an intra-tree row reorder. Carries the dragged node's id
-/// (tree structure, not a visible index — the projection can reorder it) plus
-/// the source table id so a drop into a sibling `TreeTableView` is rejected.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TreeTableRowDragData {
-    pub(crate) source_node: NodeId,
-    pub(crate) source_table_id: usize,
-}
 
 /// Hierarchical projection navigator. Adapts
 /// [`SortFilterTreeModel`]'s
@@ -241,7 +234,63 @@ pub struct TreeTableView<T: 'static> {
     /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
     body_bounds: Rc<Cell<Rect>>,
     resize_state: ResizeStateHandle,
+    /// Stable id grouping the column-header reorder/resize drag (an
+    /// unrelated mechanism to the row DnD below — see `table_view::header`).
     table_id: usize,
+
+    /// Stable, kind-tagged identity for this view's **row** drag-and-drop —
+    /// distinct from `table_id` above. Minted via
+    /// `ViewId::next(ViewKind::TreeTable)`.
+    model_id: ViewId,
+
+    /// Export: when `Some`, dragged rows carry clones of their items in the
+    /// payload so a foreign `DropTarget` / another view / the OS can consume
+    /// them, and rows become a drag source even without
+    /// [`reorderable`](Self::reorderable). The mode chooses whether the
+    /// origin removes moved rows on a foreign accept.
+    export_mode: Option<DragTransferMode>,
+    /// Clones a `&T` into an owned `T` for the export payload — captured only
+    /// by `.exportable(..)` / `.export_external(..)` (each `where T: Clone`).
+    clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
+    /// Builds MIME representations of the dragged items for OS / `DropZone`
+    /// export (`.export_external(..)`).
+    #[allow(clippy::type_complexity)]
+    export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
+    /// App override for removing rows moved out to a foreign target; the
+    /// default removes the dragged nodes directly from the underlying
+    /// `TreeModel` (descendants of another dragged node are skipped —
+    /// removing the ancestor already removes them).
+    #[allow(clippy::type_complexity)]
+    on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut EventContext)>>,
+    /// Accept exported rows dropped from a *different* view / source.
+    accept_foreign_rows: bool,
+    /// Handler for foreign rows received via `accept_foreign_rows` —
+    /// `(items, target flat row index, ctx)`.
+    #[allow(clippy::type_complexity)]
+    on_rows_received: Option<Rc<dyn Fn(Vec<T>, usize, &mut EventContext)>>,
+    /// Raw escape hatch: `TreeTableView` is backed by a concrete
+    /// `SortFilterTreeModel<T>` rather than a pluggable source, so unlike
+    /// `ListView` / `TableView` it cannot express foreign-accept purely
+    /// through source capability closures. Fires for any payload NOT
+    /// recognized as this view's own row drag, dropped on a node —
+    /// `(payload, target node, drop position, ctx) -> accepted`. Tried after
+    /// [`on_rows_received`](Self::on_rows_received).
+    #[allow(clippy::type_complexity)]
+    on_foreign_drop:
+        Option<Rc<dyn Fn(&DragPayload, NodeId, DropPosition, &mut EventContext) -> bool>>,
+    /// Set by our own `on_drop` when it handled a same-view reorder, so
+    /// `on_drag_ended` can tell "I applied this myself" from "a foreign
+    /// target took it" (and skip the move-out).
+    self_reorder_flag: Rc<Cell<bool>>,
+    /// The rows (flat visible indices at drag-start) carried by the
+    /// in-flight drag, so `on_drag_ended` (which only gets a `DropOutcome`)
+    /// can act on them.
+    dragged_rows: Rc<RefCell<Vec<usize>>>,
+    /// The `NodeId`s (at drag-start) carried by the in-flight drag — used by
+    /// the default move-out removal, which operates on stable node identity
+    /// rather than flat indices (which the tree's own structure can
+    /// invalidate).
+    dragged_nodes: Rc<RefCell<Vec<NodeId>>>,
 
     /// Whole-view enabled state, statically or reactively. Forwarded to the
     /// arena via `ctx.enabled_when(self_id, self.enabled.clone())` at build
@@ -314,6 +363,17 @@ impl<T: 'static> TreeTableView<T> {
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             resize_state: Rc::new(RefCell::new(None)),
             table_id,
+            model_id: ViewId::next(ViewKind::TreeTable),
+            export_mode: None,
+            clone_item_fn: None,
+            export_mime_fn: None,
+            on_rows_transferred_out: None,
+            accept_foreign_rows: false,
+            on_rows_received: None,
+            on_foreign_drop: None,
+            self_reorder_flag: Rc::new(Cell::new(false)),
+            dragged_rows: Rc::new(RefCell::new(Vec::new())),
+            dragged_nodes: Rc::new(RefCell::new(Vec::new())),
             enabled: Prop::Static(true),
         }
     }
@@ -400,6 +460,112 @@ impl<T: 'static> TreeTableView<T> {
     /// by the sort, a manual reorder would have no visible effect.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Make rows **droppable outside this view** — on a
+    /// [`DropTarget`](crate::DropTarget), another data view, or the OS.
+    ///
+    /// A dragged row (or the whole selection, when the pressed row is part of a
+    /// multi-selection) carries clones of its items in a public
+    /// [`RowDragData<T>`](crate::RowDragData), so a foreign receiver can pull
+    /// them out with `payload.get_typed::<RowDragData<T>>()` /
+    /// `DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+    /// also makes rows a drag source even without [`reorderable`](Self::reorderable).
+    ///
+    /// `mode` chooses what happens to the origin rows once a *foreign* target
+    /// accepts them: [`DragTransferMode::Move`] removes them — by default,
+    /// directly from the underlying `TreeModel` (any dragged node that is a
+    /// descendant of another dragged node is skipped, since removing the
+    /// ancestor already removes it); override via
+    /// [`on_rows_transferred_out`](Self::on_rows_transferred_out).
+    /// [`DragTransferMode::Copy`] leaves them. A same-view reorder is never a
+    /// transfer, so `mode` never affects it. Requires `T: Clone`.
+    pub fn exportable(mut self, mode: DragTransferMode) -> Self
+    where
+        T: Clone,
+    {
+        self.export_mode = Some(mode);
+        if self.clone_item_fn.is_none() {
+            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
+        }
+        self
+    }
+
+    /// Additionally advertise the dragged rows as MIME data so they can be
+    /// dropped on a [`DropZone`](crate::DropZone) or exported to another
+    /// application / window via the OS. `f` maps the dragged items to
+    /// `(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+    /// app-specific `application/x-…`). Implies [`exportable`](Self::exportable)
+    /// (defaulting to [`DragTransferMode::Move`] if not already set). Requires
+    /// `T: Clone`.
+    pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self
+    where
+        T: Clone,
+    {
+        if self.clone_item_fn.is_none() {
+            self.clone_item_fn = Some(Rc::new(|t: &T| t.clone()));
+        }
+        if self.export_mode.is_none() {
+            self.export_mode = Some(DragTransferMode::default());
+        }
+        self.export_mime_fn = Some(Rc::new(f));
+        self
+    }
+
+    /// Override how rows moved out to a foreign target are removed from this
+    /// view. Receives the dragged rows' flat visible indices (as captured at
+    /// drag-start) and the live context. Without this, an
+    /// [`exportable`](Self::exportable) [`Move`](DragTransferMode::Move) drag
+    /// removes the dragged nodes directly from the underlying `TreeModel`
+    /// (leaf-first / descending — a dragged node that is a descendant of
+    /// another dragged node is skipped, since removing the ancestor already
+    /// removes its whole subtree).
+    pub fn on_rows_transferred_out(
+        mut self,
+        f: impl Fn(&[usize], &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_rows_transferred_out = Some(Rc::new(f));
+        self
+    }
+
+    /// Accept exported rows dropped from a **different** view or source
+    /// without writing a custom source. Pair with
+    /// [`on_rows_received`](Self::on_rows_received), which is handed the
+    /// dropped items and the target flat row index. (Same-view reorder is
+    /// [`reorderable`](Self::reorderable).)
+    pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
+        self.accept_foreign_rows = accept;
+        self
+    }
+
+    /// Handler for rows accepted via
+    /// [`accept_foreign_rows`](Self::accept_foreign_rows): `(items, target
+    /// flat row index, ctx)`. Insert them into your tree at/near the index.
+    pub fn on_rows_received(
+        mut self,
+        f: impl Fn(Vec<T>, usize, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_rows_received = Some(Rc::new(f));
+        self
+    }
+
+    /// Raw escape hatch for a foreign drop. Unlike `ListView` / `TableView`,
+    /// `TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
+    /// than a pluggable source, so it cannot express foreign-accept purely
+    /// through source capability closures (`can_accept` / `accept_drop`).
+    /// This fires for **any** payload NOT recognized as this view's own row
+    /// drag — a different view's [`RowDragData<T>`](crate::RowDragData), or a
+    /// completely different payload type — dropped on a node: `(payload,
+    /// target node, drop position, ctx) -> accepted`. Tried after
+    /// [`on_rows_received`](Self::on_rows_received), so the typed sugar wins
+    /// when both are set and the payload happens to carry an exportable
+    /// `RowDragData<T>`.
+    pub fn on_foreign_drop(
+        mut self,
+        f: impl Fn(&DragPayload, NodeId, DropPosition, &mut EventContext) -> bool + 'static,
+    ) -> Self {
+        self.on_foreign_drop = Some(Rc::new(f));
         self
     }
 
@@ -1124,26 +1290,40 @@ impl<T: 'static> Widget for TreeTableView<T> {
             .clips_children(true)
             .focusable(true);
 
-        // Row reorder DnD: the drop reparents/reorders the dragged node in the
-        // underlying `TreeModel`, cycle-guarded. Suppressed while sorted.
-        if self.reorderable {
-            let my_table_id = self.table_id;
+        // Row DnD: same-view reorder (reorderable) reparents/reorders the
+        // dragged node(s) in the underlying `TreeModel`, cycle-guarded and
+        // suppressed while sorted; plus optional foreign receive
+        // (accept_foreign_rows / on_foreign_drop). Registered whenever ANY
+        // of the three capabilities is enabled — a foreign-receive-only view
+        // (reorderable == false) still needs to be a drop target.
+        if self.reorderable || self.accept_foreign_rows || self.on_foreign_drop.is_some() {
+            let my_model_id = self.model_id;
             let proxy_hover = self.proxy.clone();
             let metrics_for_hover = self.row_metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
             let header_h_for_hover = header_h;
             let feedback_for_hover = self.drop_feedback.clone();
             let sort_for_hover = self.sort_signal.clone();
+            let reorderable_hover = self.reorderable;
+            let accept_foreign_hover = self.accept_foreign_rows;
+            let has_foreign_hook_hover = self.on_foreign_drop.is_some();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
-                let Some(drag) = payload.get_typed::<TreeTableRowDragData>() else {
-                    feedback_for_hover.set(None);
-                    return bastyde_core::DropFeedback::NoFeedback;
-                };
-                if sort_for_hover.get().is_some() || drag.source_table_id != my_table_id {
+                let rd = payload.get_typed::<RowDragData<T>>();
+                let is_same_view = rd.is_some_and(|r| r.source == my_model_id);
+                let reorder_ok =
+                    is_same_view && reorderable_hover && sort_for_hover.get().is_none();
+                // The typed `accept_foreign_rows`/`on_rows_received` path can
+                // only consume an EXPORT payload (items present); the raw
+                // `on_foreign_drop` hook can take any foreign payload. Gate the
+                // "drop allowed" affordance accordingly so a reorder-only drag
+                // doesn't show a false insertion line.
+                let is_export = rd.is_some_and(|r| r.is_export());
+                let foreign_ok = !is_same_view
+                    && (has_foreign_hook_hover || (accept_foreign_hover && is_export));
+                if !reorder_ok && !foreign_ok {
                     feedback_for_hover.set(None);
                     return bastyde_core::DropFeedback::NoFeedback;
                 }
-                let source_node = drag.source_node;
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y - header_h_for_hover + scroll;
                 let count = proxy_hover.visible_count();
@@ -1153,16 +1333,23 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     let ins = m.insertion_index(content_y);
                     (m.row_top(ins), m.row_at(content_y))
                 };
-                // A drop is valid unless it targets the node itself or a node
-                // inside its own subtree (a cycle) — invalid shows NO line.
-                let valid = proxy_hover.visible_node_id(row_idx).is_some_and(|t| {
-                    t != source_node
-                        && !bastyde_data::tree_data_source::tree_is_desc_or_self(
-                            &proxy_hover.tree(),
-                            t,
-                            source_node,
-                        )
-                });
+                // A same-view reorder is valid unless it targets one of the
+                // dragged nodes or a node inside one of their subtrees (a
+                // cycle) — invalid shows NO line. A foreign drop has no
+                // tree-structural constraint (the raw/typed receive handlers
+                // decide at commit time).
+                let valid = match rd {
+                    Some(rd_ref) if reorder_ok => {
+                        proxy_hover.visible_node_id(row_idx).is_some_and(|t| {
+                            !rd_ref.rows.iter().any(|&r| {
+                                proxy_hover.visible_node_id(r).is_some_and(|sn| {
+                                    t == sn || tree_is_desc_or_self(&proxy_hover.tree(), t, sn)
+                                })
+                            })
+                        })
+                    }
+                    _ => foreign_ok,
+                };
                 if valid {
                     let insertion_y = insertion_top - scroll;
                     feedback_for_hover.set(Some((insertion_y, 400.0)));
@@ -1176,22 +1363,20 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 }
             });
 
-            let drop_table_id = self.table_id;
+            let drop_model_id = self.model_id;
             let proxy_drop = self.proxy.clone();
             let metrics_for_drop = self.row_metrics.clone();
             let scroll_for_drop = self.scroll_y.clone();
             let header_h_for_drop = header_h;
             let feedback_for_drop = self.drop_feedback.clone();
             let sort_for_drop = self.sort_signal.clone();
-            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+            let reorderable_drop = self.reorderable;
+            let accept_foreign_drop = self.accept_foreign_rows;
+            let on_received_for_drop = self.on_rows_received.clone();
+            let on_foreign_for_drop = self.on_foreign_drop.clone();
+            let flag_for_drop = self.self_reorder_flag.clone();
+            handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 feedback_for_drop.set(None);
-                let Some(drag) = payload.take_typed::<TreeTableRowDragData>() else {
-                    return false;
-                };
-                if sort_for_drop.get().is_some() || drag.source_table_id != drop_table_id {
-                    return false;
-                }
-                let source_node = drag.source_node;
                 let scroll = scroll_for_drop.get().max(0.0);
                 let content_y = position.y - header_h_for_drop + scroll;
                 let (flat_idx, row_top, row_h) = {
@@ -1215,12 +1400,100 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 } else {
                     DropPosition::Into
                 };
-                bastyde_data::tree_data_source::tree_apply_reorder(
-                    &proxy_drop.tree(),
-                    source_node,
-                    target_node,
-                    drop_pos,
-                )
+
+                let is_same_view = payload
+                    .get_typed::<RowDragData<T>>()
+                    .is_some_and(|rd| rd.source == drop_model_id);
+
+                if is_same_view {
+                    if !reorderable_drop || sort_for_drop.get().is_some() {
+                        return false;
+                    }
+                    let Some(rd) = payload.get_typed::<RowDragData<T>>() else {
+                        return false;
+                    };
+                    let source_nodes: Vec<NodeId> = rd
+                        .rows
+                        .iter()
+                        .filter_map(|&r| proxy_drop.visible_node_id(r))
+                        .collect();
+                    if source_nodes.is_empty() {
+                        return false;
+                    }
+                    let tree = proxy_drop.tree();
+                    // Reject the WHOLE same-table drop if the target lands
+                    // inside (or on) ANY dragged node's subtree — matches the
+                    // hover's "invalid" verdict, which checks every dragged
+                    // row (not just the top-level movers). Without this, a
+                    // multi-row drag whose target is inside only ONE dragged
+                    // subtree would silently apply a partial reparent (the
+                    // node containing the target fails cycle-check inside
+                    // `tree_apply_reorder`, but the others still move).
+                    if source_nodes
+                        .iter()
+                        .any(|&n| tree_is_desc_or_self(&tree, target_node, n))
+                    {
+                        return false;
+                    }
+                    let applied = if source_nodes.len() == 1 {
+                        tree_apply_reorder(&tree, source_nodes[0], target_node, drop_pos)
+                    } else {
+                        // Multi-row: drop any dragged node that is a
+                        // descendant of another dragged node (moving an
+                        // ancestor already carries its subtree), then
+                        // reparent the remaining top-level nodes to the
+                        // target one at a time, re-anchoring after each move
+                        // — NodeIds are stable across moves.
+                        let top: Vec<NodeId> = source_nodes
+                            .iter()
+                            .copied()
+                            .filter(|&n| {
+                                !source_nodes.iter().any(|&other| {
+                                    other != n && tree_is_desc_or_self(&tree, n, other)
+                                })
+                            })
+                            .collect();
+                        let mut anchor = target_node;
+                        let mut pos = drop_pos;
+                        let mut moved = false;
+                        for &node in &top {
+                            if node == anchor {
+                                continue;
+                            }
+                            if tree_apply_reorder(&tree, node, anchor, pos) {
+                                moved = true;
+                                anchor = node;
+                                pos = DropPosition::After;
+                            }
+                        }
+                        moved
+                    };
+                    if applied {
+                        flag_for_drop.set(true);
+                    }
+                    return applied;
+                }
+
+                // Foreign: try the typed sugar first (peek before taking, so
+                // a shape mismatch doesn't consume the payload out from under
+                // the raw fallback below), then the raw escape hatch.
+                if accept_foreign_drop
+                    && let Some(cb) = on_received_for_drop.as_ref()
+                    && payload
+                        .get_typed::<RowDragData<T>>()
+                        .is_some_and(|rd| rd.source != drop_model_id && rd.is_export())
+                {
+                    if let Some(rd) = payload.take_typed::<RowDragData<T>>()
+                        && let Some(items) = rd.items
+                    {
+                        cb(items, flat_idx, ctx);
+                        return true;
+                    }
+                }
+                if let Some(cb) = on_foreign_for_drop.as_ref() {
+                    return cb(&payload, target_node, drop_pos, ctx);
+                }
+                false
             });
 
             let feedback_for_leave = self.drop_feedback.clone();
@@ -1252,6 +1525,67 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
                     scroll_for_tick.set(new_y);
+                }
+            });
+        }
+
+        // Export completion: remove rows moved out to a FOREIGN target. The
+        // handler fires on the drag source — this view's root id, the stable
+        // id `start_drag` is given via the body pane's `drag_anchor`. A
+        // same-view reorder set `self_reorder_flag` in `on_drop` above, so
+        // it is skipped here (already applied).
+        if let Some(mode) = self.export_mode {
+            let flag = self.self_reorder_flag.clone();
+            let stash_rows = self.dragged_rows.clone();
+            let stash_nodes = self.dragged_nodes.clone();
+            let on_out = self.on_rows_transferred_out.clone();
+            let tree_for_out = self.proxy.tree();
+            handlers = handlers.on_drag_ended(move |outcome, ctx| {
+                if flag.replace(false) {
+                    stash_rows.borrow_mut().clear();
+                    stash_nodes.borrow_mut().clear();
+                    return;
+                }
+                let accepted_elsewhere = matches!(
+                    outcome,
+                    DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
+                );
+                let rows = std::mem::take(&mut *stash_rows.borrow_mut());
+                let nodes = std::mem::take(&mut *stash_nodes.borrow_mut());
+                if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
+                    return;
+                }
+                if let Some(cb) = on_out.as_ref() {
+                    // Deliver descending so a caller that removes by index
+                    // one at a time stays valid across the batch.
+                    let mut desc = rows;
+                    desc.sort_unstable();
+                    desc.reverse();
+                    cb(&desc, ctx);
+                } else {
+                    // Default: remove the dragged nodes directly from the
+                    // underlying TreeModel. Skip a node that is a descendant
+                    // of another dragged node — removing an ancestor already
+                    // removes its whole subtree, so removing the descendant
+                    // afterwards would operate on an already-freed NodeId.
+                    let top: Vec<NodeId> = nodes
+                        .iter()
+                        .copied()
+                        // Still present: a node could have been removed by
+                        // some unrelated mutation while the drag was in
+                        // flight — `TreeModel::remove` panics on a stale
+                        // key, so re-check existence rather than trust the
+                        // drag-start snapshot.
+                        .filter(|&n| tree_for_out.with_item(n, |_| ()).is_some())
+                        .filter(|&n| {
+                            !nodes.iter().any(|&other| {
+                                other != n && tree_is_desc_or_self(&tree_for_out, n, other)
+                            })
+                        })
+                        .collect();
+                    for node in top {
+                        tree_for_out.remove(node);
+                    }
                 }
             });
         }
@@ -1325,7 +1659,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
                 reorderable: self.reorderable,
-                table_id: self.table_id,
+                model_id: self.model_id,
+                export_mode: self.export_mode,
+                clone_item_fn: self.clone_item_fn.clone(),
+                export_mime_fn: self.export_mime_fn.clone(),
+                dragged_rows: self.dragged_rows.clone(),
+                dragged_nodes: self.dragged_nodes.clone(),
                 drag_anchor: ctx.self_id(),
                 on_row_activate: self.on_row_activate.clone(),
                 activate_on: self.activate_on,

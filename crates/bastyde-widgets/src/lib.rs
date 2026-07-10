@@ -34,7 +34,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub mod docking;
-pub use data_views::ActivateOn;
+pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;

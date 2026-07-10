@@ -8,10 +8,13 @@
 //! `TableView` / `TreeTableView`) share, so DnD validation (`can_accept`) and
 //! the lazy placeholder are wired one way everywhere:
 //!
-//! - [`RowDrag`] — the non-generic intra-app drag payload a row emits. The
-//!   receiving source distinguishes its OWN reorder (matching `source_view_id`)
-//!   from a foreign drop, and translates `source_index` → its own key via
-//!   `key_at`, so the source's `Key` type never leaks into the view.
+//! - [`RowDragData`] — the **public, generic** intra-app drag payload a row (or
+//!   a whole selected set) emits. The receiving source distinguishes its OWN
+//!   reorder (matching [`ViewId`]) from a foreign drop, and translates the
+//!   origin's `rows` → its own key via `key_at`, so the source's `Key` type
+//!   never leaks into the view. When the origin opted into export it also
+//!   carries `items` (clones of the dragged `T`), so a foreign `DropTarget`,
+//!   a different data view, or the OS can consume the drag.
 //! - [`DropIndicator`] — what `paint` renders; `allowed == false` is the
 //!   pre-commit forbidden affordance.
 //! - [`flat_insertion_target`] — maps a flat insertion index to the
@@ -45,13 +48,104 @@ pub enum ActivateOn {
     DoubleClick,
 }
 
-/// The intra-app drag payload a data-view row emits. Non-generic: the receiving
-/// source compares `source_view_id` to decide SameView-vs-Foreign and maps
-/// `source_index` → its own key.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RowDrag {
-    pub(crate) source_index: usize,
-    pub(crate) source_view_id: usize,
+/// Which kind of data view minted a [`ViewId`]. Folded into the id so two
+/// different widget kinds that happen to draw the same value from the shared
+/// process counter can never be mistaken for one another — the reason a bare
+/// `usize` id was a latent cross-widget hazard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ViewKind {
+    List,
+    Tree,
+    Table,
+    TreeTable,
+    Grid,
+}
+
+/// Opaque, kind-tagged, process-unique identity of a drag-capable data-view
+/// instance. Used to tell a view's OWN reorder (`SameView`) from a foreign drop
+/// on the receive side. Apps only ever compare two `ViewId`s for equality (e.g.
+/// out of a received [`RowDragData`]); there is no public constructor, and the
+/// value is stable for a view instance's lifetime, so it is safe to compare
+/// even across windows (each mint is globally unique).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ViewId(ViewKind, usize);
+
+impl ViewId {
+    /// Mint a fresh, globally-unique id for a view of the given kind.
+    pub(crate) fn next(kind: ViewKind) -> Self {
+        Self(kind, next_view_id())
+    }
+}
+
+/// What the *origin* view does to its own rows once a drag is accepted by a
+/// **foreign** target (a different `DropTarget` / view / the OS). Purely an
+/// origin-side cleanup choice — the receiver is unaffected. A same-view reorder
+/// is never a transfer, so this never applies to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DragTransferMode {
+    /// Leave the origin rows in place (the dragged data is duplicated).
+    Copy,
+    /// Remove the dragged rows from the origin once accepted elsewhere
+    /// (or exported as an OS move). This is the [`Default`].
+    #[default]
+    Move,
+}
+
+/// The public, generic drag payload every data-view row (or selected set)
+/// emits. It occupies the single typed slot of a
+/// [`bastyde_core::drag_payload::DragPayload`] and serves both audiences:
+///
+/// - the origin view's own erased classifier reads [`source`](Self::source) +
+///   [`rows`](Self::rows) to recognise a same-view reorder;
+/// - a **foreign** consumer (another view's custom `ListDataSource`, a
+///   `DropTarget::accept_typed::<RowDragData<T>>()`, or `on_rows_received`)
+///   reads [`items`](Self::items).
+///
+/// `items` is `Some` only when the origin view opted into export via
+/// `.exportable(..)` (which requires `T: Clone`); a plain `.reorderable(true)`
+/// drag carries `items == None` (nothing outside the origin could use it
+/// anyway), so a reorder-only view is never accidentally droppable elsewhere.
+#[derive(Debug)]
+pub struct RowDragData<T: 'static> {
+    /// Identity of the view that started the drag.
+    pub source: ViewId,
+    /// The dragged rows as the origin view's flat visible indices at
+    /// drag-start, ascending. Meaningful to the origin (for same-view
+    /// reorder); a foreign consumer should read [`items`](Self::items) instead.
+    pub rows: Vec<usize>,
+    /// Clones of the dragged items, `rows`-ordered. `None` for a reorder-only
+    /// (non-exportable) drag.
+    pub items: Option<Vec<T>>,
+}
+
+impl<T: 'static> RowDragData<T> {
+    /// The dragged items, if this is an export drag (`.exportable(..)` was set
+    /// on the origin). `None` for a reorder-only drag.
+    pub fn items(&self) -> Option<&[T]> {
+        self.items.as_deref()
+    }
+
+    /// Consume the payload for its items (avoids cloning on the receive side).
+    pub fn into_items(self) -> Option<Vec<T>> {
+        self.items
+    }
+
+    /// Whether this drag carries exportable items — i.e. the origin opted into
+    /// `.exportable(..)`. A foreign receiver should gate on this (a reorder-only
+    /// payload has the same Rust type but carries nothing usable).
+    pub fn is_export(&self) -> bool {
+        self.items.is_some()
+    }
+
+    /// Number of dragged rows.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether no rows are carried (never true for a real drag).
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
 }
 
 /// A drop indicator the data views' `paint` renders. `allowed == false` paints a

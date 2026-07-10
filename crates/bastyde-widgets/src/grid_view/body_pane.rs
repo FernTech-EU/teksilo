@@ -22,9 +22,10 @@ use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::{EventResponse, PointerButton, WidgetEvent};
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{DragEligibility, RowState, SelectionModel};
@@ -32,11 +33,16 @@ use bastyde_data::{DragEligibility, RowState, SelectionModel};
 use super::TileContext;
 use super::a11y::TileA11y;
 use super::layout::GridLayoutStrategy;
-use crate::data_views::{RowDrag, default_placeholder};
+use crate::data_views::{DragTransferMode, RowDragData, ViewId, default_placeholder};
 
 pub(crate) type LenFn = Rc<dyn Fn() -> usize>;
 pub(crate) type WithItemFn<T> =
     Rc<dyn Fn(usize, &dyn Fn(&T) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>;
+/// Read `&T` from the resident row at `index` via a side-effecting callback,
+/// returning whether it ran (row present + loaded). Powers export
+/// item-cloning (`.exportable(..)`) without the delegate's widget-building
+/// path.
+pub(crate) type ReadItemFn<T> = Rc<dyn Fn(usize, &mut dyn FnMut(&T)) -> bool>;
 pub(crate) type TileDelegate<T> = Rc<dyn Fn(&TileContext<'_, T>) -> Box<dyn Widget>>;
 /// Per-tile transferable gate (source-owned): may this tile begin a drag?
 pub(crate) type DragFn = Rc<dyn Fn(usize) -> DragEligibility>;
@@ -90,7 +96,35 @@ pub(crate) struct GridBodyPane<T: 'static> {
         >,
     >,
     pub(crate) reorderable: bool,
-    pub(crate) model_id: usize,
+    pub(crate) model_id: ViewId,
+    /// Export: when `Some`, dragged tiles carry clones of their items in the
+    /// payload (source-shared with `GridView`, which is the single source of
+    /// truth for the setting).
+    pub(crate) export_mode: Option<DragTransferMode>,
+    /// Clones a `&T` into an owned `T` for the export payload.
+    #[allow(clippy::type_complexity)]
+    pub(crate) clone_item_fn: Option<Rc<dyn Fn(&T) -> T>>,
+    /// Builds MIME representations of the dragged items for OS / `DropZone`
+    /// export.
+    #[allow(clippy::type_complexity)]
+    pub(crate) export_mime_fn: Option<Rc<dyn Fn(&[T]) -> Vec<(String, Vec<u8>)>>>,
+    /// Read `&T` from the resident row at `index` (source-owned), used to
+    /// clone dragged items for export.
+    pub(crate) read_item_fn: ReadItemFn<T>,
+    /// App override for removing rows moved out to a foreign target; default
+    /// is the source's `on_drag_out`.
+    #[allow(clippy::type_complexity)]
+    pub(crate) on_rows_transferred_out: Option<Rc<dyn Fn(&[usize], &mut EventContext)>>,
+    /// Source-side completion for a plain (non-custom) move-out.
+    pub(crate) on_drag_out_fn: Rc<dyn Fn(&[usize])>,
+    /// Shared with `GridView`'s root `on_drop`: set when a drop was applied as
+    /// a same-view reorder, so `on_drag_ended` skips the move-out (already
+    /// applied).
+    pub(crate) self_reorder_flag: Rc<Cell<bool>>,
+    /// The rows carried by the in-flight drag (shared with `GridView`, which
+    /// captures them at drag-start since `on_drag_ended` gets only a
+    /// `DropOutcome`).
+    pub(crate) dragged_rows: Rc<RefCell<Vec<usize>>>,
     /// The GridView root's focusable `WidgetId`. The focus scope this pane
     /// opens for its tiles is keyed on the root (where keyboard focus lands),
     /// not on the pane itself (a non-focusable child), so a `StandardItem`
@@ -217,6 +251,44 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             });
         }
 
+        // Export completion: remove rows moved out to a FOREIGN target. The
+        // handler fires on the drag source — THIS pane's own id, the stable
+        // id `start_drag` is anchored on below. A same-view reorder is
+        // applied by `GridView`'s root `on_drop`, which sets
+        // `self_reorder_flag`, so it is skipped here (already applied).
+        if let Some(mode) = self.export_mode {
+            let flag = self.self_reorder_flag.clone();
+            let stash = self.dragged_rows.clone();
+            let on_out = self.on_rows_transferred_out.clone();
+            let on_drag_out_fn = self.on_drag_out_fn.clone();
+            ctx.apply_self_handlers(HandlerSet::new().on_drag_ended(move |outcome, ctx| {
+                if flag.replace(false) {
+                    stash.borrow_mut().clear();
+                    return;
+                }
+                let accepted_elsewhere = matches!(
+                    outcome,
+                    DropOutcome::InApp { accepted: true } | DropOutcome::OsMove
+                );
+                let rows = std::mem::take(&mut *stash.borrow_mut());
+                if mode != DragTransferMode::Move || !accepted_elsewhere || rows.is_empty() {
+                    return;
+                }
+                if let Some(cb) = on_out.as_ref() {
+                    // Deliver descending so a caller that removes by index
+                    // one at a time stays valid across the batch.
+                    let mut desc = rows;
+                    desc.sort_unstable();
+                    desc.reverse();
+                    cb(&desc, ctx);
+                } else {
+                    // The erasure resolves stable keys before mutating and
+                    // removes in a key-safe order.
+                    (on_drag_out_fn)(&rows);
+                }
+            }));
+        }
+
         // Realize the visible tiles.
         self.tile_entries.clear();
         let total = (self.len_fn)();
@@ -270,30 +342,72 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             ));
 
             // Selection click. Returns Ignored so the gesture arena still
-            // sees the PointerDown (drag-to-reorder / marquee in later phases).
+            // sees the PointerDown (drag-to-reorder / marquee). Deferred
+            // collapse: pressing an already-selected tile (no modifiers)
+            // keeps the whole (multi-)selection so it can be dragged; the
+            // collapse-to-single happens on release WITHOUT a drag (mirrors
+            // `ListView`).
             if let Some(ref sel) = self.selection {
                 let sel_click = sel.clone();
                 let focused_set = self.focused_index.clone();
                 let idx = i;
+                let pending_collapse = Rc::new(Cell::new(false));
                 ctx.apply_handlers(
                     tile_id,
-                    HandlerSet::new().on_pointer_event(move |event, _ctx| {
-                        if let WidgetEvent::PointerDown {
+                    HandlerSet::new().on_pointer_event(move |event, ctx| match event {
+                        WidgetEvent::PointerDown {
                             button: PointerButton::Primary,
                             modifiers,
                             ..
-                        } = event
-                        {
-                            if modifiers.ctrl() {
-                                sel_click.toggle(idx);
-                            } else if modifiers.shift() {
-                                sel_click.extend_to(idx);
-                            } else {
-                                sel_click.select(idx);
+                        } => {
+                            // The press belongs to an interactive child (an
+                            // embedded checkbox, button, …) — let it handle
+                            // the tap; don't also select the tile. Clear any
+                            // stale deferred-collapse (left by a prior drag
+                            // whose PointerUp the drag machinery consumed) so
+                            // it can't fire on this unrelated interaction.
+                            if ctx.press_claimed_by_interactive_child() {
+                                pending_collapse.set(false);
+                                return EventResponse::Ignored;
                             }
                             focused_set.set(Some(idx));
+                            if modifiers.ctrl() {
+                                sel_click.toggle(idx);
+                                pending_collapse.set(false);
+                            } else if modifiers.shift() {
+                                sel_click.extend_to(idx);
+                                pending_collapse.set(false);
+                            } else if sel_click.is_selected(idx) {
+                                // Defer: a following drag preserves the whole
+                                // selection; a plain click collapses on
+                                // release.
+                                pending_collapse.set(true);
+                            } else {
+                                sel_click.select(idx);
+                                pending_collapse.set(false);
+                            }
+                            EventResponse::Ignored
                         }
-                        EventResponse::Ignored
+                        WidgetEvent::PointerUp {
+                            button: PointerButton::Primary,
+                            ..
+                        } => {
+                            // A release on an interactive child is that
+                            // child's tap — never collapse the tile from it
+                            // (guards against a `pending_collapse` a prior
+                            // drag left stuck true).
+                            if ctx.press_claimed_by_interactive_child() {
+                                return EventResponse::Ignored;
+                            }
+                            // Reached only on a click WITHOUT a drag (an
+                            // active drag consumes PointerUp). Collapse the
+                            // deferred multi-selection to the clicked tile.
+                            if pending_collapse.replace(false) {
+                                sel_click.select(idx);
+                            }
+                            EventResponse::Ignored
+                        }
+                        _ => EventResponse::Ignored,
                     }),
                 );
             }
@@ -320,7 +434,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 extra = extra.context_menu(move |pos, ctx| factory(idx, pos, ctx));
                 has_extra = true;
             }
-            if self.reorderable {
+            if self.reorderable || self.export_mode.is_some() {
                 let idx = i;
                 let model_id = self.model_id;
                 let anchor = ctx.self_id();
@@ -329,16 +443,71 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let strategy = self.strategy.clone();
                 let vp_w = self.viewport_width.clone();
                 let drag_gate = self.drag_fn.clone();
+                // Export capture: the dragged set is selection-aware, and
+                // clones/MIME are built only when the view opted in.
+                let sel_for_drag = self.selection.clone();
+                let clone_for_drag = self.clone_item_fn.clone();
+                let mime_for_drag = self.export_mime_fn.clone();
+                let read_for_drag = self.read_item_fn.clone();
+                let stash_for_drag = self.dragged_rows.clone();
                 extra = extra.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
                         // The source's per-tile transferable gate.
                         if (drag_gate)(idx) == DragEligibility::NoDrag {
                             return;
                         }
-                        let payload = bastyde_core::drag_payload::DragPayload::typed(RowDrag {
-                            source_index: idx,
-                            source_view_id: model_id,
+                        // Selection-aware dragged set: the whole selection
+                        // when the pressed tile is part of a
+                        // multi-selection, else just the pressed tile.
+                        let mut rows: Vec<usize> = match sel_for_drag.as_ref() {
+                            Some(s) if s.is_selected(idx) => {
+                                let mut v = s.selected_indices();
+                                v.sort_unstable();
+                                if v.len() <= 1 { vec![idx] } else { v }
+                            }
+                            _ => vec![idx],
+                        };
+                        // Export clones, if opted in. Drop any row whose
+                        // item isn't resident (a lazy `Loading` tile) so
+                        // `rows` and `items` stay index-aligned and a Move
+                        // never removes a tile whose data was never
+                        // transferred.
+                        let items: Option<Vec<T>> = if let Some(cf) = clone_for_drag.as_ref() {
+                            let mut out = Vec::with_capacity(rows.len());
+                            rows.retain(|&r| {
+                                let mut got = None;
+                                (read_for_drag)(r, &mut |t| got = Some(cf(t)));
+                                match got {
+                                    Some(v) => {
+                                        out.push(v);
+                                        true
+                                    }
+                                    None => false,
+                                }
+                            });
+                            Some(out)
+                        } else {
+                            None
+                        };
+                        // MIME reps for OS / DropZone export.
+                        let mime_pairs: Vec<(String, Vec<u8>)> =
+                            match (mime_for_drag.as_ref(), items.as_ref()) {
+                                (Some(mf), Some(its)) => mf(its),
+                                _ => Vec::new(),
+                            };
+                        let mut payload = DragPayload::typed(RowDragData::<T> {
+                            source: model_id,
+                            rows: rows.clone(),
+                            items,
                         });
+                        let has_mime = !mime_pairs.is_empty();
+                        for (mime, bytes) in mime_pairs {
+                            payload = payload.with_mime(&mime, bytes);
+                        }
+                        if has_mime {
+                            payload.enrich_external_from_mime();
+                        }
+                        *stash_for_drag.borrow_mut() = rows;
                         let r = strategy.tile_rect(idx, vp_w.get());
                         let (w, h) = (r.width.max(40.0), r.height.max(40.0));
                         let delegate = delegate.clone();

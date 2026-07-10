@@ -262,12 +262,12 @@ the source answers `can_accept` / `accept_drop`. Reading
 [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) as reference examples:
 
 - `drop_feedback` signal (bound at `BindingLevel::RepaintOnly`) — set by `on_drag_hover`, cleared by `on_drag_leave`. Reading it in `paint()` is enough; the binding dirties the widget when the signal changes.
-- `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared `RowDrag { source_index, source_view_id }` typed payload (one type for all four data views) and a `DragPreview` built by re-invoking the delegate for the dragged row.
+- `on_drag` (per item wrapper) — fires only when the source's `drag(key)` returns `CanDrag`; emits the shared **public** [`RowDragData<T> { source: ViewId, rows: Vec<usize>, items: Option<Vec<T>> }`](../crates/bastyde-widgets/src/data_views.rs) typed payload (one type for all five data views) and a `DragPreview` built by re-invoking the delegate for the dragged row. `rows` is the selection-aware dragged set; `items` is `Some` only when the view opted into [`.exportable(..)`](#12-dragging-rows-out-of-a-data-view--cross-widget-export). The identity is a kind-tagged, process-global [`ViewId`](../crates/bastyde-widgets/src/data_views.rs) so a foreign drag is never misread as a same-view reorder.
 - `on_drag_hover` (on the list/tree itself) — computes the geometric `(target, position)` from local Y + scroll offset, asks the source `can_accept`, and sets the feedback signal to match the verdict (`Accept` → insertion line, `Reject` → suppress, `Redirect` → snap). `TreeView` also records the hovered node + timestamp for spring-load.
 - `on_drag_tick` — edge auto-scroll (linear ramp inside a 32 px zone, max 12 px/frame). `TreeView` additionally checks the spring-load timer and expands the hovered branch after 700 ms.
 - `on_drag_leave` — clears the feedback signal and the spring-load timer.
-- `on_drop` — re-queries `can_accept`; if not `Reject`, routes the commit to the source's `accept_drop`. A same-view `RowDrag` is a `DragSource::SameView` the source applies (a `ListModel` reorders in place, a `TreeModel`-backed source `move_node`s with the cycle guard); a cross-view or OS payload arrives as `DragSource::Foreign { payload }` at the *same* `accept_drop`, which downcasts it. There is no separate `on_item_drop` on the data views anymore — `GridView` keeps one only as a foreign-payload escape hatch.
-- `on_key` — Alt+ArrowUp / Alt+ArrowDown synthesize the same `RowDrag` and route it through `accept_drop`, so the keyboard contract travels the identical path.
+- `on_drop` — re-queries `can_accept`; if not `Reject`, routes the commit to the source's `accept_drop`. A same-view `RowDragData` is a `DragSource::SameView` the source applies (a `ListModel` reorders in place — one row via `move_item`, a multi-row block via `move_items`; a `TreeModel`-backed source `move_node`s with the cycle guard); a cross-view or OS payload arrives as `DragSource::Foreign { payload }` at the *same* `accept_drop`, which downcasts it. The same-view reorder only runs when the view is `reorderable`.
+- `on_key` — Alt+ArrowUp / Alt+ArrowDown synthesize the same `RowDragData` and route it through `accept_drop`, so the keyboard contract travels the identical path.
 
 ## 10. Testing
 
@@ -484,9 +484,96 @@ Demo: the "Internal drop target" panel in `cargo run -p file-drop` is a `DropTar
 recovering a typed `String` (drop a row on it directly, or drag a row out to the OS
 and back).
 
-## 12. Non-goals — what DnD does NOT do yet
+## 12. Dragging rows OUT of a data view — cross-widget export
 
-- **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export.
+Sections 9 and 4 cover a row **reordering within its own view** and a source
+owning `can_accept` / `accept_drop`. This section is the other direction:
+letting a user drag row(s) **out** of a `ListView` / `TreeView` / `TableView` /
+`TreeTableView` / `GridView` and drop them **elsewhere** — on a
+[`DropTarget`](#116-droptarget), a [`DropZone`](#114-the-dropzone-widget),
+another data view, or the OS. All five views share one opt-in builder surface.
+
+### 12.1 The payload — `RowDragData<T>`
+
+Every data-view row drag carries the public, generic
+[`RowDragData<T>`](../crates/bastyde-widgets/src/data_views.rs):
+
+```rust
+pub struct RowDragData<T: 'static> {
+    pub source: ViewId,          // kind-tagged, process-global identity
+    pub rows: Vec<usize>,        // origin's flat visible indices (drag-start)
+    pub items: Option<Vec<T>>,   // clones — Some only for an export drag
+}
+```
+
+It occupies the single typed slot of the [`DragPayload`](#2-payload--dragpayload)
+and serves both audiences: the origin's own erased classifier reads
+`source` + `rows` to recognise a same-view reorder; a **foreign** receiver reads
+`items`. A plain `.reorderable(true)` drag carries `items == None`, so a
+reorder-only view is never accidentally consumed elsewhere — a receiver gates on
+[`RowDragData::is_export()`](../crates/bastyde-widgets/src/data_views.rs).
+
+### 12.2 Send side — opting rows into export
+
+| Builder (on every data view) | Effect |
+|---|---|
+| `.exportable(DragTransferMode)` (`where T: Clone`) | Carry `items` clones so a foreign target gets typed rows; also makes rows a drag source **without** `reorderable`. `Move` removes the origin rows once a foreign target accepts them; `Copy` keeps them. |
+| `.export_external(\|&[T]\| -> Vec<(String, Vec<u8>)>)` (`where T: Clone`) | Additionally advertise MIME (`text/plain`, `text/uri-list`, an app `application/x-…`) so a `DropZone` / the OS can take the drag. Implies `.exportable`. |
+| `.on_rows_transferred_out(\|&[usize], ctx\|)` | Override the `Move` removal (rows are delivered **descending** so index-by-index removal stays valid). Default: the source's `on_drag_out`. |
+
+The dragged set is **selection-aware**: pressing an already-selected row keeps
+the whole multi-selection (the collapse-to-one is deferred to a release without
+a drag), so dragging one member of a selection exports them all. Rows whose item
+isn't resident (a lazy `Loading` row) are dropped from the export so `rows` and
+`items` stay aligned.
+
+### 12.3 Receive side
+
+- **A `DropTarget` / `DropZone` / any widget elsewhere** — already works: name the same `T` and read it:
+
+  ```rust
+  DropTarget::new()
+      .accept_when(|p| p.get_typed::<RowDragData<Chapter>>().is_some_and(|d| d.is_export()))
+      .on_drop(|mut p, _pos, _ctx| {
+          if let Some(items) = p.take_typed::<RowDragData<Chapter>>().and_then(|d| d.items) {
+              trash.extend(items); return true;
+          }
+          false
+      })
+      .child(trash_bin);
+  ```
+
+- **Another data view** — two ways: (a) a **custom `ListDataSource`/`TreeDataSource`** whose `can_accept`/`accept_drop` inspect the `DragSource::Foreign { payload }` (§9); or (b) the zero-custom-source sugar `.accept_foreign_rows(true)` + `.on_rows_received(\|Vec<T>, insertion_index, ctx\|)` on the receiving view, which inserts the dropped items into your model.
+- **`TreeTableView`** is not source-pluggable (it wraps a concrete `SortFilterTreeModel<T>`), so it exposes a raw escape hatch in addition to the typed sugar: `.on_foreign_drop(\|&DragPayload, target: NodeId, DropPosition, ctx\| -> bool)`.
+
+### 12.4 Completion (move-vs-copy)
+
+The framework delivers the outcome to the source's `on_drag_ended`. The view sets
+a `self_reorder_flag` when *it* handled a same-view reorder, so a `Move` only
+removes rows that a **foreign** target accepted — never double-removing after an
+own reorder. **Move caveats:** removal fires for an in-app drop *in the same
+window* (`DropOutcome::InApp { accepted: true }`) or a genuine OS move; shipped
+OS backends advertise **copy only**, so a drag exported to another application or
+another window is a *copy* (the origin row is kept — see §13). For a
+`ListModel`-backed view (key == index) the move-out removes by drag-start
+indices; mutate a shared model mid-drag and use `.on_rows_transferred_out` with
+your own stable identity.
+
+### 12.5 Correctness notes
+
+`ViewId` is a process-global, kind-tagged id (so a `ListView` and a `TreeView`
+can never collide and misread a foreign drag as a same-view reorder). Multi-row
+same-view reorder lands the block **contiguously** (`ListModel::move_items`
+emits `ItemsMoved` so index selection follows; trees re-anchor and drop
+descendants of another dragged node, and reject a drop *into* a dragged
+subtree). See the integration tests in
+[list_view.rs](../crates/bastyde-widgets/src/list_view.rs) (`exportable_*`,
+`accept_foreign_rows_receives_from_another_view`,
+`two_views_over_same_model_do_not_spuriously_reorder`).
+
+## 13. Non-goals — what DnD does NOT do yet
+
+- **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export. (A data-view `.exportable(Move)` drag therefore behaves as a copy across the window boundary — see §12.4.)
 - **Windows / X11 outbound export.** `begin_os_drag` declines on these targets (no `IDropSource` / X11 source yet); the in-app drag simply stays alive when the pointer leaves. Re-addable behind the same `ExternalDndGuard::begin_drag` surface.
 - **X11 inbound OS drops.** Out of scope for now (no-op backend); the `DropZone` Browse fallback covers it. Re-addable behind the same `ExternalDndBackend` trait.
 - **`Opacity` primitive for previews.** The current `DragPreview` uses a raised surface — no transparency. Opacity is a separate widget-primitive enhancement.

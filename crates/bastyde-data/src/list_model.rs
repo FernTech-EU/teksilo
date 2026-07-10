@@ -202,6 +202,59 @@ impl<T: 'static> ListModel<T> {
         self.notify(DataChange::ItemsMoved { from, to, count: 1 });
     }
 
+    /// Move a set of items so they land **contiguously** at a drop gap,
+    /// preserving their relative order — the multi-row same-view reorder
+    /// commit. `indices` are the items' current positions (any order;
+    /// out-of-range entries are ignored); `insert_gap` is the destination in
+    /// `0..=len` expressed in the pre-move indexing (i.e. "land before the item
+    /// currently at `insert_gap`"; `len` = at the end).
+    ///
+    /// Returns whether anything moved (`false` if `indices` held no in-range
+    /// entry). A **contiguous** source block emits a single
+    /// [`DataChange::ItemsMoved`] — so index-based selection follows the moved
+    /// rows; a non-contiguous set emits [`DataChange::Reset`] (that permutation
+    /// is not expressible as one `ItemsMoved`, and selection is dropped). For a
+    /// single index prefer [`move_item`](Self::move_item).
+    pub fn move_items(&self, indices: &[usize], insert_gap: usize) -> bool {
+        let len = self.len();
+        let mut idx: Vec<usize> = indices.iter().copied().filter(|&i| i < len).collect();
+        idx.sort_unstable();
+        idx.dedup();
+        if idx.is_empty() {
+            return false;
+        }
+        let contiguous = idx.windows(2).all(|w| w[1] == w[0] + 1);
+        let from0 = idx[0];
+        let count = idx.len();
+        let at;
+        {
+            let mut guard = self.inner.borrow_mut();
+            // Remove from the back so earlier indices stay valid, then restore
+            // ascending (original) order.
+            let mut block: Vec<T> = idx.iter().rev().map(|&i| guard.items.remove(i)).collect();
+            block.reverse();
+            let removed_before = idx.iter().filter(|&&i| i < insert_gap).count();
+            at = insert_gap
+                .saturating_sub(removed_before)
+                .min(guard.items.len());
+            for (off, item) in block.into_iter().enumerate() {
+                guard.items.insert(at + off, item);
+            }
+        }
+        if contiguous && from0 != at {
+            self.notify(DataChange::ItemsMoved {
+                from: from0,
+                to: at,
+                count,
+            });
+        } else if contiguous {
+            // No net movement (block landed where it started).
+        } else {
+            self.notify(DataChange::Reset);
+        }
+        true
+    }
+
     /// Replace the entire list contents.
     pub fn replace_all(&self, items: Vec<T>) {
         {
@@ -387,6 +440,38 @@ impl<T: 'static> ListDataSource for ListModel<T> {
         let to = to.min(len.saturating_sub(1));
         self.move_item(from, to);
         true
+    }
+
+    fn reorder_within(&self, sources: &[usize], target: &usize, position: DropPosition) -> bool {
+        // A `ListModel`'s key IS the index, so the stable-key default (which
+        // re-anchors on a just-moved key) would corrupt after the first move —
+        // route the multi-row case through the index-safe block move instead.
+        // A single row keeps the finer-grained `accept_drop`/`move_item` path.
+        if sources.len() <= 1 {
+            let Some(&from) = sources.first() else {
+                return false;
+            };
+            return self.accept_drop(DropCommit {
+                source: DragSource::SameView { key: from },
+                target: *target,
+                position,
+            });
+        }
+        let gap = match position {
+            DropPosition::Before => *target,
+            DropPosition::After => *target + 1,
+            DropPosition::Into => return false,
+        };
+        self.move_items(sources, gap)
+    }
+
+    fn on_drag_out(&self, key: &usize) {
+        // Source-side completion for a foreign move: drop the row that was
+        // accepted elsewhere. Callers remove in descending index order so
+        // earlier keys stay valid across a multi-row transfer.
+        if *key < ListModel::len(self) {
+            let _ = self.remove(*key);
+        }
     }
 }
 
@@ -674,5 +759,103 @@ mod tests {
         assert_eq!(model.index_of(&2), Some(2));
         assert_eq!(model.key_at(5), None);
         assert_eq!(model.index_of(&9), None);
+    }
+
+    fn snapshot<T: Clone>(model: &ListModel<T>) -> Vec<T> {
+        (0..model.len())
+            .filter_map(|i| model.with_item(i, |v| v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn move_items_block_move_contiguous_and_ordered() {
+        // Move a non-contiguous set {A(0), C(2), E(4)} to land at gap 3
+        // (before the item originally at index 3, i.e. D).
+        let model = ListModel::from_vec(vec!['A', 'B', 'C', 'D', 'E', 'F']);
+        model.move_items(&[0, 2, 4], 3);
+        // gap 3 = "before the original item at index 3" (D). Remove A,C,E →
+        // [B,D,F]; two removed before the gap → insert the block before D.
+        assert_eq!(snapshot(&model), vec!['B', 'A', 'C', 'E', 'D', 'F']);
+    }
+
+    #[test]
+    fn move_items_to_end() {
+        let model = ListModel::from_vec(vec![1, 2, 3, 4]);
+        model.move_items(&[0, 1], 4);
+        assert_eq!(snapshot(&model), vec![3, 4, 1, 2]);
+    }
+
+    #[test]
+    fn move_items_ignores_out_of_range_and_dedups() {
+        let model = ListModel::from_vec(vec![1, 2, 3]);
+        model.move_items(&[1, 1, 9], 3);
+        assert_eq!(snapshot(&model), vec![1, 3, 2]);
+    }
+
+    #[test]
+    fn move_items_single_matches_move_item() {
+        let a = ListModel::from_vec(vec![1, 2, 3, 4, 5]);
+        let b = ListModel::from_vec(vec![1, 2, 3, 4, 5]);
+        // move_items([1], gap 4) == move a block of one from 1 to before-4.
+        a.move_items(&[1], 4);
+        // Equivalent single move: remove index 1, insert at post-removal index 3.
+        b.move_item(1, 3);
+        assert_eq!(snapshot(&a), snapshot(&b));
+    }
+
+    #[test]
+    fn reorder_within_multi_row_lands_contiguously() {
+        // Exercise the ListModel `reorder_within` override (multi → block move).
+        let model = ListModel::from_vec(vec![0, 1, 2, 3, 4, 5]);
+        // Drag rows {0,1} to drop After index 4.
+        assert!(model.reorder_within(&[0, 1], &4, DropPosition::After));
+        assert_eq!(snapshot(&model), vec![2, 3, 4, 0, 1, 5]);
+    }
+
+    #[test]
+    fn reorder_within_single_row_uses_accept_drop() {
+        let model = ListModel::from_vec(vec![10, 20, 30]);
+        assert!(model.reorder_within(&[0], &2, DropPosition::After));
+        assert_eq!(snapshot(&model), vec![20, 30, 10]);
+    }
+
+    #[test]
+    fn reorder_within_into_is_rejected_for_flat_list() {
+        let model = ListModel::from_vec(vec![1, 2, 3]);
+        assert!(!model.reorder_within(&[0, 1], &2, DropPosition::Into));
+        assert_eq!(snapshot(&model), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn on_drag_out_removes_the_moved_row() {
+        let model = ListModel::from_vec(vec!['a', 'b', 'c']);
+        model.on_drag_out(&1);
+        assert_eq!(snapshot(&model), vec!['a', 'c']);
+    }
+
+    #[test]
+    fn move_items_contiguous_emits_moved_non_contiguous_resets() {
+        let model = ListModel::from_vec(vec![0, 1, 2, 3, 4]);
+        let log: Rc<RefCell<Vec<DataChange>>> = Rc::new(RefCell::new(Vec::new()));
+        let l = log.clone();
+        let _h = model.observe_changes(move |c| l.borrow_mut().push(c.clone()));
+        // Contiguous block → ItemsMoved (so index selection can follow).
+        assert!(model.move_items(&[1, 2], 5));
+        assert!(matches!(
+            log.borrow().last(),
+            Some(DataChange::ItemsMoved { .. })
+        ));
+        log.borrow_mut().clear();
+        // Non-contiguous set → Reset.
+        assert!(model.move_items(&[0, 2], 0));
+        assert!(matches!(log.borrow().last(), Some(DataChange::Reset)));
+    }
+
+    #[test]
+    fn reorder_within_and_move_items_report_no_move_for_out_of_range() {
+        let model = ListModel::from_vec(vec![1, 2, 3]);
+        assert!(!model.reorder_within(&[99, 100], &0, DropPosition::Before));
+        assert!(!model.move_items(&[99, 100], 0));
+        assert_eq!(snapshot(&model), vec![1, 2, 3]);
     }
 }
