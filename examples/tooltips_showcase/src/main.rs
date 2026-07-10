@@ -20,8 +20,8 @@
 use bastyde::prelude::*;
 use bastyde::widgets::tooltip::TooltipContent;
 use bastyde::widgets::{
-    Button, Expand, HStack, Padding, Panel, ProgressBar, Spacer, TabInfo, TabWidget, TextWidget,
-    VStack,
+    Button, Expand, HStack, MenuItem, MenuList, Padding, Panel, ProgressBar, Spacer, TabInfo,
+    TabWidget, TextWidget, VStack,
 };
 
 // ── Rich-tooltip registry keys ───────────────────────────────────────────
@@ -207,6 +207,72 @@ fn composite_column() -> impl Widget {
     )
 }
 
+/// The regression demo for this change. Two surfaces where tooltips are
+/// attached to *vertically-stacked* items:
+///
+/// * a right-click context menu whose `MenuItem`s carry rich tooltips —
+///   opening it no longer floods a wall of tooltips (Part A); hover or
+///   arrow-key a single item to reveal exactly its tooltip, opened to the
+///   trailing side (Parts B + C);
+/// * a **vertical** `TabWidget` whose tabs carry rich tooltips — hovering a
+///   tab opens its tooltip beside it, not over the tab below (Part B).
+fn menu_and_vtabs_column() -> impl Widget {
+    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
+    let vtabs = TabWidget::new(selected)
+        .vertical()
+        .static_tab(
+            TabInfo::new().title(lit!("Food")).rich_tooltip(KEY_FOOD),
+            TextWidget::new(lit!("Food panel")),
+        )
+        .static_tab(
+            TabInfo::new().title(lit!("Trade")).rich_tooltip(KEY_TRADE),
+            TextWidget::new(lit!("Trade panel")),
+        )
+        .static_tab(
+            TabInfo::new()
+                .title(lit!("Happiness"))
+                .rich_tooltip(KEY_HAPPINESS),
+            TextWidget::new(lit!("Happiness panel")),
+        );
+
+    // Right-click target that mounts a menu of rich-tooltip items.
+    let menu_area = Panel::new()
+        .child(
+            VStack::new()
+                .spacing(4.0)
+                .child(
+                    TextWidget::new(lit!("Right-click here for a menu"))
+                        .style(TextStyleRole::BodyBold),
+                )
+                .child(TextWidget::new(lit!("(every item carries a rich tooltip)"))),
+        )
+        .context_menu(|_pos, _ctx| {
+            Some(Box::new(
+                MenuList::new()
+                    .item(MenuItem::new(lit!("Food")).rich_tooltip(KEY_FOOD))
+                    .item(MenuItem::new(lit!("Trade")).rich_tooltip(KEY_TRADE))
+                    .item(MenuItem::new(lit!("Happiness")).rich_tooltip(KEY_HAPPINESS)),
+            ) as Box<dyn Widget>)
+        });
+
+    Panel::new().child(
+        VStack::new()
+            .spacing(8.0)
+            .child(TextWidget::new(lit!("Menus & vertical tabs")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("(the wall + occlusion fix)")))
+            .child(Spacer::new())
+            .child(menu_area)
+            .child(TextWidget::new(lit!(
+                "Open it: no wall. Hover one item, or arrow-key through — one tooltip, to the side."
+            )))
+            .child(Spacer::new())
+            .child(TextWidget::new(lit!(
+                "Vertical tabs — hover a tab; the tooltip opens beside it, not over the next tab:"
+            )))
+            .child(Expand::new().child(vtabs)),
+    )
+}
+
 fn root() -> impl Widget {
     VStack::new()
         .spacing(12.0)
@@ -219,7 +285,8 @@ fn root() -> impl Widget {
                     .spacing(12.0)
                     .child(Expand::new().flex(1.0).child(plain_column()))
                     .child(Expand::new().flex(1.0).child(rich_column()))
-                    .child(Expand::new().flex(1.0).child(composite_column())),
+                    .child(Expand::new().flex(1.0).child(composite_column()))
+                    .child(Expand::new().flex(1.0).child(menu_and_vtabs_column())),
             ),
         )
 }
