@@ -7,6 +7,14 @@ impl WidgetTree {
     /// Process dirty state bindings: mark bound widgets for repaint, relayout,
     /// or rebuild. Called automatically at the start of layout().
     pub(super) fn process_state_changes(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // Refresh the node-resident `effective_enabled_signal`s FIRST, so a
+        // widget bound to one is dirty-marked in time for the binding flush
+        // immediately below to drain it in this same pass, rather than a frame
+        // late. This is also where a signal seeded during `build()` — when the
+        // widget's parent was not yet wired, so the seed could only see its own
+        // `enabled` prop — is corrected against the now-complete tree.
+        self.flush_effective_enabled_signals();
+
         // One unified flush: both visual buckets and the a11y flag
         // are drained from the same walk, so a signal bound at both
         // a visual level and `AccessibilityOnly` (e.g. a Button's

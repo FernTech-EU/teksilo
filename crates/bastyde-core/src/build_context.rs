@@ -488,14 +488,15 @@ impl<'a> BuildContext<'a> {
     /// This method is for composites that need the value at build time
     /// or want to chain signals.
     ///
-    /// Returns `Signal::new(true)` for any node whose entire ancestor
-    /// chain (including itself) has no `enabled_state` bound. Captures
-    /// the ancestor chain at call time — re-parenting a widget after
-    /// this returns will not retroactively update the derived signal.
-    /// In Bastyde's rebuild-on-change tree this is the expected
-    /// semantics; widgets that re-anchor across builds should call
-    /// `effective_enabled_signal` from inside their `build()`.
-    pub fn effective_enabled_signal(&self, id: WidgetId) -> Signal<bool> {
+    /// The signal is node-resident and framework-refreshed (install-or-reuse,
+    /// like [`Self::activation_signal`]), so it tracks ancestors correctly even
+    /// though a widget's parent is not yet wired while its own `build()` runs.
+    /// It is a *mutable* signal, so — unlike the old derived implementation —
+    /// it can be passed to [`Self::effect`].
+    ///
+    /// Returns a signal reading `true` for any node whose entire ancestor
+    /// chain (including itself) has no `enabled_state` bound.
+    pub fn effective_enabled_signal(&mut self, id: WidgetId) -> Signal<bool> {
         self.tree.effective_enabled_signal(id)
     }
 

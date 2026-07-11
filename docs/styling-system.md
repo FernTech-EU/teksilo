@@ -88,53 +88,68 @@ type.
 
 ### How a widget goes grey when disabled
 
-Two mechanisms, and picking the wrong one is the classic way to ship a
-control that stays fully lit after `.enabled(false)`.
+A widget is disabled when its own `enabled` prop is false **or any ancestor's
+is** — a control inside a disabled form is disabled. Its chrome greys by one
+of two routes, and there is a trap in each.
 
-**Accent-filled controls dim for free.** `ColorProp::resolve(theme,
+**Role-driven chrome dims for free.** `ColorProp::resolve(theme,
 effective_enabled)` — which every role-driven leaf (`TextWidget`,
-`IconWidget`, `RectWidget`) calls at paint time — substitutes the
-disabled counterpart of a role when the subtree is disabled: any
-`TextRole` → `TextRole::Disabled`, and the *accent* family
-(`SurfaceRole::Accent` / `AccentHover` / `AccentPressed`,
-`BorderRole::Accent`) → their `AccentDisabled` counterpart. So a Filled
-`Button`, a checked `Checkbox`, a `Toggle` and a `Slider` fill all grey
-out with **no disabled-handling code at all**. That is why most recipes
-never mention `is_disabled`.
+`IconWidget`, `RectWidget`) calls at paint time — substitutes the disabled
+counterpart of a role in a disabled subtree: any `TextRole` →
+`TextRole::Disabled`; the *accent* family (`SurfaceRole::Accent` /
+`AccentHover` / `AccentPressed`, `BorderRole::Accent`) → their
+`AccentDisabled` counterpart; and the *neutral interactive*
+`SurfaceRole::Field` / `BorderRole::Field` → their `Disabled` counterpart.
+This is why most recipes never mention `is_disabled`.
 
-**Neutral controls must opt in.** The substitution deliberately leaves
-*non-accent* surfaces and borders alone — a disabled `Panel` keeps its
-surface, and only interactive accent chrome dims. It has to: a text
-field's frame and a passive `Panel` both paint `SurfaceRole::Content`,
-so the hook cannot tell them apart. A neutral **interactive** control —
-`TextInput`, `SpinBox`, `ComboBox`, `DateEdit` — therefore states it
-explicitly, using the neutral disabled roles:
+⚠️ The substitution only reaches roles. `ColorProp::Bound(Signal<Color>)`
+resolves to `s.get()` and ignores `enabled` entirely — so a recipe that folds
+per-state colours into a flat reactive colour (as `RecipeButtonStyle` does via
+`PerStateRecipe` + `bind_fill`) gets **no** paint-time safety net, and must
+select its `WidgetState::Disabled` from `cfg.is_disabled`.
+
+**Neutral controls must opt into a `Field` role.** The substitution
+deliberately leaves passive surfaces alone — a disabled `Panel` keeps its
+surface. It has to: a text field's frame and a passive `Panel` both painted
+`SurfaceRole::Content`, so the hook could not tell them apart, and dimmed
+neither. That is what `Field` is for. It resolves **identically to `Content`
+while enabled** and substitutes to `Disabled` when not, so a field dims and a
+panel does not:
 
 ```rust
-let bg_role = cfg.is_disabled.map(|d| {
-    if *d { SurfaceRole::Disabled } else { SurfaceRole::Content }
-});
+// A field's frame. No `is_disabled` needed for the resting case — the role
+// dims itself at paint, from the live arena.
+let bg = RectWidget::new().background(SurfaceRole::Field);
+
+// The border still consults `is_disabled`, so disabled outranks *focus*.
 let border_role = cfg.is_focused.zip(&cfg.is_disabled).map(|(f, d)| {
-    if *d { BorderRole::Disabled }          // outranks focus
+    if *d { BorderRole::Disabled }
     else if *f { BorderRole::Focused }
-    else { BorderRole::Default }
+    else { BorderRole::Field }
 });
 ```
 
 `SurfaceRole::Disabled` / `BorderRole::Disabled` resolve to the neutral
 `surface_disabled` / `border_disabled` tokens. Do **not** reach for
 `AccentDisabled` here: it is a washed-out *accent* (pale cyan in IntUI),
-correct for an accent-filled Button and wrong for a grey field.
+right for an accent-filled Button and wrong for a grey field.
 
-Get the `is_disabled` signal from
-`ctx.effective_enabled_signal(self_id).map(|on| !*on)` — it ANDs the
-widget's own `enabled` prop with every ancestor's, so a field inside a
-disabled form dims too. Note it returns a **derived** signal, so it can
-be bound to a prop but cannot be passed to `ctx.effect` (`Signal::observe`
-panics on derived signals). A widget that paints raw colours rather than
-roles — anything shaping through a `RichTextEngine`, e.g.
-`TextInputField` — bypasses `ColorProp` entirely and must resolve against
-`ctx.effective_enabled` in `paint` instead.
+**Getting the signal.** `ctx.effective_enabled_signal(self_id).map(|on| !*on)`
+ANDs the widget's own `enabled` prop with every ancestor's. It is a node-resident
+signal that the framework refreshes from the live arena each state-change pass,
+so it may be bound to a prop *and* passed to `ctx.effect`.
+
+It is deliberately not a signal derived by walking ancestors at call time. A
+widget's `parent` is still `None` while its own `build()` runs — `insert_widget`
+inserts the node parentless and wires the parent only after `build()` returns —
+so such a walk sees an empty chain and captures the widget's *own* `enabled` prop
+as the whole answer, permanently. Prefer a `Field` role over the signal where you
+can: the paint-time route reads the live tree and cannot go stale.
+
+**Raw-colour widgets bypass all of this.** Anything shaping through a
+`RichTextEngine` (e.g. `TextInputField`) hands GPU colours straight to the
+engine, so no `ColorProp` is involved. Resolve against `ctx.effective_enabled`
+in `paint` instead.
 
 ## Tier 1 — Variants
 

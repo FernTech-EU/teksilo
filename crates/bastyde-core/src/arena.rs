@@ -106,6 +106,19 @@ pub struct WidgetNode {
     /// that resource. This signal is that notification. Set only on an
     /// actual Active↔Dormant transition. See `set_dormant` / `activate`.
     pub(crate) activation_signal: Option<Signal<bool>>,
+    /// Framework-written mirror of [`WidgetArena::is_enabled`] for this node —
+    /// the AND of its own `enabled_state` and every ancestor's. Opted into via
+    /// `BuildContext::effective_enabled_signal`.
+    ///
+    /// This has to be a *node-resident* signal that the framework refreshes,
+    /// rather than a signal derived by walking ancestors at call time, because
+    /// a widget's `parent` is still `None` while its own `build()` runs — the
+    /// parent link is wired only after `build()` returns (see
+    /// `WidgetTree::insert_widget`). A signal derived during `build()` would
+    /// therefore capture an empty ancestor chain and report only the widget's
+    /// own `enabled` prop, forever. Refreshed in
+    /// `WidgetTree::flush_effective_enabled_signals`.
+    pub(crate) effective_enabled_signal: Option<Signal<bool>>,
     pub(crate) alignment_override: Option<bastyde_tokens::Alignment>,
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
@@ -321,6 +334,7 @@ impl WidgetNode {
             view_focus_signal: None,
             hover_within_signal: None,
             activation_signal: None,
+            effective_enabled_signal: None,
             alignment_override: None,
             clips_children: false,
             ime: None,
@@ -397,6 +411,15 @@ pub struct WidgetArena {
     /// Only nodes with a signal contribute, so the buffer is empty for the
     /// overwhelming majority of trees.
     pending_activation_changes: Vec<(WidgetId, bool)>,
+    /// Every node that installed an `effective_enabled_signal`, so the
+    /// per-pass refresh visits only opted-in nodes instead of the whole arena.
+    /// Unlike `pending_activation_changes` this is NOT a change queue: an
+    /// ancestor's `enabled` prop is a `Signal` that can flip at any time
+    /// without the arena being told, so there is no single mutation site to
+    /// record a transition at. The refresh recomputes and diffs instead —
+    /// see `WidgetTree::flush_effective_enabled_signals`. Dead ids are pruned
+    /// there, so a destroyed widget cannot leak.
+    effective_enabled_watchers: Vec<WidgetId>,
 }
 
 /// Hashable key for a [`bastyde_canvas::SizeProposal`] used by the per-pass
@@ -440,6 +463,7 @@ impl WidgetArena {
             layout_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             measuring: std::cell::Cell::new(false),
             pending_activation_changes: Vec::new(),
+            effective_enabled_watchers: Vec::new(),
         }
     }
 
@@ -991,6 +1015,28 @@ impl WidgetArena {
     /// any arena mutation.
     pub(crate) fn take_activation_changes(&mut self) -> Vec<(WidgetId, bool)> {
         std::mem::take(&mut self.pending_activation_changes)
+    }
+
+    /// Record that `id` installed an `effective_enabled_signal`. Idempotent —
+    /// the signal is install-or-reuse, so a rebuild re-registering the same
+    /// node must not grow the list.
+    pub(crate) fn watch_effective_enabled(&mut self, id: WidgetId) {
+        if !self.effective_enabled_watchers.contains(&id) {
+            self.effective_enabled_watchers.push(id);
+        }
+    }
+
+    /// The nodes carrying an `effective_enabled_signal`, for the per-pass
+    /// refresh. Cloned so the caller can recompute `is_enabled` (an immutable
+    /// ancestor walk) without holding a borrow on the arena.
+    pub(crate) fn effective_enabled_watchers(&self) -> Vec<WidgetId> {
+        self.effective_enabled_watchers.clone()
+    }
+
+    /// Drop watchers whose node is gone (destroyed / rebuilt away).
+    pub(crate) fn prune_effective_enabled_watchers(&mut self) {
+        self.effective_enabled_watchers
+            .retain(|id| self.nodes.contains_key(*id));
     }
 
     pub fn is_active(&self, id: WidgetId) -> bool {

@@ -2928,52 +2928,80 @@ impl WidgetTree {
     /// This method is for composites that want to derive cursor / custom
     /// paint roles / etc. reactively.
     ///
-    /// Returns `Signal::new(true)` for any node whose entire ancestor
-    /// chain (including itself) has no `enabled_state` bound. Captures
-    /// the ancestor chain at call time; re-parenting a widget afterwards
-    /// will not retroactively update the derived signal.
-    pub fn effective_enabled_signal(&self, id: WidgetId) -> crate::signal::Signal<bool> {
-        use crate::signal::{Prop, Signal};
-        // Walk this node's ancestor chain, collecting every bound
-        // `enabled_state` signal. Static `Prop::Static(b)` and unbound
-        // nodes contribute `b` (or `true`) into `static_acc` so we
-        // don't allocate one `Signal::new(true)` per ancestor.
-        let mut signals: Vec<Signal<bool>> = Vec::new();
-        let mut static_acc: bool = true;
-        let mut current = Some(id);
-        while let Some(node_id) = current {
-            let Some(node) = self.arena.get(node_id) else {
-                break;
+    /// Install-or-reuse, exactly like [`Self::activation_signal`]: the signal
+    /// lives on the node and the framework refreshes it from the live arena
+    /// once per state-change pass (`flush_effective_enabled_signals`).
+    ///
+    /// It is deliberately NOT a signal derived by walking the ancestor chain
+    /// here. A widget's `parent` is still `None` while its own `build()` runs
+    /// — `insert_widget` inserts the node parentless and wires the parent link
+    /// only after `build()` returns — so an ancestor walk performed from
+    /// inside `build()` (which is how every caller uses this) sees an empty
+    /// chain and would capture the widget's OWN `enabled` prop as the whole
+    /// answer, permanently. That was a real bug: a Button inside a disabled
+    /// form stayed painted as if enabled.
+    ///
+    /// The value is seeded from the live arena and corrected on the next
+    /// flush, so a first-`build()` caller (parent not yet wired) and a
+    /// rebuild caller (parent wired) both converge before anything paints.
+    pub fn effective_enabled_signal(&mut self, id: WidgetId) -> crate::signal::Signal<bool> {
+        if let Some(existing) = self
+            .arena
+            .get(id)
+            .and_then(|n| n.effective_enabled_signal.clone())
+        {
+            return existing;
+        }
+        // Seed from the live tree. Mid-`build()` the parent is not wired yet,
+        // so this is the widget's own state only; `flush_effective_enabled_signals`
+        // corrects it against the fully-wired tree before the first paint.
+        let seed = self.arena.is_enabled(id);
+        let sig = crate::signal::Signal::new(seed);
+        let Some(node) = self.arena.get_mut(id) else {
+            // Node missing (shouldn't happen in build) — hand back a detached
+            // handle so the caller still gets a valid signal.
+            return crate::signal::Signal::new(true);
+        };
+        node.effective_enabled_signal = Some(sig.clone());
+        self.arena.watch_effective_enabled(id);
+        sig
+    }
+
+    /// Refresh every node-resident `effective_enabled_signal` against the live
+    /// arena, firing observers only where the value actually changed.
+    ///
+    /// Unlike [`Self::flush_activation_signals`] this cannot be driven off a
+    /// change queue: a node's `enabled_state` is a `Prop<bool>` that may be
+    /// bound to an app `Signal` which flips without the arena being notified,
+    /// so there is no mutation site at which to record a transition. Instead
+    /// this recomputes the (cheap, `O(depth)`) ancestor AND for each opted-in
+    /// node and diffs. Only nodes that called
+    /// [`Self::effective_enabled_signal`] are visited, so a tree with no
+    /// interactive widgets pays nothing.
+    ///
+    /// Values are collected first and set afterwards: a `Signal::set` observer
+    /// may mutate the tree, and must not run while the arena is being walked —
+    /// the same discipline as `flush_activation_signals` and the
+    /// `focus_within` / `hover_within` updates.
+    pub(crate) fn flush_effective_enabled_signals(&mut self) {
+        self.arena.prune_effective_enabled_watchers();
+        let mut updates: Vec<(crate::signal::Signal<bool>, bool)> = Vec::new();
+        for id in self.arena.effective_enabled_watchers() {
+            let Some(sig) = self
+                .arena
+                .get(id)
+                .and_then(|n| n.effective_enabled_signal.clone())
+            else {
+                continue;
             };
-            if let Some(prop) = node.enabled_state.as_ref() {
-                match prop {
-                    Prop::Static(b) => {
-                        static_acc &= *b;
-                    }
-                    Prop::Bound(s) => signals.push(s.clone()),
-                }
+            let now = self.arena.is_enabled(id);
+            if sig.get() != now {
+                updates.push((sig, now));
             }
-            current = node.parent;
         }
-        if signals.is_empty() {
-            // No bound signals; the result is a constant carrying the
-            // AND of all static contributors (or `true` if none).
-            return Signal::new(static_acc);
+        for (sig, value) in updates {
+            sig.set(value);
         }
-        if !static_acc {
-            // A static `false` anywhere in the chain pins the result
-            // to `false` regardless of any bound signals — short-
-            // circuit without building the derived chain.
-            return Signal::new(false);
-        }
-        // One or more bound signals, all static contributors `true`:
-        // AND every bound signal together.
-        let mut iter = signals.into_iter();
-        let mut acc = iter.next().expect("non-empty (length-checked above)");
-        for sig in iter {
-            acc = acc.and(&sig);
-        }
-        acc
     }
 
     /// Whether a widget is effectively enabled. Returns `false` if the widget
@@ -3317,5 +3345,159 @@ mod text_scale_tests {
         // Out-of-range clamps into [0.25, 8.0].
         tree.set_user_text_scale(100.0);
         assert_eq!(tree.user_text_scale(), 8.0);
+    }
+}
+
+#[cfg(test)]
+mod effective_enabled_signal_tests {
+    use super::*;
+    use crate::build_context::BuildContext;
+    use crate::signal::Signal;
+    use crate::widget::{LayoutContext, LayoutResponse, Widget};
+    use bastyde_canvas::SizeProposal;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type SignalSlot = Rc<RefCell<Option<Signal<bool>>>>;
+
+    /// A leaf that opts into `effective_enabled_signal` from inside its own
+    /// `build()` — the only way real widgets use it, and the case that was
+    /// broken. It publishes the handle so the test can read the live value.
+    #[derive(Debug)]
+    struct EnabledProbe {
+        out: SignalSlot,
+    }
+
+    impl Widget for EnabledProbe {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let id = ctx.self_id();
+            let sig = ctx.effective_enabled_signal(id);
+            // Also pins that the signal is *mutable*: the previous derived
+            // implementation panicked here with "observe() is only supported
+            // on mutable signals", which is why widgets could not use
+            // `ctx.effect` to react to being disabled.
+            ctx.effect(&sig, |_| {});
+            *self.out.borrow_mut() = Some(sig);
+            Vec::new()
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// A composite that adds the probe through the ordinary `ctx.add` idiom, so
+    /// the child is inserted PARENTLESS and builds before its parent link is
+    /// wired — the exact situation that defeated the old
+    /// walk-the-ancestors-at-call-time implementation.
+    #[derive(Debug)]
+    struct Form {
+        enabled: Signal<bool>,
+        out: SignalSlot,
+    }
+
+    impl Widget for Form {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let id = ctx.self_id();
+            ctx.enabled_when(id, self.enabled.clone());
+            vec![ctx.add(EnabledProbe {
+                out: self.out.clone(),
+            })]
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    fn mount_form(enabled: Signal<bool>) -> (WidgetTree, WidgetId, Signal<bool>) {
+        let out: SignalSlot = Rc::new(RefCell::new(None));
+        let mut tree = WidgetTree::new();
+        let form = tree.add(Form {
+            enabled,
+            out: out.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let sig = out.borrow().clone().expect("probe published its signal");
+        (tree, form, sig)
+    }
+
+    /// THE REGRESSION. A widget whose own `enabled` is untouched must still
+    /// report disabled when an ANCESTOR is disabled. This failed before the
+    /// signal became node-resident: `insert_widget` inserts the node with
+    /// `parent: None` and wires the parent only after `build()` returns, so an
+    /// ancestor walk done during `build()` saw an empty chain and captured
+    /// "enabled" for the widget's whole life.
+    #[test]
+    fn tracks_an_ancestor_disabled_before_mount() {
+        let (_tree, _form, sig) = mount_form(Signal::new(false));
+        assert!(
+            !sig.get(),
+            "a child of a disabled ancestor must report effectively-disabled"
+        );
+    }
+
+    /// The live case: the ancestor's bound signal flips after mount. The child
+    /// must follow, in both directions, with no rebuild.
+    #[test]
+    fn follows_an_ancestor_flipping_after_mount() {
+        let enabled = Signal::new(true);
+        let (mut tree, _form, sig) = mount_form(enabled.clone());
+        assert!(sig.get(), "starts enabled");
+
+        enabled.set(false);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(!sig.get(), "child follows the ancestor going disabled");
+
+        enabled.set(true);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(sig.get(), "and follows it coming back");
+    }
+
+    /// A widget's own `enabled_state` still works on its own.
+    #[test]
+    fn honours_the_widgets_own_state() {
+        let out: SignalSlot = Rc::new(RefCell::new(None));
+        let mut tree = WidgetTree::new();
+        let probe = tree.add(EnabledProbe { out: out.clone() });
+        tree.enabled_when(probe, false);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let sig = out.borrow().clone().unwrap();
+        assert!(!sig.get(), "own enabled_state alone disables");
+    }
+
+    /// The signal must agree with the paint-time bool the render walker
+    /// computes. If they disagreed, role-driven chrome (which dims from
+    /// `PaintContext::effective_enabled`) and signal-driven chrome (which dims
+    /// from this signal) would grey out at different moments.
+    #[test]
+    fn agrees_with_the_paint_time_effective_enabled() {
+        let enabled = Signal::new(true);
+        let (mut tree, form, sig) = mount_form(enabled.clone());
+        let probe = tree.children(form)[0];
+
+        for value in [false, true, false] {
+            enabled.set(value);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                sig.get(),
+                tree.is_enabled(probe),
+                "signal and the arena's live is_enabled must agree (enabled={value})"
+            );
+        }
+    }
+
+    /// Install-or-reuse: asking twice hands back the same signal.
+    #[test]
+    fn is_install_or_reuse() {
+        let out: SignalSlot = Rc::new(RefCell::new(None));
+        let mut tree = WidgetTree::new();
+        let id = tree.add(EnabledProbe { out });
+        let a = tree.effective_enabled_signal(id);
+        let b = tree.effective_enabled_signal(id);
+        assert!(
+            Signal::same(&a, &b),
+            "must hand back the same signal handle"
+        );
     }
 }
