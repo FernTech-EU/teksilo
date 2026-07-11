@@ -290,8 +290,23 @@ impl Widget for SegmentCell {
         let handlers = HandlerSet::new()
             .cursor(CursorIcon::Pointer)
             .focusable(false)
-            .on_tap(move |_pos, _ctx| {
-                selected.set(idx);
+            .on_tap({
+                let selected = selected.clone();
+                move |_pos, _ctx| {
+                    selected.set(idx);
+                }
+            })
+            // The cell advertises `Action::Click` in `accessibility`; the
+            // framework routes an AT / automation click here rather than
+            // synthesizing a pointer tap, so the selection must be driven
+            // explicitly (same shape as Button / Checkbox / RadioButton).
+            .on_access_action(move |action, _ctx| {
+                if action == bastyde_core::accesskit::Action::Click {
+                    selected.set(idx);
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
             })
             .on_hover(move |entered, _ctx| {
                 if entered {
@@ -907,6 +922,52 @@ mod tests {
         assert!(
             info.actions()
                 .contains(&bastyde_core::accesskit::Action::Increment)
+        );
+    }
+
+    #[test]
+    fn access_click_selects_segment() {
+        // A segment advertises `Action::Click`; invoking it (screen reader,
+        // automation bridge) must drive the bound signal, not just a
+        // synthetic pointer tap.
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sc = tree.add(abc(selected.clone()));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        // children: [chrome, seg0, seg1, seg2]
+        let cells = tree.children(sc);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(cells[3]),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert_eq!(selected.get(), 2, "AT click on segment 2 must select it");
+    }
+
+    #[test]
+    fn access_click_on_disabled_segment_is_ignored() {
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sc = tree.add(SegmentedControl::new(selected.clone()).segments([
+            Segment::new(lit!("A")),
+            Segment::new(lit!("B")).disabled(true),
+            Segment::new(lit!("C")),
+        ]));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        let cells = tree.children(sc);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(cells[2]),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert_eq!(
+            selected.get(),
+            0,
+            "AT click on a disabled segment must not select it"
         );
     }
 

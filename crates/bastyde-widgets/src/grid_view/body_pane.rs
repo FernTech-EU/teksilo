@@ -361,9 +361,10 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 );
             }
 
-            // Activation (double-tap), context menu, and drag-to-reorder.
+            // Activation (double-tap), context menu, drag-to-reorder, and
+            // the AT click. `extra` is always applied — every tile carries
+            // the access-action handler below.
             let mut extra = HandlerSet::new();
-            let mut has_extra = false;
             if let Some(cb) = &self.on_tile_activate {
                 let cb = cb.clone();
                 let idx = i;
@@ -375,13 +376,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                         extra.on_double_tap(move |_tap, ctx| cb(idx, ctx))
                     }
                 };
-                has_extra = true;
             }
             if let Some(factory) = &self.tile_context_menu {
                 let factory = factory.clone();
                 let idx = i;
                 extra = extra.context_menu(move |pos, ctx| factory(idx, pos, ctx));
-                has_extra = true;
             }
             if self.export.is_drag_source(self.reorderable) {
                 let idx = i;
@@ -445,11 +444,40 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                         }
                     }
                 });
-                has_extra = true;
             }
-            if has_extra {
-                ctx.apply_handlers(tile_id, extra);
+            // AT / automation `Action::Click`. `TileA11y` advertises it,
+            // but every pointer handler above is `on_pointer_event` /
+            // `on_tap` — and the dispatcher never synthesizes a tap from
+            // an access action, so a tile is otherwise undriveable by
+            // assistive tech. AccessKit defines `Click` as "the
+            // equivalent of a single click or tap", and the Windows /
+            // macOS adapters also map AT *select-this-item* on a
+            // selectable node (this one calls `set_selected`) to `Click`
+            // — so select, and activate only when a single click would.
+            {
+                let sel = self.selection.clone();
+                let focused_set = self.focused_index.clone();
+                let activate = self.on_tile_activate.clone();
+                let activate_on = self.activate_on;
+                let idx = i;
+                extra = extra.on_access_action(move |action, ctx| {
+                    if action != bastyde_core::accesskit::Action::Click {
+                        return EventResponse::Ignored;
+                    }
+                    focused_set.set(Some(idx));
+                    if let Some(sel) = sel.as_ref() {
+                        sel.select(idx);
+                    }
+                    if activate_on == crate::data_views::ActivateOn::SingleClick
+                        && let Some(cb) = activate.as_ref()
+                    {
+                        cb(idx, ctx);
+                    }
+                    EventResponse::Handled
+                });
             }
+
+            ctx.apply_handlers(tile_id, extra);
 
             self.tile_entries.push((i, tile_id));
         }

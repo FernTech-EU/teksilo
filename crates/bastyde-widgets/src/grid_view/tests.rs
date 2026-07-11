@@ -132,6 +132,100 @@ fn click_selects_tile() {
     assert!(!selection.is_selected(0));
 }
 
+/// A tile advertises `Action::Click`; an AT / automation click must select
+/// it. AccessKit defines `Click` as "the equivalent of a single click", and
+/// the Windows / macOS adapters also route AT *select-this-item* on a
+/// selectable node through `Click` — a tile is `set_selected`, so this is
+/// the AT selection path.
+#[test]
+fn access_click_selects_tile() {
+    let model = ListModel::from_vec((0..12).collect());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+        action: bastyde_core::accesskit::Action::Click,
+        target: Some(t[2]),
+        target_node: bastyde_core::accessibility::root_node_id(),
+        data: None,
+    });
+    assert!(selection.is_selected(2), "AT click should select tile 2");
+    assert!(!selection.is_selected(0));
+}
+
+/// `Click` is a *single* click: it activates only under
+/// `ActivateOn::SingleClick`. Under the `DoubleClick` default it selects
+/// without activating — otherwise AT would fire destructive open-actions
+/// that a sighted single click never triggers.
+#[test]
+fn access_click_activates_only_on_single_click_mode() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let at_click = |tree: &mut WidgetTree, id: WidgetId| {
+        tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(id),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+    };
+
+    // DoubleClick (the default): AT click selects but must NOT activate.
+    let fired: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let f = fired.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(ListModel::from_vec((0..12).collect()), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0))
+        })
+        .tile_size(100.0, 50.0)
+        .selection(SelectionModel::new(SelectionMode::Single))
+        .activate_on(crate::data_views::ActivateOn::DoubleClick)
+        .on_tile_activate(move |_idx, _ctx| f.set(f.get() + 1)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    at_click(&mut tree, t[2]);
+    assert_eq!(
+        fired.get(),
+        0,
+        "AT click must not activate under DoubleClick mode"
+    );
+
+    // SingleClick: AT click activates, like a real single click.
+    let fired: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let f = fired.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(ListModel::from_vec((0..12).collect()), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0))
+        })
+        .tile_size(100.0, 50.0)
+        .selection(SelectionModel::new(SelectionMode::Single))
+        .activate_on(crate::data_views::ActivateOn::SingleClick)
+        .on_tile_activate(move |idx, _ctx| {
+            assert_eq!(idx, 2);
+            f.set(f.get() + 1)
+        }),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    at_click(&mut tree, t[2]);
+    assert_eq!(
+        fired.get(),
+        1,
+        "AT click must activate under SingleClick mode"
+    );
+}
+
 #[test]
 fn arrow_keys_move_focus_and_selection() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};

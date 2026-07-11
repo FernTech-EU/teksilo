@@ -139,6 +139,30 @@ fn click_opens_overlay() {
 }
 
 #[test]
+fn access_click_opens_overlay() {
+    // The node advertises `Action::Click`; an AT / automation click must
+    // open the dropdown. No platform adapter sends `Expand`/`Collapse` —
+    // every one funnels activation through `Click` — so this is the only
+    // AT open path.
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+
+    assert!(tree.active_overlays().is_empty());
+
+    tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+        action: bastyde_core::accesskit::Action::Click,
+        target: Some(cb),
+        target_node: bastyde_core::accessibility::root_node_id(),
+        data: None,
+    });
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+
+    assert_eq!(tree.active_overlays().len(), 1);
+}
+
+#[test]
 fn type_ahead_jumps_to_matching_item() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);

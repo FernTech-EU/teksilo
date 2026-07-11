@@ -1049,6 +1049,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .on_focus(move |gained: bool, _ctx: &mut EventContext| {
                 is_focused_h.set(gained);
             })
+            // `accessibility` advertises `Action::Click`; the dispatcher
+            // routes an AT / automation click here rather than
+            // synthesizing a pointer tap, so the dropdown must be opened
+            // explicitly. Every platform adapter funnels activation
+            // through `Click` (AT-SPI `DoAction(0)`, Windows Invoke,
+            // macOS `accessibilityPerformPress`) — none sends
+            // `Expand`/`Collapse` — so this is the only AT open path.
+            .on_access_action({
+                let open_overlay = open_overlay.clone();
+                move |action, ctx: &mut EventContext| {
+                    if action == bastyde_core::accesskit::Action::Click {
+                        open_overlay(ctx);
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
             // Focus walker skips disabled subtrees on its own.
             .focusable(true)
             .cursor(CursorIcon::Pointer);

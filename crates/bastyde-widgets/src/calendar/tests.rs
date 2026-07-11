@@ -180,6 +180,54 @@ fn count_descendants(tree: &WidgetTree, root: WidgetId) -> usize {
     count
 }
 
+/// Find a day cell by the AT name it publishes — the same way a screen
+/// reader addresses it. `DayCell` is `Role::GridCell` and names itself
+/// "<weekday> <month> <day>, <year>".
+fn find_day_cell(tree: &WidgetTree, root: WidgetId, day: u8) -> WidgetId {
+    let needle = format!(" {day}, ");
+    let mut queue = vec![root];
+    while let Some(id) = queue.pop() {
+        let node = tree.accessibility_node(id);
+        if node.role() == bastyde_core::accesskit::Role::GridCell
+            && node.name().is_some_and(|n| n.contains(&needle))
+        {
+            return id;
+        }
+        queue.extend(tree.children(id));
+    }
+    panic!("no day cell for day {day}");
+}
+
+/// A day cell advertises `Action::Click`; invoking it (screen reader,
+/// automation bridge) must commit the date. Without a handler the cell is
+/// announced as clickable and then does nothing — the cell is not
+/// arena-disabled, so its `interactable` guard has to be honoured on the
+/// AT path too.
+#[test]
+fn access_click_on_day_cell_commits_the_date() {
+    let mut tree = light_tree();
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = tree.add(Calendar::single(date.clone()));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+
+    let cell = find_day_cell(&tree, cal, 17);
+    tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+        action: bastyde_core::accesskit::Action::Click,
+        target: Some(cell),
+        target_node: bastyde_core::accessibility::root_node_id(),
+        data: None,
+    });
+
+    assert_eq!(
+        date.get(),
+        Some(Date::constant(2026, 5, 17)),
+        "AT click on a day cell must commit that date"
+    );
+}
+
 #[test]
 fn range_mode_first_commit_parks_anchor_second_commit_sets_value() {
     // The first commit in range mode parks the anchor without touching the

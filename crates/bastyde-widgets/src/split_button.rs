@@ -802,6 +802,26 @@ impl Widget for SplitButton {
                     int_for_focus.set(InteractionState::Idle);
                 }
             })
+            // `accessibility` exposes ONE node (this one) advertising
+            // `Action::Click`, but the pointer handlers live on the
+            // descendant main / chevron regions — an AT click dispatched
+            // to this node never reaches them (preview walks strict
+            // ancestors, bubble walks target → root; neither descends).
+            // Fire the current default action, mirroring Enter/Space.
+            .on_access_action({
+                let actions = actions_rc.clone();
+                let selected = selected.clone();
+                move |action, ctx: &mut EventContext| {
+                    if action == bastyde_core::accesskit::Action::Click {
+                        if let Some(Some(default_action)) = actions.get(selected.get()) {
+                            default_action(ctx);
+                        }
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
             .focusable(true);
 
         ctx.apply_self_handlers(handler_set);
@@ -942,6 +962,35 @@ mod tests {
             fired.get(),
             Some(1),
             "Enter must fire the currently-selected item's action"
+        );
+    }
+
+    /// The SplitButton exposes ONE a11y node advertising `Action::Click`,
+    /// but the pointer handlers live on descendant regions the dispatch
+    /// never reaches. An AT / automation click must therefore fire the
+    /// current default action, exactly like Enter.
+    #[test]
+    fn access_click_fires_current_default_action() {
+        let fired: StdRc<StdCell<Option<usize>>> = StdRc::new(StdCell::new(None));
+        let (f0, f1) = (fired.clone(), fired.clone());
+        let mut tree = themed_tree();
+        let split = tree.add(
+            SplitButton::new()
+                .initial_selected(1)
+                .item(MenuItem::new(lit!("A")).on_activate_fn(move |_| f0.set(Some(0))))
+                .item(MenuItem::new(lit!("B")).on_activate_fn(move |_| f1.set(Some(1)))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(split),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+        assert_eq!(
+            fired.get(),
+            Some(1),
+            "AT click must fire the currently-selected item's action"
         );
     }
 

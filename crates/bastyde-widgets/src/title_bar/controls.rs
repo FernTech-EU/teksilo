@@ -26,6 +26,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::PlatformTitleBarHost;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::color_prop::ColorProp;
+use bastyde_core::event::EventResponse;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
@@ -204,7 +205,24 @@ impl Widget for ControlButton {
                 });
 
         if let Some(action) = self.action.take() {
-            handlers = handlers.on_tap(move |_pos, ctx| action(ctx));
+            // `accessibility` advertises `Action::Click`, and on macOS
+            // VoiceOver only offers a press at all when the node claims
+            // that action (`is_clickable` == `supports_action(Click)`).
+            // The dispatcher never synthesizes a tap from it, so without
+            // this handler the window controls are advertised to AT and
+            // then do nothing when invoked. `ControlAction` is an `Rc`
+            // closure — pointer and AT share the one action.
+            let access_action = action.clone();
+            handlers = handlers
+                .on_tap(move |_pos, ctx| action(ctx))
+                .on_access_action(move |a, ctx: &mut EventContext| {
+                    if a == bastyde_core::accesskit::Action::Click {
+                        access_action(ctx);
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                });
         }
 
         ctx.apply_self_handlers(handlers);

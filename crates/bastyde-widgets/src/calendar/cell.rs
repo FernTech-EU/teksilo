@@ -15,9 +15,10 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::{Action, Role};
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::event::EventResponse;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{CalendarDayConfig, CalendarDayFill, SharedCalendarStyle};
-use bastyde_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::resolve_message_widget;
@@ -188,6 +189,35 @@ impl Widget for DayCell {
         let focused_date = self.focused_date.clone();
         let range_status = self.range_status.clone();
 
+        // One selection closure, two entry points: a pointer tap and an
+        // AT / automation `Action::Click`. The cell advertises
+        // `Action::Click` in `accessibility`, and the dispatcher never
+        // synthesizes a tap from it, so the AT path has to run the same
+        // pipeline explicitly. `interactable` is checked inside (this
+        // cell is not arena-disabled — the guard lives here).
+        let select_date: Rc<dyn Fn(&mut EventContext)> = Rc::new(move |ctx_evt| {
+            if !interactable {
+                return;
+            }
+            // Move focus to this cell first.
+            focused_date.set(date_owned);
+            // If clicking outside the visible month, follow.
+            let new_ym = YearMonth::from_date(date_owned);
+            if visible_month.get() != new_ym {
+                visible_month.set(new_ym);
+            }
+            commit_date(
+                date_owned,
+                &selection,
+                on_sel.as_ref(),
+                on_range.as_ref(),
+                on_activate.as_ref(),
+                ctx_evt,
+            );
+            update_range_status(&selection, &range_status);
+            ctx_evt.request_frame();
+        });
+
         let handlers = HandlerSet::new()
             .focusable(false) // grid uses roving focus on the parent widget
             .cursor(if interactable {
@@ -195,27 +225,17 @@ impl Widget for DayCell {
             } else {
                 CursorIcon::Default
             })
-            .on_tap(move |_pos, ctx_evt| {
-                if !interactable {
-                    return;
+            .on_tap({
+                let select_date = select_date.clone();
+                move |_pos, ctx_evt: &mut EventContext| select_date(ctx_evt)
+            })
+            .on_access_action(move |action, ctx_evt: &mut EventContext| {
+                if action == Action::Click {
+                    select_date(ctx_evt);
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
                 }
-                // Move focus to this cell first.
-                focused_date.set(date_owned);
-                // If clicking outside the visible month, follow.
-                let new_ym = YearMonth::from_date(date_owned);
-                if visible_month.get() != new_ym {
-                    visible_month.set(new_ym);
-                }
-                commit_date(
-                    date_owned,
-                    &selection,
-                    on_sel.as_ref(),
-                    on_range.as_ref(),
-                    on_activate.as_ref(),
-                    ctx_evt,
-                );
-                update_range_status(&selection, &range_status);
-                ctx_evt.request_frame();
             });
         ctx.apply_self_handlers(handlers);
 

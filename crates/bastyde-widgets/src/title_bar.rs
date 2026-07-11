@@ -661,6 +661,75 @@ mod tests {
         );
     }
 
+    /// Each control button advertises `Action::Click` — on macOS that is
+    /// precisely what makes VoiceOver offer a press (`is_clickable` ==
+    /// `supports_action(Click)`). Invoking it must actually drive the
+    /// window, or a screen-reader user cannot minimize / maximize /
+    /// close the window at all.
+    #[test]
+    fn access_click_drives_window_controls() {
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
+
+        let [minimize, maximize, _close] = locate_control_buttons(&tree, bar);
+
+        let at_click = |tree: &mut WidgetTree, id: WidgetId| {
+            tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+                action: bastyde_core::accesskit::Action::Click,
+                target: Some(id),
+                target_node: bastyde_core::accessibility::root_node_id(),
+                data: None,
+            });
+        };
+
+        at_click(&mut tree, minimize);
+        assert_eq!(
+            state.placement().get(),
+            bastyde_core::WindowPlacement::Minimized,
+            "AT click on minimize must flip placement to Minimized"
+        );
+
+        state
+            .placement()
+            .set(bastyde_core::WindowPlacement::Floating);
+        at_click(&mut tree, maximize);
+        assert_eq!(
+            state.placement().get(),
+            bastyde_core::WindowPlacement::Maximized,
+            "AT click on maximize must flip placement to Maximized"
+        );
+    }
+
+    /// The close button's AT click must run the same action a pointer tap
+    /// does — including a `close_action` override.
+    #[test]
+    fn access_click_invokes_close_action() {
+        let host = Rc::new(TestHost::default());
+        let close_calls = Rc::new(Cell::new(0u32));
+        let close_calls_clone = close_calls.clone();
+
+        let (mut tree, bar) = build_realistic_tree(host.clone(), move |b| {
+            b.close_action(move |_ctx| {
+                close_calls_clone.set(close_calls_clone.get() + 1);
+            })
+        });
+
+        let [_min, _max, close] = locate_control_buttons(&tree, bar);
+        tree.dispatch_event(bastyde_core::event::WidgetEvent::AccessAction {
+            action: bastyde_core::accesskit::Action::Click,
+            target: Some(close),
+            target_node: bastyde_core::accessibility::root_node_id(),
+            data: None,
+        });
+
+        assert_eq!(
+            close_calls.get(),
+            1,
+            "AT click on close must invoke the close action"
+        );
+    }
+
     /// Locate the `DragRegion` widget id by walking the title-bar subtree.
     /// Path: bar → HStack root → [drag_region, controls].
     fn locate_drag_region(tree: &WidgetTree, bar: WidgetId) -> WidgetId {
