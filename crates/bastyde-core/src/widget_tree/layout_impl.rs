@@ -613,16 +613,13 @@ fn layout_widget_recursive(
         .collect();
 
     // `place_children` is a widget's ONLY hook that receives its final,
-    // parent-assigned `bounds`. Normally it is skipped when there is nothing to
-    // place, but a widget that opts in via `Widget::tracks_bounds` needs its
-    // bounds during *layout* — before the render walker pushes any node-level
-    // transform scope built from them (see `Widget::tracks_bounds`). Call it
-    // with an empty `placements` slice in that case.
-    let wants_bounds = placements.is_empty()
-        && arena
-            .get(id)
-            .is_some_and(|node| node.widget.tracks_bounds());
-    if !placements.is_empty() || wants_bounds {
+    // parent-assigned `bounds`, so it runs for EVERY active widget on every
+    // pass — including leaves, which get an empty `placements` slice. A widget
+    // whose paint depends on where the parent put it (a scene folding its
+    // origin into a view transform, a text engine sizing its viewport) can then
+    // read its bounds during *layout*, which is the only point early enough:
+    // the render walker pushes node-level transform scopes before `paint` runs.
+    {
         let ctx = LayoutContext {
             theme: &resolved_theme,
             layout_direction,
@@ -663,19 +660,14 @@ fn layout_widget_recursive(
                 text_backend,
                 extras,
             );
-        } else if arena
-            .get(placement.id)
-            .is_some_and(|node| node.widget.tracks_bounds())
-        {
-            // A childless child is never visited by the recursion above, so it
-            // would never receive its final bounds. Widgets that opt in via
-            // `Widget::tracks_bounds` need them during layout (see that method).
-            // Hand them over directly, with an empty `placements` slice.
+        } else {
+            // A childless child is never visited by the recursion above, so
+            // hand it its final bounds here — with an empty `placements` slice.
             //
             // Deliberately NOT a `layout_widget_recursive` call: that would
             // re-measure the leaf against a fresh `exact` proposal (a memo miss,
             // since the parent measured it under a different proposal), adding a
-            // redundant `layout_response` per opted-in leaf on every pass.
+            // redundant `layout_response` per leaf on every pass.
             let ctx = LayoutContext {
                 theme: &resolved_theme,
                 layout_direction,
@@ -699,6 +691,94 @@ mod tests {
     use crate::test_widgets::{FillWidget, InsetWidget, StackWidget};
     use bastyde_canvas::Size;
     use bastyde_tokens::Color;
+
+    /// A leaf that records the bounds `place_children` hands it, and how often.
+    #[derive(Debug, Clone, Default)]
+    struct BoundsRecorder {
+        seen: std::rc::Rc<std::cell::RefCell<Vec<Rect>>>,
+    }
+
+    impl Widget for BoundsRecorder {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            Size::new(
+                proposal.width.unwrap_or(10.0),
+                proposal.height.unwrap_or(10.0),
+            )
+            .into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            assert!(
+                children.is_empty(),
+                "a leaf must be handed an empty placements slice"
+            );
+            self.seen.borrow_mut().push(bounds);
+        }
+    }
+
+    /// The invariant `SceneView` (and both text engines) depend on: a widget with
+    /// NO children still gets `place_children`, carrying its final bounds.
+    ///
+    /// Before this was guaranteed, the walker skipped `place_children` whenever
+    /// there was nothing to place, so a leaf could only discover its bounds in
+    /// `paint`. That is too late for anything the renderer consumes *before*
+    /// paint — a `SceneView` folds `bounds.origin` into the transform scope the
+    /// walker pushes around its subtree, so a scene holding only lightweight
+    /// items (hence no arena children) painted its content offset by
+    /// `-bounds.origin`, an error that scaled with zoom.
+    #[test]
+    fn a_childless_widget_still_receives_its_bounds() {
+        let mut tree = WidgetTree::new();
+        let leaf = BoundsRecorder::default();
+        let seen = leaf.seen.clone();
+
+        // Nested inside an inset container, so a correct origin is non-zero and a
+        // stale/zero origin cannot pass by accident.
+        let leaf_id = tree.add(leaf);
+        let _root = tree.add(InsetWidget::new(12.0).set_child(leaf_id));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let bounds = seen.borrow();
+        assert_eq!(
+            bounds.len(),
+            1,
+            "the leaf must be placed exactly once per layout pass, got {bounds:?}"
+        );
+        assert_eq!(
+            (bounds[0].x, bounds[0].y),
+            (12.0, 12.0),
+            "the leaf must receive its real, parent-assigned origin"
+        );
+        assert_eq!(
+            (bounds[0].width, bounds[0].height),
+            (176.0, 76.0),
+            "the leaf must receive its real, parent-assigned size"
+        );
+    }
+
+    /// The same guarantee at the root: a tree whose root IS a leaf.
+    #[test]
+    fn a_childless_root_still_receives_its_bounds() {
+        let mut tree = WidgetTree::new();
+        let leaf = BoundsRecorder::default();
+        let seen = leaf.seen.clone();
+        let _id = tree.add(leaf);
+        tree.layout(SizeProposal::exact(320.0, 240.0));
+
+        let bounds = seen.borrow();
+        assert_eq!(bounds.len(), 1, "root leaf must be placed once");
+        assert_eq!((bounds[0].width, bounds[0].height), (320.0, 240.0));
+    }
 
     #[derive(Debug)]
     struct ShrinkWrapContainer {

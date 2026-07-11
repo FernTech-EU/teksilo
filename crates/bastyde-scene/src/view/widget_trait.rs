@@ -49,23 +49,6 @@ impl Widget for SceneView {
         true
     }
 
-    /// The SceneView folds `bounds.origin` into the view transform it installs
-    /// via `set_content_transform`, and the render walker pushes that transform
-    /// around this node's subtree **before** calling `paint`. So the origin must
-    /// be known during *layout*, not discovered during paint.
-    ///
-    /// `place_children` is the only hook that receives `bounds`, but it is
-    /// skipped for a widget with no children — and a scene holding only
-    /// lightweight items has no arena children at all. Without this opt-in such
-    /// a view never learns its own origin in time: it pushes a transform built
-    /// from a stale origin and paints its content offset by `-bounds.origin`
-    /// (an error that then scales with zoom, so an embedded scene visibly
-    /// drifts as you zoom). Opting in makes the walker hand us our bounds every
-    /// pass regardless of child count.
-    fn tracks_bounds(&self) -> bool {
-        true
-    }
-
     fn preserves_children_on_rebuild(&self) -> bool {
         true
     }

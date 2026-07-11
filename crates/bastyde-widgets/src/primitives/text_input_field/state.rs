@@ -364,6 +364,26 @@ impl TextInputState {
         }
     }
 
+    /// Adopt `bounds` as the field's viewport — the single writer of
+    /// `viewport_origin` / `viewport_width`.
+    ///
+    /// Called from BOTH `TextInputField::place_children` (the authority — layout
+    /// runs first) and `TextInputField::paint` (an idempotent echo). `viewport_width`
+    /// is itself the change detector for `needs_full_layout`, so writing it
+    /// without also raising that flag would blind the detector and silently drop
+    /// the re-layout a resize is supposed to trigger. Keep the two welded here.
+    ///
+    /// Returns `true` if the width actually changed.
+    pub fn sync_viewport(&mut self, bounds: bastyde_canvas::Rect) -> bool {
+        self.viewport_origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+        let changed = (self.viewport_width - bounds.width).abs() > 0.5;
+        if changed {
+            self.viewport_width = bounds.width;
+            self.needs_full_layout = true;
+        }
+        changed
+    }
+
     pub fn layout_full_masked(&mut self) {
         let masked = self.should_mask();
         let echo = if masked && self.echo_mode != EchoMode::NoEcho {

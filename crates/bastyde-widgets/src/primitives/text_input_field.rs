@@ -1256,8 +1256,12 @@ impl Widget for TextInputField {
         _children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Layout runs before paint, so this is the authoritative point to adopt
+        // the field's viewport. `sync_viewport` welds the width write to the
+        // `needs_full_layout` flag it also serves as the detector for (see its
+        // docs); paint calls it again as an idempotent echo.
         if let Some(state) = self.state.as_ref() {
-            state.borrow_mut().viewport_width = bounds.width;
+            state.borrow_mut().sync_viewport(bounds);
         }
     }
 
@@ -1267,16 +1271,13 @@ impl Widget for TextInputField {
         };
         let mut st = state.borrow_mut();
 
-        st.viewport_origin = Point::new(bounds.x, bounds.y);
         // Grow the shaped text with the global accessibility scale. Must run
         // before the relayout block below so the larger glyphs are shaped this
         // frame; no-op when the scale is unchanged.
         st.apply_font_scale(ctx.text_scale);
-        let viewport_changed = (st.viewport_width - bounds.width).abs() > 0.5;
-        if viewport_changed {
-            st.viewport_width = bounds.width;
-            st.needs_full_layout = true;
-        }
+        // Idempotent echo — `place_children` already adopted these exact bounds
+        // during layout, so this is normally a no-op.
+        st.sync_viewport(bounds);
 
         // Resolve the glyph / caret / suffix colours against the *effective*
         // enabled state, exactly as `TextWidget` and `RectWidget` resolve a

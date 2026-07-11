@@ -217,6 +217,35 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 
     /// Position children within the allocated bounds.
+    ///
+    /// Called for **every active widget on every layout pass** — including
+    /// leaves, which receive an empty `children` slice. It is therefore also the
+    /// canonical *"here are your final, parent-assigned bounds"* hook, and the
+    /// only one that runs during layout: `layout_response` sees a *proposal*, not
+    /// the outcome, and `paint` runs too late for anything the renderer consumes
+    /// before it (a node-level transform scope, a text engine's viewport).
+    ///
+    /// A widget whose bounds feed such a thing must read them here, not in
+    /// `paint`. `SceneView` is the motivating case: it folds `bounds.origin` into
+    /// the view transform the render walker pushes *around* its subtree, so a
+    /// scene that learned its origin only at paint time drew its content offset
+    /// by `-bounds.origin` — an error that then scaled with zoom.
+    ///
+    /// **If you mutate interior state here, keep the write and its consequences
+    /// together.** This hook runs *before* `paint`, so writing a field that
+    /// `paint` later uses as a compare-then-act change detector will silently
+    /// blind that detector. (Both text engines were bitten: `place_children` set
+    /// the `viewport_width` that `paint` compared against, so `paint` concluded
+    /// "unchanged" and skipped the `engine.set_viewport` + relayout it owed.)
+    /// Route such writes through one idempotent helper that both hooks call.
+    ///
+    /// **Do not `Signal::set` here at [`BindingLevel::Relayout`] or
+    /// [`Rebuild`](crate::binding::BindingLevel::Rebuild).** This runs inside the
+    /// layout pass, so dirtying the tree from it re-enters layout. A plain
+    /// `Cell`/`RefCell` (what the colour-picker leaves use to cache their bounds
+    /// for hit-testing) or a `RepaintOnly` signal is fine.
+    ///
+    /// [`BindingLevel::Relayout`]: crate::binding::BindingLevel::Relayout
     fn place_children(
         &self,
         _bounds: Rect,
@@ -224,7 +253,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         _children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Leaf widgets have no children to place..into()
+        // Leaf widgets have no children to place.
     }
 
     /// Draw the widget's visual representation.
@@ -432,33 +461,6 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 
     /// Whether this widget clips its children to its bounds.
     fn clips_children(&self) -> bool {
-        false
-    }
-
-    /// Whether this widget must receive its final, parent-assigned `bounds`
-    /// every layout pass **even when it has no children**.
-    ///
-    /// [`place_children`](Self::place_children) is a widget's only hook that is
-    /// handed its `bounds`, but the layout walker skips it for a widget with no
-    /// children — there is nothing to place, and calling it for every leaf would
-    /// cost a virtual call per leaf per pass. Most widgets therefore learn their
-    /// bounds in [`paint`](Self::paint), which is soon enough for drawing.
-    ///
-    /// That is *not* soon enough for a widget whose **bounds feed something the
-    /// renderer consumes before `paint` runs** — most notably a node-level
-    /// transform scope (`BuildContext::set_content_transform`), which the render
-    /// walker pushes around the widget's subtree *before* invoking its `paint`.
-    /// Such a widget would push a transform built from a stale, one-frame-old
-    /// origin. [`SceneView`](https://docs.rs/bastyde-scene) is the motivating
-    /// case: it folds `bounds.origin` into the view transform, and a scene
-    /// holding only lightweight items has no arena children — so without this
-    /// opt-in it never learns its own origin during layout, and its content
-    /// paints offset by `-bounds.origin` (an error that then scales with zoom).
-    ///
-    /// Returning `true` makes the walker call `place_children` with an **empty**
-    /// `children` slice purely so the widget can read `bounds`. Opt in only when
-    /// you genuinely need bounds before paint; the default is `false`.
-    fn tracks_bounds(&self) -> bool {
         false
     }
 

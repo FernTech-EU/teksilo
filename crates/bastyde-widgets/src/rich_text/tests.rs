@@ -5072,12 +5072,27 @@ mod affinity_tests {
         );
     }
 
-    /// A grow editor inside a page `ScrollArea`, with its caret seeded
-    /// **off-screen below** the page viewport (as if the reader had scrolled it
-    /// away). `viewport_origin` is paint-set; headless tests don't paint, so we
-    /// seed it directly. Returns `(tree, editor_id, state_handle, outer_scroll_y,
-    /// proposal)`; the caller seeds `viewport_origin` and drives IME / key
-    /// events, then asserts on `outer_scroll_y`.
+    /// Height of the spacer stacked **above** the editor inside the scroll page.
+    /// It exceeds the page viewport (150 dp), so with the page at rest
+    /// (`scroll_y == 0`) the editor's body — and therefore a caret at document
+    /// position 0 — genuinely lands *below* the visible area.
+    const IME_FIXTURE_SPACER_H: f32 = 300.0;
+
+    /// A grow editor inside a page `ScrollArea`, preceded by a tall spacer so the
+    /// caret starts **really** off-screen below the page viewport whenever the
+    /// page is at rest — the state a reader reaches by scrolling the caret away.
+    ///
+    /// The off-screen condition is produced by the actual layout (the ScrollArea
+    /// offsets its content child's bounds by `scroll_y`, and `place_children`
+    /// feeds those bounds to `EditorState::sync_viewport`), NOT by seeding
+    /// `viewport_origin` behind layout's back. A seeded origin would be
+    /// overwritten by the next layout pass, and — worse — the flood tests below
+    /// would still pass while silently testing nothing, because a caret that is
+    /// actually *in view* never triggers a page-follow no matter how broken the
+    /// gate is.
+    ///
+    /// Returns `(tree, editor_id, state_handle, outer_scroll_y, proposal)`. Drive
+    /// IME / key events, then assert on `outer_scroll_y`.
     fn ime_flood_fixture() -> (
         WidgetTree,
         bastyde_core::widget_id::WidgetId,
@@ -5098,29 +5113,52 @@ mod affinity_tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let editor = RichTextEditor::editor(doc);
         let st = editor.state_handle();
-        {
-            let mut s = st.borrow_mut();
-            s.viewport_width = 208.0;
-            s.viewport_height = 2000.0; // > content → grow, editor can't scroll itself
-            s.engine.set_viewport(208.0, 2000.0);
-            s.needs_full_layout = true;
-        }
         let editor_id = tree.add(editor);
+        // Taller than its content → the editor grows and cannot scroll itself, so
+        // the only scroller in play is the outer page.
         let editor_box = tree.add(
             FixedSize::new()
                 .width(220.0)
                 .height(2000.0)
                 .child_id(editor_id),
         );
-        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        let spacer = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(IME_FIXTURE_SPACER_H)
+                .child(crate::primitives::RectWidget::new()),
+        );
+        let outer_content = tree.add(VStack::new().add_child(spacer).add_child(editor_box));
         let outer = ScrollArea::from_id(outer_content);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
 
         let sz = SizeProposal::exact(220.0, 150.0);
         tree.layout(sz);
+        // Let the engine take its real viewport (via `place_children`) and run its
+        // first full layout, so the caret rect below is meaningful.
+        pump(&mut tree, 220.0, 150.0);
+
+        // Focusing reveals the caret — which, being below the spacer, scrolls the
+        // page down to it. That is correct behaviour, and it is the state the
+        // reader then scrolls *away* from.
         tree.focus(editor_id);
         pump(&mut tree, 220.0, 150.0);
+
+        // The reader scrolls the caret off-screen again: page back to the top.
+        outer_y.set(0.0);
+        tree.layout(sz);
+
+        // Guard the fixture's own premise. If layout ever stops offsetting the
+        // body by the page scroll, the flood tests below would go vacuous (a caret
+        // that is actually in view never triggers a follow, however broken the
+        // gate). Fail loudly here instead of passing for the wrong reason.
+        let origin_y = st.borrow().viewport_origin.y;
+        assert!(
+            origin_y >= 150.0,
+            "fixture premise broken: with the page at rest the body must start \
+             below the 150dp page viewport, but viewport_origin.y = {origin_y}"
+        );
         (tree, editor_id, st, outer_y, sz)
     }
 
@@ -5133,10 +5171,9 @@ mod affinity_tests {
         // back to it (~800 events/sec). The flood must now be completely inert.
         use bastyde_core::event::WidgetEvent;
 
-        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
-        // Caret at document start, seeded off-screen below the 150px page
-        // viewport, with the page at rest at the top.
-        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        let (mut tree, _editor_id, _st, outer_y, sz) = ime_flood_fixture();
+        // Page at rest at the top ⇒ the caret (document position 0) sits below the
+        // spacer, off-screen. The fixture asserts that premise.
         outer_y.set(0.0);
         tree.layout(sz);
 
@@ -5164,8 +5201,7 @@ mod affinity_tests {
         // position gate suppresses only no-op repeats, never real motion.
         use bastyde_core::event::{Key, Modifiers};
 
-        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
-        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        let (mut tree, _editor_id, _st, outer_y, sz) = ime_flood_fixture();
         outer_y.set(0.0);
         tree.layout(sz);
 
@@ -5188,8 +5224,7 @@ mod affinity_tests {
         // reader scrolled it away.
         use bastyde_core::event::WidgetEvent;
 
-        let (mut tree, _editor_id, st, outer_y, sz) = ime_flood_fixture();
-        st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(0.0, 300.0);
+        let (mut tree, _editor_id, _st, outer_y, sz) = ime_flood_fixture();
         tree.layout(sz);
 
         // First preedit "x": caret advances to 1, the page follows it into view.
@@ -5306,12 +5341,9 @@ mod affinity_tests {
         let sz = SizeProposal::exact(220.0, 150.0);
         tree.layout(sz);
         pump(&mut tree, 220.0, 150.0);
-        // Seed viewport_origin to the editor's laid-out window origin (paint's
-        // job) so the caret rect is consistent.
-        {
-            let b = tree.bounds(editor_id);
-            st.borrow_mut().viewport_origin = bastyde_canvas::Point::new(b.x, b.y);
-        }
+        // `viewport_origin` needs no seeding: `place_children` adopts the body's
+        // real laid-out origin every pass. (The old seed used the *wrapper's*
+        // bounds, which is off by the body's inset.)
 
         // Focus the editor (caret at document start). Must reveal the caret near
         // the top, NOT jump to the editor's ~1900px bottom.

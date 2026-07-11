@@ -2151,16 +2151,13 @@ impl Widget for RichTextEditorBody {
         _children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Record the viewport for the frame loop to read next tick.
-        // The rich text editor is currently a leaf — scroll bar
-        // siblings (§27.10.5's "scrollbars outside ScrollArea" trick)
-        // are a future addition. For now `paint()` is the only
-        // place `viewport_width / height` get reliably refreshed
-        // (since leaf widgets may not call `place_children`), and
-        // this path is the fallback when a parent does call us.
-        let mut st = self.state.borrow_mut();
-        st.viewport_width = bounds.width;
-        st.viewport_height = bounds.height;
+        // The body is a leaf, but the layout walker hands every widget its final
+        // bounds here — and layout runs before paint, so this is the earliest
+        // (hence authoritative) point at which the viewport can be adopted.
+        // `sync_viewport` owns the whole handoff, including `engine.set_viewport`
+        // and the relayout flag; paint calls it again as an idempotent echo. See
+        // its docs for why the writes must not be split.
+        self.state.borrow_mut().sync_viewport(bounds);
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -2276,19 +2273,10 @@ impl Widget for RichTextEditorBody {
             }
         }
 
-        // `RichTextEditorBody` is a leaf, so the framework never calls
-        // `place_children` on it. Sync the viewport from paint bounds,
-        // flag a relayout if the size changed, and record the window-space
-        // origin so pointer handlers can convert to widget-local coordinates.
-        st.viewport_origin = Point::new(bounds.x, bounds.y);
-        let viewport_changed = (st.viewport_width - bounds.width).abs() > 0.5
-            || (st.viewport_height - bounds.height).abs() > 0.5;
-        if viewport_changed {
-            st.viewport_width = bounds.width;
-            st.viewport_height = bounds.height;
-            st.engine.set_viewport(bounds.width, bounds.height);
-            st.needs_full_layout = true;
-        }
+        // Idempotent echo — `place_children` already adopted these exact bounds
+        // during layout, so this is normally a no-op. It stays so that any path
+        // which paints without a preceding layout still sizes the engine.
+        st.sync_viewport(bounds);
 
         // First-frame guard + viewport-change guard: (re)run the
         // full layout so the render call produces glyphs sized

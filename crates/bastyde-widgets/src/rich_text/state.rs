@@ -69,10 +69,11 @@ pub(crate) struct EditorState {
     pub viewport_ratio_x: Signal<f32>,
     pub viewport_ratio_y: Signal<f32>,
 
-    // Viewport (widget bounds at last layout). Populated by `paint()`
-    // (since the editor body is a leaf widget and `place_children` is
-    // never called on it). `viewport_origin` is the **body's** top-left
-    // in window coordinates — the engine lays text out from there.
+    // Viewport (the body's bounds at the last layout pass). Written only by
+    // [`EditorState::sync_viewport`], which the body calls from BOTH
+    // `place_children` (authoritative — layout runs first) and `paint`
+    // (idempotent fallback). `viewport_origin` is the **body's** top-left in
+    // window coordinates — the engine lays text out from there.
     pub viewport_width: f32,
     pub viewport_height: f32,
     pub viewport_origin: bastyde_canvas::Point,
@@ -549,6 +550,38 @@ impl EditorState {
             accessibility_flow_snapshot: RefCell::new(None),
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))
+    }
+
+    /// Adopt `bounds` as the body's viewport — the single writer of
+    /// `viewport_origin` / `viewport_width` / `viewport_height`.
+    ///
+    /// Called from BOTH `RichTextEditorBody::place_children` (the authority —
+    /// layout runs before paint, so the engine is sized before the first
+    /// `layout_full` ever runs) and `RichTextEditorBody::paint` (an idempotent
+    /// echo, for any path that paints without a preceding layout). Calling it
+    /// twice in a frame is safe: the second call sees no change and does nothing.
+    ///
+    /// **The four side effects must stay welded together.** `viewport_width` /
+    /// `viewport_height` are themselves the change detector, so a caller that
+    /// writes them *without* also pushing `engine.set_viewport` +
+    /// `needs_full_layout` blinds every later caller: the engine then runs its
+    /// first `layout_full` against an uninitialised viewport, wraps the text at a
+    /// degenerate width, and — because `needs_full_layout` is cleared afterwards
+    /// — keeps that broken layout forever. Keep the write and its consequences in
+    /// this one place.
+    ///
+    /// Returns `true` if the viewport size actually changed.
+    pub fn sync_viewport(&mut self, bounds: bastyde_canvas::Rect) -> bool {
+        self.viewport_origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+        let changed = (self.viewport_width - bounds.width).abs() > 0.5
+            || (self.viewport_height - bounds.height).abs() > 0.5;
+        if changed {
+            self.viewport_width = bounds.width;
+            self.viewport_height = bounds.height;
+            self.engine.set_viewport(bounds.width, bounds.height);
+            self.needs_full_layout = true;
+        }
+        changed
     }
 
     /// Snapshot the document's flow in this view's highlight flavor: the full
