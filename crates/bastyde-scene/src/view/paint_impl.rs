@@ -28,7 +28,7 @@ impl SceneView {
         canvas: &mut bastyde_canvas::Canvas,
         bounds: Rect,
         band: crate::scene::SceneLayer,
-        text_scale: f32,
+        ctx: &PaintContext,
     ) {
         // Glyph-epoch gate: cached item frames bake glyph atlas UVs, and
         // this cache lives outside the widget arena, so the framework's
@@ -54,8 +54,15 @@ impl SceneView {
 
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
-        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region))
-            .with_text_scale(text_scale);
+        // Built once per band; `enabled` is refreshed per item inside the loop
+        // (it is the only field that varies per item). `theme` and
+        // `window_active` come straight from the widget paint pass, so
+        // lightweight items resolve theme roles and desaturate on window blur
+        // exactly like widgets.
+        let mut item_ctx =
+            crate::item::SceneItemPaintContext::new(view_transform, Some(region), ctx.theme)
+                .with_text_scale(ctx.text_scale)
+                .with_window_active(ctx.window_active);
         let drag_target = self.drag_target.get();
         let mut visible_ids = self.scene().items_in_rect(region);
         // Z-order within the band: higher z paints last (on top); equal-z
@@ -80,6 +87,13 @@ impl SceneView {
             if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
                 continue;
             }
+            // Per-item enabled state drives `ColorProp` disabled-role resolution.
+            // AND-combine the item's own `IS_ENABLED` flag with the widget-tree's
+            // ancestor-disabled cascade (`ctx.effective_enabled`), so a SceneView
+            // inside a disabled ancestor dims its lightweight items' role colours
+            // exactly like every other widget in that subtree.
+            item_ctx.enabled =
+                ctx.effective_enabled && flags.contains(crate::flags::ItemFlags::IS_ENABLED);
             // Items that are the drag target or a declared descendant paint
             // with a visual delta in scene coords — a child follows its
             // dragged parent until the rebuild commits the new local_pos.
@@ -225,12 +239,7 @@ impl SceneView {
         // into children, so these render under the cards. The Over band and
         // the marquee / foreground / debug overlays paint in `post_paint`
         // (after the children) so they sit on top.
-        self.paint_band(
-            canvas,
-            bounds,
-            crate::scene::SceneLayer::Under,
-            ctx.text_scale,
-        );
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Under, ctx);
     }
 
     pub(super) fn wants_post_paint_impl(&self) -> bool {
@@ -259,12 +268,7 @@ impl SceneView {
 
         // Over band: lightweight items explicitly raised above the cards
         // (highlighted connectors, selection halos, annotations).
-        self.paint_band(
-            canvas,
-            bounds,
-            crate::scene::SceneLayer::Over,
-            ctx.text_scale,
-        );
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Over, ctx);
 
         // Marquee overlay — semi-transparent fill plus a single-pixel
         // stroke. The marquee state is in screen coords (set by the on_drag

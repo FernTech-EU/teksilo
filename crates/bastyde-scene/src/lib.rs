@@ -66,6 +66,7 @@ pub(crate) mod items;
 pub(crate) mod magnet;
 pub(crate) mod minimap;
 pub(crate) mod scene;
+pub(crate) mod scene_list_adapter;
 pub(crate) mod scene_model;
 pub(crate) mod scroll_view;
 pub(crate) mod selection;
@@ -84,7 +85,7 @@ pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use item_handlers::{DragMode, SceneItemHandlerSet, SceneTapEvent};
 pub use items::AccessSubtreeMode;
-pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
+pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextAlign, TextItem};
 pub use magnet::{
     Magnet, MagnetConnection, MagnetFeedback, MagnetId, MagnetMarker, MagnetRef, MagnetRole,
     MagnetSnap, MagnetVerdict, MagnetVisualState, MagnetismConfig, MarkerVisibility,
@@ -92,6 +93,7 @@ pub use magnet::{
 pub use minimap::SceneMinimap;
 pub use scene::Scene;
 pub use scene::{ItemChange, PanAxes, SceneConstraints, SceneLayer};
+pub use scene_list_adapter::SceneListAdapter;
 pub use scene_model::SceneModel;
 pub use scroll_view::{SceneScrollView, ScrollBarMode, ScrollBarPolicy};
 pub use selection::{SceneSelection, SceneSelectionMode};

@@ -36,6 +36,16 @@
 //!   `animate_looping` to drive a continuous opacity pulse.
 //! - **Reactive view-transform signals:** `pan_x_signal` /
 //!   `pan_y_signal` / `zoom_signal` drive the live readout in the header.
+//! - **Rounded corners:** Section 1's tile grid rounds each tile with
+//!   `RectItem::corner_radius`.
+//! - **Dashed outline:** Section 5 adds an unfilled swatch outlined with
+//!   `RectItem::stroke_styled(color, StrokeStyle::dashed(...))`.
+//! - **Centered + rotated text:** Section 3's z-order labels use
+//!   `TextItem::align(TextAlign::Center)`, each fanned out with a slight
+//!   `TextItem::rotation`.
+//! - **Live colour mutation:** the toolbar's "Recolour swatch" button calls
+//!   `SceneModel::set_item_fill` on Section 5's swatch — a paint-only
+//!   repaint, no scene rebuild.
 //!
 //! Run with: `cargo run -p scene-showcase`
 
@@ -51,8 +61,8 @@ use bastyde::widgets::{
 };
 use bastyde_scene::{
     A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
-    SceneItem, SceneItemPaintContext, SceneMinimap, SceneSelectionMode, SceneView, ScrollBarMode,
-    ScrollBarPolicy, TextItem, register_animated_item_signal,
+    SceneItem, SceneItemPaintContext, SceneMinimap, SceneModel, SceneSelectionMode, SceneView,
+    ScrollBarMode, ScrollBarPolicy, TextAlign, TextItem, register_animated_item_signal,
 };
 
 // ---------------------------------------------------------------------------
@@ -157,7 +167,7 @@ impl SceneItem for PulsingDot {
         self.bounds = bounds;
     }
 
-    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext<'_>) {
         // Phase signal goes 0..1 looped. Triangle-wave-shape it so
         // the dot pulses smoothly: dim → bright → dim → …
         let phase = self.phase.get().clamp(0.0, 1.0);
@@ -254,8 +264,8 @@ fn build_lightweight_items_section(scene: &mut Scene) {
         0,
         0,
         "RectItem, PathItem, TextItem, GroupItem paint from \
-         SceneView without arena overhead. The spatial-index culls \
-         off-screen items before paint.",
+         SceneView without arena overhead — tiles use `.corner_radius()`. \
+         The spatial-index culls off-screen items before paint.",
     );
 
     let r = section_rect(0, 0);
@@ -289,6 +299,7 @@ fn build_lightweight_items_section(scene: &mut Scene) {
                 RectItem::new(rect)
                     .fill(color)
                     .stroke(ink(), 1.0)
+                    .corner_radius(6.0)
                     .access_label(lit!(format!("tile {}", i + 1))),
                 Point::ZERO,
             );
@@ -404,7 +415,9 @@ fn build_zorder_section(scene: &mut Scene) {
         2,
         0,
         "Scene::set_z(item, z) controls paint and hit-test ordering. \
-         Higher z paints on top. Equal z preserves insertion order.",
+         Higher z paints on top. Equal z preserves insertion order. \
+         Labels are TextItem::align(Center), fanned out with a slight \
+         TextItem::rotation per layer.",
     );
 
     let r = section_rect(2, 0);
@@ -438,7 +451,9 @@ fn build_zorder_section(scene: &mut Scene) {
                 lit!(*label),
                 Rect::new(rect.x + 8.0, rect.y + 6.0, rect.width - 16.0, 22.0),
             )
-            .color(ink()),
+            .color(ink())
+            .align(TextAlign::Center)
+            .rotation(i as f32 * 0.12),
             Point::ZERO,
         );
     }
@@ -532,7 +547,7 @@ fn build_heavyweight_section(scene: &mut Scene) -> ItemId {
 // Section 5 — Drag-to-move (only here are items draggable)
 // ---------------------------------------------------------------------------
 
-fn build_drag_section(scene: &mut Scene) {
+fn build_drag_section(scene: &mut Scene) -> ItemId {
     add_section_frame(scene, 0, 1, "5. Drag-to-move");
     add_section_caption(
         scene,
@@ -570,6 +585,25 @@ fn build_drag_section(scene: &mut Scene) {
         );
         scene.set_item_parent(label_id, Some(parent));
     }
+
+    // Live-recolour swatch: unfilled, dashed outline via
+    // `RectItem::stroke_styled(color, StrokeStyle::dashed(...))`. The
+    // toolbar's "Recolour swatch" button calls `SceneModel::set_item_fill`
+    // on this id — a paint-only mutation, no scene rebuild, no relayout.
+    let swatch = Rect::new(r.x + 16.0, r.y + 238.0, 269.0, 40.0);
+    let swatch_id = scene.add_item(
+        RectItem::new(swatch)
+            .stroke_styled(pastel_purple(), StrokeStyle::dashed(2.0, 6.0, 4.0))
+            .access_label(lit!("live-recolour swatch")),
+        Point::ZERO,
+    );
+    scene.add_item(
+        TextItem::new(lit!("Live fill via toolbar →"), swatch)
+            .color(dim_ink())
+            .align(TextAlign::Center),
+        Point::ZERO,
+    );
+    swatch_id
 }
 
 // ---------------------------------------------------------------------------
@@ -800,7 +834,7 @@ fn add_section_connector(
 // Whole-scene assembly
 // ---------------------------------------------------------------------------
 
-fn build_showcase_view() -> SceneView {
+fn build_showcase_view() -> (SceneView, ItemId) {
     let mut scene = Scene::new();
 
     add_scene_header(&mut scene);
@@ -809,7 +843,7 @@ fn build_showcase_view() -> SceneView {
     build_groupitem_section(&mut scene);
     build_zorder_section(&mut scene);
     let scroll_area_id = build_heavyweight_section(&mut scene);
-    build_drag_section(&mut scene);
+    let swatch_id = build_drag_section(&mut scene);
     build_a11y_groups_section(&mut scene, scroll_area_id);
     build_nested_scene_section(&mut scene);
     build_animation_section(&mut scene);
@@ -827,7 +861,7 @@ fn build_showcase_view() -> SceneView {
     // readable band. Both are reactive Scene-level signals.
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, w, h)));
     scene.set_zoom_range(Some(0.5_f32..=3.0_f32));
-    SceneView::new(scene)
+    let view = SceneView::new(scene)
         .selection_mode(SceneSelectionMode::Multi)
         .default_size(w, h)
         // Start slightly zoomed in so the content overflows the viewport and
@@ -868,7 +902,8 @@ fn build_showcase_view() -> SceneView {
                 );
                 y += step;
             }
-        })
+        });
+    (view, swatch_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -920,7 +955,12 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
         )
 }
 
-fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
+fn build_toolbar(drag_mode: Signal<DragMode>, scene: SceneModel, swatch_id: ItemId) -> impl Widget {
+    // Cycles the live-recolour swatch (§5) through a small palette. Kept
+    // outside the closure body only so the palette array itself is `Copy`
+    // and doesn't need cloning per activation.
+    let swatch_palette = [pastel_red(), pastel_blue(), pastel_green(), pastel_yellow()];
+    let swatch_phase = Signal::new(0_usize);
     Toolbar::new().child(
         HStack::new()
             .spacing(12.0)
@@ -934,14 +974,24 @@ fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
                     drag_mode.set(next);
                 }),
             )
+            .child(
+                Button::new(lit!("Recolour swatch")).on_activate_fn(move |_ctx| {
+                    // Live colour mutation: `SceneModel::set_item_fill` repaints
+                    // the §5 swatch in place — no scene rebuild, no relayout.
+                    let phase = (swatch_phase.get() + 1) % swatch_palette.len();
+                    swatch_phase.set(phase);
+                    scene.set_item_fill(swatch_id, swatch_palette[phase]);
+                }),
+            )
             .child(Spacer::new())
             .child(bastyde::widgets::ThemeSwitcher::new()),
     )
 }
 
 fn build_root() -> impl Widget + 'static {
-    let view = build_showcase_view();
+    let (view, swatch_id) = build_showcase_view();
     let drag_mode = view.drag_mode_signal();
+    let scene_model = view.model();
     let status = build_status_row(&view);
 
     // Minimap: a bottom-trailing thumbnail of the whole scene with a live
@@ -974,7 +1024,7 @@ fn build_root() -> impl Widget + 'static {
 
     VStack::new()
         .spacing(8.0)
-        .child(build_toolbar(drag_mode))
+        .child(build_toolbar(drag_mode, scene_model, swatch_id))
         .child(TextWidget::new(lit!("bastyde-scene showcase")).style(TextStyleRole::BodyBold))
         .child(status)
         .child(
@@ -1019,7 +1069,8 @@ mod tests {
         // 1 ScrollArea (§4, wraps 3 cards as ScrollArea descendants)
         // + 1 inner SceneView (§7) = 2 direct heavyweight children.
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let view_id = tree.add(build_showcase_view());
+        let (view, _swatch_id) = build_showcase_view();
+        let view_id = tree.add(view);
         tree.layout(SizeProposal::exact(1500.0, 950.0));
         let kids = tree.children(view_id);
         assert_eq!(kids.len(), 2);
@@ -1040,7 +1091,8 @@ mod tests {
         // overflows a typical scene-area viewport — both AsNeeded bars should
         // be placed with real (non-zero) bounds at the viewport edges.
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let scrollable = build_showcase_view()
+        let (view, _swatch_id) = build_showcase_view();
+        let scrollable = view
             .with_scroll_bars()
             .scroll_bar_mode(ScrollBarMode::Overlay)
             .vertical_policy(ScrollBarPolicy::AsNeeded)

@@ -44,6 +44,10 @@
 use accesskit::Role;
 use bastyde_canvas::{Canvas, Path, Point, Rect, StrokeSpace, StrokeStyle};
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::binding::BindingLevel;
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
+use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::Color;
 
 use crate::flags::ItemFlags;
@@ -64,8 +68,8 @@ use bastyde_i18n::LocalizedString;
 pub struct PathItem {
     path: Path,
     local_bounds: Rect,
-    fill: Option<Color>,
-    stroke: Option<(Color, StrokeStyle)>,
+    fill: Option<ColorProp>,
+    stroke: Option<(ColorProp, StrokeStyle)>,
     label: Option<String>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
@@ -87,24 +91,35 @@ impl PathItem {
         }
     }
 
-    /// Fill color.
-    pub fn fill(mut self, color: Color) -> Self {
-        self.fill = Some(color);
+    /// Fill colour. Accepts a plain [`Color`], a theme role, a
+    /// `Signal<Color>`, or a `Signal<Role>` — resolved against the active
+    /// theme at paint time.
+    pub fn fill(mut self, color: impl Into<ColorProp>) -> Self {
+        self.fill = Some(color.into());
         self
     }
 
-    /// Stroke color and width in **scene-coordinate** pixels — the stroke
+    /// Stroke colour and width in **scene-coordinate** pixels — the stroke
     /// scales with the view zoom.
-    pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+    pub fn stroke(mut self, color: impl Into<ColorProp>, width: f32) -> Self {
+        self.stroke = Some((color.into(), StrokeStyle::solid(width.max(0.0))));
         self
     }
 
     /// Cosmetic stroke: the connector holds a constant **device-pixel** width
     /// at any zoom (it never thins out or thickens). The renderer keeps the
     /// path body sharp at the current zoom, so joins/caps stay correct.
-    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
+    pub fn stroke_cosmetic(mut self, color: impl Into<ColorProp>, width: f32) -> Self {
+        self.stroke = Some((color.into(), StrokeStyle::hairline(width.max(0.0))));
+        self
+    }
+
+    /// Stroke with an explicit [`StrokeStyle`] — dashed, dotted, or custom caps
+    /// / joins. E.g. `.stroke_styled(color, StrokeStyle::dashed(2.0, 6.0, 4.0))`
+    /// distinguishes a pending connector from a solid confirmed one. The style
+    /// is stored verbatim (dash pattern/offset, `Logical` vs `Device` space).
+    pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self {
+        self.stroke = Some((color.into(), style));
         self
     }
 
@@ -137,12 +152,36 @@ impl SceneItem for PathItem {
         self.local_bounds = bounds;
     }
 
-    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
-        if let Some(fill) = self.fill {
-            canvas.fill_path(&self.path, fill);
+    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>) {
+        if let Some(prop) = &self.fill {
+            canvas.fill_path(&self.path, prop.resolve(ctx.theme, ctx.enabled));
         }
-        if let Some((color, style)) = &self.stroke {
-            canvas.stroke_path(&self.path, *color, style.clone());
+        if let Some((prop, style)) = &self.stroke {
+            canvas.stroke_path(
+                &self.path,
+                prop.resolve(ctx.theme, ctx.enabled),
+                style.clone(),
+            );
+        }
+    }
+
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool {
+        self.fill = fill;
+        true
+    }
+
+    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool {
+        self.stroke = stroke;
+        true
+    }
+
+    fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
+        let registry = ctx.binding_registry();
+        if let Some(p) = &self.fill {
+            p.register_if_bound(view_id, registry, BindingLevel::RepaintOnly);
+        }
+        if let Some((p, _)) = &self.stroke {
+            p.register_if_bound(view_id, registry, BindingLevel::RepaintOnly);
         }
     }
 
@@ -188,9 +227,9 @@ impl SceneItem for PathItem {
 
     fn thumbnail_color(&self) -> Color {
         // Connector-line and outline use cases dominate stroke-only
-        // paths; fill takes precedence when present.
-        self.fill
-            .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
+        // paths; fill takes precedence when present. Role-based colours
+        // have no theme here, so they fall through to the neutral grey.
+        crate::items::fill_or_stroke_hint(self.fill.as_ref(), self.stroke.as_ref())
             .unwrap_or_else(|| Color::new(0.6, 0.6, 0.6, 1.0))
     }
 
@@ -341,6 +380,32 @@ mod tests {
             .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
         let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
         assert!(item.shape_contains(Point::new(50.0, 99.0)));
+    }
+
+    #[test]
+    fn path_item_stroke_styled_stores_dash_pattern() {
+        // #5: a dashed connector keeps its dash pattern verbatim.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 4.0))
+            .stroke_styled(Color::BLACK, StrokeStyle::dashed(2.0, 6.0, 4.0));
+        let (_, style) = item.stroke.as_ref().expect("stroke set");
+        assert!(style.dash_pattern.is_some(), "dashed stroke keeps pattern");
+    }
+
+    #[test]
+    fn path_item_paint_resolves_colours() {
+        // #1/#2: fill + stroke resolve against the ctx theme and emit.
+        let theme = bastyde_core::presets::intui::light();
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(50.0, 50.0));
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 50.0, 50.0)).stroke(Color::RED, 2.0);
+        let mut canvas = bastyde_canvas::Canvas::new();
+        let ctx = SceneItemPaintContext::new(bastyde_canvas::Transform2D::identity(), None, &theme);
+        item.paint(&mut canvas, &ctx);
+        assert!(!canvas.into_render_frame().draw_order.is_empty());
     }
 
     #[test]

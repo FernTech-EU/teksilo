@@ -22,7 +22,10 @@
 //! origin (`RectItem::new(Rect::new(0.0, 0.0, w, h))`) and place it
 //! in the scene with `Scene::add_item(item, local_pos)`.
 
+use bastyde_canvas::StrokeStyle;
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::color_prop::ColorProp;
+use bastyde_tokens::Color;
 
 pub mod group;
 pub mod image;
@@ -35,7 +38,38 @@ pub use group::GroupItem;
 pub use image::ImageItem;
 pub use path::PathItem;
 pub use rect::RectItem;
-pub use text::TextItem;
+pub use text::{TextAlign, TextItem};
+
+/// A concrete-colour "hint" extracted from a [`ColorProp`] without a theme —
+/// used by `thumbnail_color` impls that have no paint context. `Static` and
+/// `Bound` colours resolve directly; role-based colours need a theme to
+/// resolve, so they yield `None` (the caller falls back to a neutral tint).
+///
+/// **Known limitation:** [`SceneItem::thumbnail_color`](crate::SceneItem::thumbnail_color)
+/// is theme-free by signature, so an item whose fill/stroke is a **theme role**
+/// (rather than a `Color` or `Signal<Color>`) renders as the caller's neutral
+/// grey in a [`SceneMinimap`](crate::SceneMinimap). Use a concrete `Color` or a
+/// `Signal<Color>` for items you want faithfully represented on a minimap.
+pub(crate) fn color_prop_hint(prop: &ColorProp) -> Option<Color> {
+    match prop {
+        ColorProp::Static(c) => Some(*c),
+        ColorProp::Bound(s) => Some(s.get()),
+        // Role-based (static or dynamic) colours can't resolve without a theme.
+        _ => None,
+    }
+}
+
+/// The fill-then-stroke thumbnail-colour fallback shared by the colour-bearing
+/// built-ins. `None` when neither slot yields a theme-free colour — the caller
+/// then picks its own neutral fallback. See [`color_prop_hint`] for the
+/// role-colour limitation.
+pub(crate) fn fill_or_stroke_hint(
+    fill: Option<&ColorProp>,
+    stroke: Option<&(ColorProp, StrokeStyle)>,
+) -> Option<Color> {
+    fill.and_then(color_prop_hint)
+        .or_else(|| stroke.and_then(|(c, _)| color_prop_hint(c)))
+}
 
 /// How the AT walker treats descendants of an item.
 ///
@@ -69,6 +103,14 @@ pub struct ItemA11yOverrides {
     pub(crate) role: Option<accesskit::Role>,
     pub(crate) hidden: bool,
     pub(crate) subtree_mode: AccessSubtreeMode,
+    /// String value announced for a data-bearing item (e.g. `"42 %"`).
+    pub(crate) value: Option<LocalizedString>,
+    /// Numeric value + optional range/step, for slider/gauge-like items whose
+    /// magnitude AT should describe.
+    pub(crate) numeric_value: Option<f64>,
+    pub(crate) min_numeric_value: Option<f64>,
+    pub(crate) max_numeric_value: Option<f64>,
+    pub(crate) numeric_value_step: Option<f64>,
 }
 
 impl ItemA11yOverrides {
@@ -92,6 +134,21 @@ impl ItemA11yOverrides {
         }
         if self.hidden {
             builder.set_hidden();
+        }
+        if let Some(ref value) = self.value {
+            builder.set_value(value.resolve_now());
+        }
+        if let Some(n) = self.numeric_value {
+            builder.set_numeric_value(n);
+        }
+        if let Some(n) = self.min_numeric_value {
+            builder.set_min_numeric_value(n);
+        }
+        if let Some(n) = self.max_numeric_value {
+            builder.set_max_numeric_value(n);
+        }
+        if let Some(n) = self.numeric_value_step {
+            builder.set_numeric_value_step(n);
         }
     }
 }
@@ -153,6 +210,37 @@ macro_rules! item_a11y_builders {
             self.a11y.subtree_mode = $crate::items::AccessSubtreeMode::Exclude;
             self
         }
+
+        /// Announce a string value for this item (e.g. a formatted data
+        /// reading like `"42 %"`). Mirrors the widget-tier `.access_value`.
+        pub fn access_value(mut self, value: impl Into<LocalizedString>) -> Self {
+            let ls: LocalizedString = value.into();
+            self.a11y.value = Some(ls);
+            self
+        }
+
+        /// Announce a numeric value for this item, for slider/gauge-like data
+        /// marks whose magnitude assistive tech should describe. Pair with
+        /// [`access_numeric_range`](Self::access_numeric_range) /
+        /// [`access_numeric_step`](Self::access_numeric_step) for full
+        /// range semantics.
+        pub fn access_numeric_value(mut self, value: f64) -> Self {
+            self.a11y.numeric_value = Some(value);
+            self
+        }
+
+        /// Announce the numeric min/max bounds for this item.
+        pub fn access_numeric_range(mut self, min: f64, max: f64) -> Self {
+            self.a11y.min_numeric_value = Some(min);
+            self.a11y.max_numeric_value = Some(max);
+            self
+        }
+
+        /// Announce the numeric step (per-arrow increment) for this item.
+        pub fn access_numeric_step(mut self, step: f64) -> Self {
+            self.a11y.numeric_value_step = Some(step);
+            self
+        }
     };
 }
 
@@ -201,5 +289,28 @@ mod tests {
         assert_eq!(item.access_subtree_mode(), AccessSubtreeMode::Exclude);
         let item = RectItem::new(r);
         assert_eq!(item.access_subtree_mode(), AccessSubtreeMode::Inherit);
+    }
+
+    #[test]
+    fn access_value_and_numeric_fields_round_trip() {
+        // #9: the value / numeric overrides store their fields. End-to-end
+        // walker coverage (the fields reaching an AccessKit node) lives in
+        // `view/tests.rs`, where a real `WidgetTree` walks the AT tree.
+        let o = ItemA11yOverrides {
+            value: Some(lit!("42 %")),
+            numeric_value: Some(0.42),
+            min_numeric_value: Some(0.0),
+            max_numeric_value: Some(1.0),
+            numeric_value_step: Some(0.1),
+            ..Default::default()
+        };
+        assert_eq!(o.numeric_value, Some(0.42));
+        assert_eq!(o.min_numeric_value, Some(0.0));
+        assert_eq!(o.max_numeric_value, Some(1.0));
+        assert_eq!(o.numeric_value_step, Some(0.1));
+        assert_eq!(
+            o.value.as_ref().map(|v| v.resolve_now()),
+            Some("42 %".to_string())
+        );
     }
 }

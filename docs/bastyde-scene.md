@@ -93,9 +93,11 @@ Custom items implement [`SceneItem`](../crates/bastyde-scene/src/item.rs):
 pub trait SceneItem: Debug + 'static {
     fn local_bounds(&self) -> Rect;
     fn set_local_bounds(&mut self, bounds: Rect);
-    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext);
+    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>);
 
     // Optional:
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool;                     // live colour mutation
+    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool;
     fn shape_contains(&self, local_pt: Point) -> bool;       // exact-shape hit-test
     fn initial_flags(&self) -> ItemFlags;                     // set on insert
     fn label(&self) -> Option<String>;                        // debug + AT default
@@ -109,16 +111,106 @@ pub trait SceneItem: Debug + 'static {
 `paint` runs in **local coordinates** — the canvas already has the
 item's `scene_transform` (chain × view) pushed by the SceneView paint
 walk, so a `RectItem` paints with `canvas.fill_rect(self.local_bounds, ...)`.
+`set_fill` / `set_stroke` default to a no-op (`false`) and back the live
+[`SceneModel::set_item_fill`](../crates/bastyde-scene/src/scene.rs) /
+`set_item_stroke` mutators — see **Item colours & theming** below.
 
 Five built-ins ship out of the box:
-[`RectItem`](../crates/bastyde-scene/src/items/rect.rs),
+[`RectItem`](../crates/bastyde-scene/src/items/rect.rs) (optional
+`corner_radius` and styled/dashed strokes via `stroke_styled`),
 [`PathItem`](../crates/bastyde-scene/src/items/path.rs) (with per-segment
-hit-test for stroke-only paths),
+hit-test for stroke-only paths, also `stroke_styled`),
 [`ImageItem`](../crates/bastyde-scene/src/items/image.rs),
 [`TextItem`](../crates/bastyde-scene/src/items/text.rs) (static or
-signal-bound), and
+signal-bound; horizontal `align(TextAlign::{Leading,Center,Trailing})`, a
+free `rotation(radians)`, and a `measure(&mut dyn TextBackend) -> Size`
+helper for sizing a slot around a label), and
 [`GroupItem`](../crates/bastyde-scene/src/items/group.rs) (labelled box
-or logical-only AT container).
+or logical-only AT container — also has `corner_radius` and
+`stroke_styled`).
+
+---
+
+## Item colours & theming
+
+`SceneItem::paint` receives a
+[`SceneItemPaintContext`](../crates/bastyde-scene/src/item.rs) carrying
+everything a colour-bearing item needs to resolve its chrome against the
+live theme:
+
+| Field | Meaning |
+|---|---|
+| `theme: &Theme` | The **fully-projected** theme for this paint pass — already swapped to the inactive-window / high-contrast variant by the render walker. Read it directly; never call `Theme::for_inactive_window` yourself. |
+| `window_active: bool` | `true` iff the host window is focused and unoccluded (`true` in headless tests). For behavioural blur cues the theme swap alone can't cover. |
+| `enabled: bool` | The item's effective `IS_ENABLED` flag, forwarded to `ColorProp::resolve` so a role colour picks its disabled variant. |
+| `text_scale: f32` | The global accessibility text-scale factor, for `TextItem::follow_text_scale` opt-ins. |
+| `view_transform` / `dirty_scene_rect` | Unchanged — pan/zoom/rotation and the current repaint region. |
+
+Built-in items' fill / stroke / foreground fields are
+[`ColorProp`](../crates/bastyde-core/src/color_prop.rs)s — accepting a plain
+[`Color`](../crates/bastyde-tokens/src/color.rs), a theme role (`SurfaceRole`
+/ `TextRole` / `BorderRole`), a `Signal<Color>`, or a `Signal<Role>` — and are
+resolved with `prop.resolve(ctx.theme, ctx.enabled)` inside `paint`. Because
+`ctx.theme` is already the inactive-window projection, a role fill
+auto-desaturates when the window loses focus with zero per-item code:
+
+```rust
+RectItem::new(rect)
+    .fill(SurfaceRole::Sunken)       // resolves against ctx.theme at paint
+    .stroke(BorderRole::Default, 1.0)
+```
+
+### Reactive colours
+
+A colour is continuously reactive in two ways:
+
+- **Build-time**: construct the item with a `Signal<Color>` or a
+  `Signal<Role>` (e.g. `.fill(my_signal.clone())`). Every colour-bearing
+  built-in (`RectItem`, `PathItem`, `GroupItem`, `TextItem`) registers its
+  bound `ColorProp`s at `BindingLevel::RepaintOnly` in `register_bindings`, so
+  a signal change repaints the owning `SceneView` — no relayout, no rebuild.
+- **Runtime**: mutate a *mounted* item's colour live through the shared
+  [`SceneModel`] — `set_item_fill` / `clear_item_fill` / `set_item_stroke` /
+  `clear_item_stroke`. Each emits
+  [`ItemChange::AppearanceChanged`](../crates/bastyde-scene/src/scene.rs),
+  which the view treats as **repaint-only, always** (it evicts the item's paint
+  cache and repaints — never a relayout, rebuild, or AccessKit re-walk). These
+  install a *snapshot*, which is all a static colour ever needs. Passing a
+  `Signal`/dynamic role here paints its current value immediately and starts
+  tracking it continuously from the view's next rebuild (whenever some other
+  structural change re-runs `register_bindings`) — a colour change is
+  deliberately never allowed to cost a rebuild. **For a colour that tracks its
+  signal forever, construct the item with it** (the build-time path above).
+
+```rust
+let model = view.model();
+model.set_item_fill(card_id, SurfaceRole::AccentSubtle);   // repaint only
+model.set_item_stroke(card_id, Color::RED, StrokeStyle::dashed(2.0, 6.0, 4.0));
+model.clear_item_fill(card_id);
+```
+
+`set_fill` / `set_stroke` are also the `SceneItem` trait hooks (default
+no-op) a custom item overrides to participate in the same live-mutation
+path: `RectItem` / `PathItem` / `GroupItem` accept both; `TextItem` maps
+`set_fill` onto its foreground colour (a `None` clear is rejected — text
+always has a colour); `ImageItem` accepts neither. Note that on a `GroupItem`,
+giving a previously **logical** (chrome-less, click-through) group a fill or
+stroke makes it *visual* — it starts hit-testing and will absorb clicks that
+used to fall through to the items it groups.
+
+> **Minimap caveat.** `SceneItem::thumbnail_color` (what
+> [`SceneMinimap`](../crates/bastyde-scene/src/minimap.rs) renders) is
+> theme-free by signature, so an item whose colour is a **theme role** has no
+> theme to resolve against and falls back to a neutral grey on the minimap.
+> Use a concrete `Color` or a `Signal<Color>` for items you want faithfully
+> represented there.
+
+> **Cache caveat.** A custom item that opts into `CacheMode::ItemCoordinate`
+> bakes its *resolved* colours into the cached frame. The `SceneView`
+> invalidates that cache on a theme swap, a window-active flip, and an
+> `IS_ENABLED` change, so role colours stay correct — but the cache is still
+> keyed by `(id, raster_scale)`, so a custom item whose paint depends on any
+> *other* ambient state must use the default `CacheMode::None`.
 
 ---
 
@@ -671,6 +763,49 @@ with no rebuild. (`SceneSelection` is itself a cheap-clone shared handle.)
 `SceneView::new(scene)` still takes a `Scene` by value (it wraps a fresh
 `SceneModel` internally); `view.scene()` / `view.scene_mut()` return borrow
 guards for ad-hoc single-view access; `view.model()` hands out the shared handle.
+
+---
+
+## `SceneListAdapter` — sync items from a `ListModel`
+
+[`SceneListAdapter<T>`](../crates/bastyde-scene/src/scene_list_adapter.rs)
+keeps a run of lightweight `SceneItem`s in lock-step with a
+`bastyde_data::ListModel<T>` (or any `ListDataSource<Item = T>`), so a
+data-driven collection of dots / markers / cards doesn't need hand-rolled
+reconciliation against `DataChange`. It is a plain non-`Widget` struct —
+construct it once, hold onto it, and it does the rest via an internal
+`ObserverHandle`.
+
+```rust
+use bastyde_scene::SceneListAdapter;
+
+let model = SceneModel::new();
+let adapter = SceneListAdapter::from_model(&list_model, model.clone(), |row, _index| {
+    Box::new(RectItem::new(Rect::new(0.0, 0.0, 12.0, 12.0)).fill(row.color)) as Box<dyn SceneItem>
+});
+
+let id = adapter.item_id_at(0);   // scene ItemId for row 0, if materialised
+```
+
+The delegate is `Fn(&T, usize) -> Box<dyn SceneItem>`; the returned item
+positions itself via its own `local_bounds` — the adapter inserts it at the
+scene origin through
+[`Scene::add_boxed_item`](../crates/bastyde-scene/src/scene.rs) (the
+boxed-`dyn` counterpart of `add_item`, needed because a trait-object item
+can't go through the generic `add_item<I: SceneItem>`). On construction the
+adapter materialises every current row; afterwards it reconciles from the
+model's `DataChange` stream: a structural change (insert / remove / move /
+reset) rebuilds every adapter-owned item (simple and always correct), an
+`ItemUpdated` rebuilds just that one row's item in place, and a lazy-loading
+source's `WindowLoaded` rebuilds only the newly-loaded range. `item_id_at`,
+`ids`, `len`, `is_empty` read the current index → `ItemId` mapping; `clear`
+removes every adapter-owned item from the scene. Dropping the adapter stops
+observing the model but does **not** remove its items — call `clear()` first
+if you want them gone.
+
+Use `SceneListAdapter::from_source` instead of `from_model` to drive the
+same reconciliation off a custom `ListDataSource<Item = T>` (the escape
+hatch for huge / external sources) rather than an in-memory `ListModel<T>`.
 
 ## Runtime mutation (after mount)
 

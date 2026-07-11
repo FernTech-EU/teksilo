@@ -216,6 +216,24 @@ RectItem::new(rect)
 `access_label_literal`, `access_description_literal` (and friends)
 are `#[doc(hidden)]` twins for explicitly-untranslated strings.
 
+Data-bearing items — gauges, value marks, progress dots — additionally carry
+`access_value` / `access_numeric_value` / `access_numeric_range` /
+`access_numeric_step`, mirroring the widget-tier numeric-range overrides:
+
+```rust
+RectItem::new(gauge_rect)
+    .access_label(tr!(cpu_load()))
+    .access_value(lit!("42 %"))
+    .access_numeric_value(0.42)
+    .access_numeric_range(0.0, 1.0)
+    .access_numeric_step(0.01);
+```
+
+`access_value` announces a formatted string reading (e.g. `"42 %"`);
+`access_numeric_value` / `access_numeric_range` / `access_numeric_step`
+populate AccessKit's numeric-value fields so a screen reader can describe
+magnitude and bounds, not just a label.
+
 ---
 
 ## Custom focus order

@@ -41,7 +41,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use bastyde_canvas::{Point, Rect, Transform2D};
+use bastyde_canvas::{Point, Rect, StrokeStyle, Transform2D};
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
 
@@ -162,6 +163,13 @@ impl SceneModel {
         self.0.borrow_mut().add_item_dynamic(item, local_pos)
     }
 
+    /// Add an already-boxed lightweight item at `local_pos`. The boxed-`dyn`
+    /// counterpart of [`add_item`](Self::add_item), used by
+    /// [`SceneListAdapter`](crate::SceneListAdapter).
+    pub fn add_boxed_item(&self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId {
+        self.0.borrow_mut().add_boxed_item(item, local_pos)
+    }
+
     // -----------------------------------------------------------------
     // Geometry mutation
     // -----------------------------------------------------------------
@@ -198,6 +206,31 @@ impl SceneModel {
     /// Set the paint opacity of `id` (0.0 = transparent, 1.0 = opaque); notifies all views.
     pub fn set_opacity(&self, id: ItemId, opacity: f32) {
         self.0.borrow_mut().set_opacity(id, opacity);
+    }
+
+    // -----------------------------------------------------------------
+    // Appearance mutation (paint-only, repaint without relayout)
+    // -----------------------------------------------------------------
+
+    /// Replace a lightweight item's fill colour live; every view repaints
+    /// (no relayout/rebuild). Accepts a plain [`Color`](bastyde_tokens::Color),
+    /// a theme role, a `Signal<Color>`, or a `Signal<Role>`. See
+    /// [`Scene::set_item_fill`] for the reactive-colour contract.
+    pub fn set_item_fill(&self, id: ItemId, fill: impl Into<ColorProp>) {
+        self.0.borrow_mut().set_item_fill(id, fill);
+    }
+    /// Clear a lightweight item's fill; every view repaints.
+    pub fn clear_item_fill(&self, id: ItemId) {
+        self.0.borrow_mut().clear_item_fill(id);
+    }
+    /// Replace a lightweight item's stroke (colour + [`StrokeStyle`]) live;
+    /// every view repaints (no relayout/rebuild).
+    pub fn set_item_stroke(&self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle) {
+        self.0.borrow_mut().set_item_stroke(id, color, style);
+    }
+    /// Clear a lightweight item's stroke; every view repaints.
+    pub fn clear_item_stroke(&self, id: ItemId) {
+        self.0.borrow_mut().clear_item_stroke(id);
     }
 
     // -----------------------------------------------------------------

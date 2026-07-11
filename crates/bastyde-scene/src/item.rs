@@ -42,16 +42,18 @@
 //! impl SceneItem for DotItem {
 //!     fn local_bounds(&self) -> Rect { self.bounds }
 //!     fn set_local_bounds(&mut self, b: Rect) { self.bounds = b; }
-//!     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+//!     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext<'_>) {
 //!         canvas.fill_rect(self.bounds, Color::RED);
 //!     }
 //! }
 //! ```
 
 use accesskit::Role;
-use bastyde_canvas::{Canvas, Point, Rect, Transform2D};
+use bastyde_canvas::{Canvas, Point, Rect, StrokeStyle, Transform2D};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
+use bastyde_core::styles::Theme;
 use bastyde_core::widget_id::WidgetId;
 
 use crate::flags::ItemFlags;
@@ -84,7 +86,17 @@ impl ItemId {
 /// that's painting this item; the canvas already has the item's
 /// `scene_transform` pushed, so paint methods work in local coords
 /// without further matrix math.
-pub struct SceneItemPaintContext {
+///
+/// `theme`, `window_active`, and `enabled` mirror the widget-tier
+/// [`PaintContext`](bastyde_core::widget::PaintContext) so lightweight items
+/// can resolve theme-aware colours exactly like widgets do — call
+/// `some_color_prop.resolve(ctx.theme, ctx.enabled)` in `paint`. `theme` is
+/// already the fully-projected theme for this pass (the render walker swaps in
+/// the inactive-window / high-contrast variant *before* handing it here), so
+/// items never call `Theme::for_inactive_window` themselves; reading
+/// `ctx.theme` grants automatic window-blur desaturation of accent roles.
+#[derive(Clone, Copy)]
+pub struct SceneItemPaintContext<'a> {
     /// View pan/zoom/rotation as a single affine. Items rarely need
     /// this directly — the canvas's transform stack already accounts
     /// for it — but custom items wanting to draw at a fixed pixel
@@ -101,24 +113,58 @@ pub struct SceneItemPaintContext {
     /// grow with the app-wide "grow all text" setting. Off-by-default because
     /// the scene already has its own pan/zoom.
     pub text_scale: f32,
+    /// Fully-projected theme for this paint pass. Already swapped to the
+    /// inactive-window / high-contrast variant by the render walker — read it
+    /// directly and never call [`Theme::for_inactive_window`] yourself. Pass
+    /// to [`ColorProp::resolve`] to turn a role/reactive colour into a
+    /// concrete [`Color`](bastyde_tokens::Color).
+    pub theme: &'a Theme,
+    /// `true` iff the host window is focused AND not occluded (`true` in
+    /// headless tests). Read for behavioural blur cues the accent-desaturation
+    /// theme swap can't cover (e.g. hiding a caret / muting a selection).
+    pub window_active: bool,
+    /// Effective enabled state of the item being painted (derived from
+    /// [`ItemFlags::IS_ENABLED`]). Forwarded to [`ColorProp::resolve`] so a
+    /// role-based colour picks its disabled variant on a disabled item.
+    pub enabled: bool,
 }
 
-impl SceneItemPaintContext {
-    /// Construct a paint context with the given view transform and
-    /// optional dirty region. `text_scale` defaults to `1.0`; use
-    /// [`with_text_scale`](Self::with_text_scale) to carry the accessibility
-    /// scale from the widget paint pass.
-    pub fn new(view_transform: Transform2D, dirty_scene_rect: Option<Rect>) -> Self {
+impl<'a> SceneItemPaintContext<'a> {
+    /// Construct a paint context with the given view transform, optional dirty
+    /// region, and the active theme. `text_scale` defaults to `1.0`,
+    /// `window_active` and `enabled` to `true`; use the `with_*` builders to
+    /// carry the accessibility scale, window-active state, and per-item enabled
+    /// state from the widget paint pass.
+    pub fn new(
+        view_transform: Transform2D,
+        dirty_scene_rect: Option<Rect>,
+        theme: &'a Theme,
+    ) -> Self {
         Self {
             view_transform,
             dirty_scene_rect,
             text_scale: 1.0,
+            theme,
+            window_active: true,
+            enabled: true,
         }
     }
 
     /// Set the global accessibility text-scale factor carried to opted-in items.
     pub fn with_text_scale(mut self, text_scale: f32) -> Self {
         self.text_scale = text_scale;
+        self
+    }
+
+    /// Set whether the host window is currently active (focused and unoccluded).
+    pub fn with_window_active(mut self, window_active: bool) -> Self {
+        self.window_active = window_active;
+        self
+    }
+
+    /// Set the effective enabled state of the item being painted.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 }
@@ -178,7 +224,35 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// item's `scene_transform` (parent chain × view) pushed, so
     /// coordinates are in **local** item space — `(0, 0)` is the
     /// item's anchor.
-    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext);
+    ///
+    /// `ctx` carries the active [`Theme`](bastyde_core::styles::Theme),
+    /// `window_active`, and per-item `enabled` state, so colour-bearing items
+    /// resolve their [`ColorProp`] fills/strokes with
+    /// `prop.resolve(ctx.theme, ctx.enabled)`.
+    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>);
+
+    /// Replace the primary fill colour, returning `true` if this item kind has
+    /// a fill slot that accepted the change. Backs
+    /// [`SceneModel::set_item_fill`](crate::SceneModel::set_item_fill) /
+    /// [`clear_item_fill`](crate::SceneModel::clear_item_fill). Rectangles,
+    /// paths, and groups set their fill; text items map it onto their
+    /// foreground colour (so a `None` is rejected — text always has a colour);
+    /// image items have no fill and return `false`. Default: no-op.
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool {
+        let _ = fill;
+        false
+    }
+
+    /// Replace the stroke (colour + [`StrokeStyle`]), returning `true` if this
+    /// item kind has a stroke slot that accepted the change. Backs
+    /// [`SceneModel::set_item_stroke`](crate::SceneModel::set_item_stroke) /
+    /// [`clear_item_stroke`](crate::SceneModel::clear_item_stroke). Rectangles,
+    /// paths, and groups accept it; text and image items return `false`.
+    /// Default: no-op.
+    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool {
+        let _ = stroke;
+        false
+    }
 
     /// Exact-shape hit-test in **local** coordinates. Default: AABB
     /// containment via [`SceneItem::local_bounds`]. Path-based items

@@ -74,6 +74,7 @@ impl SceneView {
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
             reconcile_dirty: Signal::new(0),
+            appearance_dirty: Signal::new(0),
             cursor_pos: Rc::new(Cell::new(None)),
             focus_order_callback: None,
             a11y_nested: false,

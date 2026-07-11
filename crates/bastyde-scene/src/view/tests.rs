@@ -1291,6 +1291,168 @@ fn set_a11y_landmark_overrides_role() {
     assert_eq!(node.role(), accesskit::Role::Region);
 }
 
+// -- Item theming / reactive colour / appearance (upgrade coverage) ------
+
+#[test]
+fn scene_view_threads_theme_into_item_paint() {
+    // #1 keystone: a role-based fill resolves against the tree's active theme
+    // (WidgetTree::new defaults to intui::light) when painted through the view.
+    // Proves `SceneItemPaintContext` carries the theme into `item.paint`.
+    use crate::items::RectItem;
+    use bastyde_core::color_prop::ColorProp;
+    use bastyde_tokens::SurfaceRole;
+
+    let mut scene = Scene::new();
+    scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(SurfaceRole::Sunken),
+        Point::ZERO,
+    );
+    let mut tree = WidgetTree::new();
+    let _view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let frame = tree.render();
+
+    let expected =
+        ColorProp::from(SurfaceRole::Sunken).resolve(&bastyde_core::presets::intui::light(), true);
+    assert_eq!(frame.decorations.len(), 1, "one visible role-filled rect");
+    assert_eq!(
+        frame.decorations[0].color,
+        expected.to_array(),
+        "role fill must resolve against the view's theme"
+    );
+}
+
+#[test]
+fn set_item_fill_repaints_without_rebuild() {
+    // #2: a live fill mutation is repaint-only — it bumps `appearance_dirty`,
+    // leaves `reconcile_dirty` (the rebuild channel) untouched, and the new
+    // colour paints on the next render as the ColorProp re-resolves.
+    use crate::items::RectItem;
+    use bastyde_tokens::Color;
+
+    let model = SceneModel::new();
+    let id = model.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::with_model(model.clone()));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(tree.render().decorations[0].color, Color::RED.to_array());
+
+    let (rec_before, app_before) = {
+        let view = view_handle(&tree, view_id);
+        (view.reconcile_dirty.get(), view.appearance_dirty.get())
+    };
+
+    model.set_item_fill(id, Color::BLUE);
+
+    {
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.reconcile_dirty.get(),
+            rec_before,
+            "a static appearance change must NOT trigger a rebuild"
+        );
+        assert!(
+            view.appearance_dirty.get() > app_before,
+            "an appearance change must bump the repaint-only signal"
+        );
+    }
+
+    assert_eq!(
+        tree.render().decorations[0].color,
+        Color::BLUE.to_array(),
+        "the re-render must pick up the new fill colour"
+    );
+}
+
+#[test]
+fn set_item_fill_with_a_bound_colour_is_also_repaint_only() {
+    // #2 regression guard: installing a *reactive* (Signal) colour at runtime
+    // must stay repaint-only too — it must NOT force a rebuild (and with it an
+    // AccessKit re-walk). A colour change never costs a rebuild.
+    use crate::items::RectItem;
+    use bastyde_core::signal::Signal;
+    use bastyde_tokens::Color;
+
+    let model = SceneModel::new();
+    let id = model.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::with_model(model.clone()));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let (rec_before, app_before) = {
+        let view = view_handle(&tree, view_id);
+        (view.reconcile_dirty.get(), view.appearance_dirty.get())
+    };
+
+    // A signal-bound colour — the path that previously forced a rebuild via the
+    // a11y-change channel.
+    let sig = Signal::new(Color::GREEN);
+    model.set_item_fill(id, sig.clone());
+
+    {
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.reconcile_dirty.get(),
+            rec_before,
+            "a bound appearance change must NOT trigger a rebuild / AT re-walk"
+        );
+        assert!(
+            view.appearance_dirty.get() > app_before,
+            "a bound appearance change must bump the repaint-only signal"
+        );
+    }
+
+    assert_eq!(
+        tree.render().decorations[0].color,
+        Color::GREEN.to_array(),
+        "the bound colour's current value must paint immediately"
+    );
+}
+
+#[test]
+fn item_a11y_value_and_numeric_reach_the_at_node() {
+    // #9: the `.access_value` / `.access_numeric_*` builders propagate to the
+    // synthetic AccessKit node the walker emits for a lightweight item.
+    use crate::items::RectItem;
+    use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id};
+
+    let mut scene = Scene::new();
+    let item = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
+            .access_numeric_value(0.42)
+            .access_numeric_range(0.0, 1.0)
+            .access_numeric_step(0.1)
+            .access_value(lit!("42 %")),
+        Point::ZERO,
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let update = tree.sync_accessibility();
+
+    let id = synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
+    let node = update
+        .nodes
+        .iter()
+        .find(|(nid, _)| *nid == id)
+        .map(|(_, n)| n)
+        .expect("item node");
+    assert_eq!(node.numeric_value(), Some(0.42));
+    assert_eq!(node.min_numeric_value(), Some(0.0));
+    assert_eq!(node.max_numeric_value(), Some(1.0));
+    assert_eq!(node.value(), Some("42 %"));
+}
+
 #[test]
 fn remove_a11y_group_drops_dependent_decorations() {
     // Removing a group must drop relations / live / landmarks
@@ -2673,7 +2835,7 @@ fn looping_item_animation_survives_drag_end_rebuild() {
         fn set_local_bounds(&mut self, b: Rect) {
             self.bounds = b;
         }
-        fn paint(&self, _c: &mut bastyde_canvas::Canvas, _x: &SceneItemPaintContext) {}
+        fn paint(&self, _c: &mut bastyde_canvas::Canvas, _x: &SceneItemPaintContext<'_>) {}
         fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
             register_animated_item_signal(ctx, &self.phase);
             self.phase
@@ -3840,7 +4002,7 @@ fn cache_mode_item_coordinate_avoids_repeat_paints() {
         fn set_local_bounds(&mut self, b: Rect) {
             self.bounds = b;
         }
-        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext) {
+        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext<'_>) {
             self.count.set(self.count.get() + 1);
             canvas.fill_rect(self.bounds, bastyde_tokens::Color::new(1.0, 0.0, 0.0, 1.0));
         }
@@ -3939,7 +4101,7 @@ fn item_cache_clears_on_glyph_epoch_change() {
         fn set_local_bounds(&mut self, b: Rect) {
             self.bounds = b;
         }
-        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext) {
+        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext<'_>) {
             self.count.set(self.count.get() + 1);
             canvas.fill_rect(self.bounds, bastyde_tokens::Color::new(1.0, 0.0, 0.0, 1.0));
         }
@@ -4009,7 +4171,7 @@ fn cache_evicts_on_invalidate() {
         fn set_local_bounds(&mut self, b: Rect) {
             self.bounds = b;
         }
-        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext) {
+        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext<'_>) {
             self.count.set(self.count.get() + 1);
             canvas.fill_rect(self.bounds, bastyde_tokens::Color::new(0.0, 0.5, 1.0, 1.0));
         }
@@ -4063,7 +4225,7 @@ fn cache_evicts_on_item_change_signal() {
         fn set_local_bounds(&mut self, b: Rect) {
             self.bounds = b;
         }
-        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext) {
+        fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &SceneItemPaintContext<'_>) {
             self.count.set(self.count.get() + 1);
             canvas.fill_rect(self.bounds, bastyde_tokens::Color::new(0.0, 0.5, 1.0, 1.0));
         }
@@ -4358,7 +4520,7 @@ impl crate::item::SceneItem for TransformRecorder {
     fn paint(
         &self,
         canvas: &mut bastyde_canvas::Canvas,
-        _ctx: &crate::item::SceneItemPaintContext,
+        _ctx: &crate::item::SceneItemPaintContext<'_>,
     ) {
         self.captured.set(Some(canvas.current_transform()));
         // Emit something so the renderer doesn't elide the whole

@@ -92,7 +92,7 @@ impl SceneItem for ImageItem {
         self.local_bounds = bounds;
     }
 
-    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext<'_>) {
         canvas.draw_image(self.local_bounds, self.name.clone());
     }
 

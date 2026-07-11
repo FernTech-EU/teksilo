@@ -68,7 +68,8 @@ use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::transform::local_to_parent;
-use bastyde_canvas::{Path, Point, Rect, Transform2D, Vec2};
+use bastyde_canvas::{Path, Point, Rect, StrokeStyle, Transform2D, Vec2};
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
 
@@ -119,6 +120,11 @@ pub enum ItemChange {
     /// `emit_item_change`, so `mutation_seq` advances and the AT-walk gate
     /// notices.
     PayloadChanged { id: ItemId },
+    /// `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight
+    /// item's paint-only appearance (fill / stroke colour or style) changed.
+    /// Never moves geometry, so the observing `SceneView` evicts the item's
+    /// cached frame and repaints **without** relayout or rebuild.
+    AppearanceChanged { id: ItemId },
 }
 
 /// Which paint band a lightweight [`SceneItem`] sits in, relative to
@@ -606,6 +612,20 @@ impl Scene {
         local_pos: Point,
         dynamic_bounds: bool,
     ) -> ItemId {
+        self.insert_boxed(Box::new(item), local_pos, dynamic_bounds)
+    }
+
+    /// The single lightweight-entry construction site, shared by the generic
+    /// [`add_item`](Self::add_item) / [`add_item_dynamic`](Self::add_item_dynamic)
+    /// path (via `add_item_inner`) and the boxed-`dyn`
+    /// [`add_boxed_item`](Self::add_boxed_item) path, so a future `SceneEntry`
+    /// field can't be added to one and silently missed by the other.
+    fn insert_boxed(
+        &mut self,
+        item: Box<dyn SceneItem>,
+        local_pos: Point,
+        dynamic_bounds: bool,
+    ) -> ItemId {
         let id = ItemId::next();
         let local_bounds = item.local_bounds();
         let flags = item.initial_flags();
@@ -614,7 +634,7 @@ impl Scene {
             local_pos,
             local_bounds,
             transform: Transform2D::identity(),
-            kind: SceneEntryKind::Item(Box::new(item)),
+            kind: SceneEntryKind::Item(item),
             z: 0.0,
             layer: SceneLayer::Under,
             parent: None,
@@ -1010,6 +1030,100 @@ impl Scene {
             self.entries[pos].opacity = new;
             self.emit_item_change(ItemChange::OpacityChanged { id, old, new });
         }
+    }
+
+    /// Replace a lightweight item's fill colour live, emitting
+    /// [`ItemChange::AppearanceChanged`] — **always repaint-only**, never a
+    /// relayout, rebuild, or AccessKit re-walk. The colour is a [`ColorProp`],
+    /// so it accepts a plain [`Color`](bastyde_tokens::Color), a theme role, a
+    /// `Signal<Color>`, or a `Signal<Role>`. No-op for item kinds without a fill
+    /// (e.g. `ImageItem`).
+    ///
+    /// # Reactivity contract
+    ///
+    /// A colour becomes **continuously** reactive by being registered at build
+    /// time (`SceneItem::register_bindings`). So:
+    ///
+    /// - **Construct** the item with a `Signal`/role colour (`.fill(my_signal)`)
+    ///   for a colour that tracks its signal forever. This is the recommended
+    ///   path and needs no mutator at all.
+    /// - **This mutator** installs a *snapshot*: it repaints immediately, which
+    ///   is all a static colour ever needs. If you pass a `Signal`/dynamic role
+    ///   here, it paints the signal's current value now and starts tracking it
+    ///   continuously from the owning view's next rebuild (whenever some other
+    ///   structural change re-runs `register_bindings`). Deliberately *not*
+    ///   forced: a colour change must never cost a rebuild + AT re-walk.
+    pub fn set_item_fill(&mut self, id: ItemId, fill: impl Into<ColorProp>) {
+        let prop = fill.into();
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        let applied = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_fill(Some(prop)),
+            _ => false,
+        };
+        if applied {
+            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        }
+    }
+
+    /// Clear a lightweight item's fill (Rect/Path/Group become fill-less),
+    /// emitting [`ItemChange::AppearanceChanged`] (repaint-only). No-op for items
+    /// whose fill can't be cleared (e.g. `TextItem`, which always has a
+    /// foreground colour).
+    pub fn clear_item_fill(&mut self, id: ItemId) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        let applied = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_fill(None),
+            _ => false,
+        };
+        if applied {
+            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        }
+    }
+
+    /// Replace a lightweight item's stroke (colour + [`StrokeStyle`]) live,
+    /// emitting [`ItemChange::AppearanceChanged`] (repaint-only). No-op for item
+    /// kinds without a stroke slot (`TextItem` / `ImageItem`). See
+    /// [`set_item_fill`](Self::set_item_fill) for the reactivity contract.
+    pub fn set_item_stroke(&mut self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle) {
+        let prop = color.into();
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        let applied = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_stroke(Some((prop, style))),
+            _ => false,
+        };
+        if applied {
+            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        }
+    }
+
+    /// Clear a lightweight item's stroke, emitting
+    /// [`ItemChange::AppearanceChanged`] (repaint-only). No-op for item kinds
+    /// without a stroke.
+    pub fn clear_item_stroke(&mut self, id: ItemId) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        let applied = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_stroke(None),
+            _ => false,
+        };
+        if applied {
+            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        }
+    }
+
+    /// Insert an already-boxed lightweight item at `local_pos`, returning its
+    /// id. The boxed-`dyn` counterpart of [`add_item`](Self::add_item) — used by
+    /// [`SceneListAdapter`](crate::SceneListAdapter) whose delegate yields
+    /// `Box<dyn SceneItem>`.
+    pub fn add_boxed_item(&mut self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId {
+        self.insert_boxed(item, local_pos, false)
     }
 
     /// Replace an item's handler set. Pass `None` to clear.
@@ -2669,7 +2783,7 @@ mod tests {
             fn set_local_bounds(&mut self, b: Rect) {
                 self.bounds.set(b);
             }
-            fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &SceneItemPaintContext) {}
+            fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &SceneItemPaintContext<'_>) {}
         }
 
         let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
@@ -2718,7 +2832,7 @@ mod tests {
             fn set_local_bounds(&mut self, b: Rect) {
                 self.bounds.set(b);
             }
-            fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &SceneItemPaintContext) {}
+            fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &SceneItemPaintContext<'_>) {}
         }
 
         let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));

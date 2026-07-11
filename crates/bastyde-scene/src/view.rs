@@ -667,6 +667,14 @@ pub struct SceneView {
     /// to their original positions on drag release.
     reconcile_dirty: Signal<u64>,
 
+    /// Bumped by the `item_change_signal` observer on an
+    /// [`ItemChange::AppearanceChanged`](crate::ItemChange::AppearanceChanged).
+    /// Bound at `BindingLevel::RepaintOnly` in `build`, so a lightweight item's
+    /// live colour/style change repaints the view (re-running `paint_band` →
+    /// `item.paint`) **without** a relayout or rebuild — the cheap path for a
+    /// pure appearance mutation.
+    appearance_dirty: Signal<u64>,
+
     /// Latest pointer position seen on the SceneView (screen-space).
     /// Updated via an on_pointer_event handler in `build`. Used by
     /// Ctrl+wheel zoom to zoom-about-pointer instead of zoom-about-

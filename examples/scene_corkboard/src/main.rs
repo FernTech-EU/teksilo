@@ -29,6 +29,18 @@
 //! `Live::Polite` region. Each pane's camera is app-owned via `bind_view_state`,
 //! so the per-pane "Reset" buttons snap only their own viewport home.
 //!
+//! **List-driven pins (`SceneListAdapter`).** A small `ListModel<PinTag>` backs
+//! colour-coded corner "pins" on the cards, kept in sync with the shared scene
+//! by a `SceneListAdapter` — the scene-tier counterpart of `ListView`'s
+//! automatic data-to-widget sync, but for lightweight items. The adapter is
+//! stored inside `CorkboardModel` (alongside the runtime Act-growth state) so
+//! it stays alive for the app's lifetime; dropping it would stop the sync.
+//! "Pin card" / "Unpin last" push/remove rows on `pins` — each reconciles the
+//! *whole* pin set (the adapter's insert/remove policy); "Recolour pins" calls
+//! `ListModel::set` per row instead, exercising the adapter's single-row
+//! `ItemUpdated` rebuild path. Both panes show the same pins — one adapter,
+//! one shared `SceneModel`.
+//!
 //! Run with: `cargo run -p scene_corkboard`
 
 use std::cell::RefCell;
@@ -37,11 +49,12 @@ use std::rc::Rc;
 use accesskit::Live;
 use bastyde::canvas::{Path, Point, Rect};
 use bastyde::core::BindingLevel;
+use bastyde::data::ListModel;
 use bastyde::prelude::*;
 use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 use bastyde_scene::{
-    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneLayer,
-    SceneModel, SceneSelection, SceneSelectionMode, SceneView,
+    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneItem, SceneLayer,
+    SceneListAdapter, SceneModel, SceneSelection, SceneSelectionMode, SceneView,
 };
 
 const CARDS_PER_ROW: usize = 3;
@@ -168,6 +181,65 @@ fn add_connector(model: &SceneModel, from_rect: Rect, to_rect: Rect, beat: usize
     )
 }
 
+// ---------------------------------------------------------------------------
+// List-driven pins — `ListModel<PinTag>` kept in sync via `SceneListAdapter`.
+// ---------------------------------------------------------------------------
+
+const PIN_SIZE: f32 = 14.0;
+
+fn pin_palette() -> [Color; 4] {
+    [
+        Color::new(0.90, 0.30, 0.30, 0.95), // red
+        Color::new(0.95, 0.75, 0.20, 0.95), // amber
+        Color::new(0.30, 0.75, 0.45, 0.95), // green
+        Color::new(0.35, 0.55, 0.90, 0.95), // blue
+    ]
+}
+
+fn pin_ink() -> Color {
+    Color::new(0.15, 0.15, 0.18, 1.0)
+}
+
+/// One row of the corkboard's pin `ListModel`: which card it decorates, and a
+/// palette index (rather than a `Color` directly) so "recolour" is a plain
+/// integer bump — no colour comparison needed to find "the next one".
+#[derive(Debug, Clone, Copy)]
+struct PinTag {
+    card_index: usize,
+    color_index: usize,
+}
+
+fn pin_color(tag: &PinTag) -> Color {
+    let palette = pin_palette();
+    palette[tag.color_index % palette.len()]
+}
+
+/// A pin's local rect: a small rounded square in the card's top-leading
+/// corner (the top-trailing corner already hosts the static "over-band"
+/// accent tag on card 0). Positions are absolute scene coordinates —
+/// `SceneListAdapter` always inserts its delegate's item at `Point::ZERO`, so
+/// the delegate itself computes each row's placement (see the module docs on
+/// `SceneListAdapter`).
+fn pin_rect(card_index: usize) -> Rect {
+    let card = card_rect(card_index);
+    Rect::new(card.x + 6.0, card.y + 6.0, PIN_SIZE, PIN_SIZE)
+}
+
+/// The `SceneListAdapter` delegate: one `RectItem` "pin" per `PinTag` row,
+/// corner-radius'd to a circle. Re-run for every row on an insert/remove
+/// (whole-set rebuild) and for the single changed row on a `ListModel::set`
+/// (targeted `ItemUpdated` rebuild) — see the module docs on
+/// `SceneListAdapter`'s reconciliation policy.
+fn build_pin_item(tag: &PinTag, _index: usize) -> Box<dyn SceneItem> {
+    Box::new(
+        RectItem::new(pin_rect(tag.card_index))
+            .fill(pin_color(tag))
+            .corner_radius(PIN_SIZE * 0.5)
+            .stroke(pin_ink(), 1.0)
+            .access_label(lit!(format!("pin on card {}", tag.card_index + 1))),
+    )
+}
+
 /// Runtime-growable corkboard state, tracked across "Add Act" clicks.
 struct CorkboardModel {
     /// Next grid slot for an appended card.
@@ -176,6 +248,15 @@ struct CorkboardModel {
     acts: Vec<A11yGroupId>,
     /// The last card in reading order (item + rect), for the connector + flow.
     last_card_item: Option<(ItemId, Rect)>,
+    /// Backing list model for the pin markers — the toolbar's Pin/Unpin/
+    /// Recolour buttons mutate this directly; `pins_adapter` reconciles it
+    /// into the scene automatically.
+    pins: ListModel<PinTag>,
+    /// Kept alive purely so the pin sync keeps running — dropping it would
+    /// stop `pins`' changes from reaching the scene (see the module docs).
+    /// Never read: its entire job is done by staying alive, not by its value.
+    #[allow(dead_code)]
+    pins_adapter: SceneListAdapter<PinTag>,
 }
 
 /// Build the initial 9-card / 3-Act corkboard, returning a shared [`SceneModel`]
@@ -252,10 +333,29 @@ fn build_initial_scene() -> (SceneModel, CorkboardModel) {
     model.set_layer(tag_id, SceneLayer::Over);
     model.set_flag(tag_id, ItemFlags::IS_SELECTABLE, false);
 
+    // Colour-coded pins: a `ListModel<PinTag>` synced into the scene via
+    // `SceneListAdapter` — the list-driven counterpart to every other item in
+    // this scene, which is added by hand through `SceneModel`. Seed two pins
+    // on the first two cards; the toolbar grows/shrinks/recolours `pins` from
+    // here on, and the adapter keeps the scene in step automatically.
+    let pins: ListModel<PinTag> = ListModel::from_vec(vec![
+        PinTag {
+            card_index: 0,
+            color_index: 0,
+        },
+        PinTag {
+            card_index: 1,
+            color_index: 1,
+        },
+    ]);
+    let pins_adapter = SceneListAdapter::from_model(&pins, model.clone(), build_pin_item);
+
     let cork = CorkboardModel {
         next_index: CARDS.len(),
         acts: acts.to_vec(),
         last_card_item: last,
+        pins,
+        pins_adapter,
     };
     (model, cork)
 }
@@ -351,8 +451,11 @@ fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -
         )
 }
 
-/// The toolbar: Add Act, per-pane Reset, dark-mode toggle. Captures the shared
-/// model (mutated directly) + main pane id (for `ensure_visible`) + both cameras.
+/// The toolbar: Add Act, pin controls, per-pane Reset, dark-mode toggle.
+/// Captures the shared model (mutated directly) + main pane id (for
+/// `ensure_visible`) + both cameras. Each button gets its own `cork` clone —
+/// `Rc<RefCell<_>>` is cheap to clone and every closure needs to own its
+/// capture.
 fn build_toolbar(
     main_view_id: WidgetId,
     model: SceneModel,
@@ -360,6 +463,9 @@ fn build_toolbar(
     main_cam: Camera,
     overview_cam: Camera,
 ) -> impl Widget + 'static {
+    let pin_cork = cork.clone();
+    let unpin_cork = cork.clone();
+    let recolor_cork = cork.clone();
     Toolbar::new().child(
         HStack::new()
             .spacing(8.0)
@@ -381,6 +487,39 @@ fn build_toolbar(
                     },
                 );
             }))
+            .child(Button::new(lit!("Pin card")).on_activate_fn(move |_ctx| {
+                // `ListModel::push` — the SceneListAdapter rebuilds the whole
+                // pin set (insert/remove reconciliation policy) and every pane
+                // (sharing the one SceneModel) picks up the new pin.
+                let state = pin_cork.borrow();
+                let count = state.pins.len();
+                state.pins.push(PinTag {
+                    card_index: count % CARDS.len(),
+                    color_index: count,
+                });
+            }))
+            .child(Button::new(lit!("Unpin last")).on_activate_fn(move |_ctx| {
+                let state = unpin_cork.borrow();
+                let len = state.pins.len();
+                if len > 0 {
+                    state.pins.remove(len - 1);
+                }
+            }))
+            .child(
+                Button::new(lit!("Recolour pins")).on_activate_fn(move |_ctx| {
+                    // `ListModel::set` per row — the adapter's targeted
+                    // `ItemUpdated` path rebuilds only that one pin, not the set.
+                    let state = recolor_cork.borrow();
+                    for i in 0..state.pins.len() {
+                        if let Some(next) = state.pins.with_item(i, |tag| PinTag {
+                            card_index: tag.card_index,
+                            color_index: tag.color_index + 1,
+                        }) {
+                            state.pins.set(i, next);
+                        }
+                    }
+                }),
+            )
             .child({
                 let cam = main_cam.clone();
                 Button::new(lit!("Reset Main")).on_activate_fn(move |_ctx| cam.reset(1.0))
@@ -501,10 +640,14 @@ mod tests {
         let before_ov = tree.children(overview_id).len();
 
         // Mutate the shared model directly (the way the "Add Act" button does).
+        let pins: ListModel<PinTag> = ListModel::from_vec(vec![]);
+        let pins_adapter = SceneListAdapter::from_model(&pins, model.clone(), build_pin_item);
         let mut cork = CorkboardModel {
             next_index: CARDS.len(),
             acts: vec![],
             last_card_item: Some((model.ids()[0], card_rect(CARDS.len() - 1))),
+            pins,
+            pins_adapter,
         };
         let (_card, _rect) = add_act(&model, &mut cork);
         tree.layout(SizeProposal::exact(1200.0, 600.0));

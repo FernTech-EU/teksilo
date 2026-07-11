@@ -469,7 +469,7 @@ impl crate::item::SceneItem for DynRect {
         Rect::new(0.0, 0.0, s, s)
     }
     fn set_local_bounds(&mut self, _b: Rect) {}
-    fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &crate::item::SceneItemPaintContext) {}
+    fn paint(&self, _: &mut bastyde_canvas::Canvas, _: &crate::item::SceneItemPaintContext<'_>) {}
     fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
         self.size
             .bind_to(view_id, ctx.binding_registry(), BindingLevel::Rebuild);

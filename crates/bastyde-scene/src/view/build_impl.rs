@@ -99,6 +99,16 @@ impl SceneView {
         self.reconcile_dirty
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
+        // Bind the appearance signal at `RepaintOnly`: a lightweight item's
+        // live colour/style change (via `set_item_fill` / `set_item_stroke`)
+        // dirties paint only — `paint_band` re-runs `item.paint` and re-resolves
+        // the `ColorProp` — with no relayout or rebuild.
+        self.appearance_dirty.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+
         // Wire the item-coordinate cache invalidation observer.
         // Cached frames are recorded in **local** coordinates, so
         // only changes that alter the local-coord paint output
@@ -112,6 +122,7 @@ impl SceneView {
         {
             let cache = self.item_cache.clone();
             let reconcile_dirty = self.reconcile_dirty.clone();
+            let appearance_dirty = self.appearance_dirty.clone();
             let payload_dirty = self.payload_dirty.clone();
             let handle = self.model.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
@@ -123,10 +134,30 @@ impl SceneView {
                     ItemChange::Removed { id } | ItemChange::LocalBoundsChanged { id, .. } => {
                         cache.borrow_mut().evict(id);
                     }
+                    // `IS_ENABLED` feeds `ColorProp::resolve` (disabled-role
+                    // colours), so it bakes into a cached frame just like the
+                    // geometry does — a flag flip must evict, or the item would
+                    // replay its stale enabled-state colours.
+                    ItemChange::FlagsChanged { id, old, new } => {
+                        use crate::flags::ItemFlags;
+                        if old.contains(ItemFlags::IS_ENABLED)
+                            != new.contains(ItemFlags::IS_ENABLED)
+                        {
+                            cache.borrow_mut().evict(id);
+                        }
+                    }
                     // A `Delegated` item's data changed: queue a targeted rebuild
                     // so the next build re-invokes the delegate for just that id.
                     ItemChange::PayloadChanged { id } => {
                         payload_dirty.borrow_mut().insert(id);
+                    }
+                    // Paint-only appearance change: colour bakes into the cached
+                    // local-coord frame, so evict it, then repaint WITHOUT a
+                    // rebuild — return before the shared `reconcile_dirty` bump.
+                    ItemChange::AppearanceChanged { id } => {
+                        cache.borrow_mut().evict(id);
+                        appearance_dirty.set(appearance_dirty.get().wrapping_add(1));
+                        return;
                     }
                     _ => {}
                 }
@@ -156,6 +187,31 @@ impl SceneView {
                 reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
             });
             *self._a11y_observer.borrow_mut() = Some(handle);
+        }
+
+        // An item's `ColorProp` resolves against `ctx.theme` (already projected
+        // for window-active / high-contrast) at paint time, so a theme swap or a
+        // window-activation flip changes an item's *painted* colours — and those
+        // colours bake into a `CacheMode::ItemCoordinate` frame, which is keyed
+        // only by `(id, raster_scale)`. The framework repaints on both events, but
+        // `paint_band` would replay the stale cached frame and the item would keep
+        // its old (e.g. still-saturated) colour while every widget around it
+        // desaturates. Clear the cache so the next paint re-records at the new
+        // theme / window-active state. Items on the default `CacheMode::None`
+        // re-resolve every paint and are unaffected either way.
+        {
+            let cache = self.item_cache.clone();
+            let handle = ctx.theme_signal().observe(move |_| {
+                cache.borrow_mut().clear();
+            });
+            ctx.own_handle(handle);
+        }
+        {
+            let cache = self.item_cache.clone();
+            let handle = ctx.window_active_signal().observe(move |_| {
+                cache.borrow_mut().clear();
+            });
+            ctx.own_handle(handle);
         }
 
         // Materialise heavyweight widgets. Two paths, neither holding a model

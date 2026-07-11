@@ -231,6 +231,27 @@ bastyde-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equi
                      consumers that drive their own drag. Synthetic `SceneMagnet` AT nodes +
                      roving `active_descendant`. `SceneView::magnetism(MagnetismConfig)`; demo
                      `scene_magnetism`.
+                     **Item colours & theming**: lightweight items' fill/stroke/foreground fields are
+                     `ColorProp`s (plain `Color` / theme role / `Signal<Color>` / `Signal<Role>`),
+                     resolved at paint via `prop.resolve(ctx.theme, ctx.enabled)` against a new
+                     `theme: &Theme` + `window_active: bool` + `enabled: bool` threaded onto
+                     `SceneItemPaintContext` (mirrors the widget-tier `PaintContext`) — so a role fill
+                     auto-desaturates on window blur with zero per-item code. Build-time `Signal`/role
+                     colours are continuously reactive (`register_bindings` at `RepaintOnly`); live
+                     `SceneModel::set_item_fill`/`clear_item_fill`/`set_item_stroke`/`clear_item_stroke`
+                     mutate a mounted item's colour and emit `ItemChange::AppearanceChanged`
+                     (repaint-only — evicts the item's paint cache, never relayout/rebuild). `RectItem`
+                     gained `corner_radius` (`GroupItem` already had it); `RectItem`/`PathItem`/
+                     `GroupItem` gained `stroke_styled(color, StrokeStyle)` for dashed/dotted/custom
+                     strokes; `TextItem` gained `align(TextAlign::{Leading,Center,Trailing})`,
+                     `rotation(radians)`, and `measure(&mut dyn TextBackend) -> Size`. Per-item a11y
+                     overrides gained `access_value`/`access_numeric_value`/`access_numeric_range`/
+                     `access_numeric_step` for gauge/value-mark-like items.
+                     `SceneListAdapter<T>` (`from_model`/`from_source`, in `scene_list_adapter.rs`)
+                     keeps a run of lightweight items in sync with a `ListModel<T>` /
+                     `ListDataSource<Item = T>` via a `Fn(&T, usize) -> Box<dyn SceneItem>` delegate,
+                     reconciling `DataChange` (rebuild-all on structural change, single-item rebuild on
+                     `ItemUpdated`) — the data-adapter analogue of `ListView` for the lightweight tier.
                      Use cases: story corkboards, mind maps, node-graph editors, timeline views, CAD
                      canvases, simple maps. Sits at the bastyde-widgets tier; depends on widgets so the
                      heavyweight tier can be any widget in the catalog. See docs/bastyde-scene.md +

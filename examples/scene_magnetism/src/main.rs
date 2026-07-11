@@ -24,30 +24,36 @@
 //!   then arrow-keys to a source magnet, Enter to activate it, arrows to
 //!   a target, Enter to connect. Esc cancels.
 //!
+//! A dashed guide (`PathItem::stroke_styled` + `StrokeStyle::dashed`) hints at
+//! one intended-but-not-yet-made connection (Input -> Blur) — "pending". Once
+//! the user actually connects two ports, `on_connect` draws a solid cosmetic
+//! wire — "confirmed". The two styles read at a glance: dashed = suggestion,
+//! solid = real edge.
+//!
 //! Run with: `cargo run -p scene-magnetism`
 
-use bastyde::canvas::{Path, Point, Rect};
+use bastyde::canvas::{Path, Point, Rect, StrokeStyle};
 use bastyde::prelude::*;
 use bastyde::tokens::Alignment;
 use bastyde::widgets::{Expand, TextWidget, VStack, ZStack};
 use bastyde_scene::{
-    A11yNode, A11yRelation, Magnet, MagnetConnection, MagnetRef, MagnetRole, MagnetVerdict,
-    MagnetismConfig, PathItem, RectItem, SceneLayer, SceneModel, SceneView,
+    A11yNode, A11yRelation, ItemFlags, Magnet, MagnetConnection, MagnetRef, MagnetRole,
+    MagnetVerdict, MagnetismConfig, PathItem, RectItem, SceneLayer, SceneModel, SceneView,
 };
 
 const NODE_W: f32 = 150.0;
 const NODE_H: f32 = 64.0;
 
-/// Add a node rect at `(x, y)` with an output (Source) magnet on its
+/// Add a node rect at `origin` with an output (Source) magnet on its
 /// right edge and an input (Target) magnet on its left edge. The magnet
 /// payloads carry the node's name to show payload round-tripping.
-fn add_node(model: &SceneModel, x: f32, y: f32, name: &str, color: Color) {
+fn add_node(model: &SceneModel, origin: Point, name: &str, color: Color) {
     let id = model.add_item(
         RectItem::new(Rect::new(0.0, 0.0, NODE_W, NODE_H))
             .fill(color)
             .stroke(Color::new(0.0, 0.0, 0.0, 0.5), 1.5)
             .access_label(lit!(name.to_string())),
-        Point::new(x, y),
+        origin,
     );
     model.add_magnet(
         id,
@@ -63,6 +69,48 @@ fn add_node(model: &SceneModel, x: f32, y: f32, name: &str, color: Color) {
             .payload(format!("{name} in"))
             .label(lit!(format!("{name} input"))),
     );
+}
+
+/// A node's output-magnet scene position, given its origin. Mirrors the
+/// `Point::new(NODE_W, NODE_H * 0.5)` local offset `add_node` gives the
+/// Source magnet.
+fn output_pos(origin: Point) -> Point {
+    Point::new(origin.x + NODE_W, origin.y + NODE_H * 0.5)
+}
+
+/// A node's input-magnet scene position, given its origin. Mirrors the
+/// `Point::new(0.0, NODE_H * 0.5)` local offset `add_node` gives the
+/// Target magnet.
+fn input_pos(origin: Point) -> Point {
+    Point::new(origin.x, origin.y + NODE_H * 0.5)
+}
+
+/// A dashed guide line between two magnet positions, hinting at an
+/// intended-but-not-yet-made connection — visually distinct from
+/// [`add_wire`]'s solid cosmetic stroke for an actually-made one. Decorative
+/// only: excluded from marquee/click selection and painted under the nodes.
+fn add_suggested_link(model: &SceneModel, from: Point, to: Point) {
+    let mut path = Path::new();
+    path.move_to(from).line_to(to);
+    let stroke_w = 2.0_f32;
+    let pad = stroke_w * 0.5 + 2.0;
+    let bounds = Rect::new(
+        from.x.min(to.x) - pad,
+        from.y.min(to.y) - pad,
+        (to.x - from.x).abs() + 2.0 * pad,
+        (to.y - from.y).abs() + 2.0 * pad,
+    );
+    let id = model.add_item(
+        PathItem::new(path, bounds)
+            .stroke_styled(
+                Color::new(0.45, 0.45, 0.50, 0.75),
+                StrokeStyle::dashed(stroke_w, 6.0, 4.0),
+            )
+            .access_label(lit!("suggested connection — not yet made")),
+        Point::ZERO,
+    );
+    model.set_flag(id, ItemFlags::IS_SELECTABLE, false);
+    model.set_layer(id, SceneLayer::Under);
 }
 
 /// Source <-> Target on different nodes accept; everything else rejects.
@@ -123,34 +171,40 @@ fn add_wire(model: &SceneModel, conn: &MagnetConnection) {
 
 fn build_view() -> SceneView {
     let model = SceneModel::new();
+    let input_origin = Point::new(60.0, 120.0);
+    let blur_origin = Point::new(360.0, 50.0);
+    let sharpen_origin = Point::new(360.0, 220.0);
+    let output_origin = Point::new(660.0, 140.0);
+
     add_node(
         &model,
-        60.0,
-        120.0,
+        input_origin,
         "Input",
         Color::new(0.30, 0.45, 0.85, 1.0),
     );
     add_node(
         &model,
-        360.0,
-        50.0,
+        blur_origin,
         "Blur",
         Color::new(0.55, 0.40, 0.80, 1.0),
     );
     add_node(
         &model,
-        360.0,
-        220.0,
+        sharpen_origin,
         "Sharpen",
         Color::new(0.80, 0.50, 0.35, 1.0),
     );
     add_node(
         &model,
-        660.0,
-        140.0,
+        output_origin,
         "Output",
         Color::new(0.30, 0.65, 0.45, 1.0),
     );
+
+    // Pending vs confirmed: a dashed guide hints at one intended connection
+    // (Input -> Blur) the user hasn't made yet. Actually connecting any pair
+    // of ports draws a solid wire via `add_wire` below.
+    add_suggested_link(&model, output_pos(input_origin), input_pos(blur_origin));
 
     let on_connect_model = model.clone();
     let config = MagnetismConfig::new(predicate).on_connect(move |conn, _ctx| {
