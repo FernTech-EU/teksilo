@@ -294,6 +294,11 @@ fn on_scroll_pixels_animates_pan() {
     // Trackpad two-finger pan delivers `ScrollDelta::Pixels`.
     // Verify the on_scroll handler routes the delta into the pan
     // signals as an `Easing::EaseOut` tween.
+    //
+    // A scroll delta is NEGATED into a pan: pan is added to the content's
+    // position by the view transform, while a scroll offset is subtracted, so
+    // a positive delta (scroll down/right) must *decrease* pan to move content
+    // up/left — matching `ScrollArea`. See `wheel_scroll_moves_content_like_scrollarea`.
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(Scene::new()));
     tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -306,17 +311,62 @@ fn on_scroll_pixels_animates_pan() {
     });
 
     // The animation has started but not finished — `animation_target`
-    // should already reflect the requested delta.
+    // should already reflect the requested (negated) delta.
     let view = view_handle(&tree, view_id);
-    assert_eq!(view.pan_x.animation_target(), Some(50.0));
-    assert_eq!(view.pan_y.animation_target(), Some(30.0));
+    assert_eq!(view.pan_x.animation_target(), Some(-50.0));
+    assert_eq!(view.pan_y.animation_target(), Some(-30.0));
 
     // Drive past the terminal tick.
     tree.tick_animations(Duration::from_millis(180));
     tree.tick_animations(Duration::from_millis(0));
     let view = view_handle(&tree, view_id);
-    assert!((view.pan().x - 50.0).abs() < 0.5);
-    assert!((view.pan().y - 30.0).abs() < 0.5);
+    assert!((view.pan().x + 50.0).abs() < 0.5);
+    assert!((view.pan().y + 30.0).abs() < 0.5);
+}
+
+#[test]
+fn wheel_scroll_moves_content_like_scrollarea() {
+    // The authoritative scroll-direction guard.
+    //
+    // Framework convention, pinned by `ScrollArea`'s own test: a POSITIVE y
+    // delta is "scroll down" and moves content UP (that test asserts the top
+    // item lands at a negative y). A `SceneView` must agree, or a scene scrolls
+    // backwards — the macOS "natural" feel — while every list in the same app
+    // scrolls normally.
+    //
+    // Asserted on where a scene point actually *projects to screen*, not on the
+    // pan sign, so it stays true regardless of how pan is plumbed.
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(Scene::new()));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    let probe = Point::new(100.0, 100.0);
+    let before = view_handle(&tree, view_id).map_from_scene(probe);
+
+    tree.pointer_move(Point::new(400.0, 300.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 40.0, y: 60.0 },
+        modifiers: Default::default(),
+    });
+    // Settle the pan tween.
+    tree.tick_animations(Duration::from_millis(300));
+    tree.tick_animations(Duration::from_millis(0));
+
+    let after = view_handle(&tree, view_id).map_from_scene(probe);
+    assert!(
+        after.y < before.y - 1.0,
+        "a positive y delta (scroll down) must move scene content UP \
+         (before.y={}, after.y={})",
+        before.y,
+        after.y
+    );
+    assert!(
+        after.x < before.x - 1.0,
+        "a positive x delta (scroll right) must move scene content LEFT \
+         (before.x={}, after.x={})",
+        before.x,
+        after.x
+    );
 }
 
 #[test]
@@ -367,8 +417,9 @@ fn on_scroll_lines_uses_line_height_multiplier() {
         modifiers: Default::default(),
     });
 
+    // Negated into a pan (see the sign convention in `gestures_impl`).
     let view = view_handle(&tree, view_id);
-    assert_eq!(view.pan_y.animation_target(), Some(32.0));
+    assert_eq!(view.pan_y.animation_target(), Some(-32.0));
 }
 
 #[test]
@@ -496,9 +547,10 @@ fn reduced_motion_snaps_pan_instead_of_animating() {
     });
 
     let view = view_handle(&tree, view_id);
-    // The signal landed at the target immediately, no tween.
-    assert!((view.pan().x - 50.0).abs() < 1e-3);
-    assert!((view.pan().y - 30.0).abs() < 1e-3);
+    // The signal landed at the target immediately, no tween. (The delta is
+    // negated into a pan — see the sign convention in `gestures_impl`.)
+    assert!((view.pan().x + 50.0).abs() < 1e-3);
+    assert!((view.pan().y + 30.0).abs() < 1e-3);
     // No animation was queued.
     assert!(view.pan_x.animation_target().is_none());
     assert!(view.pan_y.animation_target().is_none());

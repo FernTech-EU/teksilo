@@ -486,17 +486,31 @@ impl SceneView {
                 if dx == 0.0 && dy == 0.0 {
                     return EventResponse::Ignored;
                 }
-                // Convention: positive scroll delta on the y-axis
-                // means content scrolls "up" in the viewport, which
-                // is equivalent to panning the *view* down — i.e. the
-                // pan offset increases. This matches `ScrollArea` and
-                // the natural-scroll feel of trackpads.
+                // Sign convention — must match the rest of the framework.
+                //
+                // A `ScrollDelta` is expressed in *scroll-offset* terms: a
+                // POSITIVE y is "scroll down", and every scrollable moves its
+                // content UP in response (see `ScrollArea`, whose own test pins
+                // `Pixels { y: +100 }` → content lands at a negative y).
+                //
+                // A scene's `pan` is NOT a scroll offset: it is *added* to the
+                // content's position by the view transform
+                // (`compose_view` → `translate(+pan)`), so a larger `pan.y`
+                // pushes content DOWN — the exact opposite of a scroll offset,
+                // which is subtracted. The delta must therefore be **negated**
+                // when it drives a pan, or the scene scrolls backwards
+                // (content chasing the wheel, the macOS "natural" feel) while
+                // every list/panel in the same app scrolls the normal way.
+                //
+                // So: positive delta (scroll down / right) → pan decreases →
+                // content moves up / left → the viewport advances down / right
+                // through the scene. Same as `ScrollArea`.
                 let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                 let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
                 // Clamp the projected pan against effective bounds.
                 // Axes already applied by zeroing dx/dy above.
                 let clamped = clamp_pan(
-                    Vec2::new(base_x + dx, base_y + dy),
+                    Vec2::new(base_x - dx, base_y - dy),
                     scene_pan_bounds_sig.get(),
                     view_pan_bounds_sig.get(),
                     last_viewport_for_scroll.get(),

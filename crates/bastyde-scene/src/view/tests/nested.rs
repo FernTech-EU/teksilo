@@ -150,12 +150,15 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
 
     let mut tree = WidgetTree::new();
 
-    // A scene whose content is larger than its viewport, resting at its
-    // top-left pan bound: the default pan (0,0) is the max corner, so a
-    // positive wheel delta on either axis is fully clamped, and the scene's
-    // handler declines (default `Chain`). (The SceneView's viewport is
-    // hittable at any pan — see `panned_scene_viewport_is_fully_hittable` —
-    // so the pan value here is only about being at a clamped bound.)
+    // A scene whose content is larger than its viewport. A scroll delta is
+    // negated into a pan (positive delta = scroll down = pan *decreases*, so
+    // the viewport advances down through the scene — see `gestures_impl`), so
+    // to make a downward wheel unabsorbable we park the scene at its MINIMUM
+    // pan corner, i.e. scrolled fully to the bottom-right of its content.
+    // `set_pan` clamps, so an extreme value lands exactly on the bound.
+    // (The SceneView's viewport is hittable at any pan — see
+    // `panned_scene_viewport_is_fully_hittable` — so the pan value here is
+    // only about being at a clamped bound.)
     let mut scene = Scene::new();
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 1000.0)));
     let scene_view = SceneView::new(scene).default_size(200.0, 100.0);
@@ -169,9 +172,13 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
 
     tree.layout(SizeProposal::exact(200.0, 150.0));
 
-    // Scroll over the scene with a positive delta it can't absorb (already at
-    // its (0,0) max) → the default `Chain` declines → the event bubbles to the
-    // outer ScrollArea, which scrolls.
+    // Park the scene hard against its bottom-right pan bound.
+    view_handle(&tree, scene_id).set_pan(bastyde_canvas::Vec2::new(-100_000.0, -100_000.0));
+    tree.layout(SizeProposal::exact(200.0, 150.0));
+
+    // Now scroll DOWN over the scene: it is already at the bottom of its
+    // content and cannot absorb the delta → the default `Chain` declines → the
+    // event bubbles to the outer ScrollArea, which scrolls down.
     tree.pointer_move(Point::new(50.0, 40.0));
     tree.dispatch_event(WidgetEvent::Scroll {
         delta: ScrollDelta::Pixels { x: 100.0, y: 100.0 },
@@ -206,10 +213,11 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
 
     let mut tree = WidgetTree::new();
 
-    // A scene whose content is larger than its viewport, resting at its
-    // top-left pan bound (the default pan of (0,0) is the max corner). The
-    // pan can't increase further, so a positive wheel delta is fully clamped
-    // — but `Contain` keeps the event instead of chaining to the outer.
+    // A scene whose content is larger than its viewport, parked hard against
+    // its MINIMUM pan corner (scrolled fully to the bottom-right of its
+    // content). A scroll delta is negated into a pan, so a downward wheel there
+    // is fully clamped and the boundary branch fires — but `Contain` keeps the
+    // event instead of chaining to the outer.
     let mut scene = Scene::new();
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 1000.0)));
     let scene_view = SceneView::new(scene)
@@ -225,8 +233,11 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
 
     tree.layout(SizeProposal::exact(200.0, 150.0));
 
-    // Positive delta on both axes tries to push pan past its (0,0) max → fully
-    // clamped → the boundary branch fires.
+    // Park at the bottom-right bound (`set_pan` clamps), then scroll DOWN: the
+    // pan can't decrease further → fully clamped → the boundary branch fires.
+    view_handle(&tree, scene_id).set_pan(bastyde_canvas::Vec2::new(-100_000.0, -100_000.0));
+    tree.layout(SizeProposal::exact(200.0, 150.0));
+
     tree.pointer_move(Point::new(50.0, 40.0));
     tree.dispatch_event(WidgetEvent::Scroll {
         delta: ScrollDelta::Pixels { x: 100.0, y: 100.0 },
