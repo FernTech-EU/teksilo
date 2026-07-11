@@ -51,6 +51,15 @@ pub struct SpinBoxStyleConfig {
     /// Reactive focus signal — drives the border colour (focused →
     /// accent, otherwise default).
     pub is_focused: Signal<bool>,
+    /// Reactive disabled signal — the AND of the SpinBox's own `enabled`
+    /// prop and every ancestor's, via
+    /// `BuildContext::effective_enabled_signal`. Drives the inert grey
+    /// fill / outline. A SpinBox frames a `TextInputField` in *neutral*
+    /// roles (`SurfaceRole::Content`, `BorderRole::Default`), and the
+    /// disabled-role substitution in `ColorProp::resolve` only rewrites
+    /// the *accent* family — so unlike an accent-filled Button, this
+    /// control has to dim itself explicitly.
+    pub is_disabled: Signal<bool>,
 }
 
 pub trait SpinBoxStyle: 'static {

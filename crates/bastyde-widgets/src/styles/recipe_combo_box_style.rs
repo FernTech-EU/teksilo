@@ -109,7 +109,12 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let bg_role = cfg.is_open.zip3(&cfg.is_hovered, &cfg.is_disabled).map(
             move |(open, hovered, disabled)| {
                 if *disabled {
-                    SurfaceRole::AccentDisabled
+                    // Neutral inert grey — NOT `AccentDisabled`, which is a
+                    // washed-out *accent* (pale cyan in IntUI) and belongs on
+                    // accent-filled controls like a Filled Button. A ComboBox
+                    // is a neutral field and must grey out like its SpinBox /
+                    // TextInput neighbours on the same form.
+                    SurfaceRole::Disabled
                 } else if matches!(variant, ComboBoxVariant::Filled) {
                     SurfaceRole::Hover
                 } else if *open || *hovered {
@@ -134,7 +139,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
                     // border_width is forced to 0 below.
                     BorderRole::Default
                 } else if *disabled {
-                    BorderRole::AccentDisabled
+                    BorderRole::Disabled
                 } else if *focused {
                     BorderRole::Focused
                 } else {

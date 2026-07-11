@@ -52,10 +52,10 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
             row = row.add_child(expanded_field_id);
             if let Some(buttons_id) = buttons_id_opt {
                 // Thin vertical divider between text and buttons so
-                // the click targets read as distinct affordances.
-                let divider = Divider::vertical()
-                    .thickness(1.0)
-                    .color(BorderRole::Default);
+                // the click targets read as distinct affordances. `Field`
+                // so it dims with the rest of the frame — a live rule
+                // inside an inert field reads as a rendering glitch.
+                let divider = Divider::vertical().thickness(1.0).color(BorderRole::Field);
                 let divider_id = ctx.add(Padding::new(2.0, 0.0, 2.0, 0.0).child(divider));
                 row = row.add_child(divider_id).add_child(buttons_id);
             }
@@ -82,11 +82,24 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         let theme = ctx.theme_signal().get();
         let focus_ring_width = theme.shape.focus_ring_width;
         let field_border_width = field_dims::TEXT_FIELD_BORDER_WIDTH;
-        let border_role = cfg.is_focused.map(|f| {
-            if *f {
+        // `Field` is `Content`'s twin for *interactive* surfaces: the same
+        // colour while enabled, dimming to `SurfaceRole::Disabled` inside
+        // `ColorProp::resolve` at paint. Resolving there — off the live arena
+        // chain — rather than switching roles from `cfg.is_disabled` is what
+        // lets a SpinBox dim when an *ancestor* is disabled: `is_disabled`
+        // comes from `effective_enabled_signal`, which cannot see ancestors
+        // (a widget's parent is not wired during its own `build()`), so it
+        // only ever reflects the SpinBox's own `enabled` prop.
+        //
+        // The border still consults `is_disabled` so that disabled outranks
+        // *focus*; `Field` covers the resting case.
+        let border_role = cfg.is_focused.zip(&cfg.is_disabled).map(|(f, d)| {
+            if *d {
+                BorderRole::Disabled
+            } else if *f {
                 BorderRole::Focused
             } else {
-                BorderRole::Default
+                BorderRole::Field
             }
         });
         let border_width_signal = cfg.is_focused.map(move |f| {
@@ -97,7 +110,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
             }
         });
         let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
+            .background(SurfaceRole::Field)
             .border_color(ColorProp::DynamicBorderRole(border_role))
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));

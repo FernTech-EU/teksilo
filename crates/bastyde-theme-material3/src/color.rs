@@ -180,6 +180,8 @@ fn apply_m3_roles(c: &mut ColorTokens, m: M3Roles, link_hover: Color) {
     c.surface_selected = m.secondary_container;
     c.surface_selected_inactive = m.surface_variant;
     c.surface_alt_row = m.surface_container;
+    // M3 states spec: a disabled container is on-surface at 12 %.
+    c.surface_disabled = m.on_surface.with_alpha(0.12);
 
     // ── Text ──
     c.text_primary = m.on_surface;
@@ -202,6 +204,9 @@ fn apply_m3_roles(c: &mut ColorTokens, m: M3Roles, link_hover: Color) {
     c.border = m.outline_variant; // M3 default borders use outlineVariant
     c.border_strong = m.outline;
     c.border_focused = m.primary;
+    // M3 states spec: a disabled container and a disabled outline are both
+    // on-surface at 12 %, same as the disabled *accent* container above.
+    c.border_disabled = m.on_surface.with_alpha(0.12);
     c.border_error = m.error;
     c.divider = m.outline_variant;
     c.divider_strong = m.outline;

@@ -68,10 +68,25 @@ impl ColorProp {
     /// like `IconWidget` / `TextWidget` / `RectWidget` pass
     /// `ctx.effective_enabled` through verbatim). `TextRole` →
     /// [`TextRole::Disabled`]; the accent `SurfaceRole` / `BorderRole`
-    /// family → their `AccentDisabled` counterpart (the only generic
-    /// "disabled surface/border" tokens the preset carries). Non-accent
-    /// surface/border roles pass through unchanged (a disabled panel keeps
-    /// its surface; only interactive accent chrome dims).
+    /// family → their `AccentDisabled` counterpart; and the *neutral
+    /// interactive* [`SurfaceRole::Field`] / [`BorderRole::Field`] → their
+    /// `Disabled` counterpart.
+    ///
+    /// Every other surface / border role passes through unchanged — a
+    /// disabled panel keeps its surface; only interactive chrome dims. That
+    /// is why a field paints `Field` rather than `Content`: the two resolve
+    /// identically while enabled, and the distinction exists solely so this
+    /// substitution can dim the field without also greying every `Panel` and
+    /// `Card` in the disabled subtree.
+    ///
+    /// Resolving here — at paint, from `PaintContext::effective_enabled` —
+    /// rather than from a build-time `Signal` is deliberate and load-bearing:
+    /// `effective_enabled_signal` captures the ancestor chain when it is
+    /// called, and a widget's `parent` is not yet wired during its own
+    /// `build()`, so such a signal only ever reflects the widget's *own*
+    /// `enabled` prop. The paint walker, by contrast, ANDs the live arena
+    /// chain, so this hook is the only thing that dims a control sitting
+    /// inside a disabled *ancestor*.
     pub fn resolve(&self, theme: &Theme, enabled: bool) -> Color {
         match self {
             ColorProp::Static(c) => *c,
@@ -136,6 +151,11 @@ fn disabled_surface(role: SurfaceRole, enabled: bool) -> SurfaceRole {
         SurfaceRole::Accent | SurfaceRole::AccentHover | SurfaceRole::AccentPressed => {
             SurfaceRole::AccentDisabled
         }
+        // The neutral counterpart: a *field* dims, a passive `Panel` (which
+        // paints `Content`) does not. Both resolve to the same colour while
+        // enabled — `Field` exists precisely so this substitution can tell
+        // them apart.
+        SurfaceRole::Field => SurfaceRole::Disabled,
         other => other,
     }
 }
@@ -148,6 +168,7 @@ fn disabled_border(role: BorderRole, enabled: bool) -> BorderRole {
     }
     match role {
         BorderRole::Accent => BorderRole::AccentDisabled,
+        BorderRole::Field => BorderRole::Disabled,
         other => other,
     }
 }
@@ -308,6 +329,43 @@ mod tests {
         let theme = intui::light();
         let prop = ColorProp::SurfaceRole(SurfaceRole::Main);
         assert_eq!(prop.resolve(&theme, false), theme.colors.surface_main);
+    }
+
+    /// `Field` is the neutral twin of `Accent`: it dims to a *neutral* grey,
+    /// not to the accent-tinted `accent_disabled`, so a greyed-out text field
+    /// never renders as washed-out cyan.
+    #[test]
+    fn field_surface_dims_to_the_neutral_disabled_token() {
+        let theme = intui::light();
+        let prop = ColorProp::SurfaceRole(SurfaceRole::Field);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.surface_content);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.surface_disabled);
+        assert_ne!(prop.resolve(&theme, false), theme.colors.accent_disabled);
+    }
+
+    #[test]
+    fn field_border_dims_to_the_neutral_disabled_token() {
+        let theme = intui::light();
+        let prop = ColorProp::BorderRole(BorderRole::Field);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.border);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.border_disabled);
+        assert_ne!(prop.resolve(&theme, false), theme.colors.accent_disabled);
+    }
+
+    /// The reason `Field` exists at all. A field and a passive `Panel` both
+    /// used to paint `Content`, so the substitution could not dim one without
+    /// greying the other — and so dimmed neither. They must still resolve
+    /// identically while *enabled*, or the split would be a visible change.
+    #[test]
+    fn field_and_content_are_indistinguishable_until_disabled() {
+        let theme = intui::light();
+        let field = ColorProp::SurfaceRole(SurfaceRole::Field);
+        let panel = ColorProp::SurfaceRole(SurfaceRole::Content);
+        assert_eq!(field.resolve(&theme, true), panel.resolve(&theme, true));
+
+        // Disabled: the field dims, the panel keeps its surface.
+        assert_eq!(field.resolve(&theme, false), theme.colors.surface_disabled);
+        assert_eq!(panel.resolve(&theme, false), theme.colors.surface_content);
     }
 
     #[test]

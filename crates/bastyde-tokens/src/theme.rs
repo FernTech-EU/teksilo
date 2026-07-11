@@ -26,6 +26,17 @@ pub struct ColorTokens {
     /// `surface_sunken`, which is used for scroll-container chrome and is
     /// noticeably darker than the row contrast TableView wants.
     pub surface_alt_row: Color,
+    /// Inert fill for a **disabled interactive control that is not
+    /// accent-filled** — text fields, spin boxes, combo boxes. The neutral
+    /// counterpart of `accent_disabled` (which washes out an accent-filled
+    /// Button). Needed as its own token because a field frame and a passive
+    /// `Panel` both paint `SurfaceRole::Content`, so the disabled-role
+    /// substitution in `ColorProp::resolve` cannot tell them apart and
+    /// deliberately leaves neutral surfaces alone — a disabled panel keeps
+    /// its surface. Interactive controls opt in by painting
+    /// [`crate::roles::SurfaceRole::Field`], which substitutes to
+    /// [`crate::roles::SurfaceRole::Disabled`] in a disabled subtree.
+    pub surface_disabled: Color,
 
     // ── Text / foreground ───────────────────────────────────────────────────
     pub text_primary: Color,
@@ -52,6 +63,10 @@ pub struct ColorTokens {
     pub border_focused: Color,
     pub border_error: Color,
     pub border_warning: Color,
+    /// Outline for a disabled neutral control — the border twin of
+    /// `surface_disabled`. Keeps a greyed-out field's shape legible without
+    /// the accent tint `accent_disabled` would impose.
+    pub border_disabled: Color,
     pub divider: Color,
     pub divider_strong: Color,
 
@@ -248,6 +263,9 @@ impl ColorTokens {
             // (which it previously duplicated).
             surface_selected_inactive: Color::from_hex("#DCE9EC"),
             surface_alt_row: Color::from_hex("#F7F8FA"),
+            // gray(12) — a disabled field reads as inert grey against the
+            // white `surface_content` an enabled one uses.
+            surface_disabled: Color::from_hex("#EBECF0"),
 
             // Text — cross-checked against Jewel IntUiLightTheme.kt:
             //   text.normal   = gray( 1) = #000000
@@ -289,6 +307,9 @@ impl ColorTokens {
             border_focused: Color::from_hex("#0C8294"),
             border_error: Color::from_hex("#DB3B4B"),
             border_warning: Color::from_hex("#E8A33D"),
+            // gray(11) — one step darker than `surface_disabled` so the
+            // outline still delineates the greyed-out field.
+            border_disabled: Color::from_hex("#DFE1E5"),
             divider: Color::from_hex("#EBECF0"),
             divider_strong: Color::from_hex("#DFE1E5"),
 
@@ -377,6 +398,10 @@ impl ColorTokens {
             // indistinguishable from hover).
             surface_selected_inactive: Color::from_hex("#2C4A54"),
             surface_alt_row: Color::from_hex("#26282E"),
+            // Lifted off the near-black `surface_content` an enabled field
+            // uses, so a disabled one reads as filled-and-inert rather than
+            // as an empty hole.
+            surface_disabled: Color::from_hex("#2B2D30"),
 
             // Text — values cross-checked against the Jewel standalone
             // theme source (IntUiGlobalColors.kt + IntUiDarkTheme.kt).
@@ -419,6 +444,9 @@ impl ColorTokens {
             border_focused: Color::from_hex("#19BDD4"),
             border_error: Color::from_hex("#E55765"),
             border_warning: Color::from_hex("#E8A33D"),
+            // A hair above `surface_disabled` — the same delineating role
+            // gray(11) plays in the light preset.
+            border_disabled: Color::from_hex("#43454A"),
             divider: Color::from_hex("#393B40"),
             divider_strong: Color::from_hex("#43454A"),
 

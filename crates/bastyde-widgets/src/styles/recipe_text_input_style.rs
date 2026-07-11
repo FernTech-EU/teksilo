@@ -29,6 +29,7 @@
 //!   filter input).
 
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{
     TextInputStyle, TextInputStyleConfig, TextInputValidationLevel, TextInputVariant,
@@ -116,10 +117,14 @@ impl TextInputStyle for RecipeTextInputStyle {
             return ctx.add(MinSize::new(0.0, height).child_id(cfg.editor));
         }
 
-        // Derived border role: validation outcome trumps focus, and
-        // focus trumps default. Mirrors the legacy `derive_border_role`
-        // closure that lived on the widget.
-        let border_role = derive_border_role(cfg.is_focused.clone(), cfg.validation.clone());
+        // Derived border role: disabled trumps everything (an inert field
+        // must not shout a validation error the user cannot act on), then
+        // validation outcome trumps focus, and focus trumps default.
+        let border_role = derive_border_role(
+            cfg.is_focused.clone(),
+            cfg.validation.clone(),
+            cfg.is_disabled.clone(),
+        );
 
         // Border width: thickens to focus_ring_width when focused,
         // regardless of validation. For `Filled`, force 0.
@@ -135,11 +140,24 @@ impl TextInputStyle for RecipeTextInputStyle {
             }
         });
 
-        // Background role: Filled uses accent-subtle (a faint tint),
-        // every other variant uses the standard content surface.
-        let bg_role = match cfg.variant {
-            TextInputVariant::Filled => SurfaceRole::Hover,
-            _ => SurfaceRole::Content,
+        // Background role. `SurfaceRole::Field` is `Content`'s twin for
+        // *interactive* surfaces: identical while enabled, but it dims to
+        // `SurfaceRole::Disabled` inside `ColorProp::resolve` at paint time.
+        // Going through that hook (rather than switching the role from
+        // `cfg.is_disabled` here) is what makes a field dim when an
+        // *ancestor* is disabled — `is_disabled` is derived from
+        // `effective_enabled_signal`, which cannot see ancestors, since a
+        // widget's parent is not wired yet during its own `build()`.
+        // Filled keeps its faint tint, and dims from the signal.
+        let bg_role: ColorProp = match variant {
+            TextInputVariant::Filled => ColorProp::DynamicSurfaceRole(cfg.is_disabled.map(|d| {
+                if *d {
+                    SurfaceRole::Disabled
+                } else {
+                    SurfaceRole::Hover
+                }
+            })),
+            _ => SurfaceRole::Field.into(),
         };
 
         let bg = RectWidget::new()
@@ -158,30 +176,41 @@ impl TextInputStyle for RecipeTextInputStyle {
     }
 }
 
-/// Derive the border role from focus + validation. Validation tints
-/// override focus tint, so a typo in a focused field still reads as an
-/// error rather than as "focused and fine".
+/// Derive the border role from disabled + focus + validation. Disabled
+/// outranks both — an inert field reads as grey, not as a live error the
+/// user could still fix. Below that, validation tints override the focus
+/// tint, so a typo in a focused field still reads as an error rather than
+/// as "focused and fine".
 fn derive_border_role(
     is_focused: Signal<bool>,
     validation: Signal<TextInputValidationLevel>,
+    is_disabled: Signal<bool>,
 ) -> Signal<BorderRole> {
     is_focused
-        .zip(&validation)
-        .map(|(focused, level)| match *level {
-            TextInputValidationLevel::Error => BorderRole::Error,
-            TextInputValidationLevel::Warning => BorderRole::Warning,
-            // Corrected: accent tint (matches the IntUI "we changed
-            // something — look here briefly" cue). The decay back to
-            // default is driven by the widget setting the validation
-            // signal back to None after the corrected pulse.
-            TextInputValidationLevel::Corrected | TextInputValidationLevel::Info => {
-                BorderRole::Focused
+        .zip3(&validation, &is_disabled)
+        .map(|(focused, level, disabled)| {
+            if *disabled {
+                return BorderRole::Disabled;
             }
-            TextInputValidationLevel::None => {
-                if *focused {
+            match *level {
+                TextInputValidationLevel::Error => BorderRole::Error,
+                TextInputValidationLevel::Warning => BorderRole::Warning,
+                // Corrected: accent tint (matches the IntUI "we changed
+                // something — look here briefly" cue). The decay back to
+                // default is driven by the widget setting the validation
+                // signal back to None after the corrected pulse.
+                TextInputValidationLevel::Corrected | TextInputValidationLevel::Info => {
                     BorderRole::Focused
-                } else {
-                    BorderRole::Default
+                }
+                TextInputValidationLevel::None => {
+                    if *focused {
+                        BorderRole::Focused
+                    } else {
+                        // `Field`, not `Default`: same colour while enabled,
+                        // but it dims at paint time even when the field is
+                        // only disabled via an ancestor. See `bg_role`.
+                        BorderRole::Field
+                    }
                 }
             }
         })

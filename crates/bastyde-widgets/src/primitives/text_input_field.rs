@@ -869,6 +869,12 @@ impl Widget for TextInputField {
         // engine stores colors in GPU-ready form, so we register an
         // effect on the theme signal that re-applies the palette on
         // every theme switch instead of capturing a single snapshot.
+        //
+        // The text / caret / suffix *foreground* colours are deliberately
+        // NOT set here — `paint` owns them, because they depend on the
+        // effective enabled state as well as the theme (see the resolve
+        // block there). Selection is theme + window-active only, so it
+        // stays on this effect path.
         let theme_signal = ctx.theme_signal();
         // The selection colour is also window-active-aware. `ctx.effect` can
         // only observe *mutable* signals (a derived `theme.zip(window_active)`
@@ -880,8 +886,6 @@ impl Widget for TextInputField {
             let theme = theme_signal.get();
             let colors = &theme.colors;
             let mut st = self.state().borrow_mut();
-            st.engine.set_text_color(colors.text_primary.to_array());
-            st.engine.set_cursor_color(colors.text_primary.to_array());
             st.engine
                 .set_selection_color(field_selection_color(colors, ctx.window_active()));
         }
@@ -891,15 +895,8 @@ impl Widget for TextInputField {
             ctx.effect(&theme_signal, move |theme| {
                 let colors = &theme.colors;
                 let mut st = state.borrow_mut();
-                st.engine.set_text_color(colors.text_primary.to_array());
-                st.engine.set_cursor_color(colors.text_primary.to_array());
                 st.engine
                     .set_selection_color(field_selection_color(colors, wa_signal.get()));
-                if let Some(ref mut suffix_engine) = st.suffix_engine {
-                    let secondary = colors.text_secondary.to_array();
-                    suffix_engine.set_text_color(secondary);
-                    suffix_engine.set_cursor_color(secondary);
-                }
             });
         }
 
@@ -1281,6 +1278,26 @@ impl Widget for TextInputField {
             st.needs_full_layout = true;
         }
 
+        // Resolve the glyph / caret / suffix colours against the *effective*
+        // enabled state, exactly as `TextWidget` and `RectWidget` resolve a
+        // `ColorProp` at paint time. `paint` is the single writer of these:
+        // the field shapes through a `RichTextEngine`, which takes raw GPU
+        // colours and so never passes through `ColorProp::resolve` — the
+        // disabled substitution that greys every role-driven leaf for free
+        // cannot reach it. Doing it here (rather than as a build-time effect
+        // on `effective_enabled_signal`) is also the only correct option:
+        // that signal is *derived* whenever an ancestor binds `enabled`, and
+        // `Signal::observe` panics on derived signals. Cheap — the engine
+        // stores the colour and the render-frame builder reads it, so there
+        // is no relayout and no reshaping.
+        let text_color = if ctx.effective_enabled {
+            ctx.theme.colors.text_primary
+        } else {
+            ctx.theme.colors.text_disabled
+        };
+        st.engine.set_text_color(text_color.to_array());
+        st.engine.set_cursor_color(text_color.to_array());
+
         let suffix_width = st.suffix_width;
         let text_viewport_width = (bounds.width - suffix_width).max(0.0);
 
@@ -1375,6 +1392,14 @@ impl Widget for TextInputField {
         if suffix_width > 0.0
             && let Some(suffix_engine) = st.suffix_engine.as_mut()
         {
+            // The suffix dims with the value it annotates — a crisp " %"
+            // beside greyed-out digits reads as a rendering bug.
+            let suffix_color = if ctx.effective_enabled {
+                ctx.theme.colors.text_secondary
+            } else {
+                ctx.theme.colors.text_disabled
+            };
+            suffix_engine.set_text_color(suffix_color.to_array());
             let suffix_clip = Rect::new(
                 bounds.x + text_viewport_width,
                 bounds.y,

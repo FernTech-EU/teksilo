@@ -488,3 +488,140 @@ fn tooltip_appears_on_hover() {
     );
     assert!(tree.find_by_label("Tip").is_some());
 }
+
+// ── Disabled appearance ───────────────────────────────────────────
+//
+// A SpinBox frames its `TextInputField` in *neutral* roles
+// (`SurfaceRole::Content` / `BorderRole::Default`), and the disabled-role
+// substitution in `ColorProp::resolve` only rewrites the *accent* family —
+// so unlike a Filled Button it gets no automatic greying and must opt in via
+// `SurfaceRole::Disabled`. It once did not, and stayed fully lit after
+// `.enabled(false)`. These pin the painted pixels, not the intent.
+//
+// Match on the frame rect + stroke width rather than "some quad has this
+// colour": the IntUI light palette reuses `#EBECF0` for `border`,
+// `surface_hover` and `surface_disabled` alike, so a bare colour scan cannot
+// tell an enabled field's *border* from a disabled field's *fill*.
+
+/// The frame's fill (`stroke_width == 0`) and outline (`stroke_width > 0`),
+/// identified as the quads covering the SpinBox's own bounds.
+fn frame_colors(
+    tree: &mut WidgetTree,
+    id: bastyde_core::widget_id::WidgetId,
+) -> (Option<[f32; 4]>, Option<[f32; 4]>) {
+    let b = tree.bounds(id);
+    let covers = |s: &[f32; 4]| {
+        (s[0] - b.x).abs() < 0.5
+            && (s[1] - b.y).abs() < 0.5
+            && (s[2] - b.width).abs() < 0.5
+            && (s[3] - b.height).abs() < 0.5
+    };
+    let frame = tree.render();
+    let fill = frame
+        .shapes
+        .iter()
+        .find(|s| covers(&s.screen) && s.stroke_width == 0.0)
+        .map(|s| s.color);
+    let border = frame
+        .shapes
+        .iter()
+        .find(|s| covers(&s.screen) && s.stroke_width > 0.0)
+        .map(|s| s.color);
+    (fill, border)
+}
+
+fn assert_color(got: Option<[f32; 4]>, want: bastyde_tokens::Color, what: &str) {
+    let want = want.to_array();
+    let got = got.unwrap_or_else(|| panic!("no {what} quad painted at the SpinBox bounds"));
+    assert!(
+        got.iter()
+            .zip(want.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-4),
+        "{what}: expected {want:?}, painted {got:?}"
+    );
+}
+
+fn spin_box_tree(enabled: bool) -> (WidgetTree, bastyde_core::widget_id::WidgetId) {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(Signal::new(5_i32), 0, 100).enabled(enabled));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    (tree, id)
+}
+
+#[test]
+fn disabled_spin_box_paints_the_neutral_disabled_frame() {
+    let theme = bastyde_core::presets::intui::light();
+    let (mut tree, id) = spin_box_tree(false);
+    let (fill, border) = frame_colors(&mut tree, id);
+
+    assert_color(fill, theme.colors.surface_disabled, "fill");
+    assert_color(border, theme.colors.border_disabled, "border");
+
+    // `accent_disabled` is a washed-out *accent* (pale cyan in IntUI) — right
+    // for a Filled Button, wrong for a neutral field.
+    let accent_disabled = theme.colors.accent_disabled.to_array();
+    assert_ne!(fill.unwrap(), accent_disabled);
+    assert_ne!(border.unwrap(), accent_disabled);
+}
+
+#[test]
+fn enabled_spin_box_frame_is_unchanged() {
+    let theme = bastyde_core::presets::intui::light();
+    let (mut tree, id) = spin_box_tree(true);
+    let (fill, border) = frame_colors(&mut tree, id);
+    assert_color(fill, theme.colors.surface_content, "fill");
+    assert_color(border, theme.colors.border, "border");
+}
+
+#[test]
+fn spin_box_dims_reactively_without_a_rebuild() {
+    // The chrome binds `effective_enabled_signal`, so flipping a bound
+    // `Signal<bool>` must re-tint on the next paint — no rebuild.
+    let theme = bastyde_core::presets::intui::light();
+    let enabled = Signal::new(true);
+    let mut tree = WidgetTree::new().with_theme(theme.clone());
+    let id = tree.add(SpinBox::new(Signal::new(5_i32), 0, 100).enabled(enabled.clone()));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+
+    let (fill, _) = frame_colors(&mut tree, id);
+    assert_color(fill, theme.colors.surface_content, "fill (enabled)");
+
+    enabled.set(false);
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    let (fill, border) = frame_colors(&mut tree, id);
+    assert_color(fill, theme.colors.surface_disabled, "fill (after disable)");
+    assert_color(
+        border,
+        theme.colors.border_disabled,
+        "border (after disable)",
+    );
+}
+
+/// A SpinBox inside a disabled *form* must dim, even though it is itself
+/// `enabled`. This is the case the obvious implementation gets wrong: a
+/// `cfg.is_disabled` signal derived from `effective_enabled_signal` reflects
+/// only the widget's OWN `enabled` prop, because that walk captures the
+/// ancestor chain at call time and a widget's parent is not wired yet during
+/// its own `build()`. The frame therefore paints `SurfaceRole::Field`, which
+/// dims inside `ColorProp::resolve` from the paint walker's live arena chain.
+#[test]
+fn spin_box_dims_inside_a_disabled_ancestor() {
+    use crate::primitives::VStack;
+
+    let theme = bastyde_core::presets::intui::light();
+    let enabled = Signal::new(true);
+    let mut tree = WidgetTree::new().with_theme(theme.clone());
+    let form = tree.add(VStack::new().child(SpinBox::new(Signal::new(5_i32), 0, 100)));
+    tree.enabled_when(form, enabled.clone());
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    let spin = tree
+        .children(form)
+        .first()
+        .copied()
+        .expect("VStack should hold the SpinBox");
+
+    enabled.set(false);
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    let (fill, _) = frame_colors(&mut tree, spin);
+    assert_color(fill, theme.colors.surface_disabled, "fill");
+}

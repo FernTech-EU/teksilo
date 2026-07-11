@@ -86,6 +86,56 @@ state survive theme swaps. See
 fit any of the five token groups. Cheap (TypeId lookup), arbitrary
 type.
 
+### How a widget goes grey when disabled
+
+Two mechanisms, and picking the wrong one is the classic way to ship a
+control that stays fully lit after `.enabled(false)`.
+
+**Accent-filled controls dim for free.** `ColorProp::resolve(theme,
+effective_enabled)` — which every role-driven leaf (`TextWidget`,
+`IconWidget`, `RectWidget`) calls at paint time — substitutes the
+disabled counterpart of a role when the subtree is disabled: any
+`TextRole` → `TextRole::Disabled`, and the *accent* family
+(`SurfaceRole::Accent` / `AccentHover` / `AccentPressed`,
+`BorderRole::Accent`) → their `AccentDisabled` counterpart. So a Filled
+`Button`, a checked `Checkbox`, a `Toggle` and a `Slider` fill all grey
+out with **no disabled-handling code at all**. That is why most recipes
+never mention `is_disabled`.
+
+**Neutral controls must opt in.** The substitution deliberately leaves
+*non-accent* surfaces and borders alone — a disabled `Panel` keeps its
+surface, and only interactive accent chrome dims. It has to: a text
+field's frame and a passive `Panel` both paint `SurfaceRole::Content`,
+so the hook cannot tell them apart. A neutral **interactive** control —
+`TextInput`, `SpinBox`, `ComboBox`, `DateEdit` — therefore states it
+explicitly, using the neutral disabled roles:
+
+```rust
+let bg_role = cfg.is_disabled.map(|d| {
+    if *d { SurfaceRole::Disabled } else { SurfaceRole::Content }
+});
+let border_role = cfg.is_focused.zip(&cfg.is_disabled).map(|(f, d)| {
+    if *d { BorderRole::Disabled }          // outranks focus
+    else if *f { BorderRole::Focused }
+    else { BorderRole::Default }
+});
+```
+
+`SurfaceRole::Disabled` / `BorderRole::Disabled` resolve to the neutral
+`surface_disabled` / `border_disabled` tokens. Do **not** reach for
+`AccentDisabled` here: it is a washed-out *accent* (pale cyan in IntUI),
+correct for an accent-filled Button and wrong for a grey field.
+
+Get the `is_disabled` signal from
+`ctx.effective_enabled_signal(self_id).map(|on| !*on)` — it ANDs the
+widget's own `enabled` prop with every ancestor's, so a field inside a
+disabled form dims too. Note it returns a **derived** signal, so it can
+be bound to a prop but cannot be passed to `ctx.effect` (`Signal::observe`
+panics on derived signals). A widget that paints raw colours rather than
+roles — anything shaping through a `RichTextEngine`, e.g.
+`TextInputField` — bypasses `ColorProp` entirely and must resolve against
+`ctx.effective_enabled` in `paint` instead.
+
 ## Tier 1 — Variants
 
 Each themable widget exposes a closed `*Variant` enum naming its
@@ -292,7 +342,7 @@ impl ButtonStyle for MaterialFilledButton {
         let bg = cfg.is_pressed
             .zip3(&cfg.is_hovered, &cfg.is_disabled)
             .map(|(pressed, hovered, disabled)| {
-                if *disabled { SurfaceRole::SurfaceDimmed }
+                if *disabled { SurfaceRole::AccentDisabled }
                 else if *pressed { SurfaceRole::AccentPressed }
                 else if *hovered { SurfaceRole::AccentHover }
                 else { SurfaceRole::Accent }

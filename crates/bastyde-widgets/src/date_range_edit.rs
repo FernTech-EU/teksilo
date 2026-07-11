@@ -530,24 +530,35 @@ impl Widget for DateRangeEdit {
             .child_id(inline_row_id),
         );
 
-        // ── Frame: bg + border driven by focus + validation ───
+        // ── Frame: bg + border driven by disabled + focus + validation ───
+        // This widget frames its two inner fields itself rather than
+        // delegating to `RecipeTextInputStyle`, so it has to opt into the
+        // neutral disabled roles the same way that recipe does — the
+        // accent-only substitution in `ColorProp::resolve` leaves
+        // `Content` / `Default` alone. Disabled outranks validation: an
+        // inert field must not shout an error the user cannot act on.
         let feedback_for_border = self.feedback.clone();
         let focused_for_border = self.focused.clone();
-        let border_role =
-            focused_for_border
-                .clone()
-                .zip(&feedback_for_border)
-                .map(|(focused, fb)| match fb {
+        let is_disabled = ctx.effective_enabled_signal(self_id).map(|on| !*on);
+        let border_role = focused_for_border
+            .clone()
+            .zip3(&feedback_for_border, &is_disabled)
+            .map(|(focused, fb, disabled)| {
+                if *disabled {
+                    return BorderRole::Disabled;
+                }
+                match fb {
                     ValidationFeedback::Invalid { .. } => BorderRole::Error,
                     ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
                     _ => {
                         if *focused {
                             BorderRole::Focused
                         } else {
-                            BorderRole::Default
+                            BorderRole::Field
                         }
                     }
-                });
+                }
+            });
         let border_width_signal =
             focused_for_border
                 .clone()
@@ -560,7 +571,7 @@ impl Widget for DateRangeEdit {
                     }
                 });
         let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
+            .background(SurfaceRole::Field)
             .border_color(border_role)
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));

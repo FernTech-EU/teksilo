@@ -1056,12 +1056,17 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // surface) to the active SpinBoxStyle.
         let style =
             crate::styles::recipe_spin_box_style::resolve_spin_box_style(&self.style_override, ctx);
+        // Derive the disabled state from the arena rather than from the
+        // build-time `enabled` snapshot above, so a bound `Signal<bool>`
+        // (or a disabled *ancestor*) re-tints the chrome with no rebuild.
+        let is_disabled = ctx.effective_enabled_signal(self_id).map(|on| !*on);
         let cfg = bastyde_core::styles::SpinBoxStyleConfig {
             field: padded_field_id,
             step_up: step_up_id,
             step_down: step_down_id,
             layout: self.button_layout,
             is_focused: self.focused.clone(),
+            is_disabled,
         };
         let zstack_id = style.make_body(&cfg, ctx);
         let _ = focus_ring_width;

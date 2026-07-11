@@ -154,6 +154,22 @@ pub enum SurfaceRole {
     AccentPressed,
     /// Accent disabled.
     AccentDisabled,
+    /// The fill of a **neutral interactive control** — a text field, spin
+    /// box, date edit. Resolves to the same colour as [`Self::Content`] while
+    /// enabled, but auto-substitutes to [`Self::Disabled`] in a disabled
+    /// subtree, exactly as [`Self::Accent`] substitutes to
+    /// [`Self::AccentDisabled`].
+    ///
+    /// This is the role a *field* should paint, and `Content` is the role a
+    /// passive `Panel` / `Card` should paint. They resolve identically while
+    /// enabled, and that is the whole point of keeping them apart: the two
+    /// were indistinguishable before, so the disabled substitution could not
+    /// dim a field without also greying every panel, and chose to dim
+    /// neither.
+    Field,
+    /// Inert fill for a disabled neutral control — the non-accent counterpart
+    /// of `AccentDisabled`, and the substitution target of [`Self::Field`].
+    Disabled,
     /// Subtle accent tint (badges, info backgrounds).
     AccentSubtle,
     /// Status info background.
@@ -207,6 +223,8 @@ impl SurfaceRole {
             SurfaceRole::AccentHover => colors.accent_hover,
             SurfaceRole::AccentPressed => colors.accent_pressed,
             SurfaceRole::AccentDisabled => colors.accent_disabled,
+            SurfaceRole::Field => colors.surface_content,
+            SurfaceRole::Disabled => colors.surface_disabled,
             SurfaceRole::AccentSubtle => colors.accent_subtle_bg,
             SurfaceRole::StatusInfo => colors.status_info_bg,
             SurfaceRole::StatusSuccess => colors.status_success_bg,
@@ -242,6 +260,8 @@ impl SurfaceRole {
             "AccentHover",
             "AccentPressed",
             "AccentDisabled",
+            "Field",
+            "Disabled",
             "AccentSubtle",
             "StatusInfo",
             "StatusSuccess",
@@ -294,6 +314,15 @@ pub enum BorderRole {
     /// blends its border into its fill. Distinct from `Default` because
     /// non-filled disabled widgets still use this as their outer ring.
     AccentDisabled,
+    /// The outline of a **neutral interactive control** — the border twin of
+    /// [`SurfaceRole::Field`]. Resolves to the same colour as
+    /// [`Self::Default`] while enabled, and auto-substitutes to
+    /// [`Self::Disabled`] in a disabled subtree.
+    Field,
+    /// Outline for a disabled neutral control — the substitution target of
+    /// [`Self::Field`]. Keeps a greyed-out field's shape legible without the
+    /// accent tint `AccentDisabled` would impose.
+    Disabled,
     /// Fully transparent border — paints nothing.
     Transparent,
 }
@@ -311,6 +340,8 @@ impl BorderRole {
             BorderRole::TooltipBorder => colors.tooltip_border,
             BorderRole::Accent => colors.accent,
             BorderRole::AccentDisabled => colors.accent_disabled,
+            BorderRole::Field => colors.border,
+            BorderRole::Disabled => colors.border_disabled,
             BorderRole::Transparent => Color::TRANSPARENT,
         }
     }
@@ -328,6 +359,8 @@ impl BorderRole {
             "TooltipBorder",
             "Accent",
             "AccentDisabled",
+            "Field",
+            "Disabled",
             "Transparent",
         ]
     }
