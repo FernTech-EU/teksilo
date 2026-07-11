@@ -672,13 +672,38 @@ impl EditorState {
                         // pending_format_changed / pending_text_changed.
                     }
                 }
-                DocumentEvent::DocumentReset
-                | DocumentEvent::FlowElementsInserted { .. }
+                // A programmatic repopulation (`set_plain_text` / `clear` /
+                // `set_djot` / `set_markdown` / `set_html`) is the ONLY thing
+                // that queues `DocumentReset` — text-document emits it from
+                // exactly three explicit sites, and never from an edit path.
+                // So it, alone, is the reliable "this was a load, stay quiet"
+                // signal for `on_change`.
+                DocumentEvent::DocumentReset => {
+                    self.pending_text_changed = true;
+                    a11y_snapshot_dirty = true;
+                    saw_reset_or_load = true;
+                    self.needs_full_layout = true;
+                    single_pos = None;
+                }
+                // Structural edits. These are emitted by text-document's
+                // GENERIC post-mutation detectors (`check_block_count_changed`
+                // / `check_flow_changed`), so they fire for genuine user edits
+                // — pressing Enter, a backspace that merges two paragraphs, a
+                // multi-paragraph paste, an AT `SetValue` — and must count as
+                // content changes. Lumping them in with `DocumentReset` (they
+                // once were) silently suppressed `on_change` for every edit
+                // that changed the block count.
+                //
+                // A load stays suppressed regardless: it queues `DocumentReset`
+                // in the SAME batch as any `BlockCountChanged` it triggers (and
+                // emits no `FlowElements*` at all, because the reset paths call
+                // `reset_cached_child_order`, which resyncs silently).
+                DocumentEvent::FlowElementsInserted { .. }
                 | DocumentEvent::FlowElementsRemoved { .. }
                 | DocumentEvent::BlockCountChanged(_) => {
                     self.pending_text_changed = true;
                     a11y_snapshot_dirty = true;
-                    saw_reset_or_load = true;
+                    saw_content_change = true;
                     self.needs_full_layout = true;
                     single_pos = None;
                 }

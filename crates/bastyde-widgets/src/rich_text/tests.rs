@@ -12,6 +12,8 @@ use bastyde_canvas::{Point, SizeProposal};
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_i18n::lit;
 use bastyde_text::text_document::TextDocument;
+use std::cell::Cell;
+use std::rc::Rc;
 
 use super::RichTextEditor;
 
@@ -4071,6 +4073,222 @@ fn editor_wrapper_is_generic_container_in_a11y_tree() {
     assert!(
         has_input,
         "the inner body must still emit Role::MultilineTextInput",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// `on_change` fires for structural edits, stays silent for loads
+//
+// Regression guard. `drain_events` used to lump `DocumentReset` in with
+// `BlockCountChanged` / `FlowElementsInserted` / `FlowElementsRemoved`
+// under one "this was a programmatic load, stay quiet" flag. But
+// text-document emits the latter three from generic post-mutation
+// detectors, so they also fire for genuine user edits — meaning any
+// edit that changed the block count (Enter, a backspace that merges two
+// paragraphs, a multi-paragraph paste) silently suppressed `on_change`,
+// contradicting its documented contract.
+//
+// A load stays suppressed because it queues `DocumentReset` in the same
+// drain batch (and never emits `FlowElements*` at all).
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Install an `on_change` probe, returning the editor and a counter of
+/// how many times the callback fired.
+fn with_on_change_probe(editor: RichTextEditor) -> (RichTextEditor, Rc<Cell<u32>>) {
+    let counter = Rc::new(Cell::new(0u32));
+    let probe = counter.clone();
+    (
+        editor.on_change(move || probe.set(probe.get() + 1)),
+        counter,
+    )
+}
+
+#[test]
+fn editor_on_change_fires_for_plain_typing() {
+    // Baseline: this path never regressed (ContentsChanged alone). It
+    // guards the fix against over-correcting into silence.
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_char(&mut tree, 'x');
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert!(
+        fired.get() > 0,
+        "typing a character must fire on_change (fired {} times)",
+        fired.get()
+    );
+}
+
+#[test]
+fn editor_on_change_fires_on_enter_paragraph_split() {
+    // The core repro: Enter emits BlockCountChanged + FlowElementsInserted
+    // and NO DocumentReset, yet used to be classified as a "load".
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::End,
+        bastyde_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Enter,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert!(
+        fired.get() > 0,
+        "pressing Enter (paragraph split) must fire on_change — a structural \
+         edit is still a user edit (fired {} times)",
+        fired.get()
+    );
+}
+
+#[test]
+fn editor_on_change_fires_on_backspace_paragraph_merge() {
+    // The inverse structural edit: a backspace at the start of a block
+    // merges it into the previous one, emitting BlockCountChanged +
+    // FlowElementsRemoved with no DocumentReset.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first\nsecond").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    // Caret to the very end, then to the start of that (second) block, so
+    // Backspace deletes the block boundary rather than a character.
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::End,
+        bastyde_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Home,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0); // ignore anything the caret moves may have produced
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Backspace,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("firstsecond"),
+        "precondition: Backspace at block start must merge the paragraphs, got {plain:?}"
+    );
+    assert!(
+        fired.get() > 0,
+        "a backspace that merges two paragraphs must fire on_change (fired {} times)",
+        fired.get()
+    );
+}
+
+#[test]
+fn editor_on_change_fires_on_accesskit_set_value_replace() {
+    // The AT write path (a screen reader / braille keyboard / dictation
+    // client replacing the document). `handle_access_action_request`
+    // services SetValue by select-all + insert_text, which crosses block
+    // boundaries here — so it lands as a structural edit and used to be
+    // swallowed too. This is also the first coverage of the SetValue
+    // handler at all.
+    use bastyde_core::accessibility::widget_id_to_node_id;
+    use bastyde_core::accesskit::{Action, ActionData};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0);
+
+    let mut ops = bastyde_core::window::NoopWindowOps;
+    let resolved = tree.dispatch_access_action(
+        widget_id_to_node_id(id),
+        Action::SetValue,
+        Some(ActionData::Value("alpha\nbeta".into())),
+        &mut ops,
+    );
+    assert!(resolved, "SetValue must resolve a live target widget");
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("alpha") && plain.contains("beta") && !plain.contains("first"),
+        "SetValue must replace the whole document, got {plain:?}"
+    );
+    assert!(
+        fired.get() > 0,
+        "an assistive-tech SetValue edit must fire on_change (fired {} times)",
+        fired.get()
+    );
+}
+
+#[test]
+fn editor_on_change_stays_silent_for_programmatic_load() {
+    // The behaviour the suppression was written to protect, and which the
+    // arm split must preserve: `set_plain_text` queues DocumentReset in the
+    // same batch as the BlockCountChanged it triggers, so the gate still
+    // closes.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0);
+
+    // Repopulate the document from code, the way `set_djot` / `set_markdown`
+    // would — several blocks, so a BlockCountChanged is definitely emitted.
+    doc.set_plain_text("one\ntwo\nthree").unwrap();
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+
+    assert_eq!(
+        fired.get(),
+        0,
+        "a programmatic load must NOT fire on_change, even though it changes \
+         the block count"
     );
 }
 
