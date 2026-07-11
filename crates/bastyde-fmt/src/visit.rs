@@ -61,20 +61,28 @@ impl<'a, 'ast> Visit<'ast> for BatiMacroVisitor<'a> {
 /// continuation line by this amount so the result aligns with where
 /// the user already had the body's outer brace.
 ///
-/// - If the body has no newline, return 0 — the body was inline with
-///   `bati!(` and we keep it inline.
-/// - Otherwise, return the leading-whitespace count of the LAST
-///   non-empty line. That's the line carrying the outermost `}` in
-///   the user's source, so the formatted output's matching `}` will
+/// - If the body spans several lines, return the leading-whitespace count
+///   of the LAST non-empty line. That's the line carrying the outermost
+///   `}` in the user's source, so the formatted output's matching `}` will
 ///   land at the same column.
+/// - If the body is on one line, there is no such brace line to measure.
+///   Fall back to the indentation of the line the macro call sits on, so a
+///   body that the printer expands still lands under its `bati!(` rather
+///   than at column 0.
 fn observed_body_indent(source: &str, body_range: &Range<usize>) -> usize {
     let body = &source[body_range.clone()];
-    if !body.contains('\n') {
-        return 0;
+    if body.contains('\n') {
+        return body
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| l.len() - l.trim_start().len())
+            .unwrap_or(0);
     }
-    body.lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .map(|l| l.len() - l.trim_start().len())
-        .unwrap_or(0)
+    // Inline body: measure the line the `bati!` call itself starts on.
+    let line_start = source[..body_range.start]
+        .rfind('\n')
+        .map_or(0, |nl| nl + 1);
+    let line = &source[line_start..body_range.start];
+    line.len() - line.trim_start().len()
 }

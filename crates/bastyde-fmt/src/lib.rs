@@ -97,6 +97,19 @@ pub fn format_file(source: &str, config: &FmtConfig) -> Result<String, FmtError>
     let mut out = source.to_string();
     for edit in edits {
         let body_src = &source[edit.body_range.clone()];
+
+        // Don't fight rustfmt. It formats a macro body that parses as a Rust
+        // expression and leaves the rest alone. Because bati! separates fields
+        // by whitespace rather than commas, a body only parses as an expression
+        // when it is a leaf widget with zero or one field (`FixedSize { h: 1.0 }`
+        // is a struct literal; `VStack { Button("a") }` and `spacing: 8.0
+        // Button("ok")` are not). Expanding those is pointless churn — rustfmt
+        // collapses them straight back on the next `cargo fmt`, and the two
+        // formatters ping-pong forever. Leave them to rustfmt.
+        if syn::parse_str::<syn::Expr>(body_src).is_ok() {
+            continue;
+        }
+
         let formatted = match format_block(body_src, config) {
             Ok(f) => f,
             // Block is syntactically invalid (e.g. intentional fail-test).

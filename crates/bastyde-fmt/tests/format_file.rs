@@ -97,3 +97,47 @@ fn idempotent_at_file_level() {
     let twice = fmt(&once);
     assert_eq!(once, twice, "format_file is not idempotent");
 }
+
+/// A body that parses as a plain Rust expression is rustfmt's to format —
+/// a leaf widget with a single field is just a struct literal. Expanding it
+/// only to have rustfmt collapse it again makes the two formatters ping-pong,
+/// so we leave it exactly as found.
+#[test]
+fn expression_parseable_body_is_left_to_rustfmt() {
+    let src =
+        "fn vspace(height: f32) -> impl Widget {\n    bati!(FixedSize { height: height })\n}\n";
+    assert_eq!(fmt(src), src);
+
+    // Zero-field leaf: also a valid struct literal, also rustfmt's.
+    let empty = "fn build() {\n    bati!(VStack {});\n}\n";
+    assert_eq!(fmt(empty), empty);
+}
+
+/// Whitespace-separated fields are not a struct literal, so rustfmt cannot
+/// parse them and we still own the body — two fields keep it ours even though
+/// one would not.
+#[test]
+fn multi_field_body_is_still_formatted() {
+    let src = "fn build() {\n    bati!(Panel { padding: 8.0 radius: 4.0 });\n}\n";
+    let out = fmt(src);
+    assert!(out.contains("Panel {\n"), "got:\n{out}");
+    assert!(out.contains("padding: 8.0"), "got:\n{out}");
+}
+
+/// An inline body the printer expands must land under its own `bati!(`, not at
+/// column 0 — there is no closing-brace line in the source to measure, so the
+/// call line's indent is the reference.
+#[test]
+fn expanded_inline_body_is_indented_to_the_call_site() {
+    let src = "fn build() {\n    bati!(VStack { spacing: 8.0 Button(\"ok\") });\n}\n";
+    let out = fmt(src);
+    assert!(
+        out.contains("\n        spacing: 8.0\n"),
+        "children should sit one level inside the call's 4-space indent, got:\n{out}"
+    );
+    assert!(
+        out.contains("\n    });\n"),
+        "closing brace should return to the call's column, got:\n{out}"
+    );
+    assert_eq!(fmt(&out), out, "not idempotent");
+}
