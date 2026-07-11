@@ -31,14 +31,15 @@ use bastyde::core::styles::{
 use bastyde::core::{FrameTickSubscription, WidgetPlacement};
 use bastyde::data::SelectionMode;
 use bastyde::prelude::*;
-use bastyde::tokens::HAlignment;
+use bastyde::tokens::{Color, HAlignment};
 use bastyde::widgets::{
     Button, ButtonVariant, Center, Expand, GroupHeader, HStack, Padding, ScrollArea,
     SegmentedControl, Spacer, Switcher, TextWidget, Toolbar, VStack,
 };
 use bastyde_charts::{
-    AxisConfig, BarChart, BarGrouping, ChartDatum, ChartModel, ChartSelection, ChartSeries,
-    ChartWindow, LegendPosition, LineChart, PieChart, PieLabelMode, SeriesId,
+    AxisConfig, BarChart, BarGrouping, ChartAggregate, ChartAggregateFn, ChartDatum, ChartModel,
+    ChartSelection, ChartSeries, ChartWindow, LegendPosition, LineChart, PieChart, PieLabelMode,
+    SeriesId,
 };
 
 use std::cell::Cell;
@@ -47,8 +48,35 @@ use std::time::{Duration, Instant};
 
 const SERIES_NAMES: [&str; 3] = ["Revenue", "Cost", "Profit"];
 const QUARTERS: [&str; 4] = ["Q1", "Q2", "Q3", "Q4"];
+const MAX_SERIES: usize = 5;
 const STRIP_WINDOW: usize = 24;
 const STRIP_PERIOD_MS: u64 = 600;
+/// Selectable bucket widths for the live `ChartAggregate` rollup.
+const AGG_BUCKETS: [usize; 3] = [2, 4, 8];
+
+fn agg_fn_for(idx: usize) -> ChartAggregateFn {
+    match idx {
+        1 => ChartAggregateFn::Max,
+        2 => ChartAggregateFn::Min,
+        _ => ChartAggregateFn::Mean,
+    }
+}
+
+/// Copy a projection's current points (window or aggregate — both keyed by
+/// the *source* series id) into a render-bound display `ChartModel`. Chart
+/// widgets consume a `ChartModel<T>`, not a projection, so each tick the
+/// projection's computed tail is materialized here.
+fn materialize(
+    src: SeriesId,
+    count: usize,
+    read: impl Fn(usize) -> Option<ChartDatum<u32>>,
+    display: &ChartModel<u32>,
+    dst: SeriesId,
+) {
+    let _ = src;
+    let points: Vec<ChartDatum<u32>> = (0..count).filter_map(read).collect();
+    display.replace_series_data(dst, points);
+}
 
 fn dark_mode_toolbar() -> impl Widget {
     Toolbar::new().child(
@@ -60,22 +88,18 @@ fn dark_mode_toolbar() -> impl Widget {
 
 // ─── Data generation (seeded pseudo-random, matches the pre-refactor demo) ─
 
-fn series_points(seed: u32) -> Vec<Vec<ChartDatum<String>>> {
-    (0..SERIES_NAMES.len())
-        .map(|si| {
-            QUARTERS
-                .iter()
-                .enumerate()
-                .map(|(i, label)| {
-                    let v = ((seed
-                        .wrapping_mul(31)
-                        .wrapping_add(si as u32 * 53)
-                        .wrapping_add(i as u32 * 17))
-                        % 60) as f32
-                        + 10.0;
-                    ChartDatum::new(label.to_string(), v)
-                })
-                .collect()
+fn quarter_points(seed: u32, si: usize) -> Vec<ChartDatum<String>> {
+    QUARTERS
+        .iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let v = ((seed
+                .wrapping_mul(31)
+                .wrapping_add(si as u32 * 53)
+                .wrapping_add(i as u32 * 17))
+                % 60) as f32
+                + 10.0;
+            ChartDatum::new(label.to_string(), v)
         })
         .collect()
 }
@@ -83,8 +107,8 @@ fn series_points(seed: u32) -> Vec<Vec<ChartDatum<String>>> {
 fn make_series_model(seed: u32) -> ChartModel<String> {
     let series = SERIES_NAMES
         .iter()
-        .zip(series_points(seed))
-        .map(|(name, points)| ChartSeries::<String>::new(*name).data(points))
+        .enumerate()
+        .map(|(si, name)| ChartSeries::<String>::new(*name).data(quarter_points(seed, si)))
         .collect();
     ChartModel::from_series_vec(series)
 }
@@ -103,10 +127,30 @@ fn pie_points(seed: u32) -> Vec<ChartDatum<String>> {
 
 // ─── ChartStyle override: gradient fills + dashed gridlines ───────────────
 
+/// Mix `c` toward white by `k` (0 = unchanged, 1 = white), keeping it fully
+/// OPAQUE. Gradients that fade via *alpha* let the page background bleed
+/// through, which desaturates the (deliberately vivid, colorblind-safe)
+/// Okabe-Ito palette into pastel mush and destroys each series' identity.
+/// Fading toward a lighter *opaque* tint instead keeps the hue and the
+/// series recognisable while still reading as a gradient.
+fn tint(c: Color, k: f32) -> Color {
+    Color::new(
+        c.r() + (1.0 - c.r()) * k,
+        c.g() + (1.0 - c.g()) * k,
+        c.b() + (1.0 - c.b()) * k,
+        c.a(),
+    )
+}
+
 /// A `ChartStyle` demonstrating every gradient hook: a vertical bar
 /// gradient, a top-to-bottom area gradient that fades toward the
 /// baseline, a radial donut gradient (continuous across wedges — see
 /// `PieChart`'s `project_gradient_to_wedge_local`), and dashed gridlines.
+///
+/// Bars and slices fade between two *opaque* tints of the series color (see
+/// [`tint`]) rather than fading out via alpha, so the palette stays vivid.
+/// Only the line's area fill fades to transparent — that IS the idiom for an
+/// area chart (the plot must show through), so it stays alpha-based.
 #[derive(Debug, Default, Clone, Copy)]
 struct GradientChartStyle;
 
@@ -116,24 +160,27 @@ impl ChartStyle for GradientChartStyle {
             stops: vec![
                 GradientStop {
                     offset: 0.0,
-                    color: RecipeColor::Static(cfg.resolved_color.with_alpha(0.55)),
+                    color: RecipeColor::Static(tint(cfg.resolved_color, 0.45)),
                 },
                 GradientStop {
                     offset: 1.0,
                     color: RecipeColor::Static(cfg.resolved_color),
                 },
             ],
-            angle_deg: 0.0, // top -> bottom
+            angle_deg: 0.0, // top (lighter tint) -> bottom (full series color)
         }
     }
 
     fn area_fill(&self, cfg: &ChartFillContext, opacity: f32) -> FillRecipe {
+        // The one place an alpha fade is right: an area fill must fade out so
+        // the gridlines/other series show through. Keep the top edge strong
+        // enough to read, though.
         FillRecipe::LinearGradient {
             stops: vec![
                 GradientStop {
                     offset: 0.0,
                     color: RecipeColor::Static(
-                        cfg.resolved_color.with_alpha((opacity * 2.5).min(1.0)),
+                        cfg.resolved_color.with_alpha((opacity * 3.0).min(0.55)),
                     ),
                 },
                 GradientStop {
@@ -146,6 +193,12 @@ impl ChartStyle for GradientChartStyle {
     }
 
     fn donut_fill(&self, cfg: &ChartFillContext) -> FillRecipe {
+        // The radial field is centred on the DISC centre, which for a donut
+        // lies inside the (invisible) hole: with a plain 0.0->1.0 ramp the
+        // whole visible ring would sample only the tail of the gradient and
+        // never show the true series color. Hold the full color out to the
+        // inner radius (the donut ratio, 0.55) and only lighten across the
+        // ring itself.
         FillRecipe::RadialGradient {
             stops: vec![
                 GradientStop {
@@ -153,8 +206,12 @@ impl ChartStyle for GradientChartStyle {
                     color: RecipeColor::Static(cfg.resolved_color),
                 },
                 GradientStop {
-                    offset: 1.0,
-                    color: RecipeColor::Static(cfg.resolved_color.with_alpha(0.6)),
+                    offset: 0.55, // inner radius — ring starts at FULL color
+                    color: RecipeColor::Static(cfg.resolved_color),
+                },
+                GradientStop {
+                    offset: 1.0, // outer rim — lighter, still opaque
+                    color: RecipeColor::Static(tint(cfg.resolved_color, 0.40)),
                 },
             ],
             center: (0.5, 0.5),
@@ -352,6 +409,32 @@ fn pie_center_widget(
     )
 }
 
+/// A one-line readout of the Bar/Line `ChartSelection`: the selected
+/// point's series, category, and value, or a prompt when nothing is
+/// selected. Reactive on both the selection and the model's structure, so
+/// a data refresh re-reads the value live.
+fn series_selection_readout(selection: ChartSelection, model: ChartModel<String>) -> impl Widget {
+    let text = selection
+        .selection_signal()
+        .zip(&model.structure_version())
+        .map(move |(set, _)| {
+            if let Some(&(sid, idx)) = set.iter().next() {
+                let name = model
+                    .with_series_view(sid, |v| v.name.to_string())
+                    .unwrap_or_default();
+                let detail = model
+                    .with_point(sid, idx, |d| format!("{} = {:.0}", d.category, d.value))
+                    .unwrap_or_default();
+                format!("Selected: {name} · {detail}")
+            } else {
+                "Click a bar or point to select it.".to_string()
+            }
+        });
+    TextWidget::new(lit!(""))
+        .style(TextStyleRole::Small)
+        .text(text)
+}
+
 // ─── Live strip chart: ChartModel push_point on a periodic tick, projected
 //     through a ChartWindow. Chart widgets bind to a `ChartModel<T>`, not a
 //     `ChartWindow<T>`, so the window's computed tail is materialized into a
@@ -360,12 +443,20 @@ fn pie_center_widget(
 
 struct LiveStripPane {
     history: ChartModel<u32>,
-    display: ChartModel<u32>,
-    window: ChartWindow<u32>,
     history_series: SeriesId,
-    display_series: SeriesId,
+    // ChartWindow projection → render-bound display model.
+    window: ChartWindow<u32>,
+    window_display: ChartModel<u32>,
+    window_series: SeriesId,
+    // ChartAggregate projection → render-bound display model.
+    aggregate: ChartAggregate<u32>,
+    agg_display: ChartModel<u32>,
+    agg_series: SeriesId,
     tick: Rc<Cell<u32>>,
     status: Signal<String>,
+    bucket_idx: Signal<usize>, // index into AGG_BUCKETS
+    agg_fn_idx: Signal<usize>, // 0=Mean, 1=Max, 2=Min
+    feed_state: Signal<usize>, // 0=running, 1=paused
     root_id: Option<WidgetId>,
     tick_sub: Option<FrameTickSubscription>,
 }
@@ -374,19 +465,32 @@ impl LiveStripPane {
     fn new() -> Self {
         let history: ChartModel<u32> = ChartModel::new();
         let history_series = history.add_series("Live");
-        let display: ChartModel<u32> = ChartModel::new();
-        let display_series = display.add_series("Live");
+
+        let window_display: ChartModel<u32> = ChartModel::new();
+        let window_series = window_display.add_series("Windowed");
         let window = ChartWindow::new(history.clone(), STRIP_WINDOW);
+
+        let agg_display: ChartModel<u32> = ChartModel::new();
+        let agg_series = agg_display.add_series("Rollup");
+        let aggregate =
+            ChartAggregate::new(history.clone(), AGG_BUCKETS[1], ChartAggregateFn::Mean);
+
         Self {
             history,
-            display,
-            window,
             history_series,
-            display_series,
+            window,
+            window_display,
+            window_series,
+            aggregate,
+            agg_display,
+            agg_series,
             tick: Rc::new(Cell::new(0)),
             status: Signal::new(format!(
-                "0 samples captured — ChartWindow shows the last 0 of {STRIP_WINDOW}"
+                "0 samples — window: last 0 of {STRIP_WINDOW} · rollup: 0 buckets"
             )),
+            bucket_idx: Signal::new(1),
+            agg_fn_idx: Signal::new(0),
+            feed_state: Signal::new(0),
             root_id: None,
             tick_sub: None,
         }
@@ -401,7 +505,7 @@ impl std::fmt::Debug for LiveStripPane {
 
 impl Widget for LiveStripPane {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let chart = LineChart::new(self.display.clone())
+        let raw_chart = LineChart::new(self.window_display.clone())
             .grid(true)
             .points(true)
             .area_fill(true)
@@ -413,23 +517,117 @@ impl Widget for LiveStripPane {
             )
             .axis_x(AxisConfig::new().show_labels(false));
 
+        let agg_chart = LineChart::new(self.agg_display.clone())
+            .grid(true)
+            .points(true)
+            .hover_tooltip(true)
+            .axis_y(
+                AxisConfig::new()
+                    .label("Rollup")
+                    .formatter(|v| format!("{:.0}", v)),
+            )
+            .axis_x(AxisConfig::new().show_labels(false));
+
+        let controls = HStack::new()
+            .spacing(10.0)
+            .child(TextWidget::new(lit!("Feed")).style(TextStyleRole::Small))
+            .child(
+                SegmentedControl::new(self.feed_state.clone())
+                    .segments([lit!("Running"), lit!("Paused")]),
+            )
+            .child(Spacer::new())
+            .child(TextWidget::new(lit!("Rollup bucket")).style(TextStyleRole::Small))
+            .child(SegmentedControl::new(self.bucket_idx.clone()).segments([
+                lit!("×2"),
+                lit!("×4"),
+                lit!("×8"),
+            ]))
+            .child(TextWidget::new(lit!("fn")).style(TextStyleRole::Small))
+            .child(SegmentedControl::new(self.agg_fn_idx.clone()).segments([
+                lit!("Mean"),
+                lit!("Max"),
+                lit!("Min"),
+            ]));
+
         let status_label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Small)
             .text(self.status.clone());
 
-        let root = ctx.add(VStack::new().spacing(4.0).child(chart).child(status_label));
+        let raw_labeled = VStack::new()
+            .spacing(2.0)
+            .child(
+                TextWidget::new(lit!("Raw — ChartWindow (last N samples)"))
+                    .style(TextStyleRole::Tiny),
+            )
+            .child(raw_chart);
+        let agg_labeled = VStack::new()
+            .spacing(2.0)
+            .child(
+                TextWidget::new(lit!("Rollup — ChartAggregate over the full history"))
+                    .style(TextStyleRole::Tiny),
+            )
+            .child(agg_chart);
+
+        let root = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(controls)
+                .child(raw_labeled)
+                .child(agg_labeled)
+                .child(status_label),
+        );
         self.root_id = Some(root);
 
-        // Reduced motion: build the (empty) chart but don't start the timer.
+        // Re-configure + re-materialize the rollup when its controls change.
+        {
+            let aggregate = self.aggregate.clone();
+            let disp = self.agg_display.clone();
+            let src = self.history_series;
+            let dst = self.agg_series;
+            ctx.effect(&self.bucket_idx, move |i| {
+                aggregate.set_bucket_size(AGG_BUCKETS[*i]);
+                let n = aggregate.point_count(src);
+                materialize(
+                    src,
+                    n,
+                    |k| aggregate.with_point(src, k, |d| ChartDatum::new(d.category, d.value)),
+                    &disp,
+                    dst,
+                );
+            });
+        }
+        {
+            let aggregate = self.aggregate.clone();
+            let disp = self.agg_display.clone();
+            let src = self.history_series;
+            let dst = self.agg_series;
+            ctx.effect(&self.agg_fn_idx, move |i| {
+                aggregate.set_aggregate_fn(agg_fn_for(*i));
+                let n = aggregate.point_count(src);
+                materialize(
+                    src,
+                    n,
+                    |k| aggregate.with_point(src, k, |d| ChartDatum::new(d.category, d.value)),
+                    &disp,
+                    dst,
+                );
+            });
+        }
+
+        // Reduced motion: build the (empty) charts but don't start the timer.
         if ctx.prefers_reduced_motion() {
             return vec![root];
         }
 
         let history = self.history.clone();
-        let display = self.display.clone();
-        let window = self.window.clone();
         let history_series = self.history_series;
-        let display_series = self.display_series;
+        let window = self.window.clone();
+        let window_display = self.window_display.clone();
+        let window_series = self.window_series;
+        let aggregate = self.aggregate.clone();
+        let agg_display = self.agg_display.clone();
+        let agg_series = self.agg_series;
+        let feed_state = self.feed_state.clone();
         let status = self.status.clone();
         let tick = self.tick.clone();
         let period = Duration::from_millis(STRIP_PERIOD_MS);
@@ -438,6 +636,9 @@ impl Widget for LiveStripPane {
         // Absolute-time gated, throttled tick — same pattern as `Cycle`'s
         // once-per-period advance (see crates/bastyde-widgets/src/animations/cycle.rs).
         ctx.effect(&ctx.frame_tick(), move |_delta| {
+            if feed_state.get() == 1 {
+                return; // paused
+            }
             let now = Instant::now();
             let due = match last_advance.get() {
                 None => {
@@ -460,25 +661,37 @@ impl Widget for LiveStripPane {
             let value = 50.0 + 32.0 * (t * 0.35).sin() + 8.0 * (t * 0.9).cos();
             history.push_point(history_series, x, value);
 
-            // Materialize the ChartWindow's current tail into the
-            // render-bound display model — the chart widget can only
-            // consume a ChartModel, not the ChartWindow projection itself.
-            let n = window.point_count(history_series);
-            let points: Vec<ChartDatum<u32>> = (0..n)
-                .filter_map(|i| {
-                    window.with_point(history_series, i, |d| ChartDatum::new(d.category, d.value))
-                })
-                .collect();
-            display.replace_series_data(display_series, points);
+            // Materialize both projections' current tails into their
+            // render-bound display models — chart widgets consume a
+            // ChartModel, not a ChartWindow / ChartAggregate projection.
+            let wn = window.point_count(history_series);
+            materialize(
+                history_series,
+                wn,
+                |k| window.with_point(history_series, k, |d| ChartDatum::new(d.category, d.value)),
+                &window_display,
+                window_series,
+            );
+            let an = aggregate.point_count(history_series);
+            materialize(
+                history_series,
+                an,
+                |k| {
+                    aggregate
+                        .with_point(history_series, k, |d| ChartDatum::new(d.category, d.value))
+                },
+                &agg_display,
+                agg_series,
+            );
 
             status.set(format!(
-                "{} samples captured — ChartWindow shows the last {} of {}",
+                "{} samples — window: last {} of {} · rollup: {} buckets",
                 history.point_count(history_series),
-                window.point_count(history_series),
+                wn,
                 STRIP_WINDOW,
+                an,
             ));
         });
-        self.tick_sub = None;
         self.tick_sub = Some(ctx.subscribe_frame_tick_throttled(period));
 
         vec![root]
@@ -535,6 +748,12 @@ fn main() {
                     // series).
                     let series_selection = ChartSelection::new(SelectionMode::Single);
                     let pie_selection = ChartSelection::new(SelectionMode::Single);
+                    // Clones for the selection-readout row (the switcher below
+                    // consumes `series_selection`).
+                    let readout_selection = series_selection.clone();
+                    let clear_selection = series_selection.clone();
+                    let readout_model = series_model.clone();
+                    let kind_for_readout = chart_kind.clone();
 
                     let chart_switcher = Switcher::new(chart_kind.clone())
                         .child(bar_panel(
@@ -553,6 +772,31 @@ fn main() {
                             pie_selection,
                         ));
 
+                    // Selection readout: a one-liner for Bars/Lines, a hint for
+                    // the Donut (whose selection drives the center slot).
+                    let selection_readout =
+                        Switcher::new(kind_for_readout.map(|k| (*k == 2) as usize))
+                            .child(
+                                HStack::new()
+                                    .spacing(8.0)
+                                    .child(series_selection_readout(
+                                        readout_selection,
+                                        readout_model,
+                                    ))
+                                    .child(Spacer::new())
+                                    .child(
+                                        Button::new(lit!("Clear selection"))
+                                            .variant(ButtonVariant::Ghost)
+                                            .on_activate_fn(move |_ctx| clear_selection.clear()),
+                                    ),
+                            )
+                            .child(
+                                TextWidget::new(lit!(
+                                    "The selected slice is shown in the donut center."
+                                ))
+                                .style(TextStyleRole::Small),
+                            );
+
                     let kind_selector = SegmentedControl::new(chart_kind).segments([
                         lit!("Bars"),
                         lit!("Lines"),
@@ -561,6 +805,27 @@ fn main() {
                     let theme_selector = SegmentedControl::new(theme_mode)
                         .segments([lit!("Default"), lit!("Gradient theme")]);
 
+                    // Live structural mutation: add / remove a series in place.
+                    let add_model = series_model.clone();
+                    let add_series_button =
+                        Button::new(lit!("Add series")).on_activate_fn(move |_ctx| {
+                            let count = add_model.series_count();
+                            if count < MAX_SERIES {
+                                let sid = add_model.add_series(format!("Series {}", count + 1));
+                                for d in quarter_points(count as u32 + 7, count) {
+                                    add_model.push_point(sid, d.category, d.value);
+                                }
+                            }
+                        });
+                    let rem_model = series_model.clone();
+                    let remove_series_button =
+                        Button::new(lit!("Remove series")).on_activate_fn(move |_ctx| {
+                            let ids = rem_model.series_ids();
+                            if let Some(&last) = ids.last().filter(|_| ids.len() > 1) {
+                                rem_model.remove_series(last);
+                            }
+                        });
+
                     let refresh_series_model = series_model.clone();
                     let refresh_pie_model = pie_model.clone();
                     let refresh_button = Button::new(lit!("Refresh data"))
@@ -568,12 +833,12 @@ fn main() {
                         .on_activate_fn(move |_ctx| {
                             let next = counter.get().wrapping_add(1);
                             counter.set(next);
-                            for (id, points) in refresh_series_model
-                                .series_ids()
-                                .into_iter()
-                                .zip(series_points(next))
+                            // Regenerate every current series (any count).
+                            for (si, id) in
+                                refresh_series_model.series_ids().into_iter().enumerate()
                             {
-                                refresh_series_model.replace_series_data(id, points);
+                                refresh_series_model
+                                    .replace_series_data(id, quarter_points(next, si));
                             }
                             if let Some(pid) = refresh_pie_model.only_series() {
                                 refresh_pie_model.replace_series_data(pid, pie_points(next));
@@ -590,9 +855,12 @@ fn main() {
                                 .child(theme_selector),
                         )
                         .child(chart_switcher)
+                        .child(selection_readout)
                         .child(
                             HStack::new()
                                 .spacing(8.0)
+                                .child(add_series_button)
+                                .child(remove_series_button)
                                 .child(Spacer::new())
                                 .child(refresh_button),
                         )

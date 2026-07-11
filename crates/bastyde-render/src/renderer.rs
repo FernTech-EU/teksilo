@@ -3327,6 +3327,82 @@ mod tests {
     }
 
     #[test]
+    fn gradient_path_partial_alpha_preserved() {
+        // Regression for washed-out gradient fills: a gradient stop's alpha
+        // must survive the path_gradient pipeline. Render a horizontal
+        // green→green gradient whose LEFT stop is opaque (a=1.0) and RIGHT
+        // stop is a=0.4, over a TRANSPARENT clear so the read-back alpha IS
+        // the fill's alpha (no gamma/compositing confound). Left must stay
+        // ~opaque, right must read ~0.4 (not ~0.24).
+        use bastyde_canvas::render_frame::PathEntry;
+        use bastyde_canvas::{FillRule, GradientStop, Path, Rect, StrokeStyle};
+        use bastyde_tokens::Color;
+
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("bastyde_render_partial_alpha_device"),
+        ) else {
+            return;
+        };
+
+        let path = Path::rect(Rect::new(0.0, 0.0, 32.0, 32.0));
+        let bounds = path.bounds();
+        let mut frame = RenderFrame::new();
+        frame.paths.push(PathEntry {
+            path,
+            color: [1.0, 1.0, 1.0, 1.0],
+            stroke_style: StrokeStyle::solid(0.0),
+            fill_rule: FillRule::Winding,
+            bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
+            paint_data: PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [32.0, 0.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::from_rgba(0.0, 0.62, 0.45, 1.0),
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::from_rgba(0.0, 0.62, 0.45, 0.4),
+                    },
+                ],
+            },
+        });
+        frame.draw_order.push(DrawCommand::Path(0));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("partial_alpha_target"),
+            size: wgpu::Extent3d {
+                width: 32,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render(&frame, &view, 1.0, 32, 32, [0.0, 0.0, 0.0, 0.0]);
+
+        let px = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
+        let alpha = |x: usize| px[(16 * 32 + x) * 4 + 3];
+        let (left, right) = (alpha(2), alpha(29));
+        // Diagnostic — surfaced on failure.
+        assert!(
+            left >= 240,
+            "opaque (a=1.0) end must stay opaque, got {left} (/255)"
+        );
+        assert!(
+            (90..=115).contains(&right),
+            "a=0.4 stop must read ~102/255, got {right} — a value near ~61 means the \
+             pipeline under-renders gradient stop alpha (washed-out fills)"
+        );
+    }
+
+    #[test]
     fn glyph_quad_renders_over_shape_in_offscreen_target() {
         let Some((mut renderer, device, queue)) = pollster::block_on(
             crate::test_support::create_test_renderer("bastyde_render_test_device"),
