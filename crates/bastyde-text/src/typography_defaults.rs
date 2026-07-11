@@ -21,7 +21,8 @@ use text_document::{BlockSnapshot, FlowElementSnapshot, FlowSnapshot, FragmentCo
 
 /// Per-editor default typography, applied to snapshot runs / blocks that carry
 /// no explicit override. Cheap to clone; a default-valued instance is a no-op
-/// (see [`needs_snapshot_fill`]) so editors that never set it pay nothing.
+/// (see the private `needs_snapshot_fill`) so editors that never set it pay
+/// nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTypographyDefaults {
     /// Fallback family for text runs whose `TextFormat.font_family` is `None`.

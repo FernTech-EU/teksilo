@@ -11,7 +11,7 @@
 //! paint pass without triggering a full rebuild.
 //!
 //! The foreground colour is a [`ColorProp`], so it accepts a plain
-//! [`Color`](bastyde_tokens::Color), a theme role
+//! [`Color`], a theme role
 //! ([`TextRole`](bastyde_tokens::TextRole)), a reactive `Signal<Color>`, or a
 //! `Signal<Role>` — resolved against the active theme at paint time.
 //!

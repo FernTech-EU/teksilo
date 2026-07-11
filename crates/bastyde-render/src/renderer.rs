@@ -2101,13 +2101,14 @@ fn path_quad_verts(
     ]
 }
 
-/// Build 4 [`PathGradientVertex`]es for a gradient-filled path entry (in
-/// pixel space, pre-NDC). Same bounds/atlas-UV/position math as
-/// [`path_quad_verts`] (the solid-path counterpart) — the actual
-/// encoding lives on [`PathGradientVertex::from_path_entry`] (mirrors the
-/// shared `encode_paint_data`/`encode_stops` helpers used by
-/// [`SdfVertex`]); this wrapper exists so the call site in `render()`
-/// reads symmetrically with `path_quad_verts`.
+/// Build 4 [`PathGradientVertex`](crate::vertex::PathGradientVertex)es for a
+/// gradient-filled path entry (in pixel space, pre-NDC). Same
+/// bounds/atlas-UV/position math as [`path_quad_verts`] (the solid-path
+/// counterpart) — the actual encoding lives on
+/// `PathGradientVertex::from_path_entry` (mirrors the shared
+/// `encode_paint_data`/`encode_stops` helpers used by [`SdfVertex`]); this
+/// wrapper exists so the call site in `render()` reads symmetrically with
+/// `path_quad_verts`.
 fn path_gradient_quad_verts(
     entry: &bastyde_canvas::PathEntry,
     region: &crate::path_atlas::AtlasRegion,

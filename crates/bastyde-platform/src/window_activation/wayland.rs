@@ -11,7 +11,7 @@
 //! client is dropped for focus-stealing prevention — hence "requester must be
 //! focused").
 //!
-//! Like [`crate::external_dnd::wayland`], we bind our own client objects on
+//! Like `crate::external_dnd::wayland`, we bind our own client objects on
 //! **winit's own `wl_display`** ([`Backend::from_foreign_display`]) so the
 //! surface object-ids match. `activate` is a one-shot, reply-less request, so we
 //! only ever *write* (flush) — we never read the socket, which winit's event

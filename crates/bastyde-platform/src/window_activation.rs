@@ -10,7 +10,7 @@
 //! `makeKeyAndOrderFront`) — including when the *target* window raises itself in
 //! response to a cross-process request. On **Wayland it is a hard no-op**, so a
 //! real raise there requires driving `xdg_activation_v1` over the window's raw
-//! `wl_surface` (see the [`wayland`] submodule).
+//! `wl_surface` (see the private `wayland` submodule).
 //!
 //! Callers keep the single `focus()` API. The optional activation `token` — an
 //! opaque string minted by the focused requester and handed across the process

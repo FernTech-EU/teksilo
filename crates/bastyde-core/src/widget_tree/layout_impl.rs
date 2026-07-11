@@ -239,7 +239,7 @@ impl WidgetTree {
     /// at `proposal` — e.g. `{ width: Some(w), height: None }` for the natural
     /// height at a fixed width. Mirrors the overlay intrinsic pass below: it
     /// calls the root's `layout_response` *directly* — NOT the
-    /// activation-ignoring [`WidgetArena::measure_intrinsic`] — so a
+    /// activation-ignoring `WidgetArena::measure_intrinsic` — so a
     /// `visible_when(false)` / parked-`Switcher` descendant is excluded exactly
     /// as the real layout excludes it. A size-to-content window is therefore
     /// sized to what is actually shown. Computes sizes only (never writes

@@ -140,7 +140,7 @@ impl WidgetTree {
     }
 
     /// Resolve a [`TooltipPlacement`](crate::overlay::TooltipPlacement) to
-    /// the concrete [`OverlayPlacement`] used to position the tooltip
+    /// the concrete [`OverlayPlacement`](crate::overlay::OverlayPlacement) used to position the tooltip
     /// overlay. `Below` keeps the historic tooltip offset; `Side` reuses
     /// the submenu-style `TrailingEdge` (RTL-aware, leading fallback,
     /// viewport-clamped) so the tooltip opens beside — not over — the next

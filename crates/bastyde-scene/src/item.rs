@@ -225,7 +225,7 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// coordinates are in **local** item space — `(0, 0)` is the
     /// item's anchor.
     ///
-    /// `ctx` carries the active [`Theme`](bastyde_core::styles::Theme),
+    /// `ctx` carries the active [`Theme`],
     /// `window_active`, and per-item `enabled` state, so colour-bearing items
     /// resolve their [`ColorProp`] fills/strokes with
     /// `prop.resolve(ctx.theme, ctx.enabled)`.
