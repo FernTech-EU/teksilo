@@ -245,3 +245,43 @@ fn apply_m3_roles(c: &mut ColorTokens, m: M3Roles, link_hover: Color) {
     c.focus_ring = m.primary;
     c.focus_ring_error = m.error;
 }
+
+#[cfg(test)]
+mod disabled_token_tests {
+    use super::*;
+    use bastyde_core::presets::intui;
+    use bastyde_tokens::{BorderRole, SurfaceRole};
+
+    /// A preset that starts from `ColorTokens::*_default()` inherits any token
+    /// it forgets to map — silently, with no compile error. For the *disabled*
+    /// family that is not a cosmetic slip: an M3 **dark** app would paint a
+    /// disabled field in IntUI's LIGHT grey. These pin that M3 maps them.
+    #[test]
+    fn disabled_family_is_m3_derived_not_the_intui_fallback() {
+        for (name, m3, base) in [
+            ("light", m3_light_colors(), intui::light().colors),
+            ("dark", m3_dark_colors(), intui::dark().colors),
+        ] {
+            assert_ne!(
+                m3.surface_disabled, base.surface_disabled,
+                "{name}: surface_disabled still holds the IntUI fallback"
+            );
+            assert_ne!(
+                m3.border_disabled, base.border_disabled,
+                "{name}: border_disabled still holds the IntUI fallback"
+            );
+        }
+    }
+
+    /// `Field` is `Content`'s interactive twin: it must resolve to the *M3*
+    /// content surface while enabled, and to M3's disabled fill when not — so
+    /// the neutral-disabled mechanism follows whichever preset is active.
+    #[test]
+    fn field_roles_follow_the_m3_palette() {
+        let c = m3_dark_colors();
+        assert_eq!(SurfaceRole::Field.resolve(&c), c.surface_content);
+        assert_eq!(SurfaceRole::Disabled.resolve(&c), c.surface_disabled);
+        assert_eq!(BorderRole::Field.resolve(&c), c.border);
+        assert_eq!(BorderRole::Disabled.resolve(&c), c.border_disabled);
+    }
+}
