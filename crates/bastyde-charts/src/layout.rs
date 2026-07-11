@@ -8,10 +8,15 @@
 //! per paint and use the result for both axis rendering and series
 //! placement.
 
-use bastyde_canvas::Rect;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-use crate::axis::AxisConfig;
+use bastyde_canvas::{Point, Rect, Size, TextBackend};
+use bastyde_tokens::TextStyle;
+
+use crate::axis::{AxisConfig, auto_tick_count, nice_ticks};
 use crate::style as cs;
+use crate::text::measure_text_width_via;
 
 /// Where the legend sits relative to the plot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +34,12 @@ pub struct PlotArea {
     pub plot: Rect,
     /// Legend band (zero-area Rect when no legend was reserved).
     pub legend: Rect,
+    /// Width of the carved y-axis band (labels + tick + axis title), in
+    /// logical pixels. `0.0` when nothing was reserved on that edge.
+    pub y_band_w: f32,
+    /// Height of the carved x-axis band (labels + tick + axis title), in
+    /// logical pixels. `0.0` when nothing was reserved on that edge.
+    pub x_band_h: f32,
 }
 
 /// Inputs for plot-area computation. Charts populate this once and pass
@@ -133,7 +144,245 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
         (rect.height - x_band_h - cs::PLOT_PADDING_TOP - cs::PLOT_PADDING_BOTTOM).max(0.0),
     );
 
-    PlotArea { plot, legend }
+    PlotArea {
+        plot,
+        legend,
+        y_band_w,
+        x_band_h,
+    }
+}
+
+/// Single-pass plot geometry: carved plot rect + legend band + the
+/// y-axis ticks fitted to that carved rect. Extraction of the
+/// "provisional `nice_ticks` off `bounds.height` for label-width
+/// measurement → `carve_plot_area` → final `nice_ticks` off `plot.height`"
+/// two-pass dance previously duplicated in `bar_chart.rs` and
+/// `line_chart.rs`. Both charts now share one algorithm — including
+/// honoring `axis_y.tick_count_hint` in the provisional pass (previously
+/// `LineChart`'s provisional measurement ignored the hint, which could
+/// under/over-reserve the y-label band width when a hint diverged
+/// sharply from the auto tick count).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotGeometry {
+    pub plot: Rect,
+    pub legend: Rect,
+    pub y_ticks: Vec<f32>,
+    pub y_lo: f32,
+    pub y_hi: f32,
+}
+
+/// Inputs for [`compute_plot_geometry`].
+pub struct PlotGeometryParams<'a> {
+    pub bounds: Rect,
+    pub axis_x: &'a AxisConfig,
+    pub axis_y: &'a AxisConfig,
+    pub y_domain: (f32, f32),
+    pub legend_size: f32,
+    pub legend_position: Option<LegendPosition>,
+    pub text_backend: Option<&'a Rc<RefCell<dyn TextBackend>>>,
+    pub label_style: &'a TextStyle,
+}
+
+pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
+    let (y_min, y_max) = p.y_domain;
+
+    // Provisional pass: nice_ticks off `bounds.height` (pre-carve) so we
+    // can measure the widest y-label string and reserve a matching band.
+    let provisional_target = p
+        .axis_y
+        .tick_count_hint
+        .unwrap_or_else(|| auto_tick_count(p.bounds.height));
+    let provisional_ticks = nice_ticks(y_min, y_max, provisional_target);
+    let y_label_max_width = if p.axis_y.show_labels {
+        provisional_ticks
+            .iter()
+            .map(|t| measure_text_width_via(p.text_backend, &p.axis_y.format(*t), p.label_style))
+            .fold(0.0_f32, f32::max)
+    } else {
+        0.0
+    };
+    let label_height = if p.axis_x.show_labels || p.axis_y.show_labels {
+        p.label_style.size * 1.2
+    } else {
+        0.0
+    };
+    let title_height = p.label_style.size * 1.2;
+
+    let area = carve_plot_area(&CarveParams {
+        bounds: p.bounds,
+        axis_x: p.axis_x,
+        axis_y: p.axis_y,
+        y_label_max_width,
+        x_label_height: label_height,
+        axis_title_line_height: title_height,
+        legend_size: p.legend_size,
+        legend_position: p.legend_position,
+    });
+
+    let plot = area.plot;
+    // Final pass: nice_ticks refitted to the carved plot rect.
+    let final_target = p
+        .axis_y
+        .tick_count_hint
+        .unwrap_or_else(|| auto_tick_count(plot.height));
+    let y_ticks = nice_ticks(y_min, y_max, final_target);
+    let y_lo = y_ticks.first().copied().unwrap_or(y_min);
+    let y_hi = y_ticks.last().copied().unwrap_or(y_max);
+
+    PlotGeometry {
+        plot,
+        legend: area.legend,
+        y_ticks,
+        y_lo,
+        y_hi,
+    }
+}
+
+/// Pie/donut disc geometry: the carved plot rect + legend band, plus the
+/// disc's center and inner/outer radii. Wraps `PieChart`'s pre-refactor
+/// `compute_plot_rect` + `compute_disc_geometry` combination so
+/// `place_children` and `paint` (and now `accessibility`) always agree
+/// on where the disc sits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PieGeometry {
+    pub plot: Rect,
+    pub legend: Rect,
+    pub center: Point,
+    pub outer_radius: f32,
+    pub inner_radius: f32,
+}
+
+/// Inputs for [`compute_pie_geometry`].
+pub struct PieGeometryParams {
+    pub bounds: Rect,
+    pub legend_size: f32,
+    pub legend_position: Option<LegendPosition>,
+    /// `0.0` for a solid pie; `> 0.0` for a donut (fraction of the outer
+    /// radius the hole occupies).
+    pub inner_radius_ratio: f32,
+}
+
+pub fn compute_pie_geometry(p: &PieGeometryParams) -> PieGeometry {
+    let no_axis = AxisConfig::new().show_labels(false).show_axis_line(false);
+    let area = carve_plot_area(&CarveParams {
+        bounds: p.bounds,
+        axis_x: &no_axis,
+        axis_y: &no_axis,
+        y_label_max_width: 0.0,
+        x_label_height: 0.0,
+        axis_title_line_height: 0.0,
+        legend_size: p.legend_size,
+        legend_position: p.legend_position,
+    });
+    let plot = area.plot;
+
+    let pad = cs::PIE_PADDING;
+    let usable_w = (plot.width - pad * 2.0).max(0.0);
+    let usable_h = (plot.height - pad * 2.0).max(0.0);
+    let diameter = usable_w.min(usable_h);
+    let center = Point::new(plot.x + plot.width * 0.5, plot.y + plot.height * 0.5);
+    if diameter <= 0.0 {
+        return PieGeometry {
+            plot,
+            legend: area.legend,
+            center,
+            outer_radius: 0.0,
+            inner_radius: 0.0,
+        };
+    }
+    let outer = diameter * 0.5;
+    let inner = if p.inner_radius_ratio > 0.0 {
+        outer * p.inner_radius_ratio
+    } else {
+        0.0
+    };
+    PieGeometry {
+        plot,
+        legend: area.legend,
+        center,
+        outer_radius: outer,
+        inner_radius: inner,
+    }
+}
+
+/// Shared intrinsic-minimum-size heuristic for `BarChart`/`LineChart`'s
+/// `layout_response` (`LayoutResponse::shrinkable`'s `min`): the carved
+/// axis bands — measured at a generous probe bounds so label-width
+/// measurement isn't itself clipped by a tight incoming proposal — plus
+/// a caller-supplied plot floor, plus any Leading/Trailing (adds width)
+/// or Top/Bottom (adds height) legend reservation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_intrinsic_min(
+    axis_x: &AxisConfig,
+    axis_y: &AxisConfig,
+    y_domain: (f32, f32),
+    legend_size: f32,
+    legend_position: Option<LegendPosition>,
+    text_backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+    label_style: &TextStyle,
+    plot_floor: Size,
+) -> Size {
+    let probe = Rect::new(0.0, 0.0, 2000.0, 2000.0);
+    let (y_min, y_max) = y_domain;
+    let target = axis_y
+        .tick_count_hint
+        .unwrap_or_else(|| auto_tick_count(probe.height));
+    let ticks = nice_ticks(y_min, y_max, target);
+    let y_label_max_width = if axis_y.show_labels {
+        ticks
+            .iter()
+            .map(|t| measure_text_width_via(text_backend, &axis_y.format(*t), label_style))
+            .fold(0.0_f32, f32::max)
+    } else {
+        0.0
+    };
+    let label_height = if axis_x.show_labels || axis_y.show_labels {
+        label_style.size * 1.2
+    } else {
+        0.0
+    };
+    let title_height = label_style.size * 1.2;
+
+    let area = carve_plot_area(&CarveParams {
+        bounds: probe,
+        axis_x,
+        axis_y,
+        y_label_max_width,
+        x_label_height: label_height,
+        axis_title_line_height: title_height,
+        legend_size,
+        legend_position,
+    });
+
+    let extra_w = if matches!(
+        legend_position,
+        Some(LegendPosition::Leading) | Some(LegendPosition::Trailing)
+    ) {
+        legend_size + cs::LEGEND_TO_PLOT_GAP
+    } else {
+        0.0
+    };
+    let extra_h = if matches!(
+        legend_position,
+        Some(LegendPosition::Top) | Some(LegendPosition::Bottom)
+    ) {
+        legend_size + cs::LEGEND_TO_PLOT_GAP
+    } else {
+        0.0
+    };
+
+    Size::new(
+        area.y_band_w
+            + cs::PLOT_PADDING_LEADING
+            + cs::PLOT_PADDING_RIGHT
+            + plot_floor.width
+            + extra_w,
+        area.x_band_h
+            + cs::PLOT_PADDING_TOP
+            + cs::PLOT_PADDING_BOTTOM
+            + plot_floor.height
+            + extra_h,
+    )
 }
 
 #[cfg(test)]

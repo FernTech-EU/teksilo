@@ -19,6 +19,8 @@ mod button_style;
 mod calendar_style;
 #[path = "styles/card_style.rs"]
 mod card_style;
+#[path = "styles/chart_style.rs"]
+mod chart_style;
 #[path = "styles/checkbox_style.rs"]
 mod checkbox_style;
 #[path = "styles/color_picker_style.rs"]
@@ -112,6 +114,7 @@ pub use calendar_style::{
     CalendarZoomCellConfig, SharedCalendarStyle,
 };
 pub use card_style::{CardStyle, CardStyleConfig, CardVariant, SharedCardStyle};
+pub use chart_style::{ChartFillContext, ChartStyle, SharedChartStyle};
 pub use checkbox_style::{
     CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
 };

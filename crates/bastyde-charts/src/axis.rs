@@ -22,6 +22,9 @@ pub struct AxisConfig {
     /// Custom value-to-string formatter. `None` → default `format!("{}", v)`
     /// with a sensible decimal cap.
     pub formatter: Option<Rc<dyn Fn(f32) -> String>>,
+    /// Dash pattern `(dash, gap)` for this axis's gridlines, in logical
+    /// pixels. `None` (default) draws solid gridlines.
+    pub gridline_dash: Option<(f32, f32)>,
 }
 
 impl AxisConfig {
@@ -34,6 +37,7 @@ impl AxisConfig {
             min: None,
             max: None,
             formatter: None,
+            gridline_dash: None,
         }
     }
 
@@ -68,6 +72,13 @@ impl AxisConfig {
         self
     }
 
+    /// Draw this axis's gridlines dashed, `dash` logical pixels on and
+    /// `gap` logical pixels off.
+    pub fn gridline_dash(mut self, dash: f32, gap: f32) -> Self {
+        self.gridline_dash = Some((dash, gap));
+        self
+    }
+
     /// Format `v` for display using the configured formatter, or a default
     /// that drops trailing zeros and caps at 4 decimal places.
     pub fn format(&self, v: f32) -> String {
@@ -89,6 +100,7 @@ impl std::fmt::Debug for AxisConfig {
             .field("min", &self.min)
             .field("max", &self.max)
             .field("formatter", &self.formatter.as_ref().map(|_| "<fn>"))
+            .field("gridline_dash", &self.gridline_dash)
             .finish()
     }
 }

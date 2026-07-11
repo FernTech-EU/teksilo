@@ -16,8 +16,18 @@
 //! validation (`drag`/`can_accept`/`accept_drop`/`on_drag_out`), and lazy
 //! loading (`row_state`/`request_window`/`can_fetch_more`/`fetch_more`) — as
 //! defaulted methods (see [`dnd_types`]).
+//!
+//! Chart data follows the same shape: [`ChartModel<T>`] is the reactive,
+//! multi-series primary model (mirroring `ListModel`/`TreeModel`), with
+//! [`ChartWindow<T>`] / [`ChartAggregate<T>`] streaming/rollup projections
+//! and [`ChartSelection`] for point-level selection.
 #![allow(clippy::type_complexity)]
 
+pub mod chart_aggregate;
+pub mod chart_change;
+pub mod chart_model;
+pub mod chart_selection;
+pub mod chart_window;
 pub mod check_state;
 pub mod checked_model;
 pub mod data_change;
@@ -39,6 +49,11 @@ pub mod tree_model;
 pub mod tree_row_filter;
 pub mod tree_slice;
 
+pub use chart_aggregate::{ChartAggregate, ChartAggregateFn};
+pub use chart_change::{ChartChange, SeriesId};
+pub use chart_model::{ChartDatum, ChartModel, ChartSeries, SeriesView};
+pub use chart_selection::ChartSelection;
+pub use chart_window::ChartWindow;
 pub use check_state::CheckState;
 pub use checked_model::CheckedModel;
 pub use data_change::{DataChange, map_index_after_move};

@@ -314,26 +314,37 @@ impl Canvas {
 
     // --- Tier 3: Arbitrary paths (CPU rasterized) ---
 
-    /// Fill an arbitrary path with a solid color, using the non-zero
-    /// winding rule. The path will be CPU-rasterized (Tier 3) and cached
-    /// in the shape atlas.
-    pub fn fill_path(&mut self, path: &Path, color: Color) {
-        self.fill_path_with_rule(path, color, FillRule::Winding);
+    /// Fill an arbitrary path with a paint (solid color or gradient),
+    /// using the non-zero winding rule. The path will be CPU-rasterized
+    /// (Tier 3, as an opaque coverage mask) and cached in the shape atlas;
+    /// the paint is applied by the GPU at draw time (solid fills go
+    /// through the lean quad pipeline, gradients through a dedicated
+    /// `path_gradient` pipeline — see `Canvas::fill_rounded_rect` for the
+    /// analogous Tier-2 SDF path).
+    pub fn fill_path(&mut self, path: &Path, paint: impl Into<Paint>) {
+        self.fill_path_with_rule(path, paint, FillRule::Winding);
     }
 
-    /// Fill an arbitrary path with an explicit [`FillRule`] — use
-    /// [`FillRule::EvenOdd`] for SVG `fill-rule="evenodd"` geometry
+    /// Fill an arbitrary path with a paint and an explicit [`FillRule`] —
+    /// use [`FillRule::EvenOdd`] for SVG `fill-rule="evenodd"` geometry
     /// (rings / donuts / counters). The path will be CPU-rasterized
     /// (Tier 3) and cached in the shape atlas.
-    pub fn fill_path_with_rule(&mut self, path: &Path, color: Color, fill_rule: FillRule) {
+    pub fn fill_path_with_rule(
+        &mut self,
+        path: &Path,
+        paint: impl Into<Paint>,
+        fill_rule: FillRule,
+    ) {
+        let (color, paint_data) = paint_to_data(&paint.into());
         let bounds = path.bounds();
         let idx = self.frame.paths.len();
         self.frame.paths.push(PathEntry {
             path: path.clone(),
-            color: color.to_array(),
+            color,
             stroke_style: StrokeStyle::solid(0.0),
             fill_rule,
             bounds: bounds.to_array(),
+            paint_data,
         });
         self.frame.draw_order.push(DrawCommand::Path(idx));
     }
@@ -355,6 +366,7 @@ impl Canvas {
             stroke_style: style,
             fill_rule: FillRule::Winding,
             bounds: bounds.to_array(),
+            paint_data: PaintData::Solid,
         });
         self.frame.draw_order.push(DrawCommand::Path(idx));
     }
@@ -1174,6 +1186,51 @@ mod tests {
         assert_eq!(frame.paths.len(), 1);
         assert_eq!(frame.paths[0].stroke_style.width, 0.0);
         assert!(matches!(frame.draw_order[0], DrawCommand::Path(0)));
+        // A flat Color paint records PaintData::Solid.
+        assert_eq!(frame.paths[0].paint_data, PaintData::Solid);
+    }
+
+    #[test]
+    fn fill_path_with_gradient_records_gradient_paint_data() {
+        use crate::paint::{GradientStop, Paint};
+        let mut canvas = Canvas::new();
+        let star = crate::path::Path::star(crate::geometry::Point::new(50.0, 50.0), 30.0, 15.0, 5);
+        let paint = Paint::LinearGradient {
+            start: Point::new(0.0, 0.0),
+            end: Point::new(100.0, 0.0),
+            stops: vec![
+                GradientStop {
+                    offset: 0.0,
+                    color: Color::RED,
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color::BLUE,
+                },
+            ],
+        };
+        canvas.fill_path(&star, paint);
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.paths.len(), 1);
+        assert!(matches!(
+            frame.paths[0].paint_data,
+            PaintData::LinearGradient { .. }
+        ));
+    }
+
+    #[test]
+    fn fill_path_preserves_color_alpha() {
+        // A translucent flat-color fill_path still records the same
+        // PathEntry.color alpha — the atlas rasterization is now always
+        // opaque-white (C3), but the API-visible color must be unchanged
+        // (the GPU applies the tint, including its alpha, at draw time).
+        let mut canvas = Canvas::new();
+        let star = crate::path::Path::star(crate::geometry::Point::new(50.0, 50.0), 30.0, 15.0, 5);
+        let translucent = Color::new(1.0, 0.0, 0.0, 0.3);
+        canvas.fill_path(&star, translucent);
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.paths[0].color, translucent.to_array());
+        assert!((frame.paths[0].color[3] - 0.3).abs() < 1e-6);
     }
 
     #[test]

@@ -173,6 +173,12 @@ impl ColorTokens {
     /// [`for_inactive_window`](Self::for_inactive_window).
     pub const INACTIVE_ACCENT_DESATURATION: f32 = 0.70;
 
+    /// Chart-palette-specific inactive-window desaturation. Lighter than
+    /// `INACTIVE_ACCENT_DESATURATION` — the Okabe-Ito sequence's whole purpose
+    /// is inter-series hue separation; fully desaturating it like a single accent
+    /// control would defeat that even in a background window. See `for_inactive_window`.
+    pub const INACTIVE_CHART_DESATURATION: f32 = 0.35;
+
     /// Project this palette for an **inactive window**: the accent-control
     /// family and focus indicators are desaturated toward graphite, matching
     /// the macOS / Qt `QPalette::Inactive` convention where accent-coloured
@@ -191,6 +197,7 @@ impl ColorTokens {
     /// (status colours keep their meaning); `text_*` / links.
     pub fn for_inactive_window(&self) -> ColorTokens {
         let d = Self::INACTIVE_ACCENT_DESATURATION;
+        let cd = Self::INACTIVE_CHART_DESATURATION;
         ColorTokens {
             accent: self.accent.desaturated(d),
             accent_hover: self.accent_hover.desaturated(d),
@@ -199,6 +206,11 @@ impl ColorTokens {
             accent_subtle_bg: self.accent_subtle_bg.desaturated(d),
             border_focused: self.border_focused.desaturated(d),
             focus_ring: self.focus_ring.desaturated(d),
+            chart_palette: self
+                .chart_palette
+                .iter()
+                .map(|c| c.desaturated(cd))
+                .collect(),
             ..self.clone()
         }
     }
@@ -787,6 +799,27 @@ mod tests {
             assert_eq!(inactive.editor_selection_bg, c.editor_selection_bg);
             assert_eq!(inactive.status_error_bg, c.status_error_bg);
             assert_eq!(inactive.text_primary, c.text_primary);
+        }
+    }
+
+    #[test]
+    fn for_inactive_window_desaturates_chart_palette_lightly() {
+        for c in [ColorTokens::light_default(), ColorTokens::dark_default()] {
+            let inactive = c.for_inactive_window();
+            assert_eq!(inactive.chart_palette.len(), c.chart_palette.len());
+            let n = c.chart_palette.len();
+            for i in 0..n.saturating_sub(1) {
+                assert_eq!(
+                    inactive.chart_palette[i],
+                    c.chart_palette[i].desaturated(ColorTokens::INACTIVE_CHART_DESATURATION)
+                );
+                // The Okabe-Ito palette's non-achromatic entries should actually change.
+                assert_ne!(inactive.chart_palette[i], c.chart_palette[i]);
+            }
+            // The last Okabe-Ito entry is achromatic (black/white) — desaturation is a no-op on it.
+            if n > 0 {
+                assert_eq!(inactive.chart_palette[n - 1], c.chart_palette[n - 1]);
+            }
         }
     }
 

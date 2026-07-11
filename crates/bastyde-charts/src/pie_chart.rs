@@ -7,6 +7,10 @@
 //! pie; `> 0.0` is a donut. The optional center widget slot is only used
 //! when `inner_radius_ratio > 0.0` (the slot is silently ignored for pies).
 //!
+//! Bound to a [`ChartModel`] — a pie's slices are the points of ONE
+//! series (`new` picks `ChartModel::only_series()` or the first series;
+//! `from_series` wraps a single [`ChartSeries`] into its own model).
+//!
 //! Slot integration follows the existing `Option<PendingChild>` pattern
 //! used by [`Card`](https://docs.rs/bastyde-widgets) /
 //! [`DialogContent`](https://docs.rs/bastyde-widgets) / `GroupBox`: two
@@ -14,25 +18,34 @@
 //! (`.center(impl Widget)` / `.center_id(WidgetId)`), and `build()`
 //! resolves the pending child via `ctx.add_boxed`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
+use bastyde_core::Theme;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, WidgetEvent};
+use bastyde_core::gesture::TapEvent;
+use bastyde_core::paint_prop::PaintProp;
 use bastyde_core::signal::{Prop, Signal};
-use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use bastyde_core::styles::{ChartFillContext, ChartStyle, FillRecipe, SharedChartStyle};
+use bastyde_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
+    WidgetPlacement,
+};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{CornerRadius, TextRole, TextStyleRole};
+use bastyde_data::{ChartModel, ChartSelection, ChartSeries, SeriesId};
+use bastyde_tokens::{CornerRadius, TextRole, TextStyle, TextStyleRole};
 
-use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
-use crate::legend::{LegendOrientation, orientation_for_position, paint_embedded_legend};
+use crate::hit::{self, MarkGeometry, MarkShape};
+use crate::layout::{LegendPosition, PieGeometry, PieGeometryParams, compute_pie_geometry};
+use crate::legend::{LegendOrientation, orientation_for_position};
 use crate::palette::ChartPalette;
-use crate::series::{ChartDatum, ChartSeries};
+use crate::recipe_style::RecipeChartStyle;
 use crate::text::measure_text_width;
 
 /// How slice labels are placed.
@@ -49,24 +62,25 @@ pub enum PieLabelMode {
     InsideWithLeaders,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HoveredSlice {
-    slice_idx: usize,
+/// Cache key for the memoized [`PieGeometry`] — a miss recomputes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GeometryKey {
+    bounds: Rect,
+    structure_version: u64,
 }
 
-#[derive(Debug, Clone)]
-struct SliceHit {
-    /// Cumulative start angle in radians (clockwise from start_angle).
-    start_rad: f32,
-    /// Sweep in radians.
-    sweep_rad: f32,
-    label: String,
-    value: f32,
-    percent: f32,
+/// Text-measurement context stashed during `paint()` so `accessibility()`
+/// can recompute the same geometry without a `Canvas`/`Theme`.
+struct PaintSnapshot {
+    backend: Option<Rc<RefCell<dyn TextBackend>>>,
+    label_style: TextStyle,
 }
 
 pub struct PieChart<T: Clone + 'static> {
-    data: Prop<Vec<ChartDatum<T>>>,
+    model: ChartModel<T>,
+    /// The series whose points become slices. `None` only for an empty
+    /// model (nothing to draw).
+    series_id: Option<SeriesId>,
     inner_radius_ratio: f32,
     start_angle_degrees: f32,
     clockwise: bool,
@@ -80,19 +94,22 @@ pub struct PieChart<T: Clone + 'static> {
     explicit_colors: Vec<Option<ColorProp>>,
     pending_center: Option<PendingChild>,
     center_id: Option<WidgetId>,
+    style_override: Option<SharedChartStyle>,
+    selection: Option<ChartSelection>,
 
-    // hover plumbing
-    hover: Signal<Option<HoveredSlice>>,
-    hit_index: Rc<RefCell<Vec<SliceHit>>>,
-    /// Center of the disc + outer radius, in window space; used by the
-    /// pointer hit-test.
-    disc: Rc<RefCell<(Point, f32, f32)>>, // (center, outer_radius, inner_radius)
+    hover: Signal<Option<(SeriesId, usize)>>,
+    marks: Rc<RefCell<Vec<MarkGeometry>>>,
+    bounds: Rc<Cell<Rect>>,
+    geometry_cache: Rc<RefCell<Option<(GeometryKey, PieGeometry)>>>,
+    paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
 }
 
 impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
-    pub fn new(data: impl Into<Prop<Vec<ChartDatum<T>>>>) -> Self {
+    pub fn new(model: ChartModel<T>) -> Self {
+        let series_id = model.only_series().or_else(|| model.series_id_at(0));
         Self {
-            data: data.into(),
+            model,
+            series_id,
             inner_radius_ratio: 0.0,
             start_angle_degrees: -90.0, // 12 o'clock
             clockwise: true,
@@ -106,16 +123,20 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             explicit_colors: Vec::new(),
             pending_center: None,
             center_id: None,
+            style_override: None,
+            selection: None,
             hover: Signal::new(None),
-            hit_index: Rc::new(RefCell::new(Vec::new())),
-            disc: Rc::new(RefCell::new((Point::ZERO, 0.0, 0.0))),
+            marks: Rc::new(RefCell::new(Vec::new())),
+            bounds: Rc::new(Cell::new(Rect::ZERO)),
+            geometry_cache: Rc::new(RefCell::new(None)),
+            paint_snapshot: Rc::new(RefCell::new(None)),
         }
     }
 
     /// Adapter: take a single `ChartSeries<T>` and use its data points as
     /// pie slices (the series's name and color are ignored for the pie).
     pub fn from_series(series: ChartSeries<T>) -> Self {
-        Self::new(series.data)
+        Self::new(ChartModel::from_series_vec(vec![series]))
     }
 
     pub fn donut(mut self, inner_radius_ratio: f32) -> Self {
@@ -188,6 +209,33 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         self.pending_center = Some(PendingChild::Id(id));
         self
     }
+
+    /// Per-call [`ChartStyle`] override. Takes precedence over
+    /// `theme.style_slots.chart`.
+    pub fn style(mut self, style: impl ChartStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Wire a shared [`ChartSelection`] into this chart: clicking a
+    /// slice selects its `(series, point)` key (Ctrl/Cmd-click toggles
+    /// it in [`bastyde_data::SelectionMode::Multi`]), clicking empty
+    /// space (outside the ring, or the donut hole) clears the
+    /// selection, and every selected slice paints an accent-colored
+    /// outline. Pass a clone of the same `ChartSelection` to other
+    /// charts/widgets to keep selection state in sync.
+    pub fn selection(mut self, selection: ChartSelection) -> Self {
+        self.selection = Some(selection);
+        self
+    }
+
+    /// A clone of the live hover signal — the `(series, point)` key
+    /// currently under the pointer, or `None`. Lets an app observe
+    /// hover state from outside the chart (a synced detail panel, a
+    /// custom tooltip) without re-implementing hit-testing.
+    pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
+        self.hover.clone()
+    }
 }
 
 impl<T: Clone + 'static> std::fmt::Debug for PieChart<T> {
@@ -204,13 +252,28 @@ impl<T: Clone + 'static> std::fmt::Debug for PieChart<T> {
 impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        // Data swap → relayout (slice angles change, labels change).
-        self.data
-            .register_if_bound(id, registry, BindingLevel::Relayout);
-        self.palette
-            .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+        {
+            let registry = ctx.binding_registry();
+            // Data swap → relayout (slice angles change, labels change)
+            // AND the AT mark list must refresh.
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::Relayout);
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            self.model
+                .style_version()
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.palette
+                .register_if_bound(id, registry, BindingLevel::RepaintOnly);
+            self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            if let Some(selection) = &self.selection {
+                selection
+                    .selection_signal()
+                    .bind_to(id, registry, BindingLevel::RepaintOnly);
+            }
+        }
 
         // Resolve the center slot via ctx.add_boxed.
         if let Some(c) = self.pending_center.take() {
@@ -220,75 +283,107 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             });
         }
 
-        // Hover hit-test handler.
-        if self.show_hover_tooltip {
-            let disc = self.disc.clone();
-            let hits = self.hit_index.clone();
-            let hover = self.hover.clone();
-            let clockwise = self.clockwise;
-            let start_angle_rad = self.start_angle_degrees.to_radians();
-            let handlers = HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
-                WidgetEvent::PointerMove { position } => {
-                    let (center, outer, inner) = *disc.borrow();
-                    if outer <= 0.0 {
-                        return EventResponse::Ignored;
-                    }
-                    let dx = position.x - center.x;
-                    let dy = position.y - center.y;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist < inner || dist > outer {
-                        if hover.get().is_some() {
-                            hover.set(None);
-                        }
-                        return EventResponse::Ignored;
-                    }
-                    // Pointer angle in screen-space radians, measured
-                    // from +x axis (3 o'clock = 0). Translate into the
-                    // chart's logical angle space (rooted at
-                    // `start_angle_rad`), then flip for non-clockwise.
-                    // SliceHit::start_rad is stored in this same logical
-                    // space, so the comparison is direct.
-                    let raw = dy.atan2(dx).rem_euclid(std::f32::consts::TAU);
-                    let logical = (raw - start_angle_rad).rem_euclid(std::f32::consts::TAU);
-                    let test_angle = if clockwise {
-                        logical
-                    } else {
-                        (std::f32::consts::TAU - logical) % std::f32::consts::TAU
-                    };
-                    let hits = hits.borrow();
-                    if hits.is_empty() {
-                        return EventResponse::Ignored;
-                    }
-                    let mut found = None;
-                    for (i, h) in hits.iter().enumerate() {
-                        if angle_in_sweep(test_angle, h.start_rad, h.sweep_rad) {
-                            found = Some(i);
-                            break;
-                        }
-                    }
-                    match found {
-                        Some(idx) => {
-                            let prev = hover.get().map(|h| h.slice_idx);
-                            if prev != Some(idx) {
-                                hover.set(Some(HoveredSlice { slice_idx: idx }));
+        // Hover + tap hit-test handlers. `marks` store already-resolved
+        // screen-space slice angles (see `compute_marks`), so the test
+        // angle is just the raw pointer bearing — no separate
+        // "logical vs. clockwise" conversion needed.
+        if self.show_hover_tooltip || self.selection.is_some() {
+            let mut handlers = HandlerSet::new();
+
+            if self.show_hover_tooltip {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                let hover = self.hover.clone();
+                handlers =
+                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
+                        WidgetEvent::PointerMove { position } => {
+                            let b = bounds.get();
+                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
+                            let (center, outer, inner) = geometry_cache
+                                .borrow()
+                                .as_ref()
+                                .map(|(_, g)| (g.center, g.outer_radius, g.inner_radius))
+                                .unwrap_or((Point::ZERO, 0.0, 0.0));
+                            if outer <= 0.0 {
+                                return EventResponse::Ignored;
                             }
+                            let dx = window_pos.x - center.x;
+                            let dy = window_pos.y - center.y;
+                            let dist = (dx * dx + dy * dy).sqrt();
+                            if dist < inner || dist > outer {
+                                if hover.get().is_some() {
+                                    hover.set(None);
+                                }
+                                return EventResponse::Ignored;
+                            }
+                            let raw = dy.atan2(dx);
+                            let hit = hit::slice_hit(&marks.borrow(), raw);
+                            match hit.and_then(|idx| {
+                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
+                            }) {
+                                Some(key) => {
+                                    if hover.get() != Some(key) {
+                                        hover.set(Some(key));
+                                    }
+                                }
+                                None => {
+                                    if hover.get().is_some() {
+                                        hover.set(None);
+                                    }
+                                }
+                            }
+                            EventResponse::Ignored
                         }
-                        None => {
+                        WidgetEvent::PointerLeave => {
                             if hover.get().is_some() {
                                 hover.set(None);
                             }
+                            EventResponse::Ignored
                         }
+                        _ => EventResponse::Ignored,
+                    });
+            }
+
+            if let Some(selection) = self.selection.clone() {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                    let b = bounds.get();
+                    let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
+                    let (center, outer, inner) = geometry_cache
+                        .borrow()
+                        .as_ref()
+                        .map(|(_, g)| (g.center, g.outer_radius, g.inner_radius))
+                        .unwrap_or((Point::ZERO, 0.0, 0.0));
+                    if outer <= 0.0 {
+                        return;
                     }
-                    EventResponse::Ignored
-                }
-                WidgetEvent::PointerLeave => {
-                    if hover.get().is_some() {
-                        hover.set(None);
+                    let dx = window_pos.x - center.x;
+                    let dy = window_pos.y - center.y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < inner || dist > outer {
+                        selection.clear();
+                        return;
                     }
-                    EventResponse::Ignored
-                }
-                _ => EventResponse::Ignored,
-            });
+                    let raw = dy.atan2(dx);
+                    let hit = hit::slice_hit(&marks.borrow(), raw);
+                    match hit
+                        .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
+                    {
+                        Some((sid, idx)) => {
+                            if tap.modifiers.ctrl() || tap.modifiers.super_key() {
+                                selection.toggle_point(sid, idx);
+                            } else {
+                                selection.select_point(sid, idx);
+                            }
+                        }
+                        None => selection.clear(),
+                    }
+                });
+            }
+
             ctx.apply_self_handlers(handlers);
         }
 
@@ -296,16 +391,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         self.center_id.into_iter().collect()
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        Size::new(
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let ideal = Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(220.0),
-        )
-        .into()
+        );
+        let min = self.compute_intrinsic_min(ctx);
+        LayoutResponse::shrinkable(ideal, min, 1.0)
     }
 
     fn place_children(
@@ -315,22 +407,18 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
-        // Place the center widget (if any) into the inscribed square at
-        // the donut's inner radius. For pies (inner_radius_ratio == 0)
-        // the side is 0 so the slot occupies no space.
+        self.bounds.set(bounds);
         if children.is_empty() {
             return;
         }
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
-        let legend_size = self.compute_legend_size(ctx.text_backend, &label_style);
-        // Carve off the legend band first so the disc placed here matches
-        // the disc rendered in paint (otherwise the center widget drifts
-        // off-center when a legend is shown).
-        let plot_rect = self.compute_plot_rect(bounds, legend_size);
-        let (center, _outer, inner) = self.compute_disc_geometry(plot_rect);
-        let side = (inner * std::f32::consts::FRAC_1_SQRT_2 * 2.0).max(0.0);
+        let geometry = self.ensure_geometry(bounds, ctx.text_backend, &label_style);
+        let side = (geometry.inner_radius * std::f32::consts::FRAC_1_SQRT_2 * 2.0).max(0.0);
         for child in children.iter_mut() {
-            child.origin = Point::new(center.x - side * 0.5, center.y - side * 0.5);
+            child.origin = Point::new(
+                geometry.center.x - side * 0.5,
+                geometry.center.y - side * 0.5,
+            );
             child.size = Size::new(side, side);
         }
     }
@@ -338,52 +426,57 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
         let enabled = ctx.effective_enabled;
+        let Some(_series_id) = self.series_id else {
+            return;
+        };
 
-        let data = self.data.get();
-        if data.is_empty() {
-            return;
-        }
-        let total: f32 = data.iter().map(|d| d.value.max(0.0)).sum();
-        if total <= 0.0 {
-            return;
-        }
+        let style: SharedChartStyle = self
+            .style_override
+            .clone()
+            .or_else(|| theme.style_slots.chart.clone())
+            .unwrap_or_else(|| Rc::new(RecipeChartStyle));
 
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
-        let legend_orientation = orientation_for_position(self.legend_position);
+        let backend = canvas.text_backend().cloned();
+        *self.paint_snapshot.borrow_mut() = Some(PaintSnapshot {
+            backend: backend.clone(),
+            label_style: label_style.clone(),
+        });
 
-        let legend_size = self.compute_legend_size(canvas.text_backend(), &label_style);
-        let plot = self.compute_plot_rect(bounds, legend_size);
-        if plot.width <= 0.0 || plot.height <= 0.0 {
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        self.bounds.set(bounds);
+        if geometry.outer_radius <= 0.0 {
             return;
         }
-        let legend_band = legend_band_rect(bounds, self.legend_position, legend_size);
 
-        // Disc geometry. `center` is window-space (paint draws there);
-        // the pointer handler receives widget-local positions, so cache a
-        // widget-local copy of the centre for hit-testing.
-        let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot);
-        if outer_radius <= 0.0 {
+        let marks = self.compute_marks(&geometry);
+        if marks.is_empty() {
+            *self.marks.borrow_mut() = marks;
             return;
         }
-        let local_center = Point::new(center.x - bounds.x, center.y - bounds.y);
-        *self.disc.borrow_mut() = (local_center, outer_radius, inner_radius);
+        *self.marks.borrow_mut() = marks.clone();
 
-        // Paint slices.
         let palette = self.palette.get();
-        let start_rad = self.start_angle_degrees.to_radians();
-        let mut accum = 0.0_f32;
-        let mut new_hits: Vec<SliceHit> = Vec::new();
-        let half_gap = self.slice_gap_degrees.to_radians() * 0.5;
+        let total: f32 = marks.iter().map(|m| m.value).sum();
+        let disc_bounds = Rect::new(
+            geometry.center.x - geometry.outer_radius,
+            geometry.center.y - geometry.outer_radius,
+            geometry.outer_radius * 2.0,
+            geometry.outer_radius * 2.0,
+        );
 
-        for (i, datum) in data.iter().enumerate() {
-            let v = datum.value.max(0.0);
-            let sweep_full = v / total * std::f32::consts::TAU;
-            // Clip the gap so we never produce negative sweeps.
-            let usable_sweep = (sweep_full - half_gap * 2.0).max(0.0);
-            let slice_start = accum + half_gap;
-            let slice_end = accum + sweep_full - half_gap;
+        for (i, m) in marks.iter().enumerate() {
+            let MarkShape::Slice {
+                center,
+                inner_radius,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+            } = m.shape
+            else {
+                continue;
+            };
 
-            // Color resolution.
             let color = self
                 .explicit_colors
                 .get(i)
@@ -391,77 +484,116 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 .map(|c| c.resolve(theme, enabled))
                 .unwrap_or_else(|| palette.color_for(i, theme));
 
-            // Build the wedge / ring-segment path. Angles are in
-            // **clockwise** orientation when `self.clockwise = true`. We
-            // render with clockwise sweep by default (matches start at 12
-            // o'clock + clockwise convention).
-            let path = build_slice_path(
-                center,
-                outer_radius,
-                inner_radius,
-                start_rad + slice_start,
-                usable_sweep,
-                self.clockwise,
+            let path = build_slice_path(center, outer_radius, inner_radius, start_rad, sweep_rad);
+            let cfg = ChartFillContext {
+                series_index: i,
+                resolved_color: color,
+                theme,
+            };
+            let fill = style.donut_fill(&cfg);
+            let wedge_bounds = path.bounds();
+            let projected = project_gradient_to_wedge_local(&fill, disc_bounds, wedge_bounds);
+            let paint = PaintProp::from_fill(&projected, &theme.colors).resolve(
+                theme,
+                enabled,
+                wedge_bounds.size(),
             );
-            canvas.fill_path(&path, color);
+            canvas.fill_path(&path, paint);
 
-            new_hits.push(SliceHit {
-                start_rad: slice_start,
-                sweep_rad: usable_sweep,
-                label: format!("{}", datum.category),
-                value: v,
-                percent: v / total * 100.0,
-            });
+            if self
+                .selection
+                .as_ref()
+                .is_some_and(|s| s.is_selected(m.series_id, m.point_idx))
+            {
+                use crate::style::SELECTION_STROKE_WIDTH;
+                canvas.stroke_path(&path, theme.colors.accent, SELECTION_STROKE_WIDTH);
+            }
 
-            // Slice labels.
+            let bisector = start_rad + sweep_rad * 0.5;
+            let percent = if total > 0.0 {
+                m.value / total * 100.0
+            } else {
+                0.0
+            };
             self.draw_slice_label(
                 canvas,
                 theme,
                 center,
                 outer_radius,
-                start_rad + (slice_start + slice_end) * 0.5,
-                self.clockwise,
-                v,
-                v / total * 100.0,
-                &format!("{}", datum.category),
+                bisector,
+                percent,
+                &m.category_label,
                 &label_style,
             );
-
-            accum += sweep_full;
         }
-        *self.hit_index.borrow_mut() = new_hits;
 
-        // Embedded legend — synthesize a series list (one entry per slice)
-        // so the embedded-legend painter works uniformly across charts.
-        if self.show_legend && legend_band.width > 0.0 && legend_band.height > 0.0 {
-            let pseudo_series: Vec<ChartSeries<String>> = data
-                .iter()
-                .map(|d| ChartSeries::new(format!("{}", d.category)))
-                .collect();
-            paint_embedded_legend(
-                canvas,
-                legend_band,
-                &pseudo_series,
-                &palette,
-                legend_orientation,
-                theme,
-                enabled,
-            );
+        // Embedded legend (Pie synthesizes one entry per SLICE, i.e. per
+        // point of the single displayed series — a different granularity
+        // than Bar/Line's per-SERIES `ChartLegend`, so it isn't reused
+        // here; see the module-level note in the deviations report).
+        if self.show_legend && geometry.legend.width > 0.0 && geometry.legend.height > 0.0 {
+            self.paint_legend(canvas, geometry.legend, theme, enabled, &label_style);
         }
 
         // Hover marker + tooltip.
         if self.show_hover_tooltip
-            && let Some(hovered) = self.hover.get()
-            && let Some(hit) = self.hit_index.borrow().get(hovered.slice_idx)
+            && let Some((sid, idx)) = self.hover.get()
+            && let Some(m) = marks
+                .iter()
+                .find(|m| m.series_id == sid && m.point_idx == idx)
+            && let MarkShape::Slice {
+                center,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+                ..
+            } = m.shape
         {
-            self.draw_hover(canvas, theme, plot, center, outer_radius, hit, &label_style);
+            let bisector = start_rad + sweep_rad * 0.5;
+            let r_anchor = outer_radius + 12.0;
+            let anchor = Point::new(
+                center.x + r_anchor * bisector.cos(),
+                center.y + r_anchor * bisector.sin(),
+            );
+            let percent = if total > 0.0 {
+                m.value / total * 100.0
+            } else {
+                0.0
+            };
+            let text = format!(
+                "{}: {} ({:.1}%)",
+                m.category_label,
+                format_pie_value(m.value),
+                percent
+            );
+            hit::draw_mark_tooltip(canvas, theme, geometry.plot, anchor, &text, &label_style);
         }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::GraphicsDocument);
-        let data = self.data.get();
-        builder.set_name(format!("Pie chart: {} slices", data.len()));
+        let n = self
+            .series_id
+            .map(|s| self.model.point_count(s))
+            .unwrap_or(0);
+        builder.set_name(format!("Pie chart: {} slices", n));
+
+        let bounds = self.bounds.get();
+        let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {
+            Some(s) => (s.backend.clone(), s.label_style.clone()),
+            None => (
+                None,
+                TextStyle {
+                    size: 11.0,
+                    ..TextStyle::default()
+                },
+            ),
+        };
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        let marks = self.compute_marks(&geometry);
+        for m in &marks {
+            hit::emit_mark_node(builder, m);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -470,111 +602,274 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
-    /// Compute the size the embedded legend would reserve along its main
-    /// axis (height for Top/Bottom, width for Leading/Trailing). Returns
-    /// 0 when the legend is disabled. Vertical orientation measures the
-    /// widest slice label via `backend` so the reservation matches what
-    /// will later be drawn.
-    fn compute_legend_size(
+    /// Memoized [`PieGeometry`] for `bounds` — see `BarChart::ensure_geometry`.
+    fn ensure_geometry(
         &self,
+        bounds: Rect,
         backend: Option<&Rc<RefCell<dyn TextBackend>>>,
-        label_style: &bastyde_tokens::TextStyle,
-    ) -> f32 {
-        use crate::style as cs;
-        if !self.show_legend {
-            return 0.0;
-        }
-        let orientation = orientation_for_position(self.legend_position);
-        match orientation {
-            LegendOrientation::Horizontal => cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2),
-            LegendOrientation::Vertical => {
-                let data = self.data.get();
-                let max_w = data
-                    .iter()
-                    .map(|d| {
-                        let name = format!("{}", d.category);
-                        crate::text::measure_text_width_via(backend, &name, label_style)
-                    })
-                    .fold(0.0_f32, f32::max);
-                cs::LEGEND_SWATCH_SIZE + 4.0 + max_w
-            }
-        }
-    }
-
-    /// Carve the legend band off `bounds` and return the inner plot rect
-    /// where the disc lives. Both `place_children` and `paint` go through
-    /// this so the donut's center-slot placement matches the rendered
-    /// disc when a legend is shown.
-    fn compute_plot_rect(&self, bounds: Rect, legend_size: f32) -> Rect {
-        let no_axis = crate::axis::AxisConfig::new()
-            .show_labels(false)
-            .show_axis_line(false);
-        let area = carve_plot_area(&CarveParams {
+        label_style: &TextStyle,
+    ) -> PieGeometry {
+        let key = GeometryKey {
             bounds,
-            axis_x: &no_axis,
-            axis_y: &no_axis,
-            y_label_max_width: 0.0,
-            x_label_height: 0.0,
-            axis_title_line_height: 0.0,
+            structure_version: self.model.structure_version().get(),
+        };
+        if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
+            && *cached_key == key
+        {
+            return *geometry;
+        }
+        let legend_size = self.compute_legend_size(backend, label_style);
+        let geometry = compute_pie_geometry(&PieGeometryParams {
+            bounds,
             legend_size,
             legend_position: if self.show_legend {
                 Some(self.legend_position)
             } else {
                 None
             },
+            inner_radius_ratio: self.inner_radius_ratio,
         });
-        area.plot
+        *self.geometry_cache.borrow_mut() = Some((key, geometry));
+        geometry
     }
 
-    /// Compute (center, outer_radius, inner_radius) given a bounds rect.
-    fn compute_disc_geometry(&self, bounds: Rect) -> (Point, f32, f32) {
+    fn compute_intrinsic_min(&self, ctx: &LayoutContext) -> Size {
         use crate::style as cs;
-        let pad = cs::PIE_PADDING;
-        let usable_w = (bounds.width - pad * 2.0).max(0.0);
-        let usable_h = (bounds.height - pad * 2.0).max(0.0);
-        let diameter = usable_w.min(usable_h);
-        if diameter <= 0.0 {
-            return (
-                Point::new(
-                    bounds.x + bounds.width * 0.5,
-                    bounds.y + bounds.height * 0.5,
-                ),
-                0.0,
-                0.0,
-            );
-        }
-        let outer = diameter * 0.5;
-        let center = Point::new(
-            bounds.x + bounds.width * 0.5,
-            bounds.y + bounds.height * 0.5,
-        );
-        let inner = if self.inner_radius_ratio > 0.0 {
-            outer * self.inner_radius_ratio
+        const DISC_FLOOR: f32 = 60.0;
+        let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+        let legend_size = self.compute_legend_size(ctx.text_backend, &label_style);
+        let extra_w = if self.show_legend
+            && matches!(
+                self.legend_position,
+                LegendPosition::Leading | LegendPosition::Trailing
+            ) {
+            legend_size + cs::LEGEND_TO_PLOT_GAP
         } else {
             0.0
         };
-        (center, outer, inner)
+        let extra_h = if self.show_legend
+            && matches!(
+                self.legend_position,
+                LegendPosition::Top | LegendPosition::Bottom
+            ) {
+            legend_size + cs::LEGEND_TO_PLOT_GAP
+        } else {
+            0.0
+        };
+        Size::new(
+            DISC_FLOOR + cs::PIE_PADDING * 2.0 + extra_w,
+            DISC_FLOOR + cs::PIE_PADDING * 2.0 + extra_h,
+        )
+    }
+
+    /// Compute every slice's geometry + identity from the displayed
+    /// series' points. `start_rad`/`sweep_rad` are resolved to ACTUAL
+    /// screen-space angles (accounting for `start_angle_degrees` AND
+    /// `clockwise`) — unlike the pre-refactor `SliceHit`, which stored
+    /// angles in an unrotated "logical" space and required the pointer
+    /// handler to convert into it. Storing the resolved angle directly
+    /// means [`hit::slice_hit`] and [`build_slice_path`] both consume a
+    /// plain `f32.cos()/.sin()` with no extra clockwise branch, and the
+    /// bounding-box math in `hit::MarkShape::Slice::bounding_rect` is
+    /// correct regardless of chart configuration.
+    fn compute_marks(&self, geometry: &PieGeometry) -> Vec<MarkGeometry> {
+        let Some(series_id) = self.series_id else {
+            return Vec::new();
+        };
+        let mut marks = Vec::new();
+        self.model.with_series_view(series_id, |view| {
+            let total: f32 = view.points.iter().map(|d| d.value.max(0.0)).sum();
+            if total <= 0.0 {
+                return;
+            }
+            let start_angle_rad = self.start_angle_degrees.to_radians();
+            let half_gap = self.slice_gap_degrees.to_radians() * 0.5;
+            let mut accum = 0.0_f32;
+            for (i, datum) in view.points.iter().enumerate() {
+                let v = datum.value.max(0.0);
+                let sweep_full = v / total * std::f32::consts::TAU;
+                let usable_sweep = (sweep_full - half_gap * 2.0).max(0.0);
+                let slice_start = accum + half_gap;
+                let start_rad_total = start_angle_rad + slice_start;
+                let (screen_start, screen_sweep) = if self.clockwise {
+                    (start_rad_total, usable_sweep)
+                } else {
+                    (-start_rad_total, -usable_sweep)
+                };
+                marks.push(MarkGeometry {
+                    series_id,
+                    point_idx: i,
+                    series_name: view.name.to_string(),
+                    category_label: format!("{}", datum.category),
+                    value: v,
+                    shape: MarkShape::Slice {
+                        center: geometry.center,
+                        inner_radius: geometry.inner_radius,
+                        outer_radius: geometry.outer_radius,
+                        start_rad: screen_start,
+                        sweep_rad: screen_sweep,
+                    },
+                });
+                accum += sweep_full;
+            }
+        });
+        marks
+    }
+
+    /// Compute the size the embedded per-slice legend would reserve along
+    /// its main axis (height for Top/Bottom, width for Leading/Trailing).
+    /// Returns 0 when the legend is disabled. `Vertical` orientation
+    /// measures the widest slice label via `backend` so the reservation
+    /// matches what will later be drawn.
+    fn compute_legend_size(
+        &self,
+        backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+        label_style: &TextStyle,
+    ) -> f32 {
+        use crate::style as cs;
+        if !self.show_legend {
+            return 0.0;
+        }
+        let Some(series_id) = self.series_id else {
+            return 0.0;
+        };
+        let orientation = orientation_for_position(self.legend_position);
+        match orientation {
+            LegendOrientation::Horizontal => cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2),
+            LegendOrientation::Vertical => {
+                let max_w = self
+                    .model
+                    .with_series_view(series_id, |view| {
+                        view.points
+                            .iter()
+                            .map(|d| {
+                                let name = format!("{}", d.category);
+                                crate::text::measure_text_width_via(backend, &name, label_style)
+                            })
+                            .fold(0.0_f32, f32::max)
+                    })
+                    .unwrap_or(0.0);
+                cs::LEGEND_SWATCH_SIZE + 4.0 + max_w
+            }
+        }
+    }
+
+    fn paint_legend(
+        &self,
+        canvas: &mut Canvas,
+        band: Rect,
+        theme: &Theme,
+        enabled: bool,
+        label_style: &TextStyle,
+    ) {
+        use crate::style as cs;
+        let Some(series_id) = self.series_id else {
+            return;
+        };
+        let orientation = orientation_for_position(self.legend_position);
+        let label_color = TextRole::Primary.resolve(&theme.colors);
+        let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
+        let palette = self.palette.get();
+
+        self.model
+            .with_series_view(series_id, |view| match orientation {
+                LegendOrientation::Horizontal => {
+                    let names: Vec<String> = view
+                        .points
+                        .iter()
+                        .map(|d| format!("{}", d.category))
+                        .collect();
+                    let label_widths: Vec<f32> = names
+                        .iter()
+                        .map(|n| measure_text_width(canvas, n, label_style))
+                        .collect();
+                    let item_widths: Vec<f32> = label_widths
+                        .iter()
+                        .map(|w| cs::LEGEND_SWATCH_SIZE + 4.0 + w)
+                        .collect();
+                    let total_w: f32 = item_widths.iter().sum::<f32>()
+                        + cs::LEGEND_ITEM_GAP * (item_widths.len() as f32 - 1.0).max(0.0);
+                    let mut x = band.x + (band.width - total_w) * 0.5;
+                    let center_y = band.y + line_height * 0.5;
+                    for (i, name) in names.iter().enumerate() {
+                        let color = self
+                            .explicit_colors
+                            .get(i)
+                            .and_then(|c| c.clone())
+                            .map(|c| c.resolve(theme, enabled))
+                            .unwrap_or_else(|| palette.color_for(i, theme));
+                        let swatch = Rect::new(
+                            x,
+                            center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                            cs::LEGEND_SWATCH_SIZE,
+                            cs::LEGEND_SWATCH_SIZE,
+                        );
+                        canvas.fill_rounded_rect(swatch, CornerRadius::uniform(2.0), color);
+                        x += cs::LEGEND_SWATCH_SIZE + 4.0;
+                        canvas.draw_text(
+                            name,
+                            Rect::new(
+                                x,
+                                center_y - label_style.size * 0.6,
+                                label_widths[i],
+                                label_style.size * 1.2,
+                            ),
+                            label_style,
+                            label_color,
+                        );
+                        x += label_widths[i] + cs::LEGEND_ITEM_GAP;
+                    }
+                }
+                LegendOrientation::Vertical => {
+                    for (i, datum) in view.points.iter().enumerate() {
+                        let name = format!("{}", datum.category);
+                        let color = self
+                            .explicit_colors
+                            .get(i)
+                            .and_then(|c| c.clone())
+                            .map(|c| c.resolve(theme, enabled))
+                            .unwrap_or_else(|| palette.color_for(i, theme));
+                        let row_y = band.y + i as f32 * line_height;
+                        let center_y = row_y + line_height * 0.5;
+                        let swatch = Rect::new(
+                            band.x,
+                            center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                            cs::LEGEND_SWATCH_SIZE,
+                            cs::LEGEND_SWATCH_SIZE,
+                        );
+                        canvas.fill_rounded_rect(swatch, CornerRadius::uniform(2.0), color);
+                        let label_w = measure_text_width(canvas, &name, label_style);
+                        canvas.draw_text(
+                            &name,
+                            Rect::new(
+                                band.x + cs::LEGEND_SWATCH_SIZE + 4.0,
+                                center_y - label_style.size * 0.6,
+                                label_w,
+                                label_style.size * 1.2,
+                            ),
+                            label_style,
+                            label_color,
+                        );
+                    }
+                }
+            });
     }
 
     #[allow(clippy::too_many_arguments)]
     fn draw_slice_label(
         &self,
         canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
+        theme: &Theme,
         center: Point,
         outer: f32,
         bisector_rad: f32,
-        clockwise: bool,
-        _value: f32,
         percent: f32,
         category: &str,
-        label_style: &bastyde_tokens::TextStyle,
+        label_style: &TextStyle,
     ) {
         use crate::style as cs;
         let label_color = TextRole::Primary.resolve(&theme.colors);
         let min_deg = cs::PIE_MIN_SLICE_LABEL_DEGREES;
-        // Compute the slice's actual sweep degrees by looking it up in
-        // the live hits. (Hits include the gap-adjusted sweep.)
         let label_text = if self.show_percentages {
             format!("{} ({:.0}%)", category, percent)
         } else {
@@ -582,12 +877,8 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         };
         let approx_w = measure_text_width(canvas, &label_text, label_style);
         let height = label_style.size * 1.2;
+        let (cos, sin) = (bisector_rad.cos(), bisector_rad.sin());
 
-        // Convert to a screen direction.
-        let (cos, sin) = bisector_direction(bisector_rad, clockwise);
-
-        // For PR 5 we keep label placement simple: skip if mode is None,
-        // otherwise place inside or outside per mode.
         match self.label_mode {
             PieLabelMode::None => {}
             PieLabelMode::Inside => {
@@ -604,21 +895,15 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                 }
             }
             PieLabelMode::Outside => {
-                let r_inner = outer * 0.95;
-                let r_outer = outer + cs::PIE_LEADER_LENGTH;
-                let p1 = Point::new(center.x + r_inner * cos, center.y + r_inner * sin);
-                let p2 = Point::new(center.x + r_outer * cos, center.y + r_outer * sin);
-                canvas.draw_line(p1, p2, label_color, 1.0);
-                let lx_anchor = center.x + (r_outer + cs::PIE_LABEL_GAP) * cos;
-                let lx = if cos >= 0.0 {
-                    lx_anchor
-                } else {
-                    lx_anchor - approx_w
-                };
-                let ly = center.y + (r_outer + cs::PIE_LABEL_GAP) * sin - height * 0.5;
-                canvas.draw_text(
+                self.draw_outside_label(
+                    canvas,
+                    center,
+                    outer,
+                    cos,
+                    sin,
                     &label_text,
-                    Rect::new(lx, ly, approx_w, height),
+                    approx_w,
+                    height,
                     label_style,
                     label_color,
                 );
@@ -635,21 +920,15 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                         label_color,
                     );
                 } else {
-                    let r_inner = outer * 0.95;
-                    let r_outer = outer + cs::PIE_LEADER_LENGTH;
-                    let p1 = Point::new(center.x + r_inner * cos, center.y + r_inner * sin);
-                    let p2 = Point::new(center.x + r_outer * cos, center.y + r_outer * sin);
-                    canvas.draw_line(p1, p2, label_color, 1.0);
-                    let lx_anchor = center.x + (r_outer + cs::PIE_LABEL_GAP) * cos;
-                    let lx = if cos >= 0.0 {
-                        lx_anchor
-                    } else {
-                        lx_anchor - approx_w
-                    };
-                    let ly = center.y + (r_outer + cs::PIE_LABEL_GAP) * sin - height * 0.5;
-                    canvas.draw_text(
+                    self.draw_outside_label(
+                        canvas,
+                        center,
+                        outer,
+                        cos,
+                        sin,
                         &label_text,
-                        Rect::new(lx, ly, approx_w, height),
+                        approx_w,
+                        height,
                         label_style,
                         label_color,
                     );
@@ -659,174 +938,145 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_hover(
+    fn draw_outside_label(
         &self,
         canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
-        plot: Rect,
         center: Point,
         outer: f32,
-        hit: &SliceHit,
-        label_style: &bastyde_tokens::TextStyle,
+        cos: f32,
+        sin: f32,
+        label_text: &str,
+        approx_w: f32,
+        height: f32,
+        label_style: &TextStyle,
+        label_color: bastyde_tokens::Color,
     ) {
         use crate::style as cs;
-        let label = format!(
-            "{}: {} ({:.1}%)",
-            hit.label,
-            self.axis_y_format_dummy(hit.value),
-            hit.percent
-        );
-        let text_w = measure_text_width(canvas, &label, label_style);
-        let approx_w = text_w + cs::TOOLTIP_PADDING * 2.0;
-        let height = label_style.size * 1.4 + cs::TOOLTIP_PADDING;
-
-        // Anchor at the bisector midpoint between inner and outer radius.
-        let bisector_rad =
-            self.start_angle_degrees.to_radians() + hit.start_rad + hit.sweep_rad * 0.5;
-        let (cos, sin) = bisector_direction(bisector_rad, self.clockwise);
-        let r_anchor = outer + 12.0;
-        let mut tx = center.x + r_anchor * cos - approx_w * 0.5;
-        let mut ty = center.y + r_anchor * sin - height * 0.5;
-        if tx < plot.x {
-            tx = plot.x;
-        }
-        if tx + approx_w > plot.right() {
-            tx = plot.right() - approx_w;
-        }
-        if ty < plot.y {
-            ty = plot.y;
-        }
-        if ty + height > plot.bottom() {
-            ty = plot.bottom() - height;
-        }
-
-        let tip = Rect::new(tx, ty, approx_w, height);
-        canvas.fill_rounded_rect(tip, CornerRadius::uniform(4.0), theme.colors.tooltip_bg);
-        canvas.stroke_rounded_rect(
-            tip,
-            CornerRadius::uniform(4.0),
-            theme.colors.tooltip_border,
-            1.0,
-        );
-
-        let label_rect = Rect::new(
-            tip.x + cs::TOOLTIP_PADDING,
-            tip.y + (tip.height - label_style.size * 1.2) * 0.5,
-            tip.width - cs::TOOLTIP_PADDING * 2.0,
-            label_style.size * 1.2,
-        );
-        canvas.draw_text(&label, label_rect, label_style, theme.colors.tooltip_text);
-    }
-
-    /// Pie has no formal y-axis but we want consistent number formatting
-    /// in tooltips. Use a default formatter.
-    fn axis_y_format_dummy(&self, v: f32) -> String {
-        if v.fract() == 0.0 {
-            format!("{:.0}", v)
+        let r_inner = outer * 0.95;
+        let r_outer = outer + cs::PIE_LEADER_LENGTH;
+        let p1 = Point::new(center.x + r_inner * cos, center.y + r_inner * sin);
+        let p2 = Point::new(center.x + r_outer * cos, center.y + r_outer * sin);
+        canvas.draw_line(p1, p2, label_color, 1.0);
+        let lx_anchor = center.x + (r_outer + cs::PIE_LABEL_GAP) * cos;
+        let lx = if cos >= 0.0 {
+            lx_anchor
         } else {
-            format!("{:.2}", v)
-        }
-    }
-}
-
-/// Re-derive just the legend band rect from `bounds` for a given
-/// position + size. Mirrors the carve done inside `carve_plot_area`.
-fn legend_band_rect(bounds: Rect, pos: LegendPosition, size: f32) -> Rect {
-    if size <= 0.0 {
-        return Rect::ZERO;
-    }
-    match pos {
-        LegendPosition::Top => Rect::new(bounds.x, bounds.y, bounds.width, size),
-        LegendPosition::Bottom => Rect::new(bounds.x, bounds.bottom() - size, bounds.width, size),
-        LegendPosition::Leading => Rect::new(bounds.x, bounds.y, size, bounds.height),
-        LegendPosition::Trailing => Rect::new(bounds.right() - size, bounds.y, size, bounds.height),
+            lx_anchor - approx_w
+        };
+        let ly = center.y + (r_outer + cs::PIE_LABEL_GAP) * sin - height * 0.5;
+        canvas.draw_text(
+            label_text,
+            Rect::new(lx, ly, approx_w, height),
+            label_style,
+            label_color,
+        );
     }
 }
 
 /// Build a path for a single slice. For pie (`inner == 0`) this is a
 /// pie wedge; for donut (`inner > 0`) it's a hollow ring segment.
-fn build_slice_path(
-    center: Point,
-    outer: f32,
-    inner: f32,
-    start_rad: f32,
-    sweep_rad: f32,
-    clockwise: bool,
-) -> Path {
-    // The Path::arc_to API takes degrees; convert.
+/// `start_rad`/`sweep_rad` are in the same actual-screen-space angle
+/// convention as [`MarkShape::Slice`] (standard `atan2`; `sweep_rad` may
+/// be negative), so plain `cos`/`sin` place every point with no extra
+/// clockwise handling (the pre-refactor version needed a `clockwise`
+/// parameter plus a `bisector_direction` mirror helper — folded into
+/// `PieChart::compute_marks`'s angle resolution instead).
+fn build_slice_path(center: Point, outer: f32, inner: f32, start_rad: f32, sweep_rad: f32) -> Path {
     let start_deg = start_rad.to_degrees();
-    // Sweep direction: positive = clockwise in screen-space (y-down).
-    let sweep_deg = if clockwise {
-        sweep_rad.to_degrees()
-    } else {
-        -sweep_rad.to_degrees()
-    };
+    let sweep_deg = sweep_rad.to_degrees();
+    let end_rad = start_rad + sweep_rad;
 
-    // Use direction-aware sin/cos for endpoint placement.
-    let (sx_o, sy_o) = endpoint(center, outer, start_rad, clockwise);
-    let (ex_o, ey_o) = endpoint(center, outer, start_rad + sweep_rad, clockwise);
-
+    let sx_o = center.x + outer * start_rad.cos();
+    let sy_o = center.y + outer * start_rad.sin();
     let outer_rect = Rect::new(center.x - outer, center.y - outer, outer * 2.0, outer * 2.0);
 
     let mut path = Path::new();
     if inner <= 0.0 {
-        // Pie wedge: center → outer arc start → arc → close back to center.
         path.move_to(center);
         path.line_to(Point::new(sx_o, sy_o));
         path.arc_to(outer_rect, start_deg, sweep_deg);
-        let _ = (ex_o, ey_o);
         path.close();
     } else {
-        // Donut wedge: outer arc → line to inner arc end → reversed inner
-        // arc → close back.
-        let (sx_i, sy_i) = endpoint(center, inner, start_rad, clockwise);
-        let (ex_i, ey_i) = endpoint(center, inner, start_rad + sweep_rad, clockwise);
+        let ex_i = center.x + inner * end_rad.cos();
+        let ey_i = center.y + inner * end_rad.sin();
         let inner_rect = Rect::new(center.x - inner, center.y - inner, inner * 2.0, inner * 2.0);
         path.move_to(Point::new(sx_o, sy_o));
         path.arc_to(outer_rect, start_deg, sweep_deg);
-        let _ = (ex_o, ey_o);
         path.line_to(Point::new(ex_i, ey_i));
         path.arc_to(inner_rect, start_deg + sweep_deg, -sweep_deg);
-        let _ = (sx_i, sy_i);
         path.close();
     }
     path
 }
 
-/// Compute the endpoint of a radial line at angle `rad` and distance
-/// `radius` from `center`. Direction respects the `clockwise` flag.
-fn endpoint(center: Point, radius: f32, rad: f32, clockwise: bool) -> (f32, f32) {
-    let (cos, sin) = bisector_direction(rad, clockwise);
-    (center.x + radius * cos, center.y + radius * sin)
+/// Remap a [`FillRecipe`]'s gradient coordinates from disc-normalized
+/// (`center`/`radius` fractions of the FULL disc bounds) to the given
+/// wedge's own local bounds, so every wedge samples one continuous
+/// radial field instead of restarting the gradient at its own bounding
+/// box (which would show as visible seams between adjacent slices).
+///
+/// `Solid`/`None`/`StateLayer` pass through unchanged (no coordinates to
+/// remap). `LinearGradient` also passes through unchanged: its angle+size
+/// model draws the gradient axis through each rect's OWN center
+/// (`PaintProp::resolve`'s `angle_to_endpoints`), which has no
+/// wedge-bounds-only remapping that reconstructs one straight line shared
+/// by every wedge (their bounding rects differ in both size and aspect
+/// ratio) — a caller supplying a `LinearGradient` donut_fill gets a
+/// per-wedge angle-only gradient, not a disc-continuous field.
+/// `RadialGradient` is the recommended (and only fully continuous)
+/// donut-fill gradient shape.
+fn project_gradient_to_wedge_local(
+    fill: &FillRecipe,
+    disc_bounds: Rect,
+    wedge_bounds: Rect,
+) -> FillRecipe {
+    match fill {
+        FillRecipe::Solid(_) | FillRecipe::None | FillRecipe::StateLayer { .. } => fill.clone(),
+        FillRecipe::LinearGradient { .. } => fill.clone(),
+        FillRecipe::RadialGradient {
+            stops,
+            center,
+            radius,
+        } => {
+            let abs_center = Point::new(
+                disc_bounds.x + center.0 * disc_bounds.width,
+                disc_bounds.y + center.1 * disc_bounds.height,
+            );
+            let abs_radius = radius * disc_bounds.width.max(disc_bounds.height);
+            let new_center = (
+                if wedge_bounds.width > 0.0 {
+                    (abs_center.x - wedge_bounds.x) / wedge_bounds.width
+                } else {
+                    0.5
+                },
+                if wedge_bounds.height > 0.0 {
+                    (abs_center.y - wedge_bounds.y) / wedge_bounds.height
+                } else {
+                    0.5
+                },
+            );
+            let wedge_longer = wedge_bounds
+                .width
+                .max(wedge_bounds.height)
+                .max(f32::EPSILON);
+            let new_radius = abs_radius / wedge_longer;
+            FillRecipe::RadialGradient {
+                stops: stops.clone(),
+                center: new_center,
+                radius: new_radius,
+            }
+        }
+    }
 }
 
-/// Convert a "logical" angle to a (cos, sin) screen direction. We treat
-/// `start_angle_degrees = -90` as 12 o'clock and let `clockwise` flip
-/// the direction. In screen coordinates y grows downward.
-fn bisector_direction(rad: f32, clockwise: bool) -> (f32, f32) {
-    if clockwise {
-        (rad.cos(), rad.sin())
+/// Pie has no formal y-axis but we want consistent number formatting in
+/// tooltips.
+fn format_pie_value(v: f32) -> String {
+    if v.fract() == 0.0 {
+        format!("{:.0}", v)
     } else {
-        // Counter-clockwise: mirror y.
-        (rad.cos(), -rad.sin())
+        format!("{:.2}", v)
     }
-}
-
-/// Whether `angle` (in 0..2π) lies inside `[start, start + sweep]`,
-/// also normalized to 0..2π.
-fn angle_in_sweep(angle: f32, start: f32, sweep: f32) -> bool {
-    let two_pi = std::f32::consts::TAU;
-    let s = start.rem_euclid(two_pi);
-    let mut e = (start + sweep).rem_euclid(two_pi);
-    let a = angle.rem_euclid(two_pi);
-    if (sweep - two_pi).abs() < 1e-4 {
-        return true;
-    }
-    if e < s {
-        e += two_pi;
-    }
-    let a_lifted = if a < s { a + two_pi } else { a };
-    a_lifted >= s && a_lifted <= e
 }
 
 #[cfg(test)]
@@ -834,20 +1084,21 @@ mod tests {
     use super::*;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_data::ChartDatum;
     use bastyde_i18n::lit;
 
-    fn three_slices() -> Vec<ChartDatum<String>> {
-        vec![
-            ChartDatum::new("A".into(), 30.0),
-            ChartDatum::new("B".into(), 50.0),
-            ChartDatum::new("C".into(), 20.0),
-        ]
+    fn three_slices_model() -> ChartModel<String> {
+        ChartModel::from_points(vec![
+            ChartDatum::new("A".to_string(), 30.0),
+            ChartDatum::new("B".to_string(), 50.0),
+            ChartDatum::new("C".to_string(), 20.0),
+        ])
     }
 
     #[test]
     fn three_slices_three_paths() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(PieChart::new(three_slices()));
+        tree.add(PieChart::new(three_slices_model()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
         assert_eq!(
@@ -861,15 +1112,13 @@ mod tests {
     #[test]
     fn donut_inner_radius_creates_hollow_wedges() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(PieChart::new(three_slices()).donut(0.5));
+        tree.add(PieChart::new(three_slices_model()).donut(0.5));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
-        // Still 3 paths (one per slice), but each path now has more
-        // commands (outer arc + line + inner arc + close).
         assert_eq!(frame.paths.len(), 3);
         let cmds_pie = {
             let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-            tree.add(PieChart::new(three_slices()));
+            tree.add(PieChart::new(three_slices_model()));
             tree.layout(SizeProposal::exact(400.0, 300.0));
             let f = tree.render();
             f.paths[0].path.commands.len()
@@ -883,19 +1132,19 @@ mod tests {
     #[test]
     fn empty_data_does_not_panic() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(PieChart::<String>::new(Vec::<ChartDatum<String>>::new()));
+        tree.add(PieChart::<String>::new(ChartModel::new()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let _ = tree.render();
     }
 
     #[test]
     fn all_zero_values_do_not_panic() {
-        let data: Vec<ChartDatum<String>> = vec![
-            ChartDatum::new("A".into(), 0.0),
-            ChartDatum::new("B".into(), 0.0),
-        ];
+        let model = ChartModel::from_points(vec![
+            ChartDatum::new("A".to_string(), 0.0),
+            ChartDatum::new("B".to_string(), 0.0),
+        ]);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(PieChart::new(data));
+        tree.add(PieChart::new(model));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let _ = tree.render();
     }
@@ -903,7 +1152,7 @@ mod tests {
     #[test]
     fn accessibility_role_is_graphics_document() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(PieChart::new(three_slices()));
+        let id = tree.add(PieChart::new(three_slices_model()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::GraphicsDocument);
@@ -911,15 +1160,11 @@ mod tests {
 
     #[test]
     fn pie_ignores_center_slot() {
-        // Pie (inner_radius_ratio = 0). We add a child via .center(...)
-        // and verify the chart does not panic and the center child has
-        // zero placement size when rendered.
         use bastyde_widgets::TextWidget;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let pie = PieChart::new(three_slices()).center(TextWidget::new(lit!("$100")));
+        let pie = PieChart::new(three_slices_model()).center(TextWidget::new(lit!("$100")));
         let id = tree.add(pie);
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        // child exists but its bounds should be zero (inner radius = 0).
         let kids = tree.children(id);
         assert!(!kids.is_empty(), "center widget child registered");
         let child_bounds = tree.bounds(kids[0]);
@@ -931,7 +1176,7 @@ mod tests {
     fn donut_center_slot_has_inscribed_size() {
         use bastyde_widgets::TextWidget;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let donut = PieChart::new(three_slices())
+        let donut = PieChart::new(three_slices_model())
             .donut(0.6)
             .center(TextWidget::new(lit!("$100")));
         let id = tree.add(donut);
@@ -947,15 +1192,10 @@ mod tests {
 
     #[test]
     fn donut_center_slot_centered_with_legend() {
-        // Regression: when a legend was visible, place_children carved
-        // against the full bounds while paint carved against the
-        // legend-trimmed plot rect — the center slot drifted off-center.
-        // Now both go through compute_plot_rect, so the center widget
-        // sits inside the actually-rendered disc.
         use bastyde_widgets::TextWidget;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            PieChart::new(three_slices())
+            PieChart::new(three_slices_model())
                 .donut(0.6)
                 .legend(true)
                 .legend_position(LegendPosition::Bottom)
@@ -964,9 +1204,6 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let kids = tree.children(id);
         let child = tree.bounds(kids[0]);
-        // Vertical center of the child should be in the upper half of
-        // the chart (the legend takes the bottom strip, pulling the disc
-        // up). Loose check — just verify it's not at the geometric mid.
         let chart_center_y = 150.0;
         let child_center_y = child.y + child.height * 0.5;
         assert!(
@@ -978,34 +1215,11 @@ mod tests {
     }
 
     #[test]
-    fn pie_hit_test_uses_logical_angle_space() {
-        // Regression: the on_pointer_event handler used to compare the
-        // raw screen-space angle against SliceHit::start_rad without
-        // subtracting `start_angle_degrees` first. With the default
-        // `start_angle_degrees = -90` (12 o'clock), this off-by-90°
-        // misalignment meant a pointer over the first slice could miss.
-        // We can't easily synthesize pointer events in a unit test, but
-        // we can lock the logical-space conversion math.
-        use std::f32::consts::TAU;
-        let start_angle_rad = (-90.0_f32).to_radians();
-        // Pointer at 12 o'clock in screen space: dx ≈ 0, dy ≈ -1 → angle = -π/2.
-        let raw = (-1.0_f32).atan2(0.0).rem_euclid(TAU);
-        let logical = (raw - start_angle_rad).rem_euclid(TAU);
-        // After subtracting the start offset, the pointer at 12 o'clock
-        // sits at logical angle ≈ 0 (the start of the first slice).
-        assert!(
-            logical < 0.05 || (TAU - logical) < 0.05,
-            "pointer at 12 o'clock should map to logical 0 (got {})",
-            logical
-        );
-    }
-
-    #[test]
     fn slice_color_overrides_palette() {
         use bastyde_tokens::Color;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            PieChart::new(three_slices())
+            PieChart::new(three_slices_model())
                 .slice_color(0, Color::RED)
                 .slice_color(2, Color::BLUE),
         );
@@ -1013,8 +1227,273 @@ mod tests {
         let frame = tree.render();
         assert_eq!(frame.paths[0].color, Color::RED.to_array());
         assert_eq!(frame.paths[2].color, Color::BLUE.to_array());
-        // Slice 1 falls back to palette → not RED or BLUE.
         assert_ne!(frame.paths[1].color, Color::RED.to_array());
         assert_ne!(frame.paths[1].color, Color::BLUE.to_array());
+    }
+
+    #[test]
+    fn pointer_move_over_slice_sets_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let chart = PieChart::new(three_slices_model());
+        let marks_handle = chart.marks.clone();
+        let hover_handle = chart.hover.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+
+        let (target, sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Slice {
+                center,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+                ..
+            } = m.shape
+            else {
+                panic!("expected slice mark")
+            };
+            let bisector = start_rad + sweep_rad * 0.5;
+            let r = outer_radius * 0.5;
+            let p = Point::new(center.x + r * bisector.cos(), center.y + r * bisector.sin());
+            (p, m.series_id, m.point_idx)
+        };
+        tree.pointer_move(target);
+        assert_eq!(hover_handle.get(), Some((sid, idx)));
+    }
+
+    #[test]
+    fn slice_bounding_rects_cover_full_circle_at_default_config() {
+        // Regression guard for the screen-space angle resolution: with
+        // the default start_angle=-90 (12 o'clock) + clockwise=true, the
+        // union of all slice bounding rects should span (approximately)
+        // the full disc, not be rotated/mirrored off it.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let chart = PieChart::new(three_slices_model());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+        let marks = marks_handle.borrow();
+        let MarkShape::Slice {
+            center,
+            outer_radius,
+            ..
+        } = marks[0].shape
+        else {
+            panic!("expected slice")
+        };
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        for m in marks.iter() {
+            let r = m.shape.bounding_rect();
+            min_x = min_x.min(r.x);
+            max_x = max_x.max(r.right());
+        }
+        assert!((min_x - (center.x - outer_radius)).abs() < 1.0);
+        assert!((max_x - (center.x + outer_radius)).abs() < 1.0);
+    }
+
+    #[test]
+    fn counter_clockwise_slices_still_hit_test_correctly() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let chart = PieChart::new(three_slices_model()).clockwise(false);
+        let marks_handle = chart.marks.clone();
+        let hover_handle = chart.hover.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+
+        let (target, sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = &marks[1];
+            let MarkShape::Slice {
+                center,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+                ..
+            } = m.shape
+            else {
+                panic!("expected slice mark")
+            };
+            let bisector = start_rad + sweep_rad * 0.5;
+            let r = outer_radius * 0.5;
+            let p = Point::new(center.x + r * bisector.cos(), center.y + r * bisector.sin());
+            (p, m.series_id, m.point_idx)
+        };
+        tree.pointer_move(target);
+        assert_eq!(hover_handle.get(), Some((sid, idx)));
+    }
+
+    #[test]
+    fn gradient_donut_fill_produces_gradient_path_data() {
+        use bastyde_canvas::render_frame::PaintData;
+        use bastyde_core::styles::{GradientStop, RecipeColor, Theme};
+        use bastyde_tokens::Color;
+
+        #[derive(Debug)]
+        struct GradientStyle;
+        impl ChartStyle for GradientStyle {
+            fn bar_fill(&self, cfg: &ChartFillContext) -> FillRecipe {
+                FillRecipe::Solid(RecipeColor::Static(cfg.resolved_color))
+            }
+            fn area_fill(&self, cfg: &ChartFillContext, _opacity: f32) -> FillRecipe {
+                FillRecipe::Solid(RecipeColor::Static(cfg.resolved_color))
+            }
+            fn donut_fill(&self, cfg: &ChartFillContext) -> FillRecipe {
+                FillRecipe::RadialGradient {
+                    stops: vec![
+                        GradientStop {
+                            offset: 0.0,
+                            color: RecipeColor::Static(cfg.resolved_color),
+                        },
+                        GradientStop {
+                            offset: 1.0,
+                            color: RecipeColor::Static(Color::WHITE),
+                        },
+                    ],
+                    center: (0.5, 0.5),
+                    radius: 0.5,
+                }
+            }
+            fn gridline(&self, _theme: &Theme) -> bastyde_core::styles::BorderRecipe {
+                bastyde_core::styles::BorderRecipe::none()
+            }
+        }
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(PieChart::new(three_slices_model()).style(GradientStyle));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        assert!(
+            frame
+                .paths
+                .iter()
+                .all(|p| matches!(p.paint_data, PaintData::RadialGradient { .. })),
+            "expected every wedge to carry radial-gradient paint data"
+        );
+    }
+
+    #[test]
+    fn default_style_produces_solid_path_data() {
+        use bastyde_canvas::render_frame::PaintData;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(PieChart::new(three_slices_model()));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        assert!(
+            frame.paths.iter().all(|p| p.paint_data == PaintData::Solid),
+            "default RecipeChartStyle should be flat-colored"
+        );
+    }
+
+    #[test]
+    fn tap_on_slice_selects_point() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = PieChart::new(three_slices_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+
+        let (target, sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Slice {
+                center,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+                ..
+            } = m.shape
+            else {
+                panic!("expected slice mark")
+            };
+            let bisector = start_rad + sweep_rad * 0.5;
+            let r = outer_radius * 0.5;
+            let p = Point::new(center.x + r * bisector.cos(), center.y + r * bisector.sin());
+            (p, m.series_id, m.point_idx)
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert!(sel.is_selected(sid, idx));
+    }
+
+    #[test]
+    fn tap_outside_ring_clears_selection() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = PieChart::new(three_slices_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+
+        let target = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Slice {
+                center,
+                outer_radius,
+                start_rad,
+                sweep_rad,
+                ..
+            } = m.shape
+            else {
+                panic!("expected slice mark")
+            };
+            let bisector = start_rad + sweep_rad * 0.5;
+            let r = outer_radius * 0.5;
+            Point::new(center.x + r * bisector.cos(), center.y + r * bisector.sin())
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert_eq!(sel.count(), 1);
+
+        // Top-left corner of the widget: outside the disc entirely.
+        let outside = Point::new(1.0, 1.0);
+        tree.pointer_down_button(outside, PointerButton::Primary);
+        tree.pointer_up_button(outside, PointerButton::Primary);
+        assert_eq!(
+            sel.count(),
+            0,
+            "tap outside the pie/donut ring should clear selection"
+        );
+    }
+
+    #[test]
+    fn selected_slice_paints_highlight_outline() {
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = PieChart::new(three_slices_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let baseline_paths = tree.render().paths.len();
+
+        let (sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            (m.series_id, m.point_idx)
+        };
+        sel.select_point(sid, idx);
+        let after = tree.render();
+        assert!(
+            after.paths.len() > baseline_paths,
+            "expected an extra outline path after selecting a slice (baseline {}, after {})",
+            baseline_paths,
+            after.paths.len()
+        );
     }
 }

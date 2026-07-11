@@ -116,6 +116,10 @@ pub struct StreamBuffers {
     /// IndeterminateSweep, future Pulse / Shimmer). Per-frame uniform
     /// state lives in a separate `wgpu::Buffer` owned by `Renderer`.
     pub anim_proc: StreamBuffer,
+    /// Gradient-filled path vertices (Tier 3, `path_gradient_pipeline`).
+    /// Solid-filled paths still stream through `quad` above; only
+    /// `PathEntry`s whose `paint_data` is a gradient variant land here.
+    pub path_gradient: StreamBuffer,
     /// Shared index buffer — quad indices are deterministic so one buffer
     /// serves every pipeline that renders quads.
     pub index: StreamBuffer,
@@ -129,6 +133,7 @@ impl StreamBuffers {
             quad: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "quad_stream"),
             shadow: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "shadow_stream"),
             anim_proc: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "anim_proc_stream"),
+            path_gradient: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "path_gradient_stream"),
             index: StreamBuffer::new(wgpu::BufferUsages::INDEX, "index_stream"),
         }
     }
@@ -139,6 +144,7 @@ impl StreamBuffers {
         self.quad.reset();
         self.shadow.reset();
         self.anim_proc.reset();
+        self.path_gradient.reset();
         self.index.reset();
     }
 }

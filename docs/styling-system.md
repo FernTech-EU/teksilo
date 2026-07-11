@@ -410,8 +410,11 @@ pub fn brutalist_light() -> Theme {
 ## Migration status (as of this branch)
 
 Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **36 widgets**
-across six families:
+slot lookup. No themable widget self-paints anymore. **43 widgets
+across 38 style traits, spanning seven families** (a "trait" can cover
+more than one widget — e.g. `ListContainerStyle` styles both
+`ListView` and `TreeView`; `ChartStyle` styles `BarChart`, `LineChart`,
+and `PieChart`):
 
 **Controls**
 
@@ -480,8 +483,23 @@ across six families:
 | --- | --- | --- | --- |
 | `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
 
+**Data Visualization**
+
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
+| `BarChart` / `LineChart` / `PieChart` (`bastyde-charts`) | `ChartStyle` ² | `RecipeChartStyle` (in `bastyde-charts`, not `bastyde-widgets`) | `style_slots.chart` |
+
 ¹ Multi-method trait — see [Multi-method styles](#multi-method-styles)
 below.
+
+² All-recipe trait, no `make_*` methods — see
+[Data-visualization styling](#data-visualization-styling) below. Its
+default impl is the one entry in this table whose `Recipe*Style` does
+**not** live under `bastyde-widgets/src/styles/*` — `bastyde-charts`
+deliberately has no dependency on `bastyde-widgets`, so its default
+style has to live where its own dependencies already reach. See
+[charts.md §11](charts.md) for the
+full reference.
 
 The legacy per-widget dimension structs are gone: the 17
 old `bastyde-tokens::components::*Style` structs were deleted and their
@@ -549,6 +567,37 @@ For these traits, a custom `impl` must implement every method (no
 default impls beyond the trait's own — the recipe defaults compose
 the four slots into the IntUI look). Apps that only want to tweak
 one slot typically forward the others to `Recipe*Style::default()`.
+
+### Data-visualization styling
+
+`ChartStyle` (`BarChart` / `LineChart` / `PieChart`, `bastyde-charts`)
+is a third trait *shape*, distinct from both the single-method
+`make_body` traits and the multi-method traits above:
+
+```rust
+pub trait ChartStyle: 'static {
+    fn bar_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
+    fn area_fill(&self, cfg: &ChartFillContext, opacity: f32) -> FillRecipe;
+    fn donut_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
+    fn gridline(&self, theme: &Theme) -> BorderRecipe;
+}
+```
+
+Every method returns a Tier-2 recipe (`FillRecipe` / `BorderRecipe`)
+directly — **none returns a `WidgetId`**. Charts paint through `Canvas`
+calls inside their own `paint()` instead of composing a child widget
+subtree, so there is no `make_*(cfg, ctx) -> WidgetId` step for a
+custom impl to hook: the widget resolves the active `ChartStyle`,
+asks it for a recipe, and paints that recipe's fill/stroke directly.
+Where `TabStyle`/`DialogStyle`/`TableStyle`/`CalendarStyle` split
+chrome into *named `WidgetId`-returning slots* because each slot is a
+distinct sub-tree, `ChartStyle` splits into named *recipe-returning*
+methods because each is a distinct paint operation (bar fill vs. area
+fill vs. donut fill vs. gridline stroke) inside one widget's own paint
+pass. Resolution precedence is identical to every other trait:
+per-call `.style(impl ChartStyle)` > `theme.style_slots.chart` >
+`RecipeChartStyle::default()`. Full reference:
+[charts.md §11](charts.md).
 
 ## Custom widgets and the styling system
 

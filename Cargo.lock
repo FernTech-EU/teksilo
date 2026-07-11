@@ -1100,6 +1100,7 @@ name = "bastyde-data"
 version = "0.6.2"
 dependencies = [
  "bastyde-core",
+ "bastyde-tokens",
  "slotmap",
 ]
 

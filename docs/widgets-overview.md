@@ -244,13 +244,28 @@ TreeView::new_with_context(model, move |item, entry, selected, ctx| {
 
 ## Charts — `crates/bastyde-charts/src/`
 
-Sits at the same tier as `bastyde-widgets` (no dep on widgets). See [charts.md](charts.md).
+Sits at the same tier as `bastyde-widgets` (no dep on widgets). Series
+data is a [`ChartModel<T>`](../crates/bastyde-data/src/chart_model.rs)
+(`bastyde-data`, see [data-models.md](data-models.md)), not a `Prop`/
+`Signal`-bound `Vec`. See [charts.md](charts.md).
 
-- [BarChart](../crates/bastyde-charts/src/bar_chart.rs) — vertical or horizontal bars; single or grouped series; optional value labels, axis labels, grid lines.
+- [BarChart](../crates/bastyde-charts/src/bar_chart.rs) — vertical or horizontal bars; single or grouped series; optional value labels, axis labels, grid lines, hover tooltips.
 - [LineChart](../crates/bastyde-charts/src/line_chart.rs) — points connected by polylines; single or multiple series; optional area fill; hover tooltips on data points.
 - [PieChart](../crates/bastyde-charts/src/pie_chart.rs) — pie + donut variants; donut variant has a center slot.
 
-Shared infrastructure ([series.rs](../crates/bastyde-charts/src/series.rs), [axis.rs](../crates/bastyde-charts/src/axis.rs), [legend.rs](../crates/bastyde-charts/src/legend.rs), [palette.rs](../crates/bastyde-charts/src/palette.rs), [layout.rs](../crates/bastyde-charts/src/layout.rs)) is reused across all three.
+All three sit on the Tier-3 styling ladder via
+[`ChartStyle`](../crates/bastyde-core/src/styles/chart_style.rs)
+(`.style(...)` / `theme.style_slots.chart`) — an all-recipe trait
+distinct from the widget world's `make_*(cfg, ctx) -> WidgetId`
+traits; its default `RecipeChartStyle` lives in `bastyde-charts`
+itself, not `bastyde-widgets/src/styles/*` (see
+[styling-system.md](styling-system.md#data-visualization-styling)).
+Gridlines support dashed/dotted patterns (theme-wide via a custom
+`ChartStyle`, or per-axis via `AxisConfig::gridline_dash`); area and
+donut fills support gradients. Full reference:
+[charts.md §11](charts.md).
+
+Shared infrastructure ([axis.rs](../crates/bastyde-charts/src/axis.rs), [legend.rs](../crates/bastyde-charts/src/legend.rs), [palette.rs](../crates/bastyde-charts/src/palette.rs), [layout.rs](../crates/bastyde-charts/src/layout.rs), [hit.rs](../crates/bastyde-charts/src/hit.rs)) is reused across all three; `ChartSeries<T>` / `ChartDatum<T>` construction DTOs live in `bastyde-data` and are re-exported from `bastyde_charts`.
 
 ---
 

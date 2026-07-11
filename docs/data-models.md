@@ -3,8 +3,8 @@
 
 # Reactive Data Models
 
-**Companion to:** [architecture.md](architecture.md)
-**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `TreeRowFilter`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `KeyedTreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
+**Companion to:** [architecture.md](architecture.md), [charts.md](charts.md)
+**Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `TreeDataSlice`, `TreeRowFilter`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `KeyedTreeCheckedModel`, `CheckState`, `ListDataSource`, `TreeDataSource`, `ChartModel`, `ChartWindow`, `ChartAggregate`, `ChartSelection`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`) and to `bastyde-charts` (`BarChart` / `LineChart` / `PieChart`).
 **API reference:** the full rustdoc for every type lives at [`/api/bastyde_data/`](api/bastyde_data/index.html).
 
 ---
@@ -397,6 +397,7 @@ Widget-tree tests that want a representative model use `ListModel::from_vec(vec!
 - `Repeater` for bounded non-scrollable collections, `ListView` for scrollable or large ones.
 - Two `TreeView`s sharing a `TreeModel` get independent `TreeSlice`s; expand state is per-view.
 - Mutations flow one-way: widget emits typed intent → `Action` translates → model mutates → change notification → widgets repaint. The widget never writes directly to the model.
+- `ChartModel<T>` (§15) follows the same `Rc<RefCell<…>>` / mutate-then-notify discipline as every other model here, keyed by `SeriesId` — a slotmap key that survives series reorder, exactly like `NodeId` survives tree mutation.
 
 ## 13. Divergence reporting — `first_changed_index()`
 
@@ -504,6 +505,192 @@ the bounded-projection case); a `TreeTableView`'s rows are a `TreeDataSource`. A
 cell edit is an in-place value update the source emits. Columns are
 configuration, not data.
 
+## 15. `ChartModel`, projections, and selection
+
+`bastyde-charts` (`BarChart` / `LineChart` / `PieChart`) is the other
+consumer of bastyde-data besides the widget-catalog row views — it
+gets its own model family rather than reusing `ListModel<T>` because
+chart data is two-level (series, then points within a series) and
+carries chart-specific concerns (a color per series, a visibility
+flag, a distinct paint-only vs. relayout change class) that a flat
+list model has no vocabulary for. Full widget-side usage and the
+reactivity/binding-level mapping live in
+[charts.md §3](charts.md) and
+[charts.md §8](charts.md); this section
+covers the data-layer mechanism.
+
+### 15.1 `ChartModel<T>` — the source
+
+[`ChartModel<T>`](../crates/bastyde-data/src/chart_model.rs) is a
+concrete reactive multi-series chart data model, `Rc<RefCell<…>>`
+inside like every other model here — cloning shares the same series
+and points and all clones see the same `ChartChange` notifications.
+Series live in a flat `SlotMap` arena keyed by
+[`SeriesId`](../crates/bastyde-data/src/chart_change.rs) (an opaque,
+stable handle — the chart counterpart of `NodeId`: removing other
+series never invalidates an existing `SeriesId`), plus a separate
+`order: Vec<SeriesId>` giving display order independent of arena
+layout. Each series holds a `Vec<ChartDatum<T>>` (`{ category: T,
+value: f32 }`).
+
+```rust
+use bastyde_data::{ChartModel, ChartSeries, ChartDatum};
+
+let model = ChartModel::from_series_vec(vec![
+    ChartSeries::new("Revenue").data(vec![
+        ChartDatum::new("Q1".to_string(), 10.0),
+        ChartDatum::new("Q2".to_string(), 20.0),
+    ]),
+]);
+let revenue = model.series_id_at(0).unwrap();
+model.push_point(revenue, "Q3".to_string(), 30.0);
+```
+
+Every mutation method follows the mutate-then-notify discipline
+(drop the `RefCell` borrow, *then* notify) and does two things:
+
+1. Emits a [`ChartChange`](../crates/bastyde-data/src/chart_change.rs)
+   describing exactly what changed — `SeriesInserted` / `SeriesRemoved`
+   / `SeriesMoved` / `SeriesRenamed` / `SeriesColorChanged` /
+   `SeriesVisibilityChanged` / `PointsInserted` / `PointsRemoved` /
+   `PointUpdated` / `SeriesDataReplaced` / `Reset` — to every observer
+   registered via `model.observe_changes(|change| …) -> ObserverHandle`
+   (RAII, same as every other model's observer handle).
+2. Bumps exactly one of two `Signal<u64>` version counters:
+   `structure_version()` for everything that can move the y-domain,
+   tick positions, or bar/point layout (series add/remove/move/rename,
+   *and* visibility toggles, plus every point mutation), or
+   `style_version()` for the one variant that's paint-only —
+   `SeriesColorChanged`, from `set_series_color` /
+   `clear_series_color`. This binary split is deliberately coarse: a
+   consumer that only cares "did *anything* change" can bind either
+   signal at `Rebuild`; a chart widget that wants to skip a relayout
+   for a pure color change binds `structure_version` at `Relayout` and
+   `style_version` at `RepaintOnly` separately (see charts.md §8 for
+   the exact wiring).
+
+Construction: `ChartModel::new()` (empty) + `add_series` /
+`insert_series`, `ChartModel::from_series_vec(vec![ChartSeries...])`
+(the common multi-series case, no per-item notification — mirrors
+`ListModel::from_vec`), or `ChartModel::from_points(vec![ChartDatum...])`
+(a single anonymous, visible series — the flat, one-dimensional path
+`PieChart` uses). `ChartSeries<T>` (the construction DTO) carries
+`visible: bool` — a **plain bool**, not a `Signal<bool>`: it only
+describes a series' desired shape at construction time. Once a series
+is in the model, mutate it through the model's own methods
+(`set_series_visible`, `set_series_color`, `rename_series`,
+`move_series`, `push_point` / `insert_point` / `remove_point` /
+`update_point` / `replace_series_data`), not by reaching back into the
+DTO. Read access is callback-scoped like every other model here —
+`with_series`, `with_point`, `with_series_view` (one series, metadata
++ points slice), `with_all_series` (every series as an ordered slice
+of views) — so the `RefCell` borrow never escapes.
+
+### 15.2 `ChartWindow<T>` — last-N-points streaming projection
+
+[`ChartWindow<T>`](../crates/bastyde-data/src/chart_window.rs) wraps a
+`ChartModel<T>` and exposes only the tail `window_size` points of
+every series — the live-scrolling-strip-chart pattern (a sensor feed,
+a log-rate graph, a stock ticker). Unlike `ChartAggregate` below, it
+copies **no point data**: it tracks, per series, the source index of
+the window's first visible point and delegates every read straight
+through to the source, so it needs no `T: Clone` bound at all.
+
+```rust
+let window = ChartWindow::new(model.clone(), 10);
+assert_eq!(window.point_count(revenue), 10.min(model.point_count(revenue)));
+```
+
+The upstream `ChartChange` stream is *translated*, not collapsed to a
+blanket `Reset` — a fixed-size tail window has no sort-key-move hazard
+the way `SortFilterListModel` does, so fine-grained translation is
+safe: a tail append into a full window becomes a `PointsRemoved` +
+`PointsInserted` pair (the window slides), a tail append into a
+still-growing window becomes a plain `PointsInserted`, and anything
+that isn't a clean tail append (a mid-series insert, any removal)
+falls back to a per-series rebuild reported as `SeriesDataReplaced`.
+`set_window_size(n)` rebuilds every series and emits `Reset`.
+`first_changed_index(series)` reports the first window-local index
+that may differ since the latest translated change — per-series,
+unlike the single flat value the list/tree proxies expose (§13),
+because chart data is naturally two-level.
+
+### 15.3 `ChartAggregate<T>` — bucket/rollup projection
+
+[`ChartAggregate<T>`](../crates/bastyde-data/src/chart_aggregate.rs)
+wraps a `ChartModel<T>` and reduces each series into fixed-size
+buckets of `bucket_size` source points, each collapsed to one
+`ChartDatum` via a [`ChartAggregateFn`](../crates/bastyde-data/src/chart_aggregate.rs)
+— `Mean` / `Sum` / `Min` / `Max` / `First` / `Last` / `Custom(Rc<dyn
+Fn(&[f32]) -> f32>)`. The "downsample a long series for display"
+pattern — a year of daily sensor readings shown as weekly means, a
+tick feed shown as 1-minute bars. Bucket `b` covers source indices
+`[b*bucket_size, min((b+1)*bucket_size, n))`; a trailing partial
+bucket is included; a bucket's category is its first member's.
+
+```rust
+let weekly = ChartAggregate::new(model.clone(), 7, ChartAggregateFn::Mean);
+```
+
+Unlike `ChartWindow`, `ChartAggregate` **materializes** its buckets —
+a bucket's category is a *clone* of a source point's category, so
+building or rebuilding one requires `T: Clone` (read-only queries
+afterward need only `T: 'static`). Reactivity: a tail append that
+doesn't change the bucket count updates the not-yet-full last bucket
+in place (`PointUpdated`); a tail append that starts a new bucket
+finalizes the previous last bucket (`PointUpdated`) and appends the
+new one(s) (`PointsInserted`); a mid-series insert or any removal
+falls back to a full per-series rebuild (`SeriesDataReplaced`).
+`set_bucket_size(n)` / `set_aggregate_fn(f)` rebuild and emit `Reset`.
+Same per-series `first_changed_index()` side-channel as `ChartWindow`.
+
+### 15.4 `ChartSelection` — point-level selection
+
+[`ChartSelection`](../crates/bastyde-data/src/chart_selection.rs) is
+the chart counterpart of `SelectionModel` (§5) / `KeyedSelectionModel`
+— it manages which `(SeriesId, usize)` pairs are selected across a
+`ChartModel`, share-by-clone like the model itself, with the current
+selection exposed as a reactive `Signal<HashSet<(SeriesId, usize)>>`
+via `selection_signal()`. It uses a `HashSet`, not the `BTreeSet` flat
+`SelectionModel` uses, because `SeriesId` is intentionally not `Ord`
+(an opaque SlotMap key, mirroring `NodeId`) — there is no natural
+ordering across series, only within one series' point indices.
+
+```rust
+let sel = ChartSelection::new(SelectionMode::Multi);
+sel.select_point(revenue, 1);
+sel.extend_to(revenue, 3);          // (revenue,1), (revenue,2), (revenue,3)
+sel.toggle_point(revenue, 5);       // Ctrl+click
+```
+
+Same three `SelectionMode`s as `SelectionModel` (`None` / `Single` /
+`Multi`, with anchor-based range extension in `Multi`).
+`extend_to(series, target)` only extends **within the anchor's own
+series** — a cross-series "range" has no natural order, so it falls
+back to a single-point select of `(series, target)`. `adjust(&change)`
+keeps the selection consistent as the source model mutates: a removed
+or wholesale-replaced series drops its selected points (and the
+anchor, if it pointed there); point insertions/removals shift or drop
+indices within their series; series metadata changes (rename / recolor
+/ visibility / move / insert) and in-place point updates never affect
+which points are selected. `prune(exists)` drops any selected point
+`exists` rejects — the same shape as `KeyedTreeCheckedModel::prune_missing`
+(§6.1).
+
+`ChartWindow` and `ChartAggregate` stay pure `bastyde-data` building
+blocks an app composes on top of a `ChartModel` (feed a `ChartWindow`'s
+or `ChartAggregate`'s output into a fresh `ChartModel::from_series_vec`
+snapshot). `ChartSelection` is wired in directly, though: all three
+chart widgets (`BarChart` / `LineChart` / `PieChart`) accept a shared
+handle via `.selection(ChartSelection)` — the chart reuses its own
+hover hit-test to select the tapped mark (Ctrl/Cmd-click toggles it in
+`Multi` mode), clears the selection on a tap that misses every mark,
+and paints an accent highlight on every selected mark. See
+[charts.md §9](charts.md) for the paint/interaction details and
+[charts.md §13](charts.md) for
+the current state of the remaining `ChartWindow` / `ChartAggregate`
+wiring.
+
 ---
 
 ## See also
@@ -513,4 +700,6 @@ configuration, not data.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — typed intents, ancestor `Action`s, how the MVVM command layer lands in Rust.
 - [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [tree_data_slice.rs](../crates/bastyde-data/src/tree_data_slice.rs), [tree_row_filter.rs](../crates/bastyde-data/src/tree_row_filter.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs), [tree_data_source.rs](../crates/bastyde-data/src/tree_data_source.rs), [keyed_tree_checked_model.rs](../crates/bastyde-data/src/keyed_tree_checked_model.rs).
 - [crates/bastyde-data/src/data_change.rs](../crates/bastyde-data/src/data_change.rs), [tree_change.rs](../crates/bastyde-data/src/tree_change.rs).
+- [crates/bastyde-data/src/chart_model.rs](../crates/bastyde-data/src/chart_model.rs) (§15) — `ChartModel<T>`, `ChartChange`, `SeriesId`; see also [chart_window.rs](../crates/bastyde-data/src/chart_window.rs), [chart_aggregate.rs](../crates/bastyde-data/src/chart_aggregate.rs), [chart_selection.rs](../crates/bastyde-data/src/chart_selection.rs).
 - [examples/data_collections](../examples/data_collections/) — runnable demonstration of ListView, TreeView, Repeater, SelectionModel, and intra-widget DnD.
+- [examples/chart_demo](../examples/chart_demo/) — `bastyde-charts` demo; see [charts.md](charts.md) for the chart-widget side of `ChartModel`.

@@ -72,6 +72,9 @@ pub enum SyntheticKind {
     /// anchor is screen-reader perceivable and can be the target of the
     /// view's `active_descendant` during the keyboard connect flow.
     SceneMagnet = 7,
+    /// A per-datum mark (bar / line point / pie slice) emitted by a
+    /// `bastyde-charts` widget's `accessibility()`.
+    ChartMark = 8,
 }
 
 /// A captured live-region announcement — the text a screen reader would
@@ -775,9 +778,12 @@ impl AccessNodeBuilder {
         debug_assert!(
             matches!(
                 kind,
-                SyntheticKind::SceneItem | SyntheticKind::SceneGroup | SyntheticKind::SceneMagnet
+                SyntheticKind::SceneItem
+                    | SyntheticKind::SceneGroup
+                    | SyntheticKind::SceneMagnet
+                    | SyntheticKind::ChartMark
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, or ::SceneMagnet"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, or ::ChartMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -852,9 +858,12 @@ impl AccessNodeBuilder {
         debug_assert!(
             matches!(
                 kind,
-                SyntheticKind::SceneItem | SyntheticKind::SceneGroup | SyntheticKind::SceneMagnet
+                SyntheticKind::SceneItem
+                    | SyntheticKind::SceneGroup
+                    | SyntheticKind::SceneMagnet
+                    | SyntheticKind::ChartMark
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, or ::SceneMagnet"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, or ::ChartMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(

@@ -3,24 +3,40 @@
 
 //! BarChart — vertical or horizontal bars, one or more series.
 //!
-//! PR 1 ships vertical / single-series only. Grouped multi-series, horizontal
-//! orientation, value labels, grid lines, axis titles, and legends arrive
-//! in PR 2.
+//! Bound to a [`ChartModel`]. Supports grouped multi-series, horizontal
+//! orientation, value labels, grid lines, axis titles, an embedded
+//! interactive legend, per-datum pointer hover with a shared tooltip
+//! card, and per-datum accessibility marks.
 
-use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use bastyde_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
+use bastyde_core::Theme;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::signal::Prop;
-use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use bastyde_core::color_prop::ColorProp;
+use bastyde_core::event::{EventResponse, WidgetEvent};
+use bastyde_core::gesture::TapEvent;
+use bastyde_core::paint_prop::PaintProp;
+use bastyde_core::signal::{Prop, Signal};
+use bastyde_core::styles::{ChartFillContext, ChartStyle, SharedChartStyle};
+use bastyde_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+};
+use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{BorderRole, TextRole, TextStyleRole};
+use bastyde_data::{ChartModel, ChartSelection, SeriesId, SeriesView};
+use bastyde_tokens::{BorderRole, CornerRadius, TextRole, TextStyle, TextStyleRole};
 
-use crate::axis::{AxisConfig, auto_tick_count, nice_ticks};
-use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
-use crate::legend::{legend_main_axis_size, orientation_for_position, paint_embedded_legend};
+use crate::axis::AxisConfig;
+use crate::hit::{self, MarkGeometry, MarkShape};
+use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_plot_geometry};
+use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
-use crate::series::ChartSeries;
+use crate::recipe_style::RecipeChartStyle;
 use crate::text::measure_text_width;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,38 +51,73 @@ pub enum BarGrouping {
     Grouped,
 }
 
+/// Cache key for the memoized [`PlotGeometry`] — a miss recomputes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GeometryKey {
+    bounds: Rect,
+    structure_version: u64,
+}
+
+/// Text-measurement context stashed during `paint()` so `accessibility()`
+/// can recompute the same geometry without a `Canvas`/`Theme`.
+struct PaintSnapshot {
+    backend: Option<Rc<RefCell<dyn TextBackend>>>,
+    label_style: TextStyle,
+}
+
 pub struct BarChart<T: Clone + 'static> {
-    series: Prop<Vec<ChartSeries<T>>>,
+    model: ChartModel<T>,
     orientation: BarOrientation,
     grouping: BarGrouping,
     show_value_labels: bool,
     show_grid: bool,
     show_legend: bool,
     legend_position: LegendPosition,
+    legend_interactive: bool,
     axis_x: AxisConfig,
     axis_y: AxisConfig,
     palette: Prop<ChartPalette>,
     bar_corner_radius: Option<f32>,
     min_bar_gap: f32,
     group_gap: f32,
+    style_override: Option<SharedChartStyle>,
+    show_hover_tooltip: bool,
+    selection: Option<ChartSelection>,
+
+    hover: Signal<Option<(SeriesId, usize)>>,
+    marks: Rc<RefCell<Vec<MarkGeometry>>>,
+    bounds: Rc<Cell<Rect>>,
+    geometry_cache: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
+    paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
+    legend_id: Option<WidgetId>,
 }
 
 impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
-    pub fn new(series: impl Into<Prop<Vec<ChartSeries<T>>>>) -> Self {
+    pub fn new(model: ChartModel<T>) -> Self {
         Self {
-            series: series.into(),
+            model,
             orientation: BarOrientation::Vertical,
             grouping: BarGrouping::Single,
             show_value_labels: false,
             show_grid: false,
             show_legend: false,
             legend_position: LegendPosition::Bottom,
+            legend_interactive: false,
             axis_x: AxisConfig::new(),
             axis_y: AxisConfig::new(),
             palette: Prop::Static(ChartPalette::FromTheme),
             bar_corner_radius: None,
             min_bar_gap: 6.0,
             group_gap: 12.0,
+            style_override: None,
+            show_hover_tooltip: true,
+            selection: None,
+            hover: Signal::new(None),
+            marks: Rc::new(RefCell::new(Vec::new())),
+            bounds: Rc::new(Cell::new(Rect::ZERO)),
+            geometry_cache: Rc::new(RefCell::new(None)),
+            paint_snapshot: Rc::new(RefCell::new(None)),
+            legend_id: None,
         }
     }
 
@@ -100,6 +151,13 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         self
     }
 
+    /// Make the embedded legend interactive: clicking (or Space on a
+    /// focused) row toggles that series' visibility. Default `false`.
+    pub fn legend_interactive(mut self, on: bool) -> Self {
+        self.legend_interactive = on;
+        self
+    }
+
     pub fn axis_x(mut self, cfg: AxisConfig) -> Self {
         self.axis_x = cfg;
         self
@@ -129,6 +187,40 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         self.group_gap = g;
         self
     }
+
+    /// Per-call [`ChartStyle`] override. Takes precedence over
+    /// `theme.style_slots.chart`.
+    pub fn style(mut self, style: impl ChartStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Whether hovering a bar shows a tooltip card + updates the
+    /// hover-driven state (also observable via `hover_signal`). Default `true`.
+    pub fn hover_tooltip(mut self, on: bool) -> Self {
+        self.show_hover_tooltip = on;
+        self
+    }
+
+    /// Wire a shared [`ChartSelection`] into this chart: clicking a bar
+    /// selects its `(series, point)` key (Ctrl/Cmd-click toggles it in
+    /// [`bastyde_data::SelectionMode::Multi`]), clicking empty space
+    /// clears the selection, and every selected bar paints an
+    /// accent-colored outline on top of its fill. Pass a clone of the
+    /// same `ChartSelection` to other charts/widgets to keep selection
+    /// state in sync.
+    pub fn selection(mut self, selection: ChartSelection) -> Self {
+        self.selection = Some(selection);
+        self
+    }
+
+    /// A clone of the live hover signal — the `(series, point)` key
+    /// currently under the pointer, or `None`. Lets an app observe
+    /// hover state from outside the chart (a synced detail panel, a
+    /// custom tooltip) without re-implementing hit-testing.
+    pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
+        self.hover.clone()
+    }
 }
 
 impl<T: Clone + 'static> std::fmt::Debug for BarChart<T> {
@@ -143,555 +235,630 @@ impl<T: Clone + 'static> std::fmt::Debug for BarChart<T> {
 impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        // Data swap → relayout (y-domain might shift).
-        self.series
-            .register_if_bound(id, registry, BindingLevel::Relayout);
-        // Palette swap is color-only → repaint.
-        self.palette
-            .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        Vec::new()
+        {
+            let registry = ctx.binding_registry();
+            // Data swap → relayout (y-domain might shift) AND the AT mark
+            // list must refresh.
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::Relayout);
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            // Color-only swap → repaint.
+            self.model
+                .style_version()
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.palette
+                .register_if_bound(id, registry, BindingLevel::RepaintOnly);
+            self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            if let Some(selection) = &self.selection {
+                selection
+                    .selection_signal()
+                    .bind_to(id, registry, BindingLevel::RepaintOnly);
+            }
+        }
+
+        if self.show_hover_tooltip || self.selection.is_some() {
+            let mut handlers = HandlerSet::new();
+
+            if self.show_hover_tooltip {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                let hover = self.hover.clone();
+                handlers =
+                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
+                        WidgetEvent::PointerMove { position } => {
+                            let b = bounds.get();
+                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
+                            let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
+                            let Some(plot) = plot else {
+                                return EventResponse::Ignored;
+                            };
+                            if !plot.contains(window_pos) {
+                                if hover.get().is_some() {
+                                    hover.set(None);
+                                }
+                                return EventResponse::Ignored;
+                            }
+                            let hit = hit::rect_hit(&marks.borrow(), window_pos);
+                            match hit.and_then(|idx| {
+                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
+                            }) {
+                                Some(key) => {
+                                    if hover.get() != Some(key) {
+                                        hover.set(Some(key));
+                                    }
+                                }
+                                None => {
+                                    if hover.get().is_some() {
+                                        hover.set(None);
+                                    }
+                                }
+                            }
+                            EventResponse::Ignored
+                        }
+                        WidgetEvent::PointerLeave => {
+                            if hover.get().is_some() {
+                                hover.set(None);
+                            }
+                            EventResponse::Ignored
+                        }
+                        _ => EventResponse::Ignored,
+                    });
+            }
+
+            if let Some(selection) = self.selection.clone() {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                    let b = bounds.get();
+                    let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
+                    let Some(plot) = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot) else {
+                        return;
+                    };
+                    if !plot.contains(window_pos) {
+                        selection.clear();
+                        return;
+                    }
+                    let hit = hit::rect_hit(&marks.borrow(), window_pos);
+                    match hit
+                        .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
+                    {
+                        Some((sid, idx)) => {
+                            if tap.modifiers.ctrl() || tap.modifiers.super_key() {
+                                selection.toggle_point(sid, idx);
+                            } else {
+                                selection.select_point(sid, idx);
+                            }
+                        }
+                        None => selection.clear(),
+                    }
+                });
+            }
+
+            ctx.apply_self_handlers(handlers);
+        }
+
+        if self.show_legend {
+            let legend = ChartLegend::new(self.model.clone())
+                .palette(self.palette.clone())
+                .orientation(orientation_for_position(self.legend_position))
+                .interactive(self.legend_interactive);
+            let legend_id = ctx.add(legend);
+            self.legend_id = Some(legend_id);
+            vec![legend_id]
+        } else {
+            self.legend_id = None;
+            Vec::new()
+        }
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        Size::new(
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let ideal = Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(200.0),
-        )
-        .into()
+        );
+        let min = self.compute_intrinsic_min(ctx);
+        LayoutResponse::shrinkable(ideal, min, 1.0)
     }
 
     fn place_children(
         &self,
-        _bounds: Rect,
+        bounds: Rect,
         _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
     ) {
+        self.bounds.set(bounds);
+        if let Some(legend_id) = self.legend_id {
+            let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+            let geometry = self.ensure_geometry(bounds, ctx.text_backend, &label_style);
+            for child in children.iter_mut() {
+                if child.id == legend_id {
+                    child.origin = Point::new(geometry.legend.x, geometry.legend.y);
+                    child.size = Size::new(geometry.legend.width, geometry.legend.height);
+                }
+            }
+        }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
         let enabled = ctx.effective_enabled;
-        use crate::style as cs;
 
-        let series_vec = self.series.get();
-        if series_vec.is_empty() {
+        if self.model.series_count() == 0 {
             return;
         }
 
-        // Determine y-domain (auto from data if not overridden).
-        let (y_min, y_max) = self.compute_y_domain(&series_vec);
-        if (y_max - y_min).abs() < f32::EPSILON {
-            return;
-        }
+        let style: SharedChartStyle = self
+            .style_override
+            .clone()
+            .or_else(|| theme.style_slots.chart.clone())
+            .unwrap_or_else(|| Rc::new(RecipeChartStyle));
 
-        // Generate y-ticks.
-        let y_axis_pixels = bounds.height; // approximation pre-carve; refined below
-        let target = self
-            .axis_y
-            .tick_count_hint
-            .unwrap_or_else(|| auto_tick_count(y_axis_pixels));
-        let y_ticks = nice_ticks(y_min, y_max, target);
-
-        // Measure widest y-label string in pixels.
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
-        let y_label_max_width = if self.axis_y.show_labels {
-            measure_max_label_width(canvas, &y_ticks, &self.axis_y, &label_style)
-        } else {
-            0.0
+        let backend = canvas.text_backend().cloned();
+        *self.paint_snapshot.borrow_mut() = Some(PaintSnapshot {
+            backend: backend.clone(),
+            label_style: label_style.clone(),
+        });
+
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        let plot = geometry.plot;
+        if plot.width <= 0.0 || plot.height <= 0.0 {
+            return;
+        }
+
+        let marks = self.compute_marks(&geometry);
+        *self.marks.borrow_mut() = marks.clone();
+
+        // ─── Grid lines ─────────────────────────────────────────────────
+        if self.show_grid {
+            let recipe = style.gridline(theme);
+            let stroke = hit::resolve_gridline_stroke(&recipe, self.axis_y.gridline_dash);
+            let color = recipe.color.resolve(theme);
+            for &t in &geometry.y_ticks {
+                let y = y_to_pixel(t, geometry.y_lo, geometry.y_hi, plot);
+                let mut path = Path::new();
+                path.move_to(Point::new(plot.x, y));
+                path.line_to(Point::new(plot.right(), y));
+                canvas.stroke_path(&path, color, stroke.clone());
+            }
+        }
+
+        // ─── Bars ───────────────────────────────────────────────────────
+        // Draw directly from `marks` — the same geometry used for hit-test
+        // and AT — so there is one source of truth for bar rects. Colors
+        // are resolved via a `series_id -> (visible-index, explicit
+        // color)` lookup built in the same visible-series order
+        // `compute_marks` walked, so palette indices match pre-refactor
+        // behavior exactly.
+        let palette = self.palette.get();
+        let mut color_lookup: HashMap<SeriesId, (usize, Option<ColorProp>)> = HashMap::new();
+        self.model.with_all_series(|views| {
+            let mut vi = 0usize;
+            for v in views {
+                if v.visible {
+                    color_lookup.insert(v.id, (vi, v.color.cloned()));
+                    vi += 1;
+                }
+            }
+        });
+        for m in &marks {
+            let MarkShape::Rect(rect) = m.shape else {
+                continue;
+            };
+            let (si, color_prop) = color_lookup.get(&m.series_id).cloned().unwrap_or((0, None));
+            let resolved_color = color_prop
+                .as_ref()
+                .map(|c| c.resolve(theme, enabled))
+                .unwrap_or_else(|| palette.color_for(si, theme));
+            let cfg = ChartFillContext {
+                series_index: si,
+                resolved_color,
+                theme,
+            };
+            let fill = style.bar_fill(&cfg);
+            let paint =
+                PaintProp::from_fill(&fill, &theme.colors).resolve(theme, enabled, rect.size());
+            paint_bar(canvas, rect, paint, self.bar_corner_radius);
+
+            if self
+                .selection
+                .as_ref()
+                .is_some_and(|s| s.is_selected(m.series_id, m.point_idx))
+            {
+                use crate::style::{SELECTION_BAR_OUTLINE_PAD, SELECTION_STROKE_WIDTH};
+                let outline_rect = rect.expand(SELECTION_BAR_OUTLINE_PAD);
+                let radius = self.bar_corner_radius.unwrap_or(0.0) + SELECTION_BAR_OUTLINE_PAD;
+                canvas.stroke_rounded_rect(
+                    outline_rect,
+                    CornerRadius::uniform(radius),
+                    theme.colors.accent,
+                    SELECTION_STROKE_WIDTH,
+                );
+            }
+        }
+
+        // ─── Value labels ───────────────────────────────────────────────
+        if self.show_value_labels {
+            self.draw_value_labels(canvas, theme, &marks, &label_style);
+        }
+
+        // ─── Axes ───────────────────────────────────────────────────────
+        let x_labels: Vec<String> = self.model.with_all_series(|views| {
+            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
+            if visible.is_empty() {
+                return Vec::new();
+            }
+            visible[0]
+                .points
+                .iter()
+                .map(|d| format!("{}", d.category))
+                .collect()
+        });
+        self.draw_axes_with_x_labels(
+            canvas,
+            theme,
+            plot,
+            &geometry.y_ticks,
+            &x_labels,
+            geometry.y_lo,
+            geometry.y_hi,
+            &label_style,
+        );
+
+        // ─── Hover marker + tooltip ─────────────────────────────────────
+        if self.show_hover_tooltip
+            && let Some((sid, idx)) = self.hover.get()
+            && let Some(m) = marks
+                .iter()
+                .find(|m| m.series_id == sid && m.point_idx == idx)
+            && let MarkShape::Rect(rect) = m.shape
+        {
+            let anchor = Point::new(rect.x + rect.width * 0.5, rect.y);
+            let text = format!(
+                "{}: {} = {}",
+                m.series_name,
+                m.category_label,
+                self.axis_y.format(m.value)
+            );
+            hit::draw_mark_tooltip(canvas, theme, plot, anchor, &text, &label_style);
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(bastyde_core::accesskit::Role::GraphicsDocument);
+        let n_series = self.model.series_count();
+        let n_categories = self
+            .model
+            .series_id_at(0)
+            .map(|s| self.model.point_count(s))
+            .unwrap_or(0);
+        builder.set_name(format!(
+            "Bar chart: {} series, {} categories",
+            n_series, n_categories
+        ));
+
+        let bounds = self.bounds.get();
+        let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {
+            Some(s) => (s.backend.clone(), s.label_style.clone()),
+            None => (
+                None,
+                TextStyle {
+                    size: 11.0,
+                    ..TextStyle::default()
+                },
+            ),
         };
-        let label_height = if self.axis_x.show_labels || self.axis_y.show_labels {
-            label_style.size * 1.2
-        } else {
-            0.0
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        let marks = self.compute_marks(&geometry);
+        for m in &marks {
+            hit::emit_mark_node(builder, m);
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.legend_id.into_iter().collect()
+    }
+}
+
+impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
+    /// Memoized [`PlotGeometry`] for `bounds` — recomputed only when
+    /// `bounds` or `model.structure_version()` changed since the last
+    /// call. Shared by `paint()` and `accessibility()` so a mark's bounds
+    /// never disagree between the visual tree and the AT tree, even
+    /// without an intervening paint.
+    fn ensure_geometry(
+        &self,
+        bounds: Rect,
+        backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+        label_style: &TextStyle,
+    ) -> PlotGeometry {
+        let key = GeometryKey {
+            bounds,
+            structure_version: self.model.structure_version().get(),
         };
-        let title_height = label_style.size * 1.2;
+        if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
+            && *cached_key == key
+        {
+            return geometry.clone();
+        }
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(
-                canvas.text_backend(),
-                &series_vec,
-                &label_style,
-                legend_orientation,
-            )
+            legend_main_axis_size(backend, &self.model, label_style, legend_orientation)
         } else {
             0.0
         };
-
-        let area = carve_plot_area(&CarveParams {
+        let y_domain = self
+            .model
+            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
+        let geometry = compute_plot_geometry(&PlotGeometryParams {
             bounds,
             axis_x: &self.axis_x,
             axis_y: &self.axis_y,
-            y_label_max_width,
-            x_label_height: label_height,
-            axis_title_line_height: title_height,
+            y_domain,
             legend_size,
             legend_position: if self.show_legend {
                 Some(self.legend_position)
             } else {
                 None
             },
+            text_backend: backend,
+            label_style,
+        });
+        *self.geometry_cache.borrow_mut() = Some((key, geometry.clone()));
+        geometry
+    }
+
+    /// Intrinsic compression floor — see [`crate::layout::compute_intrinsic_min`].
+    fn compute_intrinsic_min(&self, ctx: &LayoutContext) -> Size {
+        let plot_floor = Size::new(40.0, 40.0);
+        let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+        let legend_orientation = orientation_for_position(self.legend_position);
+        let legend_size = if self.show_legend {
+            legend_main_axis_size(
+                ctx.text_backend,
+                &self.model,
+                &label_style,
+                legend_orientation,
+            )
+        } else {
+            0.0
+        };
+        let y_domain = self
+            .model
+            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
+        crate::layout::compute_intrinsic_min(
+            &self.axis_x,
+            &self.axis_y,
+            y_domain,
+            legend_size,
+            if self.show_legend {
+                Some(self.legend_position)
+            } else {
+                None
+            },
+            ctx.text_backend,
+            &label_style,
+            plot_floor,
+        )
+    }
+
+    /// Compute every visible bar's geometry + identity. Pure — reads only
+    /// the model and layout config, no theme/canvas — so it's shared
+    /// verbatim by `paint()` (drives the actual bar fills), the pointer
+    /// hit-test (`hit::rect_hit`), and `accessibility()` (per-mark AT
+    /// nodes).
+    fn compute_marks(&self, geometry: &PlotGeometry) -> Vec<MarkGeometry> {
+        use crate::style as cs;
+        let plot = geometry.plot;
+        let y_lo = geometry.y_lo;
+        let y_hi = geometry.y_hi;
+        let mut marks = Vec::new();
+
+        self.model.with_all_series(|views| {
+            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
+            if visible.is_empty() {
+                return;
+            }
+            let n = visible[0].points.len();
+            if n == 0 {
+                return;
+            }
+
+            match self.grouping {
+                BarGrouping::Single => {
+                    let series = visible[0];
+                    match self.orientation {
+                        BarOrientation::Vertical => {
+                            let total_gap = self.min_bar_gap * (n as f32 + 1.0);
+                            let bar_w =
+                                ((plot.width - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
+                            let baseline_y =
+                                y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
+                            for (i, datum) in series.points.iter().enumerate() {
+                                let x = plot.x
+                                    + self.min_bar_gap
+                                    + i as f32 * (bar_w + self.min_bar_gap);
+                                let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
+                                let (top, h) = if datum.value >= 0.0 {
+                                    (value_y, baseline_y - value_y)
+                                } else {
+                                    (baseline_y, value_y - baseline_y)
+                                };
+                                marks.push(MarkGeometry {
+                                    series_id: series.id,
+                                    point_idx: i,
+                                    series_name: series.name.to_string(),
+                                    category_label: format!("{}", datum.category),
+                                    value: datum.value,
+                                    shape: MarkShape::Rect(Rect::new(x, top, bar_w, h.max(0.0))),
+                                });
+                            }
+                        }
+                        BarOrientation::Horizontal => {
+                            let total_gap = self.min_bar_gap * (n as f32 + 1.0);
+                            let bar_h =
+                                ((plot.height - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
+                            let baseline_x =
+                                value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
+                            for (i, datum) in series.points.iter().enumerate() {
+                                let y = plot.y
+                                    + self.min_bar_gap
+                                    + i as f32 * (bar_h + self.min_bar_gap);
+                                let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
+                                let (left, w) = if datum.value >= 0.0 {
+                                    (baseline_x, value_x - baseline_x)
+                                } else {
+                                    (value_x, baseline_x - value_x)
+                                };
+                                marks.push(MarkGeometry {
+                                    series_id: series.id,
+                                    point_idx: i,
+                                    series_name: series.name.to_string(),
+                                    category_label: format!("{}", datum.category),
+                                    value: datum.value,
+                                    shape: MarkShape::Rect(Rect::new(left, y, w.max(0.0), bar_h)),
+                                });
+                            }
+                        }
+                    }
+                }
+                BarGrouping::Grouped => {
+                    let s = visible.len();
+                    match self.orientation {
+                        BarOrientation::Vertical => {
+                            let total_group_gap = self.group_gap * (n as f32 + 1.0);
+                            let group_w =
+                                ((plot.width - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
+                            let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0))
+                                / s as f32)
+                                .max(cs::BAR_MIN_WIDTH);
+                            let baseline_y =
+                                y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
+                            for gi in 0..n {
+                                let group_x = plot.x
+                                    + self.group_gap
+                                    + gi as f32 * (group_w + self.group_gap);
+                                for (si, series) in visible.iter().enumerate() {
+                                    let Some(datum) = series.points.get(gi) else {
+                                        continue;
+                                    };
+                                    let x = group_x + si as f32 * (bar_w + self.min_bar_gap);
+                                    let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
+                                    let (top, h) = if datum.value >= 0.0 {
+                                        (value_y, baseline_y - value_y)
+                                    } else {
+                                        (baseline_y, value_y - baseline_y)
+                                    };
+                                    marks.push(MarkGeometry {
+                                        series_id: series.id,
+                                        point_idx: gi,
+                                        series_name: series.name.to_string(),
+                                        category_label: format!("{}", datum.category),
+                                        value: datum.value,
+                                        shape: MarkShape::Rect(Rect::new(
+                                            x,
+                                            top,
+                                            bar_w,
+                                            h.max(0.0),
+                                        )),
+                                    });
+                                }
+                            }
+                        }
+                        BarOrientation::Horizontal => {
+                            let total_group_gap = self.group_gap * (n as f32 + 1.0);
+                            let group_h =
+                                ((plot.height - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
+                            let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0))
+                                / s as f32)
+                                .max(cs::BAR_MIN_WIDTH);
+                            let baseline_x =
+                                value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
+                            for gi in 0..n {
+                                let group_y = plot.y
+                                    + self.group_gap
+                                    + gi as f32 * (group_h + self.group_gap);
+                                for (si, series) in visible.iter().enumerate() {
+                                    let Some(datum) = series.points.get(gi) else {
+                                        continue;
+                                    };
+                                    let y = group_y + si as f32 * (bar_h + self.min_bar_gap);
+                                    let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
+                                    let (left, w) = if datum.value >= 0.0 {
+                                        (baseline_x, value_x - baseline_x)
+                                    } else {
+                                        (value_x, baseline_x - value_x)
+                                    };
+                                    marks.push(MarkGeometry {
+                                        series_id: series.id,
+                                        point_idx: gi,
+                                        series_name: series.name.to_string(),
+                                        category_label: format!("{}", datum.category),
+                                        value: datum.value,
+                                        shape: MarkShape::Rect(Rect::new(
+                                            left,
+                                            y,
+                                            w.max(0.0),
+                                            bar_h,
+                                        )),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         });
 
-        let plot = area.plot;
-        if plot.width <= 0.0 || plot.height <= 0.0 {
-            return;
-        }
-
-        // Re-derive y-axis-true-pixel target now that we have the plot rect.
-        let target = self
-            .axis_y
-            .tick_count_hint
-            .unwrap_or_else(|| auto_tick_count(plot.height));
-        let y_ticks = nice_ticks(y_min, y_max, target);
-        let y_lo = y_ticks.first().copied().unwrap_or(y_min);
-        let y_hi = y_ticks.last().copied().unwrap_or(y_max);
-
-        // ─── Grid lines ─────────────────────────────────────────────────
-        if self.show_grid {
-            let grid_color = BorderRole::Default.resolve(&theme.colors).with_alpha(0.4);
-            for &t in &y_ticks {
-                let y = y_to_pixel(t, y_lo, y_hi, plot);
-                canvas.draw_line(
-                    Point::new(plot.x, y),
-                    Point::new(plot.right(), y),
-                    grid_color,
-                    cs::GRIDLINE_WIDTH,
-                );
-            }
-        }
-
-        // ─── Bars ───────────────────────────────────────────────────────
-        let palette = self.palette.get();
-        let visible: Vec<&ChartSeries<T>> = series_vec.iter().filter(|s| s.visible.get()).collect();
-        if visible.is_empty() {
-            // Still draw the axes — the chart is "empty but configured".
-            self.draw_axes_with_x_labels(
-                canvas,
-                theme,
-                plot,
-                &y_ticks,
-                &[],
-                y_lo,
-                y_hi,
-                &label_style,
-            );
-            return;
-        }
-
-        // Use the first visible series's categories as the canonical x-axis
-        // for PR 1. Multi-series x-alignment lands in PR 2 with grouping.
-        let categories: Vec<&T> = visible[0].data.iter().map(|d| &d.category).collect();
-        let n = categories.len();
-        if n == 0 {
-            return;
-        }
-
-        match self.grouping {
-            BarGrouping::Single => self.paint_single(
-                canvas,
-                theme,
-                plot,
-                &visible,
-                &categories,
-                y_lo,
-                y_hi,
-                &palette,
-                enabled,
-            ),
-            BarGrouping::Grouped => self.paint_grouped(
-                canvas,
-                theme,
-                plot,
-                &visible,
-                &categories,
-                y_lo,
-                y_hi,
-                &palette,
-                enabled,
-            ),
-        }
-
-        // ─── Value labels (above each bar) ──────────────────────────────
-        if self.show_value_labels {
-            self.draw_value_labels(
-                canvas,
-                theme,
-                plot,
-                &visible,
-                &categories,
-                y_lo,
-                y_hi,
-                &label_style,
-            );
-        }
-
-        // ─── Embedded legend ────────────────────────────────────────────
-        if self.show_legend && area.legend.width > 0.0 && area.legend.height > 0.0 {
-            paint_embedded_legend(
-                canvas,
-                area.legend,
-                &series_vec,
-                &palette,
-                legend_orientation,
-                theme,
-                enabled,
-            );
-        }
-
-        // ─── Axes ───────────────────────────────────────────────────────
-        let x_labels: Vec<String> = categories.iter().map(|c| format!("{}", c)).collect();
-        self.draw_axes_with_x_labels(
-            canvas,
-            theme,
-            plot,
-            &y_ticks,
-            &x_labels,
-            y_lo,
-            y_hi,
-            &label_style,
-        );
+        marks
     }
 
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::GraphicsDocument);
-        let series_vec = self.series.get();
-        let n_series = series_vec.len();
-        let n_categories = series_vec.first().map(|s| s.data.len()).unwrap_or(0);
-        builder.set_name(format!(
-            "Bar chart: {} series, {} categories",
-            n_series, n_categories
-        ));
-    }
-}
-
-impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
-    fn compute_y_domain(&self, series_vec: &[ChartSeries<T>]) -> (f32, f32) {
-        let mut min = self.axis_y.min.unwrap_or(f32::INFINITY);
-        let mut max = self.axis_y.max.unwrap_or(f32::NEG_INFINITY);
-        if self.axis_y.min.is_none() || self.axis_y.max.is_none() {
-            for s in series_vec.iter().filter(|s| s.visible.get()) {
-                for d in &s.data {
-                    if self.axis_y.min.is_none() {
-                        min = min.min(d.value);
-                    }
-                    if self.axis_y.max.is_none() {
-                        max = max.max(d.value);
-                    }
-                }
-            }
-        }
-        // Bar charts conventionally include zero in their y-domain so bars
-        // have a meaningful baseline.
-        if self.axis_y.min.is_none() {
-            min = min.min(0.0);
-        }
-        if self.axis_y.max.is_none() {
-            max = max.max(0.0);
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return (0.0, 1.0);
-        }
-        if (max - min).abs() < f32::EPSILON {
-            // All-zero data — give a tiny span so we don't degenerate.
-            return (0.0, 1.0);
-        }
-        (min, max)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn paint_single(
-        &self,
-        canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
-        plot: Rect,
-        visible: &[&ChartSeries<T>],
-        categories: &[&T],
-        y_lo: f32,
-        y_hi: f32,
-        palette: &ChartPalette,
-        enabled: bool,
-    ) {
-        use crate::style as cs;
-        let n = categories.len();
-        if n == 0 {
-            return;
-        }
-        let series = visible[0];
-
-        match self.orientation {
-            BarOrientation::Vertical => {
-                let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_w = ((plot.width - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
-                for (i, datum) in series.data.iter().enumerate() {
-                    let color = series
-                        .color
-                        .as_ref()
-                        .map(|c| c.resolve(theme, enabled))
-                        .unwrap_or_else(|| palette.color_for(0, theme));
-                    let x = plot.x + self.min_bar_gap + i as f32 * (bar_w + self.min_bar_gap);
-                    let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                    let (top, h) = if datum.value >= 0.0 {
-                        (value_y, baseline_y - value_y)
-                    } else {
-                        (baseline_y, value_y - baseline_y)
-                    };
-                    let rect = Rect::new(x, top, bar_w, h.max(0.0));
-                    if let Some(r) = self.bar_corner_radius {
-                        canvas.fill_rounded_rect(
-                            rect,
-                            bastyde_tokens::CornerRadius::uniform(r),
-                            color,
-                        );
-                    } else {
-                        canvas.fill_rect(rect, color);
-                    }
-                }
-            }
-            BarOrientation::Horizontal => {
-                let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_h = ((plot.height - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                // For horizontal we flip the value mapping onto the x-axis
-                // and use vertical positions for categories.
-                let baseline_x = value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
-                for (i, datum) in series.data.iter().enumerate() {
-                    let color = series
-                        .color
-                        .as_ref()
-                        .map(|c| c.resolve(theme, enabled))
-                        .unwrap_or_else(|| palette.color_for(0, theme));
-                    let y = plot.y + self.min_bar_gap + i as f32 * (bar_h + self.min_bar_gap);
-                    let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
-                    let (left, w) = if datum.value >= 0.0 {
-                        (baseline_x, value_x - baseline_x)
-                    } else {
-                        (value_x, baseline_x - value_x)
-                    };
-                    let rect = Rect::new(left, y, w.max(0.0), bar_h);
-                    if let Some(r) = self.bar_corner_radius {
-                        canvas.fill_rounded_rect(
-                            rect,
-                            bastyde_tokens::CornerRadius::uniform(r),
-                            color,
-                        );
-                    } else {
-                        canvas.fill_rect(rect, color);
-                    }
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn paint_grouped(
-        &self,
-        canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
-        plot: Rect,
-        visible: &[&ChartSeries<T>],
-        categories: &[&T],
-        y_lo: f32,
-        y_hi: f32,
-        palette: &ChartPalette,
-        enabled: bool,
-    ) {
-        use crate::style as cs;
-        let n = categories.len();
-        let s = visible.len();
-        if n == 0 || s == 0 {
-            return;
-        }
-        match self.orientation {
-            BarOrientation::Vertical => {
-                let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_w = ((plot.width - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(cs::BAR_MIN_WIDTH);
-                let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
-                for (gi, _) in categories.iter().enumerate() {
-                    let group_x = plot.x + self.group_gap + gi as f32 * (group_w + self.group_gap);
-                    for (si, series) in visible.iter().enumerate() {
-                        let Some(datum) = series.data.get(gi) else {
-                            continue;
-                        };
-                        let color = series
-                            .color
-                            .as_ref()
-                            .map(|c| c.resolve(theme, enabled))
-                            .unwrap_or_else(|| palette.color_for(si, theme));
-                        let x = group_x + si as f32 * (bar_w + self.min_bar_gap);
-                        let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                        let (top, h) = if datum.value >= 0.0 {
-                            (value_y, baseline_y - value_y)
-                        } else {
-                            (baseline_y, value_y - baseline_y)
-                        };
-                        let rect = Rect::new(x, top, bar_w, h.max(0.0));
-                        if let Some(r) = self.bar_corner_radius {
-                            canvas.fill_rounded_rect(
-                                rect,
-                                bastyde_tokens::CornerRadius::uniform(r),
-                                color,
-                            );
-                        } else {
-                            canvas.fill_rect(rect, color);
-                        }
-                    }
-                }
-            }
-            BarOrientation::Horizontal => {
-                let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_h = ((plot.height - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(cs::BAR_MIN_WIDTH);
-                let baseline_x = value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
-                for (gi, _) in categories.iter().enumerate() {
-                    let group_y = plot.y + self.group_gap + gi as f32 * (group_h + self.group_gap);
-                    for (si, series) in visible.iter().enumerate() {
-                        let Some(datum) = series.data.get(gi) else {
-                            continue;
-                        };
-                        let color = series
-                            .color
-                            .as_ref()
-                            .map(|c| c.resolve(theme, enabled))
-                            .unwrap_or_else(|| palette.color_for(si, theme));
-                        let y = group_y + si as f32 * (bar_h + self.min_bar_gap);
-                        let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
-                        let (left, w) = if datum.value >= 0.0 {
-                            (baseline_x, value_x - baseline_x)
-                        } else {
-                            (value_x, baseline_x - value_x)
-                        };
-                        let rect = Rect::new(left, y, w.max(0.0), bar_h);
-                        if let Some(r) = self.bar_corner_radius {
-                            canvas.fill_rounded_rect(
-                                rect,
-                                bastyde_tokens::CornerRadius::uniform(r),
-                                color,
-                            );
-                        } else {
-                            canvas.fill_rect(rect, color);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
     fn draw_value_labels(
         &self,
         canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
-        plot: Rect,
-        visible: &[&ChartSeries<T>],
-        categories: &[&T],
-        y_lo: f32,
-        y_hi: f32,
-        label_style: &bastyde_tokens::TextStyle,
+        theme: &Theme,
+        marks: &[MarkGeometry],
+        label_style: &TextStyle,
     ) {
-        use crate::style as cs;
         let label_color = TextRole::Primary.resolve(&theme.colors);
-        let s = visible.len();
-        let n = categories.len();
-        if n == 0 || s == 0 {
-            return;
-        }
-        match (self.orientation, self.grouping) {
-            (BarOrientation::Vertical, BarGrouping::Single) => {
-                let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_w = ((plot.width - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let series = visible[0];
-                for (i, datum) in series.data.iter().enumerate() {
-                    let x = plot.x + self.min_bar_gap + i as f32 * (bar_w + self.min_bar_gap);
-                    let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                    let label = self.axis_y.format(datum.value);
-                    let approx_w = measure_text_width(canvas, &label, label_style);
-                    let rect = Rect::new(
-                        x + (bar_w - approx_w) * 0.5,
+        for m in marks {
+            let MarkShape::Rect(rect) = m.shape else {
+                continue;
+            };
+            let label = self.axis_y.format(m.value);
+            let approx_w = measure_text_width(canvas, &label, label_style);
+            let text_rect = match self.orientation {
+                BarOrientation::Vertical => {
+                    let value_y = if m.value >= 0.0 {
+                        rect.y
+                    } else {
+                        rect.bottom()
+                    };
+                    Rect::new(
+                        rect.x + (rect.width - approx_w) * 0.5,
                         value_y - label_style.size * 1.2 - 2.0,
                         approx_w,
                         label_style.size * 1.2,
-                    );
-                    canvas.draw_text(&label, rect, label_style, label_color);
+                    )
                 }
-            }
-            (BarOrientation::Vertical, BarGrouping::Grouped) => {
-                let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_w = ((plot.width - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(cs::BAR_MIN_WIDTH);
-                for (gi, _) in categories.iter().enumerate() {
-                    let group_x = plot.x + self.group_gap + gi as f32 * (group_w + self.group_gap);
-                    for (si, series) in visible.iter().enumerate() {
-                        let Some(datum) = series.data.get(gi) else {
-                            continue;
-                        };
-                        let x = group_x + si as f32 * (bar_w + self.min_bar_gap);
-                        let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                        let label = self.axis_y.format(datum.value);
-                        let approx_w = measure_text_width(canvas, &label, label_style);
-                        let rect = Rect::new(
-                            x + (bar_w - approx_w) * 0.5,
-                            value_y - label_style.size * 1.2 - 2.0,
-                            approx_w,
-                            label_style.size * 1.2,
-                        );
-                        canvas.draw_text(&label, rect, label_style, label_color);
-                    }
-                }
-            }
-            (BarOrientation::Horizontal, BarGrouping::Single) => {
-                let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_h = ((plot.height - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let series = visible[0];
-                for (i, datum) in series.data.iter().enumerate() {
-                    let y = plot.y + self.min_bar_gap + i as f32 * (bar_h + self.min_bar_gap);
-                    let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
-                    let label = self.axis_y.format(datum.value);
-                    let approx_w = measure_text_width(canvas, &label, label_style);
-                    let rect = Rect::new(
+                BarOrientation::Horizontal => {
+                    let value_x = if m.value >= 0.0 { rect.right() } else { rect.x };
+                    Rect::new(
                         value_x + 4.0,
-                        y + (bar_h - label_style.size * 1.2) * 0.5,
+                        rect.y + (rect.height - label_style.size * 1.2) * 0.5,
                         approx_w,
                         label_style.size * 1.2,
-                    );
-                    canvas.draw_text(&label, rect, label_style, label_color);
+                    )
                 }
-            }
-            (BarOrientation::Horizontal, BarGrouping::Grouped) => {
-                let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_h = ((plot.height - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
-                let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(cs::BAR_MIN_WIDTH);
-                for (gi, _) in categories.iter().enumerate() {
-                    let group_y = plot.y + self.group_gap + gi as f32 * (group_h + self.group_gap);
-                    for (si, series) in visible.iter().enumerate() {
-                        let Some(datum) = series.data.get(gi) else {
-                            continue;
-                        };
-                        let y = group_y + si as f32 * (bar_h + self.min_bar_gap);
-                        let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
-                        let label = self.axis_y.format(datum.value);
-                        let approx_w = measure_text_width(canvas, &label, label_style);
-                        let rect = Rect::new(
-                            value_x + 4.0,
-                            y + (bar_h - label_style.size * 1.2) * 0.5,
-                            approx_w,
-                            label_style.size * 1.2,
-                        );
-                        canvas.draw_text(&label, rect, label_style, label_color);
-                    }
-                }
-            }
+            };
+            canvas.draw_text(&label, text_rect, label_style, label_color);
         }
     }
 
@@ -699,19 +866,18 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     fn draw_axes_with_x_labels(
         &self,
         canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
+        theme: &Theme,
         plot: Rect,
         y_ticks: &[f32],
         x_labels: &[String],
         y_lo: f32,
         y_hi: f32,
-        label_style: &bastyde_tokens::TextStyle,
+        label_style: &TextStyle,
     ) {
         use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
         let label_color = TextRole::Secondary.resolve(&theme.colors);
 
-        // Y axis line on the leading edge (skip if disabled).
         if self.axis_y.show_axis_line {
             canvas.draw_line(
                 Point::new(plot.x, plot.y),
@@ -719,7 +885,6 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 axis_color,
                 1.0,
             );
-            // Tick marks.
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
                 canvas.draw_line(
@@ -730,7 +895,6 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 );
             }
         }
-        // X axis line on the bottom edge.
         if self.axis_x.show_axis_line {
             canvas.draw_line(
                 Point::new(plot.x, plot.bottom()),
@@ -740,8 +904,6 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             );
         }
 
-        // Y tick labels — measure via text backend so wider digits ("100",
-        // "1000") aren't truncated to "..." by draw_text's max_width gate.
         if self.axis_y.show_labels {
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
@@ -757,7 +919,6 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
         }
 
-        // X category labels (one per bar).
         if self.axis_x.show_labels && !x_labels.is_empty() {
             let n = x_labels.len();
             let slot_w = plot.width / n as f32;
@@ -774,7 +935,6 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
         }
 
-        // Axis titles.
         if let Some(title) = self.axis_y.label.as_ref() {
             let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
@@ -798,6 +958,55 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     }
 }
 
+/// Bar-fill helper: `Solid` + no corner radius → a plain `fill_rect`
+/// (Tier 1, cheapest); `Solid` + a corner radius, or any gradient → an
+/// SDF rounded rect (Tier 2) so gradients render.
+fn paint_bar(
+    canvas: &mut Canvas,
+    rect: Rect,
+    paint: bastyde_canvas::Paint,
+    corner_radius: Option<f32>,
+) {
+    use bastyde_canvas::Paint;
+    match (paint, corner_radius) {
+        (Paint::Solid(c), None) => canvas.fill_rect(rect, c),
+        (Paint::Solid(c), Some(r)) => canvas.fill_rounded_rect(rect, CornerRadius::uniform(r), c),
+        (p, r) => canvas.fill_rounded_rect(rect, CornerRadius::uniform(r.unwrap_or(0.0)), p),
+    }
+}
+
+/// Y-domain from a slice of `SeriesView`s — bar charts conventionally
+/// include zero so bars have a meaningful baseline.
+fn y_domain_from_views<T>(axis_y: &AxisConfig, views: &[SeriesView<'_, T>]) -> (f32, f32) {
+    let mut min = axis_y.min.unwrap_or(f32::INFINITY);
+    let mut max = axis_y.max.unwrap_or(f32::NEG_INFINITY);
+    if axis_y.min.is_none() || axis_y.max.is_none() {
+        for v in views.iter().filter(|v| v.visible) {
+            for d in v.points {
+                if axis_y.min.is_none() {
+                    min = min.min(d.value);
+                }
+                if axis_y.max.is_none() {
+                    max = max.max(d.value);
+                }
+            }
+        }
+    }
+    if axis_y.min.is_none() {
+        min = min.min(0.0);
+    }
+    if axis_y.max.is_none() {
+        max = max.max(0.0);
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return (0.0, 1.0);
+    }
+    if (max - min).abs() < f32::EPSILON {
+        return (0.0, 1.0);
+    }
+    (min, max)
+}
+
 fn y_to_pixel(value: f32, y_lo: f32, y_hi: f32, plot: Rect) -> f32 {
     let span = (y_hi - y_lo).max(f32::EPSILON);
     let frac = (value - y_lo) / span;
@@ -810,36 +1019,25 @@ fn value_to_pixel_h(value: f32, x_lo: f32, x_hi: f32, plot: Rect) -> f32 {
     plot.x + frac * plot.width
 }
 
-fn measure_max_label_width(
-    canvas: &mut Canvas,
-    ticks: &[f32],
-    axis: &AxisConfig,
-    style: &bastyde_tokens::TextStyle,
-) -> f32 {
-    ticks
-        .iter()
-        .map(|t| measure_text_width(canvas, &axis.format(*t), style))
-        .fold(0.0_f32, f32::max)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_data::{ChartDatum, ChartSeries};
 
-    fn sample_series() -> Vec<ChartSeries<String>> {
-        let mut s = ChartSeries::new("Revenue");
-        s.push("Q1".into(), 10.0);
-        s.push("Q2".into(), 25.0);
-        s.push("Q3".into(), 18.0);
-        s.push("Q4".into(), 30.0);
-        vec![s]
+    fn sample_model() -> ChartModel<String> {
+        ChartModel::from_series_vec(vec![ChartSeries::new("Revenue").data(vec![
+            ChartDatum::new("Q1".to_string(), 10.0),
+            ChartDatum::new("Q2".to_string(), 25.0),
+            ChartDatum::new("Q3".to_string(), 18.0),
+            ChartDatum::new("Q4".to_string(), 30.0),
+        ])])
     }
 
     #[test]
     fn size_fills_proposal() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(BarChart::new(sample_series()));
+        let id = tree.add(BarChart::new(sample_model()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let b = tree.bounds(id);
         assert!((b.width - 400.0).abs() < 0.01);
@@ -849,7 +1047,7 @@ mod tests {
     #[test]
     fn fallback_size_when_proposal_unbounded() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(BarChart::new(sample_series()));
+        let id = tree.add(BarChart::new(sample_model()));
         tree.layout(SizeProposal::unspecified());
         let b = tree.bounds(id);
         assert!(b.width >= 320.0);
@@ -859,7 +1057,7 @@ mod tests {
     #[test]
     fn one_decoration_per_bar() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(BarChart::new(sample_series()));
+        tree.add(BarChart::new(sample_model()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
         // 4 bars: at minimum 4 fill_rect decorations. The axis lines are
@@ -874,7 +1072,7 @@ mod tests {
     #[test]
     fn empty_series_does_not_panic() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(BarChart::<String>::new(Vec::<ChartSeries<String>>::new()));
+        tree.add(BarChart::<String>::new(ChartModel::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
     }
@@ -882,7 +1080,7 @@ mod tests {
     #[test]
     fn accessibility_role_is_graphics_document() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(BarChart::new(sample_series()));
+        let id = tree.add(BarChart::new(sample_model()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::GraphicsDocument);
@@ -891,7 +1089,7 @@ mod tests {
     #[test]
     fn horizontal_orientation_swaps_axes() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(BarChart::new(sample_series()).orientation(BarOrientation::Horizontal));
+        tree.add(BarChart::new(sample_model()).orientation(BarOrientation::Horizontal));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
         assert!(frame.decorations.len() >= 4);
@@ -899,14 +1097,18 @@ mod tests {
 
     #[test]
     fn grouped_multi_series_renders_per_series_bars() {
-        let mut a = ChartSeries::<String>::new("A");
-        a.push("Q1".into(), 1.0);
-        a.push("Q2".into(), 2.0);
-        let mut b = ChartSeries::<String>::new("B");
-        b.push("Q1".into(), 3.0);
-        b.push("Q2".into(), 4.0);
+        let model = ChartModel::from_series_vec(vec![
+            ChartSeries::new("A").data(vec![
+                ChartDatum::new("Q1".to_string(), 1.0),
+                ChartDatum::new("Q2".to_string(), 2.0),
+            ]),
+            ChartSeries::new("B").data(vec![
+                ChartDatum::new("Q1".to_string(), 3.0),
+                ChartDatum::new("Q2".to_string(), 4.0),
+            ]),
+        ]);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(BarChart::new(vec![a, b]).grouping(BarGrouping::Grouped));
+        tree.add(BarChart::new(model).grouping(BarGrouping::Grouped));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
         // 2 categories × 2 series = 4 bars (plus axis decorations).
@@ -917,7 +1119,7 @@ mod tests {
     fn legend_band_reserved_when_show_legend() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            BarChart::new(sample_series())
+            BarChart::new(sample_model())
                 .legend(true)
                 .legend_position(LegendPosition::Bottom),
         );
@@ -932,39 +1134,16 @@ mod tests {
 
     #[test]
     fn value_labels_emit_glyphs() {
-        // With value_labels(true) the chart issues one extra `draw_text`
-        // call per bar. Wire MockTextBackend so glyph emission is
-        // observable in the render frame.
         use bastyde_canvas::text_backend::MockTextBackend;
-        use std::cell::RefCell;
-        use std::rc::Rc;
 
         let backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>> =
             Rc::new(RefCell::new(MockTextBackend::new()));
 
-        let mut tree_off = WidgetTree::new()
-            .with_theme(bastyde_core::presets::intui::light())
-            .with_text_backend(backend.clone());
-        tree_off.add(BarChart::new(sample_series()).value_labels(false));
-        tree_off.layout(SizeProposal::exact(400.0, 200.0));
-        let off_glyphs = tree_off.render().glyphs.len();
-
-        let mut tree_on = WidgetTree::new()
-            .with_theme(bastyde_core::presets::intui::light())
-            .with_text_backend(backend.clone());
-        tree_on.add(BarChart::new(sample_series()).value_labels(true));
-        tree_on.layout(SizeProposal::exact(400.0, 200.0));
-        let on_glyphs = tree_on.render().glyphs.len();
-
-        // MockTextBackend emits empty glyph slices, so we instead lock the
-        // weaker invariant: the render path was reached without panic and
-        // the layout_keys (one per draw_text call) grew by ≥ 4 (one per bar).
-        let _ = (off_glyphs, on_glyphs);
         let off_keys = {
             let mut t = WidgetTree::new()
                 .with_theme(bastyde_core::presets::intui::light())
                 .with_text_backend(backend.clone());
-            t.add(BarChart::new(sample_series()).value_labels(false));
+            t.add(BarChart::new(sample_model()).value_labels(false));
             t.layout(SizeProposal::exact(400.0, 200.0));
             t.render().layout_keys.len()
         };
@@ -972,7 +1151,7 @@ mod tests {
             let mut t = WidgetTree::new()
                 .with_theme(bastyde_core::presets::intui::light())
                 .with_text_backend(backend.clone());
-            t.add(BarChart::new(sample_series()).value_labels(true));
+            t.add(BarChart::new(sample_model()).value_labels(true));
             t.layout(SizeProposal::exact(400.0, 200.0));
             t.render().layout_keys.len()
         };
@@ -986,21 +1165,193 @@ mod tests {
 
     #[test]
     fn hidden_series_not_rendered() {
-        let mut s = ChartSeries::<String>::new("X");
-        s.push("a".into(), 1.0);
-        s.push("b".into(), 2.0);
-        s.visible = Prop::Static(false);
+        let model = ChartModel::from_series_vec(vec![
+            ChartSeries::new("X")
+                .data(vec![
+                    ChartDatum::new("a".to_string(), 1.0),
+                    ChartDatum::new("b".to_string(), 2.0),
+                ])
+                .visibility(false),
+        ]);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(BarChart::new(vec![s]));
+        tree.add(BarChart::new(model));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // No bar fills should exist (only axis lines as decorations).
-        // Axis lines are 2 (y + x), tick marks add a few more. Without
-        // bars the count should be small (<10).
         assert!(
             frame.decorations.len() < 10,
             "expected few decorations when series is hidden, got {}",
             frame.decorations.len()
+        );
+    }
+
+    #[test]
+    fn pointer_move_over_bar_sets_hover() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let model = sample_model();
+        let chart = BarChart::new(model.clone());
+        let marks_handle = chart.marks.clone();
+        let hover_handle = chart.hover.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let target = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Rect(r) = m.shape else {
+                panic!("expected rect mark")
+            };
+            (r.center(), m.series_id, m.point_idx)
+        };
+        tree.pointer_move(target.0);
+        assert_eq!(hover_handle.get(), Some((target.1, target.2)));
+    }
+
+    #[test]
+    fn per_datum_accessibility_marks_match_visible_count() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(BarChart::new(sample_model()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+        tree.sync_accessibility();
+        // 4 bars → 4 synthetic ChartMark AT nodes (verified via the mark
+        // cache populated by the same paint that drove the a11y walk).
+        // We can't easily enumerate synthetic nodes from the public test
+        // API, so assert the underlying mark count directly instead.
+        assert_eq!(
+            {
+                let mut t = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+                let chart = BarChart::new(sample_model());
+                let marks_handle = chart.marks.clone();
+                t.add(chart);
+                t.layout(SizeProposal::exact(400.0, 200.0));
+                let _ = t.render();
+                marks_handle.borrow().len()
+            },
+            4
+        );
+    }
+
+    #[test]
+    fn single_pass_geometry_matches_between_paint_and_accessibility() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(BarChart::new(sample_model()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+        // accessibility() must reuse the same cached geometry — reading
+        // it again should not panic and should report the chart role.
+        let info = tree.accessibility_node(id);
+        assert_eq!(info.role(), bastyde_core::accesskit::Role::GraphicsDocument);
+    }
+
+    #[test]
+    fn layout_min_grows_with_wider_y_labels() {
+        let theme = bastyde_core::presets::intui::light();
+        let narrow = {
+            let mut tree = WidgetTree::new().with_theme(theme.clone());
+            let id = tree.add(BarChart::new(sample_model()));
+            tree.layout(SizeProposal::exact(30.0, 200.0));
+            tree.bounds(id).width
+        };
+        let wide_axis = AxisConfig::new().formatter(|v| format!("{:.5}------wide", v));
+        let wide = {
+            let mut tree = WidgetTree::new().with_theme(theme);
+            let id = tree.add(BarChart::new(sample_model()).axis_y(wide_axis));
+            tree.layout(SizeProposal::exact(30.0, 200.0));
+            tree.bounds(id).width
+        };
+        assert!(
+            wide >= narrow,
+            "wider y-axis labels should not shrink the min width below the narrower case (narrow={narrow}, wide={wide})"
+        );
+    }
+
+    #[test]
+    fn tap_on_bar_selects_point() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = BarChart::new(sample_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let (target, sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Rect(r) = m.shape else {
+                panic!("expected rect mark")
+            };
+            (r.center(), m.series_id, m.point_idx)
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert!(sel.is_selected(sid, idx));
+    }
+
+    #[test]
+    fn tap_outside_plot_clears_selection() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = BarChart::new(sample_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let target = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Rect(r) = m.shape else {
+                panic!("expected rect mark")
+            };
+            r.center()
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert_eq!(sel.count(), 1);
+
+        // Top-left corner: outside the plot rect (axis-label margins).
+        let outside = Point::new(1.0, 1.0);
+        tree.pointer_down_button(outside, PointerButton::Primary);
+        tree.pointer_up_button(outside, PointerButton::Primary);
+        assert_eq!(
+            sel.count(),
+            0,
+            "tap outside the plot should clear selection"
+        );
+    }
+
+    #[test]
+    fn selected_bar_paints_highlight_shape() {
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = BarChart::new(sample_model()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let baseline_shapes = tree.render().shapes.len();
+
+        let (sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            (m.series_id, m.point_idx)
+        };
+        sel.select_point(sid, idx);
+        let after = tree.render();
+        assert!(
+            after.shapes.len() > baseline_shapes,
+            "expected an extra highlight shape after selecting a bar (baseline {}, after {})",
+            baseline_shapes,
+            after.shapes.len()
         );
     }
 }

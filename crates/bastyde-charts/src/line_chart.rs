@@ -3,52 +3,58 @@
 
 //! LineChart — points connected by polylines, single or multi-series.
 //!
-//! Lines, optional point markers, axes, grid, and legend, plus optional area
-//! fill (`area_fill` / `area_fill_opacity`) and an interactive hover tooltip
-//! (`hover_tooltip`) with a nearest-point marker and edge-flip placement so the
-//! tooltip never clips the plot rect.
+//! Lines, optional point markers, axes, grid, and legend, plus optional
+//! area fill (`area_fill` / `area_fill_opacity`) and an interactive
+//! hover tooltip (`hover_tooltip`) with a nearest-point marker and
+//! edge-flip placement so the tooltip never clips the plot rect.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use bastyde_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
+use bastyde_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
+use bastyde_core::Theme;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, WidgetEvent};
+use bastyde_core::gesture::TapEvent;
+use bastyde_core::paint_prop::PaintProp;
 use bastyde_core::signal::{Prop, Signal};
-use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use bastyde_core::styles::{ChartFillContext, ChartStyle, SharedChartStyle};
+use bastyde_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
+use bastyde_data::{ChartModel, ChartSelection, SeriesId, SeriesView};
+use bastyde_tokens::{BorderRole, TextRole, TextStyle, TextStyleRole};
 
-use crate::axis::{AxisConfig, auto_tick_count, nice_ticks};
-use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
-use crate::legend::{legend_main_axis_size, orientation_for_position, paint_embedded_legend};
+use crate::axis::AxisConfig;
+use crate::hit::{self, MarkGeometry, MarkShape};
+use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_plot_geometry};
+use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
-use crate::series::ChartSeries;
+use crate::recipe_style::RecipeChartStyle;
 use crate::text::measure_text_width;
 
-/// One screen-space data point cached during paint, used by the hover
-/// hit-test.
-#[derive(Debug, Clone)]
-struct PointHit {
-    series_idx: usize,
-    datum_idx: usize,
-    screen: Point,
-    series_name: String,
-    category_label: String,
-    value: f32,
+/// Cache key for the memoized [`PlotGeometry`] — a miss recomputes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GeometryKey {
+    bounds: Rect,
+    structure_version: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HoveredPoint {
-    series_idx: usize,
-    datum_idx: usize,
+/// Text-measurement context stashed during `paint()` so `accessibility()`
+/// can recompute the same geometry without a `Canvas`/`Theme`.
+struct PaintSnapshot {
+    backend: Option<Rc<RefCell<dyn TextBackend>>>,
+    label_style: TextStyle,
 }
 
 pub struct LineChart<T: Clone + 'static> {
-    series: Prop<Vec<ChartSeries<T>>>,
+    model: ChartModel<T>,
     show_points: bool,
     show_area_fill: bool,
     area_fill_opacity: f32,
@@ -56,29 +62,28 @@ pub struct LineChart<T: Clone + 'static> {
     show_hover_tooltip: bool,
     show_legend: bool,
     legend_position: LegendPosition,
+    legend_interactive: bool,
     line_width: Option<f32>,
     point_radius: Option<f32>,
     axis_x: AxisConfig,
     axis_y: AxisConfig,
     palette: Prop<ChartPalette>,
+    style_override: Option<SharedChartStyle>,
+    selection: Option<ChartSelection>,
+
     /// Live hover state; bound at `RepaintOnly` so hovering doesn't relayout.
-    hover: Signal<Option<HoveredPoint>>,
-    /// Snapshot of all visible data points in screen coordinates, written
-    /// during paint and read by the on_pointer_event handler.
-    hit_index: Rc<RefCell<Vec<PointHit>>>,
-    /// Plot rectangle (window-space), written during paint.
-    plot_rect: Rc<RefCell<Rect>>,
-    /// Widget window-space origin, written during paint. Pointer events
-    /// arrive widget-local, so the handler reconstructs the window point
-    /// (`position + origin`) before comparing against the window-space
-    /// `plot_rect` / `hit_index.screen` (the latter is shared with paint).
-    origin: Rc<std::cell::Cell<Point>>,
+    hover: Signal<Option<(SeriesId, usize)>>,
+    marks: Rc<RefCell<Vec<MarkGeometry>>>,
+    bounds: Rc<Cell<Rect>>,
+    geometry_cache: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
+    paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
+    legend_id: Option<WidgetId>,
 }
 
 impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
-    pub fn new(series: impl Into<Prop<Vec<ChartSeries<T>>>>) -> Self {
+    pub fn new(model: ChartModel<T>) -> Self {
         Self {
-            series: series.into(),
+            model,
             show_points: true,
             show_area_fill: false,
             area_fill_opacity: 0.15,
@@ -86,15 +91,20 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             show_hover_tooltip: true,
             show_legend: false,
             legend_position: LegendPosition::Bottom,
+            legend_interactive: false,
             line_width: None,
             point_radius: None,
             axis_x: AxisConfig::new(),
             axis_y: AxisConfig::new(),
             palette: Prop::Static(ChartPalette::FromTheme),
+            style_override: None,
+            selection: None,
             hover: Signal::new(None),
-            hit_index: Rc::new(RefCell::new(Vec::new())),
-            plot_rect: Rc::new(RefCell::new(Rect::ZERO)),
-            origin: Rc::new(std::cell::Cell::new(Point::ZERO)),
+            marks: Rc::new(RefCell::new(Vec::new())),
+            bounds: Rc::new(Cell::new(Rect::ZERO)),
+            geometry_cache: Rc::new(RefCell::new(None)),
+            paint_snapshot: Rc::new(RefCell::new(None)),
+            legend_id: None,
         }
     }
 
@@ -133,6 +143,13 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         self
     }
 
+    /// Make the embedded legend interactive: clicking (or Space on a
+    /// focused) row toggles that series' visibility. Default `false`.
+    pub fn legend_interactive(mut self, on: bool) -> Self {
+        self.legend_interactive = on;
+        self
+    }
+
     pub fn line_width(mut self, w: f32) -> Self {
         self.line_width = Some(w);
         self
@@ -157,6 +174,32 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         self.palette = p.into();
         self
     }
+
+    /// Per-call [`ChartStyle`] override. Takes precedence over
+    /// `theme.style_slots.chart`.
+    pub fn style(mut self, style: impl ChartStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Wire a shared [`ChartSelection`] into this chart: clicking a
+    /// point selects its `(series, point)` key (Ctrl/Cmd-click toggles
+    /// it in [`bastyde_data::SelectionMode::Multi`]), clicking empty
+    /// space clears the selection, and every selected point paints an
+    /// accent-colored ring. Pass a clone of the same `ChartSelection`
+    /// to other charts/widgets to keep selection state in sync.
+    pub fn selection(mut self, selection: ChartSelection) -> Self {
+        self.selection = Some(selection);
+        self
+    }
+
+    /// A clone of the live hover signal — the `(series, point)` key
+    /// currently under the pointer, or `None`. Lets an app observe
+    /// hover state from outside the chart (a synced detail panel, a
+    /// custom tooltip) without re-implementing hit-testing.
+    pub fn hover_signal(&self) -> Signal<Option<(SeriesId, usize)>> {
+        self.hover.clone()
+    }
 }
 
 impl<T: Clone + 'static> std::fmt::Debug for LineChart<T> {
@@ -171,357 +214,526 @@ impl<T: Clone + 'static> std::fmt::Debug for LineChart<T> {
 impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        self.series
-            .register_if_bound(id, registry, BindingLevel::Relayout);
-        self.palette
-            .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        // Hover repaints the chart but never relayouts.
-        self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+        {
+            let registry = ctx.binding_registry();
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::Relayout);
+            self.model
+                .structure_version()
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            self.model
+                .style_version()
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.palette
+                .register_if_bound(id, registry, BindingLevel::RepaintOnly);
+            // Hover repaints the chart but never relayouts.
+            self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
+            if let Some(selection) = &self.selection {
+                selection
+                    .selection_signal()
+                    .bind_to(id, registry, BindingLevel::RepaintOnly);
+            }
+        }
 
-        if self.show_hover_tooltip {
-            let hit_index = self.hit_index.clone();
-            let plot_rect = self.plot_rect.clone();
-            let origin = self.origin.clone();
-            let hover = self.hover.clone();
-            let handlers = HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
-                WidgetEvent::PointerMove { position } => {
-                    // `position` is widget-local; `plot_rect` and the
-                    // cached hit points are window-space, so reconstruct
-                    // the window point.
-                    let o = origin.get();
-                    let position = &Point::new(position.x + o.x, position.y + o.y);
-                    let plot = *plot_rect.borrow();
-                    if !plot.contains(*position) {
-                        if hover.get().is_some() {
-                            hover.set(None);
+        if self.show_hover_tooltip || self.selection.is_some() {
+            let mut handlers = HandlerSet::new();
+
+            if self.show_hover_tooltip {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                let hover = self.hover.clone();
+                handlers =
+                    handlers.on_pointer_event(move |event, _ctx: &mut EventContext| match event {
+                        WidgetEvent::PointerMove { position } => {
+                            let b = bounds.get();
+                            let window_pos = Point::new(position.x + b.x, position.y + b.y);
+                            let plot = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot);
+                            let Some(plot) = plot else {
+                                return EventResponse::Ignored;
+                            };
+                            if !plot.contains(window_pos) {
+                                if hover.get().is_some() {
+                                    hover.set(None);
+                                }
+                                return EventResponse::Ignored;
+                            }
+                            let hit = hit::nearest_point(&marks.borrow(), window_pos);
+                            match hit.and_then(|idx| {
+                                marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx))
+                            }) {
+                                Some(key) => {
+                                    if hover.get() != Some(key) {
+                                        hover.set(Some(key));
+                                    }
+                                }
+                                None => {
+                                    if hover.get().is_some() {
+                                        hover.set(None);
+                                    }
+                                }
+                            }
+                            EventResponse::Ignored
                         }
-                        return EventResponse::Ignored;
-                    }
-                    let hits = hit_index.borrow();
-                    if hits.is_empty() {
-                        return EventResponse::Ignored;
-                    }
-                    let mut best_idx = 0_usize;
-                    let mut best_d2 = f32::INFINITY;
-                    for (i, h) in hits.iter().enumerate() {
-                        let dx = h.screen.x - position.x;
-                        let dy = h.screen.y - position.y;
-                        let d2 = dx * dx + dy * dy;
-                        if d2 < best_d2 {
-                            best_d2 = d2;
-                            best_idx = i;
+                        WidgetEvent::PointerLeave => {
+                            if hover.get().is_some() {
+                                hover.set(None);
+                            }
+                            EventResponse::Ignored
                         }
-                    }
-                    let h = &hits[best_idx];
-                    let hp = HoveredPoint {
-                        series_idx: h.series_idx,
-                        datum_idx: h.datum_idx,
+                        _ => EventResponse::Ignored,
+                    });
+            }
+
+            if let Some(selection) = self.selection.clone() {
+                let marks = self.marks.clone();
+                let bounds = self.bounds.clone();
+                let geometry_cache = self.geometry_cache.clone();
+                handlers = handlers.on_tap(move |tap: &TapEvent, _ctx: &mut EventContext| {
+                    let b = bounds.get();
+                    let window_pos = Point::new(tap.position.x + b.x, tap.position.y + b.y);
+                    let Some(plot) = geometry_cache.borrow().as_ref().map(|(_, g)| g.plot) else {
+                        return;
                     };
-                    let prev = hover.get();
-                    if prev.map(|p| (p.series_idx, p.datum_idx))
-                        != Some((hp.series_idx, hp.datum_idx))
+                    if !plot.contains(window_pos) {
+                        selection.clear();
+                        return;
+                    }
+                    let hit = hit::nearest_point(&marks.borrow(), window_pos);
+                    match hit
+                        .and_then(|idx| marks.borrow().get(idx).map(|m| (m.series_id, m.point_idx)))
                     {
-                        hover.set(Some(hp));
+                        Some((sid, idx)) => {
+                            if tap.modifiers.ctrl() || tap.modifiers.super_key() {
+                                selection.toggle_point(sid, idx);
+                            } else {
+                                selection.select_point(sid, idx);
+                            }
+                        }
+                        None => selection.clear(),
                     }
-                    EventResponse::Ignored
-                }
-                WidgetEvent::PointerLeave => {
-                    if hover.get().is_some() {
-                        hover.set(None);
-                    }
-                    EventResponse::Ignored
-                }
-                _ => EventResponse::Ignored,
-            });
+                });
+            }
+
             ctx.apply_self_handlers(handlers);
         }
-        Vec::new()
+
+        if self.show_legend {
+            let legend = ChartLegend::new(self.model.clone())
+                .palette(self.palette.clone())
+                .orientation(orientation_for_position(self.legend_position))
+                .interactive(self.legend_interactive);
+            let legend_id = ctx.add(legend);
+            self.legend_id = Some(legend_id);
+            vec![legend_id]
+        } else {
+            self.legend_id = None;
+            Vec::new()
+        }
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        Size::new(
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let ideal = Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(200.0),
-        )
-        .into()
+        );
+        let min = self.compute_intrinsic_min(ctx);
+        LayoutResponse::shrinkable(ideal, min, 1.0)
     }
 
     fn place_children(
         &self,
-        _bounds: Rect,
+        bounds: Rect,
         _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
     ) {
+        self.bounds.set(bounds);
+        if let Some(legend_id) = self.legend_id {
+            let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+            let geometry = self.ensure_geometry(bounds, ctx.text_backend, &label_style);
+            for child in children.iter_mut() {
+                if child.id == legend_id {
+                    child.origin = Point::new(geometry.legend.x, geometry.legend.y);
+                    child.size = Size::new(geometry.legend.width, geometry.legend.height);
+                }
+            }
+        }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        use crate::style as cs;
         let theme = ctx.theme;
         let enabled = ctx.effective_enabled;
-        use crate::style as cs;
 
-        let series_vec = self.series.get();
-        if series_vec.is_empty() {
+        if self.model.series_count() == 0 {
             return;
         }
 
-        let visible: Vec<&ChartSeries<T>> = series_vec.iter().filter(|s| s.visible.get()).collect();
-        if visible.is_empty() {
-            return;
-        }
-
-        // Y-domain (auto from data unless user pinned it).
-        let (y_min, y_max) = self.compute_y_domain(&visible);
-        if (y_max - y_min).abs() < f32::EPSILON {
-            return;
-        }
+        let style: SharedChartStyle = self
+            .style_override
+            .clone()
+            .or_else(|| theme.style_slots.chart.clone())
+            .unwrap_or_else(|| Rc::new(RecipeChartStyle));
 
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
-        let label_height = if self.axis_x.show_labels || self.axis_y.show_labels {
-            label_style.size * 1.2
-        } else {
-            0.0
-        };
-        let title_height = label_style.size * 1.2;
+        let backend = canvas.text_backend().cloned();
+        *self.paint_snapshot.borrow_mut() = Some(PaintSnapshot {
+            backend: backend.clone(),
+            label_style: label_style.clone(),
+        });
 
-        // Provisional ticks for label-width measurement.
-        let provisional = nice_ticks(y_min, y_max, auto_tick_count(bounds.height));
-        let y_label_max_width = if self.axis_y.show_labels {
-            measure_max_label_width(canvas, &provisional, &self.axis_y, &label_style)
-        } else {
-            0.0
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        let plot = geometry.plot;
+        if plot.width <= 0.0 || plot.height <= 0.0 {
+            return;
+        }
+
+        // Stash bounds for the on_pointer_event handler (window-space
+        // reconstruction: `position + bounds.origin`).
+        self.bounds.set(bounds);
+
+        let marks = self.compute_marks(&geometry);
+        *self.marks.borrow_mut() = marks.clone();
+
+        // ─── Grid lines ─────────────────────────────────────────────────
+        if self.show_grid {
+            let recipe = style.gridline(theme);
+            let stroke = hit::resolve_gridline_stroke(&recipe, self.axis_y.gridline_dash);
+            let color = recipe.color.resolve(theme);
+            for &t in &geometry.y_ticks {
+                let y = y_to_pixel(t, geometry.y_lo, geometry.y_hi, plot);
+                let mut path = Path::new();
+                path.move_to(Point::new(plot.x, y));
+                path.line_to(Point::new(plot.right(), y));
+                canvas.stroke_path(&path, color, stroke.clone());
+            }
+        }
+
+        // ─── Series (area fill first so lines paint on top) ─────────────
+        // Draw directly from `marks` (series-contiguous runs, in the same
+        // visible-series order `compute_marks` walked) so line/area/point
+        // geometry is never recomputed — one source of truth shared with
+        // the hit-test and AT paths.
+        let palette = self.palette.get();
+        let line_w = self.line_width.unwrap_or(cs::LINE_DEFAULT_WIDTH);
+        let point_r = self.point_radius.unwrap_or(cs::POINT_DEFAULT_RADIUS);
+
+        let mut color_lookup: HashMap<SeriesId, (usize, Option<ColorProp>)> = HashMap::new();
+        self.model.with_all_series(|views| {
+            let mut vi = 0usize;
+            for v in views {
+                if v.visible {
+                    color_lookup.insert(v.id, (vi, v.color.cloned()));
+                    vi += 1;
+                }
+            }
+        });
+
+        let baseline_y = y_to_pixel(
+            0.0_f32.max(geometry.y_lo).min(geometry.y_hi),
+            geometry.y_lo,
+            geometry.y_hi,
+            plot,
+        );
+        for series_marks in marks_by_series(&marks) {
+            let sid = series_marks[0].series_id;
+            let (si, color_prop) = color_lookup.get(&sid).cloned().unwrap_or((0, None));
+            let color = color_prop
+                .as_ref()
+                .map(|c| c.resolve(theme, enabled))
+                .unwrap_or_else(|| palette.color_for(si, theme));
+
+            let mut path = Path::new();
+            for (i, m) in series_marks.iter().enumerate() {
+                let MarkShape::Point { center, .. } = m.shape else {
+                    continue;
+                };
+                if i == 0 {
+                    path.move_to(center);
+                } else {
+                    path.line_to(center);
+                }
+            }
+
+            if self.show_area_fill && series_marks.len() > 1 {
+                let MarkShape::Point { center: first, .. } = series_marks[0].shape else {
+                    continue;
+                };
+                let MarkShape::Point { center: last, .. } =
+                    series_marks[series_marks.len() - 1].shape
+                else {
+                    continue;
+                };
+                let mut filled = path.clone();
+                filled.line_to(Point::new(last.x, baseline_y));
+                filled.line_to(Point::new(first.x, baseline_y));
+                filled.close();
+                let cfg = ChartFillContext {
+                    series_index: si,
+                    resolved_color: color,
+                    theme,
+                };
+                let fill = style.area_fill(&cfg, self.area_fill_opacity);
+                let paint = PaintProp::from_fill(&fill, &theme.colors).resolve(
+                    theme,
+                    enabled,
+                    filled.bounds().size(),
+                );
+                canvas.fill_path(&filled, paint);
+            }
+
+            canvas.stroke_path(&path, color, line_w);
+
+            if self.show_points {
+                for m in series_marks {
+                    if let MarkShape::Point { center, .. } = m.shape {
+                        canvas.fill_circle(center, point_r, color);
+                    }
+                }
+            }
+        }
+
+        // ─── Selection highlight ────────────────────────────────────────
+        if let Some(selection) = &self.selection {
+            for m in &marks {
+                if let MarkShape::Point { center, .. } = m.shape
+                    && selection.is_selected(m.series_id, m.point_idx)
+                {
+                    canvas.stroke_circle(
+                        center,
+                        cs::SELECTION_POINT_RING_RADIUS,
+                        theme.colors.accent,
+                        cs::SELECTION_STROKE_WIDTH,
+                    );
+                }
+            }
+        }
+
+        // ─── Axes ───────────────────────────────────────────────────────
+        let x_labels: Vec<String> = self.model.with_all_series(|views| {
+            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
+            if visible.is_empty() {
+                return Vec::new();
+            }
+            let n = visible[0].points.len();
+            visible[0]
+                .points
+                .iter()
+                .take(n)
+                .map(|d| format!("{}", d.category))
+                .collect()
+        });
+        self.draw_axes(
+            canvas,
+            theme,
+            plot,
+            &geometry.y_ticks,
+            &x_labels,
+            geometry.y_lo,
+            geometry.y_hi,
+            &label_style,
+        );
+
+        // ─── Hover marker + tooltip ─────────────────────────────────────
+        if self.show_hover_tooltip
+            && let Some((sid, idx)) = self.hover.get()
+            && let Some(m) = marks
+                .iter()
+                .find(|m| m.series_id == sid && m.point_idx == idx)
+            && let MarkShape::Point { center, .. } = m.shape
+        {
+            let (si, color_prop) = color_lookup.get(&sid).cloned().unwrap_or((0, None));
+            let marker_color = color_prop
+                .as_ref()
+                .map(|c| c.resolve(theme, enabled))
+                .unwrap_or_else(|| palette.color_for(si, theme));
+            canvas.stroke_circle(center, 6.0, marker_color, 2.0);
+            canvas.fill_circle(center, 3.0, marker_color);
+
+            let text = format!(
+                "{}: {} = {}",
+                m.series_name,
+                m.category_label,
+                self.axis_y.format(m.value)
+            );
+            hit::draw_mark_tooltip(canvas, theme, plot, center, &text, &label_style);
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(bastyde_core::accesskit::Role::GraphicsDocument);
+        let n_series = self.model.series_count();
+        let n_points = self
+            .model
+            .series_id_at(0)
+            .map(|s| self.model.point_count(s))
+            .unwrap_or(0);
+        builder.set_name(format!(
+            "Line chart: {} series, {} points",
+            n_series, n_points
+        ));
+
+        let bounds = self.bounds.get();
+        let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {
+            Some(s) => (s.backend.clone(), s.label_style.clone()),
+            None => (
+                None,
+                TextStyle {
+                    size: 11.0,
+                    ..TextStyle::default()
+                },
+            ),
         };
+        let geometry = self.ensure_geometry(bounds, backend.as_ref(), &label_style);
+        let marks = self.compute_marks(&geometry);
+        for m in &marks {
+            hit::emit_mark_node(builder, m);
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.legend_id.into_iter().collect()
+    }
+}
+
+impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
+    /// Memoized [`PlotGeometry`] for `bounds` — see `BarChart::ensure_geometry`.
+    fn ensure_geometry(
+        &self,
+        bounds: Rect,
+        backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+        label_style: &TextStyle,
+    ) -> PlotGeometry {
+        let key = GeometryKey {
+            bounds,
+            structure_version: self.model.structure_version().get(),
+        };
+        if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
+            && *cached_key == key
+        {
+            return geometry.clone();
+        }
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(
-                canvas.text_backend(),
-                &series_vec,
-                &label_style,
-                legend_orientation,
-            )
+            legend_main_axis_size(backend, &self.model, label_style, legend_orientation)
         } else {
             0.0
         };
-
-        let area = carve_plot_area(&CarveParams {
+        let y_domain = self
+            .model
+            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
+        let geometry = compute_plot_geometry(&PlotGeometryParams {
             bounds,
             axis_x: &self.axis_x,
             axis_y: &self.axis_y,
-            y_label_max_width,
-            x_label_height: label_height,
-            axis_title_line_height: title_height,
+            y_domain,
             legend_size,
             legend_position: if self.show_legend {
                 Some(self.legend_position)
             } else {
                 None
             },
+            text_backend: backend,
+            label_style,
         });
+        *self.geometry_cache.borrow_mut() = Some((key, geometry.clone()));
+        geometry
+    }
 
-        let plot = area.plot;
-        if plot.width <= 0.0 || plot.height <= 0.0 {
-            return;
-        }
-        // Stash plot rect + widget origin for the on_pointer_event handler.
-        *self.plot_rect.borrow_mut() = plot;
-        self.origin.set(Point::new(bounds.x, bounds.y));
+    fn compute_intrinsic_min(&self, ctx: &LayoutContext) -> Size {
+        let plot_floor = Size::new(40.0, 40.0);
+        let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+        let legend_orientation = orientation_for_position(self.legend_position);
+        let legend_size = if self.show_legend {
+            legend_main_axis_size(
+                ctx.text_backend,
+                &self.model,
+                &label_style,
+                legend_orientation,
+            )
+        } else {
+            0.0
+        };
+        let y_domain = self
+            .model
+            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
+        crate::layout::compute_intrinsic_min(
+            &self.axis_x,
+            &self.axis_y,
+            y_domain,
+            legend_size,
+            if self.show_legend {
+                Some(self.legend_position)
+            } else {
+                None
+            },
+            ctx.text_backend,
+            &label_style,
+            plot_floor,
+        )
+    }
 
-        // Final ticks fitted to the carved plot rect.
-        let target = self
-            .axis_y
-            .tick_count_hint
-            .unwrap_or_else(|| auto_tick_count(plot.height));
-        let y_ticks = nice_ticks(y_min, y_max, target);
-        let y_lo = y_ticks.first().copied().unwrap_or(y_min);
-        let y_hi = y_ticks.last().copied().unwrap_or(y_max);
-
-        // ─── Grid lines ─────────────────────────────────────────────────
-        if self.show_grid {
-            let grid_color = BorderRole::Default.resolve(&theme.colors).with_alpha(0.4);
-            for &t in &y_ticks {
-                let y = y_to_pixel(t, y_lo, y_hi, plot);
-                canvas.draw_line(
-                    Point::new(plot.x, y),
-                    Point::new(plot.right(), y),
-                    grid_color,
-                    cs::GRIDLINE_WIDTH,
-                );
-            }
-        }
-
-        // ─── Series (area fill first so lines paint on top) ─────────────
-        let palette = self.palette.get();
-        let line_w = self.line_width.unwrap_or(cs::LINE_DEFAULT_WIDTH);
+    /// Compute every visible point's geometry + identity, in series-major
+    /// order (all of series 0's points, then series 1's, …) — `paint()`
+    /// relies on this contiguity via [`marks_by_series`] to draw each
+    /// series' polyline/area/points without recomputing pixel positions.
+    /// Pure — reads only the model and layout config, so it's shared
+    /// verbatim by `paint()`, the pointer hit-test (`hit::nearest_point`),
+    /// and `accessibility()` (per-mark AT nodes).
+    fn compute_marks(&self, geometry: &PlotGeometry) -> Vec<MarkGeometry> {
+        use crate::style as cs;
+        let plot = geometry.plot;
+        let y_lo = geometry.y_lo;
+        let y_hi = geometry.y_hi;
         let point_r = self.point_radius.unwrap_or(cs::POINT_DEFAULT_RADIUS);
+        let mut marks = Vec::new();
 
-        // Use the first visible series to determine x categories. PR 3
-        // assumes all visible series share the same x categories — multi-x
-        // is a follow-up.
-        let n = visible[0].data.len();
-        if n == 0 {
-            return;
-        }
-
-        let mut new_hits: Vec<PointHit> = Vec::new();
-        for (si, series) in visible.iter().enumerate() {
-            let color = series
-                .color
-                .as_ref()
-                .map(|c| c.resolve(theme, enabled))
-                .unwrap_or_else(|| palette.color_for(si, theme));
-            let count = series.data.len().min(n);
-            if count == 0 {
-                continue;
+        self.model.with_all_series(|views| {
+            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
+            if visible.is_empty() {
+                return;
             }
-
-            // Build the polyline path.
-            let mut path = Path::new();
-            for (i, datum) in series.data.iter().take(count).enumerate() {
-                let x = x_for_index(i, count, plot);
-                let y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                if i == 0 {
-                    path.move_to(Point::new(x, y));
-                } else {
-                    path.line_to(Point::new(x, y));
-                }
-                new_hits.push(PointHit {
-                    series_idx: si,
-                    datum_idx: i,
-                    screen: Point::new(x, y),
-                    series_name: series.name.clone(),
-                    category_label: format!("{}", datum.category),
-                    value: datum.value,
-                });
+            let n = visible[0].points.len();
+            if n == 0 {
+                return;
             }
-
-            // Area fill: close the polyline down to the baseline.
-            if self.show_area_fill {
-                let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
-                let mut filled = path.clone();
-                let last_x = x_for_index(count - 1, count, plot);
-                let first_x = x_for_index(0, count, plot);
-                filled.line_to(Point::new(last_x, baseline_y));
-                filled.line_to(Point::new(first_x, baseline_y));
-                filled.close();
-                canvas.fill_path(&filled, color.with_alpha(self.area_fill_opacity));
-            }
-
-            canvas.stroke_path(&path, color, line_w);
-
-            if self.show_points {
-                for (i, datum) in series.data.iter().take(count).enumerate() {
+            for series in visible.iter() {
+                let count = series.points.len().min(n);
+                for (i, datum) in series.points.iter().take(count).enumerate() {
                     let x = x_for_index(i, count, plot);
                     let y = y_to_pixel(datum.value, y_lo, y_hi, plot);
-                    canvas.fill_circle(Point::new(x, y), point_r, color);
+                    marks.push(MarkGeometry {
+                        series_id: series.id,
+                        point_idx: i,
+                        series_name: series.name.to_string(),
+                        category_label: format!("{}", datum.category),
+                        value: datum.value,
+                        shape: MarkShape::Point {
+                            center: Point::new(x, y),
+                            radius: point_r,
+                        },
+                    });
                 }
             }
-        }
+        });
 
-        // Update the hover hit index now that we have all screen-space
-        // points (replace, never append, so a data swap can shrink it).
-        *self.hit_index.borrow_mut() = new_hits;
-
-        // ─── Embedded legend ────────────────────────────────────────────
-        if self.show_legend && area.legend.width > 0.0 && area.legend.height > 0.0 {
-            paint_embedded_legend(
-                canvas,
-                area.legend,
-                &series_vec,
-                &palette,
-                legend_orientation,
-                theme,
-                enabled,
-            );
-        }
-
-        // ─── Axes ───────────────────────────────────────────────────────
-        let x_labels: Vec<String> = visible[0]
-            .data
-            .iter()
-            .take(n)
-            .map(|d| format!("{}", d.category))
-            .collect();
-        self.draw_axes(
-            canvas,
-            theme,
-            plot,
-            &y_ticks,
-            &x_labels,
-            y_lo,
-            y_hi,
-            &label_style,
-        );
-
-        // ─── Hover marker + tooltip ─────────────────────────────────────
-        if self.show_hover_tooltip
-            && let Some(hp) = self.hover.get()
-        {
-            let hits = self.hit_index.borrow();
-            if let Some(hit) = hits
-                .iter()
-                .find(|h| h.series_idx == hp.series_idx && h.datum_idx == hp.datum_idx)
-            {
-                self.draw_hover(canvas, theme, plot, hit, &label_style, enabled);
-            }
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::GraphicsDocument);
-        let series_vec = self.series.get();
-        let n_series = series_vec.len();
-        let n_points = series_vec.first().map(|s| s.data.len()).unwrap_or(0);
-        builder.set_name(format!(
-            "Line chart: {} series, {} points",
-            n_series, n_points
-        ));
-    }
-}
-
-impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
-    fn compute_y_domain(&self, visible: &[&ChartSeries<T>]) -> (f32, f32) {
-        let mut min = self.axis_y.min.unwrap_or(f32::INFINITY);
-        let mut max = self.axis_y.max.unwrap_or(f32::NEG_INFINITY);
-        if self.axis_y.min.is_none() || self.axis_y.max.is_none() {
-            for s in visible {
-                for d in &s.data {
-                    if self.axis_y.min.is_none() {
-                        min = min.min(d.value);
-                    }
-                    if self.axis_y.max.is_none() {
-                        max = max.max(d.value);
-                    }
-                }
-            }
-        }
-        if !min.is_finite() || !max.is_finite() {
-            return (0.0, 1.0);
-        }
-        if (max - min).abs() < f32::EPSILON {
-            return (min - 1.0, max + 1.0);
-        }
-        // Tiny padding so points at the extremes don't touch the axis edge.
-        let pad = (max - min) * 0.05;
-        (min - pad, max + pad)
+        marks
     }
 
     #[allow(clippy::too_many_arguments)]
     fn draw_axes(
         &self,
         canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
+        theme: &Theme,
         plot: Rect,
         y_ticks: &[f32],
         x_labels: &[String],
         y_lo: f32,
         y_hi: f32,
-        label_style: &bastyde_tokens::TextStyle,
+        label_style: &TextStyle,
     ) {
         use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
@@ -605,70 +817,52 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             canvas.draw_text(title, rect, label_style, label_color);
         }
     }
+}
 
-    fn draw_hover(
-        &self,
-        canvas: &mut Canvas,
-        theme: &bastyde_core::Theme,
-        plot: Rect,
-        hit: &PointHit,
-        label_style: &bastyde_tokens::TextStyle,
-        enabled: bool,
-    ) {
-        use crate::style as cs;
-        let palette = self.palette.get();
-        // Marker color follows the series color.
-        let marker_color = self
-            .series
-            .get()
-            .get(hit.series_idx)
-            .and_then(|s| s.color.clone())
-            .map(|c| c.resolve(theme, enabled))
-            .unwrap_or_else(|| palette.color_for(hit.series_idx, theme));
-        // Outer ring: lighter, then inner dot in the series color.
-        canvas.stroke_circle(hit.screen, 6.0, marker_color, 2.0);
-        canvas.fill_circle(hit.screen, 3.0, marker_color);
-
-        // Tooltip text: "<series>: <category>: <value>".
-        let label = format!(
-            "{}: {} = {}",
-            hit.series_name,
-            hit.category_label,
-            self.axis_y.format(hit.value)
-        );
-        let text_w = measure_text_width(canvas, &label, label_style);
-        let approx_w = text_w + cs::TOOLTIP_PADDING * 2.0;
-        let height = label_style.size * 1.4 + cs::TOOLTIP_PADDING;
-
-        // Place the tooltip above the marker by default; flip below if it
-        // would clip; flip horizontally if it would clip left/right.
-        let mut tx = hit.screen.x - approx_w * 0.5;
-        let mut ty = hit.screen.y - height - 8.0;
-        if ty < plot.y {
-            ty = hit.screen.y + 8.0;
+/// Split a series-major-ordered mark list into contiguous per-series
+/// runs. Relies on [`LineChart::compute_marks`] always appending marks
+/// series-by-series (never interleaved).
+fn marks_by_series(marks: &[MarkGeometry]) -> Vec<&[MarkGeometry]> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < marks.len() {
+        let sid = marks[i].series_id;
+        let mut j = i + 1;
+        while j < marks.len() && marks[j].series_id == sid {
+            j += 1;
         }
-        if tx < plot.x {
-            tx = plot.x;
-        }
-        if tx + approx_w > plot.right() {
-            tx = plot.right() - approx_w;
-        }
-
-        let tip = Rect::new(tx, ty, approx_w, height);
-        let bg = theme.colors.tooltip_bg;
-        let border = theme.colors.tooltip_border;
-        canvas.fill_rounded_rect(tip, CornerRadius::uniform(4.0), bg);
-        canvas.stroke_rounded_rect(tip, CornerRadius::uniform(4.0), border, 1.0);
-
-        let text_color = theme.colors.tooltip_text;
-        let label_rect = Rect::new(
-            tip.x + cs::TOOLTIP_PADDING,
-            tip.y + (tip.height - label_style.size * 1.2) * 0.5,
-            tip.width - cs::TOOLTIP_PADDING * 2.0,
-            label_style.size * 1.2,
-        );
-        canvas.draw_text(&label, label_rect, label_style, text_color);
+        out.push(&marks[i..j]);
+        i = j;
     }
+    out
+}
+
+/// Y-domain from a slice of `SeriesView`s, with a small padding so points
+/// at the extremes don't touch the axis edge (line charts, unlike bars,
+/// don't force a zero baseline into the domain).
+fn y_domain_from_views<T>(axis_y: &AxisConfig, views: &[SeriesView<'_, T>]) -> (f32, f32) {
+    let mut min = axis_y.min.unwrap_or(f32::INFINITY);
+    let mut max = axis_y.max.unwrap_or(f32::NEG_INFINITY);
+    if axis_y.min.is_none() || axis_y.max.is_none() {
+        for v in views.iter().filter(|v| v.visible) {
+            for d in v.points {
+                if axis_y.min.is_none() {
+                    min = min.min(d.value);
+                }
+                if axis_y.max.is_none() {
+                    max = max.max(d.value);
+                }
+            }
+        }
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return (0.0, 1.0);
+    }
+    if (max - min).abs() < f32::EPSILON {
+        return (min - 1.0, max + 1.0);
+    }
+    let pad = (max - min) * 0.05;
+    (min - pad, max + pad)
 }
 
 pub(crate) fn x_for_index(i: usize, n: usize, plot: Rect) -> f32 {
@@ -685,42 +879,34 @@ pub(crate) fn y_to_pixel(value: f32, y_lo: f32, y_hi: f32, plot: Rect) -> f32 {
     plot.bottom() - frac * plot.height
 }
 
-fn measure_max_label_width(
-    canvas: &mut Canvas,
-    ticks: &[f32],
-    axis: &AxisConfig,
-    style: &bastyde_tokens::TextStyle,
-) -> f32 {
-    ticks
-        .iter()
-        .map(|t| measure_text_width(canvas, &axis.format(*t), style))
-        .fold(0.0_f32, f32::max)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_data::{ChartDatum, ChartSeries};
 
-    fn one_series() -> Vec<ChartSeries<String>> {
-        let mut s = ChartSeries::<String>::new("Trend");
-        s.push("A".into(), 5.0);
-        s.push("B".into(), 12.0);
-        s.push("C".into(), 8.0);
-        s.push("D".into(), 20.0);
-        vec![s]
+    fn one_series() -> ChartModel<String> {
+        ChartModel::from_series_vec(vec![ChartSeries::new("Trend").data(vec![
+            ChartDatum::new("A".to_string(), 5.0),
+            ChartDatum::new("B".to_string(), 12.0),
+            ChartDatum::new("C".to_string(), 8.0),
+            ChartDatum::new("D".to_string(), 20.0),
+        ])])
     }
 
-    fn two_series() -> Vec<ChartSeries<String>> {
-        let mut a = ChartSeries::<String>::new("Foo");
-        a.push("A".into(), 1.0);
-        a.push("B".into(), 2.0);
-        a.push("C".into(), 3.0);
-        let mut b = ChartSeries::<String>::new("Bar");
-        b.push("A".into(), 4.0);
-        b.push("B".into(), 1.0);
-        b.push("C".into(), 5.0);
-        vec![a, b]
+    fn two_series() -> ChartModel<String> {
+        ChartModel::from_series_vec(vec![
+            ChartSeries::new("Foo").data(vec![
+                ChartDatum::new("A".to_string(), 1.0),
+                ChartDatum::new("B".to_string(), 2.0),
+                ChartDatum::new("C".to_string(), 3.0),
+            ]),
+            ChartSeries::new("Bar").data(vec![
+                ChartDatum::new("A".to_string(), 4.0),
+                ChartDatum::new("B".to_string(), 1.0),
+                ChartDatum::new("C".to_string(), 5.0),
+            ]),
+        ])
     }
 
     #[test]
@@ -739,7 +925,6 @@ mod tests {
         tree.add(LineChart::new(two_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // Two stroke paths, no area fill yet.
         assert_eq!(
             frame.paths.len(),
             2,
@@ -754,7 +939,6 @@ mod tests {
         tree.add(LineChart::new(two_series()).area_fill(true));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // 2 strokes + 2 fills = 4 paths
         assert_eq!(frame.paths.len(), 4);
     }
 
@@ -764,7 +948,6 @@ mod tests {
         tree.add(LineChart::new(one_series()).points(true));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // 4 data points → 4 SDF circle shapes.
         assert!(
             frame.shapes.len() >= 4,
             "expected ≥ 4 point shapes, got {}",
@@ -778,14 +961,13 @@ mod tests {
         tree.add(LineChart::new(one_series()).points(false));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // Without legend, no shapes should render (only paths + decorations).
         assert!(frame.shapes.is_empty());
     }
 
     #[test]
     fn empty_data_does_not_panic() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(LineChart::<String>::new(Vec::<ChartSeries<String>>::new()));
+        tree.add(LineChart::<String>::new(ChartModel::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
     }
@@ -808,23 +990,20 @@ mod tests {
     #[test]
     fn hover_marker_renders_when_hover_set() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        // Build the chart first.
         let chart = LineChart::new(one_series()).hover_tooltip(true);
-        // Capture the hover signal before we hand the chart to the tree.
         let hover_signal = chart.hover.clone();
+        let marks_handle = chart.marks.clone();
         tree.add(chart);
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
         let baseline_shapes = tree.render().shapes.len();
-        // Force a hovered point and re-render.
-        hover_signal.set(Some(HoveredPoint {
-            series_idx: 0,
-            datum_idx: 1,
-        }));
+        let (sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = &marks[1];
+            (m.series_id, m.point_idx)
+        };
+        hover_signal.set(Some((sid, idx)));
         let after = tree.render();
-        // Hover marker = 1 stroked circle + 1 filled circle (≥2 extra
-        // shapes). Tooltip background also adds 2 more shapes. Either
-        // way the count grows.
         assert!(
             after.shapes.len() > baseline_shapes,
             "expected more shapes after hover (baseline {}, after {})",
@@ -834,19 +1013,155 @@ mod tests {
     }
 
     #[test]
-    fn hidden_series_dropped() {
-        let mut s1 = ChartSeries::<String>::new("Visible");
-        s1.push("A".into(), 1.0);
-        s1.push("B".into(), 2.0);
-        let mut s2 = ChartSeries::<String>::new("Hidden");
-        s2.push("A".into(), 3.0);
-        s2.push("B".into(), 4.0);
-        s2.visible = Prop::Static(false);
+    fn pointer_move_over_point_sets_hover() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(LineChart::new(vec![s1, s2]));
+        let chart = LineChart::new(one_series());
+        let marks_handle = chart.marks.clone();
+        let hover_handle = chart.hover.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let target = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Point { center, .. } = m.shape else {
+                panic!("expected point mark")
+            };
+            (center, m.series_id, m.point_idx)
+        };
+        tree.pointer_move(target.0);
+        assert_eq!(hover_handle.get(), Some((target.1, target.2)));
+    }
+
+    #[test]
+    fn hidden_series_dropped() {
+        let model = ChartModel::from_series_vec(vec![
+            ChartSeries::new("Visible").data(vec![
+                ChartDatum::new("A".to_string(), 1.0),
+                ChartDatum::new("B".to_string(), 2.0),
+            ]),
+            ChartSeries::new("Hidden")
+                .data(vec![
+                    ChartDatum::new("A".to_string(), 3.0),
+                    ChartDatum::new("B".to_string(), 4.0),
+                ])
+                .visibility(false),
+        ]);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(LineChart::new(model));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
-        // Only the visible series produces a stroked path.
         assert_eq!(frame.paths.len(), 1);
+    }
+
+    #[test]
+    fn per_datum_mark_count_matches_visible_points() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let chart = LineChart::new(two_series());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+        assert_eq!(marks_handle.borrow().len(), 6);
+    }
+
+    #[test]
+    fn layout_min_shrinks_below_ideal_under_over_constraint() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(LineChart::new(one_series()));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let b = tree.bounds(id);
+        assert!(b.width <= 50.0 + 0.01);
+        assert!(b.height <= 50.0 + 0.01);
+    }
+
+    #[test]
+    fn tap_on_point_selects_point() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = LineChart::new(one_series()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let (target, sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Point { center, .. } = m.shape else {
+                panic!("expected point mark")
+            };
+            (center, m.series_id, m.point_idx)
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert!(sel.is_selected(sid, idx));
+    }
+
+    #[test]
+    fn tap_outside_plot_clears_selection() {
+        use bastyde_core::event::PointerButton;
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = LineChart::new(one_series()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = tree.render();
+
+        let target = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            let MarkShape::Point { center, .. } = m.shape else {
+                panic!("expected point mark")
+            };
+            center
+        };
+        tree.pointer_down_button(target, PointerButton::Primary);
+        tree.pointer_up_button(target, PointerButton::Primary);
+        assert_eq!(sel.count(), 1);
+
+        // Top-left corner: outside the plot rect (axis-label margins).
+        let outside = Point::new(1.0, 1.0);
+        tree.pointer_down_button(outside, PointerButton::Primary);
+        tree.pointer_up_button(outside, PointerButton::Primary);
+        assert_eq!(
+            sel.count(),
+            0,
+            "tap outside the plot should clear selection"
+        );
+    }
+
+    #[test]
+    fn selected_point_paints_highlight_ring() {
+        use bastyde_data::SelectionMode;
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let sel = ChartSelection::new(SelectionMode::Single);
+        let chart = LineChart::new(one_series()).selection(sel.clone());
+        let marks_handle = chart.marks.clone();
+        tree.add(chart);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let baseline_shapes = tree.render().shapes.len();
+
+        let (sid, idx) = {
+            let marks = marks_handle.borrow();
+            let m = marks.first().expect("at least one mark");
+            (m.series_id, m.point_idx)
+        };
+        sel.select_point(sid, idx);
+        let after = tree.render();
+        assert!(
+            after.shapes.len() > baseline_shapes,
+            "expected an extra highlight ring after selecting a point (baseline {}, after {})",
+            baseline_shapes,
+            after.shapes.len()
+        );
     }
 }

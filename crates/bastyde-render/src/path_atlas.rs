@@ -33,18 +33,17 @@ pub struct AtlasRegion {
 }
 
 /// Cache key derived from path geometry + stroke style + rasterized size.
+///
+/// Deliberately does **not** include color: the atlas now always
+/// rasterizes an opaque-white AA coverage mask (see [`rasterize_path`]),
+/// so a solid fill and a gradient fill of identical geometry share one
+/// atlas entry — the color/gradient tint is applied by the GPU at draw
+/// time, not baked into the bitmap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct PathCacheKey(u64);
 
 impl PathCacheKey {
-    fn new(
-        path: &Path,
-        color: [f32; 4],
-        style: &StrokeStyle,
-        fill_rule: FillRule,
-        w: u32,
-        h: u32,
-    ) -> Self {
+    fn new(path: &Path, style: &StrokeStyle, fill_rule: FillRule, w: u32, h: u32) -> Self {
         let mut hasher = std::hash::DefaultHasher::new();
         // Hash path commands
         for cmd in &path.commands {
@@ -103,11 +102,6 @@ impl PathCacheKey {
         std::mem::discriminant(&style.space).hash(&mut hasher);
         // Winding vs even-odd fill produce different pixels for the same path.
         std::mem::discriminant(&fill_rule).hash(&mut hasher);
-        // Hash color (rasterization depends on it)
-        color[0].to_bits().hash(&mut hasher);
-        color[1].to_bits().hash(&mut hasher);
-        color[2].to_bits().hash(&mut hasher);
-        color[3].to_bits().hash(&mut hasher);
         // Hash rasterized dimensions
         w.hash(&mut hasher);
         h.hash(&mut hasher);
@@ -201,6 +195,13 @@ impl PathAtlas {
 
     /// Look up or rasterize a path, returning its atlas region.
     ///
+    /// The rasterized bitmap is always an **opaque-white AA coverage
+    /// mask** — color is applied by the GPU at draw time (solid fills tint
+    /// it via the quad pipeline; gradients sample an analytic gradient in
+    /// `path_gradient.wgsl` and modulate by the mask's alpha channel), so
+    /// this function takes no color and two fills of identical geometry
+    /// share one atlas entry regardless of their paint.
+    ///
     /// `zoom` is the uniform scale of the view transform active where the path
     /// is drawn. For a **cosmetic** stroke ([`StrokeSpace::Device`]) the body
     /// is rasterized at the current zoom (so it stays sharp, matching the
@@ -212,7 +213,6 @@ impl PathAtlas {
     pub fn lookup_or_rasterize(
         &mut self,
         path: &Path,
-        color: [f32; 4],
         style: &StrokeStyle,
         fill_rule: FillRule,
         bounds: [f32; 4],
@@ -248,7 +248,7 @@ impl PathAtlas {
             return None;
         }
 
-        let key = PathCacheKey::new(path, color, style, fill_rule, raster_w, raster_h);
+        let key = PathCacheKey::new(path, style, fill_rule, raster_w, raster_h);
 
         // Cache hit
         if let Some(region) = self.cache.get_mut(&key) {
@@ -256,16 +256,9 @@ impl PathAtlas {
             return Some(*region);
         }
 
-        // Rasterize
-        let pixels = rasterize_path(
-            path,
-            color,
-            style,
-            fill_rule,
-            bounds,
-            geom_scale,
-            stroke_scale,
-        )?;
+        // Rasterize — always opaque white; see PathCacheKey and this
+        // function's doc comment for why color is not a parameter.
+        let pixels = rasterize_path(path, style, fill_rule, bounds, geom_scale, stroke_scale)?;
         let region = self.allocate_and_write(key, raster_w, raster_h, &pixels)?;
         Some(region)
     }
@@ -502,7 +495,16 @@ impl PathAtlas {
     }
 }
 
-/// Rasterize a path to RGBA pixels using tiny-skia.
+/// Rasterize a path to RGBA pixels using tiny-skia, always as an
+/// **opaque-white AA coverage mask** (RGB = white, alpha = coverage).
+/// Color is intentionally not a parameter — see [`PathAtlas::lookup_or_rasterize`]:
+/// the mask is tinted/gradient-sampled by the GPU at draw time (matching
+/// `quad.wgsl`'s `flags = 0` monochrome-mask convention), so rasterization
+/// only needs to bake the geometry's AA coverage, letting solid and
+/// gradient fills of the same path share one atlas entry. This also fixes
+/// a pre-existing double-alpha bug: baking a translucent color into the
+/// bitmap AND multiplying by that same color's alpha again at draw time
+/// squared the effective alpha.
 ///
 /// `geom_scale` scales the path **geometry** into the bitmap (= `scale_factor`
 /// for logical strokes, `scale_factor × zoom` for cosmetic ones so the body is
@@ -511,7 +513,6 @@ impl PathAtlas {
 /// device-pixel thickness). The two are equal for the logical/fill path.
 fn rasterize_path(
     path: &Path,
-    color: [f32; 4],
     style: &StrokeStyle,
     fill_rule: FillRule,
     bounds: [f32; 4],
@@ -589,10 +590,10 @@ fn rasterize_path(
 
     let sk_path = pb.finish()?;
 
+    // Always opaque white — a pure AA coverage mask. Color/gradient tint
+    // is applied by the GPU at draw time (see this function's doc comment).
     let paint = tiny_skia::Paint {
-        shader: tiny_skia::Shader::SolidColor(tiny_skia::Color::from_rgba(
-            color[0], color[1], color[2], color[3],
-        )?),
+        shader: tiny_skia::Shader::SolidColor(tiny_skia::Color::from_rgba(1.0, 1.0, 1.0, 1.0)?),
         anti_alias: true,
         ..Default::default()
     };
@@ -732,21 +733,17 @@ mod tests {
 
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(
-            &path,
-            [1.0, 0.0, 0.0, 1.0],
-            &style,
-            FillRule::Winding,
-            bounds,
-            1.0,
-            1.0,
-        );
+        let pixels = rasterize_path(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
         assert!(pixels.is_some());
         let px = pixels.unwrap();
         assert_eq!(px.len(), 10 * 10 * 4);
-        // Center pixel should be red
+        // Center pixel should be opaque white (a pure coverage mask —
+        // color is no longer baked into the bitmap, see C3).
         let center = (5 * 10 + 5) * 4;
         assert!(px[center] > 200); // R
+        assert!(px[center + 1] > 200); // G
+        assert!(px[center + 2] > 200); // B
+        assert!(px[center + 3] > 200); // A (coverage)
     }
 
     #[test]
@@ -759,15 +756,7 @@ mod tests {
 
         let style = StrokeStyle::solid(2.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(
-            &path,
-            [0.0, 1.0, 0.0, 1.0],
-            &style,
-            FillRule::Winding,
-            bounds,
-            1.0,
-            1.0,
-        );
+        let pixels = rasterize_path(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
         assert!(pixels.is_some());
     }
 
@@ -793,10 +782,9 @@ mod tests {
             line_join: LineJoin::Round,
             ..StrokeStyle::solid(2.0)
         };
-        let color = [0.0, 0.0, 0.0, 1.0];
         assert_ne!(
-            PathCacheKey::new(&path, color, &miter, FillRule::Winding, 12, 12),
-            PathCacheKey::new(&path, color, &round, FillRule::Winding, 12, 12),
+            PathCacheKey::new(&path, &miter, FillRule::Winding, 12, 12),
+            PathCacheKey::new(&path, &round, FillRule::Winding, 12, 12),
             "miter and round joins must hash to different cache keys"
         );
     }
@@ -814,10 +802,9 @@ mod tests {
             .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
         path.commands.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
-        let color = [0.0, 0.0, 0.0, 1.0];
         assert_ne!(
-            PathCacheKey::new(&path, color, &style, FillRule::Winding, 12, 12),
-            PathCacheKey::new(&path, color, &style, FillRule::EvenOdd, 12, 12),
+            PathCacheKey::new(&path, &style, FillRule::Winding, 12, 12),
+            PathCacheKey::new(&path, &style, FillRule::EvenOdd, 12, 12),
             "winding and even-odd fills must hash to different cache keys"
         );
     }
@@ -840,31 +827,56 @@ mod tests {
         let bounds = [0.0, 0.0, 10.0, 10.0];
 
         let r1 = atlas
-            .lookup_or_rasterize(
-                &path,
-                [1.0, 0.0, 0.0, 1.0],
-                &style,
-                FillRule::Winding,
-                bounds,
-                1.0,
-                1.0,
-            )
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(
-                &path,
-                [1.0, 0.0, 0.0, 1.0],
-                &style,
-                FillRule::Winding,
-                bounds,
-                1.0,
-                1.0,
-            )
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
             .unwrap();
 
         // Same region (cache hit)
         assert_eq!(r1.x, r2.x);
         assert_eq!(r1.y, r2.y);
+    }
+
+    #[test]
+    fn cache_hit_is_independent_of_color() {
+        // C3: color is no longer part of the rasterization or the cache
+        // key — two lookups with identical geometry/stroke/size but
+        // DIFFERENT colors (as the caller would pass via the paint,
+        // before this refactor) must now hit the SAME atlas entry, since
+        // `lookup_or_rasterize` no longer takes a color at all. This is
+        // what lets a solid fill and a gradient fill of the same path
+        // share one atlas entry.
+        let mut atlas = PathAtlas::new(256, 256);
+        atlas.begin_frame();
+
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.commands.push(PathCommand::Close);
+
+        let style = StrokeStyle::solid(0.0);
+        let bounds = [0.0, 0.0, 10.0, 10.0];
+
+        // Simulate two draw calls that would previously have carried
+        // different colors — the API no longer distinguishes them, so
+        // both lookups are for the exact same cache key.
+        let r1 = atlas
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .expect("first lookup rasterizes and caches");
+        let r2 = atlas
+            .lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0)
+            .expect("second lookup hits the same cache entry");
+
+        assert_eq!(r1.x, r2.x, "cache hit: same region x");
+        assert_eq!(r1.y, r2.y, "cache hit: same region y");
+        assert_eq!(r1.w, r2.w);
+        assert_eq!(r1.h, r2.h);
+        assert_eq!(atlas.cache.len(), 1, "only one atlas entry for both calls");
     }
 
     #[test]
@@ -893,15 +905,7 @@ mod tests {
         let bounds = [0.0, 0.0, 8.0, 8.0];
 
         atlas.begin_frame(); // frame 1
-        atlas.lookup_or_rasterize(
-            &path,
-            [1.0, 0.0, 0.0, 1.0],
-            &style,
-            FillRule::Winding,
-            bounds,
-            1.0,
-            1.0,
-        );
+        atlas.lookup_or_rasterize(&path, &style, FillRule::Winding, bounds, 1.0, 1.0);
 
         // Advance well past the entry
         atlas.begin_frame(); // frame 2
@@ -941,7 +945,6 @@ mod tests {
         let r1 = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 40.0, 40.0],
@@ -954,7 +957,6 @@ mod tests {
         // After the fix, p1 (current-frame) survives and gets repacked.
         let _r2 = atlas.lookup_or_rasterize(
             &p2,
-            [0.0, 1.0, 0.0, 1.0],
             &style,
             FillRule::Winding,
             [0.0, 0.0, 50.0, 50.0],
@@ -967,7 +969,6 @@ mod tests {
         let r1b = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 40.0, 40.0],
@@ -980,7 +981,6 @@ mod tests {
         let _ = (r1, r1b);
         assert!(atlas.cache.contains_key(&PathCacheKey::new(
             &p1,
-            [1.0, 0.0, 0.0, 1.0],
             &style,
             FillRule::Winding,
             40,
@@ -1017,7 +1017,6 @@ mod tests {
         let r1 = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 60.0, 60.0],
@@ -1029,7 +1028,6 @@ mod tests {
         // p2 can't fit, can't grow → must be skipped, not placed by moving p1.
         let r2 = atlas.lookup_or_rasterize(
             &p2,
-            [0.0, 1.0, 0.0, 1.0],
             &style,
             FillRule::Winding,
             [0.0, 0.0, 62.0, 62.0],
@@ -1045,7 +1043,6 @@ mod tests {
         let r1b = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 60.0, 60.0],
@@ -1077,7 +1074,6 @@ mod tests {
         atlas
             .lookup_or_rasterize(
                 &path,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 8.0, 8.0],
@@ -1138,7 +1134,6 @@ mod tests {
         let r1 = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 50.0, 50.0],
@@ -1153,7 +1148,6 @@ mod tests {
         let _r2 = atlas
             .lookup_or_rasterize(
                 &p2,
-                [0.0, 1.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 60.0, 60.0],
@@ -1165,7 +1159,6 @@ mod tests {
         let r1_after = atlas
             .lookup_or_rasterize(
                 &p1,
-                [1.0, 0.0, 0.0, 1.0],
                 &style,
                 FillRule::Winding,
                 [0.0, 0.0, 50.0, 50.0],
@@ -1192,14 +1185,13 @@ mod tests {
         path.commands
             .push(PathCommand::LineTo(Point::new(40.0, 0.0)));
         let bounds = [0.0, 0.0, 40.0, 4.0];
-        let color = [0.0, 0.0, 0.0, 1.0];
 
         let cosmetic = StrokeStyle::hairline(2.0);
         let r1 = atlas
-            .lookup_or_rasterize(&path, color, &cosmetic, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 1.0)
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(&path, color, &cosmetic, FillRule::Winding, bounds, 1.0, 2.0)
+            .lookup_or_rasterize(&path, &cosmetic, FillRule::Winding, bounds, 1.0, 2.0)
             .unwrap();
         assert_eq!(r1.w, 40, "cosmetic body at zoom 1: 40·sf1·zoom1");
         assert_eq!(
@@ -1209,10 +1201,10 @@ mod tests {
 
         let logical = StrokeStyle::solid(2.0);
         let l1 = atlas
-            .lookup_or_rasterize(&path, color, &logical, FillRule::Winding, bounds, 1.0, 1.0)
+            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 1.0)
             .unwrap();
         let l2 = atlas
-            .lookup_or_rasterize(&path, color, &logical, FillRule::Winding, bounds, 1.0, 4.0)
+            .lookup_or_rasterize(&path, &logical, FillRule::Winding, bounds, 1.0, 4.0)
             .unwrap();
         assert_eq!(l1.w, l2.w, "logical raster size ignores zoom");
         assert_eq!(
@@ -1221,9 +1213,9 @@ mod tests {
             "logical hits the same cache entry"
         );
 
-        // Same width/color/dims but different stroke space must not collide.
-        let k_cos = PathCacheKey::new(&path, color, &cosmetic, FillRule::Winding, 40, 4);
-        let k_log = PathCacheKey::new(&path, color, &logical, FillRule::Winding, 40, 4);
+        // Same width/dims but different stroke space must not collide.
+        let k_cos = PathCacheKey::new(&path, &cosmetic, FillRule::Winding, 40, 4);
+        let k_log = PathCacheKey::new(&path, &logical, FillRule::Winding, 40, 4);
         assert_ne!(
             k_cos, k_log,
             "cache key must distinguish cosmetic vs logical"

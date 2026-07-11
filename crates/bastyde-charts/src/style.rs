@@ -56,3 +56,16 @@ pub const PIE_MIN_SLICE_LABEL_DEGREES: f32 = 12.0;
 /// Donut chart — default `inner_radius / outer_radius` ratio. `0.0`
 /// would be a solid pie; `0.55` is the conventional donut thickness.
 pub const DONUT_DEFAULT_INNER_RATIO: f32 = 0.55;
+
+/// Selection highlight — outward padding applied when stroking a
+/// selected bar's outline, so the accent ring sits just outside the
+/// bar fill instead of overlapping its edge.
+pub const SELECTION_BAR_OUTLINE_PAD: f32 = 3.0;
+/// Selection highlight — ring radius drawn around a selected line
+/// point. Deliberately larger than the hover marker's 6.0 px ring so a
+/// point that is both hovered and selected shows two distinguishable
+/// rings rather than one indistinguishable one.
+pub const SELECTION_POINT_RING_RADIUS: f32 = 9.0;
+/// Selection highlight stroke width, shared by the bar outline,
+/// line-point ring, and pie/donut wedge outline.
+pub const SELECTION_STROKE_WIDTH: f32 = 2.5;

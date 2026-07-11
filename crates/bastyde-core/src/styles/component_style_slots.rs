@@ -29,15 +29,15 @@
 
 use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCalendarStyle,
-    SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle, SharedComboBoxStyle,
-    SharedDateEditStyle, SharedDialogStyle, SharedDropTargetStyle, SharedDropZoneStyle,
-    SharedGridViewStyle, SharedIconButtonStyle, SharedLinkStyle, SharedListContainerStyle,
-    SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
-    SharedRadioStyle, SharedRadioTileStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
-    SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
-    SharedSpinBoxStyle, SharedSplitButtonStyle, SharedSplitterStyle, SharedStandardItemStyle,
-    SharedTabStyle, SharedTableStyle, SharedTextInputStyle, SharedToastStyle, SharedToggleStyle,
-    SharedTooltipStyle, SharedWebViewStyle,
+    SharedCardStyle, SharedChartStyle, SharedCheckboxStyle, SharedColorPickerStyle,
+    SharedComboBoxStyle, SharedDateEditStyle, SharedDialogStyle, SharedDropTargetStyle,
+    SharedDropZoneStyle, SharedGridViewStyle, SharedIconButtonStyle, SharedLinkStyle,
+    SharedListContainerStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedRadioTileStyle, SharedRichTextEditorStyle,
+    SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle,
+    SharedSnackbarStyle, SharedSpinBoxStyle, SharedSplitButtonStyle, SharedSplitterStyle,
+    SharedStandardItemStyle, SharedTabStyle, SharedTableStyle, SharedTextInputStyle,
+    SharedToastStyle, SharedToggleStyle, SharedTooltipStyle, SharedWebViewStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -59,6 +59,7 @@ pub struct ComponentStyleSlots {
     pub menu_item: Option<SharedMenuItemStyle>,
     pub panel: Option<SharedPanelStyle>,
     pub card: Option<SharedCardStyle>,
+    pub chart: Option<SharedChartStyle>,
     pub popover: Option<SharedPopoverStyle>,
     pub tooltip: Option<SharedTooltipStyle>,
     pub scroll_bar: Option<SharedScrollBarStyle>,
@@ -107,6 +108,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("menu_item", &self.menu_item.is_some())
             .field("panel", &self.panel.is_some())
             .field("card", &self.card.is_some())
+            .field("chart", &self.chart.is_some())
             .field("popover", &self.popover.is_some())
             .field("tooltip", &self.tooltip.is_some())
             .field("scroll_bar", &self.scroll_bar.is_some())
@@ -163,6 +165,7 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.menu_item, &other.menu_item)
             && rc_eq(&self.panel, &other.panel)
             && rc_eq(&self.card, &other.card)
+            && rc_eq(&self.chart, &other.chart)
             && rc_eq(&self.popover, &other.popover)
             && rc_eq(&self.tooltip, &other.tooltip)
             && rc_eq(&self.scroll_bar, &other.scroll_bar)

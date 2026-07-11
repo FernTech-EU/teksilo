@@ -13,3 +13,11 @@ repository.workspace = true
 [dependencies]
 bastyde-core = { workspace = true }
 slotmap = "1"
+
+[dev-dependencies]
+# Test-only: constructing a concrete `bastyde_tokens::Color` to exercise
+# `ChartModel::set_series_color` needs the tokens crate directly (`ColorProp`
+# itself, re-exported from `bastyde-core`, has no zero-argument constructor).
+# Not a production dependency — bastyde-data's own code only ever takes
+# `impl Into<ColorProp>` and never names `Color`.
+bastyde-tokens = { workspace = true }

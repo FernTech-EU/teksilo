@@ -18,7 +18,7 @@ use crate::vertex::{AnimQuadVertex, QuadVertex, RectVertex, SdfVertex, ShadowVer
 /// static). 128 × 64 B = 8 KiB — well within UBO caps.
 const MAX_ANIM_SLOTS: usize = 128;
 
-/// GPU renderer that draws a RenderFrame using five shader pipelines.
+/// GPU renderer that draws a RenderFrame using six shader pipelines.
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -26,6 +26,13 @@ pub struct Renderer {
     sdf_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Gradient-filled path pipeline (Tier 3) — draws `PathEntry`s whose
+    /// `paint_data` is a gradient variant. Solid-filled paths keep using
+    /// the lean `quad_pipeline` above; see `path_gradient_quad_verts` /
+    /// `PathGradientVertex`. Shares its group(0) bind-group layout
+    /// (texture + sampler) with `quad_pipeline`, so it binds the same
+    /// `path_atlas_texture` bind group the solid path-quad batch uses.
+    path_gradient_pipeline: wgpu::RenderPipeline,
     /// Procedural animated-quad pipeline — IndeterminateSweep and
     /// future Pulse / Shimmer kinds. Binds group 0 to a uniform buffer
     /// holding an array of `AnimParams` (one per slot).
@@ -151,6 +158,14 @@ impl Renderer {
         let rect_pipeline = create_rect_pipeline(&device, surface_format);
         let sdf_pipeline = create_sdf_pipeline(&device, surface_format);
         let quad_pipeline = create_quad_pipeline(&device, surface_format);
+        // Must come after quad_pipeline — reuses its group(0) bind-group
+        // layout (texture + sampler) so the path atlas's bind group
+        // binds unchanged for both the solid and gradient path batches.
+        let path_gradient_pipeline = create_path_gradient_pipeline(
+            &device,
+            surface_format,
+            &quad_pipeline.get_bind_group_layout(0),
+        );
         let shadow_pipeline = create_shadow_pipeline(&device, surface_format);
         let (anim_proc_pipeline, anim_uniform_buffer, anim_uniform_bind_group, anim_uniform_layout) =
             create_anim_proc_pipeline(&device, surface_format);
@@ -186,6 +201,7 @@ impl Renderer {
             rect_pipeline,
             sdf_pipeline,
             quad_pipeline,
+            path_gradient_pipeline,
             shadow_pipeline,
             anim_proc_pipeline,
             anim_sprite_pipeline,
@@ -379,7 +395,6 @@ impl Renderer {
                             let zoom = ptf_current.m[0].hypot(ptf_current.m[1]);
                             path_regions[*idx] = self.path_atlas.lookup_or_rasterize(
                                 &entry.path,
-                                entry.color,
                                 &entry.stroke_style,
                                 entry.fill_rule,
                                 entry.bounds,
@@ -408,6 +423,7 @@ impl Renderer {
             quad: quad_quads,
             shadow: shadow_quads,
             anim_proc: anim_proc_quads,
+            path_gradient: path_gradient_quads,
         } = counts;
         let max_quads = counts.max();
 
@@ -430,6 +446,11 @@ impl Renderer {
         self.streams.anim_proc.ensure_capacity(
             &self.device,
             (anim_proc_quads * 4 * std::mem::size_of::<AnimQuadVertex>()) as u64,
+        );
+        self.streams.path_gradient.ensure_capacity(
+            &self.device,
+            (path_gradient_quads * 4 * std::mem::size_of::<crate::vertex::PathGradientVertex>())
+                as u64,
         );
         self.streams.index.ensure_capacity(
             &self.device,
@@ -526,6 +547,7 @@ impl Renderer {
             let mut quad_batch: Vec<QuadVertex> = Vec::new();
             let mut shadow_batch: Vec<ShadowVertex> = Vec::new();
             let mut anim_proc_batch: Vec<AnimQuadVertex> = Vec::new();
+            let mut path_gradient_batch: Vec<crate::vertex::PathGradientVertex> = Vec::new();
 
             // Which pipeline the current quad batch uses (glyph atlas, path atlas, or image).
             // Flushed when the bind group source changes.
@@ -570,8 +592,8 @@ impl Renderer {
             // Flush all pending batches (called on state changes).
             macro_rules! flush_all {
                 ($pass:expr, $queue:expr, $streams:expr,
-                 $rp:expr, $sp:expr, $qp:expr, $shp:expr,
-                 $rb:expr, $sb:expr, $qb:expr, $shb:expr,
+                 $rp:expr, $sp:expr, $qp:expr, $pgp:expr, $shp:expr,
+                 $rb:expr, $sb:expr, $qb:expr, $pgb:expr, $shb:expr,
                  $atlas:expr, $path_atlas:expr, $qs:expr, $index_binding:expr) => {
                     flush_stream!($pass, $queue, &$streams.rect, $rp, $rb, $index_binding);
                     flush_stream!($pass, $queue, &$streams.sdf, $sp, $sb, $index_binding);
@@ -600,6 +622,35 @@ impl Renderer {
                             }
                         }
                         $qb.clear();
+                    }
+                    // Gradient-filled path batch. Binds the SAME path
+                    // atlas texture bind group the solid path-quad batch
+                    // above uses (`$path_atlas`) — the gradient pipeline
+                    // reuses `quad_pipeline`'s group(0) layout, so the
+                    // bind group is interchangeable.
+                    if !$pgb.is_empty() {
+                        if let (Some(bind_group), Some((ib, _, _))) = (
+                            $path_atlas.as_ref().map(|a: &AtlasTexture| &a.bind_group),
+                            $index_binding,
+                        ) {
+                            let bytes: &[u8] = bytemuck::cast_slice(&$pgb);
+                            if let Some((vb, v_off, v_len)) =
+                                $streams.path_gradient.write($queue, bytes)
+                            {
+                                let quads = ($pgb.len() / 4) as u32;
+                                let index_count = quads * 6;
+                                let index_bytes = (index_count as u64) * 4;
+                                $pass.set_pipeline($pgp);
+                                $pass.set_bind_group(0, bind_group, &[]);
+                                $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+                                $pass.set_index_buffer(
+                                    ib.slice(0..index_bytes),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                $pass.draw_indexed(0..index_count, 0, 0..1);
+                            }
+                        }
+                        $pgb.clear();
                     }
                     flush_stream!($pass, $queue, &$streams.shadow, $shp, $shb, $index_binding);
                     // Animated-quad procedural batch. Unlike the shared
@@ -745,10 +796,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -781,10 +834,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -857,10 +912,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -917,10 +974,12 @@ impl Renderer {
                                         &self.rect_pipeline,
                                         &self.sdf_pipeline,
                                         &self.quad_pipeline,
+                                        &self.path_gradient_pipeline,
                                         &self.shadow_pipeline,
                                         rect_batch,
                                         sdf_batch,
                                         quad_batch,
+                                        path_gradient_batch,
                                         shadow_batch,
                                         self.atlas_texture,
                                         self.path_atlas_texture,
@@ -968,10 +1027,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1006,10 +1067,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1039,10 +1102,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1051,32 +1116,65 @@ impl Renderer {
                                 );
                                 quad_source = None;
                                 if let Some(Some(region)) = path_regions.get(*idx) {
-                                    quad_source = Some(QuadSource::PathAtlas);
-
                                     let Some(entry) = frame.paths.get(*idx) else {
                                         continue;
                                     };
                                     let Some(path_atlas) = self.path_atlas_texture.as_ref() else {
                                         continue;
                                     };
-                                    let verts = path_quad_verts(
-                                        entry,
-                                        region,
-                                        scale_factor,
-                                        path_atlas.width,
-                                        path_atlas.height,
-                                        current_opacity,
-                                        &current_transform,
-                                    );
-                                    for v in &verts {
-                                        quad_batch.push(QuadVertex {
-                                            position: pixel_to_ndc(
-                                                v.position,
-                                                viewport_width,
-                                                viewport_height,
-                                            ),
-                                            ..*v
-                                        });
+                                    if matches!(entry.paint_data, bastyde_canvas::PaintData::Solid)
+                                    {
+                                        // Solid fill (or any stroke — strokes are
+                                        // always Solid): the lean quad_pipeline,
+                                        // tinted by entry.color.
+                                        quad_source = Some(QuadSource::PathAtlas);
+                                        let verts = path_quad_verts(
+                                            entry,
+                                            region,
+                                            scale_factor,
+                                            path_atlas.width,
+                                            path_atlas.height,
+                                            current_opacity,
+                                            &current_transform,
+                                        );
+                                        for v in &verts {
+                                            quad_batch.push(QuadVertex {
+                                                position: pixel_to_ndc(
+                                                    v.position,
+                                                    viewport_width,
+                                                    viewport_height,
+                                                ),
+                                                ..*v
+                                            });
+                                        }
+                                    } else {
+                                        // Gradient fill: the dedicated
+                                        // path_gradient pipeline, which
+                                        // samples the SAME atlas coverage
+                                        // mask but computes an analytic
+                                        // gradient color instead of a flat
+                                        // tint.
+                                        let verts = path_gradient_quad_verts(
+                                            entry,
+                                            region,
+                                            scale_factor,
+                                            path_atlas.width,
+                                            path_atlas.height,
+                                            current_opacity,
+                                            &current_transform,
+                                        );
+                                        for v in &verts {
+                                            path_gradient_batch.push(
+                                                crate::vertex::PathGradientVertex {
+                                                    position: pixel_to_ndc(
+                                                        v.position,
+                                                        viewport_width,
+                                                        viewport_height,
+                                                    ),
+                                                    ..*v
+                                                },
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -1089,10 +1187,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1167,10 +1267,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1193,10 +1295,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1215,10 +1319,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1242,10 +1348,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1353,10 +1461,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1399,10 +1509,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1438,10 +1550,12 @@ impl Renderer {
                                     &self.rect_pipeline,
                                     &self.sdf_pipeline,
                                     &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
                                     &self.shadow_pipeline,
                                     rect_batch,
                                     sdf_batch,
                                     quad_batch,
+                                    path_gradient_batch,
                                     shadow_batch,
                                     self.atlas_texture,
                                     self.path_atlas_texture,
@@ -1475,10 +1589,12 @@ impl Renderer {
                         &self.rect_pipeline,
                         &self.sdf_pipeline,
                         &self.quad_pipeline,
+                        &self.path_gradient_pipeline,
                         &self.shadow_pipeline,
                         rect_batch,
                         sdf_batch,
                         quad_batch,
+                        path_gradient_batch,
                         shadow_batch,
                         self.atlas_texture,
                         self.path_atlas_texture,
@@ -1983,6 +2099,33 @@ fn path_quad_verts(
             _pad: 0,
         },
     ]
+}
+
+/// Build 4 [`PathGradientVertex`]es for a gradient-filled path entry (in
+/// pixel space, pre-NDC). Same bounds/atlas-UV/position math as
+/// [`path_quad_verts`] (the solid-path counterpart) — the actual
+/// encoding lives on [`PathGradientVertex::from_path_entry`] (mirrors the
+/// shared `encode_paint_data`/`encode_stops` helpers used by
+/// [`SdfVertex`]); this wrapper exists so the call site in `render()`
+/// reads symmetrically with `path_quad_verts`.
+fn path_gradient_quad_verts(
+    entry: &bastyde_canvas::PathEntry,
+    region: &crate::path_atlas::AtlasRegion,
+    scale_factor: f32,
+    atlas_width: u32,
+    atlas_height: u32,
+    current_opacity: f32,
+    transform: &Transform2D,
+) -> [crate::vertex::PathGradientVertex; 4] {
+    crate::vertex::PathGradientVertex::from_path_entry(
+        entry,
+        region,
+        scale_factor,
+        atlas_width,
+        atlas_height,
+        current_opacity,
+        transform,
+    )
 }
 
 fn pixel_to_ndc(pixel: [f32; 2], viewport_width: u32, viewport_height: u32) -> [f32; 2] {
@@ -2543,6 +2686,113 @@ fn create_quad_pipeline(
     })
 }
 
+/// Build the gradient-filled path pipeline (Tier 3, gradient paint
+/// only). Reuses `texture_bind_group_layout` — the SAME group(0) layout
+/// the `quad_pipeline` exposes (texture + sampler) — as its own group 0,
+/// so the path atlas's bind group (built once, shared with the solid
+/// path quad batch) binds unchanged for both pipelines.
+fn create_path_gradient_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    texture_bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("path_gradient_shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/path_gradient.wgsl").into()),
+    });
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("path_gradient_pipeline_layout"),
+        bind_group_layouts: &[Some(texture_bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("path_gradient_pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<crate::vertex::PathGradientVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2, // position
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 8,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x2, // tex_coord
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 16,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32x2, // local_uv
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 24,
+                        shader_location: 3,
+                        format: wgpu::VertexFormat::Uint32, // paint_type
+                    },
+                    // Offset 28 (_pad: u32) is skipped — no attribute.
+                    wgpu::VertexAttribute {
+                        offset: 32,
+                        shader_location: 4,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_geo
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 48,
+                        shader_location: 5,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_color0
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 64,
+                        shader_location: 6,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_color1
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 80,
+                        shader_location: 7,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_color2
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 96,
+                        shader_location: 8,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_color3
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 112,
+                        shader_location: 9,
+                        format: wgpu::VertexFormat::Float32x4, // gradient_offsets
+                    },
+                ],
+            }],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 fn create_shadow_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -2640,6 +2890,9 @@ pub(crate) struct StreamQuadCounts {
     pub quad: usize,
     pub shadow: usize,
     pub anim_proc: usize,
+    /// Gradient-filled path quads (Tier 3, `path_gradient_pipeline`).
+    /// Split out of `quad` — see `stream_quad_counts`.
+    pub path_gradient: usize,
 }
 
 impl StreamQuadCounts {
@@ -2651,6 +2904,7 @@ impl StreamQuadCounts {
             .max(self.quad)
             .max(self.shadow)
             .max(self.anim_proc)
+            .max(self.path_gradient)
     }
 }
 
@@ -2660,26 +2914,40 @@ impl StreamQuadCounts {
 ///   `DrawCommand::CosmeticLine` (each hairline emits one 4-vertex quad
 ///   through the same rect stream — see the CosmeticLine arm in the
 ///   draw walk).
-/// - `quad` covers glyphs, paths, images, plus one composite-blit quad
-///   per blur scope (`BeginBlurredSubtree`), emitted on End.
+/// - `quad` covers glyphs, SOLID-filled paths, images, plus one
+///   composite-blit quad per blur scope (`BeginBlurredSubtree`), emitted
+///   on End. Gradient-filled paths are split out into `path_gradient`
+///   instead (see below) — they draw through a different pipeline.
 /// - `anim_proc` covers BOTH animated-quad classes: `Procedural` quads
 ///   batch into `anim_proc_batch`, but `Sprite` quads ALSO write their
 ///   4 vertices into the same `streams.anim_proc` buffer (one
 ///   individually-bound draw each). Counting only `Procedural` here
 ///   undersized the buffer whenever a sprite-animated icon was on
 ///   screen, overflowing the stream at write time.
+/// - `path_gradient` covers `PathEntry`s whose `paint_data` is a
+///   gradient variant (`LinearGradient`/`RadialGradient`/`ConicGradient`)
+///   — drawn by the dedicated `path_gradient_pipeline` instead of the
+///   shared `quad_pipeline`. Solid paths (`PaintData::Solid`, including
+///   every stroke) stay counted under `quad`.
 pub(crate) fn stream_quad_counts(frame: &RenderFrame) -> StreamQuadCounts {
     let composite_quads = frame
         .draw_order
         .iter()
         .filter(|c| matches!(c, bastyde_canvas::DrawCommand::BeginBlurredSubtree { .. }))
         .count();
+    let gradient_paths = frame
+        .paths
+        .iter()
+        .filter(|p| !matches!(p.paint_data, bastyde_canvas::PaintData::Solid))
+        .count();
+    let solid_paths = frame.paths.len() - gradient_paths;
     StreamQuadCounts {
         rect: frame.decorations.len() + frame.cosmetic_lines.len(),
         sdf: frame.shapes.len(),
-        quad: frame.glyphs.len() + frame.paths.len() + frame.images.len() + composite_quads,
+        quad: frame.glyphs.len() + solid_paths + frame.images.len() + composite_quads,
         shadow: frame.shadows.len(),
         anim_proc: frame.animated_quads.len(),
+        path_gradient: gradient_paths,
     }
 }
 
@@ -2906,6 +3174,156 @@ mod tests {
         assert_eq!(counts.sdf, 0);
         assert_eq!(counts.shadow, 0);
         assert_eq!(counts.max(), 5, "index buffer sizes to the largest stream");
+    }
+
+    #[test]
+    fn stream_quad_counts_splits_solid_and_gradient_paths() {
+        // C4.5: gradient-filled paths draw through a different pipeline
+        // (`path_gradient_pipeline`) than solid-filled ones (which stay
+        // on `quad_pipeline`), so the two must size DIFFERENT stream
+        // buffers — undercounting either overflows its `StreamBuffer`
+        // at write time (see `StreamBuffer::write`'s debug_assert).
+        use bastyde_canvas::render_frame::PathEntry;
+        use bastyde_canvas::{FillRule, GradientStop, Path, StrokeStyle};
+        use bastyde_tokens::Color;
+
+        let mut frame = RenderFrame::new();
+        frame.paths.push(PathEntry {
+            path: Path::new(),
+            color: [1.0, 0.0, 0.0, 1.0],
+            stroke_style: StrokeStyle::solid(0.0),
+            fill_rule: FillRule::Winding,
+            bounds: [0.0, 0.0, 10.0, 10.0],
+            paint_data: PaintData::Solid,
+        });
+        frame.paths.push(PathEntry {
+            path: Path::new(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            stroke_style: StrokeStyle::solid(0.0),
+            fill_rule: FillRule::Winding,
+            bounds: [0.0, 0.0, 20.0, 20.0],
+            paint_data: PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [20.0, 0.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ],
+            },
+        });
+
+        let counts = stream_quad_counts(&frame);
+        assert_eq!(counts.quad, 1, "the solid path counts toward quad");
+        assert_eq!(
+            counts.path_gradient, 1,
+            "the gradient path counts toward path_gradient, not quad"
+        );
+        assert_eq!(counts.rect, 0);
+        assert_eq!(counts.sdf, 0);
+        assert_eq!(counts.shadow, 0);
+        assert_eq!(counts.anim_proc, 0);
+        assert_eq!(counts.max(), 1);
+    }
+
+    #[test]
+    fn gradient_path_renders_nonflat_on_gpu() {
+        // #12 end-to-end GPU verification: a gradient-filled Tier-3 path must
+        // flush through the dedicated `path_gradient` pipeline and produce a
+        // real gradient (not a flat tint) on an actual device — and without
+        // tripping `StreamBuffer::write`'s capacity debug_assert. This is the
+        // one property headless-CPU tests structurally cannot prove; it needs
+        // a real device + pixel readback.
+        use bastyde_canvas::render_frame::PathEntry;
+        use bastyde_canvas::{FillRule, GradientStop, Path, Rect, StrokeStyle};
+        use bastyde_tokens::Color;
+
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("bastyde_render_gradient_path_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+
+        // A filled 30×30 square, horizontally red (left) → blue (right).
+        let path = Path::rect(Rect::new(1.0, 1.0, 30.0, 30.0));
+        let bounds = path.bounds();
+        let mut frame = RenderFrame::new();
+        frame.paths.push(PathEntry {
+            path,
+            color: [1.0, 1.0, 1.0, 1.0],
+            stroke_style: StrokeStyle::solid(0.0),
+            fill_rule: FillRule::Winding,
+            bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
+            paint_data: PaintData::LinearGradient {
+                start: [bounds.x, bounds.y],
+                end: [bounds.x + bounds.width, bounds.y],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ],
+            },
+        });
+        frame.draw_order.push(DrawCommand::Path(0));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bastyde_render_gradient_path_target"),
+            size: wgpu::Extent3d {
+                width: 32,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Reaching here without a panic means the gradient batch flushed
+        // without a `StreamBuffer` capacity overflow (the debug_assert the
+        // count-split guards).
+        renderer.render(&frame, &view, 1.0, 32, 32, [0.0, 0.0, 0.0, 0.0]);
+
+        let pixels = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
+        let px = |x: usize, y: usize| {
+            let i = (y * 32 + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        // Sample a row through the middle: near the red edge and the blue edge.
+        let left = px(4, 16);
+        let right = px(27, 16);
+
+        assert!(
+            left[3] > 200 && right[3] > 200,
+            "gradient square not covered (coverage-mask atlas broken): left={left:?} right={right:?}"
+        );
+        // Left red-dominant, right blue-dominant, ends clearly different — a
+        // real interpolated gradient, not a single flat tint.
+        assert!(
+            left[0] as i32 > left[2] as i32 + 40,
+            "left edge must be red-dominant, got {left:?}"
+        );
+        assert!(
+            right[2] as i32 > right[0] as i32 + 40,
+            "right edge must be blue-dominant, got {right:?}"
+        );
+        assert!(
+            (left[0] as i32 - right[0] as i32).abs() > 60,
+            "gradient looks flat (shader not sampling the gradient): left={left:?} right={right:?}"
+        );
     }
 
     #[test]

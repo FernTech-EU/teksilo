@@ -41,7 +41,7 @@ cargo run -p tooltips-showcase                  # Three-tier tooltip cascade dem
 cargo run -p scene_showcase                     # Scene viewport: pan/zoom + heavyweight+lightweight tier mix
 cargo run -p scene_corkboard                    # Scene-based story corkboard (worked-example use case)
 cargo run -p scene-magnetism                    # Scene magnetism: node-graph with typed snap-and-connect (item-drag-snap / port-drag wires / keyboard connect), persistent PathItem wires
-cargo run -p chart-demo                         # BarChart / LineChart / PieChart (+ donut + center slot)
+cargo run -p chart-demo                         # BarChart / LineChart / PieChart (+ donut + center slot); planned redesign: gradient-vs-flat ChartStyle toggle, dashed grid, interactive legend, live strip-chart via ChartWindow — see docs/charts.md §14
 cargo run -p toast-demo                         # Toast notifications + persistent NotificationLog + bell button + dialog
 cargo run -p async-demo                         # bastyde-async: spawn_local + spawn_blocking + spawn_local_with (opt-in async executor)
 cargo run -p tab-migration                      # Cross-TabWidget tab drag-and-drop (migrate tabs between two groups)
@@ -172,6 +172,23 @@ bastyde-data            Reactive data models, designed as a *peer* of the GUI, n
                          ancestors they affected, `reaggregate()` re-derives all parents from the new
                          shape. See docs/data-models.md §6.1.
                        • `CheckState` (`Unchecked` / `Checked` / `Indeterminate`).
+                       • `ChartModel<T>` — reactive multi-series chart data model for bastyde-charts
+                         (BarChart/LineChart/PieChart): `SlotMap` arena keyed by `SeriesId` (stable,
+                         like `NodeId`) + `order: Vec<SeriesId>`, mutate-then-notify, emits
+                         `ChartChange` (series add/remove/move/rename/recolor/show-hide, point
+                         push/insert/remove/update/replace) to observers and bumps one of two
+                         `Signal<u64>`s — `structure_version()` (everything except color; bind
+                         `Relayout`) / `style_version()` (`SeriesColorChanged` only; bind
+                         `RepaintOnly`). `ChartSeries<T>`/`ChartDatum<T>` are its construction DTOs
+                         (re-exported from `bastyde_charts`); `ChartSeries::visible` is a plain
+                         `bool` — reactivity lives in the model's version signals, not the DTO.
+                         `ChartWindow<T>` — last-N-points streaming projection (strip charts),
+                         translates `ChartChange` incrementally instead of collapsing to `Reset`.
+                         `ChartAggregate<T>` + `ChartAggregateFn` (Mean/Sum/Min/Max/First/Last/Custom)
+                         — bucket/rollup projection (downsample a long series for display).
+                         `ChartSelection` — the chart counterpart of `SelectionModel`, keyed
+                         `HashSet<(SeriesId, usize)>` (not `BTreeSet`: `SeriesId` isn't `Ord`).
+                         See docs/data-models.md §15.
                        • `debug_registry.rs` — opt-in registration for the Inspector's Models tab via
                          `ListModel::debug_named("…")` / `TreeModel::debug_named` /
                          `SelectionModel::debug_named`.
@@ -196,7 +213,20 @@ cargo-bastyde-telemetry-lint  CLI schema-drift linter. Checks expiry, required f
 bastyde-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, TreeView, TableView,
                      TreeTableView, MenuBar, Dialog, TextInput, SpinBox, etc.)
 bastyde-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
-                     as bastyde-widgets — no dep on widgets.
+                     as bastyde-widgets — no dep on widgets. Series data is a `ChartModel<T>`
+                     (bastyde-data, see above) — `Bar/Line/PieChart::new(model)`, no `Prop<Vec<…>>`
+                     binding path. Tier-3 `ChartStyle` trait (bastyde-core::styles; 4 all-recipe
+                     methods, no `make_*→WidgetId`) — its default `RecipeChartStyle` lives in THIS
+                     crate, not bastyde-widgets/src/styles/* (the one styling exception — charts
+                     don't depend on widgets), resolved `.style(...)` → `style_slots.chart` →
+                     `RecipeChartStyle::default()`. Dashed/dotted gridlines (`AxisConfig::gridline_dash`
+                     wins over the style's `BorderRecipe`) + gradient area/donut fills (`FillRecipe::
+                     Linear/RadialGradient` via a custom `ChartStyle` + `Canvas::fill_path`'s
+                     gradient-capable `Paint`). Per-datum `Role::GraphicsObject` a11y nodes
+                     (`SyntheticKind::ChartMark`, name+numeric value) on every visible bar/point/slice.
+                     Interactive legend (`.legend_interactive(true)` on Bar/Line, `ChartLegend::
+                     interactive(true)`) toggles `ChartModel::set_series_visible` directly. BarChart
+                     now has hover tooltips (parity with Line/Pie). Reference: docs/charts.md.
 bastyde-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equivalent). Two-tier content
                      under one view transform: heavyweight `Widget`s placed at scene coordinates (focus,
                      animation, DnD, AT all survive embedding) + lightweight `SceneItem`s (paint-only,

@@ -4,7 +4,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use bastyde_canvas::render_frame::PaintData;
-use bastyde_canvas::{DecorationRect, GlyphQuad, ShadowQuad, ShapeQuad, Transform2D};
+use bastyde_canvas::{DecorationRect, GlyphQuad, PathEntry, ShadowQuad, ShapeQuad, Transform2D};
 
 /// Convert a single sRGB channel (0..1) to linear light (0..1).
 ///
@@ -373,7 +373,11 @@ impl SdfVertex {
 
 /// Encode PaintData into vertex-friendly arrays.
 /// Returns (paint_type, gradient_geo, [4 colors], [4 offsets]).
-fn encode_paint_data(
+///
+/// `pub(crate)` — shared by [`SdfVertex`] (Tier 2) and
+/// [`PathGradientVertex`] (Tier 3 gradient paths), which both encode the
+/// same `PaintData` into the same vertex-attribute shape.
+pub(crate) fn encode_paint_data(
     paint_data: &PaintData,
     width: f32,
     height: f32,
@@ -425,8 +429,9 @@ fn encode_paint_data(
     }
 }
 
-/// Encode up to 4 gradient stops into arrays.
-fn encode_stops(stops: &[bastyde_canvas::GradientStop]) -> ([[f32; 4]; 4], [f32; 4]) {
+/// Encode up to 4 gradient stops into arrays. `pub(crate)` — see
+/// [`encode_paint_data`].
+pub(crate) fn encode_stops(stops: &[bastyde_canvas::GradientStop]) -> ([[f32; 4]; 4], [f32; 4]) {
     let mut colors = [[0.0f32; 4]; 4];
     let mut offsets = [0.0f32; 4];
     for (i, stop) in stops.iter().take(4).enumerate() {
@@ -442,6 +447,123 @@ fn encode_stops(stops: &[bastyde_canvas::GradientStop]) -> ([[f32; 4]; 4], [f32;
         }
     }
     (colors, offsets)
+}
+
+/// Vertex for the gradient-filled path pipeline (Tier 3 arbitrary paths
+/// filled with a `Paint` gradient — linear/radial/conic). Solid-filled
+/// paths keep using the lean `QuadVertex`/`quad_pipeline`, tinted by a
+/// flat vertex color (see `path_quad_verts` in `renderer.rs`); this
+/// vertex type is only built when `PathEntry::paint_data` is a gradient
+/// variant, and is drawn by the dedicated `path_gradient` pipeline
+/// (`shaders/path_gradient.wgsl`).
+///
+/// `tex_coord` samples the path atlas's AA **coverage mask** (alpha
+/// channel only — the atlas always rasterizes opaque white, see
+/// `path_atlas::rasterize_path`), exactly like `QuadVertex`'s monochrome-
+/// glyph path. `local_uv` is the shape-local 0..1 placement used for the
+/// analytic gradient math — same meaning as `SdfVertex::local_uv`. The
+/// gradient fields mirror `SdfVertex`'s layout exactly so the shared
+/// `encode_paint_data`/`encode_stops` helpers apply unchanged.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct PathGradientVertex {
+    pub position: [f32; 2],
+    /// Atlas UV — samples the path atlas's AA coverage mask.
+    pub tex_coord: [f32; 2],
+    /// Shape-local UV (0..1 across the path's bounds) — gradient placement.
+    pub local_uv: [f32; 2],
+    /// 1 = linear, 2 = radial, 3 = conic. Never 0 (Solid) — solid fills
+    /// never build a `PathGradientVertex`; see `path_gradient_quad_verts`
+    /// in `renderer.rs`, which branches on `PathEntry::paint_data` before
+    /// choosing this pipeline.
+    pub paint_type: u32,
+    /// Padding so the struct stride stays a multiple of 8 bytes.
+    pub _pad: u32,
+    /// Gradient geometry: `[start_x, start_y, end_x, end_y]` (or
+    /// center/radius for radial, center/angle for conic) in shape-local
+    /// UV space — see `encode_paint_data`.
+    pub gradient_geo: [f32; 4],
+    /// Gradient stop 0: [r, g, b, a]
+    pub gradient_color0: [f32; 4],
+    /// Gradient stop 1: [r, g, b, a]
+    pub gradient_color1: [f32; 4],
+    /// Gradient stop 2: [r, g, b, a]
+    pub gradient_color2: [f32; 4],
+    /// Gradient stop 3: [r, g, b, a]
+    pub gradient_color3: [f32; 4],
+    /// Gradient stop offsets: [offset0, offset1, offset2, offset3]
+    pub gradient_offsets: [f32; 4],
+}
+
+impl PathGradientVertex {
+    /// Build the 4 vertices for a gradient-filled path quad. Mirrors
+    /// `path_quad_verts`'s bounds/atlas-UV/position math (Tier 3, solid
+    /// paths) — same pixel-space quad, same atlas-region UV lookup, same
+    /// `transform` composition inside the function — but emits full
+    /// `paint_type` + gradient fields via the shared `encode_paint_data`
+    /// instead of a single flat tinted color.
+    ///
+    /// `opacity` is folded into EACH gradient stop's alpha
+    /// (`gradient_colorN[3] *= opacity`), not a flat `color` field,
+    /// because `path_gradient.wgsl`'s fragment shader ignores any flat
+    /// color for gradient paint types and only ever reads the gradient
+    /// stops — unlike the SDF pipeline, which (pre-existingly, and out of
+    /// scope here) does not fold `SetOpacity` into gradient `ShapeQuad`s.
+    pub(crate) fn from_path_entry(
+        entry: &PathEntry,
+        region: &crate::path_atlas::AtlasRegion,
+        scale_factor: f32,
+        atlas_width: u32,
+        atlas_height: u32,
+        opacity: f32,
+        transform: &Transform2D,
+    ) -> [PathGradientVertex; 4] {
+        let [bx, by, bw, bh] = entry.bounds;
+        let sx = bx * scale_factor;
+        let sy = by * scale_factor;
+        let sw = bw * scale_factor;
+        let sh = bh * scale_factor;
+
+        let aw = atlas_width.max(1) as f32;
+        let ah = atlas_height.max(1) as f32;
+        let u0 = region.x as f32 / aw;
+        let v0 = region.y as f32 / ah;
+        let u1 = (region.x + region.w) as f32 / aw;
+        let v1 = (region.y + region.h) as f32 / ah;
+
+        let (paint_type, gradient_geo, raw_colors, gradient_offsets) =
+            encode_paint_data(&entry.paint_data, bw, bh);
+        // Linearize (sRGB → linear, matching every other pipeline) and
+        // fold opacity into alpha — see the doc comment above.
+        let colors: [[f32; 4]; 4] = std::array::from_fn(|i| {
+            let mut c = srgb_to_linear_rgba(raw_colors[i]);
+            c[3] *= opacity;
+            c
+        });
+
+        let positions = [
+            apply_affine([sx, sy], transform),
+            apply_affine([sx + sw, sy], transform),
+            apply_affine([sx + sw, sy + sh], transform),
+            apply_affine([sx, sy + sh], transform),
+        ];
+        let tex_coords = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+        let local_uvs: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+        std::array::from_fn(|i| PathGradientVertex {
+            position: positions[i],
+            tex_coord: tex_coords[i],
+            local_uv: local_uvs[i],
+            paint_type,
+            _pad: 0,
+            gradient_geo,
+            gradient_color0: colors[0],
+            gradient_color1: colors[1],
+            gradient_color2: colors[2],
+            gradient_color3: colors[3],
+            gradient_offsets,
+        })
+    }
 }
 
 /// Standard quad indices for two triangles from 4 vertices.
@@ -986,6 +1108,181 @@ mod tests {
         assert!((verts[0].gradient_geo[1]).abs() < 1e-5, "start_uv.y");
         assert!((verts[0].gradient_geo[2]).abs() < 1e-5, "end_uv.x");
         assert!((verts[0].gradient_geo[3] - 1.0).abs() < 1e-5, "end_uv.y");
+    }
+
+    /// Rasterize `entry`'s path into a scratch atlas and return the
+    /// resulting region — the public-API way to obtain an `AtlasRegion`
+    /// for a `PathGradientVertex` test (its `last_used_frame` field is
+    /// private to `path_atlas`, so tests outside that module can't
+    /// construct one by hand).
+    fn rasterize_for_test(entry: &PathEntry, atlas_size: u32) -> crate::path_atlas::AtlasRegion {
+        let mut atlas = crate::path_atlas::PathAtlas::new(atlas_size, atlas_size);
+        atlas.begin_frame();
+        atlas
+            .lookup_or_rasterize(
+                &entry.path,
+                &entry.stroke_style,
+                entry.fill_rule,
+                entry.bounds,
+                1.0,
+                1.0,
+            )
+            .expect("test path rasterizes")
+    }
+
+    fn gradient_path_entry(bounds_rect: bastyde_canvas::Rect, paint_data: PaintData) -> PathEntry {
+        use bastyde_canvas::{FillRule, StrokeStyle};
+        PathEntry {
+            path: bastyde_canvas::Path::rect(bounds_rect),
+            color: [1.0, 1.0, 1.0, 1.0],
+            stroke_style: StrokeStyle::solid(0.0),
+            fill_rule: FillRule::Winding,
+            bounds: bounds_rect.to_array(),
+            paint_data,
+        }
+    }
+
+    #[test]
+    fn path_gradient_linear_encoding() {
+        let bounds_rect = bastyde_canvas::Rect::new(0.0, 0.0, 100.0, 50.0);
+        let entry = gradient_path_entry(
+            bounds_rect,
+            PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [100.0, 0.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ],
+            },
+        );
+        let region = rasterize_for_test(&entry, 256);
+
+        let verts = PathGradientVertex::from_path_entry(
+            &entry,
+            &region,
+            1.0,
+            256,
+            256,
+            1.0,
+            &Transform2D::IDENTITY,
+        );
+
+        // paint_type = 1 (linear)
+        assert_eq!(verts[0].paint_type, 1);
+        // gradient_geo: start=(0,0), end=(1,0) in UV
+        assert!((verts[0].gradient_geo[0]).abs() < 0.01);
+        assert!((verts[0].gradient_geo[2] - 1.0).abs() < 0.01);
+        // First stop is red (pure red/blue are fixed points of sRGB→linear)
+        assert!((verts[0].gradient_color0[0] - 1.0).abs() < 0.01);
+        assert!((verts[0].gradient_color0[1]).abs() < 0.01);
+        // Offsets
+        assert!((verts[0].gradient_offsets[0]).abs() < 0.01);
+        assert!((verts[0].gradient_offsets[1] - 1.0).abs() < 0.01);
+        // local_uv corners follow the same 0..1 convention as SdfVertex.
+        assert_eq!(verts[0].local_uv, [0.0, 0.0]);
+        assert_eq!(verts[1].local_uv, [1.0, 0.0]);
+        assert_eq!(verts[2].local_uv, [1.0, 1.0]);
+        assert_eq!(verts[3].local_uv, [0.0, 1.0]);
+    }
+
+    #[test]
+    fn path_gradient_endpoints_are_rect_local_not_absolute() {
+        // Same regression as `linear_gradient_endpoints_are_rect_local_not_absolute`,
+        // for the Tier-3 path case: gradient endpoints are normalized by
+        // the path bounds' width/height alone (`encode_paint_data` never
+        // sees the bounds origin), so a path positioned away from the
+        // origin must still encode the same normalized start/end UVs.
+        let bounds_rect = bastyde_canvas::Rect::new(50.0, 100.0, 200.0, 200.0);
+        let entry = gradient_path_entry(
+            bounds_rect,
+            PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [0.0, 200.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::new(0.0, 0.0, 0.0, 0.0),
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLACK,
+                    },
+                ],
+            },
+        );
+        let region = rasterize_for_test(&entry, 512);
+
+        let verts = PathGradientVertex::from_path_entry(
+            &entry,
+            &region,
+            1.0,
+            512,
+            512,
+            1.0,
+            &Transform2D::IDENTITY,
+        );
+        assert!((verts[0].gradient_geo[0]).abs() < 1e-5, "start_uv.x");
+        assert!((verts[0].gradient_geo[1]).abs() < 1e-5, "start_uv.y");
+        assert!((verts[0].gradient_geo[2]).abs() < 1e-5, "end_uv.x");
+        assert!((verts[0].gradient_geo[3] - 1.0).abs() < 1e-5, "end_uv.y");
+    }
+
+    #[test]
+    fn path_gradient_opacity_folds_into_every_stop_alpha() {
+        // The fold-opacity-into-gradient-stops fix this pipeline adds
+        // (see `PathGradientVertex::from_path_entry` doc comment): unlike
+        // the SDF pipeline's pre-existing gap, opacity must reach EVERY
+        // gradient stop's alpha, since the fragment shader ignores any
+        // flat vertex color for gradient paint types.
+        let bounds_rect = bastyde_canvas::Rect::new(0.0, 0.0, 40.0, 20.0);
+        let entry = gradient_path_entry(
+            bounds_rect,
+            PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [40.0, 0.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ],
+            },
+        );
+        let region = rasterize_for_test(&entry, 128);
+
+        let full = PathGradientVertex::from_path_entry(
+            &entry,
+            &region,
+            1.0,
+            128,
+            128,
+            1.0,
+            &Transform2D::IDENTITY,
+        );
+        let half = PathGradientVertex::from_path_entry(
+            &entry,
+            &region,
+            1.0,
+            128,
+            128,
+            0.5,
+            &Transform2D::IDENTITY,
+        );
+
+        assert!((full[0].gradient_color0[3] - 1.0).abs() < 1e-5);
+        assert!((half[0].gradient_color0[3] - 0.5).abs() < 1e-5);
+        assert!((half[0].gradient_color1[3] - 0.5).abs() < 1e-5);
     }
 
     #[test]

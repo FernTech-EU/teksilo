@@ -3,11 +3,13 @@
 
 # Charts
 
-**Companion to:** [architecture.md](architecture.md)
+**Companion to:** [architecture.md](architecture.md), [data-models.md](data-models.md)
 **Scope:** The `bastyde-charts` crate — `BarChart`, `LineChart`, `PieChart`
-(pie + donut), the `ChartSeries<T>` / `ChartDatum<T>` data model, the
-shared axis / palette / legend infrastructure, and the rendering and
-reactivity contracts that connect them to the widget tree.
+(pie + donut), the `ChartModel<T>` data model (`bastyde-data`) and its
+`ChartSeries<T>` / `ChartDatum<T>` construction DTOs, the Tier-3
+`ChartStyle` trait, the shared axis / palette / legend infrastructure,
+and the rendering and reactivity contracts that connect them to the
+widget tree.
 
 ---
 
@@ -59,7 +61,7 @@ grid lines, axis titles, and an embedded legend are all opt-in flags
 on the builder.
 
 ```rust
-use bastyde_charts::{AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition};
+use bastyde_charts::{AxisConfig, BarChart, BarGrouping, ChartModel, ChartSeries, LegendPosition};
 
 let mut revenue = ChartSeries::<String>::new("Revenue");
 revenue.push("Q1".into(), 12.5);
@@ -67,7 +69,9 @@ revenue.push("Q2".into(), 18.3);
 revenue.push("Q3".into(), 9.8);
 revenue.push("Q4".into(), 22.1);
 
-BarChart::new(vec![revenue])
+let model = ChartModel::from_series_vec(vec![revenue]);
+
+BarChart::new(model)
     .grid(true)
     .value_labels(true)
     .legend(true)
@@ -92,14 +96,16 @@ Polyline per series with optional area fill, hover tooltips, and
 embedded legend. PR-3 / PR-4 territory.
 
 ```rust
-use bastyde_charts::{AxisConfig, ChartSeries, LineChart};
+use bastyde_charts::{AxisConfig, ChartModel, ChartSeries, LineChart};
 
 let mut series = ChartSeries::<String>::new("Latency p99");
 series.push("Mon".into(), 142.0);
 series.push("Tue".into(), 138.5);
 // ...
 
-LineChart::new(vec![series])
+let model = ChartModel::from_series_vec(vec![series]);
+
+LineChart::new(model)
     .grid(true)
     .points(true)
     .area_fill(true)
@@ -121,13 +127,14 @@ default) for a pie; any positive value is a donut. The optional
 so swapping pie ↔ donut at runtime is safe.
 
 ```rust
-use bastyde_charts::{ChartDatum, LegendPosition, PieChart, PieLabelMode};
+use bastyde_charts::{ChartDatum, ChartModel, LegendPosition, PieChart, PieLabelMode};
 use bastyde::widgets::{TextWidget, VStack};
 
-let total = data.map(|d| d.iter().map(|x| x.value).sum::<f32>())
-                .map(|t| format!("${:.0}", t));
+let data: Vec<ChartDatum<String>> = /* … */;
+let total = format!("${:.0}", data.iter().map(|d| d.value).sum::<f32>());
+let model = ChartModel::from_points(data);
 
-PieChart::new(data)
+PieChart::new(model)
     .donut(0.55)
     .label_mode(PieLabelMode::Outside)
     .show_percentages(true)
@@ -136,7 +143,7 @@ PieChart::new(data)
     .center(
         VStack::new()
             .child(TextWidget::new(lit!("Total")).style(TextStyleRole::Tiny))
-            .child(TextWidget::new(lit!("")).text(total)),
+            .child(TextWidget::new(lit!(total))),
     )
 ```
 
@@ -152,10 +159,37 @@ The placement is the largest square inscribed in the donut hole
 `VStack` of label + value / a small `IconWidget` all fit comfortably;
 larger compositions need to be self-clipping.
 
-## 3. Data model
+## 3. Data model — `ChartModel<T>`
 
-`ChartSeries<T>` and `ChartDatum<T>` live in
-[crates/bastyde-charts/src/series.rs](../crates/bastyde-charts/src/series.rs).
+Series data lives in a [`ChartModel<T>`](../crates/bastyde-data/src/chart_model.rs)
+— a concrete reactive multi-series chart data model in `bastyde-data`,
+the same tier as `ListModel<T>` / `TreeModel<T>`. All three chart
+widgets (`BarChart::new`, `LineChart::new`, `PieChart::new`) take a
+`ChartModel<T>` directly; there is no `Prop<Vec<ChartSeries<T>>>` or
+`Signal<Vec<ChartDatum<T>>>` binding path anymore — mutating the model
+*is* the reactivity. Full mechanism reference:
+[data-models.md §15](data-models.md).
+
+`ChartModel<T>` is `Rc<RefCell<…>>` inside — cloning shares the same
+series and points, and every clone receives the same change
+notifications. Series live in a flat `SlotMap` arena keyed by
+[`SeriesId`](../crates/bastyde-data/src/chart_change.rs) (a stable
+handle, like `NodeId`) plus a separate `order: Vec<SeriesId>` for
+display order. Every mutation method follows the mutate-then-notify
+discipline (drop the borrow, then notify) and:
+
+1. emits a [`ChartChange`](../crates/bastyde-data/src/chart_change.rs)
+   describing exactly what changed (`SeriesInserted`, `SeriesRemoved`,
+   `SeriesMoved`, `SeriesRenamed`, `SeriesColorChanged`,
+   `SeriesVisibilityChanged`, `PointsInserted`, `PointsRemoved`,
+   `PointUpdated`, `SeriesDataReplaced`, `Reset`) to every observer
+   registered via `model.observe_changes(|change| …)`, and
+2. bumps one of two `Signal<u64>` version counters the three chart
+   widgets bind internally — see §8 for the full mapping.
+
+`ChartSeries<T>` and `ChartDatum<T>` (the construction DTOs) now live
+in `bastyde-data` alongside the model and are re-exported from
+`bastyde_charts` for convenience:
 
 ```rust
 pub struct ChartDatum<T> {
@@ -166,29 +200,65 @@ pub struct ChartDatum<T> {
 pub struct ChartSeries<T> {
     pub name: String,
     pub color: Option<ColorProp>,    // None → palette assigns
-    pub visible: Signal<bool>,       // toggleable from a legend / settings
-    pub data: Vec<ChartDatum<T>>,
+    pub visible: bool,               // plain bool — see note below
+    pub points: Vec<ChartDatum<T>>,
 }
 ```
 
-The unit of binding is `Prop<Vec<ChartSeries<T>>>` — static for fixed
-charts, `Signal<Vec<…>>` for live data. The whole vec is replaced on
-update; data sets that fit a chart (typically <500 points across
-<10 series) don't need incremental change events. If profiling shows
-clone cost from `Signal<Vec<…>>::get()`, the next step is wrapping
-the vec in `Rc<…>` rather than introducing a `ChartListModel` analog
-of [`ListModel<T>`](../crates/bastyde-data/src/list_model.rs).
+`ChartSeries::visible` is a **plain `bool`**, not a `Signal<bool>` —
+unlike the pre-`ChartModel` shape, reactivity does not live on the
+per-series DTO. `ChartSeries` only describes the *desired shape* of
+one series at construction time (`ChartModel::from_series_vec`); once
+a series is in the model, its visibility is toggled through
+`ChartModel::set_series_visible(series, bool)`, which notifies
+observers and bumps `structure_version()` like every other structural
+change (§8).
+
+Construction:
+
+```rust
+use bastyde_charts::{ChartDatum, ChartModel, ChartSeries};
+
+// Multi-series (BarChart / LineChart):
+let model = ChartModel::from_series_vec(vec![
+    ChartSeries::new("Revenue").data(vec![
+        ChartDatum::new("Q1".to_string(), 10.0),
+        ChartDatum::new("Q2".to_string(), 20.0),
+    ]),
+    ChartSeries::new("Costs").data(vec![
+        ChartDatum::new("Q1".to_string(), 5.0),
+    ]),
+]);
+
+// Single anonymous series (PieChart's flat, one-dimensional path):
+let pie_model = ChartModel::from_points(vec![
+    ChartDatum::new("Storage".to_string(), 42.0),
+    ChartDatum::new("Apps".to_string(), 18.0),
+]);
+```
+
+Live updates mutate the model in place — no `.set()`, no vec swap:
+
+```rust
+let revenue = model.series_id_at(0).unwrap();
+model.push_point(revenue, "Q3".to_string(), 30.0);   // structure_version bumps → chart relayouts
+model.set_series_color(revenue, Color::from_hex("#0072B2")); // style_version bumps → repaint only
+```
 
 `T` is the **category / x-axis** type. Common choices: `String` for
 human-readable labels, an `enum` for fixed buckets, `chrono::DateTime`
 for time-series (the chart only requires `Display`). Numeric values
-are always `f32`. PieChart accepts a flat `Vec<ChartDatum<T>>` directly
-since it's naturally one-dimensional, with a `from_series(series)`
-adapter for callers that already have a `ChartSeries`.
+are always `f32`.
 
-`series.visible` is a `Signal<bool>` so a legend (or any other UI)
-can drive show/hide without reaching into the data vec. Hidden series
-are dropped from the y-domain and skipped in paint.
+`ChartModel<T>` also underpins three companion types for the streaming
+/ downsampling / selection cases — `ChartWindow<T>` (last-N-points
+projection), `ChartAggregate<T>` (bucket/rollup projection), and
+`ChartSelection` (point-level selection state). None of the three
+chart widgets wire these in directly today; they're building blocks
+for apps that need a strip-chart, a downsampled long series, or
+click-to-select behavior on top of the same model. See
+[data-models.md §15](data-models.md)
+for the full API.
 
 ## 4. Axes — `nice_ticks` and formatting
 
@@ -273,6 +343,20 @@ Wrap-around is automatic: `palette.color_for(index, theme)` does
 chart you should reasonably draw without a legend so dense it's
 unreadable.
 
+> **Inactive-window desaturation.** Like every other themed control,
+> the chart palette dims when its window loses OS focus (see
+> [window-activation.md](window-activation.md)). The paint walker
+> swaps in
+> [`ColorTokens::for_inactive_window`](../crates/bastyde-tokens/src/theme.rs),
+> which desaturates `chart_palette` by
+> `ColorTokens::INACTIVE_CHART_DESATURATION` (`0.35`) — deliberately
+> **lighter** than `INACTIVE_ACCENT_DESATURATION` (`0.70`) used for the
+> accent family. The Okabe-Ito sequence's whole purpose is inter-series
+> hue separation; fully desaturating it like a single accent control
+> would defeat that even in a background window. No per-chart code is
+> needed — this falls out of the same theme-side swap every other
+> control gets.
+
 ## 6. Legend
 
 Two ways to use it:
@@ -280,28 +364,32 @@ Two ways to use it:
 **Embedded** — the chart instantiates `ChartLegend` internally when
 constructed with `.legend(true)`, lays it out at `legend_position`
 (`Top` / `Bottom` / `Leading` / `Trailing`), and shares the same
-`series` and `palette` props.
+`ChartModel` and `palette` prop.
 
 **Standalone** — build a [`ChartLegend`](../crates/bastyde-charts/src/legend.rs)
 yourself and place it anywhere in your widget tree, sharing the
-same series prop the chart binds to:
+same `ChartModel` the chart binds to:
 
 ```rust
-use bastyde_charts::{ChartLegend, LegendOrientation};
+use bastyde_charts::{ChartLegend, ChartModel, LegendOrientation};
 
-let series_signal = Signal::new(make_series());
-let chart = LineChart::new(series_signal.clone())
+let model = ChartModel::from_series_vec(make_series());
+let chart = LineChart::new(model.clone())
     .legend(false);                       // chart draws no legend
-let legend = ChartLegend::new(series_signal.clone())
+let legend = ChartLegend::new(model.clone())
     .orientation(LegendOrientation::Vertical);
 
 VStack::new()
     .child(HStack::new().child(chart).child(legend))
 ```
 
-The standalone form is the right answer when you want the legend in
-a different container, with a custom layout, or interactive
-(click-to-hide) — currently planned as a follow-up.
+**Interactive.** `ChartLegend::interactive(true)` (or the chart-level
+`.legend_interactive(true)` on `BarChart` / `LineChart` — `PieChart`
+does not expose it) turns every row into a real focusable/clickable
+element (`Role::CheckBox`, click or Space toggles). Toggling a row
+calls `ChartModel::set_series_visible(series, !visible)` directly —
+there's no separate wiring; the legend mutates the same model the
+chart reads. Default `false`.
 
 Embedded legend orientation is auto-derived from position: `Top` and
 `Bottom` get horizontal, `Leading` and `Trailing` get vertical.
@@ -324,8 +412,11 @@ Inside `paint`, the bounds are carved into a plot rect by
    width + tick length + gap + axis-title height (when applicable).
 3. Reserves an x-axis band on the bottom edge: tick label height +
    tick length + gap + axis-title height.
-4. Insets the inner plot by `plot_padding_*` from the
-   [`ChartStyle`](../crates/bastyde-tokens/src/components.rs) tokens.
+4. Insets the inner plot by `plot_padding_*` from the dimension
+   constants in
+   [crates/bastyde-charts/src/style.rs](../crates/bastyde-charts/src/style.rs)
+   (not to be confused with the Tier-3 `ChartStyle` *trait* — §11 below
+   — which carries paint recipes, not dimensions).
 
 Y-tick labels need actual values to measure widths, so the order is:
 domain → `nice_ticks` → measure widest label string → carve y-band →
@@ -343,38 +434,56 @@ otherwise the slot drifts when a legend is shown.
 
 ## 8. Reactivity — binding levels
 
-| Change | Binding level | Why |
-|---|---|---|
-| `Vec<ChartSeries<T>>` swap | `Relayout` | Y-domain may shift → tick positions change → label widths change → carve changes |
-| `ChartSeries::color` via `Signal<Color>` | `RepaintOnly` | Geometry unchanged |
-| `series.visible` toggle | `Relayout` | Visible set changes auto-domain and bar widths |
-| Hover state `Signal<Option<HoveredPoint>>` | `RepaintOnly` | Marker + tooltip only |
-| Theme change | Auto via tree-wide `mark_all_dirty` | Colors/fonts re-resolved on next paint |
-| `Prop<ChartPalette>` change | `RepaintOnly` | Color-only |
-| PieChart `inner_radius_ratio` change | `Relayout` | Center-slot inscribed-square size depends on it |
+Every chart binds to its `ChartModel<T>`'s two version signals — see
+§3 and [data-models.md §15](data-models.md)
+for what bumps which. The mapping is deliberately coarse: **only a
+series color change is paint-only** — everything else that can mutate
+a model (including a visibility toggle, which shifts the auto
+y-domain and bar widths) goes through `structure_version` and is a
+full `Relayout`.
 
-The wiring lives in each chart's `build()`:
+| Change | Model signal | Binding level | Why |
+|---|---|---|---|
+| Series add/insert/remove/move/rename | `structure_version` | `Relayout` + `AccessibilityOnly` | Y-domain, tick positions, and label widths may all shift; the per-datum AT mark list must also refresh |
+| Point push/insert/remove/update, `replace_series_data`, `clear` | `structure_version` | `Relayout` + `AccessibilityOnly` | Same — any point-shape change can move the domain |
+| `set_series_visible` | `structure_version` | `Relayout` + `AccessibilityOnly` | Visible set changes the auto y-domain and bar widths, not just paint |
+| `set_series_color` / `clear_series_color` | `style_version` | `RepaintOnly` | Geometry unchanged — this is the **only** `ChartChange` variant that doesn't bump `structure_version` |
+| Hover state (private `Signal<Option<(SeriesId, usize)>>`, all three charts) | — | `RepaintOnly` | Marker + tooltip only |
+| Theme change | — | Auto via tree-wide `mark_all_dirty` | Colors/fonts re-resolved on next paint |
+| `Prop<ChartPalette>` change | — | `RepaintOnly` | Color-only |
+| PieChart `inner_radius_ratio` change | — | `Relayout` | Center-slot inscribed-square size depends on it |
+
+The wiring lives in each chart's `build()` (`BarChart` shown; `LineChart`
+/ `PieChart` follow the same shape):
 
 ```rust
 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let id = ctx.self_id();
     let registry = ctx.binding_registry();
-    self.series.register_if_bound(id, registry, BindingLevel::Relayout);
+    // Data swap → relayout (y-domain might shift) AND the AT mark
+    // list must refresh.
+    self.model.structure_version().bind_to(id, registry, BindingLevel::Relayout);
+    self.model.structure_version().bind_to(id, registry, BindingLevel::AccessibilityOnly);
+    // Color-only swap → repaint.
+    self.model.style_version().bind_to(id, registry, BindingLevel::RepaintOnly);
     self.palette.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+    self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
     // ...
 }
 ```
 
-For widgets that bind via per-series `ColorProp::Bound(signal)`, the
-chart palette stays untouched and the series color signal triggers a
-repaint without a full relayout. This is the right path for
-"pulsing" / "highlighted" colors that don't change geometry.
+For widgets that bind via per-series `ColorProp::Bound(signal)` (a
+series' `color` field holding a live `Signal<Color>` rather than a
+static value), the chart palette stays untouched and the color signal
+triggers a repaint without a full relayout — same effect as
+`set_series_color`, driven from outside the model. This is the right
+path for "pulsing" / "highlighted" colors that don't change geometry.
 
 ## 9. Hover tooltips
 
-LineChart and PieChart draw their hover tooltips **inline inside
-their own `paint()`**, clipped to the plot rect. This is
-deliberately different from
+All three charts — `BarChart`, `LineChart`, `PieChart` — draw their
+hover tooltips **inline inside their own `paint()`**, clipped to the
+plot rect. This is deliberately different from
 [`TooltipWidget`](../crates/bastyde-widgets/src/tooltip.rs):
 
 - Chart tooltips track the cursor across the plot to the **nearest
@@ -387,9 +496,10 @@ deliberately different from
 
 The implementation is straightforward:
 
-1. The chart owns a private hover signal — `Signal<Option<HoveredPoint>>`
-   for `LineChart`, `Signal<Option<HoveredSlice>>` for `PieChart` —
-   bound at `BindingLevel::RepaintOnly`.
+1. The chart owns a private hover signal —
+   `Signal<Option<(SeriesId, usize)>>`, the same `(series, point
+   index)` shape across all three chart kinds — bound at
+   `BindingLevel::RepaintOnly`.
 2. An `on_pointer_event` handler attached via `HandlerSet` reads the
    pointer position, finds the nearest hit in a `Vec<…Hit>` snapshot
    the chart wrote during paint, and updates the signal.
@@ -416,7 +526,21 @@ test locks this.
 
 Disable with `.hover_tooltip(false)` if you'd rather the chart not
 react to hover at all (e.g. embedded in a tooltip itself, or behind
-a busy overlay).
+a busy overlay). A clone of the hover signal is also public via
+`.hover_signal() -> Signal<Option<(SeriesId, usize)>>` on each chart,
+for apps that want to observe hover from outside without
+re-implementing the hit-test.
+
+`ChartSelection` ([bastyde-data](../crates/bastyde-data/src/chart_selection.rs),
+keyed by `(SeriesId, usize)`) is consumed by all three charts the
+same way: `.selection(ChartSelection)` reuses the exact hit-test the
+hover handler uses (`hit::rect_hit` / `hit::nearest_point` /
+`hit::slice_hit`) to add click-to-select — a tap on a mark selects it
+(Ctrl/Cmd-click toggles it in `SelectionMode::Multi`), a tap on empty
+space clears the selection — and every selected mark paints an
+accent-colored highlight (a bar's outline, a line point's ring, a
+slice's outline) on top of its normal fill; see
+[data-models.md §15.4](data-models.md).
 
 ## 10. Theming — chart style constants
 
@@ -443,20 +567,127 @@ overriding the palette doesn't need to touch any other chart token;
 a theme tightening density can change the `PLOT_PADDING_*` constants
 in `bastyde-charts/src/style.rs` without touching colors.
 
-## 11. Accessibility
+## 11. Styling — the `ChartStyle` trait
+
+Charts sit on the same Tier-3 styling ladder as every other themable
+widget (see [styling-system.md](styling-system.md)) via
+[`ChartStyle`](../crates/bastyde-core/src/styles/chart_style.rs), a
+trait in `bastyde-core::styles`:
+
+```rust
+pub struct ChartFillContext<'a> {
+    pub series_index: usize,
+    pub resolved_color: Color,     // palette / per-series color, already resolved
+    pub theme: &'a Theme,
+}
+
+pub trait ChartStyle: 'static {
+    fn bar_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
+    fn area_fill(&self, cfg: &ChartFillContext, opacity: f32) -> FillRecipe;
+    fn donut_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
+    fn gridline(&self, theme: &Theme) -> BorderRecipe;
+}
+```
+
+Unlike every other Tier-3 trait, `ChartStyle` is **all-recipe** — four
+methods returning plain-data `FillRecipe` / `BorderRecipe` (Tier 2),
+none returning `WidgetId`. Charts paint via `Canvas` calls inside their
+own `paint()` rather than composing child widgets, so there's no
+`make_*(cfg, ctx) -> WidgetId` step to hook into; the recipe is
+resolved once per fill/stroke and painted directly. This is a
+different trait *shape* from the widget world's `make_body` traits
+and from the multi-method traits (`TabStyle`, `DialogStyle`,
+`TableStyle`, `CalendarStyle`) that still return `WidgetId`s from
+several named slots — `ChartStyle` returns data from all four.
+
+**Resolution chain**, same precedence as every other themable widget:
+
+```
+per-call .style(impl ChartStyle)  >  theme.style_slots.chart  >  RecipeChartStyle::default()
+```
+
+`BarChart` / `LineChart` / `PieChart` all expose
+`.style(impl ChartStyle) -> Self`. The theme-wide slot is
+`theme.style_slots.chart: Option<Rc<dyn ChartStyle>>`
+(`SharedChartStyle`).
+
+**Layering note:** `RecipeChartStyle`, the shipped default, lives in
+**`bastyde-charts` itself, not `bastyde-widgets/src/styles/*`** — the
+one place this default breaks the convention every other `Recipe*Style`
+follows (see §1 and [styling-system.md](styling-system.md)). The
+reason is layering, not oversight: `bastyde-charts` deliberately does
+not depend on `bastyde-widgets`, so its default style implementation
+has to live where its dependencies already reach. `bastyde-core` only
+holds the trait and the `Rc<dyn ChartStyle>` slot type — it has no
+opinion on where the default lives.
+
+`RecipeChartStyle` reproduces the flat-color chrome charts always
+painted before Tier-3 styling landed: `bar_fill` / `donut_fill`
+resolve to `FillRecipe::Solid(cfg.resolved_color)`, `area_fill` is the
+same solid color at the caller-given opacity, and `gridline` is a
+`BorderRole::Default`-at-40%-alpha solid `BorderRecipe`.
+
+**Dashed gridlines.** `gridline()`'s returned `BorderRecipe` carries a
+`BorderStyle` (`Solid` by default in `RecipeChartStyle`), so a custom
+`ChartStyle` can theme-wide switch every chart's gridlines to
+`BorderStyle::Dashed { dash, gap }`. For a one-chart override without
+writing a whole `ChartStyle`, `AxisConfig::gridline_dash(dash, gap)`
+sets a per-axis dash pattern that **wins** over the style's gridline
+recipe. Gridlines are drawn via `Canvas::stroke_path` (Tier 3) rather
+than the faster `draw_line` (Tier 1), because `draw_line` doesn't
+honor dash patterns.
+
+**Gradient area / donut fills.** `area_fill` and `donut_fill` can
+return `FillRecipe::LinearGradient { .. }` / `FillRecipe::RadialGradient
+{ .. }` instead of `Solid` — a custom `ChartStyle` is the only way to
+opt in (`RecipeChartStyle` stays flat). Gradient fills route through
+the same two recipe methods plus
+[`Canvas::fill_path(path: &Path, paint: impl Into<Paint>)`](../crates/bastyde-canvas/src/canvas.rs)
+(widened from a flat-color-only signature) and a new Tier-3
+path-gradient GPU pipeline (`path_gradient.wgsl`). Radial gradients on
+a donut are continuous across wedge boundaries (the gradient is
+defined once over the whole disc, not re-evaluated per slice); a
+linear gradient across a donut is a documented edge case — it reads
+correctly per-wedge but the seam between wedges isn't a straight
+gradient line the way a radial one is, so radial is the natural choice
+for donut fills.
+
+## 12. Accessibility
 
 Each chart declares `Role::GraphicsDocument` with a name that
 describes the shape (`"Bar chart: 3 series, 4 categories"`,
 `"Line chart: 2 series, 12 points"`, `"Pie chart: 5 slices"`).
 
-Per-series `GraphicsObject` children with descriptive metadata are a
-follow-up. Today the chart node is a single accessible label without
-per-series drill-down. Apps that need
-data-table semantics for screen readers should mirror the chart with
-a `TreeView` or a custom data table next to it — the same pattern
-matplotlib / d3 users follow.
+**Per-datum AT nodes.** Every visible bar / line point / pie slice is
+also its own synthetic child node — `Role::GraphicsObject`, name
+`"{series name}, {category}: {value}"`, and `numeric_value` set to the
+datum's `f32` value — emitted via
+[`hit::emit_mark_node`](../crates/bastyde-charts/src/hit.rs) under
+`SyntheticKind::ChartMark` (the same synthetic-child mechanism
+`bastyde-scene` uses for lightweight scene items). Node ids are
+deterministic within a process run, derived from `(SeriesId, usize)`
+via `DefaultHasher`, so a mark keeps the same AT id across repeated
+`accessibility()` walks. Apps that need full data-table semantics
+(sortable columns, cell-level navigation) should still mirror the
+chart with a `TreeView` / `TableView` next to it — the per-datum marks
+give a screen reader a way to inspect individual values, not a
+substitute for tabular navigation.
 
-## 12. Limits and explicit follow-ups
+## 13. Limits and explicit follow-ups
+
+Closed since the initial five-PR cycle: BarChart hover tooltips,
+interactive legends, per-datum accessibility nodes, the styling
+ladder gap (`ChartStyle`, §11), and `ChartSelection` click-to-select
+are all now implemented — see §5 (inactive-window desaturation), §6
+(interactive legend), §9 (BarChart tooltip + selection), §11
+(`ChartStyle`, dashed gridlines, gradient fills), and §12 (per-datum
+AT nodes) above. The flat-fill limit is closed as an **opt-in**:
+`RecipeChartStyle` stays flat by default (visual parity with every
+chart drawn before Tier-3 styling landed) — gradients and dashed
+gridlines require installing a custom `ChartStyle` or setting
+`AxisConfig::gridline_dash`.
+
+Still genuinely open:
 
 - **No stacked bars.** Single + grouped only. Stacked needs its own
   legend + hit-test pass for the sub-bar; deferred.
@@ -464,39 +695,85 @@ matplotlib / d3 users follow.
 - **No time-axis formatters.** `T = chrono::DateTime` works
   structurally (the chart only needs `Display`), but tick generation
   doesn't snap to month/quarter/year boundaries. Deferred.
-- **No animation on data change.** Whole-vec replace is instant. A
-  per-bar / per-point `animate_to` integration is planned but not in
-  the initial five-PR cycle.
-- **No BarChart hover tooltip.** The infrastructure is shared with
-  LineChart; wiring is straightforward but waited on Stacked
-  semantics so the tooltip knows which sub-bar to label.
-- **No interactive legend.** The standalone `ChartLegend` widget
-  exposes an `interactive(true)` flag that's currently a no-op.
-  Click-to-hide via `series.visible.set(...)` is the planned wire-up.
-- **Per-series `GraphicsObject` a11y nodes.** Single
-  `GraphicsDocument` only today.
+- **No animation on data change.** A model mutation (`push_point`,
+  `set_series_visible`, …) relayouts/repaints instantly — there's no
+  `animate_to` integration on bar height / line position / slice angle
+  transitions yet.
 - **Pie / donut hover for BarChart-style "follow the cursor across
   multiple slices."** The handler exists but the visual treatment
   matches Excel's "highlight one slice" — no slice-pull-on-hover yet.
+- **Linear gradient on a donut is a documented edge, not a bug.** See
+  §11 — reach for a radial gradient on a donut; a linear gradient
+  reads correctly per-wedge but has a visible seam across wedge
+  boundaries.
+- **No chart widget wires `ChartWindow` / `ChartAggregate`
+  internally.** Both remain `bastyde-data` building blocks (§3, and
+  [data-models.md §15](data-models.md)) an app composes on top of a
+  `ChartModel` for a strip-chart or a downsampled long series.
+  `ChartSelection` is the one exception — see §9 — all three charts
+  consume it directly via `.selection(ChartSelection)`.
 
 For each of these, the file pattern in
 [crates/bastyde-charts/src/](../crates/bastyde-charts/src/) is the place
 to look — the modules are intentionally split so future work lands
 in one or two files at most.
 
-## 13. Demo
+## 14. Demo
 
 [examples/chart_demo](../examples/chart_demo/src/main.rs) ships all
-three charts in one window driven by a `SegmentedControl` switch and
-a "Refresh data" button that re-rolls a `Signal<Vec<ChartSeries>>`.
-Run with:
+three charts in one window, built throughout on the current
+`ChartModel<T>` API — `ChartModel::from_series_vec` /
+`ChartModel::from_points` construction plus in-place mutation
+(`replace_series_data`, `push_point`, §3) — with no wholesale
+`Signal<Vec<ChartSeries<T>>>` swap anywhere in the demo. Run with:
 
 ```
 cargo run -p chart-demo
 ```
 
-It's the smallest non-trivial integration — bar/line share the same
-series prop, the donut consumes a parallel `Signal<Vec<ChartDatum>>`
-with a center-slot `VStack` showing the live total. Useful as a
-sanity-check after any change to bastyde-charts; `cargo test -p
-bastyde-charts` (51 headless tests, no GPU) is the faster CI path.
+What it shows, end to end:
+
+- **Chart-kind switcher.** A `SegmentedControl` ("Bars" / "Lines" /
+  "Donut") drives a `Switcher` between the three panels. Bar and Line
+  share one series `ChartModel<String>` — constructed once, cloned
+  into both chart widgets, the same sharing pattern `ChartModel::clone()`
+  gives for free (§3) — and one `ChartSelection`, so switching
+  between the two panels keeps the highlighted point selected. The
+  donut consumes a second, single-series `ChartModel<String>`.
+- **Default / Gradient theme toggle.** A second `SegmentedControl`
+  drives a `Switcher` between the shipped flat `RecipeChartStyle` and
+  a demo-defined `GradientChartStyle` (§11): a vertical bar-fill
+  gradient, a top-to-bottom area-fill gradient fading toward the
+  baseline, a continuous radial donut gradient, and dashed gridlines
+  via `ChartStyle::gridline`.
+- **Interactive legend (§6).** Both the Bar and Line panels embed a
+  `.legend_interactive(true)` legend — clicking (or pressing Space on
+  a focused) row toggles that series' visibility live.
+- **BarChart hover (§9, §4).** Hovering a bar shows the shared
+  tooltip card, snapping to the nearest bar.
+- **Click-to-select (§9, §2, [data-models.md §15.4](data-models.md)).**
+  All three charts are wired with `.selection(ChartSelection)`:
+  clicking a bar, line point, or donut slice paints an accent
+  highlight on it and clicking empty space clears the selection. The
+  donut's center slot reads the pie's own
+  `ChartSelection::selection_signal()` directly and shows the
+  selected category plus its share of the total, falling back to
+  "Total" plus the full sum when nothing is selected — real slice
+  interaction, no button-chip stand-in.
+- **"Refresh data" button.** Re-seeds the pseudo-random series and
+  calls `ChartModel::replace_series_data` per series (Bar/Line model)
+  and per point (pie model) — an in-place data swap, not a rebuild.
+- **Live strip-chart pane (§3, [data-models.md §15](data-models.md)).**
+  A `LiveStripPane` widget appends one point every tick (via a
+  periodic frame-tick timer) to an unbounded history `ChartModel<u32>`,
+  then projects its tail through a `ChartWindow<u32>` ("last N
+  points"). Since chart widgets bind to a `ChartModel`, not a
+  `ChartWindow` projection directly, the window's current tail is
+  materialized each tick into a small render-bound `ChartModel` the
+  `LineChart` actually consumes — an honest bridge given that
+  constraint. Reduced-motion builds the (empty) chart but skips the
+  timer.
+
+Useful as a sanity-check after any change to bastyde-charts;
+`cargo test -p bastyde-charts` (88 headless tests, no GPU) is the
+faster CI path.

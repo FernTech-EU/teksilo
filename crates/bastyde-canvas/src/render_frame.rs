@@ -361,6 +361,13 @@ pub struct PathEntry {
     pub fill_rule: FillRule,
     /// Bounding rect in logical pixels (computed from path bounds).
     pub bounds: [f32; 4],
+    /// Paint type for the fill. Mirrors `ShapeQuad::paint_data` (Tier 2):
+    /// `Solid` fills draw through the lean `quad_pipeline` (tinted by
+    /// `color`); gradient variants draw through the dedicated
+    /// `path_gradient` pipeline, which ignores `color` and instead
+    /// samples an analytic gradient using this data. Always `Solid` for
+    /// strokes (`stroke_style.width > 0.0`) — gradients are fills-only.
+    pub paint_data: PaintData,
 }
 
 /// Paint data for SDF shapes, passed to the GPU shader.
