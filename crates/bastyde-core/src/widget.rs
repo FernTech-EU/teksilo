@@ -435,6 +435,33 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Whether this widget must receive its final, parent-assigned `bounds`
+    /// every layout pass **even when it has no children**.
+    ///
+    /// [`place_children`](Self::place_children) is a widget's only hook that is
+    /// handed its `bounds`, but the layout walker skips it for a widget with no
+    /// children — there is nothing to place, and calling it for every leaf would
+    /// cost a virtual call per leaf per pass. Most widgets therefore learn their
+    /// bounds in [`paint`](Self::paint), which is soon enough for drawing.
+    ///
+    /// That is *not* soon enough for a widget whose **bounds feed something the
+    /// renderer consumes before `paint` runs** — most notably a node-level
+    /// transform scope (`BuildContext::set_content_transform`), which the render
+    /// walker pushes around the widget's subtree *before* invoking its `paint`.
+    /// Such a widget would push a transform built from a stale, one-frame-old
+    /// origin. [`SceneView`](https://docs.rs/bastyde-scene) is the motivating
+    /// case: it folds `bounds.origin` into the view transform, and a scene
+    /// holding only lightweight items has no arena children — so without this
+    /// opt-in it never learns its own origin during layout, and its content
+    /// paints offset by `-bounds.origin` (an error that then scales with zoom).
+    ///
+    /// Returning `true` makes the walker call `place_children` with an **empty**
+    /// `children` slice purely so the widget can read `bounds`. Opt in only when
+    /// you genuinely need bounds before paint; the default is `false`.
+    fn tracks_bounds(&self) -> bool {
+        false
+    }
+
     /// The rectangle (in **absolute tree coordinates**) that best *represents*
     /// this widget when the framework reveals it into an ancestor scroll area on
     /// focus gain. Returning `None` (the default) reveals the widget's whole

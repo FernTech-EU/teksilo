@@ -1343,6 +1343,318 @@ fn set_a11y_landmark_overrides_role() {
     assert_eq!(node.role(), accesskit::Role::Region);
 }
 
+#[test]
+fn zoom_about_cursor_keeps_anchor_in_an_offset_scene_view() {
+    // The zoom-about-pointer guard, but for an **embedded** SceneView — one the
+    // parent layout placed at a non-zero `bounds.origin`.
+    //
+    // `ctrl_wheel_zooms_about_cursor_keeping_scene_anchor_fixed` only covers a
+    // root view at (0,0), where `bounds_origin` is zero and therefore cancels
+    // out of the anchor maths. Any mishandling of `bounds_origin` in
+    // `anchor_pan_for_pinch` is invisible there and shows up only once the view
+    // is offset — as the scene "drifting" out from under the cursor while you
+    // zoom an embedded scene.
+    use bastyde_canvas::Size;
+    use bastyde_core::event::{Modifiers, WidgetEvent as Ev};
+    use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use bastyde_widgets::primitives::VStack;
+
+    #[derive(Debug)]
+    struct Filler(f32, f32);
+    impl Widget for Filler {
+        fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(p.width.unwrap_or(self.0), self.1).into()
+        }
+    }
+
+    let mut tree = WidgetTree::new();
+    let spacer = tree.add(Filler(400.0, 120.0));
+    let scene_id = tree.add(SceneView::new(Scene::new()).default_size(400.0, 300.0));
+    let _root = tree.add(VStack::new().add_child(spacer).add_child(scene_id));
+    tree.layout(SizeProposal::exact(400.0, 420.0));
+
+    // Sanity: the view really is offset (otherwise the test proves nothing).
+    let bo = tree.bounds(scene_id);
+    assert!(
+        bo.y > 1.0,
+        "test setup: the SceneView must be offset from the window origin (got y={})",
+        bo.y
+    );
+
+    // Park the cursor well inside the view but far from its centre.
+    let cursor = Point::new(320.0, 340.0);
+    tree.dispatch_event(Ev::PointerMove { position: cursor });
+
+    let scene_under_cursor = view_handle(&tree, scene_id).map_to_scene(cursor);
+
+    // Ctrl+wheel → zoom about the cursor.
+    tree.dispatch_event(Ev::Scroll {
+        delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        modifiers: Modifiers::CTRL,
+    });
+    tree.layout(SizeProposal::exact(400.0, 420.0));
+
+    let view = view_handle(&tree, scene_id);
+    assert!(
+        (view.zoom() - 1.0).abs() > 1e-3,
+        "ctrl+wheel must have changed the zoom"
+    );
+
+    // The scene point that was under the cursor must still project to it.
+    let back = view.map_from_scene(scene_under_cursor);
+    assert!(
+        (back.x - cursor.x).abs() < 0.5 && (back.y - cursor.y).abs() < 0.5,
+        "zooming an OFFSET SceneView must keep the scene point under the cursor \
+         fixed — it drifted to ({}, {}) from ({}, {})",
+        back.x,
+        back.y,
+        cursor.x,
+        cursor.y
+    );
+}
+
+// -- Heavyweight / lightweight projection agreement ----------------------
+
+/// Replay a `RenderFrame`'s draw order, modelling the renderer's transform
+/// stack exactly (`PushTransform` composes onto the stack; `SetTransform`
+/// composes with the current stack top without pushing), and return the
+/// screen-space rect of the first decoration matching `color`.
+fn decoration_screen_rect(
+    frame: &bastyde_canvas::RenderFrame,
+    color: bastyde_tokens::Color,
+) -> Option<Rect> {
+    use bastyde_canvas::{DrawCommand, Transform2D};
+
+    let mut stack: Vec<Transform2D> = vec![Transform2D::identity()];
+    let mut current = Transform2D::identity();
+    let want = color.to_array();
+
+    for cmd in &frame.draw_order {
+        match cmd {
+            DrawCommand::PushTransform(t) => {
+                let top = t.then(stack.last().expect("stack never empty"));
+                stack.push(top);
+                current = top;
+            }
+            DrawCommand::PopTransform => {
+                stack.pop();
+                current = *stack.last().expect("stack never empty");
+            }
+            DrawCommand::SetTransform(t) => {
+                current = t.then(stack.last().expect("stack never empty"));
+            }
+            DrawCommand::Decoration(i) => {
+                let d = &frame.decorations[*i];
+                if d.color == want {
+                    let r = Rect::new(d.rect[0], d.rect[1], d.rect[2], d.rect[3]);
+                    return Some(current.apply_rect(r));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[test]
+fn nested_scene_view_content_tracks_the_outer_zoom() {
+    // An "embedded scene": a SceneView living as a heavyweight item INSIDE
+    // another scene. Zooming the OUTER scene must carry the inner view's
+    // content with it — the inner view is just content of the outer scene.
+    //
+    // This is the one place `bounds_origin` is NOT a screen-space position (as
+    // its doc claims) but a position in the OUTER SCENE's coordinates, because
+    // the outer's `place_children` puts heavyweight children at pure scene
+    // coords. If anything treats it as screen space, the inner scene's content
+    // drifts away from its own frame as the outer zooms.
+    use crate::items::RectItem;
+    use bastyde_tokens::Color;
+
+    let inner_rect = Rect::new(120.0, 90.0, 200.0, 150.0);
+
+    for zoom in [1.0_f32, 2.0, 0.5] {
+        // Inner scene: one item filling the inner view's own local viewport.
+        let mut inner = Scene::new();
+        inner.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 200.0, 150.0)).fill(Color::BLUE),
+            Point::ZERO,
+        );
+        let inner_view = SceneView::new(inner).default_size(200.0, 150.0);
+
+        // Outer scene: a reference item at exactly the inner view's rect, plus
+        // the inner view itself as a heavyweight child at that same rect.
+        let mut outer = Scene::new();
+        outer.add_item(RectItem::new(inner_rect).fill(Color::RED), Point::ZERO);
+        outer.add_widget(inner_view, inner_rect);
+
+        let mut tree = WidgetTree::new();
+        let outer_id = tree.add(SceneView::new(outer));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        view_handle(&tree, outer_id).set_zoom(zoom);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let frame = tree.render();
+        let reference = decoration_screen_rect(&frame, Color::RED)
+            .unwrap_or_else(|| panic!("outer reference item must paint (zoom {zoom})"));
+        let nested = decoration_screen_rect(&frame, Color::BLUE)
+            .unwrap_or_else(|| panic!("inner scene content must paint (zoom {zoom})"));
+
+        assert!(
+            (reference.x - nested.x).abs() < 0.5 && (reference.y - nested.y).abs() < 0.5,
+            "outer zoom {zoom}: the embedded scene's content drifted from its frame — \
+             outer reference at ({}, {}), nested content at ({}, {})",
+            reference.x,
+            reference.y,
+            nested.x,
+            nested.y
+        );
+        assert!(
+            (reference.width - nested.width).abs() < 0.5,
+            "outer zoom {zoom}: the embedded scene's content scaled differently — \
+             reference w={}, nested w={}",
+            reference.width,
+            nested.width
+        );
+    }
+}
+
+#[test]
+fn heavyweight_and_lightweight_project_identically_in_an_offset_view() {
+    // Same agreement check, but for an **embedded** SceneView (non-zero
+    // bounds.origin) — the case where a `bounds_origin` mishandling in either
+    // tier would surface as heavyweight widgets drifting off the scene as you
+    // zoom. The root-view variant below cannot see it (bounds_origin == 0).
+    use crate::items::RectItem;
+    use bastyde_canvas::{Canvas, Size};
+    use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
+    use bastyde_tokens::Color;
+    use bastyde_widgets::primitives::VStack;
+
+    #[derive(Debug)]
+    struct Spacer(f32);
+    impl Widget for Spacer {
+        fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(p.width.unwrap_or(0.0), self.0).into()
+        }
+    }
+
+    #[derive(Debug)]
+    struct PaintedLeaf;
+    impl Widget for PaintedLeaf {
+        fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(p.width.unwrap_or(0.0), p.height.unwrap_or(0.0)).into()
+        }
+        fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+            canvas.fill_rect(bounds, Color::BLUE);
+        }
+    }
+
+    let scene_rect = Rect::new(100.0, 80.0, 40.0, 20.0);
+
+    for zoom in [1.0_f32, 2.0, 0.5, 3.25] {
+        let mut scene = Scene::new();
+        scene.add_item(RectItem::new(scene_rect).fill(Color::RED), Point::ZERO);
+        scene.add_widget(PaintedLeaf, scene_rect);
+
+        let mut tree = WidgetTree::new();
+        let spacer = tree.add(Spacer(120.0));
+        let scene_id = tree.add(SceneView::new(scene).default_size(600.0, 400.0));
+        let _root = tree.add(VStack::new().add_child(spacer).add_child(scene_id));
+        tree.layout(SizeProposal::exact(600.0, 520.0));
+
+        assert!(
+            tree.bounds(scene_id).y > 1.0,
+            "test setup: the SceneView must be offset"
+        );
+
+        view_handle(&tree, scene_id).set_zoom(zoom);
+        tree.layout(SizeProposal::exact(600.0, 520.0));
+
+        let frame = tree.render();
+        let light = decoration_screen_rect(&frame, Color::RED)
+            .unwrap_or_else(|| panic!("lightweight item must paint (zoom {zoom})"));
+        let heavy = decoration_screen_rect(&frame, Color::BLUE)
+            .unwrap_or_else(|| panic!("heavyweight widget must paint (zoom {zoom})"));
+
+        assert!(
+            (light.x - heavy.x).abs() < 0.5 && (light.y - heavy.y).abs() < 0.5,
+            "OFFSET view, zoom {zoom}: heavyweight drifted from the scene — \
+             lightweight at ({}, {}), heavyweight at ({}, {})",
+            light.x,
+            light.y,
+            heavy.x,
+            heavy.y
+        );
+    }
+}
+
+#[test]
+fn heavyweight_and_lightweight_project_identically_at_zoom() {
+    // A heavyweight widget and a lightweight item occupying the SAME scene rect
+    // must land on exactly the same screen rect at any zoom. If the two tiers
+    // disagree, embedded widgets visibly "drift" away from the scene as you
+    // zoom. Asserts on the real RenderFrame, replaying the renderer's transform
+    // stack — not on the transform math in isolation.
+    use crate::items::RectItem;
+    use bastyde_canvas::Canvas;
+    use bastyde_core::widget::PaintContext;
+    use bastyde_tokens::Color;
+
+    /// A leaf that fills its assigned bounds — so its painted rect is directly
+    /// comparable with a lightweight item's.
+    #[derive(Debug)]
+    struct PaintedLeaf;
+    impl Widget for PaintedLeaf {
+        fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(p.width.unwrap_or(0.0), p.height.unwrap_or(0.0)).into()
+        }
+        fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+            canvas.fill_rect(bounds, Color::BLUE);
+        }
+    }
+
+    let scene_rect = Rect::new(100.0, 80.0, 40.0, 20.0);
+
+    for zoom in [1.0_f32, 2.0, 0.5, 3.25] {
+        let mut scene = Scene::new();
+        // Lightweight item whose local_bounds carry the absolute scene rect.
+        scene.add_item(RectItem::new(scene_rect).fill(Color::RED), Point::ZERO);
+        // Heavyweight widget at the very same scene rect.
+        scene.add_widget(PaintedLeaf, scene_rect);
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        view_handle(&tree, view_id).set_zoom(zoom);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let frame = tree.render();
+        let light = decoration_screen_rect(&frame, Color::RED)
+            .unwrap_or_else(|| panic!("lightweight item must paint (zoom {zoom})"));
+        let heavy = decoration_screen_rect(&frame, Color::BLUE)
+            .unwrap_or_else(|| panic!("heavyweight widget must paint (zoom {zoom})"));
+
+        assert!(
+            (light.x - heavy.x).abs() < 0.5 && (light.y - heavy.y).abs() < 0.5,
+            "zoom {zoom}: heavyweight drifted from the scene — \
+             lightweight at ({}, {}), heavyweight at ({}, {})",
+            light.x,
+            light.y,
+            heavy.x,
+            heavy.y
+        );
+        assert!(
+            (light.width - heavy.width).abs() < 0.5 && (light.height - heavy.height).abs() < 0.5,
+            "zoom {zoom}: heavyweight scaled differently — \
+             lightweight {}x{}, heavyweight {}x{}",
+            light.width,
+            light.height,
+            heavy.width,
+            heavy.height
+        );
+    }
+}
+
 // -- Item theming / reactive colour / appearance (upgrade coverage) ------
 
 #[test]

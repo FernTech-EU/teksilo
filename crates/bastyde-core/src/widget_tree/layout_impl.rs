@@ -597,23 +597,85 @@ fn layout_widget_recursive(
     }
 
     let child_ids: Vec<WidgetId> = arena.children(id).to_vec();
-    if !child_ids.is_empty() {
-        let active_child_ids: Vec<WidgetId> = child_ids
-            .iter()
-            .copied()
-            .filter(|&child_id| arena.is_active(child_id))
-            .collect();
+    let active_child_ids: Vec<WidgetId> = child_ids
+        .iter()
+        .copied()
+        .filter(|&child_id| arena.is_active(child_id))
+        .collect();
 
-        let mut placements: Vec<WidgetPlacement> = active_child_ids
-            .iter()
-            .map(|&child_id| WidgetPlacement {
-                id: child_id,
-                origin: bounds.origin(),
-                size: bounds.size(),
-            })
-            .collect();
+    let mut placements: Vec<WidgetPlacement> = active_child_ids
+        .iter()
+        .map(|&child_id| WidgetPlacement {
+            id: child_id,
+            origin: bounds.origin(),
+            size: bounds.size(),
+        })
+        .collect();
 
+    // `place_children` is a widget's ONLY hook that receives its final,
+    // parent-assigned `bounds`. Normally it is skipped when there is nothing to
+    // place, but a widget that opts in via `Widget::tracks_bounds` needs its
+    // bounds during *layout* — before the render walker pushes any node-level
+    // transform scope built from them (see `Widget::tracks_bounds`). Call it
+    // with an empty `placements` slice in that case.
+    let wants_bounds = placements.is_empty()
+        && arena
+            .get(id)
+            .is_some_and(|node| node.widget.tracks_bounds());
+    if !placements.is_empty() || wants_bounds {
+        let ctx = LayoutContext {
+            theme: &resolved_theme,
+            layout_direction,
+            scale_factor,
+            text_scale,
+            text_backend,
+            arena: Some(arena),
+            extras,
+            stack_main_axis: None,
+        };
+        let node = arena.get(id).expect("widget id is active in arena");
+        node.widget
+            .place_children(bounds, proposal, &mut placements, &ctx);
+    }
+
+    for placement in &placements {
+        let child_bounds = Rect::from_origin_size(placement.origin, placement.size);
+        if let Some(child_node) = arena.get_mut(placement.id) {
+            if child_node.bounds != child_bounds {
+                child_node.cached_paint = None;
+                child_node.dirty.needs_paint = true;
+            }
+            child_node.bounds = child_bounds;
+        }
+
+        let child_proposal = SizeProposal::exact(placement.size.width, placement.size.height);
+        let grandchild_ids: Vec<WidgetId> = arena.children(placement.id).to_vec();
+        if !grandchild_ids.is_empty() {
+            layout_widget_recursive(
+                arena,
+                placement.id,
+                child_bounds,
+                child_proposal,
+                base_theme,
+                layout_direction,
+                scale_factor,
+                text_scale,
+                text_backend,
+                extras,
+            );
+        } else if arena
+            .get(placement.id)
+            .is_some_and(|node| node.widget.tracks_bounds())
         {
+            // A childless child is never visited by the recursion above, so it
+            // would never receive its final bounds. Widgets that opt in via
+            // `Widget::tracks_bounds` need them during layout (see that method).
+            // Hand them over directly, with an empty `placements` slice.
+            //
+            // Deliberately NOT a `layout_widget_recursive` call: that would
+            // re-measure the leaf against a fresh `exact` proposal (a memo miss,
+            // since the parent measured it under a different proposal), adding a
+            // redundant `layout_response` per opted-in leaf on every pass.
             let ctx = LayoutContext {
                 theme: &resolved_theme,
                 layout_direction,
@@ -624,37 +686,9 @@ fn layout_widget_recursive(
                 extras,
                 stack_main_axis: None,
             };
-            let node = arena.get(id).expect("widget id is active in arena");
+            let node = arena.get(placement.id).expect("child id is active");
             node.widget
-                .place_children(bounds, proposal, &mut placements, &ctx);
-        }
-
-        for placement in &placements {
-            let child_bounds = Rect::from_origin_size(placement.origin, placement.size);
-            if let Some(child_node) = arena.get_mut(placement.id) {
-                if child_node.bounds != child_bounds {
-                    child_node.cached_paint = None;
-                    child_node.dirty.needs_paint = true;
-                }
-                child_node.bounds = child_bounds;
-            }
-
-            let child_proposal = SizeProposal::exact(placement.size.width, placement.size.height);
-            let grandchild_ids: Vec<WidgetId> = arena.children(placement.id).to_vec();
-            if !grandchild_ids.is_empty() {
-                layout_widget_recursive(
-                    arena,
-                    placement.id,
-                    child_bounds,
-                    child_proposal,
-                    base_theme,
-                    layout_direction,
-                    scale_factor,
-                    text_scale,
-                    text_backend,
-                    extras,
-                );
-            }
+                .place_children(child_bounds, child_proposal, &mut [], &ctx);
         }
     }
 }
