@@ -49,6 +49,7 @@ mod collection;
 mod ext;
 mod file;
 mod flush;
+mod lock;
 mod migration;
 mod mru;
 mod path;

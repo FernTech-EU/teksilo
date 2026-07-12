@@ -1289,6 +1289,7 @@ dependencies = [
  "bastyde-core",
  "bastyde-data",
  "etcetera",
+ "fs2",
  "serde",
  "tempfile",
  "thiserror 2.0.18",
@@ -3318,6 +3319,16 @@ dependencies = [
  "cc",
  "libc",
  "pkg-config",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -10957,7 +10968,7 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "etagere 0.3.0",
  "fontdb",

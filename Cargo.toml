@@ -51,6 +51,14 @@ fluent-syntax = "0.12"
 unic-langid = "0.9"
 sys-locale = "0.3"
 notify = "8.2.0"
+# Advisory (fcntl/flock) cross-platform file locking, used by
+# `bastyde-settings`'s opt-in shared (cross-process) `SettingsFile` mode.
+# `fs2` is small, dependency-light, and has been the de-facto standard for
+# this exact use case (Cargo itself has used it for the same purpose) for
+# years; we only need `lock_exclusive`/`unlock`, a tiny stable surface
+# that hasn't needed to change, so its low maintenance churn is a
+# feature here, not a risk.
+fs2 = "0.4"
 intl-memoizer = "0.5"
 icu_decimal = "2"
 icu_datetime = "2"

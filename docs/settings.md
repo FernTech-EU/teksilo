@@ -506,19 +506,141 @@ cheap and synchronous.
 ## Threading and source-of-truth
 
 `Signal<T>` and `*Model<T>` use `Rc<RefCell<>>`; the settings store
-inherits that. **In-memory is the source of truth.** Disk is a
-flushed projection: load once at startup, write on change. Widgets
-never read from disk.
+inherits that. **In-memory is the source of truth by default.** Disk
+is a flushed projection: load once at startup, write on change.
+Widgets never read from disk.
 
 This is why `OpenedSettings: Clone` is a *shared* clone, not a deep
 one. Cloning each contained service is an `Rc` bump; mutations
 through any clone are visible to every clone.
 
-Multi-process is **out of scope**. Two app instances writing to the
-same file is last-write-wins. Single-instance apps are the target;
-if a CLI tool ever wants to share config with the GUI, an advisory
-`fcntl` lock around the atomic write is the path forward — file format
-unchanged.
+This "load once, in-memory is truth" model is exactly what makes
+**default-mode multi-process sharing last-write-wins**: two instances
+each hold their own private snapshot, and each write re-serializes
+from that increasingly-stale snapshot with no re-read and no lock. If
+two processes share a file this way, one's change is silently
+discarded by the other's next write. `SettingsFile<T>` now has an
+opt-in fix for exactly this — see "Cross-process (shared) mode" below.
+**The default remains last-write-wins**, and stays exactly as cheap as
+before: `SettingsStore`, `MruList`, and `WindowStateService` all still
+use the default path and pay zero cost for the shared-mode machinery.
+
+---
+
+## Cross-process (shared) mode
+
+Some files genuinely are shared by more than one process. Skribisto
+runs **one process per open project**, and every window process writes
+to the same `<config_dir>/backup.toml` — a per-project retention
+policy written by window A must not vanish because window B's stale
+snapshot overwrote it a moment later.
+
+`SettingsFile<T>` supports this as an **opt-in** mode via
+`SettingsFile::load_shared(path, migrator)`, alongside the existing
+`SettingsFile::load`. The two modes differ only in how `mutate` /
+`replace` persist and how staleness is detected — `borrow`, `snapshot`,
+migrations, and the atomic-write mechanics underneath are unchanged.
+
+### Why an advisory lock alone is not enough
+
+The obvious fix — "wrap the atomic write in an advisory `fcntl` /
+`flock` lock" (which is what this document used to recommend) — is
+*necessary but not sufficient*. A lock only serializes the two
+*writes* against each other; it does nothing about a **stale in-memory
+snapshot**. If process A takes the lock, writes, releases it, and then
+process B takes the lock and writes *its own* pre-loaded snapshot
+(which predates A's write and doesn't contain A's change), B's write —
+though itself perfectly atomic and lock-protected — still clobbers A's
+change. The lock made the write safe; it did nothing to make the write
+*correct*.
+
+The fix has to be a **locked read-modify-write**: the re-read of the
+current on-disk state has to happen *after* the lock is acquired and
+*before* the caller's change is applied, so the write that follows is
+always based on fresh data, not a snapshot that might already be
+behind a peer's write.
+
+### The contract
+
+```rust
+use bastyde_settings::{SettingsFile, Migrator};
+
+let migrator = Migrator::new(); // ...same as any other SettingsFile
+let file: SettingsFile<BackupConfig> =
+    SettingsFile::load_shared(paths.config_file("backup"), migrator)?;
+
+// Locked read-modify-write: re-reads + re-migrates backup.toml under an
+// exclusive advisory lock, applies the closure to that fresh value,
+// writes it back atomically, then releases the lock. Synchronous —
+// no debounce.
+file.mutate(|cfg| cfg.retention.min_keep += 1)?;
+```
+
+* **`load_shared(path, migrator)`** opens the file like `load` does
+  (running migrations, falling back to `T::default()` if absent,
+  quarantining on genuine corruption) but takes the `Migrator`
+  **by value** and retains it for the handle's lifetime — shared mode
+  needs to re-run migrations on every locked read, not just once at
+  construction, since a peer might still be behind on schema version.
+  The initial read is itself lock-protected, so a peer mid-write at
+  startup can't hand this process a torn read.
+* **`mutate(f)` / `replace(v)`** perform the locked read-modify-write
+  described above: acquire an exclusive advisory lock on a `<path>.lock`
+  sidecar file → re-read and re-migrate the document fresh from disk →
+  apply the caller's change to *that* fresh value → serialize → write
+  atomically (the same `write_atomic` used everywhere else — write-temp
+  + `sync_all` + rename) → refresh the in-memory snapshot and mtime
+  baseline → release the lock. Only genuine errors propagate; a parse
+  failure encountered under the lock is retried a few times rather than
+  treated as corruption — a well-behaved peer's atomic rename means a
+  torn read should never actually happen, but retrying instead of
+  quarantining means a transient hiccup can never destroy a peer's
+  legitimate write.
+* **Shared-mode writes bypass the debounce entirely** and happen
+  synchronously on the caller's thread. This is deliberate: shared-mode
+  writes are expected to be rare (a settings change, one record per
+  backup run), so there is no write burst to coalesce, and synchronous
+  writes make the "read fresh, apply, write" window as short as
+  possible.
+* **`reload_if_stale()`** is how *reads* pick up a peer's change — the
+  locked read-modify-write above only covers this handle's own writes.
+  It is a cheap `stat`-based mtime check, available **in both modes**:
+  if the on-disk mtime differs from the last one this handle observed,
+  it re-reads, re-migrates, and refreshes `current`, returning whether
+  it actually reloaded. Safe to call speculatively (on focus-in, on a
+  timer, before reading a value you need to be fresh). In shared mode
+  it re-migrates using the retained `Migrator`; in default mode there
+  is no retained migrator (by design — `load`'s signature is
+  unchanged), so it falls back to a disposable empty one, which
+  correctly picks up a peer's write whenever that peer already wrote at
+  `T::CURRENT_VERSION` (the expected case for peers running the same
+  build) and surfaces a clear migration error rather than silently
+  discarding data if it genuinely can't bring an old on-disk schema
+  forward.
+* The advisory lock lives in a new internal `lock` module (not part of
+  the public API — `SettingsFile` is the only thing that uses it),
+  built on the [`fs2`](https://docs.rs/fs2) crate (cross-platform
+  `flock`/`LockFileEx`) — see that module's doc comment (in
+  `crates/bastyde-settings/src/lock.rs`) for why `fs2` specifically. It
+  locks a stable `<path>.lock` sidecar rather than the settings path
+  itself, so the lock's identity never depends on the settings file's
+  own temp-file-then-rename dance.
+
+### What's still out of scope
+
+**`SettingsStore`, `MruList<T>`, and `WindowStateService` do not yet
+support shared mode.** They still use `SettingsFile::load` (or its own
+K/V store equivalent) under the hood and remain last-write-wins across
+processes — extending them to opt into shared mode is a planned
+follow-up, not yet implemented. Only code that explicitly calls
+`SettingsFile::load_shared` gets the locked read-modify-write contract.
+
+Mixing shared and non-shared handles over the *same* path is not a
+supported configuration: a non-shared handle's debounced write doesn't
+take the lock, so it can still race a shared handle's locked
+read-modify-write (and vice versa — the shared handle's lock offers no
+protection against a peer that never asks for it). Pick one mode per
+file, for every process that opens it.
 
 ---
 
@@ -533,6 +655,7 @@ unchanged.
 | Add a v2 schema migration | Bump `CURRENT_VERSION`, register a `Migrator::new().step(1, ...)` transformation, plumb the migrator into `SettingsFile::load`. |
 | Force a flush before a child process | `opened.flush_all()` (or per-service `flush_now()`). |
 | Test settings code without touching `~/.config` | `AppPaths::for_testing(tempdir.path())` and `Duration::ZERO` for the debounce. |
+| Share a struct file across processes (opt-in) | `SettingsFile::load_shared(path, migrator)` instead of `load`; `mutate`/`replace` become locked read-modify-writes. Call `reload_if_stale()` before reads that must see a peer's latest write. See "Cross-process (shared) mode". |
 
 ---
 
@@ -548,7 +671,11 @@ unchanged.
 - **Encryption.** Plaintext TOML. Secrets go through a future
   `bastyde-secrets` crate against the OS keychain.
 - **Cloud sync.** No.
-- **Multi-instance write coordination.** Last-write-wins, documented.
+- **Multi-instance write coordination for the *default* mode.**
+  Last-write-wins, documented — see "Threading and source-of-truth"
+  above. `SettingsFile::load_shared` is the opt-in escape hatch (see
+  "Cross-process (shared) mode"); `SettingsStore` / `MruList` /
+  `WindowStateService` don't support it yet.
 - **Large persisted collections (> ~1k items).** Use SQLite via
   `rusqlite`; the persistence bridges intentionally re-serialize
   whole on every change.
