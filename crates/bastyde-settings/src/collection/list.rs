@@ -66,7 +66,6 @@
 //! plm.flush_now().expect("flush");
 //! ```
 
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -390,6 +389,32 @@ where
     }
 
     fn reload_from_disk(&self) -> Result<bool, SettingsFileError> {
+        // Flush OUR OWN pending queue before reading, so a peer's write
+        // landing mid-debounce can never make the model transiently drop
+        // a local, not-yet-flushed change (F14): without this, a fresh
+        // read here would reflect the peer's write but NOT our own
+        // still-queued op, and reconciling down to that snapshot would
+        // visibly revert the user's just-performed action until our own
+        // debounced write landed moments later on its own.
+        //
+        // Deliberately bypasses the public `flush_now()` wrapper: that
+        // wrapper also unconditionally restamps `last_known_stamp` to
+        // "disk state right now", which here would make the staleness
+        // check just below always pass and skip the read this function
+        // exists to perform — silently discarding the very peer write
+        // that triggered the reload. Calling `self.writer.flush_now()`
+        // directly flushes our queue without touching the stamp, so the
+        // existing comparison below runs against the OLD (pre-flush)
+        // stamp, correctly detects the change, and proceeds into a real
+        // read+reconcile that sees peer and ours already merged (the
+        // locked read-merge-write inside the op patch guarantees that).
+        if let Err(e) = self.writer.flush_now() {
+            eprintln!(
+                "bastyde-settings: pre-reload flush of {} failed: {e}; reloading anyway",
+                self.writer.path().display(),
+            );
+        }
+
         let path = self.writer.path();
         let current_stamp = disk_stamp(path);
         if current_stamp == self.last_known_stamp.get() {
@@ -406,74 +431,8 @@ where
             return Ok(false);
         }
 
-        reconcile_list_by_key(&self.model, file.items);
+        self.model.reconcile_by_key(file.items, |t| t.key());
         Ok(true)
-    }
-}
-
-/// Reconcile `model`'s live contents to exactly match `new_items`, using
-/// only [`ListModel`]'s existing granular mutation methods (`insert` /
-/// `remove` / `set` / `move_item`) — **never** [`ListModel::replace_all`],
-/// which emits a blanket `DataChange::Reset` that unconditionally clears a
-/// positional `SelectionModel`. A peer's write landing mid-session should
-/// never yank the user's current selection out from under them.
-///
-/// `bastyde-data::ListModel::reconcile_by_key` has since landed with the
-/// identical shape (new authoritative `Vec<T>` in, diff by key, mutate the
-/// live model minimally, never `Reset`) — this function predates it and is
-/// a candidate to delete in favor of calling
-/// `model.reconcile_by_key(new_items, |t| t.key())` directly; kept for now
-/// only because swapping the call site is a separate change from this
-/// documentation pass, not because the upstream method is missing.
-fn reconcile_list_by_key<T>(model: &ListModel<T>, new_items: Vec<T>)
-where
-    T: Keyed + Clone + PartialEq + 'static,
-{
-    let new_keys: HashSet<T::Key> = new_items.iter().map(|t| t.key()).collect();
-
-    // 1. Drop entries whose key no longer exists in the target — walk
-    //    backwards so removing at `i` never invalidates a not-yet-visited
-    //    lower index.
-    let mut i = model.len();
-    while i > 0 {
-        i -= 1;
-        let stale = model
-            .with_item(i, |t| !new_keys.contains(&t.key()))
-            .unwrap_or(false);
-        if stale {
-            model.remove(i);
-        }
-    }
-
-    // 2. Walk the target order position by position. Positions
-    //    `0..target_idx` are already correct by the end of each
-    //    iteration (an invariant maintained by construction), so each
-    //    step only searches `target_idx..` for the right key, moving or
-    //    inserting it into place, then patches the value if it differs.
-    for (target_idx, new_item) in new_items.into_iter().enumerate() {
-        let target_key = new_item.key();
-        let found = (target_idx..model.len()).find(|&i| {
-            model
-                .with_item(i, |t| t.key() == target_key)
-                .unwrap_or(false)
-        });
-
-        match found {
-            Some(pos) => {
-                if pos != target_idx {
-                    model.move_item(pos, target_idx);
-                }
-                let differs = model
-                    .with_item(target_idx, |t| *t != new_item)
-                    .unwrap_or(true);
-                if differs {
-                    model.set(target_idx, new_item);
-                }
-            }
-            None => {
-                model.insert(target_idx, new_item);
-            }
-        }
     }
 }
 
@@ -493,6 +452,7 @@ where
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
+    use std::collections::HashSet;
     use std::fs;
     use tempfile::tempdir;
 
@@ -781,5 +741,79 @@ mod tests {
             "second"
         );
         assert_eq!(b.model().with_item(2, |x| x.name.clone()).unwrap(), "first");
+    }
+
+    /// F14 repro: a local, not-yet-flushed `upsert_front` must survive a
+    /// `reload_from_disk` triggered by a peer's concurrent write, instead
+    /// of being transiently reverted by reconciling down to a disk
+    /// snapshot that doesn't yet contain our own queued op. A non-zero
+    /// debounce window is required so the op is still pending (not
+    /// already auto-flushed) when `reload_from_disk` runs.
+    #[test]
+    fn reload_from_disk_does_not_revert_a_local_not_yet_flushed_change() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("f14.toml");
+
+        // Seed the file with a peer's baseline entry and let both handles
+        // observe it, so `a`'s later reload has a real stamp to compare
+        // against.
+        let seed: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        seed.upsert_front(item("peer-baseline", 0));
+        seed.flush_now().unwrap();
+        drop(seed);
+
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::from_secs(3600), Migrator::new())
+                .unwrap();
+        assert_eq!(a.model().len(), 1);
+
+        // Local action: lands in memory immediately, but with an hour-long
+        // debounce the write to disk is still pending.
+        a.upsert_front(item("X", 1));
+        assert_eq!(
+            a.model().with_item(0, |x| x.name.clone()).unwrap(),
+            "X",
+            "X must be at the front in memory right away"
+        );
+
+        // A peer writes a DIFFERENT valid ListFile directly to the same
+        // path, bypassing `a` entirely — it does NOT contain X.
+        let peer_file = ListFile {
+            version: 1,
+            items: vec![item("peer-baseline", 0), item("peer-new", 2)],
+        };
+        fs::write(&path, toml::to_string_pretty(&peer_file).unwrap()).unwrap();
+
+        // Old (pre-F14) behavior: this reload would read the peer's
+        // snapshot (no X in it) and reconcile the live model down to
+        // exactly that, erasing X from the front of the list until a's own
+        // debounced write eventually landed on its own.
+        let changed = Reloadable::reload_from_disk(&a).unwrap();
+        assert!(changed, "the peer's write must be observed as a change");
+
+        let names_after: Vec<String> = (0..a.model().len())
+            .map(|i| a.model().with_item(i, |x| x.name.clone()).unwrap())
+            .collect();
+        assert!(
+            names_after.contains(&"X".to_string()),
+            "a's own not-yet-flushed change must survive reload_from_disk, got {names_after:?}"
+        );
+        assert!(
+            names_after.contains(&"peer-new".to_string()),
+            "the peer's concurrent addition must also be present, got {names_after:?}"
+        );
+
+        // And the merge must have actually reached disk too: both the
+        // peer's entry and our own pending op were flushed by the
+        // pre-reload flush inside `reload_from_disk`.
+        let raw = fs::read_to_string(&path).unwrap();
+        let parsed: ListFile<Item> = toml::from_str(&raw).unwrap();
+        let on_disk: HashSet<String> = parsed.items.iter().map(|i| i.name.clone()).collect();
+        assert!(on_disk.contains("X"), "X must have reached disk too");
+        assert!(
+            on_disk.contains("peer-new"),
+            "the peer's entry must still be on disk too"
+        );
     }
 }

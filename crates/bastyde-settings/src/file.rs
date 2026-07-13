@@ -69,7 +69,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::flush::{DebouncedWriter, FlushError, write_atomic};
+use crate::flush::{FlushError, write_atomic};
 use crate::lock::FileLock;
 use crate::migration::{MigrationError, Migrator, Versioned};
 use crate::reload::Reloadable;
@@ -108,7 +108,13 @@ pub enum SettingsFileError {
 
 struct Inner<T: Versioned + DeserializeOwned> {
     current: RefCell<T>,
-    writer: DebouncedWriter,
+    /// The file this handle reads from and writes to. Every write here
+    /// (`mutate`/`replace`) is a synchronous locked read-modify-write on
+    /// the calling thread — this type never registers with the shared
+    /// debounced-write worker pool at all, so there is nothing to keep
+    /// uniform with `SettingsStore`/`PersistedListModel` beyond the path
+    /// itself.
+    path: PathBuf,
     /// The on-disk `(mtime, len)` as of the last time we read or wrote the
     /// file (via construction, a locked read-modify-write, or
     /// [`SettingsFile::reload_if_stale`] / [`Reloadable::reload_from_disk`]).
@@ -155,23 +161,74 @@ where
     /// still be on an older on-disk schema at any point, not just at
     /// startup.
     ///
-    /// On parse / migration failure the offending file is renamed to
-    /// `<path>.broken-<ts>` and the returned `SettingsFile` starts from
-    /// `T::default()`. Use [`load_strict`](Self::load_strict) in tests that
+    /// On a genuine parse failure (the bytes are not valid TOML at all,
+    /// surviving [`MAX_READ_ATTEMPTS`] retries) the offending file is
+    /// renamed to `<path>.broken-<ts>` and the returned `SettingsFile`
+    /// starts from `T::default()` — the file really is corrupt, and the
+    /// quarantine lets the next launch start clean instead of repeatedly
+    /// failing to load it.
+    ///
+    /// A [`SettingsFileError::Migrate`] or [`SettingsFileError::Io`]
+    /// failure, by contrast, is **not** quarantined:
+    ///
+    /// * `Migrate` means the TOML parsed fine, but this build's own
+    ///   [`Migrator`] chain doesn't know how to bring it up to
+    ///   `T::CURRENT_VERSION` — the classic symptom of an *older* build
+    ///   opening a file a *newer* peer process already wrote in a newer
+    ///   schema. The file is not corrupt; renaming it would destroy that
+    ///   peer's live, legitimate, still-in-use data.
+    /// * `Io` means we couldn't even read the file (permissions, a
+    ///   transient failure) — we never saw its content, so there is no
+    ///   basis at all for deciding it's corrupt, and renaming (itself
+    ///   another I/O operation, on a path we just failed to read) would
+    ///   be reckless.
+    ///
+    /// In both of those cases the handle falls back to `T::default()` for
+    /// this session only, but the file on disk is left completely
+    /// untouched. Use [`load_strict`](Self::load_strict) in tests that
     /// want to assert on the specific failure instead.
     pub fn load(path: PathBuf, migrator: Migrator<T>) -> Result<Self, SettingsFileError> {
         let lock = FileLock::acquire_exclusive(&path).map_err(SettingsFileError::Io)?;
         let initial = match Self::read_or_default(&path, &migrator) {
             Ok(value) => value,
-            Err(other) => {
-                quarantine(&path);
+            Err(SettingsFileError::Migrate(e)) => {
+                // Not corruption: a peer on a newer schema. Leave the file
+                // alone so that peer's data survives; fall back to
+                // in-memory defaults for this session only.
+                eprintln!(
+                    "bastyde-settings: {} is on a schema this build cannot migrate ({}); using in-memory defaults for this session, file left untouched",
+                    path.display(),
+                    e,
+                );
                 let mut v = T::default();
                 v.set_version(T::CURRENT_VERSION);
+                v
+            }
+            Err(SettingsFileError::Io(e)) => {
+                // We never even read the content, so we have no basis to
+                // judge it corrupt. Fall back to in-memory defaults for
+                // this session only.
                 eprintln!(
-                    "bastyde-settings: load failed for {}: {}; falling back to defaults",
+                    "bastyde-settings: could not read {} ({}); using in-memory defaults for this session, file left untouched",
+                    path.display(),
+                    e,
+                );
+                let mut v = T::default();
+                v.set_version(T::CURRENT_VERSION);
+                v
+            }
+            Err(other) => {
+                // A genuinely unparsable-after-retries document: real
+                // corruption. Quarantine it so the next launch starts
+                // clean instead of repeatedly failing.
+                quarantine(&path);
+                eprintln!(
+                    "bastyde-settings: load failed for {}: {}; quarantined, falling back to defaults",
                     path.display(),
                     other,
                 );
+                let mut v = T::default();
+                v.set_version(T::CURRENT_VERSION);
                 v
             }
         };
@@ -197,16 +254,15 @@ where
         stamp: (Option<SystemTime>, Option<u64>),
         migrator: Migrator<T>,
     ) -> Self {
-        // Writes never go through the debounce (see the module docs): every
-        // `mutate` / `replace` is a synchronous locked read-modify-write.
-        // The `DebouncedWriter` is kept purely so `path()` / `flush_now()`
-        // keep working uniformly with the rest of the crate — `flush_now`
-        // is a harmless no-op here since nothing is ever pending.
-        let writer = DebouncedWriter::new(path, Duration::ZERO);
+        // Writes never go through the shared debounced-write worker pool
+        // (see the module docs): every `mutate` / `replace` is a
+        // synchronous locked read-modify-write on the calling thread. This
+        // type never registers with that pool at all — it just remembers
+        // its own `path` directly.
         Self {
             inner: Rc::new(Inner {
                 current: RefCell::new(initial),
-                writer,
+                path,
                 last_known_stamp: Cell::new(stamp),
                 migrator,
             }),
@@ -278,7 +334,7 @@ where
     /// in-memory `current` and stamp baseline — all before releasing
     /// the lock.
     fn locked_read_modify_write<F: FnOnce(&mut T)>(&self, f: F) -> Result<(), SettingsFileError> {
-        let path = self.inner.writer.path().to_path_buf();
+        let path = self.inner.path.clone();
         let lock = FileLock::acquire_exclusive(&path).map_err(SettingsFileError::Io)?;
 
         let mut fresh = Self::read_or_default(&path, &self.inner.migrator)?;
@@ -308,7 +364,7 @@ where
     /// watcher, where a coincident stamp match must never be relied on
     /// alone).
     pub fn reload_if_stale(&self) -> Result<bool, SettingsFileError> {
-        let path = self.inner.writer.path();
+        let path = self.inner.path.as_path();
         let current_stamp = disk_stamp(path);
         if current_stamp == self.inner.last_known_stamp.get() {
             return Ok(false);
@@ -320,22 +376,21 @@ where
         Ok(true)
     }
 
-    /// Synchronously write any pending payload to disk. Always a
-    /// harmless no-op: `mutate` / `replace` already write synchronously,
-    /// so nothing is ever pending. Kept so callers that hold a
-    /// `SettingsFile` alongside debounced types (`SettingsStore`,
+    /// Synchronously write any pending payload to disk. A genuine no-op:
+    /// `mutate` / `replace` already write synchronously on the calling
+    /// thread, so nothing is ever pending — this type never registers
+    /// with the shared debounced-write worker pool at all, so there is
+    /// nothing to flush and nothing that can fail. Kept so callers that
+    /// hold a `SettingsFile` alongside debounced types (`SettingsStore`,
     /// `PersistedListModel`) can flush everything uniformly without
     /// special-casing this type.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
-        self.inner
-            .writer
-            .flush_now()
-            .map_err(SettingsFileError::Flush)
+        Ok(())
     }
 
     /// The path being written to.
     pub fn path(&self) -> &Path {
-        self.inner.writer.path()
+        self.inner.path.as_path()
     }
 }
 
@@ -353,7 +408,7 @@ where
     }
 
     fn reload_from_disk(&self) -> Result<bool, SettingsFileError> {
-        let path = self.inner.writer.path();
+        let path = self.inner.path.as_path();
         let current_stamp = disk_stamp(path);
         if current_stamp == self.inner.last_known_stamp.get() {
             // Cheap check: this is almost always our own last write
@@ -380,7 +435,7 @@ where
 impl<T: Versioned + DeserializeOwned + std::fmt::Debug> std::fmt::Debug for SettingsFile<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SettingsFile")
-            .field("path", &self.inner.writer.path())
+            .field("path", &self.inner.path)
             .field("current", &*self.inner.current.borrow())
             .finish()
     }
@@ -540,8 +595,15 @@ mod tests {
             SettingsFile::load(path.clone(), Migrator::new()).unwrap();
         assert_eq!(file.snapshot().version, 1);
 
-        // Original path should now be vacant or not the broken contents.
-        // The .broken-<ts> sibling should exist.
+        // A genuine, unparsable-after-retries parse failure IS real
+        // corruption: the original path must be gone and a .broken-<ts>
+        // sibling must exist in its place. This proves the F2 fix did not
+        // regress the legitimate-corruption case while fixing the two
+        // illegitimate ones below.
+        assert!(
+            !path.exists(),
+            "the corrupt original should have been renamed away"
+        );
         let entries: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -550,6 +612,111 @@ mod tests {
             .iter()
             .any(|e| e.file_name().to_string_lossy().contains(".broken-"));
         assert!(has_quarantine, "expected a .broken-<ts> file");
+    }
+
+    /// F2 regression: a file that parses fine but is on a schema version
+    /// this build's `Migrator` cannot handle (e.g. written by a *newer*
+    /// peer process) must NOT be quarantined — that would destroy the
+    /// peer's still-live, legitimate data. Before the fix, `load` treated
+    /// every `Err` from `read_or_default` (including `Migrate`) alike and
+    /// renamed the file away; this test fails on the old code (the
+    /// original path would no longer exist) and passes on the fix (the
+    /// file survives byte-for-byte, and the handle falls back to
+    /// `T::default()` in memory only, for this session).
+    #[test]
+    fn migration_failure_does_not_quarantine_a_peers_newer_schema() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("newer_schema.toml");
+        // `Settings::CURRENT_VERSION` is 1; a `version = 99` document
+        // looks like it came from a much newer build. An empty
+        // `Migrator` has no idea how to bring version 99 down to 1 (it
+        // only walks forward), so `Migrator::run` reports
+        // `MigrationError::NewerThanCurrent`.
+        let original_contents = "version = 99\nfont_size = 12.0\ntheme = \"from-the-future\"\n";
+        fs::write(&path, original_contents).unwrap();
+
+        let file: SettingsFile<Settings> =
+            SettingsFile::load(path.clone(), Migrator::new()).unwrap();
+
+        // The handle falls back to in-memory defaults for this session
+        // (stamped to `CURRENT_VERSION`, exactly like every other
+        // fallback-to-default path in `load`)...
+        assert_eq!(
+            file.snapshot(),
+            Settings {
+                version: Settings::CURRENT_VERSION,
+                ..Settings::default()
+            }
+        );
+
+        // ...but the file on disk must be completely untouched: same
+        // path, same bytes, no .broken-<ts> sibling anywhere.
+        assert!(path.exists(), "the peer's file must not be renamed away");
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            on_disk, original_contents,
+            "the peer's file must be byte-identical before and after load()"
+        );
+        let entries: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            !entries
+                .iter()
+                .any(|e| e.file_name().to_string_lossy().contains(".broken-")),
+            "a migration failure must never produce a quarantine sibling"
+        );
+    }
+
+    /// F2 regression: an I/O error means we never even read the file's
+    /// content, so there is no basis at all for judging it corrupt.
+    /// Before the fix, `load` quarantined (attempted to rename) the file
+    /// on any `Err`, including a plain I/O failure. Skipped when running
+    /// as root, since root ignores the read-permission bit and the setup
+    /// wouldn't actually reproduce an I/O error.
+    #[test]
+    #[cfg(unix)]
+    fn io_error_does_not_quarantine() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unreadable.toml");
+        fs::write(&path, "version = 1\nfont_size = 1.0\ntheme = \"x\"\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // If we can still read it (e.g. running as root in CI), this
+        // setup doesn't reproduce the bug's precondition; skip rather
+        // than assert something meaningless.
+        if fs::read_to_string(&path).is_ok() {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+
+        let file: SettingsFile<Settings> =
+            SettingsFile::load(path.clone(), Migrator::new()).unwrap();
+        assert_eq!(
+            file.snapshot(),
+            Settings {
+                version: Settings::CURRENT_VERSION,
+                ..Settings::default()
+            }
+        );
+
+        // Restore permissions so tempdir cleanup can remove the file.
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(path.exists(), "an unreadable file must not be renamed away");
+        let entries: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            !entries
+                .iter()
+                .any(|e| e.file_name().to_string_lossy().contains(".broken-")),
+            "an I/O error must never produce a quarantine sibling"
+        );
     }
 
     #[test]
@@ -737,8 +904,65 @@ mod tests {
         file.mutate(|s| s.font_size = 1.0).unwrap();
         // Already durably written by `mutate`'s synchronous locked
         // write; `flush_now` must not error even though nothing is ever
-        // pending on the (unused) debounce path.
+        // pending — this type never registers with the shared
+        // debounced-write worker pool at all any more.
         file.flush_now().unwrap();
+    }
+
+    /// F13 regression: `flush_now` must be a genuine, unconditional no-op
+    /// — never touching the shared debounced-write worker pool at all —
+    /// even while a *different* `SettingsFile` handle pointed at the same
+    /// path is concurrently `mutate`-ing (i.e. holding the file lock).
+    /// Before the fix, `flush_now` forwarded to a real
+    /// `DebouncedWriter::flush_now`, which round-trips through the shared
+    /// worker thread; that write path is entirely gone now, so this must
+    /// return `Ok(())` immediately regardless of what any other handle
+    /// (or the file lock) is doing.
+    #[test]
+    fn flush_now_never_touches_the_shared_worker_even_under_concurrent_mutate() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("no_worker.toml");
+
+        let a: SettingsFile<Settings> = SettingsFile::load(path.clone(), Migrator::new()).unwrap();
+        let b: SettingsFile<Settings> = SettingsFile::load(path, Migrator::new()).unwrap();
+
+        a.mutate(|s| s.font_size = 5.0).unwrap();
+
+        // `b` never registered a writer with the shared pool (there is
+        // none any more), so `flush_now` on `b` has nothing to wait on
+        // and nothing to fail, no matter what `a` just did to the same
+        // file.
+        assert!(b.flush_now().is_ok());
+        assert!(a.flush_now().is_ok());
+    }
+
+    /// F13 regression: constructing and dropping a `SettingsFile` must be
+    /// cheap. Before the fix, `new_inner` registered a `DebouncedWriter`
+    /// with the shared worker pool, whose `Drop` blocks on a synchronous
+    /// ack round-trip through that thread — for a queue that was always
+    /// empty here. A tight loop of construct/drop would pay that
+    /// round-trip cost 1000 times. This is a coarse regression guard: a
+    /// generous wall-clock bound that the old behavior could plausibly
+    /// blow (thread-pool ack round-trips are not free) and the fix
+    /// trivially satisfies (no worker registration happens at all).
+    #[test]
+    fn construct_and_drop_is_cheap_in_a_tight_loop() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("drop_timing.toml");
+
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            let file: SettingsFile<Settings> =
+                SettingsFile::load(path.clone(), Migrator::new()).unwrap();
+            drop(file);
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "1000 construct/drop cycles took {elapsed:?}; \
+             this type must never register with the shared worker pool"
+        );
     }
 
     // -----------------------------------------------------------------
