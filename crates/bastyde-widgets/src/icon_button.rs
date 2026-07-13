@@ -276,6 +276,14 @@ impl IconButton {
     /// of its sub-widgets (e.g. tab-bar scroll arrows that must match
     /// the tab strip's `idle_text_role` regardless of hover state).
     /// Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
+    ///
+    /// It replaces the *interaction* cascade (idle / hover / press / focus),
+    /// **not** the disabled substitution: a role passed here still resolves to
+    /// [`TextRole::Disabled`] in a disabled subtree, like every other
+    /// role-derived color (see [`ColorProp::resolve`]). That is what a disabled
+    /// control should look like. When the tint is semantic *state* that stays
+    /// true even though the button can't be pressed — a save/sync indicator, a
+    /// validation badge — wrap it: `.icon_role(ColorProp::undimmed(role))`.
     pub fn icon_role(mut self, role: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
         self.icon_role_override = Some(role.into());
         self
@@ -648,10 +656,14 @@ impl bastyde_core::widget::Widget for IconButton {
         }
 
         // Icon color: a caller-supplied override wins over the auto
-        // cascade. The override replaces ALL states (idle / hover /
-        // press / focus / disabled) — chrome that uses this opts out
-        // of interaction-driven color feedback in exchange for matching
-        // a host's enforced text role.
+        // cascade. It replaces the interaction states (idle / hover /
+        // press / focus) — chrome that uses this opts out of
+        // interaction-driven color feedback in exchange for matching a
+        // host's enforced text role. It does NOT opt out of the disabled
+        // substitution, which happens later, at paint, inside
+        // `ColorProp::resolve`: a role passed here still dims in a
+        // disabled subtree. Callers whose tint is semantic state rather
+        // than chrome pass `ColorProp::undimmed(role)`.
         let icon_color: bastyde_core::color_prop::ColorProp =
             if let Some(ref over) = self.icon_role_override {
                 over.clone()

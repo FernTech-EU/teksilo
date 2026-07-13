@@ -54,6 +54,9 @@ pub enum ColorProp {
     DynamicSurfaceRole(Signal<SurfaceRole>),
     /// Reactive border role — the role itself changes with state.
     DynamicBorderRole(Signal<BorderRole>),
+    /// A colour that keeps its role in a **disabled** subtree instead of dimming
+    /// to the disabled counterpart — see [`ColorProp::undimmed`].
+    Undimmed(Box<ColorProp>),
 }
 
 impl ColorProp {
@@ -107,7 +110,37 @@ impl ColorProp {
             ColorProp::DynamicBorderRole(s) => {
                 disabled_border(s.get(), enabled).resolve(&theme.colors)
             }
+            // The one opt-out of the substitution above: resolve as if enabled.
+            ColorProp::Undimmed(inner) => inner.resolve(theme, true),
         }
+    }
+
+    /// Mark a colour as semantic **state** rather than interactive chrome: it keeps
+    /// its role in a disabled subtree instead of dimming.
+    ///
+    /// The disabled substitution in [`Self::resolve`] exists because a disabled
+    /// control must *look* unavailable — its label, its icon, its border. But a
+    /// widget's colour sometimes carries information that is true regardless of
+    /// whether the control can be clicked: a sync/save state, a validation result,
+    /// a severity badge. Dimming those to `Disabled` doesn't say "you can't press
+    /// this", it destroys the very thing the colour was there to communicate — and
+    /// the caller has no way to get it back, because the substitution happens at
+    /// paint, below any role they can pass in.
+    ///
+    /// Reach for this only when the colour is a *statement*, not an affordance:
+    ///
+    /// ```ignore
+    /// // A save indicator that is disabled (autosave owns the saving) but must
+    /// // still show whether the manuscript is on disk.
+    /// IconButton::new(check)
+    ///     .icon_role(ColorProp::undimmed(TextRole::Success))
+    ///     .enabled(false)
+    /// ```
+    ///
+    /// Composes with every variant, including the dynamic ones (their signal is
+    /// still registered — see [`Self::register_if_bound`]).
+    pub fn undimmed(color: impl Into<ColorProp>) -> ColorProp {
+        ColorProp::Undimmed(Box::new(color.into()))
     }
 
     /// Register dirty-tracking for signal-bearing variants so updates trigger
@@ -124,19 +157,22 @@ impl ColorProp {
             ColorProp::DynamicTextRole(s) => s.bind_to(widget_id, registry, level),
             ColorProp::DynamicSurfaceRole(s) => s.bind_to(widget_id, registry, level),
             ColorProp::DynamicBorderRole(s) => s.bind_to(widget_id, registry, level),
+            // Wrapping a reactive colour must not silently unsubscribe it.
+            ColorProp::Undimmed(inner) => inner.register_if_bound(widget_id, registry, level),
             _ => {}
         }
     }
 
     /// Whether this prop carries any signal binding.
     pub fn is_bound(&self) -> bool {
-        matches!(
-            self,
+        match self {
             ColorProp::Bound(_)
-                | ColorProp::DynamicTextRole(_)
-                | ColorProp::DynamicSurfaceRole(_)
-                | ColorProp::DynamicBorderRole(_)
-        )
+            | ColorProp::DynamicTextRole(_)
+            | ColorProp::DynamicSurfaceRole(_)
+            | ColorProp::DynamicBorderRole(_) => true,
+            ColorProp::Undimmed(inner) => inner.is_bound(),
+            _ => false,
+        }
     }
 }
 
@@ -184,6 +220,7 @@ impl std::fmt::Debug for ColorProp {
             ColorProp::DynamicTextRole(_) => f.write_str("DynamicTextRole(..)"),
             ColorProp::DynamicSurfaceRole(_) => f.write_str("DynamicSurfaceRole(..)"),
             ColorProp::DynamicBorderRole(_) => f.write_str("DynamicBorderRole(..)"),
+            ColorProp::Undimmed(inner) => f.debug_tuple("Undimmed").field(inner).finish(),
         }
     }
 }
@@ -314,6 +351,55 @@ mod tests {
         let prop = ColorProp::SurfaceRole(SurfaceRole::Accent);
         assert_eq!(prop.resolve(&theme, true), theme.colors.accent);
         assert_eq!(prop.resolve(&theme, false), theme.colors.accent_disabled);
+    }
+
+    // ── `undimmed` — colour that is state, not chrome ────────────────────────
+
+    /// The default, for contrast: *any* text role dims in a disabled subtree,
+    /// including the semantic ones. That is right for a label or an affordance,
+    /// and wrong for a colour that is saying something still true.
+    #[test]
+    fn a_plain_text_role_dims_when_disabled_even_a_semantic_one() {
+        let theme = intui::light();
+        let prop = ColorProp::TextRole(TextRole::Success);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.text_success);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.text_disabled);
+    }
+
+    #[test]
+    fn undimmed_keeps_its_role_in_a_disabled_subtree() {
+        let theme = intui::light();
+        let prop = ColorProp::undimmed(TextRole::Success);
+        assert_eq!(prop.resolve(&theme, true), theme.colors.text_success);
+        assert_eq!(
+            prop.resolve(&theme, false),
+            theme.colors.text_success,
+            "a save indicator that can't be clicked still has to say whether the \
+             work is on disk"
+        );
+    }
+
+    #[test]
+    fn undimmed_composes_with_surface_and_border_roles() {
+        let theme = intui::light();
+        let surface = ColorProp::undimmed(SurfaceRole::Accent);
+        let border = ColorProp::undimmed(BorderRole::Accent);
+        assert_eq!(surface.resolve(&theme, false), theme.colors.accent);
+        assert_eq!(border.resolve(&theme, false), theme.colors.accent);
+    }
+
+    /// Wrapping a reactive colour must not silently unsubscribe it — the wrapper
+    /// has to forward both the binding registration and the live value.
+    #[test]
+    fn undimmed_keeps_a_dynamic_role_reactive() {
+        let theme = intui::light();
+        let role = Signal::new(TextRole::Success);
+        let prop = ColorProp::undimmed(role.clone());
+        assert!(prop.is_bound(), "the wrapper must still report its binding");
+        assert_eq!(prop.resolve(&theme, false), theme.colors.text_success);
+
+        role.set(TextRole::Warning);
+        assert_eq!(prop.resolve(&theme, false), theme.colors.text_warning);
     }
 
     #[test]
