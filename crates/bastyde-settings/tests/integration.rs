@@ -6,10 +6,12 @@
 //!   * The `SettingsBundle` -> `OpenedSettings` pipeline.
 //!   * Generic `MruList<T: MruEntry>` round-trip with a custom item type.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
-use bastyde_settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsKey, SettingsStore};
+use bastyde_settings::{
+    AppPaths, Keyed, MruEntry, MruList, SettingsBundle, SettingsKey, SettingsStore,
+};
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
 
@@ -33,11 +35,14 @@ impl DemoProject {
     }
 }
 
-impl MruEntry for DemoProject {
-    type Key = Path;
-    fn key(&self) -> &Path {
-        &self.path
+impl Keyed for DemoProject {
+    type Key = PathBuf;
+    fn key(&self) -> PathBuf {
+        self.path.clone()
     }
+}
+
+impl MruEntry for DemoProject {
     fn is_pinned(&self) -> bool {
         self.pinned
     }

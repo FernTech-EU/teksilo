@@ -74,6 +74,13 @@ Add `from → from + 1` steps with `Migrator::step`; the order in which
 they're added does not matter — `Migrator::run` walks them in
 version order.
 
+`Migrator<T>` is cheaply `Clone` (each step's closure lives behind an
+`Arc`, so cloning is a handful of refcount bumps, not a deep copy) and
+`Send + Sync` whenever `T` is — which is what lets a `Patch`
+(`crate::flush::Patch`) closure retain its own copy of the migrator and re-run it against the
+document read fresh on the shared I/O worker thread, instead of the
+stale, possibly-out-of-date value this handle loaded at construction.
+
 ```rust
 pub struct Migrator<T: Versioned + DeserializeOwned> { /* fields */ }
 ```

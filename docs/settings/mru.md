@@ -6,11 +6,10 @@
 Most-recently-used list — a generic, persisted reactive collection
 with dedupe, pinning, and LRU-style cap eviction.
 
-Apps define their own item type by implementing [`MruEntry`]: a small
-trait that exposes a dedupe key, an optional pin flag, and an optional
-touch hook. The framework handles dedupe-on-add, pin-aware cap eviction,
-and debounced disk persistence; the app owns the item schema and
-semantics (e.g. updating a `last_opened` timestamp in `touch`).
+Apps define their own item type by implementing `Keyed` (a stable
+identity) and `MruEntry` (pin / touch semantics). The framework
+handles dedupe-on-add, pin-aware cap eviction, and cross-process-safe
+persistence via `PersistedListModel`; the app owns the item schema.
 
 ## When to use
 
@@ -22,15 +21,16 @@ a menu — no separate notification plumbing is required.
 
 ## Persistence
 
-`MruList::open` reads `<config_dir>/<name>.toml` on first access and
-writes it back (atomically, via a temp-and-rename) after every mutation,
-subject to the debounce window. Pass `Duration::ZERO` in tests to flush
+`MruList::open` reads `<config_dir>/<name>.toml` on first access
+(cross-process safe: the read is lock-protected, and every subsequent
+mutation merges by key against the document on disk, never overwriting
+the whole thing). Pass `Duration::ZERO` in tests to flush
 synchronously, or call `MruList::flush_now` explicitly.
 
 ```ignore
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
-use bastyde_settings::{AppPaths, MruEntry, MruList};
+use bastyde_settings::{AppPaths, Keyed, MruEntry, MruList};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -41,9 +41,12 @@ struct RecentProject {
     pinned: bool,
 }
 
+impl Keyed for RecentProject {
+    type Key = PathBuf;
+    fn key(&self) -> PathBuf { self.path.clone() }
+}
+
 impl MruEntry for RecentProject {
-    type Key = Path;
-    fn key(&self) -> &Path { &self.path }
     fn is_pinned(&self) -> bool { self.pinned }
     fn set_pinned(&mut self, p: bool) { self.pinned = p; }
     fn touch(&mut self) { self.last_opened += 1; }
@@ -67,7 +70,7 @@ assert_eq!(recents.model().len(), 1);
 
 ## Builder methods at a glance
 
-`open`, `open_with_delay`, `open_at`, `model`, `max_items`, `add`, `remove`, `touch`, `toggle_pin`, `clear`, `flush_now`, `path`
+`open`, `open_with_delay`, `open_at`, `model`, `max_items`, `add`, `remove`, `touch`, `set_pinned`, `clear`, `flush_now`, `path`
 
 ## API reference
 
@@ -79,9 +82,7 @@ A persisted MRU list backed by `PersistedListModel<T>`.
 
 Cheap to clone (`Rc`-shared internally). The reactive
 `ListModel<T>` returned by `model()` is the same
-handle the persistence bridge observes; mutating it through any
-clone fires both the on-screen UI updates and the debounced
-disk flush.
+handle the persistence bridge observes.
 
 ```rust
 pub struct MruList<T: MruEntry> { /* fields */ }
@@ -115,9 +116,12 @@ already has a resolved `PathBuf` (e.g. from a custom directory layout).
 
 The underlying reactive list; bind to UI widgets via clones of this handle.
 
-This is the same `ListModel<T>` the
-persistence bridge observes — any mutation schedules a debounced
-disk flush automatically.
+**Read-only for mutation purposes.** Use `add`,
+`remove`, `touch`,
+`set_pinned`, `clear` to mutate —
+those are what enqueue the matching persisted op. Mutating the
+returned `ListModel` directly updates what's on screen but is
+never written to disk.
 
 #### `pub fn max_items(&self) -> usize`
 
@@ -133,22 +137,27 @@ Insert `entry` at the front, deduping by `entry.key()`.
 entry reflects "now". If a previously-pinned entry is re-added
 without `pinned`, the pin state is preserved.
 
-#### `pub fn remove(&self, key: &T::Key)`
+#### `pub fn remove<Q>(&self, key: &Q) where T::Key: Borrow<Q>, Q: Eq + ?Sized,`
 
 Remove the entry whose key matches, then schedule a debounced flush.
 
-No-op when no entry with that key is present.
+No-op when no entry with that key is present. Generic over `Q` so
+callers can pass a borrowed form of the key (e.g. `&Path` when
+`T::Key = PathBuf`, `&str` when `T::Key = String`) without having
+to allocate an owned key just to look one up.
 
-#### `pub fn touch(&self, key: &T::Key)`
+#### `pub fn touch<Q>(&self, key: &Q) where T::Key: Borrow<Q>, Q: Eq + ?Sized,`
 
 Mark the entry whose key matches as freshly used by calling
 `MruEntry::touch` on a clone of it, then write it back and
 schedule a debounced flush. No-op when no entry matches.
 
-#### `pub fn toggle_pin(&self, key: &T::Key)`
+#### `pub fn set_pinned<Q>(&self, key: &Q, pinned: bool) where T::Key: Borrow<Q>, Q: Eq + ?Sized,`
 
-Flip the pin flag of the entry whose key matches, then schedule a
-debounced flush. No-op when no entry matches.
+Set the pin flag of the entry whose key matches to exactly
+`pinned` (idempotent — unlike a toggle, replaying this against an
+already-applied peer change does not flip it back). No-op when no
+entry matches.
 
 #### `pub fn clear(&self)`
 

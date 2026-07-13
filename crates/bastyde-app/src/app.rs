@@ -430,6 +430,11 @@ struct BastydeAppHandler {
     /// Created in `BastydeAppBuilder::run` when the `I18nConfig` registers
     /// any `runtime_override`s; otherwise `None`.
     _i18n_watcher: Option<bastyde_i18n::FtlFileWatcher>,
+    /// Kept alive for the lifetime of the event loop so that the
+    /// settings directory watcher's background thread keeps running.
+    /// Created in `BastydeAppBuilder::run` when a settings bundle was
+    /// opened and live-reload was not disabled; otherwise `None`.
+    _settings_watcher: Option<bastyde_settings::SettingsWatcher>,
     /// Optional per-loop-turn closure (e.g. an async executor poll) installed
     /// via [`BastydeAppBuilder::on_loop_tick`]. Runs at the top of
     /// `about_to_wait`; returning `true` means tasks advanced and a repaint is
@@ -450,6 +455,7 @@ impl BastydeAppHandler {
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
         #[cfg(feature = "text")] typesetter: SharedTypesetter,
         i18n_watcher: Option<bastyde_i18n::FtlFileWatcher>,
+        settings_watcher: Option<bastyde_settings::SettingsWatcher>,
         event_proxy: AppEventProxy,
     ) -> Self {
         let mut wm = WindowManager::new(theme);
@@ -481,6 +487,7 @@ impl BastydeAppHandler {
             #[cfg(feature = "text")]
             typesetter,
             _i18n_watcher: i18n_watcher,
+            _settings_watcher: settings_watcher,
             loop_tick: None,
             loop_tick_poll: None,
         }
@@ -2395,6 +2402,28 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                     }
                 }
             }
+            // Live cross-process settings sync: a `bastyde-settings`
+            // managed file changed on disk (a peer process's write, or
+            // harmlessly this process's own write being noticed by its
+            // own watcher). Look the path up in the app's
+            // `SettingsRegistry` and let it dispatch to whichever
+            // `Reloadable` owns it. This must *not* trigger a composite
+            // rebuild — `reload_from_disk` only mutates signals/models
+            // in place, and the existing reactive binding system
+            // propagates the change to every observer, exactly like
+            // `I18nReload` above.
+            AppEvent::SettingsReload { path } => {
+                if let Some(template) = self.wm.app_context_template()
+                    && let Some(registry) =
+                        template.app_state::<bastyde_settings::SettingsRegistry>()
+                    && let Err(e) = registry.dispatch(&path)
+                {
+                    eprintln!(
+                        "bastyde-app: settings reload failed for {}: {e}",
+                        path.display()
+                    );
+                }
+            }
             // Title-bar hosts route their `close()` through this variant so
             // the operation hops back onto the main thread before touching
             // `WindowManager` (see `title_bar_host.rs`). File-dialog
@@ -2661,6 +2690,13 @@ pub struct BastydeAppBuilder {
     /// at startup and each enabled service is registered into the
     /// `app_state` registry under its concrete type.
     settings_bundle: Option<bastyde_settings::SettingsBundle>,
+    /// Whether `run()` should start a `SettingsWatcher` over the settings
+    /// directories so a peer process's write is picked up live. On by
+    /// default whenever a settings bundle is configured — this is the
+    /// entire point of `SettingsBundle`'s cross-process-safe writes.
+    /// Toggle off via [`settings_watch`](Self::settings_watch) for tests
+    /// or environments without a usable filesystem watcher.
+    settings_watch_enabled: bool,
     /// Telemetry configuration. When present, the bundle is opened
     /// after `settings_bundle` (it depends on `SettingsStore`) and the
     /// resulting `OpenedTelemetry` + `TelemetryContext` are registered
@@ -2695,6 +2731,7 @@ impl BastydeAppBuilder {
             tooltip_contents: Vec::new(),
             app_paths: None,
             settings_bundle: None,
+            settings_watch_enabled: true,
             #[cfg(feature = "telemetry")]
             telemetry_bundle: None,
             loop_tick: None,
@@ -2756,6 +2793,25 @@ impl BastydeAppBuilder {
     /// [`app_paths`](Self::app_paths).
     pub fn settings(mut self, bundle: bastyde_settings::SettingsBundle) -> Self {
         self.settings_bundle = Some(bundle);
+        self
+    }
+
+    /// Enable or disable the live cross-process settings-reload watcher
+    /// started in [`run`](Self::run) (windowed apps only —
+    /// [`build_headless`](Self::build_headless) never starts one, since
+    /// there is no event loop to post the reload event through).
+    ///
+    /// **On by default** whenever [`settings`](Self::settings) is
+    /// configured: this is what makes a peer process's write to a
+    /// shared settings file (Skribisto's one-process-per-project model
+    /// shares `general.toml` / `recents.toml` / `window_state.toml`
+    /// across every open project) show up in this process's UI with no
+    /// restart and no polling. Pass `false` to opt out — e.g. a
+    /// sandboxed test environment with no usable filesystem watcher, or
+    /// an app that wants to poll `Reloadable::reload_from_disk` on its
+    /// own schedule instead.
+    pub fn settings_watch(mut self, enabled: bool) -> Self {
+        self.settings_watch_enabled = enabled;
         self
     }
 
@@ -3065,6 +3121,17 @@ impl BastydeAppBuilder {
                         Box::new(w.clone()),
                     );
                 }
+                // Reachable from any handler via
+                // `ctx.app_state::<bastyde_settings::SettingsRegistry>()`,
+                // so application code can register its own ad hoc
+                // `SettingsFile` / `PersistedListModel` / `MruList`
+                // handles into the very same registry a `SettingsWatcher`
+                // event gets dispatched through — not just the two
+                // services the bundle itself opens.
+                self.app_state_registry.insert(
+                    TypeId::of::<bastyde_settings::SettingsRegistry>(),
+                    Box::new(opened.registry.clone()),
+                );
                 Some(opened)
             }
             Err(e) => {
@@ -3310,6 +3377,39 @@ impl BastydeAppBuilder {
             }
         };
 
+        // Build the live cross-process settings-reload watcher, mirroring
+        // the i18n watcher immediately above: on by default whenever a
+        // settings bundle was actually opened (`opened_settings.is_some()`),
+        // opt-out via `.settings_watch(false)`. The sink posts
+        // `AppEvent::SettingsReload` through the event loop proxy; the
+        // handler (see `user_event` above) dispatches the changed path
+        // through the app's `SettingsRegistry` (installed into `app_state`
+        // by `install_settings`). Construction failures log and fall back
+        // to no live reload — the rest of settings persistence still
+        // works, peers just won't be noticed until this process happens
+        // to touch the same key itself.
+        let settings_watcher = if self.settings_watch_enabled && opened_settings.is_some() {
+            self.app_paths.as_ref().and_then(|paths| {
+                let proxy_for_sink = proxy.inner.clone();
+                let sink: bastyde_settings::SettingsReloadSink = std::sync::Arc::new(move |path| {
+                    let _ = proxy_for_sink.send_event(AppEvent::SettingsReload { path });
+                });
+                let dirs = vec![
+                    paths.config_dir().to_path_buf(),
+                    paths.data_dir().to_path_buf(),
+                ];
+                match bastyde_settings::SettingsWatcher::new(dirs, sink) {
+                    Ok(watcher) => Some(watcher),
+                    Err(e) => {
+                        eprintln!("bastyde-app: failed to start settings file watcher: {e}");
+                        None
+                    }
+                }
+            })
+        } else {
+            None
+        };
+
         // Build the typesetter first so we can auto-register it into
         // the per-tree app-state registry below. This gives rich-text
         // widgets (and anything else that needs direct typesetter
@@ -3387,6 +3487,7 @@ impl BastydeAppBuilder {
             #[cfg(feature = "text")]
             typesetter,
             i18n_watcher,
+            settings_watcher,
             proxy.clone(),
         );
         // Hand over any registered loop-tick hook (e.g. the `bastyde-async`

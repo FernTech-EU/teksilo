@@ -34,7 +34,9 @@ use std::time::SystemTime;
 use bastyde::IntentKind;
 use bastyde::core::Action;
 use bastyde::prelude::*;
-use bastyde::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
+use bastyde::settings::{
+    AppPaths, Keyed, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey,
+};
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Repeater, Spacer, TextWidget, Toolbar,
     VStack,
@@ -75,11 +77,17 @@ impl RecentProject {
     }
 }
 
-impl MruEntry for RecentProject {
-    type Key = Path;
-    fn key(&self) -> &Path {
-        &self.path
+/// Identity is now supplied by `Keyed`, and returned **by value** — the key has
+/// to be captured into the patch closure that crosses to the writer thread, so a
+/// borrow into `self` could not outlive the mutation that produced it.
+impl Keyed for RecentProject {
+    type Key = PathBuf;
+    fn key(&self) -> PathBuf {
+        self.path.clone()
     }
+}
+
+impl MruEntry for RecentProject {
     fn is_pinned(&self) -> bool {
         self.pinned
     }
@@ -159,7 +167,15 @@ impl Widget for Root {
         }));
         ctx.register_action(Action::new("app.toggle_pin").on_invoke(|i, ctx| {
             if let Some(AppIntent::TogglePin(path)) = AppIntent::from_intent(i) {
-                ctx.mru::<RecentProject>().toggle_pin(Path::new(path));
+                // Read-then-set, rather than a `toggle_pin` that flips whatever
+                // it finds. A toggle is not idempotent: replayed against a peer
+                // process's already-applied toggle it flips the value *back*,
+                // inverting their change. The button still toggles — it just
+                // computes the value it wants and states it.
+                let mru = ctx.mru::<RecentProject>();
+                let key = Path::new(path);
+                let pinned = mru.is_pinned(key);
+                mru.set_pinned(key, !pinned);
             }
         }));
         ctx.register_action(Action::new("app.remove_recent").on_invoke(|i, ctx| {

@@ -168,8 +168,13 @@ impl ConsentStore {
         current_event_schema: u32,
         current_endpoint: &str,
     ) -> Result<Self, SettingsFileError> {
+        // `delay` is vestigial: `SettingsFile`'s writes are now always a
+        // synchronous locked read-modify-write (consent is written rarely — a
+        // grant/deny, not a burst), so there is no debounce left to configure.
+        // Kept in the signature so callers don't churn.
+        let _ = delay;
         let migrator = Migrator::<ConsentFile>::new();
-        let file = SettingsFile::load(paths.config_file("telemetry-consent"), delay, &migrator)?;
+        let file = SettingsFile::load(paths.config_file("telemetry-consent"), migrator)?;
 
         // Re-prompt rule. Schema bump or endpoint change resets state.
         let snap = file.snapshot();

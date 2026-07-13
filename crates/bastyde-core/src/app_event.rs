@@ -40,6 +40,16 @@ pub enum AppEvent {
     /// The bastyde-app handler calls `I18nManager::reload_from_path` and
     /// bumps the translation version signal.
     I18nReload { locale: String, path: PathBuf },
+
+    /// A settings file managed by `bastyde-settings` changed on disk —
+    /// either a peer process's write, or (harmlessly) this very
+    /// process's own write being noticed by its own watcher. The
+    /// bastyde-app handler looks `path` up in the app's
+    /// `bastyde_settings::SettingsRegistry` (via `app_state`) and calls
+    /// `Reloadable::reload_from_disk` on whatever owns it — a no-op if
+    /// nothing is registered for that path, or if the content is
+    /// unchanged (the self-write case).
+    SettingsReload { path: PathBuf },
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -68,6 +78,10 @@ impl std::fmt::Debug for AppEvent {
             Self::I18nReload { locale, path } => f
                 .debug_struct("I18nReload")
                 .field("locale", locale)
+                .field("path", path)
+                .finish(),
+            Self::SettingsReload { path } => f
+                .debug_struct("SettingsReload")
                 .field("path", path)
                 .finish(),
         }

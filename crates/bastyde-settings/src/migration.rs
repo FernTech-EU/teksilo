@@ -42,6 +42,7 @@
 //! ```
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
@@ -81,8 +82,9 @@ pub enum MigrationError {
     Deserialize(#[source] toml::de::Error),
 }
 
-type StepFn = Box<dyn Fn(toml::Value) -> Result<toml::Value, String> + Send + Sync>;
+type StepFn = Arc<dyn Fn(toml::Value) -> Result<toml::Value, String> + Send + Sync>;
 
+#[derive(Clone)]
 struct Step {
     from: u32,
     func: StepFn,
@@ -93,6 +95,13 @@ struct Step {
 /// Add `from → from + 1` steps with [`Migrator::step`]; the order in which
 /// they're added does not matter — [`Migrator::run`] walks them in
 /// version order.
+///
+/// `Migrator<T>` is cheaply [`Clone`] (each step's closure lives behind an
+/// `Arc`, so cloning is a handful of refcount bumps, not a deep copy) and
+/// `Send + Sync` whenever `T` is — which is what lets a `Patch`
+/// (`crate::flush::Patch`) closure retain its own copy of the migrator and re-run it against the
+/// document read fresh on the shared I/O worker thread, instead of the
+/// stale, possibly-out-of-date value this handle loaded at construction.
 pub struct Migrator<T: Versioned + DeserializeOwned> {
     steps: Vec<Step>,
     _marker: PhantomData<T>,
@@ -120,7 +129,7 @@ impl<T: Versioned + DeserializeOwned> Migrator<T> {
     {
         self.steps.push(Step {
             from,
-            func: Box::new(func),
+            func: Arc::new(func),
         });
         self
     }
@@ -169,6 +178,20 @@ impl<T: Versioned + DeserializeOwned> Migrator<T> {
 impl<T: Versioned + DeserializeOwned> Default for Migrator<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: Versioned + DeserializeOwned> Clone for Migrator<T> {
+    /// Hand-written rather than `#[derive(Clone)]`: a derive would add a
+    /// spurious `T: Clone` bound (from the `PhantomData<T>` field) even
+    /// though nothing here actually needs it — `Vec<Step>` clones just fine
+    /// on its own (each `Step::func` is an `Arc`, so this is a handful of
+    /// refcount bumps).
+    fn clone(&self) -> Self {
+        Self {
+            steps: self.steps.clone(),
+            _marker: PhantomData,
+        }
     }
 }
 

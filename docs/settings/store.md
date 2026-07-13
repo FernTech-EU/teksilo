@@ -32,6 +32,28 @@ serialize as TOML tables and collide with the dotted-key model.
   with `"editor"` as a leaf value, in either order. Both directions
   panic at the call site that creates the conflict.
 
+## Merging by dirty key, not by whole-document overwrite
+
+Every `Signal<T>::set` schedules a `crate::flush::Patch` that carries
+only the keys dirtied since the last schedule — never a full render of
+`raw`. The patch, applied at flush time against the document read fresh
+off disk under a lock, `write_nested`s just those keys onto it — so a
+peer process's change to some *other* key survives. This is the fix for
+Skribisto's `general.toml`: today, changing any one of its 26 keys
+reverts every other key a peer process changed, because the whole
+document gets re-serialized from an increasingly stale in-memory copy.
+
+## Reload and the re-entrancy guard
+
+`Reloadable::reload_from_disk`
+pushes a peer's on-disk change straight into the already-handed-out
+`Signal<T>` for that key — see `SignalCell::apply_external`'s doc
+comment for why that requires capturing the concrete `T` at
+registration time. Setting a signal from a reload would otherwise
+re-trigger this same write-back observer and bounce the value straight
+back out to disk as if it were a local edit; `StoreInner::applying_external`
+is the flag the observer checks to short-circuit that.
+
 ## Cycle-free observer wiring
 
 The cell each key owns includes an `ObserverHandle` returned by
@@ -150,7 +172,7 @@ Duration::ZERO` is useful for tests — every set writes through
 on the next worker iteration, and `flush_now()` is fully
 deterministic.
 
-#### `pub fn path(&self) -> PathBuf`
+#### `pub fn path(&self) -> &Path`
 
 Path of the underlying file.
 

@@ -13,7 +13,7 @@
 //!   * Apps register their own `MruList<T>` via `app_state(...)`; the
 //!     framework no longer ships a hardcoded `RecentsService`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use bastyde_app::BastydeAppBuilder;
@@ -22,7 +22,7 @@ use bastyde_core::BuildContext;
 use bastyde_core::widget::{LayoutContext, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_settings::{
-    AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey, SettingsStore,
+    AppPaths, Keyed, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey, SettingsStore,
     WindowStateService,
 };
 use serde::{Deserialize, Serialize};
@@ -47,11 +47,14 @@ impl TestRecentProject {
     }
 }
 
-impl MruEntry for TestRecentProject {
-    type Key = Path;
-    fn key(&self) -> &Path {
-        &self.path
+impl Keyed for TestRecentProject {
+    type Key = PathBuf;
+    fn key(&self) -> PathBuf {
+        self.path.clone()
     }
+}
+
+impl MruEntry for TestRecentProject {
     fn is_pinned(&self) -> bool {
         self.pinned
     }
@@ -200,7 +203,7 @@ fn for_testing_paths_keep_writes_inside_tmp() {
         .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
         .build_headless();
 
-    let store_path: PathBuf = app.settings.as_ref().unwrap().store.path();
+    let store_path: PathBuf = app.settings.as_ref().unwrap().store.path().to_path_buf();
     assert!(
         store_path.starts_with(dir.path()),
         "store.path() = {} must be under tempdir {}",

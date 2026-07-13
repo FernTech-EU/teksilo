@@ -86,8 +86,12 @@ impl InstallId {
         delay: Duration,
         now: SystemTime,
     ) -> Result<Self, SettingsFileError> {
+        // `delay` is vestigial — see `ConsentStore::open_with_clock`. The install
+        // id is written once and then rotated ~yearly; there is no burst to
+        // debounce, and `SettingsFile` writes synchronously under a lock now.
+        let _ = delay;
         let migrator = Migrator::<InstallIdFile>::new();
-        let file = SettingsFile::load(paths.config_file("telemetry-install-id"), delay, &migrator)?;
+        let file = SettingsFile::load(paths.config_file("telemetry-install-id"), migrator)?;
 
         let snap = file.snapshot();
         let needs_rotation = snap.uuid.is_empty()

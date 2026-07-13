@@ -101,7 +101,16 @@ window's geometry under its own label (e.g. `"main"`,
 
 #### `pub fn with_debounce(mut self, delay: Duration) -> Self`
 
-Override the debounce window for all services in this bundle.
+Override the debounce window passed to every service this bundle
+opens.
+
+Only `SettingsStore` actually debounces on it — its writes are
+frequent enough (every `Signal::set`) that coalescing matters.
+`WindowStateService` accepts the same parameter (so `open` can
+call both uniformly) but ignores it: `SettingsFile`'s writes are
+always a synchronous locked read-modify-write now, so there is
+nothing left to debounce (see `file.rs`'s and `window_state.rs`'s
+module docs).
 
 #### `pub fn store_name(&self) -> &str`
 
@@ -109,11 +118,21 @@ The filename stem (without `.toml`) used for the K/V store.
 
 #### `pub fn debounce(&self) -> Duration`
 
-The debounce window applied to all services in this bundle.
+The debounce window passed to every service this bundle opens
+(see `with_debounce` for which services
+actually honor it).
 
 #### `pub fn open(self, paths: &AppPaths) -> Result<OpenedSettings, SettingsBundleError>`
 
 Open every requested service against `paths`.
+
+Every opened service is also registered into a fresh
+`SettingsRegistry` (exposed as `OpenedSettings::registry`) under
+its canonical path, so a `crate::SettingsWatcher` event naming
+that path can be dispatched straight to it. The registration
+handles are retained internally by `OpenedSettings` — see its
+field docs — so they stay alive (and thus dispatchable) for as
+long as the returned `OpenedSettings` (or any clone of it) is.
 
 ## `pub struct OpenedSettings`
 

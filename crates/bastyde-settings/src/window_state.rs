@@ -6,13 +6,36 @@
 //! Each named window — identified by a stable string label such as
 //! `"main"` or `"inspector"` — can have its position, size, and
 //! placement (`Floating` / `Maximized` / `Fullscreen`) saved across
-//! sessions. In-memory is the source of truth: [`record`] updates an
-//! in-memory [`WindowStateFile`] and schedules a debounced atomic write
-//! (write-temp + rename); [`state_for`] reads directly from memory
-//! without touching disk. On load, the file is migrated through
-//! [`Migrator`] steps (currently v1 → v2: `maximized: bool` →
-//! `placement: WindowPlacement`) before deserializing, and corrupt
-//! files are quarantined automatically by [`SettingsFile`].
+//! sessions. In-memory is the source of truth: [`state_for`] reads
+//! directly from memory without touching disk. On load, the file is
+//! migrated through [`Migrator`] steps (currently v1 → v2: `maximized:
+//! bool` → `placement: WindowPlacement`) before deserializing, and
+//! corrupt files are quarantined automatically by [`SettingsFile`].
+//!
+//! ## `record` is synchronous, not debounced
+//!
+//! This type is built on [`SettingsFile<WindowStateFile>`], whose writes
+//! are always a synchronous locked read-modify-write (see `file.rs`'s
+//! module docs) — there is no debounce window to coalesce a burst of
+//! calls into one flush. [`record`] therefore takes a lock, re-reads and
+//! re-migrates the file, applies the change, and writes it back *on the
+//! calling thread*, every single time it is invoked. That is the right
+//! trade-off for how this type is meant to be called — a handful of
+//! writes around a window's lifetime — but `bastyde-app`'s
+//! `window_persist` module (`crates/bastyde-app/src/window_persist.rs`)
+//! currently wires [`record`] to fire on *every* `Signal` change of a
+//! window's size/position/placement, which on X11/Windows/macOS means
+//! once per frame during a live drag or resize (Wayland mostly spares
+//! position, since the compositor rarely notifies apps of it — see the
+//! Wayland caveat below — but size still updates during a resize).
+//! Concretely: a live window drag currently does a synchronous
+//! lock-acquire + file read + parse + serialize + atomic write on every
+//! reported geometry change, not a debounced one. This is a known,
+//! intentional-for-now performance characteristic of the current
+//! wiring, not of `WindowStateService` itself — a caller that wants to
+//! coalesce a drag into one write should debounce at the call site
+//! (e.g. only call [`record`] from a "drag ended" / periodic-timer
+//! observer) rather than from every raw geometry `Signal`.
 //!
 //! In a typical Bastyde app, `WindowStateService` is managed by the
 //! framework's `SettingsBundle` and wired automatically when the
@@ -58,16 +81,20 @@
 //! [`record`]: WindowStateService::record
 //! [`state_for`]: WindowStateService::state_for
 
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::rc::Rc;
+use std::time::{Duration, SystemTime};
 
 use bastyde_core::WindowPlacement;
 use serde::{Deserialize, Serialize};
 
-use crate::file::{SettingsFile, SettingsFileError};
+use crate::DEFAULT_DEBOUNCE;
+use crate::file::{SettingsFileError, disk_stamp, read_toml_with_retry};
+use crate::flush::{DebouncedWriter, FlushError};
 use crate::migration::{MigrationError, Migrator, Versioned};
 use crate::path::AppPaths;
-use crate::store::DEFAULT_DEBOUNCE;
+use crate::reload::Reloadable;
 
 /// Persisted geometry for one labeled window.
 ///
@@ -167,7 +194,7 @@ fn clamp_size(value: u32, min: u32, max: u32) -> u32 {
     value.clamp(min, max).max(1)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub(crate) struct WindowStateFile {
     #[serde(default = "default_version")]
     pub version: u32,
@@ -239,52 +266,133 @@ fn make_migrator() -> Migrator<WindowStateFile> {
     Migrator::new().step(1, migrate_v1_to_v2)
 }
 
+/// Read + migrate the document at `path`, or `default` when it does not exist.
+fn read_window_state_or_default(
+    path: &Path,
+    migrator: &Migrator<WindowStateFile>,
+) -> Result<WindowStateFile, SettingsFileError> {
+    match read_toml_with_retry(path)? {
+        Some(raw) => {
+            let mut file = migrator.run(raw).map_err(SettingsFileError::Migrate)?;
+            file.version = <WindowStateFile as Versioned>::CURRENT_VERSION;
+            Ok(file)
+        }
+        None => Ok(WindowStateFile::default()),
+    }
+}
+
+/// Like [`read_window_state_or_default`], but for text already in hand — which
+/// is what a [`crate::flush::Patch`] closure receives (the current file text,
+/// read by the worker under the lock) rather than a path to re-read.
+fn parse_window_state_text(
+    text: Option<&str>,
+    migrator: &Migrator<WindowStateFile>,
+) -> Result<WindowStateFile, SettingsFileError> {
+    match text {
+        Some(text) => {
+            let raw: toml::Value = toml::from_str(text).map_err(SettingsFileError::Parse)?;
+            let mut file = migrator.run(raw).map_err(SettingsFileError::Migrate)?;
+            file.version = <WindowStateFile as Versioned>::CURRENT_VERSION;
+            Ok(file)
+        }
+        None => Ok(WindowStateFile::default()),
+    }
+}
+
 /// Document the migration error type publicly so callers can pattern
 /// match — used in tests below.
 #[allow(dead_code)]
 fn _migration_error_is_exported(_: MigrationError) {}
 
+/// One replayable mutation of the window-state document.
+///
+/// Pure owned data (a `PerWindowState`, a label), so it is `Send` and can be
+/// captured into a [`crate::flush::Patch`] and applied on the writer thread to
+/// the document *just read under the lock* — which is what lets two processes
+/// record two different windows without either erasing the other.
+#[derive(Clone, Debug)]
+enum WindowOp {
+    Set(Box<PerWindowState>),
+    Forget(String),
+}
+
+fn apply_window_op(windows: &mut Vec<PerWindowState>, op: &WindowOp) {
+    match op {
+        WindowOp::Set(state) => match windows.iter_mut().find(|w| w.label == state.label) {
+            Some(existing) => *existing = (**state).clone(),
+            None => windows.push((**state).clone()),
+        },
+        WindowOp::Forget(label) => windows.retain(|w| w.label != *label),
+    }
+}
+
 /// Persistent, in-memory-backed store for per-window geometry.
 ///
-/// Holds a [`SettingsFile`]-backed collection of [`PerWindowState`] entries
-/// keyed by a stable string label. Each [`record`] call updates the
-/// in-memory snapshot and schedules a debounced atomic flush to disk;
-/// [`state_for`] reads directly from memory with no I/O.
+/// Entries are [`PerWindowState`], keyed by a stable string label. [`state_for`]
+/// reads straight from memory with no I/O.
+///
+/// ## Why this is debounced, unlike [`SettingsFile`]
+///
+/// `SettingsFile`'s `mutate` is a *synchronous* locked read-modify-write, which
+/// is right for a document written rarely (a settings change; one record per
+/// backup). Window geometry is the opposite: `bastyde-app`'s `window_persist`
+/// observes the `size` / `position` / `placement` signals and calls [`record`]
+/// on **every change** — i.e. once per frame while the user drags a window. A
+/// synchronous `flock` + read + parse + serialize + fsync per frame would make
+/// dragging visibly janky.
+///
+/// So this service owns its own [`DebouncedWriter`] and schedules a
+/// [`WindowOp`] patch per `record`, exactly like [`crate::PersistedListModel`]:
+/// in-memory state updates instantly (so `state_for` is always current), and
+/// the burst collapses into **one** locked read-merge-write at the debounce
+/// deadline. Frequent writes ⇒ debounced patch; rare writes ⇒ synchronous
+/// locked RMW. Both are cross-process correct; they differ only in when the
+/// disk write happens.
 ///
 /// [`record`]: WindowStateService::record
 /// [`state_for`]: WindowStateService::state_for
 #[derive(Clone)]
 pub struct WindowStateService {
-    file: SettingsFile<WindowStateFile>,
+    /// Instant, authoritative-for-reads view. Kept in step with every op.
+    current: Rc<RefCell<WindowStateFile>>,
+    writer: Rc<DebouncedWriter>,
+    migrator: Migrator<WindowStateFile>,
+    /// `(mtime, len)` of the last write *we* made — so the file watcher can tell
+    /// a peer's write from the echo of our own and not reload pointlessly.
+    last_known_stamp: Rc<Cell<(Option<SystemTime>, Option<u64>)>>,
 }
 
 impl WindowStateService {
-    /// Open the window-state file at the standard location inside `paths`,
-    /// using the default debounce delay.
+    /// Open the window-state file at the standard location inside `paths`.
     pub fn open(paths: &AppPaths) -> Result<Self, SettingsFileError> {
-        Self::open_with_delay(paths, DEFAULT_DEBOUNCE)
+        Self::open_at(paths.data_file("window_state"), DEFAULT_DEBOUNCE)
     }
 
-    /// Open the window-state file at the standard location inside `paths`,
-    /// flushing debounced writes after `delay`. Pass `Duration::ZERO` in
-    /// tests for synchronous behaviour.
+    /// Open at the standard location with an explicit debounce window.
     pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError> {
-        let file = SettingsFile::load(paths.data_file("window_state"), delay, &make_migrator())?;
-        Ok(Self { file })
+        Self::open_at(paths.data_file("window_state"), delay)
     }
 
-    /// Open the window-state file at an explicit `path` with the given
-    /// debounce `delay`. Useful when the caller controls the file location
-    /// directly (e.g. integration tests writing to a known temp path).
+    /// Open the window-state file at an explicit `path`.
+    ///
+    /// `delay` is the debounce window: geometry changes arriving inside it
+    /// coalesce into a single disk write. `Duration::ZERO` writes on the
+    /// worker's next tick (used by tests).
     pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError> {
-        let file = SettingsFile::load(path, delay, &make_migrator())?;
-        Ok(Self { file })
+        let migrator = make_migrator();
+        let current = read_window_state_or_default(&path, &migrator)?;
+        let stamp = disk_stamp(&path);
+        Ok(Self {
+            current: Rc::new(RefCell::new(current)),
+            writer: Rc::new(DebouncedWriter::new(path, delay)),
+            migrator,
+            last_known_stamp: Rc::new(Cell::new(stamp)),
+        })
     }
 
-    /// Saved state for the window with `label`, or `None` if there's
-    /// no entry yet.
+    /// Saved state for the window with `label`, or `None` if there's no entry.
     pub fn state_for(&self, label: &str) -> Option<PerWindowState> {
-        self.file
+        self.current
             .borrow()
             .windows
             .iter()
@@ -292,28 +400,24 @@ impl WindowStateService {
             .cloned()
     }
 
-    /// Record the current geometry for `label`. Replaces any prior
-    /// entry. Schedules a debounced write.
+    /// Record the current geometry for `label`, replacing any prior entry.
+    ///
+    /// Updates memory immediately and schedules a debounced, locked
+    /// read-merge-write — so a drag costs one write, not one per frame.
     pub fn record(&self, state: PerWindowState) -> Result<(), SettingsFileError> {
-        self.file.mutate(|file| {
-            if let Some(existing) = file.windows.iter_mut().find(|w| w.label == state.label) {
-                *existing = state;
-            } else {
-                file.windows.push(state);
-            }
-        })
+        self.apply(WindowOp::Set(Box::new(state)));
+        Ok(())
     }
 
     /// Forget the entry for `label`.
     pub fn forget(&self, label: &str) -> Result<(), SettingsFileError> {
-        self.file.mutate(|file| {
-            file.windows.retain(|w| w.label != label);
-        })
+        self.apply(WindowOp::Forget(label.to_string()));
+        Ok(())
     }
 
     /// All recorded labels. Useful for "restore last session" features.
     pub fn labels(&self) -> Vec<String> {
-        self.file
+        self.current
             .borrow()
             .windows
             .iter()
@@ -321,23 +425,74 @@ impl WindowStateService {
             .collect()
     }
 
-    /// Write any pending in-memory changes to disk immediately, bypassing
-    /// the debounce timer. Useful before process exit or in tests that
-    /// verify on-disk content.
+    fn apply(&self, op: WindowOp) {
+        apply_window_op(&mut self.current.borrow_mut().windows, &op);
+
+        let migrator = self.migrator.clone();
+        let patch: crate::flush::Patch = Box::new(move |current: Option<String>| {
+            // Merge against the document as it is on disk RIGHT NOW, not against
+            // this process's snapshot — a peer may have recorded its own window
+            // in the meantime, and it must survive.
+            let mut file = parse_window_state_text(current.as_deref(), &migrator)
+                .map_err(|e| FlushError::Merge(e.to_string()))?;
+            apply_window_op(&mut file.windows, &op);
+            file.version = <WindowStateFile as Versioned>::CURRENT_VERSION;
+            toml::to_string_pretty(&file).map_err(|e| FlushError::Merge(e.to_string()))
+        });
+        self.writer.schedule(patch);
+    }
+
+    /// Flush any pending geometry to disk immediately, bypassing the debounce.
+    ///
+    /// Flushes the **op queue**, never a re-derived snapshot of the in-memory
+    /// document — dumping the snapshot is exactly how a cleanly-exiting process
+    /// would erase a peer's window entry.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
-        self.file.flush_now()
+        self.writer.flush_now().map_err(SettingsFileError::Flush)?;
+        self.last_known_stamp.set(disk_stamp(self.writer.path()));
+        Ok(())
     }
 
     /// Absolute path of the underlying TOML file managed by this service.
     pub fn path(&self) -> &Path {
-        self.file.path()
+        self.writer.path()
+    }
+}
+
+impl Reloadable for WindowStateService {
+    fn path(&self) -> &Path {
+        WindowStateService::path(self)
+    }
+
+    /// Pick up a peer process's window entry.
+    ///
+    /// Merging is trivially safe here: entries are keyed by `label`, and
+    /// distinct labels (distinct windows) never conflict — so whatever a peer
+    /// wrote simply appears. The `(mtime, len)` stamp check short-circuits the
+    /// echo of our *own* write, and the content comparison guarantees we never
+    /// touch anything when nothing actually changed.
+    fn reload_from_disk(&self) -> Result<bool, SettingsFileError> {
+        let path = self.writer.path();
+        let current_stamp = disk_stamp(path);
+        if current_stamp == self.last_known_stamp.get() {
+            return Ok(false);
+        }
+
+        let file = read_window_state_or_default(path, &self.migrator)?;
+        self.last_known_stamp.set(current_stamp);
+
+        if *self.current.borrow() == file {
+            return Ok(false);
+        }
+        *self.current.borrow_mut() = file;
+        Ok(true)
     }
 }
 
 impl std::fmt::Debug for WindowStateService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WindowStateService")
-            .field("path", &self.file.path())
+            .field("path", &self.path())
             .field("labels", &self.labels())
             .finish()
     }
@@ -391,6 +546,131 @@ mod tests {
         }
         assert_eq!(svc.labels(), vec!["main".to_string()]);
         assert_eq!(svc.state_for("main").unwrap().x, 2);
+    }
+
+    /// THE HEADLINE TEST for this type. Two independent `WindowStateService`
+    /// handles over the *same* file — standing in for two Skribisto
+    /// processes sharing `window_state.toml` — each record a *different*
+    /// window label with no coordination between them. Because `record`
+    /// always goes through the locked read-modify-write, both labels must
+    /// survive: distinct labels never conflict, so the merge is trivially
+    /// clean, but the *old* whole-snapshot design would still have let one
+    /// handle's stale in-memory copy clobber the other's label entirely.
+    #[test]
+    fn two_handles_recording_different_labels_both_survive() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+
+        let a = WindowStateService::open(&paths).unwrap();
+        let b = WindowStateService::open(&paths).unwrap();
+
+        a.record(PerWindowState {
+            label: "main".into(),
+            x: 10,
+            y: 20,
+            width: 800,
+            height: 600,
+            placement: WindowPlacement::Floating,
+        })
+        .unwrap();
+        b.record(PerWindowState {
+            label: "inspector".into(),
+            x: 900,
+            y: 20,
+            width: 300,
+            height: 600,
+            placement: WindowPlacement::Floating,
+        })
+        .unwrap();
+
+        // `record` is debounced (geometry changes arrive once per frame during a
+        // drag), so force both queues out before reading the file back.
+        a.flush_now().unwrap();
+        b.flush_now().unwrap();
+
+        // A third, fresh handle proves both labels are actually on disk
+        // together.
+        let c = WindowStateService::open(&paths).unwrap();
+        let mut labels = c.labels();
+        labels.sort();
+        assert_eq!(labels, vec!["inspector".to_string(), "main".to_string()]);
+        assert_eq!(c.state_for("main").unwrap().width, 800);
+        assert_eq!(c.state_for("inspector").unwrap().width, 300);
+    }
+
+    /// A window drag fires `record` on every frame. Those must coalesce into
+    /// **one** disk write, not one per frame.
+    ///
+    /// This is a regression guard: `record` originally went through
+    /// `SettingsFile::mutate`, whose write is a *synchronous* locked
+    /// read-modify-write (right for rarely-written documents like `backup.toml`,
+    /// catastrophic here) — so a drag did a `flock` + read + parse + serialize +
+    /// fsync **per frame**.
+    #[test]
+    fn a_burst_of_records_coalesces_into_one_write() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("window_state.toml");
+        // A real debounce window, so the burst genuinely has something to
+        // coalesce into.
+        let svc = WindowStateService::open_at(path.clone(), Duration::from_millis(50)).unwrap();
+
+        for i in 0..60 {
+            svc.record(PerWindowState {
+                label: "main".into(),
+                x: i,
+                y: i,
+                width: 800,
+                height: 600,
+                placement: WindowPlacement::Floating,
+            })
+            .unwrap();
+        }
+
+        // Nothing has touched the disk yet: 60 frames of dragging, zero writes.
+        assert!(
+            !path.exists(),
+            "a burst of records must not write per-record"
+        );
+
+        svc.flush_now().unwrap();
+
+        // One write, carrying the LAST geometry — no intermediate frame leaked.
+        let on_disk = read_window_state_or_default(&path, &make_migrator()).unwrap();
+        assert_eq!(on_disk.windows.len(), 1);
+        assert_eq!(on_disk.windows[0].x, 59);
+        // ...and memory agreed all along, without any I/O.
+        assert_eq!(svc.state_for("main").unwrap().x, 59);
+    }
+
+    #[test]
+    fn reload_from_disk_picks_up_a_peers_recorded_label() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+
+        let a = WindowStateService::open(&paths).unwrap();
+        let b = WindowStateService::open(&paths).unwrap();
+
+        a.record(PerWindowState {
+            label: "main".into(),
+            x: 1,
+            y: 2,
+            width: 111,
+            height: 222,
+            placement: WindowPlacement::Floating,
+        })
+        .unwrap();
+        a.flush_now().unwrap(); // `record` is debounced — force it to disk
+
+        assert!(b.state_for("main").is_none(), "b hasn't reloaded yet");
+        assert!(Reloadable::reload_from_disk(&b).unwrap());
+        assert_eq!(b.state_for("main").unwrap().width, 111);
+    }
+
+    #[test]
+    fn reload_from_disk_returns_false_when_unchanged() {
+        let dir = tempdir().unwrap();
+        let svc = open(dir.path());
+        assert!(!Reloadable::reload_from_disk(&svc).unwrap());
     }
 
     #[test]

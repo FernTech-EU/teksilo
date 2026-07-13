@@ -30,6 +30,28 @@
 //!   with `"editor"` as a leaf value, in either order. Both directions
 //!   panic at the call site that creates the conflict.
 //!
+//! ## Merging by dirty key, not by whole-document overwrite
+//!
+//! Every `Signal<T>::set` schedules a [`crate::flush::Patch`] that carries
+//! only the keys dirtied since the last schedule — never a full render of
+//! `raw`. The patch, applied at flush time against the document read fresh
+//! off disk under a lock, `write_nested`s just those keys onto it — so a
+//! peer process's change to some *other* key survives. This is the fix for
+//! Skribisto's `general.toml`: today, changing any one of its 26 keys
+//! reverts every other key a peer process changed, because the whole
+//! document gets re-serialized from an increasingly stale in-memory copy.
+//!
+//! ## Reload and the re-entrancy guard
+//!
+//! [`Reloadable::reload_from_disk`](crate::Reloadable::reload_from_disk)
+//! pushes a peer's on-disk change straight into the already-handed-out
+//! `Signal<T>` for that key — see [`SignalCell::apply_external`]'s doc
+//! comment for why that requires capturing the concrete `T` at
+//! registration time. Setting a signal from a reload would otherwise
+//! re-trigger this same write-back observer and bounce the value straight
+//! back out to disk as if it were a local edit; `StoreInner::applying_external`
+//! is the flag the observer checks to short-circuit that.
+//!
 //! ## Cycle-free observer wiring
 //!
 //! The cell each key owns includes an [`ObserverHandle`] returned by
@@ -62,13 +84,13 @@
 //! ```
 
 use std::any::{Any, TypeId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -76,7 +98,9 @@ use serde::de::DeserializeOwned;
 use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
-use crate::flush::{DebouncedWriter, FlushError};
+use crate::file::{SettingsFileError, disk_stamp};
+use crate::flush::{DebouncedWriter, FlushError, Patch};
+use crate::reload::Reloadable;
 
 /// Default debounce window for store flushes.
 pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -94,6 +118,19 @@ pub enum SettingsStoreError {
     /// An attempt to flush the in-memory state to disk failed.
     #[error("settings store flush: {0}")]
     Flush(#[source] FlushError),
+}
+
+/// Lets [`SettingsStore::reload_from_disk`] surface a `SettingsFileError`
+/// via `?`, since [`crate::Reloadable`] is shared across every persisted
+/// type in this crate and standardizes on that error type.
+impl From<SettingsStoreError> for SettingsFileError {
+    fn from(e: SettingsStoreError) -> Self {
+        match e {
+            SettingsStoreError::Io(e) => SettingsFileError::Io(e),
+            SettingsStoreError::Parse(e) => SettingsFileError::Parse(e),
+            SettingsStoreError::Flush(e) => SettingsFileError::Flush(e),
+        }
+    }
 }
 
 /// A statically-named setting. Centralizes the dotted key, the value
@@ -143,6 +180,17 @@ struct SignalCell {
     type_id: TypeId,
     type_name: &'static str,
     signal: Box<dyn Any>,
+    /// Pushes a freshly-parsed `toml::Value` for this key into the live
+    /// `Signal<T>` this cell wraps — captured at [`SettingsStore::signal`]
+    /// registration time, which is the **only** place both the concrete
+    /// `T` (needed to deserialize) and the live `Signal<T>` (needed to
+    /// `.set()`) are simultaneously in scope. `signal` above is type-erased
+    /// (`Box<dyn Any>`) specifically so one `HashMap` can hold every key's
+    /// differently-typed cell — but that erasure is exactly what makes a
+    /// reload otherwise unable to push a disk value into an
+    /// already-handed-out signal: there is nothing generic to deserialize
+    /// into. This closure is the escape hatch.
+    apply_external: Box<dyn Fn(&toml::Value)>,
     /// RAII handle for the observer that pipes Signal mutations back
     /// into the in-memory `toml::Value`. Dropping it would unhook the
     /// write-back, so the cell — and therefore the observer — lives
@@ -150,22 +198,74 @@ struct SignalCell {
     _handle: ObserverHandle,
 }
 
+/// Whether a dirty-key entry is an explicit user edit or a mere
+/// registration-time default. See [`StoreInner::dirty`]'s doc comment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DirtyKind {
+    /// A registration-time seed: written only if the key is still absent
+    /// from the document at the moment the patch actually runs.
+    SeedIfAbsent,
+    /// An explicit `Signal::set()` (or a deferred re-entrant one) — always
+    /// wins, unconditionally, over whatever is on disk.
+    Set,
+}
+
 struct StoreInner {
     raw: toml::Value,
     cells: HashMap<String, SignalCell>,
     writer: DebouncedWriter,
+    /// Keys dirtied since the last patch was scheduled from them. Drained
+    /// into one owned `Vec<(key, value)>` per schedule, which becomes the
+    /// patch's payload — see the module docs' "merging by dirty key"
+    /// section. Each entry's [`DirtyKind`] distinguishes an explicit user
+    /// `set()` (always wins) from a registration-time default seed (wins
+    /// only if the key is still absent by the time the patch actually
+    /// runs — otherwise it would stomp a peer's already-set real value
+    /// with this store's mere default, exactly the bug this whole design
+    /// exists to prevent).
+    dirty: Vec<(String, toml::Value, DirtyKind)>,
+    /// Set for the duration of [`SettingsStore::reload_from_disk`] pushing
+    /// fresh values into signals. The write-back observer checks this
+    /// (via a shared, non-conflicting immutable borrow — see that method's
+    /// implementation) and does nothing while it's set, so a reload cannot
+    /// bounce straight back out to disk as if it were a local edit.
+    applying_external: Cell<bool>,
+    /// `(mtime, len)` as of the last time this store read or wrote the
+    /// file — the cheap staleness / self-write-suppression stamp behind
+    /// [`Reloadable::reload_from_disk`].
+    last_known_stamp: Cell<(Option<SystemTime>, Option<u64>)>,
 }
 
 impl StoreInner {
-    fn schedule_flush(&self) {
-        // `to_string_pretty` on a `Value::Table` always succeeds for
-        // serializable contents; the only failure mode is values that
-        // cannot be encoded as TOML. Settings carry only such values
-        // by construction (Signal<T: Serialize>).
-        match toml::to_string_pretty(&self.raw) {
-            Ok(s) => self.writer.schedule(s),
-            Err(e) => eprintln!("bastyde-settings: serialize failed: {e}"),
+    /// Drain the current dirty-key batch into one patch and schedule it.
+    /// No-op if nothing is dirty (e.g. called defensively after a
+    /// no-op deferred-drain).
+    fn schedule_dirty_flush(&mut self) {
+        if self.dirty.is_empty() {
+            return;
         }
+        let batch: Vec<(String, toml::Value, DirtyKind)> = std::mem::take(&mut self.dirty);
+        let patch: Patch = Box::new(move |current: Option<String>| {
+            let mut doc: toml::Value = match current {
+                Some(s) => toml::from_str(&s).map_err(|e| FlushError::Merge(e.to_string()))?,
+                None => empty_table(),
+            };
+            if !doc.is_table() {
+                doc = empty_table();
+            }
+            for (k, v, kind) in &batch {
+                match kind {
+                    DirtyKind::Set => write_nested(&mut doc, k, v.clone()),
+                    DirtyKind::SeedIfAbsent => {
+                        if get_nested(&doc, k).is_none() {
+                            write_nested(&mut doc, k, v.clone());
+                        }
+                    }
+                }
+            }
+            toml::to_string_pretty(&doc).map_err(|e| FlushError::Merge(e.to_string()))
+        });
+        self.writer.schedule(patch);
     }
 }
 
@@ -177,11 +277,16 @@ pub struct SettingsStore {
     inner: Rc<RefCell<StoreInner>>,
     /// Write-backs that couldn't borrow `inner` (a re-entrant `set` during
     /// another `set`'s observer chain, while `inner` is already borrowed) are
-    /// queued here instead of being dropped. They are drained into `raw` —
-    /// preserving the in-memory → disk invariant — the next time `inner` is
-    /// successfully borrowed for a write-back, and on `flush_now`. Held in its
-    /// own cell so it can be pushed to even while `inner` is borrowed.
+    /// queued here instead of being dropped. They are drained into `raw` +
+    /// `dirty` — preserving the in-memory → disk invariant — the next time
+    /// `inner` is successfully borrowed for a write-back, and on
+    /// `flush_now`. Held in its own cell so it can be pushed to even while
+    /// `inner` is borrowed.
     pending: Rc<RefCell<Vec<(String, toml::Value)>>>,
+    /// Duplicated from `inner.writer.path()` so [`Reloadable::path`] can
+    /// return a plain `&Path` without needing a `RefCell` borrow to
+    /// outlive `&self` (paths never change post-construction).
+    path: PathBuf,
 }
 
 impl Clone for SettingsStore {
@@ -189,6 +294,7 @@ impl Clone for SettingsStore {
         Self {
             inner: Rc::clone(&self.inner),
             pending: Rc::clone(&self.pending),
+            path: self.path.clone(),
         }
     }
 }
@@ -217,46 +323,71 @@ impl SettingsStore {
             _ => empty_table(),
         };
 
-        let writer = DebouncedWriter::new(path, delay);
+        let stamp = disk_stamp(&path);
+        let writer = DebouncedWriter::new(path.clone(), delay);
         let inner = Rc::new(RefCell::new(StoreInner {
             raw,
             cells: HashMap::new(),
             writer,
+            dirty: Vec::new(),
+            applying_external: Cell::new(false),
+            last_known_stamp: Cell::new(stamp),
         }));
 
         Ok(Self {
             inner,
             pending: Rc::new(RefCell::new(Vec::new())),
+            path,
         })
     }
 
     /// Path of the underlying file.
-    pub fn path(&self) -> PathBuf {
-        self.inner.borrow().writer.path().to_path_buf()
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Force any pending payload to disk synchronously.
     pub fn flush_now(&self) -> Result<(), SettingsStoreError> {
-        // Fold any deferred (re-entrant) write-backs into `raw` and reschedule
-        // before forcing the write, so a value queued while `inner` was
-        // borrowed still reaches disk. Acquire the `inner` borrow first, then
-        // drain — otherwise a failed borrow would lose the drained values.
-        // `try_borrow_mut` keeps this safe if `flush_now` runs inside a borrow.
+        // Fold any deferred (re-entrant) write-backs into `raw` + `dirty`
+        // and reschedule before forcing the write, so a value queued while
+        // `inner` was borrowed still reaches disk. Acquire the `inner`
+        // borrow first, then drain — otherwise a failed borrow would lose
+        // the drained values. `try_borrow_mut` keeps this safe if
+        // `flush_now` runs inside a borrow.
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             let deferred: Vec<(String, toml::Value)> =
                 self.pending.borrow_mut().drain(..).collect();
             if !deferred.is_empty() {
                 for (k, v) in deferred {
-                    write_nested(&mut inner.raw, &k, v);
+                    write_nested(&mut inner.raw, &k, v.clone());
+                    // These came from the write-back observer's
+                    // deferred-on-reentrancy path, i.e. a real `set()` —
+                    // always wins.
+                    inner.dirty.push((k, v, DirtyKind::Set));
                 }
-                inner.schedule_flush();
+                inner.schedule_dirty_flush();
             }
         }
         self.inner
             .borrow()
             .writer
             .flush_now()
-            .map_err(SettingsStoreError::Flush)
+            .map_err(SettingsStoreError::Flush)?;
+
+        // Re-sync with reality rather than just bumping the stamp: our
+        // write just merged against whatever was on disk, which may have
+        // included keys a peer set that this store never locally ingested
+        // (it only knows the keys *it* wrote). A blind stamp bump here
+        // would make a later `reload_from_disk` wrongly believe nothing
+        // changed — since the stamp would already match — even though a
+        // peer's concurrently-merged key was never pushed into this
+        // store's live signals. Folding this through the same
+        // read-parse-compare path `reload_from_disk` uses keeps the
+        // "stamp matches disk <=> in-memory reflects disk" invariant
+        // intact in both the plain-self-write and the merged-with-a-peer
+        // case.
+        let _ = self.resync_with_disk()?;
+        Ok(())
     }
 
     /// Whether the given key has already been registered.
@@ -332,7 +463,7 @@ impl SettingsStore {
 
         let sig: Signal<T> = Signal::new(initial.clone());
 
-        write_nested(&mut inner.raw, key, initial_value);
+        write_nested(&mut inner.raw, key, initial_value.clone());
 
         // Wire write-back. The closure captures Weaks so a dropped store does
         // not stay alive via its own observer.
@@ -346,6 +477,19 @@ impl SettingsStore {
             let Some(pending_rc) = weak_pending.upgrade() else {
                 return;
             };
+            // Re-entrancy guard: a reload-driven `.set()` must not write
+            // back — it would bounce the value it just read straight back
+            // out to disk as if it were a fresh local edit. A shared
+            // borrow is enough to check the flag, and does not conflict
+            // with the shared borrow `reload_from_disk` may itself be
+            // holding while it drives this very observer.
+            if inner_rc
+                .try_borrow()
+                .map(|r| r.applying_external.get())
+                .unwrap_or(false)
+            {
+                return;
+            }
             let value = match serialize_to_value(new_val) {
                 Ok(v) => v,
                 Err(_) => return,
@@ -360,33 +504,56 @@ impl SettingsStore {
                     let deferred: Vec<(String, toml::Value)> =
                         pending_rc.borrow_mut().drain(..).collect();
                     for (k, v) in deferred {
-                        write_nested(&mut inner.raw, &k, v);
+                        write_nested(&mut inner.raw, &k, v.clone());
+                        inner.dirty.push((k, v, DirtyKind::Set));
                     }
-                    write_nested(&mut inner.raw, &key_owned, value);
-                    inner.schedule_flush();
+                    write_nested(&mut inner.raw, &key_owned, value.clone());
+                    inner.dirty.push((key_owned.clone(), value, DirtyKind::Set));
+                    inner.schedule_dirty_flush();
                 }
                 Err(_) => {
                     // The store is borrowed elsewhere — a re-entrant set during
                     // another set's observer chain. Defer rather than drop:
                     // queue the new value so the next successful write-back (or
-                    // `flush_now`) folds it into `raw`. Dropping it here would
-                    // silently diverge disk from the in-memory signal.
+                    // `flush_now`) folds it into `raw` + `dirty`. Dropping it
+                    // here would silently diverge disk from the in-memory
+                    // signal.
                     pending_rc.borrow_mut().push((key_owned.clone(), value));
                 }
             }
         });
 
+        let apply_external: Box<dyn Fn(&toml::Value)> = {
+            let sig_for_apply = sig.clone();
+            Box::new(move |fresh: &toml::Value| {
+                if let Ok(value) = T::deserialize(fresh.clone()) {
+                    sig_for_apply.set(value);
+                }
+            })
+        };
+
         let cell = SignalCell {
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
             signal: Box::new(sig.clone()),
+            apply_external,
             _handle: handle,
         };
         inner.cells.insert(key.to_string(), cell);
 
-        // Flush the seed-stamped raw so brand-new keys hit disk on
-        // first registration even without a `set`.
-        inner.schedule_flush();
+        // Flush the seed-stamped raw so brand-new keys hit disk on first
+        // registration even without a `set` — but only if the key is
+        // still absent by the time this patch actually runs. A peer
+        // process may register the same key with the same hardcoded
+        // default and, by pure timing, have its own seed-patch fire
+        // *after* this store (or a third party) has already set a real
+        // value there; an unconditional write would stomp that real
+        // value back to a mere default. `SeedIfAbsent` makes registration
+        // idempotent with respect to a peer's concurrent real edit.
+        inner
+            .dirty
+            .push((key.to_string(), initial_value, DirtyKind::SeedIfAbsent));
+        inner.schedule_dirty_flush();
 
         sig
     }
@@ -405,13 +572,81 @@ impl SettingsStore {
         let cell = inner.cells.get(key)?;
         Some(downcast_or_panic::<T>(key, cell))
     }
+
+    /// The actual re-sync-with-disk logic shared by [`flush_now`](Self::flush_now)
+    /// (which needs it right after every write, merged or not — see that
+    /// method's doc comment) and [`Reloadable::reload_from_disk`] (the
+    /// public, watcher-facing entry point). Kept as a `SettingsStoreError`-returning
+    /// private method so `flush_now` doesn't have to round-trip through
+    /// `SettingsFileError` for a case that can only ever produce the I/O /
+    /// parse variants.
+    fn resync_with_disk(&self) -> Result<bool, SettingsStoreError> {
+        let current_stamp = disk_stamp(&self.path);
+        if current_stamp == self.inner.borrow().last_known_stamp.get() {
+            return Ok(false);
+        }
+
+        let raw_text = match fs::read_to_string(&self.path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(SettingsStoreError::Io(e)),
+        };
+        let parsed: toml::Value = if raw_text.trim().is_empty() {
+            empty_table()
+        } else {
+            toml::from_str(&raw_text).map_err(SettingsStoreError::Parse)?
+        };
+        let parsed = match parsed {
+            v @ toml::Value::Table(_) => v,
+            _ => empty_table(),
+        };
+
+        // Backstop: compare the whole parsed document to what's already
+        // live. Unchanged content (e.g. a peer wrote back byte-identical
+        // bytes, or this really was our own write and the stamp merely
+        // didn't line up) touches nothing.
+        {
+            let mut inner = self.inner.borrow_mut();
+            if inner.raw == parsed {
+                inner.last_known_stamp.set(current_stamp);
+                return Ok(false);
+            }
+            inner.raw = parsed.clone();
+            inner.last_known_stamp.set(current_stamp);
+        }
+
+        // Push each registered cell's fresh sub-value into its live
+        // signal, with the re-entrancy guard held for the whole batch.
+        {
+            let inner_ref = self.inner.borrow();
+            inner_ref.applying_external.set(true);
+            for (key, cell) in inner_ref.cells.iter() {
+                if let Some(value) = get_nested(&parsed, key) {
+                    (cell.apply_external)(value);
+                }
+            }
+            inner_ref.applying_external.set(false);
+        }
+
+        Ok(true)
+    }
+}
+
+impl Reloadable for SettingsStore {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn reload_from_disk(&self) -> Result<bool, SettingsFileError> {
+        self.resync_with_disk().map_err(SettingsFileError::from)
+    }
 }
 
 impl std::fmt::Debug for SettingsStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let inner = self.inner.borrow();
         f.debug_struct("SettingsStore")
-            .field("path", &inner.writer.path())
+            .field("path", &self.path)
             .field("registered_keys", &inner.cells.len())
             .finish()
     }
@@ -780,5 +1015,99 @@ mod tests {
         let store = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
         let sig = store.signal::<i32>("k", 7);
         assert_eq!(sig.get(), 7);
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-process merge + Reloadable
+    // -----------------------------------------------------------------
+
+    /// THE HEADLINE TEST. Two independent `SettingsStore` handles over the
+    /// same file — standing in for two Skribisto processes sharing
+    /// `general.toml` — each set a *different* key with no coordination.
+    /// Because every write merges its dirty key onto the document read
+    /// fresh under the lock, both keys must survive, and reloading must
+    /// push the peer's key into this process's *already-live* `Signal`
+    /// with no restart needed.
+    #[test]
+    fn two_concurrent_stores_each_setting_a_different_key_both_survive_and_reload_updates_live_signal()
+     {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("shared_store.toml");
+
+        let a = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+        let b = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+
+        let dark_a = a.signal::<bool>("ui.dark", false);
+        let dark_b = b.signal::<bool>("ui.dark", false);
+        let width_b = b.signal::<f32>("editor.column_width", 80.0);
+
+        // Not yet reloaded: b's live signal for a's key still reads its
+        // own local default.
+        assert!(!dark_b.get(), "b hasn't seen a's write yet");
+
+        dark_a.set(true);
+        a.flush_now().unwrap();
+
+        // b's write only ever touches its own key — but reloading must
+        // push a's concurrent change into b's *already-live* `Signal`,
+        // with no restart needed.
+        assert!(Reloadable::reload_from_disk(&b).unwrap());
+        assert!(dark_b.get(), "b's live signal must reflect a's write");
+
+        width_b.set(120.0);
+        b.flush_now().unwrap();
+
+        // A third, fresh handle proves both keys are actually on disk
+        // together, not just cached in `a`'s or `b`'s memory.
+        let c = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
+        assert!(c.signal::<bool>("ui.dark", false).get());
+        assert_eq!(c.signal::<f32>("editor.column_width", 80.0).get(), 120.0);
+    }
+
+    #[test]
+    fn reload_driven_set_schedules_no_write() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("no_bounce.toml");
+
+        let a = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+        let b = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+        let _dark_b = b.signal::<bool>("ui.dark", false);
+
+        a.signal::<bool>("ui.dark", false).set(true);
+        a.flush_now().unwrap();
+
+        assert!(Reloadable::reload_from_disk(&b).unwrap());
+        // If the reload's `sig.set()` had scheduled a write, `b.inner`
+        // would have a non-empty `dirty` batch right now.
+        assert!(
+            b.inner.borrow().dirty.is_empty(),
+            "a reload-driven set must not enqueue a write-back"
+        );
+    }
+
+    #[test]
+    fn reload_from_disk_returns_false_and_touches_nothing_when_unchanged() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unchanged_store.toml");
+        let store = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
+        let sig = store.signal::<f32>("k", 1.0);
+        sig.set(2.0);
+        store.flush_now().unwrap();
+
+        assert!(!Reloadable::reload_from_disk(&store).unwrap());
+        assert_eq!(sig.get(), 2.0);
+    }
+
+    #[test]
+    fn reload_from_disk_ignores_our_own_last_write_via_cheap_stamp_check() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("self_write_store.toml");
+        let store = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
+        store.signal::<f32>("k", 1.0).set(9.0);
+        store.flush_now().unwrap();
+
+        // flush_now() re-stamps last_known_stamp right after the write
+        // completes, so an immediate reload sees a matching stamp.
+        assert!(!Reloadable::reload_from_disk(&store).unwrap());
     }
 }

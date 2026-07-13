@@ -2,9 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! A small RAII advisory file-lock guard, used by [`crate::SettingsFile`]'s
-//! opt-in "shared" (cross-process) mode to serialize the locked
-//! read-modify-write around a settings file that more than one process
-//! may write to concurrently.
+//! locked read-modify-write (the *only* mode it has — see `file.rs`'s
+//! module docs) to serialize that read-modify-write around a settings
+//! file that more than one process may write to concurrently.
 //!
 //! ## Why a sidecar lock file, not locking the settings file itself
 //!
@@ -50,11 +50,15 @@ use fs2::FileExt;
 /// The lock is released on `Drop` — including during unwind, since
 /// `Drop::drop` never panics here; a failure to unlock is only logged.
 /// Holding a `FileLock` across a settings read + mutate + write is what
-/// makes [`crate::SettingsFile`]'s shared mode's locked
-/// read-modify-write atomic *with respect to other `FileLock` holders*
-/// (this process's other handles, or a peer process using the same
-/// primitive). It is advisory: it does nothing to stop a process that
-/// never asks for the lock from writing to the file anyway.
+/// makes [`crate::SettingsFile`]'s locked read-modify-write atomic *with
+/// respect to other `FileLock` holders* (this process's other handles,
+/// or a peer process using the same primitive). It is advisory: it does
+/// nothing to stop a process that never asks for the lock from writing
+/// to the file anyway — which cannot happen from inside this crate,
+/// since every persisted type routes through [`crate::SettingsFile`] (or
+/// the same lock primitive directly, as
+/// [`crate::collection::list::PersistedListModel`] does), but remains
+/// true of any non-Bastyde process that touches the same file by hand.
 pub(crate) struct FileLock {
     // Kept alive for the duration of the lock; the OS releases the lock
     // implicitly when the file descriptor closes, but we still release

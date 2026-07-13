@@ -1290,6 +1290,7 @@ dependencies = [
  "bastyde-data",
  "etcetera",
  "fs2",
+ "notify",
  "serde",
  "tempfile",
  "thiserror 2.0.18",

@@ -106,6 +106,17 @@ pub enum NotificationArchiveError {
 /// Either an in-memory `ListModel` or a persistent one — exposed
 /// uniformly through `NotificationArchiveModel::entries()`. Internal
 /// detail; apps work with the model.
+///
+/// Every *mutation* goes through one of this type's own methods
+/// (`upsert_front` / `update_in_place` / `remove` / `clear`), never
+/// through `model()` directly: for the `Persistent` variant,
+/// `PersistedListModel::model()` is read/reactive-binding-only —
+/// mutating it directly would update the live `ListModel` but never
+/// touch disk. Each method updates both variants identically from the
+/// caller's point of view (id-keyed, matching
+/// [`NotificationEntry`]'s [`Keyed`] impl), so
+/// `NotificationArchiveModel` never has to branch on which backend it
+/// holds.
 enum ArchiveBackend {
     InMemory(ListModel<NotificationEntry>),
     Persistent(PersistedListModel<NotificationEntry>),
@@ -116,6 +127,66 @@ impl ArchiveBackend {
         match self {
             Self::InMemory(m) => m,
             Self::Persistent(p) => p.model(),
+        }
+    }
+
+    /// Find the entry with `id` and its current index, via the
+    /// live reactive model (works identically for both variants: for
+    /// `Persistent`, the live model always mirrors on-disk content).
+    fn find_by_id(&self, id: u64) -> Option<(usize, NotificationEntry)> {
+        let model = self.model();
+        (0..model.len()).find_map(|i| {
+            model
+                .with_item(i, |e| e.clone())
+                .filter(|e| e.id == id)
+                .map(|e| (i, e))
+        })
+    }
+
+    /// Insert `entry` at the front. `entry.id` is always freshly
+    /// stamped and therefore unique, so this never actually collides
+    /// with (and removes) an existing row — it's a plain prepend.
+    fn upsert_front(&self, entry: NotificationEntry) {
+        match self {
+            Self::InMemory(m) => m.insert(0, entry),
+            Self::Persistent(p) => p.upsert_front(entry),
+        }
+    }
+
+    /// Replace the entry with `entry.id` in place (no reordering).
+    /// Returns whether an entry with that id existed.
+    fn update_in_place(&self, entry: NotificationEntry) -> bool {
+        match self {
+            Self::InMemory(m) => match self.find_by_id(entry.id) {
+                Some((idx, _)) => {
+                    m.set(idx, entry);
+                    true
+                }
+                None => false,
+            },
+            Self::Persistent(p) => p.update_in_place(entry),
+        }
+    }
+
+    /// Remove the entry with `id`, if present. Returns whether
+    /// anything was removed.
+    fn remove(&self, id: u64) -> bool {
+        match self {
+            Self::InMemory(m) => match self.find_by_id(id) {
+                Some((idx, _)) => {
+                    m.remove(idx);
+                    true
+                }
+                None => false,
+            },
+            Self::Persistent(p) => p.remove(&id),
+        }
+    }
+
+    fn clear(&self) {
+        match self {
+            Self::InMemory(m) => m.clear(),
+            Self::Persistent(p) => p.clear(),
         }
     }
 
@@ -269,11 +340,13 @@ impl NotificationArchiveModel {
                     .unwrap_or(false)
             });
             if let Some(idx) = merge_idx {
-                // Read the existing entry, append an update, and set
-                // it back. `ListModel::set` swaps the whole entry —
-                // we preserve the original `id` + `timestamp` and
-                // append a `NotificationUpdate` describing the
-                // mutation.
+                // Read the existing entry, append an update, and write
+                // it back **in place** (same id, no reordering) — this
+                // is exactly `PersistedListModel::update_in_place`'s
+                // contract, and matches it identically for the
+                // in-memory backend too. We preserve the original `id`
+                // + `timestamp` and append a `NotificationUpdate`
+                // describing the mutation.
                 if let Some(mut existing) = model.with_item(idx, |e| e.clone()) {
                     let now = entry.timestamp;
                     let title_changed = existing.title != entry.title;
@@ -297,33 +370,35 @@ impl NotificationArchiveModel {
                     existing.title = entry.title;
                     existing.body = entry.body;
                     existing.read = false;
-                    model.set(idx, existing);
+                    self.backend.update_in_place(existing);
                     self.bump_unread();
                     return;
                 }
             }
         }
 
-        // New entry: stamp the id, insert at index 0, evict overflow.
+        // New entry: stamp the id (always fresh, so `upsert_front` is
+        // a plain prepend — it never collides with an existing key),
+        // then evict overflow.
         let next = self.next_id.get();
         entry.id = next;
         self.next_id.set(next.wrapping_add(1));
         let is_unread = !entry.read;
-        model.insert(0, entry);
+        self.backend.upsert_front(entry);
         if model.len() > self.limit {
             // Evict the oldest entry. The model has no `pop_back`;
-            // `remove(last_idx)` is the equivalent.
+            // remove-by-id of the last row is the equivalent.
             let last = model.len() - 1;
-            // If the evicted entry was unread, decrement the unread
-            // count so the badge doesn't lie about how many sit on
-            // disk.
-            if let Some(was_unread) = model.with_item(last, |e| !e.read) {
-                if was_unread {
+            if let Some(evicted) = model.with_item(last, |e| e.clone()) {
+                // If the evicted entry was unread, decrement the
+                // unread count so the badge doesn't lie about how
+                // many sit on disk.
+                if !evicted.read {
                     let n = self.unread_count.get();
                     self.unread_count.set(n.saturating_sub(1));
                 }
+                self.backend.remove(evicted.id);
             }
-            model.remove(last);
         }
         if is_unread {
             self.bump_unread();
@@ -339,14 +414,20 @@ impl NotificationArchiveModel {
     /// Called by `NotificationCenterButton` when its popover opens.
     pub fn mark_all_read(&self) {
         let model = self.backend.model();
+        // Collect the ids to flip first: mutating the persisted
+        // backend's live model mid-scan (`update_in_place` writes
+        // straight into `model`, same length, no reordering) is safe
+        // for this loop either way, but reading into an owned `Vec`
+        // up front keeps the read and the mutation cleanly separated.
+        let unread_ids: Vec<u64> = (0..model.len())
+            .filter_map(|i| model.with_item(i, |e| (!e.read).then_some(e.id)).flatten())
+            .collect();
         let mut mutated = false;
-        for i in 0..model.len() {
-            if let Some(mut entry) = model.with_item(i, |e| e.clone()) {
-                if !entry.read {
-                    entry.read = true;
-                    model.set(i, entry);
-                    mutated = true;
-                }
+        for id in unread_ids {
+            if let Some((_, mut entry)) = self.backend.find_by_id(id) {
+                entry.read = true;
+                self.backend.update_in_place(entry);
+                mutated = true;
             }
         }
         self.unread_count.set(0);
@@ -358,23 +439,33 @@ impl NotificationArchiveModel {
     /// Clear the entire archive (resets `unread_count` to 0).
     pub fn clear(&self) {
         let was_empty = self.backend.model().is_empty();
-        self.backend.model().clear();
+        self.backend.clear();
         self.unread_count.set(0);
         if !was_empty {
             self.bump_version();
         }
     }
 
-    /// Remove the entry at the given list index. Updates
-    /// `unread_count` if the removed entry was unread. No-op when
-    /// `index` is out of bounds.
-    pub fn remove(&self, index: usize) {
-        let model = self.backend.model();
-        if index >= model.len() {
+    /// Remove the entry with the given **stable** id (see
+    /// [`NotificationEntry::id`] — "assigned by the archive on first
+    /// push; never reused"). Updates `unread_count` if the removed entry
+    /// was unread. No-op (no version bump) when no entry has that id.
+    ///
+    /// Deliberately id-based rather than index-based: an index is a
+    /// snapshot of the list's shape at the moment it was read, and is
+    /// meaningless once anything else — a concurrent peer-process reload
+    /// merged in via the live archive, another `push`, another `remove` —
+    /// has shifted rows out from under it. A caller that captured "the row
+    /// I want to dismiss" as an index earlier and replays it later against
+    /// a since-mutated list can silently remove the *wrong* entry; keying
+    /// off `id` instead re-resolves the row's current position at the
+    /// moment of removal, so it always removes the entry the caller meant.
+    pub fn remove_by_id(&self, id: u64) {
+        let Some((_, entry)) = self.backend.find_by_id(id) else {
             return;
-        }
-        let was_unread = model.with_item(index, |e| !e.read).unwrap_or(false);
-        model.remove(index);
+        };
+        let was_unread = !entry.read;
+        self.backend.remove(id);
         if was_unread {
             let n = self.unread_count.get();
             self.unread_count.set(n.saturating_sub(1));
@@ -530,25 +621,102 @@ mod tests {
     }
 
     #[test]
-    fn remove_unread_decrements_count() {
+    fn remove_by_id_unread_decrements_count() {
         let m = NotificationArchiveModel::in_memory();
         m.push(entry("a"));
         m.push(entry("b"));
         assert_eq!(m.unread_count().get(), 2);
 
-        m.remove(0); // removes "b"
+        let b_id = m.entries().with_item(0, |e| e.id).unwrap(); // "b" is newest
+        m.remove_by_id(b_id);
         assert_eq!(m.entries().len(), 1);
         assert_eq!(m.unread_count().get(), 1);
+        assert_eq!(
+            m.entries().with_item(0, |e| e.title.clone()),
+            Some("a".to_string())
+        );
     }
 
     #[test]
-    fn remove_read_does_not_change_count() {
+    fn remove_by_id_read_does_not_change_count() {
         let m = NotificationArchiveModel::in_memory();
         m.push(entry("a"));
         m.mark_all_read();
         assert_eq!(m.unread_count().get(), 0);
-        m.remove(0);
+        let a_id = m.entries().with_item(0, |e| e.id).unwrap();
+        m.remove_by_id(a_id);
         assert_eq!(m.unread_count().get(), 0);
+        assert!(m.entries().is_empty());
+    }
+
+    #[test]
+    fn remove_by_id_unknown_id_is_a_noop() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(entry("a"));
+        let v_before = m.version_signal().get();
+        m.remove_by_id(999_999);
+        assert_eq!(m.entries().len(), 1, "nothing removed");
+        assert_eq!(
+            v_before,
+            m.version_signal().get(),
+            "no version bump for a no-op"
+        );
+    }
+
+    #[test]
+    fn remove_by_id_removes_the_right_entry_after_a_concurrent_insert_shifts_indices() {
+        // Bug repro for the index-based API this replaces: a caller reads
+        // "the row to dismiss" as an index, but before it acts, a
+        // concurrent insert (a peer process's reload merged into the live
+        // archive, or just another `push`) shifts every row after it down
+        // by one. An index-based `remove(stale_index)` would then delete
+        // whatever row happens to occupy that index NOW — not the one the
+        // caller meant. `remove_by_id` re-resolves the row's position at
+        // the moment of removal, so it is immune to this.
+        let m = NotificationArchiveModel::in_memory();
+        m.push(entry("a")); // index 1 after "b" below
+        m.push(entry("b")); // index 0
+        assert_eq!(
+            m.entries().with_item(1, |e| e.title.clone()),
+            Some("a".to_string()),
+            "precondition: a is at index 1"
+        );
+        // Caller observes "a" at index 1 and remembers its id to dismiss
+        // it later.
+        let a_id = m
+            .entries()
+            .with_item(1, |e| e.id)
+            .expect("a's id at index 1");
+
+        // Concurrent insert (simulating a peer's write landing directly in
+        // the live model) shifts "a" from index 1 to index 2.
+        m.entries().insert(0, entry("peer-inserted"));
+        assert_eq!(
+            m.entries().with_item(2, |e| e.title.clone()),
+            Some("a".to_string()),
+            "precondition: the insert shifted a to index 2"
+        );
+
+        // A stale `remove(1)` would now delete "b", not "a". `remove_by_id`
+        // must remove "a" regardless of where it ended up.
+        m.remove_by_id(a_id);
+
+        assert_eq!(m.entries().len(), 2, "exactly one entry removed");
+        let remaining: Vec<String> = (0..m.entries().len())
+            .map(|i| m.entries().with_item(i, |e| e.title.clone()).unwrap())
+            .collect();
+        assert!(
+            remaining.contains(&"b".to_string()),
+            "b survives: {remaining:?}"
+        );
+        assert!(
+            remaining.contains(&"peer-inserted".to_string()),
+            "peer-inserted survives: {remaining:?}"
+        );
+        assert!(
+            !remaining.contains(&"a".to_string()),
+            "a — the one actually targeted by id — is gone: {remaining:?}"
+        );
     }
 
     #[test]
@@ -632,6 +800,170 @@ mod tests {
         );
     }
 
+    /// Bug-repro for the raw-`ListModel`-mutation hazard flagged when
+    /// `PersistedListModel::model()` became read/reactive-binding-only:
+    /// every mutating `NotificationArchiveModel` method must persist
+    /// through the backend's `upsert_front` / `update_in_place` /
+    /// `remove` / `clear`, never by mutating `backend.model()`
+    /// directly (which would update the live in-memory `ListModel` but
+    /// silently never reach disk). Exercises each one and reopens a
+    /// fresh handle over the same file to prove the effect actually
+    /// landed, not just that the live model looks right.
+    #[test]
+    fn mark_all_read_persists_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("mark_read_test");
+
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(entry("a"));
+            m.push(entry("b"));
+            m.mark_all_read();
+            m.flush_now().unwrap();
+        }
+
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(
+            reopened.unread_count().get(),
+            0,
+            "read state must have been persisted, not just live-mutated"
+        );
+        assert!(reopened.entries().with_item(0, |e| e.read).unwrap());
+        assert!(reopened.entries().with_item(1, |e| e.read).unwrap());
+    }
+
+    #[test]
+    fn remove_by_id_persists_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("remove_test");
+
+        let removed_title;
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(entry("a"));
+            m.push(entry("b"));
+            let b_id = m.entries().with_item(0, |e| e.id).unwrap();
+            removed_title = m.entries().with_item(0, |e| e.title.clone()).unwrap();
+            m.remove_by_id(b_id);
+            m.flush_now().unwrap();
+            assert_eq!(m.entries().len(), 1);
+        }
+
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(
+            reopened.entries().len(),
+            1,
+            "the removal must have reached disk, not just the live model"
+        );
+        assert_eq!(
+            reopened.entries().with_item(0, |e| e.title.clone()),
+            Some("a".to_string())
+        );
+        assert_ne!(
+            reopened.entries().with_item(0, |e| e.title.clone()),
+            Some(removed_title)
+        );
+    }
+
+    #[test]
+    fn dedup_merge_update_in_place_persists_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("dedup_test");
+
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            let mut first = entry("Uploading 1 of 7");
+            first.dedup_id = Some("upload".to_string());
+            m.push(first);
+            let mut second = entry("Uploading 4 of 7");
+            second.dedup_id = Some("upload".to_string());
+            m.push(second);
+            m.flush_now().unwrap();
+            assert_eq!(m.entries().len(), 1, "merged into one row");
+        }
+
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(reopened.entries().len(), 1, "still one row after reopen");
+        let merged = reopened.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(
+            merged.title, "Uploading 4 of 7",
+            "the in-place update's title must have persisted, not the original"
+        );
+        assert_eq!(
+            merged.updates.len(),
+            1,
+            "the appended NotificationUpdate must have persisted"
+        );
+    }
+
+    #[test]
+    fn clear_persists_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("clear_test");
+
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(entry("a"));
+            m.push(entry("b"));
+            m.clear();
+            m.flush_now().unwrap();
+            assert_eq!(m.entries().len(), 0);
+        }
+
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(
+            reopened.entries().len(),
+            0,
+            "the clear must have reached disk, not just the live model"
+        );
+    }
+
+    #[test]
+    fn bounded_eviction_persists_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent_with_limit("eviction_test", 2);
+
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(entry("t0"));
+            m.push(entry("t1"));
+            m.push(entry("t2")); // evicts t0
+            m.flush_now().unwrap();
+            assert_eq!(m.entries().len(), 2);
+        }
+
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(
+            reopened.entries().len(),
+            2,
+            "the eviction must have reached disk, not just the live model"
+        );
+        let titles: Vec<String> = (0..reopened.entries().len())
+            .map(|i| {
+                reopened
+                    .entries()
+                    .with_item(i, |e| e.title.clone())
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            !titles.contains(&"t0".to_string()),
+            "t0 was evicted: {titles:?}"
+        );
+        assert!(titles.contains(&"t1".to_string()));
+        assert!(titles.contains(&"t2".to_string()));
+    }
+
     #[test]
     fn version_signal_bumps_on_push_mark_clear_remove() {
         let m = NotificationArchiveModel::in_memory();
@@ -645,7 +977,8 @@ mod tests {
         let v2 = m.version_signal().get();
         assert_ne!(v1, v2, "mark_all_read bumps version");
 
-        m.remove(0);
+        let id0 = m.entries().with_item(0, |e| e.id).unwrap();
+        m.remove_by_id(id0);
         let v3 = m.version_signal().get();
         assert_ne!(v2, v3, "remove bumps version");
 

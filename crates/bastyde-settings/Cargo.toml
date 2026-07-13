@@ -19,6 +19,7 @@ etcetera = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 fs2 = { workspace = true }
+notify = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }

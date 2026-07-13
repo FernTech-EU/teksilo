@@ -8,13 +8,36 @@ Per-window geometry persistence via `WindowStateService`.
 Each named window — identified by a stable string label such as
 `"main"` or `"inspector"` — can have its position, size, and
 placement (`Floating` / `Maximized` / `Fullscreen`) saved across
-sessions. In-memory is the source of truth: `record` updates an
-in-memory `WindowStateFile` and schedules a debounced atomic write
-(write-temp + rename); `state_for` reads directly from memory
-without touching disk. On load, the file is migrated through
-`Migrator` steps (currently v1 → v2: `maximized: bool` →
-`placement: WindowPlacement`) before deserializing, and corrupt
-files are quarantined automatically by `SettingsFile`.
+sessions. In-memory is the source of truth: `state_for` reads
+directly from memory without touching disk. On load, the file is
+migrated through `Migrator` steps (currently v1 → v2: `maximized:
+bool` → `placement: WindowPlacement`) before deserializing, and
+corrupt files are quarantined automatically by `SettingsFile`.
+
+## `record` is synchronous, not debounced
+
+This type is built on `SettingsFile<WindowStateFile>`, whose writes
+are always a synchronous locked read-modify-write (see `file.rs`'s
+module docs) — there is no debounce window to coalesce a burst of
+calls into one flush. `record` therefore takes a lock, re-reads and
+re-migrates the file, applies the change, and writes it back *on the
+calling thread*, every single time it is invoked. That is the right
+trade-off for how this type is meant to be called — a handful of
+writes around a window's lifetime — but `bastyde-app`'s
+`window_persist` module (`crates/bastyde-app/src/window_persist.rs`)
+currently wires `record` to fire on *every* `Signal` change of a
+window's size/position/placement, which on X11/Windows/macOS means
+once per frame during a live drag or resize (Wayland mostly spares
+position, since the compositor rarely notifies apps of it — see the
+Wayland caveat below — but size still updates during a resize).
+Concretely: a live window drag currently does a synchronous
+lock-acquire + file read + parse + serialize + atomic write on every
+reported geometry change, not a debounced one. This is a known,
+intentional-for-now performance characteristic of the current
+wiring, not of `WindowStateService` itself — a caller that wants to
+coalesce a drag into one write should debounce at the call site
+(e.g. only call `record` from a "drag ended" / periodic-timer
+observer) rather than from every raw geometry `Signal`.
 
 In a typical Bastyde app, `WindowStateService` is managed by the
 framework's `SettingsBundle` and wired automatically when the
@@ -112,9 +135,10 @@ connected.
 Persistent, in-memory-backed store for per-window geometry.
 
 Holds a `SettingsFile`-backed collection of `PerWindowState` entries
-keyed by a stable string label. Each `record` call updates the
-in-memory snapshot and schedules a debounced atomic flush to disk;
-`state_for` reads directly from memory with no I/O.
+keyed by a stable string label. Each `record` call performs a
+synchronous locked read-modify-write to disk (see the module docs'
+"`record` is synchronous, not debounced" section — this is not a
+debounced flush); `state_for` reads directly from memory with no I/O.
 
 
 ```rust
@@ -125,20 +149,23 @@ pub struct WindowStateService { /* fields */ }
 
 #### `pub fn open(paths: &AppPaths) -> Result<Self, SettingsFileError>`
 
-Open the window-state file at the standard location inside `paths`,
-using the default debounce delay.
+Open the window-state file at the standard location inside `paths`.
 
 #### `pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError>`
 
-Open the window-state file at the standard location inside `paths`,
-flushing debounced writes after `delay`. Pass `Duration::ZERO` in
-tests for synchronous behaviour.
+Open the window-state file at the standard location inside `paths`.
+
+`delay` is accepted (and ignored) purely so `crate::SettingsBundle`
+can open every service it manages with one uniform debounce
+argument: `SettingsFile`'s writes are always synchronous locked
+read-modify-writes now (see `file.rs`'s module docs) — `record` /
+`forget` calls are one disk write per record, immediately, with no
+burst to coalesce.
 
 #### `pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError>`
 
-Open the window-state file at an explicit `path` with the given
-debounce `delay`. Useful when the caller controls the file location
-directly (e.g. integration tests writing to a known temp path).
+Open the window-state file at an explicit `path`. `delay` is
+accepted and ignored — see `open_with_delay`.
 
 #### `pub fn state_for(&self, label: &str) -> Option<PerWindowState>`
 
@@ -148,7 +175,9 @@ no entry yet.
 #### `pub fn record(&self, state: PerWindowState) -> Result<(), SettingsFileError>`
 
 Record the current geometry for `label`. Replaces any prior
-entry. Schedules a debounced write.
+entry. Synchronous: performs a locked read-modify-write to disk
+immediately, on the calling thread — see the module docs' "`record`
+is synchronous, not debounced" section.
 
 #### `pub fn forget(&self, label: &str) -> Result<(), SettingsFileError>`
 
@@ -160,9 +189,11 @@ All recorded labels. Useful for "restore last session" features.
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
-Write any pending in-memory changes to disk immediately, bypassing
-the debounce timer. Useful before process exit or in tests that
-verify on-disk content.
+A harmless no-op: `record` / `forget`
+already write synchronously, so nothing is ever pending. Kept so
+callers that hold a `WindowStateService` alongside debounced
+services (`SettingsStore`, `MruList`) can flush everything
+uniformly without special-casing this type.
 
 #### `pub fn path(&self) -> &Path`
 

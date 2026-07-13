@@ -2,51 +2,123 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! [`PersistedListModel<T>`] — bridge between a reactive
-//! [`ListModel<T>`](bastyde_data::ListModel) and a [`SettingsFile`].
+//! [`ListModel<T>`](bastyde_data::ListModel) and a single TOML file,
+//! merging by **op**, not by whole-document snapshot.
 //!
-//! Construction loads the file at `path`, seeds the in-memory model from
-//! its `items` field, and installs an `observe_changes` callback that
-//! re-serializes the whole list on every mutation. The observer captures
-//! the file handle via `Rc` clone — both ends are `Rc<RefCell<>>`-shaped
-//! so cloning is cheap and share-by-handle semantics apply.
+//! ## Why ops, not snapshots
 //!
-//! ## When to use
+//! The previous design re-derived the *entire* `Vec<T>` from the live model
+//! on every mutation and scheduled a debounced write of that whole
+//! snapshot. That is last-write-wins by construction: if a peer process
+//! added an entry to the same file in the meantime, this process's next
+//! flush would overwrite the peer's row right off the disk — the exact
+//! "a newly-opened project vanishes from Recents" bug this crate exists to
+//! fix.
 //!
-//! Use this bridge for flat ordered collections (pinned items, palette
-//! entries, saved searches) whose total size stays well below ~1 k items.
-//! Each mutation re-serializes the full list; the debounce window
-//! coalesces rapid bursts so this work is paid at most once per window.
-//! For larger or rapidly-mutating lists prefer SQLite.
+//! Instead, every mutation records a small, **replayable** [`ListOp<T>`]
+//! and hands it to the shared debounced writer as a [`crate::flush::Patch`]:
+//! "given the file's current text, apply this one op to it." The patch is
+//! applied against the document read **fresh off disk, under a lock**, at
+//! flush time — so it replays cleanly on top of whatever a peer wrote in
+//! the meantime, key by key, instead of overwriting the whole thing.
+//!
+//! ## Identity
+//!
+//! Every item needs a stable identity to merge by — see [`Keyed`]. Ops are
+//! keyed, not indexed: `Remove` only needs to carry a key, never a value,
+//! which is exactly what a diff of "what's gone" can always produce even
+//! though the value itself is no longer available once removed.
+//!
+//! ## Mutating through this type, not through `.model()`
+//!
+//! `.model()` is for **reading** and for reactive binding (`ListView` /
+//! `Repeater`) — every UI observer wants live updates regardless of who
+//! mutates. Writing must go through [`upsert_front`](PersistedListModel::upsert_front),
+//! [`update_in_place`](PersistedListModel::update_in_place),
+//! [`remove`](PersistedListModel::remove) and
+//! [`clear`](PersistedListModel::clear): those are the only places that both
+//! mutate the live model *and* enqueue the matching op. Mutating the
+//! `ListModel` returned by `.model()` directly updates what's on screen but
+//! is never persisted — there is no observer bridging arbitrary model
+//! mutations to disk any more (that observer *was* the whole-snapshot
+//! overwrite bug).
 //!
 //! ## Example
 //!
-//! ```ignore
-//! use bastyde_settings::collection::list::PersistedListModel;
-//! use bastyde_settings::migration::Migrator;
+//! ```
+//! use bastyde_settings::{Keyed, Migrator, PersistedListModel};
 //! use serde::{Deserialize, Serialize};
 //! use std::time::Duration;
 //!
 //! #[derive(Serialize, Deserialize, Clone)]
 //! struct Tag { name: String }
 //!
-//! let path = std::env::temp_dir().join("tags.toml");
+//! impl Keyed for Tag {
+//!     type Key = String;
+//!     fn key(&self) -> String { self.name.clone() }
+//! }
+//!
+//! let path = std::env::temp_dir().join("tags-list-doctest.toml");
 //! let plm: PersistedListModel<Tag> =
 //!     PersistedListModel::open(path, Duration::ZERO, Migrator::new())
 //!         .expect("open failed");
-//! plm.model().push(Tag { name: "rust".into() });
+//! plm.upsert_front(Tag { name: "rust".into() });
 //! plm.flush_now().expect("flush");
 //! ```
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::collections::HashSet;
+use std::hash::Hash;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
-use bastyde_core::ObserverHandle;
 use bastyde_data::ListModel;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::file::{SettingsFile, SettingsFileError};
+use crate::file::{SettingsFileError, disk_stamp, quarantine, read_toml_with_retry};
+use crate::flush::{DebouncedWriter, FlushError};
+use crate::lock::FileLock;
 use crate::migration::{Migrator, Versioned};
+use crate::reload::Reloadable;
+
+/// An item with a stable, owned identity — the merge key
+/// [`PersistedListModel`] dedupes and diffs by.
+///
+/// `Key` is owned (not borrowed, unlike the old `MruEntry::Key: ?Sized`
+/// shape) because it must be captured into a `Patch` (`crate::flush::Patch`)
+/// closure that crosses to the shared I/O worker thread — a borrow into
+/// `T` cannot outlive the mutation call that produced it.
+pub trait Keyed {
+    /// The key type. Typically `String` / `PathBuf` / a small `Copy` id.
+    type Key: Eq + Hash + Clone + Send + 'static;
+
+    /// This item's identity. Returned by value: cheap for the small key
+    /// types this is meant for (clone a `String`/`PathBuf`/id), and it
+    /// sidesteps borrow-lifetime issues entirely.
+    fn key(&self) -> Self::Key;
+}
+
+/// A replayable mutation of a [`PersistedListModel`]'s backing list,
+/// expressed **by key** so it can be applied to *any* starting `Vec<T>` —
+/// in particular, the fresh one read off disk at flush time, which may
+/// already include a peer process's concurrent changes.
+#[derive(Debug, Clone)]
+pub enum ListOp<T: Keyed> {
+    /// Remove any existing entry with this item's key, then insert `T` at
+    /// the front. This is the "most recently used" operation: re-running
+    /// it against any starting vector — including one a peer has already
+    /// mutated — reproduces the same dedupe-and-promote-to-front
+    /// invariant `MruList::add` relies on.
+    UpsertFront(T),
+    /// Replace the entry with this item's key **in place** (no
+    /// reordering). A no-op if the key is no longer present — e.g. a peer
+    /// concurrently removed it, in which case that removal wins.
+    UpdateInPlace(T),
+    /// Remove the entry with this key, if present. No-op otherwise.
+    Remove(T::Key),
+    /// Drop every entry.
+    Clear,
+}
 
 /// On-disk shape for a persisted list: a versioned wrapper around
 /// `Vec<T>`. Apps write migrations against this type, not the bare `Vec`.
@@ -89,82 +161,329 @@ impl<T: 'static> Versioned for ListFile<T> {
     }
 }
 
-/// A reactive list whose mutations persist to a single TOML file.
+/// A reactive, [`Keyed`]-item list whose mutations persist to a single
+/// TOML file by merging **ops**, not by overwriting a whole-document
+/// snapshot.
 pub struct PersistedListModel<T>
 where
-    T: Clone + Serialize + DeserializeOwned + 'static,
+    T: Keyed + Clone + Serialize + DeserializeOwned + Send + 'static,
 {
     model: ListModel<T>,
-    file: SettingsFile<ListFile<T>>,
-    /// RAII handle for the model→file observer. Dropping it would
-    /// stop persisting future mutations, so it lives as long as the
-    /// `PersistedListModel`.
-    _handle: ObserverHandle,
+    writer: DebouncedWriter,
+    /// Retained for the handle's whole lifetime: every op-patch re-reads
+    /// and re-migrates the on-disk document fresh (a peer might still be
+    /// on an older schema), not just the one read at construction.
+    migrator: Migrator<ListFile<T>>,
+    /// `(mtime, len)` as of the last time this handle read or wrote the
+    /// file — the cheap staleness / self-write-suppression stamp behind
+    /// [`Reloadable::reload_from_disk`].
+    last_known_stamp: std::cell::Cell<(Option<SystemTime>, Option<u64>)>,
 }
 
 impl<T> PersistedListModel<T>
 where
-    T: Clone + Serialize + DeserializeOwned + 'static,
+    T: Keyed + Clone + Serialize + DeserializeOwned + Send + 'static,
 {
-    /// Open the file at `path` (running `migrator`), seed the model
-    /// from its contents, and wire up automatic persistence on every
-    /// mutation.
+    /// Open the file at `path` (running `migrator`, under an exclusive
+    /// lock so a peer mid-write can't hand us a torn read), seed the model
+    /// from its contents, and retain everything needed to enqueue op
+    /// patches on every mutation.
+    ///
+    /// `delay` is the debounce window for writes — unlike
+    /// [`crate::SettingsFile`], this type's writes are expected to be
+    /// frequent (every `add`/`touch`/`remove` on a live MRU list), so the
+    /// debounce is real and load-bearing here, not vestigial.
     pub fn open(
         path: PathBuf,
         delay: Duration,
         migrator: Migrator<ListFile<T>>,
     ) -> Result<Self, SettingsFileError> {
-        let file: SettingsFile<ListFile<T>> = SettingsFile::load(path, delay, &migrator)?;
-        let snapshot = file.snapshot();
-        let model = ListModel::from_vec(snapshot.items);
+        let lock = FileLock::acquire_exclusive(&path).map_err(SettingsFileError::Io)?;
+        let file = match read_list_or_default(&path, &migrator) {
+            Ok(f) => f,
+            Err(other) => {
+                quarantine(&path);
+                eprintln!(
+                    "bastyde-settings: load failed for {}: {}; falling back to an empty list",
+                    path.display(),
+                    other,
+                );
+                ListFile::default()
+            }
+        };
+        let stamp = disk_stamp(&path);
+        drop(lock);
 
-        let model_for_obs = model.clone();
-        let file_for_obs = file.clone();
-        let handle = model.observe_changes(move |_change| {
-            // Re-serialize the whole list. Lists this is for (recents,
-            // pinned, palettes) are <100 items — microseconds of CPU.
-            let items: Vec<T> = (0..model_for_obs.len())
-                .filter_map(|i| model_for_obs.with_item(i, |t| t.clone()))
-                .collect();
-            let _ = file_for_obs.replace(ListFile {
-                version: <ListFile<T> as Versioned>::CURRENT_VERSION,
-                items,
-            });
-        });
+        let model = ListModel::from_vec(file.items);
+        let writer = DebouncedWriter::new(path, delay);
 
         Ok(Self {
             model,
-            file,
-            _handle: handle,
+            writer,
+            migrator,
+            last_known_stamp: std::cell::Cell::new(stamp),
         })
     }
 
     /// The underlying reactive list handle. Clone it to share with
-    /// `Repeater` / `ListView` widgets; mutations flow back through the
-    /// observer and schedule a debounced disk flush automatically.
+    /// `Repeater` / `ListView` widgets for **reading**. See the module
+    /// docs: mutating the returned handle directly does not persist —
+    /// use this type's own mutation methods instead.
     pub fn model(&self) -> &ListModel<T> {
         &self.model
     }
 
-    /// Flush any pending serialized payload to disk immediately,
-    /// bypassing the debounce window.
+    /// Insert `item` at the front, deduping by `item.key()` (removing any
+    /// existing entry with the same key first). Updates the live model
+    /// immediately and enqueues the matching [`ListOp::UpsertFront`].
+    pub fn upsert_front(&self, item: T) {
+        if let Some(idx) = self.find_index(&item.key()) {
+            self.model.remove(idx);
+        }
+        self.model.insert(0, item.clone());
+        self.schedule_op(ListOp::UpsertFront(item));
+    }
+
+    /// Replace the entry with `item.key()` **in place** (no reordering).
+    /// Returns `false` (and does nothing) if no entry with that key
+    /// exists locally. Enqueues [`ListOp::UpdateInPlace`] on success.
+    pub fn update_in_place(&self, item: T) -> bool {
+        let Some(idx) = self.find_index(&item.key()) else {
+            return false;
+        };
+        self.model.set(idx, item.clone());
+        self.schedule_op(ListOp::UpdateInPlace(item));
+        true
+    }
+
+    /// Remove the entry with this key, if present locally. Returns
+    /// whether anything was removed. Enqueues [`ListOp::Remove`] on
+    /// success.
+    pub fn remove(&self, key: &T::Key) -> bool {
+        let Some(idx) = self.find_index(key) else {
+            return false;
+        };
+        self.model.remove(idx);
+        self.schedule_op(ListOp::Remove(key.clone()));
+        true
+    }
+
+    /// Drop every entry, locally and on disk.
+    pub fn clear(&self) {
+        self.model.clear();
+        self.schedule_op(ListOp::Clear);
+    }
+
+    /// Flush any pending op(s) to disk immediately, bypassing the
+    /// debounce window. Flushes the **op queue** — never a re-derived
+    /// snapshot of the in-memory list, which is exactly the mechanism
+    /// that used to let a cleanly-exiting process erase a peer's
+    /// newly-added entry.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
-        self.file.flush_now()
+        self.writer.flush_now().map_err(SettingsFileError::Flush)?;
+        self.last_known_stamp.set(disk_stamp(self.writer.path()));
+        Ok(())
     }
 
     /// The absolute path of the TOML file being written to.
-    pub fn path(&self) -> &std::path::Path {
-        self.file.path()
+    pub fn path(&self) -> &Path {
+        self.writer.path()
+    }
+
+    fn find_index(&self, key: &T::Key) -> Option<usize> {
+        let model = &self.model;
+        (0..model.len()).find(|&i| model.with_item(i, |t| t.key() == *key).unwrap_or(false))
+    }
+
+    fn schedule_op(&self, op: ListOp<T>) {
+        let migrator = self.migrator.clone();
+        let patch: crate::flush::Patch = Box::new(move |current: Option<String>| {
+            let file = parse_list_file_text(current.as_deref(), &migrator)
+                .map_err(|e| FlushError::Merge(e.to_string()))?;
+            let mut items = file.items;
+            apply_list_op(&mut items, &op);
+            let new_file = ListFile {
+                version: <ListFile<T> as Versioned>::CURRENT_VERSION,
+                items,
+            };
+            toml::to_string_pretty(&new_file).map_err(|e| FlushError::Merge(e.to_string()))
+        });
+        self.writer.schedule(patch);
+    }
+}
+
+/// Apply a single [`ListOp`] to `items` (the freshly-read-from-disk
+/// vector), by key. This is the actual merge: it never looks at what this
+/// process's in-memory list looked like, only at `items` as given.
+fn apply_list_op<T: Keyed + Clone>(items: &mut Vec<T>, op: &ListOp<T>) {
+    match op {
+        ListOp::UpsertFront(item) => {
+            let key = item.key();
+            items.retain(|t| t.key() != key);
+            items.insert(0, item.clone());
+        }
+        ListOp::UpdateInPlace(item) => {
+            let key = item.key();
+            if let Some(slot) = items.iter_mut().find(|t| t.key() == key) {
+                *slot = item.clone();
+            }
+            // No-op if the key is gone — a peer's concurrent removal wins.
+        }
+        ListOp::Remove(key) => {
+            items.retain(|t| t.key() != *key);
+        }
+        ListOp::Clear => {
+            items.clear();
+        }
+    }
+}
+
+/// Read `path`'s TOML (retrying on transient parse failure) and run
+/// `migrator`, falling back to an empty [`ListFile`] if the file is
+/// absent.
+fn read_list_or_default<T>(
+    path: &Path,
+    migrator: &Migrator<ListFile<T>>,
+) -> Result<ListFile<T>, SettingsFileError>
+where
+    T: Clone + Serialize + DeserializeOwned + 'static,
+{
+    match read_toml_with_retry(path)? {
+        Some(raw) => {
+            let mut file = migrator.run(raw).map_err(SettingsFileError::Migrate)?;
+            file.version = <ListFile<T> as Versioned>::CURRENT_VERSION;
+            Ok(file)
+        }
+        None => Ok(ListFile::default()),
+    }
+}
+
+/// Like [`read_list_or_default`], but parses already-in-hand text (used
+/// from inside a [`crate::flush::Patch`] closure, which receives the
+/// current text directly rather than a path to re-read) instead of a
+/// missing file falling back on `NotFound` — `None` (no file yet) is
+/// handled the same way either way.
+fn parse_list_file_text<T>(
+    text: Option<&str>,
+    migrator: &Migrator<ListFile<T>>,
+) -> Result<ListFile<T>, SettingsFileError>
+where
+    T: Clone + Serialize + DeserializeOwned + 'static,
+{
+    match text {
+        Some(text) => {
+            let raw: toml::Value = toml::from_str(text).map_err(SettingsFileError::Parse)?;
+            let mut file = migrator.run(raw).map_err(SettingsFileError::Migrate)?;
+            file.version = <ListFile<T> as Versioned>::CURRENT_VERSION;
+            Ok(file)
+        }
+        None => Ok(ListFile::default()),
+    }
+}
+
+impl<T> Reloadable for PersistedListModel<T>
+where
+    T: Keyed + Clone + Serialize + DeserializeOwned + Send + PartialEq + 'static,
+{
+    fn path(&self) -> &Path {
+        PersistedListModel::path(self)
+    }
+
+    fn reload_from_disk(&self) -> Result<bool, SettingsFileError> {
+        let path = self.writer.path();
+        let current_stamp = disk_stamp(path);
+        if current_stamp == self.last_known_stamp.get() {
+            return Ok(false);
+        }
+
+        let file = read_list_or_default(path, &self.migrator)?;
+        self.last_known_stamp.set(current_stamp);
+
+        let current: Vec<T> = (0..self.model.len())
+            .filter_map(|i| self.model.with_item(i, |t| t.clone()))
+            .collect();
+        if current == file.items {
+            return Ok(false);
+        }
+
+        reconcile_list_by_key(&self.model, file.items);
+        Ok(true)
+    }
+}
+
+/// Reconcile `model`'s live contents to exactly match `new_items`, using
+/// only [`ListModel`]'s existing granular mutation methods (`insert` /
+/// `remove` / `set` / `move_item`) — **never** [`ListModel::replace_all`],
+/// which emits a blanket `DataChange::Reset` that unconditionally clears a
+/// positional `SelectionModel`. A peer's write landing mid-session should
+/// never yank the user's current selection out from under them.
+///
+/// `bastyde-data::ListModel::reconcile_by_key` has since landed with the
+/// identical shape (new authoritative `Vec<T>` in, diff by key, mutate the
+/// live model minimally, never `Reset`) — this function predates it and is
+/// a candidate to delete in favor of calling
+/// `model.reconcile_by_key(new_items, |t| t.key())` directly; kept for now
+/// only because swapping the call site is a separate change from this
+/// documentation pass, not because the upstream method is missing.
+fn reconcile_list_by_key<T>(model: &ListModel<T>, new_items: Vec<T>)
+where
+    T: Keyed + Clone + PartialEq + 'static,
+{
+    let new_keys: HashSet<T::Key> = new_items.iter().map(|t| t.key()).collect();
+
+    // 1. Drop entries whose key no longer exists in the target — walk
+    //    backwards so removing at `i` never invalidates a not-yet-visited
+    //    lower index.
+    let mut i = model.len();
+    while i > 0 {
+        i -= 1;
+        let stale = model
+            .with_item(i, |t| !new_keys.contains(&t.key()))
+            .unwrap_or(false);
+        if stale {
+            model.remove(i);
+        }
+    }
+
+    // 2. Walk the target order position by position. Positions
+    //    `0..target_idx` are already correct by the end of each
+    //    iteration (an invariant maintained by construction), so each
+    //    step only searches `target_idx..` for the right key, moving or
+    //    inserting it into place, then patches the value if it differs.
+    for (target_idx, new_item) in new_items.into_iter().enumerate() {
+        let target_key = new_item.key();
+        let found = (target_idx..model.len()).find(|&i| {
+            model
+                .with_item(i, |t| t.key() == target_key)
+                .unwrap_or(false)
+        });
+
+        match found {
+            Some(pos) => {
+                if pos != target_idx {
+                    model.move_item(pos, target_idx);
+                }
+                let differs = model
+                    .with_item(target_idx, |t| *t != new_item)
+                    .unwrap_or(true);
+                if differs {
+                    model.set(target_idx, new_item);
+                }
+            }
+            None => {
+                model.insert(target_idx, new_item);
+            }
+        }
     }
 }
 
 impl<T> std::fmt::Debug for PersistedListModel<T>
 where
-    T: Clone + Serialize + DeserializeOwned + 'static,
+    T: Keyed + Clone + Serialize + DeserializeOwned + Send + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PersistedListModel")
-            .field("path", &self.file.path())
+            .field("path", &self.writer.path())
             .field("len", &self.model.len())
             .finish()
     }
@@ -183,6 +502,20 @@ mod tests {
         count: i32,
     }
 
+    impl Keyed for Item {
+        type Key = String;
+        fn key(&self) -> String {
+            self.name.clone()
+        }
+    }
+
+    fn item(name: &str, count: i32) -> Item {
+        Item {
+            name: name.into(),
+            count,
+        }
+    }
+
     #[test]
     fn fresh_file_starts_empty() {
         let dir = tempdir().unwrap();
@@ -193,21 +526,15 @@ mod tests {
     }
 
     #[test]
-    fn push_persists_and_reopens() {
+    fn upsert_front_persists_and_reopens() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("list.toml");
 
         {
             let plm: PersistedListModel<Item> =
                 PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
-            plm.model().push(Item {
-                name: "a".into(),
-                count: 1,
-            });
-            plm.model().push(Item {
-                name: "b".into(),
-                count: 2,
-            });
+            plm.upsert_front(item("a", 1));
+            plm.upsert_front(item("b", 2));
             plm.flush_now().unwrap();
         }
 
@@ -216,92 +543,243 @@ mod tests {
         assert_eq!(plm.model().len(), 2);
         assert_eq!(
             plm.model().with_item(0, |x| x.clone()).unwrap(),
-            Item {
-                name: "a".into(),
-                count: 1
-            }
+            item("b", 2)
+        );
+        assert_eq!(
+            plm.model().with_item(1, |x| x.clone()).unwrap(),
+            item("a", 1)
         );
     }
 
     #[test]
-    fn every_mutation_variant_persists() {
+    fn upsert_front_dedupes_by_key() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("list.toml");
+        let plm: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+
+        plm.upsert_front(item("a", 1));
+        plm.upsert_front(item("b", 2));
+        plm.upsert_front(item("a", 99));
+
+        assert_eq!(plm.model().len(), 2);
+        assert_eq!(
+            plm.model().with_item(0, |x| x.clone()).unwrap(),
+            item("a", 99)
+        );
+        assert_eq!(
+            plm.model().with_item(1, |x| x.clone()).unwrap(),
+            item("b", 2)
+        );
+    }
+
+    #[test]
+    fn update_in_place_does_not_reorder() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("list.toml");
+        let plm: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+
+        plm.upsert_front(item("a", 1));
+        plm.upsert_front(item("b", 2));
+        assert!(plm.update_in_place(item("a", 42)));
+
+        assert_eq!(
+            plm.model().with_item(0, |x| x.clone()).unwrap(),
+            item("b", 2)
+        );
+        assert_eq!(
+            plm.model().with_item(1, |x| x.clone()).unwrap(),
+            item("a", 42)
+        );
+    }
+
+    #[test]
+    fn update_in_place_returns_false_for_missing_key() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("list.toml");
+        let plm: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+        assert!(!plm.update_in_place(item("ghost", 0)));
+    }
+
+    #[test]
+    fn remove_drops_entry_and_persists() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("list.toml");
         let plm: PersistedListModel<Item> =
             PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
 
-        let m = plm.model();
-        m.push(Item {
-            name: "a".into(),
-            count: 1,
-        });
-        m.push(Item {
-            name: "b".into(),
-            count: 2,
-        });
-        m.push(Item {
-            name: "c".into(),
-            count: 3,
-        });
-        m.insert(
-            1,
-            Item {
-                name: "x".into(),
-                count: 99,
-            },
-        );
-        m.set(
-            0,
-            Item {
-                name: "A".into(),
-                count: 10,
-            },
-        );
-        m.move_item(3, 0);
-        m.remove(0);
+        plm.upsert_front(item("a", 1));
+        plm.upsert_front(item("b", 2));
+        assert!(plm.remove(&"a".to_string()));
         plm.flush_now().unwrap();
 
         let raw = fs::read_to_string(&path).unwrap();
         let parsed: ListFile<Item> = toml::from_str(&raw).unwrap();
-        let names: Vec<&str> = parsed.items.iter().map(|i| i.name.as_str()).collect();
-        // After: ["a"] -> ["a","b"] -> ["a","b","c"] -> ["a","x","b","c"] ->
-        // ["A","x","b","c"] -> ["c","A","x","b"] -> ["A","x","b"]
-        assert_eq!(names, vec!["A", "x", "b"]);
+        assert_eq!(parsed.items.len(), 1);
+        assert_eq!(parsed.items[0].name, "b");
     }
 
     #[test]
-    fn replace_all_persists() {
+    fn clear_empties_and_persists() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("list.toml");
         let plm: PersistedListModel<Item> =
             PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
-        plm.model().replace_all(vec![Item {
-            name: "a".into(),
-            count: 1,
-        }]);
+        plm.upsert_front(item("a", 1));
+        plm.clear();
         plm.flush_now().unwrap();
 
-        let parsed: ListFile<Item> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed.items.len(), 1);
-        assert_eq!(parsed.items[0].name, "a");
+        let raw = fs::read_to_string(&path).unwrap();
+        let parsed: ListFile<Item> = toml::from_str(&raw).unwrap();
+        assert!(parsed.items.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // THE HEADLINE TEST — the merge, not the snapshot.
+    // -----------------------------------------------------------------
+
+    /// Two independent handles over the *same* file — standing in for two
+    /// Skribisto processes sharing `recents.toml` — each `upsert_front` a
+    /// *different* entry with no coordination between them. Because every
+    /// op merges against the document read fresh under the lock at flush
+    /// time, both entries must survive: neither handle's op can see, let
+    /// alone erase, the other's addition.
+    #[test]
+    fn two_concurrent_handles_each_adding_a_different_entry_both_survive() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("shared_list.toml");
+
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        let b: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+
+        a.upsert_front(item("alpha", 1));
+        a.flush_now().unwrap();
+        b.upsert_front(item("beta", 2));
+        b.flush_now().unwrap();
+
+        // A third, fresh handle proves both are actually on disk together.
+        let c: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+        let mut names: Vec<String> = (0..c.model().len())
+            .map(|i| c.model().with_item(i, |x| x.name.clone()).unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    /// The bug this replaces: a whole-snapshot design would have `b`'s
+    /// flush re-serialize *its own* in-memory list (which never saw `a`'s
+    /// addition) and overwrite it on disk. With ops, `b`'s patch only ever
+    /// touches `beta`'s key.
+    #[test]
+    fn a_peers_addition_is_not_erased_by_a_later_unrelated_flush() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("no_clobber.toml");
+
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        let b: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+
+        a.upsert_front(item("from-a", 1));
+        a.flush_now().unwrap();
+
+        // b never saw a's write (no reload) — its own mutation must
+        // still not clobber a's entry on disk.
+        b.upsert_front(item("from-b", 2));
+        b.flush_now().unwrap();
+
+        let raw = fs::read_to_string(&path).unwrap();
+        let parsed: ListFile<Item> = toml::from_str(&raw).unwrap();
+        let names: HashSet<String> = parsed.items.iter().map(|i| i.name.clone()).collect();
+        assert!(names.contains("from-a"), "a's entry must survive");
+        assert!(names.contains("from-b"), "b's entry must be present too");
     }
 
     #[test]
-    fn clones_share_persistence() {
+    fn multiple_ops_in_one_debounce_window_all_land() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("list.toml");
+        let path = dir.path().join("burst.toml");
         let plm: PersistedListModel<Item> =
-            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
-        let model_clone = plm.model().clone();
+            PersistedListModel::open(path, Duration::from_millis(200), Migrator::new()).unwrap();
 
-        model_clone.push(Item {
-            name: "via-clone".into(),
-            count: 1,
-        });
+        for i in 0..5 {
+            plm.upsert_front(item(&format!("item{i}"), i));
+        }
         plm.flush_now().unwrap();
+        assert_eq!(plm.model().len(), 5);
+    }
 
-        let parsed: ListFile<Item> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed.items.len(), 1);
-        assert_eq!(parsed.items[0].name, "via-clone");
+    // -----------------------------------------------------------------
+    // Reloadable
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn reload_from_disk_picks_up_a_peers_addition() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("reload_list.toml");
+
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        let b: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+
+        a.upsert_front(item("peer-item", 1));
+        a.flush_now().unwrap();
+
+        assert!(Reloadable::reload_from_disk(&b).unwrap());
+        assert_eq!(b.model().len(), 1);
+        assert_eq!(
+            b.model().with_item(0, |x| x.name.clone()).unwrap(),
+            "peer-item"
+        );
+    }
+
+    #[test]
+    fn reload_from_disk_returns_false_when_unchanged() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("reload_unchanged.toml");
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
+        assert!(!Reloadable::reload_from_disk(&a).unwrap());
+    }
+
+    #[test]
+    fn reload_from_disk_preserves_positions_of_unrelated_items() {
+        // A peer adds a new item; this handle's existing items must not
+        // be reshuffled by the reconciliation (only the addition should
+        // cause a change).
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("reload_stable.toml");
+
+        let a: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        a.upsert_front(item("first", 1));
+        a.upsert_front(item("second", 2));
+        a.flush_now().unwrap();
+
+        let b: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        assert_eq!(
+            b.model().with_item(0, |x| x.name.clone()).unwrap(),
+            "second"
+        );
+        assert_eq!(b.model().with_item(1, |x| x.name.clone()).unwrap(), "first");
+
+        a.upsert_front(item("third", 3));
+        a.flush_now().unwrap();
+
+        assert!(Reloadable::reload_from_disk(&b).unwrap());
+        assert_eq!(b.model().len(), 3);
+        assert_eq!(b.model().with_item(0, |x| x.name.clone()).unwrap(), "third");
+        assert_eq!(
+            b.model().with_item(1, |x| x.name.clone()).unwrap(),
+            "second"
+        );
+        assert_eq!(b.model().with_item(2, |x| x.name.clone()).unwrap(), "first");
     }
 }

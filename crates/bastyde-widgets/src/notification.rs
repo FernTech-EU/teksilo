@@ -36,6 +36,7 @@ pub mod log;
 pub mod log_dialog;
 
 use bastyde_core::styles::{BannerSeverity, ToastPriority};
+use bastyde_settings::Keyed;
 use serde::{Deserialize, Serialize};
 
 pub use archive::{
@@ -82,6 +83,20 @@ pub struct NotificationEntry {
     /// In-place updates from subsequent `Toast::id(...)` presents.
     /// Empty on a freshly-pushed entry.
     pub updates: Vec<NotificationUpdate>,
+}
+
+/// Keyed by the stable, never-reused archive `id` (not the transient
+/// `dedup_id`, which is only used to *find* the row to merge into — see
+/// [`NotificationArchiveModel::push`](archive::NotificationArchiveModel::push)).
+/// This is what lets [`PersistedListModel`](bastyde_settings::PersistedListModel)
+/// merge a peer process's concurrent archive write by row identity
+/// instead of by whole-document snapshot.
+impl Keyed for NotificationEntry {
+    type Key = u64;
+
+    fn key(&self) -> u64 {
+        self.id
+    }
 }
 
 /// One in-place mutation applied when a `Toast` with the same `id` as an
