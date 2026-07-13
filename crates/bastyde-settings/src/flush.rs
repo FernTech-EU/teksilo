@@ -153,6 +153,13 @@ const MAX_WRITE_ATTEMPTS: u32 = 5;
 /// the worker at the debounce interval.
 const RETRY_BACKOFF: Duration = Duration::from_millis(250);
 
+/// How long [`DebouncedWriter::drop`] waits for the worker to acknowledge
+/// its final flush before giving up. Generous — the ack normally lands in
+/// microseconds, and a slow disk must not cost us the last write — but
+/// finite, because a writer dropped *after* the runtime has begun tearing
+/// the process down has no worker left to answer it. See the `Drop` impl.
+const DROP_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Invoked (off the caller's thread — on the shared worker thread) when a
 /// `DebouncedWriter`'s queued patches are **permanently** discarded: either
 /// `flush_writer` gave up after `MAX_WRITE_ATTEMPTS`, or the writer was
@@ -644,6 +651,22 @@ impl Drop for DebouncedWriter {
         // Drop until the pending payload (if any) has been flushed.
         // Without this, exit-time data would race with process
         // teardown.
+        //
+        // The wait is **bounded**, and that bound is load-bearing. A writer
+        // owned by a `thread_local!` (or any other slot whose destructor the
+        // runtime defers) is dropped *after* `main` returns: on Windows the
+        // main thread's TLS destructors run inside `DLL_PROCESS_DETACH`,
+        // which `ExitProcess` reaches only after it has already killed every
+        // other thread — the worker among them. `send` still succeeds there,
+        // because the `Sender` lives in a `OnceLock` and outlives the thread
+        // it fed, so an unbounded `recv` would park the last living thread on
+        // an ack that can never be sent: the process hangs forever, holding
+        // the loader lock, surviving even `TerminateProcess`.
+        //
+        // Losing one final write beats wedging the machine. Owners that care
+        // about that write must drop the writer while the app is still alive
+        // (before `main` returns) — where the ack is immediate and this
+        // timeout never fires.
         let (ack_tx, ack_rx) = mpsc::sync_channel(0);
         if pool()
             .send(PoolMsg::Unregister {
@@ -651,8 +674,14 @@ impl Drop for DebouncedWriter {
                 ack: ack_tx,
             })
             .is_ok()
+            && ack_rx.recv_timeout(DROP_ACK_TIMEOUT) == Err(RecvTimeoutError::Timeout)
         {
-            let _ = ack_rx.recv();
+            eprintln!(
+                "bastyde-settings: timed out waiting for the writer thread to flush {} on drop; \
+                 the last write may be lost. This writer was dropped during process teardown — \
+                 drop it before `main` returns instead.",
+                self.path.display()
+            );
         }
     }
 }
