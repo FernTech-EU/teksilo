@@ -671,7 +671,22 @@ impl Widget for ScrollArea {
             (pref.width, pref.height)
         } else {
             let h = self.preferred_height.unwrap_or(200.0);
-            (self.natural_content_width(ctx), h)
+            // `resolve()` below only ever consults `default_w` when
+            // `proposal.width` is `None` — computing it otherwise measures the
+            // whole content subtree via an unbounded `ctx.child_size` query
+            // and then discards the result. Gate on that literal condition
+            // (not on `preferred_height.is_some()`, which happens to hold for
+            // the one known width-hugging caller, `menu_list.rs`, but isn't
+            // the actual necessary-and-sufficient test — any other
+            // `ScrollArea` under a genuinely width-hugging parent without
+            // `preferred_height` set would silently regress under that
+            // narrower gate).
+            let w = if proposal.width.is_none() {
+                self.natural_content_width(ctx)
+            } else {
+                0.0
+            };
+            (w, h)
         };
         proposal.resolve(default_w, default_h).into()
     }
@@ -2013,6 +2028,113 @@ mod tests {
         assert!(
             outer_y.get() < 0.01,
             "Contain must prevent chaining: outer stays put"
+        );
+    }
+
+    // --- F6: `layout_response` must only pay for the unbounded natural-width
+    // measure when the incoming proposal can actually use it ---
+
+    /// A leaf widget that records every `SizeProposal` it's laid out at, in
+    /// addition to behaving like [`TallLeaf`] (reports `self.width`/`self.height`
+    /// whenever the proposal leaves that axis unspecified).
+    #[derive(Debug)]
+    struct RecordingLeaf {
+        width: f32,
+        height: f32,
+        log: Rc<std::cell::RefCell<Vec<SizeProposal>>>,
+    }
+
+    impl Widget for RecordingLeaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            self.log.borrow_mut().push(proposal);
+            Size::new(
+                proposal.width.unwrap_or(self.width),
+                proposal.height.unwrap_or(self.height),
+            )
+            .into()
+        }
+    }
+
+    #[test]
+    fn preferred_height_reports_natural_width_when_parent_proposes_unbounded() {
+        // Mirrors `menu_list.rs`: preferred_height set, preferred_size unset,
+        // content wider than the old hardcoded 300px fallback.
+        let mut tree = WidgetTree::new();
+        let content = tree.add(TallLeaf::new(392.0, 500.0));
+        let scroll = tree.add(ScrollArea::from_id(content).preferred_height(150.0));
+
+        // Mirrors the popover's own intrinsic-sizing pass: unbounded width.
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        let bounds = tree.bounds(scroll);
+        assert!(
+            (bounds.width - 392.0).abs() < 0.01,
+            "should report the content's real natural width, got {}",
+            bounds.width
+        );
+        assert!(
+            (bounds.height - 150.0).abs() < 0.01,
+            "should still cap the height at preferred_height, got {}",
+            bounds.height
+        );
+    }
+
+    #[test]
+    fn bounded_proposal_never_triggers_an_unbounded_content_query() {
+        // Plain ScrollArea: neither preferred_size nor preferred_height set.
+        let log: Rc<std::cell::RefCell<Vec<SizeProposal>>> =
+            Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let content = tree.add(RecordingLeaf {
+            width: 900.0,
+            height: 500.0,
+            log: log.clone(),
+        });
+        tree.add(ScrollArea::from_id(content));
+
+        // A real parent already bounds the width — the overwhelmingly common case.
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+
+        let recorded = log.borrow();
+        assert!(!recorded.is_empty(), "content widget was never laid out");
+        for proposal in recorded.iter() {
+            assert!(
+                proposal.width.is_some(),
+                "content queried with an unbounded width ({:?}) even though the \
+                 incoming proposal was already bounded — the unbounded natural-width \
+                 measure must only run when `proposal.width` is `None`",
+                proposal
+            );
+        }
+    }
+
+    #[test]
+    fn exact_proposal_still_wins_over_natural_width() {
+        // No preferred_size / preferred_height: a bounded proposal must still
+        // resolve to the proposal's own size, not the content's natural size.
+        let mut tree = WidgetTree::new();
+        let content = tree.add(TallLeaf::new(900.0, 500.0));
+        let scroll = tree.add(ScrollArea::from_id(content));
+
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+
+        let bounds = tree.bounds(scroll);
+        assert!(
+            (bounds.width - 300.0).abs() < 0.01,
+            "exact proposal must win over the content's natural width, got {}",
+            bounds.width
+        );
+        assert!(
+            (bounds.height - 100.0).abs() < 0.01,
+            "exact proposal must win over the content's natural height, got {}",
+            bounds.height
         );
     }
 }
