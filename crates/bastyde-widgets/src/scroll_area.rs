@@ -106,6 +106,8 @@ pub struct ScrollArea {
     /// Preferred size returned by `size_that_fits` when the proposal is
     /// unconstrained. `None` falls back to cached content size or 300×200.
     preferred_size: Option<Size>,
+    /// Height-only cap; width still follows the content. See `preferred_height`.
+    preferred_height: Option<f32>,
     /// Scroll-chaining behavior at the boundary. `Chain` (default) lets a
     /// boundary scroll bubble to an ancestor scrollable; `Contain` absorbs it
     /// (the web's `overscroll-behavior`).
@@ -180,6 +182,7 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
+            preferred_height: None,
             overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             scroll_x: Signal::new_animated(0.0),
@@ -277,8 +280,61 @@ impl ScrollArea {
 
     /// Set a preferred size returned when the parent proposes unconstrained
     /// dimensions. If not set, falls back to cached content size or 300×200.
+    ///
+    /// This overrides **both** axes. If you only want to cap the height and let
+    /// the width follow the content — the usual case for a menu or popover, which
+    /// must be as wide as its widest row — use [`preferred_height`] instead.
+    /// Passing a width of `0.0` here does *not* mean "no preference": it means
+    /// zero, and the scroll area will collapse.
+    ///
+    /// [`preferred_height`]: Self::preferred_height
     pub fn preferred_size(mut self, width: f32, height: f32) -> Self {
         self.preferred_size = Some(Size::new(width, height));
+        self
+    }
+
+    /// The content's natural width, for reporting an intrinsic width to a parent
+    /// that hugs (a menu, a popover).
+    ///
+    /// **Measured, not remembered.** `content_size` is only populated in
+    /// `place_children`, so on the very first layout pass — which is exactly when
+    /// a popover decides how wide to be — it is still zero, and the old code fell
+    /// back to a hard-coded `300.0`. That is how a menu of long rows ended up
+    /// narrower than its own content and clipped every one of them. Measuring the
+    /// child with an unbounded width asks it what it actually wants.
+    ///
+    /// Falls back to the cached size, then to `300.0`, if the child cannot be
+    /// measured (no content child yet).
+    fn natural_content_width(&self, ctx: &LayoutContext) -> f32 {
+        // The content child is `child_ids[0]` — `content_child` / `content_child_id`
+        // are both *consumed* by `build()`, so they are `None` by layout time.
+        if let Some(&child) = self.child_ids.first()
+            && let Some(size) = ctx.child_size(
+                child,
+                SizeProposal {
+                    width: None,
+                    height: None,
+                },
+            )
+            && size.width > 0.0
+        {
+            return size.width;
+        }
+        let cached = self.content_size.get().width;
+        if cached > 0.0 { cached } else { 300.0 }
+    }
+
+    /// Cap the height when the parent proposes an unconstrained one, while
+    /// letting the **width** continue to follow the content.
+    ///
+    /// This is what a scrolling menu/popover wants: it must not grow taller than
+    /// its viewport, but it must still be as wide as its widest item. Using
+    /// [`preferred_size`](Self::preferred_size) with a `0.0` width for this
+    /// collapses the panel to its minimum width and clips every row — the parent
+    /// proposes an unconstrained width (it is hugging its content), so the `0.0`
+    /// is taken literally.
+    pub fn preferred_height(mut self, height: f32) -> Self {
+        self.preferred_height = Some(height);
         self
     }
 
@@ -604,19 +660,18 @@ impl Widget for ScrollArea {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        // Use preferred_size if set; otherwise use content width but a fixed
-        // default height.  A scroll area's HEIGHT should come from its parent,
-        // not from its content — otherwise it grows to fit everything and no
-        // scrolling is needed, AND the intrinsic height is unstable across
-        // layout passes (content_size is only known after place_children).
+        // A scroll area's HEIGHT should come from its parent, not its content —
+        // otherwise it grows to fit everything and no scrolling is needed, and
+        // the intrinsic height is unstable across layout passes. Its WIDTH,
+        // though, must follow the content, or a horizontally-hugging parent (a
+        // menu, a popover) collapses it and clips every row.
         let (default_w, default_h) = if let Some(pref) = self.preferred_size {
             (pref.width, pref.height)
         } else {
-            let cs = self.content_size.get();
-            let w = if cs.width > 0.0 { cs.width } else { 300.0 };
-            (w, 200.0)
+            let h = self.preferred_height.unwrap_or(200.0);
+            (self.natural_content_width(ctx), h)
         };
         proposal.resolve(default_w, default_h).into()
     }

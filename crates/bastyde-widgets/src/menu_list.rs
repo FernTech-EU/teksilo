@@ -581,7 +581,11 @@ impl Widget for MenuList {
         let visible_cap_id = match self.max_visible_items {
             Some(cap) if self.item_widget_ids.len() > cap => {
                 let max_height = cap as f32 * menu::MENU_ITEM_HEIGHT + 8.0;
-                let scrollable = ScrollArea::from_id(padding_id).preferred_size(0.0, max_height);
+                // Cap the HEIGHT only. `preferred_size(0.0, ..)` would set the preferred
+                // *width* to zero — and a popover proposes an unconstrained width (it
+                // hugs its content), so the zero was taken literally: the menu collapsed
+                // to its minimum width and every row was clipped to a middle slice.
+                let scrollable = ScrollArea::from_id(padding_id).preferred_height(max_height);
                 let scrollable_id = ctx.add(scrollable);
                 ctx.add(MaxSize::height(max_height).child_id(scrollable_id))
             }
