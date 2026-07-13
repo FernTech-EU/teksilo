@@ -87,6 +87,25 @@ impl<'a> WidgetTreeView<'a> {
     pub fn children(&self, id: WidgetId) -> &[WidgetId] {
         self.arena.children(id)
     }
+
+    /// Whether `id` is a gesture dead-zone boundary — see
+    /// [`WidgetNode::gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone)
+    /// and the `DeadZone` wrapper widget. Lets a parent classify its own
+    /// subtree from `after_paint`: `TitleBar` uses it to carve interactive
+    /// controls out of the OS caption region it publishes.
+    pub fn is_gesture_dead_zone(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .map(|n| n.gesture_dead_zone)
+            .unwrap_or(false)
+    }
+
+    /// Whether `id` is active — i.e. not parked dormant by a `Switcher` or a
+    /// `visible_when` gate. A dormant node's [`bounds`](Self::bounds) are
+    /// stale, so callers walking a subtree must skip it.
+    pub fn is_active(&self, id: WidgetId) -> bool {
+        self.arena.is_active(id)
+    }
 }
 
 /// Placement of a child widget during layout.

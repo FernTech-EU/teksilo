@@ -202,6 +202,20 @@ pub struct HitRegions {
     /// One or more drag-region rectangles. Multiple rects allow non-rectangular
     /// drag surfaces (e.g. drag region split around a centred search bar).
     pub drag: Vec<Rect>,
+    /// Holes punched in [`drag`](Self::drag): sub-rectangles that must **not**
+    /// be treated as caption. Backends that hand the drag region to the OS
+    /// (Windows: `WM_NCHITTEST` -> `HTCAPTION`) must test these **before**
+    /// `drag` and answer `HTCLIENT`, or the OS owns those pixels and the widget
+    /// underneath never sees a click, a hover, or a cursor change.
+    ///
+    /// Published by `TitleBar::after_paint` from the
+    /// [`gesture_dead_zone`](crate::arena::WidgetNode::gesture_dead_zone) nodes
+    /// inside its drag region — the same declaration that already stops an
+    /// ancestor drag from arming in widget land. One concept, both layers:
+    /// wrap an interactive title-bar control in a `DeadZone` and it becomes
+    /// clickable on Windows *and* immune to jitter-drag everywhere else.
+    /// Bastyde's counterpart of Electron's `-webkit-app-region: no-drag`.
+    pub no_drag: Vec<Rect>,
     pub resize_borders: ResizeBorders,
 }
 

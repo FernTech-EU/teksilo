@@ -348,6 +348,7 @@ fn scale_hit_regions(src: &HitRegions, scale: f32) -> HitRegions {
         maximize_id: src.maximize_id,
         close_id: src.close_id,
         drag: src.drag.iter().copied().map(scale_rect).collect(),
+        no_drag: src.no_drag.iter().copied().map(scale_rect).collect(),
         resize_borders: src.resize_borders,
     }
 }
@@ -622,6 +623,19 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
         if let Some(r) = regions.close {
             if r.contains(pt_canvas) {
                 return LRESULT(HTCLOSE as isize);
+            }
+        }
+        // Dead zones win over the drag region: these are the interactive
+        // controls the app placed inside the title bar (a button, a project
+        // switcher, a search field). `HTCLIENT` hands the pixels back to the
+        // client area, so winit delivers `WM_LBUTTONDOWN` / `WM_MOUSEMOVE`
+        // normally and the widget tree hit-tests them like any other widget —
+        // clicks, hover styling, tooltips and cursor shapes all come back.
+        // Must be tested BEFORE `drag`, which would otherwise claim the same
+        // point as `HTCAPTION` and let the OS swallow the click.
+        for hole in &regions.no_drag {
+            if hole.contains(pt_canvas) {
+                return LRESULT(HTCLIENT as isize);
             }
         }
         for drag in &regions.drag {

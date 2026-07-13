@@ -369,6 +369,15 @@ impl Widget for TitleBar {
             // for any point at the origin — skip it.
             if drag_bounds.width > 0.0 && drag_bounds.height > 0.0 {
                 regions.drag.push(drag_bounds);
+                // Punch a hole for every `DeadZone` the app put inside the
+                // `center` slot. On Windows the drag rect becomes `HTCAPTION`,
+                // and the OS then owns those pixels outright — a button living
+                // there would never see a click, a hover or a cursor change; it
+                // would only drag the window. The dead-zone flag already means
+                // "not draggable chrome" to widget-land's drag arming, so it is
+                // the same declaration the OS needs. Wrap an interactive
+                // title-bar control in a `DeadZone` and it works on both layers.
+                collect_dead_zones(view, drag_id, drag_bounds, &mut regions.no_drag);
             }
         }
 
@@ -407,13 +416,50 @@ impl Widget for TitleBar {
     }
 }
 
+/// Depth-first walk of `root`'s descendants collecting the bounds of every
+/// gesture dead zone, clipped to `clip` (the drag rect). A dead zone is not
+/// descended into — its whole subtree is already inside its bounds.
+///
+/// Two nodes are deliberately skipped: dormant ones (a `Switcher`'s hidden page
+/// keeps stale bounds), and anything that does not overlap the drag rect — an
+/// *open* popover is an arena descendant of its trigger but hangs below the
+/// title bar, and its rect must not be mistaken for a hole in the caption.
+fn collect_dead_zones(view: &WidgetTreeView<'_>, root: WidgetId, clip: Rect, out: &mut Vec<Rect>) {
+    for &child in view.children(root) {
+        if !view.is_active(child) {
+            continue;
+        }
+        let Some(hit) = intersect(view.bounds(child), clip) else {
+            continue;
+        };
+        if view.is_gesture_dead_zone(child) {
+            out.push(hit);
+            continue;
+        }
+        collect_dead_zones(view, child, clip, out);
+    }
+}
+
+/// Overlap of two rects, or `None` when they do not overlap — `Rect` has
+/// `contains` but no intersection helper. Guards against publishing a
+/// degenerate (zero-area) exclusion rect.
+fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.right().min(b.right());
+    let y1 = a.bottom().min(b.bottom());
+    (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::{DeadZone, Expand};
     use bastyde_canvas::Point;
+    use bastyde_core::event::PointerButton;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge};
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     /// A test host that records calls. Pretends the platform supports
     /// custom controls (`renders_custom_controls = true`) and reports
@@ -424,6 +470,9 @@ mod tests {
         closed: Cell<u32>,
         drags_started: Cell<u32>,
         is_max: Signal<bool>,
+        /// Last snapshot handed to `update_hit_regions` — what a real
+        /// platform backend would hit-test against.
+        last_regions: RefCell<HitRegions>,
     }
 
     impl Default for TestHost {
@@ -434,6 +483,7 @@ mod tests {
                 closed: Cell::new(0),
                 drags_started: Cell::new(0),
                 is_max: Signal::new(false),
+                last_regions: RefCell::new(HitRegions::default()),
             }
         }
     }
@@ -461,7 +511,9 @@ mod tests {
         fn show_window_menu(&self, _at: Point) -> Result<(), PlatformError> {
             Ok(())
         }
-        fn update_hit_regions(&self, _regions: &HitRegions) {}
+        fn update_hit_regions(&self, regions: &HitRegions) {
+            *self.last_regions.borrow_mut() = regions.clone();
+        }
     }
 
     /// Build a tree where the title bar is wrapped in the same VStack +
@@ -476,7 +528,14 @@ mod tests {
         let bar_widget =
             bar_setup(TitleBar::new(host as Rc<dyn PlatformTitleBarHost>).height(40.0));
 
-        let mut tree = WidgetTree::new();
+        // A theme + text backend so `render()` (and with it the `after_paint`
+        // pass that publishes `HitRegions`) can run: the control buttons carry
+        // glyphs, which need a typesetter.
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
         let bar_id = tree.add(bar_widget);
         let body_id = tree.add(Expand::new());
         let _root = tree.add(
@@ -873,6 +932,145 @@ mod tests {
         assert!(
             info.is_hidden(),
             "DragRegion is pointer-only; should be hidden from AT"
+        );
+    }
+
+    /// Render one frame so `after_paint` runs and the host receives a
+    /// `HitRegions` snapshot. `WidgetTree::render` drives the paint pass.
+    fn paint_once(tree: &mut WidgetTree) {
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        let _ = tree.render();
+    }
+
+    #[test]
+    fn dead_zone_in_center_is_published_as_a_no_drag_hole() {
+        // Regression (Windows): the whole `center` slot is wrapped in a
+        // DragRegion whose rect goes out as `HitRegions::drag`, which the
+        // Windows backend answers with HTCAPTION. An interactive control
+        // living there was therefore unclickable — the OS took the press and
+        // started a window move instead. Wrapping it in a `DeadZone` must now
+        // punch a hole in the caption so the OS hands the pixels back.
+
+        let host = Rc::new(TestHost::default());
+        let host_for_bar = host.clone();
+        let (mut tree, _bar) = build_realistic_tree(host_for_bar, |b| {
+            b.center(
+                HStack::new()
+                    .child(DeadZone::new().child(FixedSize::new().width(60.0).height(30.0)))
+                    .child(Expand::new()),
+            )
+        });
+        paint_once(&mut tree);
+
+        let regions = host.last_regions.borrow();
+        assert_eq!(
+            regions.drag.len(),
+            1,
+            "the drag region should still be published"
+        );
+        assert_eq!(
+            regions.no_drag.len(),
+            1,
+            "the DeadZone in `center` must be published as one no_drag hole, got {:?}",
+            regions.no_drag
+        );
+        let hole = regions.no_drag[0];
+        let drag = regions.drag[0];
+        assert!(
+            (hole.width - 60.0).abs() < 1.0,
+            "the hole should match the dead zone's width, got {}",
+            hole.width
+        );
+        // The hole must lie inside the caption it is carving out of, or the
+        // Windows backend would test it against a region that never matches.
+        assert!(
+            hole.x >= drag.x - 0.01 && hole.right() <= drag.right() + 0.01,
+            "hole {hole:?} must be clipped to the drag rect {drag:?}"
+        );
+    }
+
+    #[test]
+    fn passive_center_content_punches_no_hole() {
+        // The inverse guard: a plain centred title must NOT become a no_drag
+        // hole, or the user could no longer drag the window by its title —
+        // which is the drag region's entire purpose.
+        let host = Rc::new(TestHost::default());
+        let host_for_bar = host.clone();
+        let (mut tree, _bar) = build_realistic_tree(host_for_bar, |b| {
+            b.center(crate::TextWidget::new(bastyde_i18n::lit!("My App")))
+        });
+        paint_once(&mut tree);
+
+        let regions = host.last_regions.borrow();
+        assert_eq!(regions.drag.len(), 1, "drag region still published");
+        assert!(
+            regions.no_drag.is_empty(),
+            "a passive centred title must not punch a hole in the caption, got {:?}",
+            regions.no_drag
+        );
+    }
+
+    #[test]
+    fn dead_zone_in_center_does_not_arm_the_window_drag() {
+        // The widget-land half of the same bug, live on every platform: a
+        // press on a control inside the drag region armed the DragRegion's
+        // `on_drag` via `arm_drag_observers`, so a few px of pointer jitter
+        // during an ordinary click started a window move and ate the tap.
+        // The `DeadZone` boundary must stop that arming.
+
+        let host = Rc::new(TestHost::default());
+        let host_for_bar = host.clone();
+        let (mut tree, _bar) = build_realistic_tree(host_for_bar, |b| {
+            b.center(
+                HStack::new()
+                    .child(DeadZone::new().child(FixedSize::new().width(60.0).height(30.0)))
+                    .child(Expand::new()),
+            )
+        });
+        paint_once(&mut tree);
+
+        let hole = host.last_regions.borrow().no_drag[0];
+        let (cx, cy) = (hole.x + hole.width / 2.0, hole.y + hole.height / 2.0);
+
+        // A jittery press on the dead-zoned control.
+        tree.pointer_down_button(Point::new(cx, cy), PointerButton::Primary);
+        for i in 1..=10 {
+            tree.pointer_move(Point::new(cx + (i as f32) * 3.0, cy + 1.0));
+        }
+        tree.pointer_up_button(Point::new(cx + 30.0, cy + 1.0), PointerButton::Primary);
+
+        assert_eq!(
+            host.drags_started.get(),
+            0,
+            "a jittery click on a DeadZone inside the title bar must not drag the window"
+        );
+    }
+
+    #[test]
+    fn dragging_the_bare_drag_region_still_works_with_a_dead_zone_present() {
+        // Guard the fix's blast radius: punching a hole must not disable the
+        // drag surface around it.
+
+        let host = Rc::new(TestHost::default());
+        let host_for_bar = host.clone();
+        let (mut tree, bar) = build_realistic_tree(host_for_bar, |b| {
+            b.center(
+                HStack::new()
+                    .child(DeadZone::new().child(FixedSize::new().width(60.0).height(30.0)))
+                    .child(Expand::new()),
+            )
+        });
+        paint_once(&mut tree);
+
+        // Drag from well to the right of the dead zone — still bare caption.
+        let drag_b = tree.bounds(locate_drag_region(&tree, bar));
+        let from = Point::new(drag_b.right() - 40.0, drag_b.y + drag_b.height / 2.0);
+        let to = Point::new(drag_b.right() - 200.0, drag_b.y + drag_b.height / 2.0);
+        tree.drag(from, to);
+
+        assert!(
+            host.drags_started.get() >= 1,
+            "the drag region outside the hole must still move the window"
         );
     }
 
