@@ -730,6 +730,7 @@ impl<T: 'static> Widget for ListView<T> {
             let len_fn = self.source.len_fn.clone();
             let first_changed = self.source.first_changed_fn.clone();
             let row_sel = self.row_selection.clone();
+            let focused = self.focused_index.clone();
             move |change| {
                 // Keep row metrics in step with the data: rows before
                 // the first changed index keep their (seeded or
@@ -753,6 +754,15 @@ impl<T: 'static> Widget for ListView<T> {
                 // orphaned keys (keyed model).
                 if let Some(ref rs) = row_sel {
                     rs.on_data_change(change);
+                }
+                // Keep the keyboard-navigation anchor in step too — otherwise
+                // it silently points at the wrong row after any insert /
+                // remove / move (reachable not just from local edits but
+                // from a live watcher pushing in a peer process's write).
+                if let Some(current) = focused.get() {
+                    focused.set(bastyde_data::data_change::adjust_single_index_for_change(
+                        current, change,
+                    ));
                 }
                 let next = dv.get() + 1;
                 dv.set(next);
@@ -1705,6 +1715,125 @@ mod tests {
             selection.selected_indices(),
             vec![4],
             "ArrowDown after a click resumes from the clicked row (3 → 4)"
+        );
+    }
+
+    #[test]
+    fn focused_index_follows_insert_before_it() {
+        // Bug repro: `focused_index` (the keyboard-nav anchor) was never
+        // adjusted on any DataChange, so after a peer/insert shifts the
+        // rows it silently pointed at the wrong one — the next ArrowDown
+        // would resume from a stale position instead of the row the user
+        // was actually on.
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(lv_id);
+
+        // Click row 3 — sets both selection and the keyboard-nav anchor to 3.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(selection.selected_indices(), vec![3], "precondition");
+
+        // A peer-driven reload prepends two rows — row 3 is now row 5.
+        model.insert(0, 100);
+        model.insert(0, 200);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // The selection model itself already index-shifts (existing
+        // behaviour) — this is just re-confirming the setup, not the fix.
+        assert_eq!(
+            selection.selected_indices(),
+            vec![5],
+            "precondition: selection shifts with the inserted rows"
+        );
+
+        // If `focused_index` had NOT shifted (the bug), it would still read
+        // 3, and ArrowDown would resume from there (→ select 4). With the
+        // fix it follows the insert to 5, so ArrowDown resumes from 5 (→ 6).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![6],
+            "ArrowDown after a leading insert resumes from the shifted row (5 → 6), \
+             not the stale pre-insert one (3 → 4)"
+        );
+    }
+
+    #[test]
+    fn focused_index_dropped_when_its_row_is_removed() {
+        // The focused row itself was removed: the anchor must be cleared,
+        // not left pointing at whatever now occupies its old slot.
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(lv_id);
+
+        // Click row 3.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(selection.selected_indices(), vec![3], "precondition");
+
+        // Row 3 itself is removed from under the focused anchor.
+        model.remove(3);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            selection.selected_indices().is_empty(),
+            "precondition: selection drops the removed row"
+        );
+
+        // With `focused_index` cleared (`None`), the next ArrowDown falls
+        // back to `unwrap_or(0)` and steps to row 1. Left un-cleared (the
+        // bug), the stale anchor would still read 3 (now clamped to the
+        // shrunk list, still in range) and ArrowDown would step to 4
+        // instead.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![1],
+            "focused_index was cleared, so nav restarts from the top (0 → 1), \
+             not from the stale removed row's index (3 → 4)"
         );
     }
 

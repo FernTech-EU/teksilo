@@ -81,3 +81,106 @@ pub fn map_index_after_move(idx: usize, from: usize, to: usize, count: usize) ->
         after_remove
     }
 }
+
+/// Map a **single** index anchor (not a selection set) through a
+/// [`DataChange`], or `None` if the row the anchor pointed at no longer
+/// exists (it was removed, or the whole list was reset).
+///
+/// This is the same shift semantics as [`map_index_after_move`] /
+/// `SelectionModel::adjust_for_*` / `CheckedModel::adjust_for_*`, specialized
+/// for a bare `Option<usize>` anchor that has no "membership" to prune —
+/// e.g. `ListView`'s keyboard-focus index. Used so a single-anchor consumer
+/// doesn't have to re-derive insert/remove/move shift logic by hand.
+///
+/// - `ItemsInserted`: the anchor shifts up by the inserted count if it sat
+///   at or after the insertion point, otherwise it's untouched.
+/// - `ItemsRemoved`: the anchor shifts down past the removed range; if the
+///   anchor itself pointed *into* the removed range, it is dropped (`None`)
+///   — the row it followed is gone.
+/// - `ItemsMoved`: delegates to [`map_index_after_move`] (the anchor follows
+///   its row, or shifts around the moved block like everyone else).
+/// - `ItemUpdated` / `WindowLoaded`: no structural shift — the anchor is
+///   unchanged.
+/// - `Reset`: the anchor is dropped (`None`) — nothing about the old
+///   indexing survives a wholesale replacement.
+pub fn adjust_single_index_for_change(idx: usize, change: &DataChange) -> Option<usize> {
+    match change {
+        DataChange::ItemsInserted { range } => Some(if idx >= range.start {
+            idx + (range.end - range.start)
+        } else {
+            idx
+        }),
+        DataChange::ItemsRemoved { range } => {
+            if idx < range.start {
+                Some(idx)
+            } else if idx >= range.end {
+                Some(idx - (range.end - range.start))
+            } else {
+                None
+            }
+        }
+        DataChange::ItemsMoved { from, to, count } => {
+            Some(map_index_after_move(idx, *from, *to, *count))
+        }
+        DataChange::ItemUpdated { .. } | DataChange::WindowLoaded { .. } => Some(idx),
+        DataChange::Reset => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adjust_single_index_inserted_shifts_at_or_after_start() {
+        let change = DataChange::ItemsInserted { range: 2..4 };
+        assert_eq!(adjust_single_index_for_change(0, &change), Some(0));
+        assert_eq!(adjust_single_index_for_change(1, &change), Some(1));
+        assert_eq!(adjust_single_index_for_change(2, &change), Some(4));
+        assert_eq!(adjust_single_index_for_change(5, &change), Some(7));
+    }
+
+    #[test]
+    fn adjust_single_index_removed_drops_within_range_shifts_after() {
+        let change = DataChange::ItemsRemoved { range: 2..4 };
+        assert_eq!(adjust_single_index_for_change(0, &change), Some(0));
+        assert_eq!(adjust_single_index_for_change(1, &change), Some(1));
+        assert_eq!(adjust_single_index_for_change(2, &change), None);
+        assert_eq!(adjust_single_index_for_change(3, &change), None);
+        assert_eq!(adjust_single_index_for_change(4, &change), Some(2));
+        assert_eq!(adjust_single_index_for_change(10, &change), Some(8));
+    }
+
+    #[test]
+    fn adjust_single_index_moved_delegates_to_map_index_after_move() {
+        let change = DataChange::ItemsMoved {
+            from: 1,
+            to: 4,
+            count: 2,
+        };
+        for idx in 0..8 {
+            assert_eq!(
+                adjust_single_index_for_change(idx, &change),
+                Some(map_index_after_move(idx, 1, 4, 2))
+            );
+        }
+    }
+
+    #[test]
+    fn adjust_single_index_updated_and_window_loaded_are_no_shift() {
+        assert_eq!(
+            adjust_single_index_for_change(3, &DataChange::ItemUpdated { index: 3 }),
+            Some(3)
+        );
+        assert_eq!(
+            adjust_single_index_for_change(3, &DataChange::WindowLoaded { range: 0..10 }),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn adjust_single_index_reset_always_drops() {
+        assert_eq!(adjust_single_index_for_change(0, &DataChange::Reset), None);
+        assert_eq!(adjust_single_index_for_change(99, &DataChange::Reset), None);
+    }
+}
