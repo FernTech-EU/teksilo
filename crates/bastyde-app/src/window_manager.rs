@@ -415,7 +415,16 @@ impl WindowManager {
                 t.app_state::<bastyde_settings::WindowStateService>()
                     .cloned()
             });
-        if let Some(svc) = persist_service.as_ref() {
+        // Restoring and persisting are separate decisions (see
+        // `WindowConfig::restore_geometry`): a window can save its geometry
+        // without reading the saved value back. That is what lets an app whose
+        // windows share one geometry slot open the *first* window where the user
+        // left it while letting the OS place any window opened alongside it —
+        // instead of stacking them all on the same pixel — yet still have the
+        // last-moved window be the one that reopens.
+        if let Some(svc) = persist_service.as_ref()
+            && config.restore_geometry
+        {
             crate::window_persist::apply_restored_geometry(&mut config, svc, target);
         }
 

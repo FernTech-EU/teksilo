@@ -76,6 +76,7 @@ pub struct WindowConfig {
     pub position: Option<(i32, i32)>,    // restored position; None = WM picks
     pub min_size: Option<(u32, u32)>,
     pub max_size: Option<(u32, u32)>,
+    pub restore_geometry: bool,          // read the saved geometry back? (default true)
     pub initial_placement: WindowPlacement,
     pub decorations: DecorationsMode,
     pub resizable: bool,
@@ -86,6 +87,40 @@ pub struct WindowConfig {
     pub root_builder: Option<RootBuilder>,
 }
 ```
+
+### Persisting geometry without restoring it
+
+`string_id` normally governs both halves of window-state persistence: a window
+with an id has its geometry **saved** on every move/resize, and **restored** at
+creation. `restore_geometry` splits them.
+
+They need splitting whenever **several windows share one geometry slot** — a
+multi-window (or, like Skribisto, multi-*process*) app that remembers "where the
+window was" rather than "where *this document's* window was". Restore the saved
+geometry into every window and they all land on the same pixel, stacked. What you
+want is:
+
+- the **first** window: restore it — reopen where the user left off;
+- any window opened **alongside** it: let the window manager place it (it
+  cascades), but **still save** its geometry, so whichever window the user moved
+  or closed last is the one that reopens.
+
+That second case is `id(..)` **+** `restore_geometry(false)`:
+
+```rust
+WindowConfig::new()
+    .id("main")                                   // still persists into this slot
+    .restore_geometry(peers.is_empty())           // ...but only the first one restores
+```
+
+With `position` left `None`, the WM picks the spot. This is the behaviour of
+Word, Firefox and most document apps.
+
+Per-*document* geometry (Scrivener, Sublime, the JetBrains IDEs) is a different
+design: it keys the slot on the document, so windows never collide and every one
+restores. It only works if the document is known **before** the window is created
+— i.e. a launcher/welcome window that opens a *separate* document window, rather
+than a blank window that later loads a document into itself.
 
 Builder form for the common cases:
 

@@ -101,6 +101,25 @@ pub struct WindowConfig {
     pub position: Option<(i32, i32)>,
     pub min_size: Option<(u32, u32)>,
     pub max_size: Option<(u32, u32)>,
+    /// Whether this window's geometry is **restored** from the persisted
+    /// window state at creation. Default `true`.
+    ///
+    /// Persisting and restoring are usually the same decision, so
+    /// [`string_id`](Self::string_id) normally governs both. They come apart in
+    /// one common case: a **multi-window (or multi-process) app where every
+    /// window shares one geometry slot.** Restoring the saved geometry into
+    /// *every* window would stack them exactly on top of each other; you want
+    /// the first window to land where the user left it, and any window opened
+    /// alongside it to be placed by the OS (which cascades). But you still want
+    /// every window to *save* its geometry, so whichever the user moved or
+    /// closed last is what reopens next time — the behaviour of Word, Firefox
+    /// and most document apps.
+    ///
+    /// Set `false` for those later windows: they still persist under their
+    /// `string_id`, they simply don't read the saved value back. With
+    /// [`position`](Self::position) left `None`, the window manager picks the
+    /// spot.
+    pub restore_geometry: bool,
     pub initial_placement: WindowPlacement,
     pub decorations: DecorationsMode,
     pub resizable: bool,
@@ -222,6 +241,7 @@ impl WindowConfig {
             position: None,
             min_size: None,
             max_size: None,
+            restore_geometry: true,
             initial_placement: WindowPlacement::Floating,
             decorations: DecorationsMode::Native,
             resizable: true,
@@ -271,6 +291,18 @@ impl WindowConfig {
     /// Upper bound on the floating size.
     pub fn max_size(mut self, width: u32, height: u32) -> Self {
         self.max_size = Some((width, height));
+        self
+    }
+
+    /// Whether to restore this window's persisted geometry at creation
+    /// (default `true`). See [`WindowConfig::restore_geometry`].
+    ///
+    /// Pass `false` for a window that should still *save* its geometry but be
+    /// placed by the OS rather than reopened at the remembered spot — the
+    /// second and later windows of an app whose windows share one geometry
+    /// slot, which would otherwise all land exactly on top of each other.
+    pub fn restore_geometry(mut self, restore: bool) -> Self {
+        self.restore_geometry = restore;
         self
     }
 
@@ -534,6 +566,30 @@ mod tests {
         assert!(config.on_close_requested.is_none());
         assert!(config.can_close.is_none());
         assert!(config.on_close_blocked.is_none());
+        // Geometry is restored unless an app explicitly opts out.
+        assert!(config.restore_geometry);
+    }
+
+    /// Persisting and restoring geometry are separate decisions.
+    ///
+    /// An app whose windows share one geometry slot wants the *first* window to
+    /// reopen where the user left it and any window opened alongside it to be
+    /// placed by the window manager — otherwise they all land on the same pixel.
+    /// But those later windows must still *save* their geometry, so whichever
+    /// the user moved or closed last is the one that reopens. That is
+    /// `id(..)` + `restore_geometry(false)`: persist, don't restore.
+    #[test]
+    fn restore_geometry_can_be_opted_out_of_without_giving_up_persistence() {
+        let config = WindowConfig::new().id("main").restore_geometry(false);
+
+        assert!(!config.restore_geometry, "this window must not be restored");
+        assert_eq!(
+            config.string_id.as_deref(),
+            Some("main"),
+            "...but it keeps its id, so it still persists into that slot"
+        );
+        // And with no explicit position, the window manager picks the spot.
+        assert!(config.position.is_none());
     }
 
     #[test]
