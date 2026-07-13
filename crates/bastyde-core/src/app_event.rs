@@ -50,6 +50,17 @@ pub enum AppEvent {
     /// nothing is registered for that path, or if the content is
     /// unchanged (the self-write case).
     SettingsReload { path: PathBuf },
+
+    /// A `bastyde-settings` `DebouncedWriter` gave up on a queued write —
+    /// after `MAX_WRITE_ATTEMPTS` retries, or at `Unregister` teardown
+    /// with a write still failing. The queued patches for `path` were
+    /// permanently discarded.
+    SettingsWriteFailed {
+        path: PathBuf,
+        attempts: u32,
+        dropped_patches: usize,
+        message: String,
+    },
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -83,6 +94,18 @@ impl std::fmt::Debug for AppEvent {
             Self::SettingsReload { path } => f
                 .debug_struct("SettingsReload")
                 .field("path", path)
+                .finish(),
+            Self::SettingsWriteFailed {
+                path,
+                attempts,
+                dropped_patches,
+                message,
+            } => f
+                .debug_struct("SettingsWriteFailed")
+                .field("path", path)
+                .field("attempts", attempts)
+                .field("dropped_patches", dropped_patches)
+                .field("message", message)
                 .finish(),
         }
     }

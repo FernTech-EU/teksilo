@@ -347,3 +347,9 @@ theme-switcher-system = Système
 # FontPicker widget. Voir crates/bastyde-widgets/src/font_picker.rs.
 font-picker-label = Police
 font-picker-placeholder = Choisir une police…
+
+# Toast d'échec d'écriture des paramètres. Voir en-US.ftl pour le
+# contexte complet (déclenché par ToastRegistry::show_settings_write_failed
+# via bastyde::install_toast).
+settings-write-failed-toast-title = Impossible d'enregistrer les paramètres
+settings-write-failed-toast-body = Échec de l'enregistrement de { $file } après { $attempts } tentatives ; { $dropped } modification(s) en attente abandonnée(s). { $message }

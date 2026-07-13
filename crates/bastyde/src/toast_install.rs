@@ -41,6 +41,7 @@
 use std::rc::Rc;
 
 use bastyde_app::{BastydeAppBuilder, DefaultPostRoot};
+use bastyde_core::app_event::AppEvent;
 use bastyde_widgets::notification::{NotificationArchive, NotificationArchiveModel};
 use bastyde_widgets::primitives::{Expand, ZStack};
 use bastyde_widgets::toast::{ToastHost, ToastInstallOptions, ToastRegistry};
@@ -137,8 +138,42 @@ impl BastydeAppBuilderToastExt for BastydeAppBuilder {
             tree.add(stack)
         });
 
+        // 3b. F3: turn a permanently-discarded `bastyde-settings` write
+        //     (`AppEvent::SettingsWriteFailed`) into a persistent error
+        //     toast. This is the one place in the framework that sees
+        //     both `bastyde-app`'s `AppEvent` and `bastyde-widgets`'
+        //     `Toast`/`ToastRegistry`, so every app that installs toast
+        //     gets this automatically — no per-app wiring, no
+        //     application-specific special case. `register_app_event_observer`
+        //     composes (see its doc comment on `BastydeAppBuilder`), so
+        //     this coexists with the app's own `on_app_event` handler and
+        //     any other extension's observer regardless of install order.
+        let registry_for_write_failure = registry.clone();
+        let write_failure_observer = move |event: &AppEvent| {
+            if let AppEvent::SettingsWriteFailed {
+                path,
+                attempts,
+                dropped_patches,
+                message,
+            } = event
+            {
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                registry_for_write_failure.show_settings_write_failed(
+                    &file_name,
+                    *attempts,
+                    *dropped_patches,
+                    message,
+                );
+            }
+        };
+
         // 4. Register everything in app_state.
-        let mut builder = self.app_state(registry);
+        let mut builder = self
+            .app_state(registry)
+            .register_app_event_observer(write_failure_observer);
         if let Some(a) = archive {
             builder = builder.app_state(a);
         }
@@ -166,5 +201,89 @@ mod tests {
             ..ToastInstallOptions::default()
         };
         let _builder = BastydeAppBuilder::new().install_toast(opts);
+    }
+
+    #[test]
+    fn settings_write_failed_event_reaching_the_observer_enqueues_a_toast() {
+        // F3 end-to-end, exercised at the one layer that can see both
+        // sides of the join: `install_toast` registers an
+        // `AppEvent`-observer (via `register_app_event_observer`) that
+        // turns `AppEvent::SettingsWriteFailed` into a toast in the
+        // shared `ToastRegistry`. Pull both back out of the tree's
+        // `app_context` — the same `app_state` lookup any widget or
+        // handler uses — synthesize the event, and assert on registry
+        // state (not pixels) that it landed.
+        use bastyde_app::AppEventObservers;
+        use bastyde_core::app_event::AppEvent;
+        use std::path::PathBuf;
+
+        let app = BastydeAppBuilder::new()
+            .install_toast(ToastInstallOptions {
+                archive: None,
+                ..ToastInstallOptions::default()
+            })
+            .build_headless();
+
+        let ctx = app.tree.app_context();
+        let registry = ctx
+            .app_state::<ToastRegistry>()
+            .expect("install_toast registers a ToastRegistry in app_state")
+            .clone();
+        let observers = ctx
+            .app_state::<AppEventObservers>()
+            .expect("install_toast registers an AppEvent observer in app_state")
+            .clone();
+
+        assert_eq!(registry.live_count(), 0, "no toast before the event fires");
+
+        let event = AppEvent::SettingsWriteFailed {
+            path: PathBuf::from("/tmp/does-not-exist/window_state.toml"),
+            attempts: 5,
+            dropped_patches: 2,
+            message: "disk full".to_string(),
+        };
+        (observers.0)(&event);
+
+        assert_eq!(
+            registry.live_count(),
+            1,
+            "the observer must enqueue exactly one toast for the failed write"
+        );
+    }
+
+    #[test]
+    fn unrelated_app_events_do_not_enqueue_a_toast() {
+        // The observer must pattern-match specifically on
+        // `SettingsWriteFailed` — every other `AppEvent` variant passing
+        // through must be a no-op for the toast registry.
+        use bastyde_app::AppEventObservers;
+        use bastyde_core::app_event::AppEvent;
+
+        let app = BastydeAppBuilder::new()
+            .install_toast(ToastInstallOptions {
+                archive: None,
+                ..ToastInstallOptions::default()
+            })
+            .build_headless();
+
+        let ctx = app.tree.app_context();
+        let registry = ctx
+            .app_state::<ToastRegistry>()
+            .expect("install_toast registers a ToastRegistry in app_state")
+            .clone();
+        let observers = ctx
+            .app_state::<AppEventObservers>()
+            .expect("install_toast registers an AppEvent observer in app_state")
+            .clone();
+
+        (observers.0)(&AppEvent::BackgroundComplete {
+            operation_id: "unrelated".to_string(),
+        });
+
+        assert_eq!(
+            registry.live_count(),
+            0,
+            "an unrelated AppEvent must not enqueue a toast"
+        );
     }
 }

@@ -40,18 +40,40 @@
 //! * keeps a per-id `(deadline, patch queue)`,
 //! * blocks on the next-due deadline (or waits for a message if nothing is
 //!   pending),
-//! * coalesces rapid `Schedule` bursts by **appending** to the queue and
-//!   resetting the deadline — so debouncing collapses *writes*, never
-//!   *mutations*. (The old design could overwrite the pending payload precisely
+//! * coalesces rapid `Schedule` bursts by **appending** to the queue,
+//!   resetting the failure streak (a just-queued patch has never itself
+//!   failed to write) and moving the deadline **forward, never backward** —
+//!   so debouncing collapses *writes*, never *mutations*, and a live
+//!   `RETRY_BACKOFF` deadline installed after a failed attempt can't be
+//!   clobbered back to "now" by an unrelated new patch on a zero-delay
+//!   writer. (The old design could overwrite the pending payload precisely
 //!   because each payload was a complete, self-superseding rendering.)
 //!
 //! A failed write **retains** the queue and retries with backoff, up to
 //! [`MAX_WRITE_ATTEMPTS`] — the patches replay cleanly against whatever is on
-//! disk then, which is the correct merge rather than a stale overwrite.
+//! disk then, which is the correct merge rather than a stale overwrite. Once
+//! the cap is reached (or a writer is dropped mid-failure at process
+//! teardown), the queue is discarded for good and reported through the
+//! process-wide [`WriteFailureSink`] (registered via
+//! [`set_write_failure_sink`]) in addition to the existing log — the write
+//! side's analogue of [`crate::reload::Reloadable`]'s read-side contract.
+//! Conversely, every writer may also register a [`WriteLandedSink`] (via
+//! [`DebouncedWriter::set_landed_sink`]) to learn the *real* on-disk stamp
+//! the instant its queued patches land successfully — useful to a caller
+//! whose own `apply()`-style API schedules a write and returns before it's
+//! actually on disk.
+//!
+//! The locked read-merge-write ([`apply_and_write`]) acquires its advisory
+//! lock **non-blocking**: because every writer in the process shares this
+//! one thread, a lock held by a peer process must never stall it — a
+//! contended lock is just another transient [`FlushError::Io`], retried
+//! with the same backoff as any other write failure.
 //!
 //! Application logic stays single-threaded — `SettingsStore` and friends never
 //! block on I/O. `Drop` sends an `Unregister` that synchronously flushes the
-//! queue before returning, so end-of-process state is never lost.
+//! queue before returning, so end-of-process state is never lost (unless the
+//! flush itself is still failing, in which case the discard is reported
+//! through `WriteFailureSink` exactly as above).
 //!
 //! ## Why one thread, not one-per-writer
 //!
@@ -63,11 +85,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use tempfile::NamedTempFile;
 
@@ -131,6 +153,42 @@ const MAX_WRITE_ATTEMPTS: u32 = 5;
 /// the worker at the debounce interval.
 const RETRY_BACKOFF: Duration = Duration::from_millis(250);
 
+/// Invoked (off the caller's thread — on the shared worker thread) when a
+/// `DebouncedWriter`'s queued patches are **permanently** discarded: either
+/// `flush_writer` gave up after `MAX_WRITE_ATTEMPTS`, or the writer was
+/// dropped (`Unregister`) while its final flush was still failing. This is
+/// the write-side analogue of [`crate::reload::Reloadable`]'s read-side
+/// contract — the previous behaviour was a bare `eprintln!` that never left
+/// the worker thread, so a permanently unwritable settings file (read-only
+/// mount, revoked permissions, disk full) silently ate every change for the
+/// rest of the session with zero signal to the application. Registered
+/// process-wide via [`set_write_failure_sink`].
+pub type WriteFailureSink = Arc<dyn Fn(PathBuf, u32, usize, String) + Send + Sync + 'static>;
+
+/// Register a process-wide sink invoked whenever any `DebouncedWriter`
+/// permanently discards a queued write (see [`WriteFailureSink`]). There is
+/// only one slot: a later call replaces an earlier one. `bastyde-app` uses
+/// this to forward the failure to the UI thread as a typed `AppEvent`.
+pub fn set_write_failure_sink(sink: WriteFailureSink) {
+    let _ = pool().send(PoolMsg::SetFailureSink(sink));
+}
+
+/// The `(mtime, len)` stamp `disk_stamp` computes for a settings file —
+/// named so every `Arc<Mutex<...>>` wrapping it (here and in
+/// `WindowStateService`) reads as one term instead of clippy's
+/// `type_complexity`-tripping nested-generics spelling.
+pub type LandedStamp = (Option<SystemTime>, Option<u64>);
+
+/// Invoked on the shared worker thread the instant a `DebouncedWriter`'s
+/// queued patches land successfully, with the fresh on-disk `(mtime, len)`
+/// stamp (one extra `fs::metadata`, computed once, right after the write —
+/// negligible cost). The write-side analogue of `WriteFailureSink`. `Send +
+/// Sync` because it runs off the caller's thread — a consumer that needs to
+/// update `!Send` state (an `Rc<Cell<_>>`) must copy the value out on its
+/// own thread the next time it looks (see
+/// `WindowStateService::reload_from_disk`).
+pub type WriteLandedSink = Arc<dyn Fn(LandedStamp) + Send + Sync + 'static>;
+
 // ---------------------------------------------------------------------------
 // Shared worker pool
 // ---------------------------------------------------------------------------
@@ -164,6 +222,16 @@ enum PoolMsg {
         id: WriterId,
         ack: SyncSender<()>,
     },
+    /// Register the process-wide sink invoked when a write is permanently
+    /// discarded (see [`WriteFailureSink`]). Replaces any previous sink.
+    SetFailureSink(WriteFailureSink),
+    /// Register `id`'s sink invoked with the fresh on-disk stamp whenever
+    /// its queued patches land successfully (see [`WriteLandedSink`]).
+    /// Replaces any previous sink for the same `id`.
+    SetLandedSink {
+        id: WriterId,
+        sink: WriteLandedSink,
+    },
 }
 
 /// A writer's queued-but-not-yet-written mutations.
@@ -184,6 +252,13 @@ struct PoolState {
     delays: HashMap<WriterId, Duration>,
     paths: HashMap<WriterId, PathBuf>,
     pending: HashMap<WriterId, Pending>,
+    /// Process-wide sink for permanently-discarded writes (F3). At most
+    /// one at a time — a later `SetFailureSink` replaces an earlier one.
+    failure_sink: Option<WriteFailureSink>,
+    /// Per-writer sinks for successful-flush stamps (F11 /
+    /// `WriteLandedSink`), keyed by the same `WriterId` the writer was
+    /// registered under.
+    landed_sinks: HashMap<WriterId, WriteLandedSink>,
 }
 
 /// Lazily-started shared I/O worker. Returns the sender side of the
@@ -204,11 +279,50 @@ fn pool() -> &'static Sender<PoolMsg> {
     })
 }
 
+/// Handle a `Schedule` message: append `patch` to `id`'s queue, resetting
+/// the failure streak and (monotonically) extending the deadline forward.
+/// Factored out of `worker_loop`'s match arm so tests can drive exactly
+/// this logic without going through the channel/thread machinery.
+fn apply_schedule(state: &mut PoolState, id: WriterId, patch: Patch) {
+    let delay = state.delays.get(&id).copied().unwrap_or(Duration::ZERO);
+    let slot = state.pending.entry(id).or_insert_with(|| Pending {
+        deadline: Instant::now() + delay,
+        patches: Vec::new(),
+        attempts: 0,
+    });
+    // APPEND. A patch is a delta; replacing the slot (as the
+    // old whole-document design did) would silently drop the
+    // earlier mutation.
+    slot.patches.push(patch);
+    // New work resets the failure streak: the patch just
+    // appended has never itself failed to write, and
+    // MAX_WRITE_ATTEMPTS is meant to police a *persistent*
+    // failure with no new work arriving — the plain
+    // per-tick retry path (the `Err(RecvTimeoutError::Timeout)`
+    // arm in `worker_loop`) still enforces that cap unaffected by
+    // this reset, since it only re-flushes ids already in
+    // `pending` without going through `Schedule` again.
+    slot.attempts = 0;
+    // The deadline only ever moves *forward*, never back.
+    // Ordinary debounce coalescing during an active burst is
+    // unaffected (the slot's deadline was already `<= now +
+    // delay` in that case, since it was armed by an earlier
+    // `Schedule` in the same burst), but a zero-delay writer
+    // that just had `flush_writer` install a future
+    // `RETRY_BACKOFF` deadline after a failed attempt can no
+    // longer have that backoff clobbered back to `now` by an
+    // unrelated new `Schedule` arriving before the backoff
+    // elapses.
+    slot.deadline = slot.deadline.max(Instant::now() + delay);
+}
+
 fn worker_loop(rx: Receiver<PoolMsg>) {
     let mut state = PoolState {
         delays: HashMap::new(),
         paths: HashMap::new(),
         pending: HashMap::new(),
+        failure_sink: None,
+        landed_sinks: HashMap::new(),
     };
 
     loop {
@@ -230,37 +344,45 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
                 state.delays.insert(id, delay);
                 state.paths.insert(id, path);
             }
-            Ok(PoolMsg::Schedule { id, patch }) => {
-                let delay = state.delays.get(&id).copied().unwrap_or(Duration::ZERO);
-                let slot = state.pending.entry(id).or_insert_with(|| Pending {
-                    deadline: Instant::now() + delay,
-                    patches: Vec::new(),
-                    attempts: 0,
-                });
-                // APPEND. A patch is a delta; replacing the slot (as the
-                // old whole-document design did) would silently drop the
-                // earlier mutation.
-                slot.patches.push(patch);
-                // Reset the deadline so debouncing still means "wait
-                // until the burst stops, then write" — we coalesce the
-                // *write*, never a mutation.
-                slot.deadline = Instant::now() + delay;
-            }
+            Ok(PoolMsg::Schedule { id, patch }) => apply_schedule(&mut state, id, patch),
             Ok(PoolMsg::FlushNow { id, ack }) => {
                 let _ = ack.send(flush_writer(&mut state, id));
             }
             Ok(PoolMsg::Unregister { id, ack }) => {
                 if let Err(e) = flush_writer(&mut state, id) {
-                    let path = state.paths.get(&id).map(|p| p.display().to_string());
+                    let path = state.paths.get(&id).cloned();
+                    let path_str = path.as_ref().map(|p| p.display().to_string());
                     eprintln!(
                         "bastyde-settings: final flush of {} failed: {e}",
-                        path.as_deref().unwrap_or("<unknown>"),
+                        path_str.as_deref().unwrap_or("<unknown>"),
                     );
+                    // If `flush_writer`'s own give-up branch already fired
+                    // (MAX_WRITE_ATTEMPTS reached), it already removed
+                    // `pending` and invoked `failure_sink` itself — no
+                    // entry remains here, so nothing more to report.
+                    // Otherwise this `Unregister` is the *second* discard
+                    // site F3 calls out: process teardown can't wait for
+                    // further retries, so it forces the drop here, below
+                    // the attempt cap, and must report it itself.
+                    if let Some(pending) = state.pending.get(&id) {
+                        let attempts = pending.attempts;
+                        let dropped = pending.patches.len();
+                        if let Some(sink) = &state.failure_sink {
+                            sink(path.unwrap_or_default(), attempts, dropped, e.to_string());
+                        }
+                    }
                 }
                 state.pending.remove(&id);
                 state.delays.remove(&id);
                 state.paths.remove(&id);
+                state.landed_sinks.remove(&id);
                 let _ = ack.send(());
+            }
+            Ok(PoolMsg::SetFailureSink(sink)) => {
+                state.failure_sink = Some(sink);
+            }
+            Ok(PoolMsg::SetLandedSink { id, sink }) => {
+                state.landed_sinks.insert(id, sink);
             }
             Err(RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
@@ -322,6 +444,16 @@ fn flush_writer(state: &mut PoolState, id: WriterId) -> Result<(), FlushError> {
     match result {
         Ok(()) => {
             state.pending.remove(&id);
+            // F11: report the fresh post-write stamp to whoever
+            // registered a `WriteLandedSink` for this writer (one extra
+            // `fs::metadata`, computed once, right after the write —
+            // negligible next to the write itself). Consumers that need
+            // to mutate `!Send` state off this thread (e.g.
+            // `WindowStateService`'s `Rc<Cell<_>>`) stash the value and
+            // pick it up next time they run on their own thread.
+            if let Some(sink) = state.landed_sinks.get(&id) {
+                sink(crate::file::disk_stamp(&path));
+            }
             Ok(())
         }
         Err(e) => {
@@ -332,13 +464,21 @@ fn flush_writer(state: &mut PoolState, id: WriterId) -> Result<(), FlushError> {
                 .expect("pending entry checked above");
             slot.attempts += 1;
             if slot.attempts >= MAX_WRITE_ATTEMPTS {
+                let attempts = slot.attempts;
+                let dropped = slot.patches.len();
                 eprintln!(
                     "bastyde-settings: giving up on {} after {} failed attempts; \
                      {} queued change(s) discarded: {e}",
                     path.display(),
-                    slot.attempts,
-                    slot.patches.len(),
+                    attempts,
+                    dropped,
                 );
+                // F3, discard site 1: the queue is about to be dropped
+                // for good — report it through the process-wide sink (if
+                // one is registered) in addition to the log above.
+                if let Some(sink) = &state.failure_sink {
+                    sink(path.clone(), attempts, dropped, e.to_string());
+                }
                 state.pending.remove(&id);
             } else {
                 slot.deadline = Instant::now() + delay.max(RETRY_BACKOFF);
@@ -353,7 +493,17 @@ fn apply_and_write(path: &Path, patches: &[Patch]) -> Result<(), FlushError> {
     // Hold the lock across read + merge + write, so this is atomic with
     // respect to every other `FileLock` holder (this process's other
     // handles, and any peer process using the same primitive).
-    let _guard = crate::lock::FileLock::acquire_exclusive(path)?;
+    //
+    // Non-blocking (F10): ALL `DebouncedWriter`s in the process share this
+    // one worker thread, so a *blocking* acquire here would stall every
+    // other writer's flush (and `flush_now`'s synchronous ack, called on
+    // the UI thread at shutdown) for as long as some peer holds the lock —
+    // including hanging process exit. A contended lock is just another
+    // transient `FlushError::Io`: `flush_writer`'s existing retry+backoff
+    // loop already handles any `Err` from this function uniformly, so
+    // losing this one immediate attempt to a peer costs nothing but a
+    // retry on the next scheduled tick.
+    let _guard = crate::lock::FileLock::try_acquire_exclusive(path)?;
 
     let current = match fs::read_to_string(path) {
         Ok(s) => Some(s),
@@ -459,6 +609,22 @@ impl DebouncedWriter {
         }
     }
 
+    /// Register a sink for this writer's successful-flush stamp (opt-in; a
+    /// writer with none behaves exactly as today). May be called any time
+    /// after construction — including after the writer has already flushed
+    /// once, since the sink is only ever consulted on a *future* successful
+    /// flush.
+    ///
+    /// This is how a caller learns the *real* on-disk stamp resulting from
+    /// its own debounced write, without guessing: `apply()` schedules a
+    /// patch and returns before it lands, so only the worker thread — right
+    /// after the write actually succeeds — knows the resulting `(mtime,
+    /// len)`. See `WindowStateService::reload_from_disk` for the consumer
+    /// side (F11).
+    pub fn set_landed_sink(&self, sink: WriteLandedSink) {
+        let _ = pool().send(PoolMsg::SetLandedSink { id: self.id, sink });
+    }
+
     /// The destination path this writer flushes to.
     pub fn path(&self) -> &Path {
         &self.path
@@ -504,10 +670,25 @@ impl std::fmt::Debug for DebouncedWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     fn read(path: &Path) -> String {
         fs::read_to_string(path).unwrap()
+    }
+
+    /// A fresh, empty `PoolState`, for tests that drive `flush_writer` /
+    /// `apply_schedule` directly rather than through the process-global
+    /// `pool()` singleton — avoids serializing tests around shared global
+    /// state (per the review's stated preference).
+    fn empty_state() -> PoolState {
+        PoolState {
+            delays: HashMap::new(),
+            paths: HashMap::new(),
+            pending: HashMap::new(),
+            failure_sink: None,
+            landed_sinks: HashMap::new(),
+        }
     }
 
     /// A patch that ignores whatever is currently on disk and unconditionally
@@ -717,5 +898,312 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    // -- F9: Schedule must reset attempts and never pull the deadline
+    // backward -----------------------------------------------------------
+
+    /// THE HEADLINE F9 test. A zero-delay writer that just failed a write
+    /// has a future `RETRY_BACKOFF` deadline installed by `flush_writer`.
+    /// The OLD `Schedule` arm (`slot.deadline = Instant::now() + delay`)
+    /// unconditionally overwrote that with `now` — pulling the backoff
+    /// back to immediate and spinning the worker at full speed on a
+    /// persistently-failing writer — and never reset `attempts`, so a
+    /// brand-new, unrelated patch inherited the existing failure streak
+    /// and could be discarded on its very first failure. This drives
+    /// `flush_writer` and `apply_schedule` directly against a real
+    /// `PoolState`, without the worker thread, so the assertions are
+    /// exact rather than racing wall-clock polling.
+    #[test]
+    fn schedule_after_a_failure_resets_attempts_and_does_not_rewind_the_backoff_deadline() {
+        let dir = tempdir().unwrap();
+        // An existing directory at the write target makes every write
+        // fail deterministically (the atomic rename onto it fails at the
+        // OS level).
+        let path = dir.path().join("obstructed.toml");
+        fs::create_dir_all(&path).unwrap();
+
+        let id = next_writer_id();
+        let mut state = empty_state();
+        state.delays.insert(id, Duration::ZERO);
+        state.paths.insert(id, path.clone());
+        state.pending.insert(
+            id,
+            Pending {
+                deadline: Instant::now(),
+                patches: vec![const_patch("v = 1\n")],
+                attempts: 0,
+            },
+        );
+
+        // First attempt: fails, `attempts` becomes 1, and a future
+        // RETRY_BACKOFF deadline is installed.
+        let before_backoff = Instant::now();
+        assert!(flush_writer(&mut state, id).is_err());
+        let slot = state
+            .pending
+            .get(&id)
+            .expect("still pending after 1/5 failures");
+        assert_eq!(slot.attempts, 1);
+        assert!(
+            slot.deadline >= before_backoff + RETRY_BACKOFF,
+            "a failed attempt must install a future backoff deadline, got {:?} (now was {:?})",
+            slot.deadline,
+            before_backoff,
+        );
+        let backoff_deadline = slot.deadline;
+
+        // A second, unrelated patch arrives (a genuine new mutation, not
+        // a retry) *before* the backoff elapses — exactly the scenario
+        // `apply_schedule` (the extracted `Schedule` handler) must not
+        // regress.
+        apply_schedule(&mut state, id, const_patch("v = 2\n"));
+
+        let slot = state.pending.get(&id).expect("still pending");
+        assert_eq!(
+            slot.attempts, 0,
+            "new work must reset the failure streak, since the newly queued \
+             patch has never itself failed to write"
+        );
+        assert!(
+            slot.deadline >= backoff_deadline,
+            "an unrelated Schedule must never rewind an already-armed backoff \
+             deadline back toward `now`: backoff was {backoff_deadline:?}, \
+             deadline after Schedule was {:?}",
+            slot.deadline,
+        );
+        assert_eq!(slot.patches.len(), 2, "both patches must still be queued");
+    }
+
+    /// Regression guard: ordinary rapid debounce coalescing (no failures
+    /// involved) must still work exactly as before — each new `Schedule`
+    /// during a healthy burst still pushes the deadline forward to `now +
+    /// delay`, so `.max()` must never *shorten* the debounce window
+    /// relative to the old unconditional-overwrite behaviour.
+    #[test]
+    fn schedule_still_coalesces_a_healthy_burst_into_one_forward_moving_deadline() {
+        let id = next_writer_id();
+        let mut state = empty_state();
+        let delay = Duration::from_millis(50);
+        state.delays.insert(id, delay);
+
+        let mut last_deadline = Instant::now();
+        for i in 0..5 {
+            let before = Instant::now();
+            apply_schedule(&mut state, id, const_patch(format!("v = {i}\n")));
+            let slot = state.pending.get(&id).unwrap();
+            assert!(
+                slot.deadline >= before + delay,
+                "each Schedule in a healthy burst must push the deadline to \
+                 at least `now + delay`, got {:?} (now + delay was {:?})",
+                slot.deadline,
+                before + delay,
+            );
+            assert!(
+                slot.deadline >= last_deadline,
+                "the deadline must never move backward across a healthy burst"
+            );
+            last_deadline = slot.deadline;
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(state.pending.get(&id).unwrap().patches.len(), 5);
+    }
+
+    // -- F10: a contended lock on one writer must not stall the shared
+    // worker thread's service of every other writer -----------------------
+
+    /// THE HEADLINE F10 test. Two real `DebouncedWriter`s share the one
+    /// process-global worker thread. One target's sidecar lock is held
+    /// externally (as a peer process holding it would). Before the fix,
+    /// `apply_and_write`'s blocking `FileLock::acquire_exclusive` would
+    /// stall the *entire* shared worker thread on that single contended
+    /// lock, so the unrelated, perfectly healthy writer's flush would
+    /// never land either — this asserts it lands promptly regardless.
+    #[test]
+    fn contended_lock_on_one_writer_does_not_stall_others_on_the_shared_thread() {
+        let dir = tempdir().unwrap();
+        let locked_path = dir.path().join("locked.toml");
+        let healthy_path = dir.path().join("healthy.toml");
+
+        // Hold the "locked" writer's sidecar lock externally, exactly as
+        // a peer process would.
+        let external_lock = crate::lock::FileLock::acquire_exclusive(&locked_path).unwrap();
+
+        let locked_writer = DebouncedWriter::new(locked_path.clone(), Duration::ZERO);
+        let healthy_writer = DebouncedWriter::new(healthy_path.clone(), Duration::ZERO);
+
+        locked_writer.schedule(const_patch("v = locked\n"));
+        healthy_writer.schedule(const_patch("v = healthy\n"));
+
+        // The healthy writer must land well within a couple of seconds —
+        // it shares the worker thread with the contended writer, but must
+        // not be stuck behind it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if healthy_path.exists() && read(&healthy_path) == "v = healthy\n" {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the healthy writer's write did not land promptly — the shared \
+                 worker thread appears stalled behind the other writer's \
+                 contended lock",
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        // And the locked writer correctly has NOT succeeded yet — it is
+        // still contended, not silently skipped.
+        assert!(
+            !locked_path.exists(),
+            "the locked writer should not have been able to write while its \
+             lock is still externally held"
+        );
+
+        drop(external_lock);
+    }
+
+    // -- F3: a permanently-discarded write must reach the failure sink ----
+
+    /// THE HEADLINE F3 test. Drives `flush_writer` directly (bypassing the
+    /// process-global `pool()`/`set_write_failure_sink` indirection, since
+    /// that is process-wide singleton state best kept out of parallel
+    /// tests) against a target that can never be written (an existing
+    /// directory), asserting the registered sink fires exactly once, at
+    /// the give-up point, with the correct attempt count and dropped-patch
+    /// count. Before F3 this information never left the worker thread at
+    /// all — only an `eprintln!` recorded it.
+    #[test]
+    fn giving_up_after_max_attempts_reports_through_the_failure_sink() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("obstructed_sink.toml");
+        fs::create_dir_all(&path).unwrap();
+
+        let id = next_writer_id();
+        let mut state = empty_state();
+        state.delays.insert(id, Duration::ZERO);
+        state.paths.insert(id, path.clone());
+        state.pending.insert(
+            id,
+            Pending {
+                deadline: Instant::now(),
+                patches: vec![const_patch("v = 1\n")],
+                attempts: 0,
+            },
+        );
+
+        // (path, attempts, dropped_patches, message) — one call to the sink.
+        type FailureCall = (PathBuf, u32, usize, String);
+        let calls: Arc<Mutex<Vec<FailureCall>>> = Arc::new(Mutex::new(Vec::new()));
+        let calls_for_sink = calls.clone();
+        state.failure_sink = Some(Arc::new(move |path, attempts, dropped, message| {
+            calls_for_sink
+                .lock()
+                .unwrap()
+                .push((path, attempts, dropped, message));
+        }));
+
+        for _ in 0..MAX_WRITE_ATTEMPTS {
+            let _ = flush_writer(&mut state, id);
+        }
+
+        let recorded = calls.lock().unwrap();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the sink must fire exactly once, precisely at the give-up point: {recorded:?}"
+        );
+        let (sunk_path, attempts, dropped, message) = &recorded[0];
+        assert_eq!(sunk_path, &path);
+        assert_eq!(*attempts, MAX_WRITE_ATTEMPTS);
+        assert_eq!(*dropped, 1);
+        assert!(!message.is_empty());
+        assert!(
+            !state.pending.contains_key(&id),
+            "the queue must be gone once the sink has been told about the discard"
+        );
+    }
+
+    /// A `Schedule`d writer that never fails must never invoke the
+    /// failure sink at all — it exists only for the give-up path.
+    #[test]
+    fn a_healthy_writer_never_invokes_the_failure_sink() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("healthy_no_sink.toml");
+        let writer = DebouncedWriter::new(path.clone(), Duration::ZERO);
+
+        let fired = Arc::new(Mutex::new(false));
+        let fired_for_sink = fired.clone();
+        set_write_failure_sink(Arc::new(move |_, _, _, _| {
+            *fired_for_sink.lock().unwrap() = true;
+        }));
+
+        writer.schedule(const_patch("v = 1\n"));
+        writer.flush_now().unwrap();
+
+        assert!(
+            !*fired.lock().unwrap(),
+            "a successful write must never invoke the failure sink"
+        );
+
+        // Reset the process-global sink so later tests in this binary
+        // that rely on `set_write_failure_sink`'s default (unset) state
+        // aren't affected by this test's registration. `pool()`/the sink
+        // slot are process-global, so the last writer wins; explicitly
+        // installing a no-op keeps this test's side effect from leaking
+        // into whichever test happens to run after it.
+        set_write_failure_sink(Arc::new(|_, _, _, _| {}));
+    }
+
+    // -- F11: WriteLandedSink fires with the real post-write stamp --------
+
+    /// THE HEADLINE F11 test. Registers a `WriteLandedSink` on a real
+    /// `DebouncedWriter`, schedules a patch, forces it to land via
+    /// `flush_now`, and asserts the sink received a stamp equal to one
+    /// taken independently (via `crate::file::disk_stamp`) right after —
+    /// proving the sink's value is the *real*, authoritative post-write
+    /// stamp, not a guess.
+    #[test]
+    fn landed_sink_fires_with_the_real_post_write_stamp() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("landed.toml");
+        let writer = DebouncedWriter::new(path.clone(), Duration::ZERO);
+
+        let received: Arc<Mutex<Option<LandedStamp>>> = Arc::new(Mutex::new(None));
+        let received_for_sink = received.clone();
+        writer.set_landed_sink(Arc::new(move |stamp| {
+            *received_for_sink.lock().unwrap() = Some(stamp);
+        }));
+
+        writer.schedule(const_patch("v = 1\n"));
+        writer.flush_now().unwrap();
+
+        let expected = crate::file::disk_stamp(&path);
+        let got = received
+            .lock()
+            .unwrap()
+            .expect("the landed sink must have fired after a successful flush");
+        assert_eq!(
+            got, expected,
+            "the sink's stamp must match a stamp taken independently right \
+             after the write landed"
+        );
+        // Sanity: the stamp is not the "file doesn't exist" placeholder —
+        // the write really happened.
+        assert!(expected.0.is_some() || expected.1.is_some());
+    }
+
+    /// A writer with no registered sink must behave exactly as before —
+    /// no panic, no special-casing.
+    #[test]
+    fn writer_without_a_landed_sink_flushes_normally() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("no_landed_sink.toml");
+        let writer = DebouncedWriter::new(path.clone(), Duration::ZERO);
+
+        writer.schedule(const_patch("v = 1\n"));
+        writer.flush_now().unwrap();
+
+        assert_eq!(read(&path), "v = 1\n");
     }
 }

@@ -370,3 +370,14 @@ theme-switcher-system = System
 # FontPicker widget. See crates/bastyde-widgets/src/font_picker.rs.
 font-picker-label = Font
 font-picker-placeholder = Select a font…
+
+# Settings-write-failure toast. Enqueued by
+# `ToastRegistry::show_settings_write_failed` when a `bastyde-settings`
+# background write permanently discards its queued patches
+# (`AppEvent::SettingsWriteFailed`), wired up by
+# `bastyde::install_toast`'s app-event observer in
+# crates/bastyde/src/toast_install.rs. This reports real data loss — a
+# preference change, a recents entry, a window position — not a status
+# blip, so the toast is Error severity and persistent (no auto-dismiss).
+settings-write-failed-toast-title = Settings couldn't be saved
+settings-write-failed-toast-body = { $file } failed to save after { $attempts } attempts; { $dropped } queued change(s) discarded. { $message }

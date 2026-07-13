@@ -2352,6 +2352,18 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
         }
+        // Composed framework observers (see `AppEventObservers` /
+        // `BastydeAppBuilder::register_app_event_observer`) run in
+        // addition to the app's own `on_app_event` handler above — this
+        // is what lets `bastyde::install_toast` react to
+        // `AppEvent::SettingsWriteFailed` without clobbering (or being
+        // clobbered by) an app that also called `on_app_event`.
+        if let Some(template) = self.wm.app_context_template()
+            && let Some(observers) =
+                template.app_state::<crate::app_event_observers::AppEventObservers>()
+        {
+            (observers.0)(&event);
+        }
         match event {
             // Backend-event subscription delivery (architecture §9.4): look
             // up the UI-side callback in the shared app context and invoke
@@ -2423,6 +2435,34 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                         path.display()
                     );
                 }
+            }
+            // F3: a `bastyde-settings` `DebouncedWriter` permanently gave
+            // up on a queued write (retry cap reached, or a still-failing
+            // write forced by process teardown) — the patches for `path`
+            // were discarded. `bastyde-app` itself stays widget-agnostic
+            // (it cannot depend on `bastyde-widgets`' `Toast` /
+            // `NotificationArchive`), so this log is only half the
+            // story: the composed `AppEventObservers` dispatched just
+            // above also sees this event, and `bastyde::install_toast`
+            // (the umbrella crate, which sees both `AppEvent` and
+            // `Toast`) registers an observer that turns it into a
+            // persistent error toast — see
+            // `ToastRegistry::show_settings_write_failed`. This log
+            // stays too: a headless/CI app with no toast host installed
+            // still needs *some* signal that a write was lost.
+            AppEvent::SettingsWriteFailed {
+                path,
+                attempts,
+                dropped_patches,
+                message,
+            } => {
+                eprintln!(
+                    "bastyde-app: settings write permanently failed for {} after {} attempts ({} patches dropped): {}",
+                    path.display(),
+                    attempts,
+                    dropped_patches,
+                    message
+                );
             }
             // Title-bar hosts route their `close()` through this variant so
             // the operation hops back onto the main thread before touching
@@ -2929,6 +2969,47 @@ impl BastydeAppBuilder {
         self
     }
 
+    /// Register a composable observer that runs on every `AppEvent`,
+    /// in addition to (never instead of) the single
+    /// [`on_app_event`](Self::on_app_event) handler.
+    ///
+    /// Unlike `on_app_event` — which stores a single `Option<Box<dyn
+    /// FnMut(&AppEvent)>>` and so silently replaces any previously
+    /// registered handler — this **composes**: each registered observer
+    /// runs, in call order, on every `AppEvent` delivered to the UI
+    /// thread. So a framework extension that needs to react to
+    /// `AppEvent`s (e.g. `bastyde::install_toast` turning
+    /// `AppEvent::SettingsWriteFailed` into a toast) can register its
+    /// own observer without clobbering the application's own
+    /// `on_app_event` handler, or being clobbered by it, regardless of
+    /// install order. Mirrors [`register_post_root`](Self::register_post_root)'s
+    /// type-keyed `app_state` composition pattern exactly, but for
+    /// event observation instead of post-root window chrome.
+    ///
+    /// See `BastydeAppHandler::user_event` for the dispatch order: the
+    /// `on_app_event` handler runs first, then every composed observer.
+    pub fn register_app_event_observer(mut self, observer: impl Fn(&AppEvent) + 'static) -> Self {
+        use crate::app_event_observers::AppEventObservers;
+        let key = TypeId::of::<AppEventObservers>();
+        let observer = AppEventObservers::new(observer);
+        let composed = match self.app_state_registry.remove(&key) {
+            Some(existing) => {
+                let existing = *existing
+                    .downcast::<AppEventObservers>()
+                    .expect("AppEventObservers slot held a non-AppEventObservers value");
+                let prev = existing.0;
+                let next = observer.0;
+                AppEventObservers(std::rc::Rc::new(move |event: &AppEvent| {
+                    prev(event);
+                    next(event);
+                }))
+            }
+            None => observer,
+        };
+        self.app_state_registry.insert(key, Box::new(composed));
+        self
+    }
+
     /// Install the rfd-backed native file-dialog service. Registers a
     /// [`FileDialogHandle`](bastyde_platform::file_dialog::FileDialogHandle)
     /// wrapping an
@@ -3351,6 +3432,26 @@ impl BastydeAppBuilder {
             inner: event_loop.create_proxy(),
         };
 
+        // Register the process-wide sink for permanently-discarded
+        // `bastyde-settings` writes (F3): a `DebouncedWriter` gave up
+        // after `MAX_WRITE_ATTEMPTS` retries, or was dropped at teardown
+        // with a write still failing. Previously this only reached an
+        // `eprintln!` on the settings crate's own background I/O thread
+        // and was otherwise invisible; this posts a typed `AppEvent`
+        // through the event loop proxy so it reaches the UI thread like
+        // every other backend->UI channel (see `user_event` above).
+        let proxy_for_write_failure = proxy.inner.clone();
+        bastyde_settings::set_write_failure_sink(std::sync::Arc::new(
+            move |path, attempts, dropped_patches, message| {
+                let _ = proxy_for_write_failure.send_event(AppEvent::SettingsWriteFailed {
+                    path,
+                    attempts,
+                    dropped_patches,
+                    message,
+                });
+            },
+        ));
+
         // Build the i18n hot-reload watcher if any `runtime_override`s
         // were registered. The sink posts `AppEvent::I18nReload` through
         // the event loop proxy; the watcher's background thread converts
@@ -3641,6 +3742,104 @@ mod tests {
             "both hooks run, earliest-registered innermost (first)"
         );
         assert_eq!(out, root, "passthrough hooks return the same root id");
+    }
+
+    #[test]
+    fn register_app_event_observer_composes_instead_of_clobbering() {
+        // Mirrors `register_post_root_composes_instead_of_clobbering`
+        // above: two extensions each registering their own `AppEvent`
+        // observer (e.g. a future telemetry hook AND
+        // `bastyde::install_toast`'s settings-write-failure toast) must
+        // both fire, not just the last-installed one.
+        use crate::app_event_observers::AppEventObservers;
+        use bastyde_core::app_event::AppEvent;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let order: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+        let (o1, o2) = (order.clone(), order.clone());
+
+        let builder = BastydeAppBuilder::new()
+            .register_app_event_observer(move |_event| {
+                o1.borrow_mut().push("first");
+            })
+            .register_app_event_observer(move |_event| {
+                o2.borrow_mut().push("second");
+            });
+
+        let composed = builder
+            .app_state_registry
+            .get(&TypeId::of::<AppEventObservers>())
+            .and_then(|b| b.downcast_ref::<AppEventObservers>())
+            .expect("composed AppEventObservers must be present")
+            .clone();
+
+        let event = AppEvent::BackgroundComplete {
+            operation_id: "op".to_string(),
+        };
+        (composed.0)(&event);
+
+        assert_eq!(
+            *order.borrow(),
+            vec!["first", "second"],
+            "both observers run, in registration order"
+        );
+    }
+
+    #[test]
+    fn register_app_event_observer_does_not_suppress_on_app_event_handler() {
+        // The composable observer slot and the single `on_app_event`
+        // handler slot are independent storage (`app_state_registry` vs
+        // `app_event_handler`), so registering one must never clear or
+        // shadow the other. `BastydeAppHandler::user_event` dispatches
+        // both (handler first, then composed observers) — this test
+        // proves the two slots coexist and mirrors that dispatch order
+        // directly, since driving the real `ApplicationHandler::user_event`
+        // requires a live winit event loop unavailable in a unit test.
+        use crate::app_event_observers::AppEventObservers;
+        use bastyde_core::app_event::AppEvent;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let handler_fired = Rc::new(RefCell::new(false));
+        let observer_fired = Rc::new(RefCell::new(false));
+        let (h1, h2) = (handler_fired.clone(), observer_fired.clone());
+
+        let mut builder = BastydeAppBuilder::new()
+            .on_app_event(move |_event| {
+                *h1.borrow_mut() = true;
+            })
+            .register_app_event_observer(move |_event| {
+                *h2.borrow_mut() = true;
+            });
+
+        let mut handler = builder
+            .app_event_handler
+            .take()
+            .expect("on_app_event handler must survive register_app_event_observer");
+        let observers = builder
+            .app_state_registry
+            .get(&TypeId::of::<AppEventObservers>())
+            .and_then(|b| b.downcast_ref::<AppEventObservers>())
+            .expect("registered observer must survive on_app_event")
+            .clone();
+
+        let event = AppEvent::BackgroundComplete {
+            operation_id: "op".to_string(),
+        };
+        // Mirrors the dispatch order in `user_event`: handler first, then
+        // composed observers.
+        handler(&event);
+        (observers.0)(&event);
+
+        assert!(
+            *handler_fired.borrow(),
+            "on_app_event's handler must still fire"
+        );
+        assert!(
+            *observer_fired.borrow(),
+            "the registered observer must also fire"
+        );
     }
 
     #[test]

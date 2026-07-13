@@ -36,7 +36,7 @@ use crate::toast::{
     Toast, ToastAction, ToastActionStyle, ToastDismissCallback, ToastDismissCause, ToastHandle,
     ToastHandleInner, ToastSeverity,
 };
-use bastyde_i18n::LocalizedString;
+use bastyde_i18n::{LocalizedString, tr_widget};
 
 /// Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`
 /// and use interior mutability.
@@ -354,6 +354,55 @@ impl ToastRegistry {
         (handle, None)
     }
 
+    /// Enqueue the framework's toast for a permanently-discarded
+    /// `bastyde-settings` write — the write-side counterpart of
+    /// `AppEvent::SettingsWriteFailed` (a `DebouncedWriter` gave up
+    /// after `MAX_WRITE_ATTEMPTS` retries, or was force-flushed still
+    /// failing at process teardown, and its queued patches were
+    /// dropped). This is data loss, not a status blip: `Error` severity
+    /// and persistent (no auto-dismiss), naming the file that failed.
+    ///
+    /// Framework-level and crate-internal to the join point: the
+    /// locale-validated strings can only live in bastyde-widgets
+    /// (`tr_widget!` resolves against *this* crate's own
+    /// `locales/*.ftl`), so the toast is built here rather than at the
+    /// call site. `bastyde::install_toast` (the umbrella crate — the
+    /// one place that sees both `bastyde-app`'s `AppEvent` and this
+    /// `ToastRegistry`) calls this from a
+    /// `BastydeAppBuilder::register_app_event_observer` closure, so
+    /// every app with toast installed surfaces the loss automatically,
+    /// with no per-app wiring.
+    ///
+    /// No `EventContext` is available at the call site — this fires
+    /// from a background `AppEvent` observer, not a widget event
+    /// handler — so this goes straight to `enqueue` rather than
+    /// through `EventContextToastExt::show_toast`. The only situation
+    /// `enqueue` needs a context for is invoking the slot-pool-overflow
+    /// `on_dismiss` callback; this toast never sets one, so if the pool
+    /// is already full and this arrival evicts/drops an entry, there is
+    /// nothing behind that callback to lose — the overflow result is
+    /// dropped here deliberately, not silently.
+    pub fn show_settings_write_failed(
+        &self,
+        file_name: &str,
+        attempts: u32,
+        dropped_patches: usize,
+        message: &str,
+    ) {
+        let toast = Toast::error(tr_widget!(settings_write_failed_toast_title()))
+            .body(tr_widget!(settings_write_failed_toast_body(
+                file = file_name.to_string(),
+                attempts = attempts,
+                dropped = dropped_patches as i64,
+                message = message.to_string(),
+            )))
+            .persistent()
+            .priority(ToastPriority::High);
+        let (_handle, overflow) = self.enqueue(toast);
+        // Deliberately dropped — see the doc comment above.
+        drop(overflow);
+    }
+
     /// Project a `LiveEntry` (the in-memory toast state) into a
     /// `NotificationEntry` (the persistent archive shape). Drops
     /// callbacks (`on_dismiss`, `on_click`, action callbacks) — only
@@ -632,5 +681,72 @@ mod tests {
             r.with_entry(eid, |e| e.leading.is_some()).unwrap(),
             "a same-severity text update preserves the existing spinner"
         );
+    }
+
+    #[test]
+    fn show_settings_write_failed_enqueues_a_persistent_error_toast_naming_the_file() {
+        // F3: this is the framework-level join that turns a permanently
+        // discarded `bastyde-settings` write into something the user
+        // actually sees. Assert on registry state (severity, persistence,
+        // the file name landing in the resolved body), not pixels.
+        let r = registry();
+        r.show_settings_write_failed("window_state.toml", 5, 3, "disk full");
+
+        assert_eq!(r.live_count(), 1, "the failure enqueues exactly one toast");
+        let eid = r.live_entry_ids()[0];
+        r.with_entry(eid, |e| {
+            assert_eq!(
+                e.severity,
+                ToastSeverity::Error,
+                "settings data loss is Error severity, not a status blip"
+            );
+            assert!(
+                e.time_left.is_none(),
+                "the toast is persistent — no auto-dismiss for data loss"
+            );
+            let body = e.body.as_ref().expect("body must be set").resolve_now();
+            assert!(
+                body.contains("window_state.toml"),
+                "the failing file's name must appear in the body: {body:?}"
+            );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn show_settings_write_failed_is_high_priority_and_survives_pool_pressure() {
+        // `show_settings_write_failed`'s toast is High priority (data
+        // loss deserves to be seen even when the pool is already full of
+        // routine Normal-priority toasts) and never attaches its own
+        // `on_dismiss`, so there's nothing behind the evicted entry's
+        // slot-pool-overflow callback path to lose. This proves the call
+        // completes cleanly under pool pressure (no `EventContext`
+        // available to invoke any overflow callback with) and that the
+        // settings-failure toast wins the slot rather than being dropped
+        // like a Normal-priority arrival would be.
+        let r = ToastRegistry::new(ToastInstallOptions {
+            archive: None,
+            max_visible: 1,
+            ..ToastInstallOptions::default()
+        });
+        let _ = r.enqueue(Toast::info(lit!("already here")));
+        assert_eq!(r.live_count(), 1);
+
+        r.show_settings_write_failed("settings.toml", 5, 1, "read-only filesystem");
+
+        assert_eq!(
+            r.live_count(),
+            1,
+            "High priority evicts the oldest Normal entry rather than growing past capacity"
+        );
+        let eid = r.live_entry_ids()[0];
+        r.with_entry(eid, |e| {
+            assert_eq!(
+                e.severity,
+                ToastSeverity::Error,
+                "the settings-failure toast must win the slot, not the evicted one"
+            );
+        })
+        .unwrap();
     }
 }

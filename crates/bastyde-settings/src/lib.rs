@@ -79,7 +79,10 @@ pub use crate::bundle::{OpenedSettings, SettingsBundle, SettingsBundleError};
 pub use crate::collection::list::{Keyed, ListFile, ListOp, PersistedListModel};
 pub use crate::ext::SettingsExt;
 pub use crate::file::{SettingsFile, SettingsFileError};
-pub use crate::flush::{DebouncedWriter, FlushError};
+pub use crate::flush::{
+    DebouncedWriter, FlushError, LandedStamp, WriteFailureSink, WriteLandedSink,
+    set_write_failure_sink,
+};
 pub use crate::migration::{MigrationError, Migrator, Versioned};
 pub use crate::mru::{MruEntry, MruList};
 pub use crate::path::AppPaths;
