@@ -127,9 +127,17 @@ fn skips_target_directory() {
         &target_dir.join("a.rs"),
         "fn build() { bati!(VStack { spacing: 8.0 }); }\n",
     );
+    // Two "fields" (a bare property plus a child), so this body does NOT
+    // parse as a plain `syn::Expr` and `format_file` actually reformats
+    // it — a single-field body like `VStack { spacing: 8.0 }` (used for
+    // `a.rs` above, which must be skipped regardless of its content) is
+    // deliberately left untouched by the formatter (see
+    // `bastyde_fmt::format_file`'s doc comment), so it would never be
+    // reported under `--check` and this assertion would be checking
+    // nothing.
     write(
         &tmp.path().join("b.rs"),
-        "fn build() { bati!(VStack { spacing: 8.0 }); }\n",
+        "fn build() { bati!(VStack { spacing: 8.0 Button(\"ok\") }); }\n",
     );
 
     let out = run(&["--check", "."], tmp.path());

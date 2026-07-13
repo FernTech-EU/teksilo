@@ -64,7 +64,16 @@ fn full_session_initialize_format_shutdown() {
     stdin.write_all(frame(initd).as_bytes()).unwrap();
 
     // 3. textDocument/didOpen
-    let dirty = "fn build() { bati!(VStack { spacing: 8.0 }); }\n";
+    //
+    // A single-field body like `VStack { spacing: 8.0 }` parses as a
+    // plain `syn::Expr` (struct literal) and is deliberately left
+    // untouched by `bastyde_fmt::format_file` — see its doc comment:
+    // rustfmt already owns that shape, and fighting it would just
+    // ping-pong the two formatters. Use a two-"field" body (a bare
+    // property plus a child) so it's not a valid `syn::Expr` and the
+    // DSL formatter actually reformats it — mirroring
+    // `formatting_returns_full_replace_when_dirty` in `src/main.rs`.
+    let dirty = "fn build() { bati!(VStack { spacing: 8.0 Button(\"ok\") }); }\n";
     let did_open = format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"file:///t.rs","languageId":"rust","version":1,"text":{}}}}}}}"#,
         serde_json::to_string(dirty).unwrap()
@@ -81,8 +90,12 @@ fn full_session_initialize_format_shutdown() {
         "expected formatting reply, got: {resp}"
     );
     assert!(
-        resp.contains("VStack {"),
-        "expected formatted body in newText, got: {resp}"
+        resp.contains("VStack {\\n"),
+        "expected a multi-line formatted body in newText, got: {resp}"
+    );
+    assert!(
+        resp.contains("Button(\\\"ok\\\")"),
+        "expected the child widget to survive reformatting, got: {resp}"
     );
 
     // 5. shutdown
