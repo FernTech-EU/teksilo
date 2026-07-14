@@ -16,7 +16,7 @@ use bastyde_core::event_source::TreeAppContext;
 use bastyde_core::signal::Prop;
 use bastyde_core::{
     CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, PlatformTitleBarHost,
-    TitleBarHostCallbacks, UserAttentionKind, WidgetTree, WindowCommand, WindowPlacement,
+    TitleBarHostCallbacks, UserAttentionKind, WidgetId, WidgetTree, WindowCommand, WindowPlacement,
     WindowState, WindowStateInit,
 };
 use bastyde_platform::AccessibilityPreferences;
@@ -91,6 +91,47 @@ pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit
     let repeat = empty_preedit && *last_empty;
     *last_empty = empty_preedit;
     repeat
+}
+
+/// Where keyboard focus lands when a freshly built window is shown, or `None`
+/// to leave the window with nothing focused.
+///
+/// The two window kinds get deliberately different policies:
+///
+/// * **Modal** — focus something, always: an explicitly requested target, else
+///   the root's [`Widget::initial_focus_hint`](bastyde_core::widget::Widget::initial_focus_hint),
+///   else the first focusable descendant. A dialog you must Tab into before you
+///   can answer it is broken.
+/// * **Plain window** — an *explicit* hint only. There is no
+///   `first_focusable_descendant` fallback on purpose: auto-focusing the first
+///   focusable of every window would drop the caret into whatever search box or
+///   text field happens to come first in tree order, changing behavior for every
+///   existing app window. A window that wants directed focus opts in by
+///   overriding `initial_focus_hint` — e.g. a launcher pointing at its
+///   recent-projects list so **Enter opens the highlighted entry with no Tab
+///   first**. (Before this, only modals could direct focus at all, so a plain
+///   window opened with nothing focused and its first keystroke went nowhere.)
+///
+/// The hint lookup walks descendants, so it still resolves when the opting-in
+/// widget sits deep under the window chrome (title bar, resize frame, post-root
+/// wrapper).
+///
+/// Extracted from `create_window` so the policy is unit-testable without a winit
+/// event loop.
+fn initial_window_focus(
+    tree: &WidgetTree,
+    root_id: WidgetId,
+    is_modal: bool,
+    modal_focus_target: Option<WidgetId>,
+) -> Option<WidgetId> {
+    if is_modal {
+        modal_focus_target
+            .filter(|id| tree.is_active(*id))
+            .or_else(|| tree.widget_initial_focus_hint(root_id))
+            .or_else(|| tree.first_focusable_descendant(root_id))
+    } else {
+        tree.widget_initial_focus_hint(root_id)
+    }
 }
 
 /// Per-window state managed by the WindowManager.
@@ -829,14 +870,8 @@ impl WindowManager {
                 root_id = (default_post_root.0)(&mut tree, root_id);
             }
 
-            if is_modal {
-                let focus_target = modal_focus_target
-                    .filter(|id| tree.is_active(*id))
-                    .or_else(|| tree.widget_initial_focus_hint(root_id))
-                    .or_else(|| tree.first_focusable_descendant(root_id));
-                if let Some(id) = focus_target {
-                    tree.focus(id);
-                }
+            if let Some(id) = initial_window_focus(&tree, root_id, is_modal, modal_focus_target) {
+                tree.focus(id);
             }
         }
 
@@ -1896,6 +1931,131 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
             return false;
         };
         handle.begin_drag(self.current_id, &data, image.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod initial_focus_tests {
+    use super::*;
+    use bastyde_canvas::SizeProposal;
+    use bastyde_core::build_context::BuildContext;
+    use bastyde_core::widget::Widget;
+    use bastyde_i18n::lit;
+    use bastyde_widgets::Button;
+    use bastyde_widgets::primitives::VStack;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// A root holding two focusable buttons, optionally pointing its
+    /// `initial_focus_hint` at the SECOND one — so a passing test cannot be
+    /// explained by "it happened to pick the first focusable anyway".
+    /// `second_out` republishes that id to the test.
+    #[derive(Debug)]
+    struct Root {
+        hint_to_second: bool,
+        second: Option<WidgetId>,
+        second_out: Rc<Cell<Option<WidgetId>>>,
+        root: Option<WidgetId>,
+    }
+
+    impl Widget for Root {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let first = ctx.add(Button::new(lit!("First")));
+            let second = ctx.add(Button::new(lit!("Second")));
+            self.second = Some(second);
+            self.second_out.set(Some(second));
+            let col = ctx.add(VStack::new().add_child(first).add_child(second));
+            self.root = Some(col);
+            vec![col]
+        }
+
+        fn initial_focus_hint(&self) -> Option<WidgetId> {
+            if self.hint_to_second {
+                self.second
+            } else {
+                None
+            }
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            ctx: &bastyde_core::LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            self.root
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into()
+        }
+    }
+
+    /// Build a headless tree whose root is a `Root`, and return the policy's
+    /// choice plus the id it should (or should not) have picked.
+    fn focus_for(hint: bool, is_modal: bool) -> (Option<WidgetId>, Option<WidgetId>) {
+        let second_out: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let root = tree.add(Root {
+            hint_to_second: hint,
+            second: None,
+            second_out: second_out.clone(),
+            root: None,
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        (
+            initial_window_focus(&tree, root, is_modal, None),
+            second_out.get(),
+        )
+    }
+
+    #[test]
+    fn a_plain_window_honours_an_explicit_focus_hint() {
+        // The feature: a window root can direct its own initial focus (the
+        // Launcher points at its recents list so Enter opens the highlighted
+        // project without a Tab). Must land on the SECOND button — the hint —
+        // not merely on the first focusable.
+        let (focused, second) = focus_for(true, false);
+        assert!(
+            second.is_some(),
+            "precondition: the root exposes a hint target"
+        );
+        assert_eq!(
+            focused, second,
+            "a plain window must focus the widget its root's initial_focus_hint names"
+        );
+    }
+
+    #[test]
+    fn a_plain_window_without_a_hint_focuses_nothing() {
+        // The guard rail: NO `first_focusable_descendant` fallback for plain
+        // windows. Falling back would silently drop the caret into whatever
+        // control comes first in tree order — every existing app window would
+        // change behavior.
+        let (focused, _) = focus_for(false, false);
+        assert_eq!(
+            focused, None,
+            "a plain window with no hint must open with nothing focused, \
+             not steal focus onto its first focusable widget"
+        );
+    }
+
+    #[test]
+    fn a_modal_still_falls_back_to_its_first_focusable() {
+        // Unchanged modal policy: a dialog always focuses something, so it can
+        // be answered from the keyboard immediately.
+        let (focused, second) = focus_for(false, true);
+        assert!(
+            focused.is_some() && focused != second,
+            "a modal with no hint falls back to its FIRST focusable (not the second)"
+        );
+    }
+
+    #[test]
+    fn a_modal_prefers_its_hint_over_the_first_focusable() {
+        let (focused, second) = focus_for(true, true);
+        assert_eq!(
+            focused, second,
+            "a modal's hint outranks the first focusable"
+        );
     }
 }
 
