@@ -101,7 +101,23 @@ pub(crate) fn build_grid_key_handler(
         }
         let cols = cfg.col_count.get().max(1);
         let rtl = ctx.is_rtl();
-        let current = cfg.focused_index.get().unwrap_or(0).min(n - 1);
+        // The keyboard cursor: `focused_index` once the user has navigated or
+        // clicked, else the current selection (a grid can be handed a selected
+        // tile before it is ever focused). `None` = "no cursor yet", which is
+        // NOT "cursor on tile 0" — the directional keys below land ON an end
+        // tile rather than stepping past it.
+        let cursor = cfg
+            .focused_index
+            .get()
+            .or_else(|| {
+                cfg.selection
+                    .as_ref()
+                    .and_then(|s| s.selected_indices().first().copied())
+            })
+            .map(|i| i.min(n - 1));
+        // Anchor for the keys that compute *from* a tile (reorder, paging,
+        // row-relative Home/End, type-ahead) rather than step in a direction.
+        let current = cursor.unwrap_or(0);
         let col = current % cols;
 
         // Select-all.
@@ -170,14 +186,21 @@ pub(crate) fn build_grid_key_handler(
             }
         }
 
+        // With no cursor yet, a directional key lands ON the near end tile
+        // (first for forward/down, last for backward/up) instead of stepping
+        // past it — otherwise the very first ArrowRight would skip tile 0.
         let new_idx: Option<usize> = if *key == logical_next {
-            if !cfg.wrap_navigation && col == cols - 1 {
+            if cursor.is_none() {
+                Some(0)
+            } else if !cfg.wrap_navigation && col == cols - 1 {
                 None
             } else {
                 Some((current + 1).min(n - 1))
             }
         } else if *key == logical_prev {
-            if !cfg.wrap_navigation && col == 0 {
+            if cursor.is_none() {
+                Some(n - 1)
+            } else if !cfg.wrap_navigation && col == 0 {
                 None
             } else {
                 Some(current.saturating_sub(1))
@@ -185,14 +208,18 @@ pub(crate) fn build_grid_key_handler(
         } else {
             match key {
                 Key::ArrowDown => {
-                    if current + cols < n {
+                    if cursor.is_none() {
+                        Some(0)
+                    } else if current + cols < n {
                         Some(current + cols)
                     } else {
                         None
                     }
                 }
                 Key::ArrowUp => {
-                    if current >= cols {
+                    if cursor.is_none() {
+                        Some(n - 1)
+                    } else if current >= cols {
                         Some(current - cols)
                     } else {
                         None

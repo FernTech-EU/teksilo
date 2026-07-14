@@ -221,14 +221,15 @@ fn keyboard_arrow_down_navigates() {
         text: None,
     });
 
-    // focused_index starts at None → unwrap_or(0) → ArrowDown moves to 1
+    // No cursor yet, so the first ArrowDown lands ON row 0 rather than stepping
+    // past it (it must not be possible to skip the first row by arrowing down).
     assert_eq!(
         selection.selected_indices(),
-        vec![1],
-        "ArrowDown from initial state should select index 1 (second root)"
+        vec![0],
+        "ArrowDown from initial state should select index 0 (first root)"
     );
 
-    // Another ArrowDown should move to index 2
+    // Another ArrowDown should move to index 1
     wtree.dispatch_event(bastyde_core::event::WidgetEvent::KeyDown {
         key: Key::ArrowDown,
         modifiers: Modifiers::NONE,
@@ -236,8 +237,8 @@ fn keyboard_arrow_down_navigates() {
     });
     assert_eq!(
         selection.selected_indices(),
-        vec![2],
-        "Second ArrowDown should select index 2 (third root)"
+        vec![1],
+        "Second ArrowDown should select index 1 (second root)"
     );
 }
 
@@ -301,6 +302,53 @@ fn flat_tree_view(
 }
 
 #[test]
+fn first_arrow_lands_on_an_end_row_instead_of_skipping_it() {
+    // "No cursor yet" is not "cursor on row 0": the very first ArrowDown must
+    // select the FIRST row (not step past it to row 1, leaving the top row
+    // unreachable until you arrow back up), and the first ArrowUp the LAST.
+    use bastyde_core::event::{Key, Modifiers};
+
+    for (key, want, what) in [
+        (
+            Key::ArrowDown,
+            0usize,
+            "first ArrowDown selects the first row",
+        ),
+        (Key::ArrowUp, 9usize, "first ArrowUp selects the last row"),
+    ] {
+        let (mut wtree, tv, selection) = flat_tree_view(10, bastyde_data::SelectionMode::Single);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        wtree.focus(tv);
+        assert!(
+            selection.selected_indices().is_empty(),
+            "precondition: nothing selected, no cursor"
+        );
+
+        wtree.press_key(key, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![want], "{what}");
+    }
+}
+
+#[test]
+fn keyboard_cursor_starts_from_a_preset_selection() {
+    // A tree can be handed a selection before it is ever focused (restoring the
+    // last edited item). The first arrow must continue from that visible row,
+    // not from an invisible zero.
+    use bastyde_core::event::{Key, Modifiers};
+    let (mut wtree, tv, selection) = flat_tree_view(10, bastyde_data::SelectionMode::Single);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    selection.select(4);
+    wtree.focus(tv);
+
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![5],
+        "Down from a preselected row 4 continues to 5"
+    );
+}
+
+#[test]
 fn page_down_up_moves_selection_by_viewport() {
     use bastyde_core::event::{Key, Modifiers};
     let (mut wtree, tv, selection) = flat_tree_view(100, bastyde_data::SelectionMode::Single);
@@ -354,6 +402,9 @@ fn space_toggles_enter_activates() {
     wtree.layout(SizeProposal::exact(400.0, 200.0));
     wtree.focus(tv);
 
+    // The first Down lands ON row 0 (it does not skip it), so reaching row 1
+    // takes two.
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE); // → row 0
     wtree.press_key(Key::ArrowDown, Modifiers::NONE); // → row 1
     assert_eq!(selection.selected_indices(), vec![1]);
     assert_eq!(activated.get(), None);

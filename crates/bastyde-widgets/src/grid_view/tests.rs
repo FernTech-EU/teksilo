@@ -227,6 +227,71 @@ fn access_click_activates_only_on_single_click_mode() {
 }
 
 #[test]
+fn first_arrow_lands_on_an_end_tile_instead_of_skipping_it() {
+    // "No cursor yet" is not "cursor on tile 0": a forward key must land ON the
+    // first tile rather than step past it, and a backward key on the last one.
+    // A preset selection acts as the cursor, so navigation continues from what
+    // the user can see.
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+    let press = |tree: &mut WidgetTree, key: Key| {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers: Modifiers::default(),
+            text: None,
+        });
+    };
+
+    for (key, want, what) in [
+        (Key::ArrowRight, 0usize, "first ArrowRight selects tile 0"),
+        (Key::ArrowDown, 0usize, "first ArrowDown selects tile 0"),
+        (
+            Key::ArrowLeft,
+            29usize,
+            "first ArrowLeft selects the last tile",
+        ),
+        (Key::ArrowUp, 29usize, "first ArrowUp selects the last tile"),
+    ] {
+        let model = ListModel::from_vec((0..30).collect());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+                .tile_size(100.0, 50.0)
+                .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        assert!(
+            selection.selected_indices().is_empty(),
+            "precondition: nothing selected, no cursor"
+        );
+
+        press(&mut tree, key);
+        assert!(selection.is_selected(want), "{what}");
+    }
+
+    // With a preselected tile, the first key steps from *it*.
+    let model = ListModel::from_vec((0..30).collect());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    // Tile 4 sits mid-row (3 columns), so ArrowRight is not edge-blocked.
+    selection.select(4);
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight);
+    assert!(
+        selection.is_selected(5),
+        "ArrowRight from a preselected tile 4 continues to 5"
+    );
+}
+
+#[test]
 fn arrow_keys_move_focus_and_selection() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     let model = ListModel::from_vec((0..30).collect());
@@ -241,7 +306,19 @@ fn arrow_keys_move_focus_and_selection() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.focus(id);
 
-    // Start at 0; ArrowRight → 1 (same row).
+    // No cursor yet, so the first ArrowRight lands ON tile 0 rather than
+    // stepping past it.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
+    assert!(
+        selection.is_selected(0),
+        "the first arrow key selects index 0, it does not skip it"
+    );
+
+    // Now at 0; ArrowRight → 1 (same row).
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::ArrowRight,
         modifiers: Modifiers::default(),
@@ -615,7 +692,13 @@ fn enter_activates_focused_tile() {
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     tree.focus(id);
-    // Move focus to index 1, then Enter activates it.
+    // Move focus to index 1: the first ArrowRight lands on tile 0 (no cursor
+    // yet), the second steps to 1. Then Enter activates it.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::ArrowRight,
         modifiers: Modifiers::default(),

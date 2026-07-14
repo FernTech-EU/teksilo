@@ -93,10 +93,25 @@ pub(crate) fn build_key_handler(
         if row_count == 0 || cfg.col_count == 0 {
             return EventResponse::Ignored;
         }
-        let raw = cfg.focused_cell.get();
-        let (row, col) = raw.unwrap_or((0, 0));
-        let row = row.min(row_count - 1);
-        let col = col.min(cfg.col_count - 1);
+        // The keyboard cursor: the focused cell once the user has navigated or
+        // clicked, else the selected row (a table can be handed a selection
+        // before it is ever focused — a restored last position, a preselected
+        // entry). `None` means "no cursor yet", which is deliberately NOT the
+        // same as `Some((0, 0))`: the directional keys below land ON the near
+        // end cell rather than stepping past it. Collapsing the two is what made
+        // the first ArrowDown skip row 0, the first ArrowUp a dead key
+        // (`prev_row(0)` is `None`), and the first ArrowRight skip column 0.
+        let raw = cfg.focused_cell.get().or_else(|| {
+            cfg.selection
+                .as_ref()
+                .and_then(|s| s.selected_indices().first().copied())
+                .map(|r| (r, 0))
+        });
+        let cursor = raw.map(|(r, c)| (r.min(row_count - 1), c.min(cfg.col_count - 1)));
+        // Anchor for the keys that compute *from* a cell (expand / collapse,
+        // paging, Home/End, activation, editing) rather than step in a
+        // direction.
+        let (row, col) = cursor.unwrap_or((0, 0));
         // Persist the clamp: if the stored focus was out of range (e.g. rows or
         // columns were removed since it was set), write the in-bounds cell back
         // so the focus ring and any later reader don't keep the stale position.
@@ -140,26 +155,53 @@ pub(crate) fn build_key_handler(
 
         let viewport_h = cfg.viewport_height.get();
 
+        // Each directional key, with NO cursor yet, lands ON the end cell it
+        // would have entered from — it does not step past it (see `cursor`
+        // above, and the same rule in `ListView` / `TreeView` / `GridView`).
+        // `first_row` / `last_row` (not raw 0 / row_count-1) so a hierarchical
+        // navigator — `TreeTableView` plugs its own in here — enters at a row
+        // that is actually visible.
         let new_pos: Option<(usize, usize)> = match key {
-            Key::ArrowUp => cfg.navigator.prev_row(row).map(|r| (r, col)),
-            Key::ArrowDown => cfg.navigator.next_row(row).map(|r| (r, col)),
+            Key::ArrowUp => match cursor {
+                None => cfg.navigator.last_row().map(|r| (r, col)),
+                Some(_) => cfg.navigator.prev_row(row).map(|r| (r, col)),
+            },
+            Key::ArrowDown => match cursor {
+                None => cfg.navigator.first_row().map(|r| (r, col)),
+                Some(_) => cfg.navigator.next_row(row).map(|r| (r, col)),
+            },
             // Visual-left moves to a higher display index under RTL
             // (columns run right-to-left), so the two arrows swap their
             // index delta. The clamps stay tied to the physical edge each
-            // arrow points at.
+            // arrow points at. Column 0 is the leading column in both
+            // directions, so a cursor-less entry lands on the column the key
+            // points *away* from: the "next" key on the first column, the
+            // "previous" key on the last.
             Key::ArrowLeft => {
                 if rtl {
-                    (col + 1 < cfg.col_count).then_some((row, col + 1))
+                    match cursor {
+                        None => Some((row, 0)),
+                        Some(_) => (col + 1 < cfg.col_count).then_some((row, col + 1)),
+                    }
                 } else {
-                    // `.then` (lazy) — `col - 1` must not be evaluated at col 0.
-                    (col > 0).then(|| (row, col - 1))
+                    match cursor {
+                        None => Some((row, cfg.col_count - 1)),
+                        // `.then` (lazy) — `col - 1` must not be evaluated at col 0.
+                        Some(_) => (col > 0).then(|| (row, col - 1)),
+                    }
                 }
             }
             Key::ArrowRight => {
                 if rtl {
-                    (col > 0).then(|| (row, col - 1))
+                    match cursor {
+                        None => Some((row, cfg.col_count - 1)),
+                        Some(_) => (col > 0).then(|| (row, col - 1)),
+                    }
                 } else {
-                    (col + 1 < cfg.col_count).then_some((row, col + 1))
+                    match cursor {
+                        None => Some((row, 0)),
+                        Some(_) => (col + 1 < cfg.col_count).then_some((row, col + 1)),
+                    }
                 }
             }
             Key::Home if !modifiers.ctrl() => Some((row, 0)),

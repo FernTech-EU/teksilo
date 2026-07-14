@@ -208,7 +208,23 @@ impl<T: 'static> Widget for TreeView<T> {
                         return bastyde_core::event::EventResponse::Ignored;
                     }
 
-                    let current = fi.get().unwrap_or(0).min(visible_count - 1);
+                    // The keyboard cursor: `focused_index` once the user has
+                    // navigated or clicked, else the current selection (a tree
+                    // can be handed a selected row before it is ever focused).
+                    // `None` = "no cursor yet", which is NOT "cursor on row 0" —
+                    // see the arrow keys below.
+                    let cursor = fi
+                        .get()
+                        .or_else(|| {
+                            sel_for_key
+                                .as_ref()
+                                .and_then(|s| s.selected_indices().first().copied())
+                        })
+                        .map(|i| i.min(visible_count - 1));
+                    // Anchor for the keys that compute *from* a row (expand /
+                    // collapse / paging / activation) rather than step in a
+                    // direction.
+                    let current = cursor.unwrap_or(0);
 
                     // Helper: scroll so flat row `idx` is visible in the tree's
                     // OWN viewport; returns the resulting scroll offset so the
@@ -336,10 +352,19 @@ impl<T: 'static> Widget for TreeView<T> {
                         _ => {}
                     }
 
-                    // Navigation keys
+                    // Navigation keys. With no cursor yet, the first Down lands ON
+                    // the first row and the first Up on the last one — stepping
+                    // to row 1 would silently skip the row the user is looking at
+                    // (see `ListView`, same rule).
                     let new_idx = match key {
-                        Key::ArrowDown => Some((current + 1).min(visible_count - 1)),
-                        Key::ArrowUp => Some(current.saturating_sub(1)),
+                        Key::ArrowDown => Some(match cursor {
+                            None => 0,
+                            Some(c) => (c + 1).min(visible_count - 1),
+                        }),
+                        Key::ArrowUp => Some(match cursor {
+                            None => visible_count - 1,
+                            Some(c) => c.saturating_sub(1),
+                        }),
                         Key::Home => Some(0),
                         Key::End => Some(visible_count - 1),
                         // Page keys: jump one viewport of rows by visual distance

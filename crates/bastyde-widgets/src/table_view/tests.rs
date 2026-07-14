@@ -783,6 +783,48 @@ fn read_focused_cell(tree: &WidgetTree, table: WidgetId) -> Option<(usize, usize
 }
 
 #[test]
+fn first_arrow_lands_on_an_end_cell_instead_of_skipping_it() {
+    // "No cursor yet" is not "cursor on (0, 0)". Collapsing the two (the old
+    // `focused_cell.get().unwrap_or((0, 0))`) meant the first ArrowDown stepped
+    // to row 1 — skipping row 0 — the first ArrowUp was a DEAD KEY
+    // (`prev_row(0)` is `None`, so nothing happened at all), and the first
+    // ArrowRight skipped the leading column. Each arrow must now land ON the
+    // end cell it enters from. Table is 10 rows × 2 columns.
+    use bastyde_core::event::{Key, Modifiers};
+
+    for (key, want, what) in [
+        (
+            Key::ArrowDown,
+            (0, 0),
+            "first ArrowDown enters at the first row",
+        ),
+        (Key::ArrowUp, (9, 0), "first ArrowUp enters at the last row"),
+        (
+            Key::ArrowRight,
+            (0, 0),
+            "first ArrowRight enters at the leading column",
+        ),
+        (
+            Key::ArrowLeft,
+            (0, 1),
+            "first ArrowLeft enters at the trailing column",
+        ),
+    ] {
+        let (mut tree, table, _) = build_table(10);
+        // Focus the VIEW, but set no cell cursor.
+        tree.focus(table);
+        assert_eq!(
+            read_focused_cell(&tree, table),
+            None,
+            "precondition: no cell cursor yet"
+        );
+
+        tree.press_key(key, Modifiers::NONE);
+        assert_eq!(read_focused_cell(&tree, table), Some(want), "{what}");
+    }
+}
+
+#[test]
 fn arrow_keys_move_focused_cell() {
     let (mut tree, table, _) = build_table(10);
     focus_at(&mut tree, table, 0, 0);

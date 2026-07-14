@@ -2039,6 +2039,95 @@ mod tests {
     }
 
     #[test]
+    fn first_arrow_lands_on_an_end_row_instead_of_skipping_it() {
+        // `TreeTableView` plugs its own hierarchical `RowNavigator` into
+        // `TableView`'s key handler, so it inherited the same bug: "no cursor
+        // yet" was read as "cursor on (0, 0)", which made the first ArrowDown
+        // step to flat row 1 (skipping row 0) and the first ArrowUp a DEAD KEY
+        // (`prev_row(0)` is `None`). Entry now uses the navigator's own
+        // first/last visible row, so it is hierarchy-aware.
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        for (key, want, what) in [
+            (
+                Key::ArrowDown,
+                0usize,
+                "first ArrowDown enters at the first visible row",
+            ),
+            (
+                Key::ArrowUp,
+                3usize,
+                "first ArrowUp enters at the last visible row",
+            ),
+        ] {
+            let t = TreeModel::new();
+            t.insert_root(0, "a");
+            t.insert_root(1, "b");
+            t.insert_root(2, "c");
+            t.insert_root(3, "d");
+            let proxy = SortFilterTreeModel::new(t);
+            let selection = SelectionModel::new(SelectionMode::Single);
+            let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+            let id = tree.add(
+                TreeTableView::from_projection(proxy.clone())
+                    .add_column(name_col())
+                    .selection_mode(TableSelectionMode::SingleRow)
+                    .selection(selection.clone())
+                    .row_height(20.0),
+            );
+            tree.layout(SizeProposal {
+                width: Some(400.0),
+                height: Some(200.0),
+            });
+            tree.focus(id);
+            assert_eq!(proxy.visible_count(), 4, "four flat roots");
+            assert!(
+                selection.selected_indices().is_empty(),
+                "precondition: no cursor, nothing selected"
+            );
+
+            tree.press_key(key, Modifiers::NONE);
+            assert_eq!(selection.selected_indices(), vec![want], "{what}");
+        }
+    }
+
+    #[test]
+    fn expanded_children_are_reachable_by_the_first_arrow() {
+        // Hierarchy-aware entry: with "docs" expanded, the last VISIBLE row is a
+        // child, not a root — so the first ArrowUp must land on that child. A
+        // raw `row_count - 1` would happen to agree here, but going through the
+        // navigator is what keeps it correct for any projection (filtered,
+        // sorted, partially collapsed).
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let proxy = SortFilterTreeModel::new(sample_tree()); // docs{readme,guide}, src{main.rs}
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+
+        let last = proxy.visible_count() - 1;
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![last],
+            "first ArrowUp enters at the last VISIBLE row, whatever the hierarchy shows"
+        );
+    }
+
+    #[test]
     fn row_click_moves_focus_so_arrow_nav_resumes_there() {
         // Regression: in row-selection mode a row click set the selection but
         // NOT `focused_cell` (the arrow-nav origin, `unwrap_or((0,0))`), so the

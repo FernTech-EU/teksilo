@@ -1000,10 +1000,40 @@ impl<T: 'static> Widget for ListView<T> {
                     }
 
                     // Navigation keys (no modifiers or with Shift for extend)
-                    let current = fi.get().unwrap_or(0).min(count - 1);
+                    //
+                    // The cursor is `focused_index` once the user has navigated
+                    // or clicked; failing that it is the current selection — a
+                    // view can be handed a selected row before it is ever
+                    // focused (a launcher preselecting the top entry, a dialog
+                    // restoring the last choice), and the keyboard must continue
+                    // from what the user can see, not from an invisible zero.
+                    //
+                    // `None` ("no cursor yet") is deliberately NOT the same as
+                    // `Some(0)`: from nothing, Down must land ON the first row
+                    // and Up on the last one. Stepping to row 1 instead would
+                    // silently skip row 0 — the row the user was looking at —
+                    // which is what every toolkit (GTK, Qt, macOS, the ARIA
+                    // listbox pattern) explicitly avoids.
+                    let cursor = fi
+                        .get()
+                        .or_else(|| {
+                            sel_for_key
+                                .as_ref()
+                                .and_then(|s| s.selected_indices().first().copied())
+                        })
+                        .map(|i| i.min(count - 1));
+                    // Anchor for the keys that need a row to compute *from*
+                    // (paging, activation) rather than a direction to step in.
+                    let current = cursor.unwrap_or(0);
                     let new_idx = match key {
-                        Key::ArrowDown => Some((current + 1).min(count - 1)),
-                        Key::ArrowUp => Some(current.saturating_sub(1)),
+                        Key::ArrowDown => Some(match cursor {
+                            None => 0,
+                            Some(c) => (c + 1).min(count - 1),
+                        }),
+                        Key::ArrowUp => Some(match cursor {
+                            None => count - 1,
+                            Some(c) => c.saturating_sub(1),
+                        }),
                         Key::Home => Some(0),
                         Key::End => Some(count - 1),
                         // Page keys: jump one viewport of rows (geometry-driven,
@@ -1823,18 +1853,87 @@ mod tests {
             "precondition: selection drops the removed row"
         );
 
-        // With `focused_index` cleared (`None`), the next ArrowDown falls
-        // back to `unwrap_or(0)` and steps to row 1. Left un-cleared (the
-        // bug), the stale anchor would still read 3 (now clamped to the
-        // shrunk list, still in range) and ArrowDown would step to 4
-        // instead.
+        // With `focused_index` cleared (`None`) — and the selection dropped with
+        // it, so there is no cursor to fall back on either — the next ArrowDown
+        // lands ON row 0. Left un-cleared (the bug), the stale anchor would
+        // still read 3 (now clamped to the shrunk list, still in range) and
+        // ArrowDown would step to 4 instead.
         tree.press_key(Key::ArrowDown, Modifiers::NONE);
         assert_eq!(
             selection.selected_indices(),
-            vec![1],
-            "focused_index was cleared, so nav restarts from the top (0 → 1), \
+            vec![0],
+            "focused_index was cleared, so nav restarts at the top (row 0), \
              not from the stale removed row's index (3 → 4)"
         );
+    }
+
+    #[test]
+    fn first_arrow_lands_on_an_end_row_instead_of_skipping_it() {
+        // "No cursor yet" is not "cursor on row 0": the very first ArrowDown
+        // must select the FIRST row, not step past it to row 1 (which would
+        // make the top row unreachable by keyboard until you arrow back up),
+        // and the very first ArrowUp must select the LAST row.
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        for (key, want, what) in [
+            (
+                Key::ArrowDown,
+                0usize,
+                "first ArrowDown selects the first row",
+            ),
+            (Key::ArrowUp, 9usize, "first ArrowUp selects the last row"),
+        ] {
+            let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+            let selection = SelectionModel::new(SelectionMode::Single);
+            let mut tree = WidgetTree::new();
+            let lv_id = tree.add(
+                ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+                    .item_height(20.0)
+                    .selection(selection.clone()),
+            );
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            tree.focus(lv_id);
+            assert!(
+                selection.selected_indices().is_empty(),
+                "precondition: nothing selected, no cursor"
+            );
+
+            tree.press_key(key, Modifiers::NONE);
+            assert_eq!(selection.selected_indices(), vec![want], "{what}");
+        }
+    }
+
+    #[test]
+    fn keyboard_cursor_starts_from_a_preset_selection() {
+        // A view can be handed a selection before it is ever focused (a
+        // launcher preselecting the top entry). The first arrow key must
+        // continue from that visible row rather than from an invisible zero —
+        // otherwise Down on a preselected row 2 would jump backwards to row 0.
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        selection.select(2);
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(selection.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(lv_id);
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![3],
+            "Down from a preselected row 2 continues to 3"
+        );
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![1], "and Up walks back");
     }
 
     #[test]
@@ -2415,7 +2514,9 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.focus(lv);
 
-        // Move focus to row 2 (arrow down twice from default 0).
+        // Move the cursor to row 2: the first Down lands ON row 0 (it does not
+        // skip it), so it takes three.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
         tree.press_key(Key::ArrowDown, Modifiers::NONE);
         tree.press_key(Key::ArrowDown, Modifiers::NONE);
         assert_eq!(selection.selected_indices(), vec![2]);
