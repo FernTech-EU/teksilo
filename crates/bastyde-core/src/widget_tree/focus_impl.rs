@@ -807,6 +807,111 @@ mod tests {
         assert_eq!(tree.focused(), Some(b));
     }
 
+    /// A container that rebuilds its focusable children whenever `epoch` bumps
+    /// — the shape of every data-driven view: a `ListView` on a model update, a
+    /// popover re-scanning its content when it opens.
+    #[derive(Debug)]
+    struct RebuildingRows {
+        epoch: crate::signal::Signal<u64>,
+        rows: Vec<WidgetId>,
+    }
+
+    impl Widget for RebuildingRows {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let sid = ctx.self_id();
+            let reg = ctx.binding_registry();
+            self.epoch
+                .bind_to(sid, reg, crate::binding::BindingLevel::Rebuild);
+            self.rows = (0..3)
+                .map(|_| ctx.add(FillWidget::new().focusable()))
+                .collect();
+            self.rows.clone()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.rows.clone()
+        }
+    }
+
+    /// A rebuild must keep focus **inside the subtree that owned it**.
+    ///
+    /// A rebuild destroys its children and allocates fresh `WidgetId`s, so the
+    /// focused node dies. Dropping focus to `None` there (what
+    /// `revalidate_interaction_state` does with any dead focus) kicks the user
+    /// clean out of the widget they were in — most visibly, a popover that
+    /// refreshes its content when it opens would throw away the very row the
+    /// popover had just focused, and the menu would come up with no keyboard
+    /// focus at all: no arrow keys, no Enter.
+    #[test]
+    fn a_rebuild_keeps_focus_inside_the_subtree_that_had_it() {
+        let mut tree = WidgetTree::new();
+        let epoch = crate::signal::Signal::new(0u64);
+        let root = tree.add(RebuildingRows {
+            epoch: epoch.clone(),
+            rows: Vec::new(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        let first_row = tree
+            .first_focusable_descendant(root)
+            .expect("the rows are focusable");
+        tree.focus(first_row);
+        assert_eq!(tree.focused(), Some(first_row));
+
+        // Rebuild: every row is destroyed and re-allocated.
+        epoch.set(1);
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        let focused = tree
+            .focused()
+            .expect("a rebuild must not drop focus out of the rebuilt subtree");
+        assert_ne!(
+            focused, first_row,
+            "the old row is dead — focus must have moved to a freshly built one"
+        );
+        assert!(
+            tree.is_descendant_of(focused, root),
+            "focus must land back inside the rebuilt subtree"
+        );
+        assert!(tree.is_active(focused), "the focused node must be live");
+    }
+
+    /// The restore is scoped: a rebuild that did *not* own focus must leave
+    /// focus exactly where it was, rather than yanking it into the rebuilt
+    /// subtree. Otherwise any background list update would steal the caret out
+    /// of whatever the user was typing in.
+    #[test]
+    fn a_rebuild_elsewhere_does_not_steal_focus() {
+        let mut tree = WidgetTree::new();
+        let epoch = crate::signal::Signal::new(0u64);
+        let outsider = tree.add(FillWidget::new().focusable());
+        let _rows = tree.add(RebuildingRows {
+            epoch: epoch.clone(),
+            rows: Vec::new(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        tree.focus(outsider);
+        assert_eq!(tree.focused(), Some(outsider));
+
+        epoch.set(1);
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        assert_eq!(
+            tree.focused(),
+            Some(outsider),
+            "a rebuild that never held focus must not pull focus into itself"
+        );
+    }
+
     #[test]
     fn first_focusable_descendant_prefers_first_focusable_child() {
         let mut tree = WidgetTree::new();

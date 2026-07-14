@@ -197,6 +197,32 @@ impl WidgetTree {
             self.revalidate_interaction_state(&mut *ops);
             return;
         }
+        // Does focus live inside a subtree we are about to rebuild? Its children
+        // are about to be destroyed and re-allocated with fresh ids, taking the
+        // focused node with them — and once that has happened there is no way
+        // back from the dead id to the subtree it belonged to. Work it out now.
+        let focus_owner: Option<WidgetId> = self.focused.and_then(|focused| {
+            let depth = |id: WidgetId| -> usize {
+                let mut d = 0;
+                let mut cur = id;
+                while let Some(parent) = self.arena.parent(cur) {
+                    d += 1;
+                    cur = parent;
+                }
+                d
+            };
+            // Every root containing `focused` sits on its ancestor chain, so the
+            // candidates are totally ordered by depth. Take the OUTERMOST: it is
+            // the only one sure to survive, since a rebuild destroys its children
+            // — an inner rebuild root nested inside an outer one is torn down by
+            // the outer's rebuild, and its id would be dead by restore time.
+            to_rebuild
+                .iter()
+                .copied()
+                .filter(|&root| self.is_descendant_of(focused, root))
+                .min_by_key(|&root| depth(root))
+        });
+
         for widget_id in to_rebuild {
             self.rebuild_single_widget(widget_id);
         }
@@ -213,6 +239,20 @@ impl WidgetTree {
         // drop any focus/hover state whose target is no longer valid so we
         // don't dispatch to dead widgets on the next event.
         self.revalidate_interaction_state(&mut *ops);
+        // ...but "no longer valid" must not mean "gone". If focus lived in the
+        // subtree we just rebuilt, the drop above kicked the user clean out of
+        // the widget they were in: a popover that re-scans its content when it
+        // opens throws away the row the popover itself had just focused, and the
+        // menu comes up with nothing focused — no arrow keys, no Enter. Put focus
+        // back inside that subtree, at the end of the layout pass (the fresh
+        // children have no bounds yet, and the focus-driven scroll-into-view
+        // needs them). A rebuild that never held focus, or one whose focused node
+        // survived it (the rebuild root itself is not destroyed), records nothing.
+        if self.focused.is_none()
+            && let Some(root) = focus_owner
+        {
+            self.pending_focus_restore = Some(root);
+        }
         // A rebuild's `build()` may arm new animations (looping or
         // one-shot) by calling `signal.animate_to(...)` /
         // `animate_looping(...)` — these set `pending` on the signal
@@ -549,6 +589,28 @@ impl WidgetTree {
                 }
                 self.set_hovered(new_target);
             }
+        }
+
+        // Post-layout focus refresh — the symmetric case to the hover refresh
+        // above. A rebuild destroyed the focused widget, so
+        // `revalidate_interaction_state` cleared `focused` to `None`; the
+        // subtree that owned it was recorded as `pending_focus_restore`. Now
+        // that its fresh children have bounds from this layout pass, land focus
+        // back inside it, so a rebuild keeps focus in the subtree that had it
+        // rather than dumping it out of the widget entirely.
+        //
+        // Deliberately conservative: only when nothing else has taken focus in
+        // the meantime, only into a subtree that is still active (a rebuild that
+        // also went dormant, e.g. a popover closing, must NOT drag focus back
+        // into hidden content — its own dismiss path restores focus to the
+        // trigger), and only if it still has somewhere to put it. Otherwise focus
+        // stays `None`, exactly as before.
+        if let Some(root) = self.pending_focus_restore.take()
+            && self.focused.is_none()
+            && self.arena.is_active(root)
+            && let Some(target) = self.first_focusable_descendant(root)
+        {
+            self.focus_ops(target, &mut *ops);
         }
     }
 }

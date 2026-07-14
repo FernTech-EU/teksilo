@@ -117,6 +117,19 @@ pub struct WidgetTree {
     /// through to an ancestor scrollable) instead of the item the
     /// user is actually pointing at.
     last_pointer_position: Option<bastyde_canvas::Point>,
+    /// A rebuild destroyed the focused widget: the subtree that owned focus,
+    /// remembered so the end of the layout pass can land focus back inside it.
+    ///
+    /// A rebuild allocates fresh `WidgetId`s for its children, so the focused
+    /// node dies and `revalidate_interaction_state` drops focus to `None`.
+    /// Leaving it there kicks the user out of the widget they were in — most
+    /// visibly, a popover that refreshes its content when it opens would throw
+    /// away the very row the popover had just focused, so the menu comes up with
+    /// no keyboard focus at all. Focus is re-entered *after* the layout walk
+    /// (see the tail of `layout_with_ops`), once the fresh children have real
+    /// bounds for the focus-driven scroll-into-view — the same shape as the
+    /// post-layout hover refresh next to it.
+    pending_focus_restore: Option<WidgetId>,
     last_proposal: SizeProposal,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
@@ -516,6 +529,7 @@ impl WidgetTree {
             focus_visible: crate::signal::Signal::new(false),
             view_focus_stack: Vec::new(),
             last_pointer_position: None,
+            pending_focus_restore: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,
