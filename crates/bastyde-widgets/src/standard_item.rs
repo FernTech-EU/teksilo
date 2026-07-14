@@ -76,13 +76,14 @@ use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, 
 use bastyde_core::widget_id::WidgetId;
 use bastyde_data::{CheckState, FlatEntry};
 
+use bastyde_canvas::TextOverflow;
 use bastyde_core::styles::{SharedStandardItemStyle, StandardItemStyleConfig};
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::checkbox::Checkbox;
-use crate::primitives::{FixedSize, HStack, Spacer, TextWidget, TwistArrow, VStack};
+use crate::primitives::{FixedSize, HStack, Shrinkable, Spacer, TextWidget, TwistArrow, VStack};
 
 // ---------------------------------------------------------------------------
 // CheckboxKind — two-state vs tri-state, last-call-wins on the builder.
@@ -120,6 +121,12 @@ pub struct StandardListItem {
     label_color: Option<bastyde_core::color_prop::ColorProp>,
     /// Per-call subtitle text-color override. `None` ⇒ `TextRole::Secondary`.
     subtitle_color: Option<bastyde_core::color_prop::ColorProp>,
+    /// Per-call label overflow override. `None` ⇒ the `TextWidget` default
+    /// (`TextOverflow::Wrap`).
+    label_overflow: Option<TextOverflow>,
+    /// Per-call subtitle overflow override. `None` ⇒ the `TextWidget` default
+    /// (`TextOverflow::Wrap`).
+    subtitle_overflow: Option<TextOverflow>,
     interaction: Signal<InteractionState>,
     style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
@@ -152,6 +159,8 @@ impl StandardListItem {
             subtitle_style: TextStyleRole::Small.into(),
             label_color: None,
             subtitle_color: None,
+            label_overflow: None,
+            subtitle_overflow: None,
             interaction: Signal::new(InteractionState::Idle),
             style_override: None,
             root_child_id: None,
@@ -304,6 +313,31 @@ impl StandardListItem {
         self
     }
 
+    /// Truncate the primary label instead of wrapping it. Default (unset) is
+    /// `TextOverflow::Wrap`.
+    ///
+    /// A wrapping label reports its full intrinsic width, so on a row too
+    /// narrow to hold it the primary `HStack` is over-constrained and the
+    /// [`trailing_slot`](Self::trailing_slot) is pushed past the row's edge.
+    /// Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
+    /// stay reachable: the label then shrinks and truncates within the row.
+    pub fn label_overflow(mut self, overflow: TextOverflow) -> Self {
+        self.label_overflow = Some(overflow);
+        self
+    }
+
+    /// Truncate the subtitle instead of wrapping it. Default (unset) is
+    /// `TextOverflow::Wrap`.
+    ///
+    /// Same rationale as [`label_overflow`](Self::label_overflow) — and the
+    /// usual culprit, since subtitles carry long secondary text (file paths,
+    /// URLs). `TextOverflow::Ellipsis(EllipsisMode::Middle)` suits a path: it
+    /// keeps both the root and the file name legible.
+    pub fn subtitle_overflow(mut self, overflow: TextOverflow) -> Self {
+        self.subtitle_overflow = Some(overflow);
+        self
+    }
+
     /// Attach a plain tooltip shown after the standard hover delay.
     ///
     /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
@@ -394,6 +428,9 @@ impl StandardListItem {
             Some(c) => label_widget.color(c.clone()),
             None => label_widget.color(label_role.clone()),
         };
+        if let Some(overflow) = self.label_overflow {
+            label_widget = label_widget.overflow(overflow);
+        }
         let label_id = ctx.add(label_widget);
 
         let label_column_id = if let Some(subtitle) = &self.subtitle {
@@ -405,6 +442,9 @@ impl StandardListItem {
                 Some(c) => subtitle_widget.color(c.clone()),
                 None => subtitle_widget.color(TextRole::Secondary),
             };
+            if let Some(overflow) = self.subtitle_overflow {
+                subtitle_widget = subtitle_widget.overflow(overflow);
+            }
             let subtitle_text_id = ctx.add(subtitle_widget);
 
             // Subtitle HStack: [leading?] subtitle [Spacer] [trailing?].
@@ -434,6 +474,22 @@ impl StandardListItem {
         } else {
             // Single-line: just the label.
             label_id
+        };
+
+        // An ellipsis-mode `TextWidget` is shrinkable, but that alone does not
+        // reach the primary `HStack`: a stack only advertises shrink on its own
+        // main axis, so the label *column* (a `VStack`) reports rigid against a
+        // horizontal deficit and the trailing slot gets shoved out of the row.
+        // When the caller opted into truncation, make the column itself
+        // shrinkable — the deficit lands here and the elided text absorbs it.
+        let label_column_id = if self.label_overflow.is_some() || self.subtitle_overflow.is_some() {
+            ctx.add(
+                Shrinkable::new()
+                    .min_width(si::STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH)
+                    .child_id(label_column_id),
+            )
+        } else {
+            label_column_id
         };
 
         // Primary HStack: [checkbox?] [leading?] [center?] label_column
@@ -825,6 +881,22 @@ impl StandardTreeItem {
         self
     }
 
+    /// Truncate the primary label instead of wrapping it. Forwarded to the
+    /// inner [`StandardListItem`] — see its
+    /// [`label_overflow`](StandardListItem::label_overflow).
+    pub fn label_overflow(mut self, overflow: TextOverflow) -> Self {
+        self.inner = self.inner.label_overflow(overflow);
+        self
+    }
+
+    /// Truncate the subtitle instead of wrapping it. Forwarded to the inner
+    /// [`StandardListItem`] — see its
+    /// [`subtitle_overflow`](StandardListItem::subtitle_overflow).
+    pub fn subtitle_overflow(mut self, overflow: TextOverflow) -> Self {
+        self.inner = self.inner.subtitle_overflow(overflow);
+        self
+    }
+
     /// Per-call style override for the row chrome. Forwarded to the
     /// inner [`StandardListItem`] — see its `style(...)` for the
     /// precedence rules (per-call > theme.style_slots.standard_item >
@@ -1065,6 +1137,82 @@ mod tests {
         let b = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
         assert!(b.height >= si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE - 0.5);
+    }
+
+    /// A long subtitle in the default `Wrap` mode reports its full intrinsic
+    /// width, over-constraining the primary `HStack` — the trailing slot is
+    /// pushed past the row's right edge and out of the containing card. This
+    /// pins the behaviour `subtitle_overflow` exists to escape.
+    #[test]
+    fn a_wrapping_subtitle_pushes_the_trailing_slot_out_of_the_row() {
+        const ROW_W: f32 = 680.0;
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let row = tree.add(
+            StandardListItem::new(lit!("2026-07-14 10:05"))
+                .subtitle(lit!(
+                    "11 KB · /home/user/Nextcloud/Documents/Books/backups/novel-20260714-100528.skrib"
+                ))
+                .trailing_slot(crate::button::Button::new(lit!("Open"))),
+        );
+        tree.layout(SizeProposal::exact(ROW_W, 56.0));
+
+        let button = tree.find_by_label("Open").expect("trailing button");
+        assert!(
+            tree.bounds(button).right() > tree.bounds(row).right(),
+            "a wrapping subtitle should overflow the row (got button right={}, row right={})",
+            tree.bounds(button).right(),
+            tree.bounds(row).right(),
+        );
+    }
+
+    /// With an ellipsis overflow the subtitle shrinks and truncates inside the
+    /// row instead, so the trailing actions stay reachable within it.
+    #[test]
+    fn an_eliding_subtitle_keeps_the_trailing_slot_inside_the_row() {
+        const ROW_W: f32 = 680.0;
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let row = tree.add(
+            StandardListItem::new(lit!("2026-07-14 10:05"))
+                .subtitle(lit!(
+                    "11 KB · /home/user/Nextcloud/Documents/Books/backups/novel-20260714-100528.skrib"
+                ))
+                .subtitle_overflow(TextOverflow::Ellipsis(bastyde_canvas::EllipsisMode::Middle))
+                .trailing_slot(crate::button::Button::new(lit!("Open"))),
+        );
+        tree.layout(SizeProposal::exact(ROW_W, 56.0));
+
+        let button = tree.find_by_label("Open").expect("trailing button");
+        assert!(
+            tree.bounds(button).right() <= tree.bounds(row).right() + 0.5,
+            "an elided subtitle must keep the trailing slot inside the row \
+             (got button right={}, row right={})",
+            tree.bounds(button).right(),
+            tree.bounds(row).right(),
+        );
+    }
+
+    /// The same lever on the tree row, forwarded to the inner list item.
+    #[test]
+    fn tree_item_forwards_the_overflow_levers() {
+        const ROW_W: f32 = 400.0;
+        let mut tree = WidgetTree::new().with_theme(theme());
+        let row = tree.add(
+            StandardTreeItem::new(lit!(
+                "A very long chapter title that cannot possibly fit this row"
+            ))
+            .label_overflow(TextOverflow::Ellipsis(bastyde_canvas::EllipsisMode::Trailing))
+            .trailing_slot(crate::button::Button::new(lit!("Open"))),
+        );
+        tree.layout(SizeProposal::exact(ROW_W, 56.0));
+
+        let button = tree.find_by_label("Open").expect("trailing button");
+        assert!(
+            tree.bounds(button).right() <= tree.bounds(row).right() + 0.5,
+            "an elided label must keep the tree row's trailing slot inside it \
+             (got button right={}, row right={})",
+            tree.bounds(button).right(),
+            tree.bounds(row).right(),
+        );
     }
 
     #[test]

@@ -34,6 +34,11 @@ pub const STANDARD_ITEM_PADDING_HORIZONTAL: f32 = 8.0;
 pub const STANDARD_ITEM_PADDING_VERTICAL: f32 = 4.0;
 pub const STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE: f32 = 28.0;
 pub const STANDARD_ITEM_MIN_HEIGHT_TWO_LINE: f32 = 44.0;
+/// Compression floor for the label column when the caller opted its label or
+/// subtitle into truncation (`label_overflow` / `subtitle_overflow`). Wide
+/// enough that a truncated label keeps a few glyphs before the ellipsis rather
+/// than collapsing to nothing on a very narrow row.
+pub const STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH: f32 = 48.0;
 pub const STANDARD_ITEM_CHEVRON_COLUMN_WIDTH: f32 = 16.0;
 pub const STANDARD_ITEM_TREE_INDENT_STEP: f32 = 16.0;
 pub const STANDARD_ITEM_ITEM_CORNER_RADIUS: f32 = 8.0;
