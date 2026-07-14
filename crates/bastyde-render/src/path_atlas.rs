@@ -130,6 +130,13 @@ pub struct PathAtlas {
     shelf_x: u32,
     /// Height of the current shelf (tallest entry in this row).
     shelf_height: u32,
+    /// How many paths have been skipped because they could never fit the atlas.
+    ///
+    /// Such a path is simply not drawn. That is a silent hole in the frame, so it is
+    /// counted rather than swallowed: a non-zero value means some geometry is being
+    /// asked to rasterize larger than [`max_size`](Self::max_size), which is almost
+    /// always a layout bug upstream (see [`Self::lookup_or_rasterize`]).
+    oversize_skips: u64,
 }
 
 impl PathAtlas {
@@ -146,7 +153,19 @@ impl PathAtlas {
             shelf_y: 0,
             shelf_x: 0,
             shelf_height: 0,
+            oversize_skips: 0,
         }
+    }
+
+    /// How many paths have been skipped for being too large to ever fit the atlas.
+    ///
+    /// Each one is a path that simply was not drawn. Non-zero means some geometry is
+    /// rasterizing bigger than [`max_size`](Self::max_size) — upstream, that is a
+    /// layout that has run away (an overlay spanning a whole scrolled document, a
+    /// shape scaled by a runaway transform), and it is worth chasing rather than
+    /// leaving as a hole in the frame.
+    pub fn oversize_skips(&self) -> u64 {
+        self.oversize_skips
     }
 
     /// Call at the start of each frame to advance the LRU counter.
@@ -245,6 +264,25 @@ impl PathAtlas {
         let raster_w = (bounds[2] * geom_scale).ceil() as u32;
         let raster_h = (bounds[3] * geom_scale).ceil() as u32;
         if raster_w == 0 || raster_h == 0 {
+            return None;
+        }
+
+        // A path that can never fit the atlas must never be rasterized.
+        //
+        // Growth is capped at `max_size`, so `allocate_and_write` is guaranteed to
+        // fail for anything larger — meaning the bitmap would be built, thrown away,
+        // and rebuilt from scratch on the very next frame, forever. That is not a
+        // slow frame, it is a permanent freeze: a single 7573x7563 path (one hazard
+        // stripe painted across a tall overflow strip) is a 229 MB rasterization,
+        // and redoing it every frame pinned the UI thread at 100% CPU for as long as
+        // the path stayed on screen.
+        //
+        // Returning `None` here is not a new failure mode — it is the one the caller
+        // already handled (and already reached, just hundreds of megabytes later):
+        // the path is skipped for this frame. Bailing out *before* the raster turns
+        // an unbounded stall into a dropped draw.
+        if raster_w > self.max_size || raster_h > self.max_size {
+            self.oversize_skips += 1;
             return None;
         }
 
@@ -717,6 +755,105 @@ fn arc_to_cubics(
 mod tests {
     use super::*;
     use bastyde_canvas::geometry::Point;
+
+    /// A path larger than the atlas can ever hold must be rejected **before** it is
+    /// rasterized — not after.
+    ///
+    /// The atlas grows only up to `max_size`, so `allocate_and_write` could never
+    /// store such a path: it was rasterized, discarded, and rasterized again on the
+    /// next frame, forever. The geometry below is the one that actually shipped the
+    /// freeze — a single 45° hazard band across a 7563px-tall overflow strip, whose
+    /// bounding box is a 229 MB bitmap. Redoing that every frame pinned the UI thread
+    /// at 100% CPU and the app never recovered.
+    ///
+    /// If this test ever hangs rather than fails, the guard is gone.
+    #[test]
+    fn a_path_too_big_for_the_atlas_is_never_rasterized() {
+        let mut atlas = PathAtlas::new(256, 256);
+
+        // The exact parallelogram from the freeze: height 7563, width 7563 + PITCH.
+        let (h, pitch) = (7563.0_f32, 10.0_f32);
+        let w = h + pitch;
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(pitch, 0.0)));
+        path.commands.push(PathCommand::LineTo(Point::new(w, h)));
+        path.commands.push(PathCommand::LineTo(Point::new(h, h)));
+        path.commands.push(PathCommand::Close);
+
+        let before = atlas.cache.len();
+        let region = atlas.lookup_or_rasterize(
+            &path,
+            &StrokeStyle::solid(0.0),
+            FillRule::Winding,
+            [0.0, 0.0, w, h],
+            1.0,
+            1.0,
+        );
+
+        assert!(
+            region.is_none(),
+            "a {w}x{h} path cannot fit an atlas capped at {} — it must be skipped, \
+             not rasterized into a 229 MB bitmap that is then thrown away",
+            atlas.max_size
+        );
+        assert_eq!(
+            atlas.cache.len(),
+            before,
+            "the rejected path must not leave a cache entry behind"
+        );
+        // `is_none()` alone proves nothing: BEFORE the guard existed the call also
+        // returned None — it just rasterized 229 MB and failed to allocate first,
+        // which is precisely the bug. What must be asserted is that we bailed out
+        // *early*, so pin the counter that only the pre-raster guard increments.
+        assert_eq!(
+            atlas.oversize_skips(),
+            1,
+            "the path must be rejected BEFORE rasterizing; without the early guard \
+             this call still returns None, but only after building and discarding a \
+             229 MB bitmap — every frame, forever"
+        );
+    }
+
+    /// The guard rejects only what genuinely cannot fit: a path right at the limit
+    /// still rasterizes, so the bail-out cannot quietly swallow legitimate art.
+    #[test]
+    fn a_path_that_still_fits_the_atlas_is_rasterized() {
+        let mut atlas = PathAtlas::new(256, 256);
+        let side = atlas.max_size as f32; // exactly at the cap
+
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(side, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(side, side)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(0.0, side)));
+        path.commands.push(PathCommand::Close);
+
+        let region = atlas.lookup_or_rasterize(
+            &path,
+            &StrokeStyle::solid(0.0),
+            FillRule::Winding,
+            [0.0, 0.0, side, side],
+            1.0,
+            1.0,
+        );
+        assert!(
+            region.is_some(),
+            "a path exactly at max_size ({side}) must still be rasterized — the guard \
+             is for paths that can NEVER fit, not for merely large ones"
+        );
+        assert_eq!(
+            atlas.oversize_skips(),
+            0,
+            "the guard must not fire on a path that fits"
+        );
+    }
 
     #[test]
     fn rasterize_simple_rect_path() {

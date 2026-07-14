@@ -221,12 +221,36 @@ fn paint_bands(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
     }
 }
 
+/// Band width, and the gap between bands, in the hazard pattern (px).
+const PITCH: f32 = 10.0;
+
+/// Tallest slice of an overflow strip that a single hazard band may span (px).
+///
+/// A 45° band drawn across a region of height `c` has a **bounding box** of
+/// roughly `(c + PITCH) x c` — it slides one pixel sideways for every pixel down.
+/// [`PathAtlas`](bastyde_render) rasterizes a path by its bounding box and only
+/// *composites* it through the clip, so `set_clip` does nothing to shrink the
+/// bitmap: a band drawn across a tall strip in one piece is a quadratic raster.
+///
+/// That is not theoretical. A scene overflowing a narrowed window produced a
+/// 7563px-tall strip, so each band became a single 7573x7563 path — a 229 MB
+/// rasterization the atlas (max 4096px) could never store, so it was rebuilt and
+/// discarded *every frame*, wedging the UI thread at 100% CPU for as long as the
+/// overflow was on screen.
+///
+/// Slicing the strip caps every emitted path at about `(CHUNK + PITCH)²` px
+/// regardless of how large the overflowing region is, which is the property that
+/// makes this overlay safe to leave on.
+const CHUNK: f32 = 64.0;
+
 /// Paint Flutter-style yellow/black hazard stripes over each overflow strip,
 /// with a bright red border, so over-constrained layouts are impossible to
 /// miss in debug builds.
+///
+/// The stripes are emitted in bounded-height slices (see [`CHUNK`]) rather than
+/// as full-height bands, because the path rasterizer sizes its bitmap from the
+/// path's bounding box, not from the clip.
 fn paint_overflow(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
-    use bastyde_canvas::{Path, Point};
-
     let strips = state.overflow_snapshot.get_ref();
     if strips.is_empty() {
         return;
@@ -234,7 +258,6 @@ fn paint_overflow(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
     let yellow = Color::from_rgba(0.98, 0.80, 0.10, 0.55 * opacity);
     let black = Color::from_rgba(0.0, 0.0, 0.0, 0.55 * opacity);
     let border = Color::from_rgba(0.95, 0.15, 0.10, 0.95 * opacity);
-    const PITCH: f32 = 10.0;
 
     for strip in strips.iter() {
         if strip.width <= 0.0 || strip.height <= 0.0 {
@@ -244,25 +267,53 @@ fn paint_overflow(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
         // base and 45° black diagonals (band width = gap width = PITCH).
         canvas.set_clip(*strip);
         canvas.fill_rect(*strip, yellow);
-
-        let (y0, y1) = (strip.y, strip.bottom());
-        let h = y1 - y0;
-        // Start one band before the leading edge so the corner is covered.
-        let mut d = strip.x - h - PITCH;
-        let end = strip.right() + PITCH;
-        while d < end {
-            let mut p = Path::new();
-            p.move_to(Point::new(d, y0));
-            p.line_to(Point::new(d + PITCH, y0));
-            p.line_to(Point::new(d + PITCH + h, y1));
-            p.line_to(Point::new(d + h, y1));
-            p.close();
-            canvas.fill_path(&p, black);
-            d += 2.0 * PITCH;
-        }
+        paint_hazard_bands(canvas, *strip, black);
         canvas.clear_clip();
 
         canvas.stroke_rounded_rect(*strip, bastyde_tokens::CornerRadius::ZERO, border, 1.5);
+    }
+}
+
+/// The 45° black diagonals of one hazard strip, emitted in [`CHUNK`]-tall slices.
+///
+/// Every band is a parallelogram that descends one slice only, so its bounding box
+/// stays bounded by `CHUNK` no matter how tall `strip` is. The bands are anchored to
+/// a single global lattice — a stripe is the locus where `x - y` falls in a fixed
+/// residue window — so consecutive slices line up and the diagonals read as
+/// continuous across the seams rather than resetting at each one.
+fn paint_hazard_bands(canvas: &mut Canvas, strip: Rect, color: Color) {
+    use bastyde_canvas::{Path, Point};
+
+    let lattice = 2.0 * PITCH;
+    let (y0, y1) = (strip.y, strip.bottom());
+
+    let mut cy0 = y0;
+    while cy0 < y1 {
+        let cy1 = (cy0 + CHUNK).min(y1);
+        let c = cy1 - cy0;
+
+        // A band whose left edge is at `u` on this slice's top spans x in
+        // [u, u + PITCH + c] by the time it reaches the bottom, so it can touch the
+        // strip only for u in [strip.x - PITCH - c, strip.right()].
+        let first = strip.x - PITCH - c;
+        // Snap that start onto the global lattice, phase-shifted by how far this
+        // slice has slid down the diagonal — this is what keeps the seams invisible.
+        let anchor = strip.x - PITCH + (cy0 - y0);
+        let k = ((first - anchor) / lattice).floor();
+        let mut u = anchor + k * lattice;
+
+        let end = strip.right() + PITCH;
+        while u < end {
+            let mut p = Path::new();
+            p.move_to(Point::new(u, cy0));
+            p.line_to(Point::new(u + PITCH, cy0));
+            p.line_to(Point::new(u + PITCH + c, cy1));
+            p.line_to(Point::new(u + c, cy1));
+            p.close();
+            canvas.fill_path(&p, color);
+            u += lattice;
+        }
+        cy0 = cy1;
     }
 }
 
@@ -770,5 +821,114 @@ mod overflow_tests {
             strips.is_empty(),
             "fitting layout should not flag, got {strips:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod hazard_stripe_tests {
+    use super::*;
+    use bastyde_canvas::Canvas;
+
+    /// Every hazard band emitted for `strip`, as `(width, height)` of its bounding box.
+    fn band_bounds(strip: Rect) -> Vec<(f32, f32)> {
+        let mut canvas = Canvas::new();
+        paint_hazard_bands(&mut canvas, strip, Color::from_rgba(0.0, 0.0, 0.0, 1.0));
+        canvas
+            .into_render_frame()
+            .paths
+            .iter()
+            .map(|p| (p.bounds[2], p.bounds[3]))
+            .collect()
+    }
+
+    /// The freeze, pinned.
+    ///
+    /// A scene overflowing a narrowed window produced a 7563px-tall strip. Each hazard
+    /// band used to span the whole strip in one piece, so its *bounding box* — which is
+    /// what the path rasterizer sizes its bitmap from, `set_clip` notwithstanding —
+    /// became 7573x7563: a 229 MB rasterization, too big for the 4096px atlas to ever
+    /// store, and therefore rebuilt and thrown away on every single frame. The UI thread
+    /// sat at 100% CPU and never came back.
+    ///
+    /// No band may be bigger than one slice, however tall the overflow is.
+    #[test]
+    fn a_very_tall_overflow_emits_no_oversized_band() {
+        let strip = Rect::new(48.0, 118.0, 40.0, 7563.0);
+        let bands = band_bounds(strip);
+
+        assert!(!bands.is_empty(), "a tall strip must still be striped");
+
+        let cap = CHUNK + PITCH + 1.0; // +1 for the ceil() the rasterizer applies
+        for (w, h) in &bands {
+            assert!(
+                *w <= cap && *h <= cap,
+                "a hazard band is {w}x{h}, over the {cap} cap — a band's bounding box \
+                 must stay bounded by CHUNK no matter how tall the strip is, or the \
+                 path atlas re-rasterizes hundreds of MB every frame"
+            );
+        }
+
+        // And it must stay bounded by the atlas's own limit, which is the property
+        // that actually prevents the freeze.
+        let worst = bands.iter().fold(0.0_f32, |m, (w, h)| m.max(w.max(*h)));
+        assert!(
+            worst < 4096.0,
+            "worst band dimension {worst} would not fit the 4096px path atlas"
+        );
+    }
+
+    /// Slicing the strip must not make the diagonals restart at every seam: the bands
+    /// are anchored to one global lattice, so a stripe leaving the bottom of one slice
+    /// enters the top of the next at exactly the same offset. Without this the overlay
+    /// reads as a stack of disconnected chevrons.
+    #[test]
+    fn the_diagonals_stay_continuous_across_slice_seams() {
+        // Two slices' worth of height, and a strip wide enough to hold whole bands.
+        let strip = Rect::new(0.0, 0.0, 200.0, CHUNK * 2.0);
+        let mut canvas = Canvas::new();
+        paint_hazard_bands(&mut canvas, strip, Color::from_rgba(0.0, 0.0, 0.0, 1.0));
+        let frame = canvas.into_render_frame();
+
+        // A stripe is the locus where (x - y) sits in a fixed residue window modulo
+        // 2*PITCH. Take each band's top-left vertex and check every one shares the
+        // same residue — that is exactly what "the diagonals line up" means, and it
+        // holds across the seam only because each slice is phase-shifted by its depth.
+        let lattice = 2.0 * PITCH;
+        let residues: Vec<f32> = frame
+            .paths
+            .iter()
+            .map(|p| {
+                // bounds = [x, y, w, h]; the top-left vertex of a band is (x, y)
+                // for bands fully inside, so use the bounds origin.
+                let r = (p.bounds[0] - p.bounds[1]).rem_euclid(lattice);
+                (r * 100.0).round() / 100.0
+            })
+            .collect();
+
+        assert!(!residues.is_empty(), "expected bands");
+        let first = residues[0];
+        for r in &residues {
+            let d = (r - first).abs().min(lattice - (r - first).abs());
+            assert!(
+                d < 0.01,
+                "band phases diverge ({first} vs {r}) — the slices are not anchored to \
+                 one lattice, so the diagonals break at the seam"
+            );
+        }
+    }
+
+    /// A short strip is unaffected — the slicing is transparent below one CHUNK.
+    #[test]
+    fn a_short_overflow_is_still_striped() {
+        let strip = Rect::new(0.0, 0.0, 100.0, 20.0);
+        let bands = band_bounds(strip);
+        assert!(!bands.is_empty(), "a short strip must still be striped");
+        for (w, h) in &bands {
+            assert!(*h <= 20.0 + 1.0, "band height {h} exceeds the strip's 20px");
+            assert!(
+                *w <= CHUNK + PITCH + 1.0,
+                "band width {w} unexpectedly large"
+            );
+        }
     }
 }
