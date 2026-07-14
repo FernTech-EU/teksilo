@@ -2,8 +2,18 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Image texture manager: maps image names to GPU textures for DrawCommand::Image rendering.
+//!
+//! Every image is uploaded with a full **mip chain** and sampled trilinearly, so
+//! a large source drawn small (a 512 px app icon in a 25 dp title bar, a photo
+//! in a thumbnail strip) resolves cleanly instead of aliasing. See
+//! [`crate::mipmap`] for how the chain is built — and for the two things that
+//! make it correct rather than merely present (linear-light averaging, and
+//! premultiplied filtering so transparent texels can't darken their
+//! neighbours).
 
 use std::collections::HashMap;
+
+use crate::mipmap::build_mip_chain;
 
 /// Manages uploaded image textures and their bind groups.
 #[derive(Default)]
@@ -38,6 +48,9 @@ impl ImageManager {
             return;
         }
 
+        // Levels 1..N (level 0 is `pixels`). Built once, at upload.
+        let mips = build_mip_chain(pixels, width, height);
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("image_texture"),
             size: wgpu::Extent3d {
@@ -45,7 +58,7 @@ impl ImageManager {
                 height,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: 1 + mips.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -53,30 +66,45 @@ impl ImageManager {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        // Level 0, then each generated level. A texture declaring mip levels it
+        // never receives samples as transparent black wherever the sampler
+        // reaches them, so every declared level must be written.
+        let upload = |level: u32, w: u32, h: u32, data: &[u8]| {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(w * 4),
+                    rows_per_image: Some(h),
+                },
+                wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+            );
+        };
+        upload(0, width, height, pixels);
+        for (level, (w, h, data)) in mips.iter().enumerate() {
+            upload(level as u32 + 1, *w, *h, data);
+        }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Trilinear: `mipmap_filter` is what actually engages the chain. Left at
+        // its `Nearest` default, a minified image snaps between whole levels and
+        // visibly pops as the scale crosses a power of two — and with a
+        // single-level texture (the pre-mip behaviour) it would never leave
+        // level 0 at all, which is the aliasing this exists to remove.
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 

@@ -3,6 +3,7 @@
 
 pub(crate) mod blur;
 pub mod image_manager;
+pub(crate) mod mipmap;
 pub mod path_atlas;
 pub mod renderer;
 pub mod stream_buffer;
