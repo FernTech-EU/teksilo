@@ -157,12 +157,13 @@ impl Widget for Root {
         let size_btn = Button::new(lit!("Sizing"))
             .variant(ButtonVariant::Ghost)
             .tooltip(lit!(
-                "Toggle Shared (uniform tab widths) ↔ Independent (size to content)",
+                "Cycle Shared (uniform tab widths) → Independent (size to content) → Fill (stretch across the bar)",
             ))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match sizing_for_btn.get() {
                     TabSizing::Shared => TabSizing::Independent,
-                    TabSizing::Independent => TabSizing::Shared,
+                    TabSizing::Independent => TabSizing::Fill,
+                    TabSizing::Fill => TabSizing::Shared,
                 };
                 sizing_for_btn.set(next);
             });

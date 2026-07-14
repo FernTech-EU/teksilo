@@ -235,10 +235,11 @@ pub struct TabWidget {
     tab_bar_height: Option<f32>,
     /// Reactive sizing strategy. `None` until `.tab_sizing(...)`
     /// or `.sizing(...)` is called; defaulted by the bar
-    /// (`TabSizing::Shared`) otherwise. When a signal is bound,
+    /// (`TabSizing::Shared`) otherwise. `TabSizing::Fill` stretches the
+    /// tabs across the bar (the nav-rail look). When a signal is bound,
     /// the [`TabWidget`] also binds it at
     /// [`BindingLevel::Rebuild`]
-    /// so toggling the signal swaps Shared ↔ Independent live.
+    /// so toggling the signal swaps the sizing mode live.
     sizing: Option<Signal<TabSizing>>,
     /// Reactive tab display mode (icon / text / icon+text). `None` until
     /// `.tab_display(...)` is called; defaulted by the bar
@@ -608,8 +609,8 @@ impl TabWidget {
     }
 
     /// Bind the per-tab sizing strategy, statically or reactively —
-    /// flipping a bound signal swaps Shared ↔ Independent live, with no
-    /// rebuild on the parent's part. The signal is bound at
+    /// flipping a bound signal swaps between Shared / Independent / Fill
+    /// live, with no rebuild on the parent's part. The signal is bound at
     /// `BindingLevel::Rebuild` inside [`build`](Widget::build);
     /// memoized panes survive the rebuild so per-tab state is
     /// preserved.

@@ -63,15 +63,17 @@ impl From<TabBarOrientation> for bastyde_core::styles::TabBarOrientation {
     }
 }
 
-/// Whether the layout-axis extent (width in horizontal bars, height in
-/// vertical bars) is shared across all unpinned tabs or chosen
-/// per-tab from content.
+/// How wide each tab is: shared across all unpinned tabs, chosen
+/// per-tab from content, or stretched to fill the bar.
 ///
-/// See the module docs of [`crate::tab_widget`] for how this is
-/// applied per orientation. In wrap (multi-line horizontal) mode
-/// `Independent` is forced regardless of this setting — equal-width
-/// tabs in a wrapping row look like a tile grid and lose the
-/// bookmark-bar / pill-strip aesthetic.
+/// `Shared` and `Independent` size the **layout axis** (width in
+/// horizontal bars, height in vertical bars); `Fill` sizes the tab's
+/// **width** in both orientations — see each variant. See the module
+/// docs of [`crate::tab_widget`] for how this is applied per
+/// orientation. In wrap (multi-line horizontal) mode `Independent` is
+/// forced regardless of this setting — equal-width tabs in a wrapping
+/// row look like a tile grid and lose the bookmark-bar / pill-strip
+/// aesthetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabSizing {
     /// All non-pinned tabs share the same extent on the layout axis.
@@ -79,11 +81,37 @@ pub enum TabSizing {
     /// count, then clamped to `[min_tab_extent, max_tab_extent]`.
     /// Below the min, content overflows into scroll. Above the max,
     /// slack is left as empty space at the trailing edge.
+    ///
+    /// In a **vertical** bar the layout axis is the pill *height*, so
+    /// this yields uniform pills whose width fits the widest label
+    /// (clamped to `[min_tab_width, max_tab_width]`).
     Shared,
     /// Each tab sizes to its content (icon + label + slots), clamped
     /// to `[min_tab_extent, max_tab_extent]`. Truncation via ellipsis
     /// when content hits `max`.
     Independent,
+    /// Tabs stretch to the full width the bar is offered — no slack
+    /// left over, no fit-to-content shrinking. The nav-rail /
+    /// segmented-control look (VS Code's settings sidebar, a
+    /// full-bleed tab strip).
+    ///
+    /// - **Horizontal:** the viewport width is divided equally across
+    ///   the unpinned tabs and `max_tab_width` is *not* applied, so
+    ///   the strip is filled edge to edge instead of leaving trailing
+    ///   slack. `min_tab_width` still holds — below it the headers
+    ///   overflow into scroll rather than squeezing to nothing.
+    /// - **Vertical:** every pill takes the bar's full proposed width
+    ///   (the widest-label clamp is bypassed), so the tabs span the
+    ///   sidebar. Pill height is unchanged (the intrinsic
+    ///   `editor_tab_height`, or the `tab_bar_height` override).
+    ///
+    /// With no width proposed at all (an unbounded measure — a
+    /// `Center`, an `HStack` asking for the natural size), there is
+    /// nothing to fill: a vertical bar falls back to the `Shared`
+    /// fit-to-widest-label width. Give the bar a bounded width (a
+    /// `FixedSize`, an `Expand` in a sized parent) for `Fill` to have
+    /// any effect.
+    Fill,
 }
 
 /// Bar-level control over what each tab shows — its icon, its label, or both.

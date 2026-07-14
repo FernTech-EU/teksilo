@@ -300,6 +300,13 @@ pub struct TabBar<T: 'static> {
     pinned_strip_id: Option<WidgetId>,
     bar_leading_slot_id: Option<WidgetId>,
     bar_trailing_slot_id: Option<WidgetId>,
+    /// The bar's outer stack (slots + arrows + the scroll slot +
+    /// dropdown), *inside* the style chrome. A vertical bar measures
+    /// this at an unbounded height to recover its natural height —
+    /// the scroll slot is an `Expand::vertical`, which reports 0 and
+    /// takes its size from surplus, so the stack alone would say the
+    /// bar is 0 dp tall. See `natural_height_vertical`.
+    outer_stack_id: Option<WidgetId>,
 }
 
 #[derive(Clone)]
@@ -479,6 +486,7 @@ impl<T: 'static> TabBar<T> {
             pinned_strip_id: None,
             bar_leading_slot_id: None,
             bar_trailing_slot_id: None,
+            outer_stack_id: None,
         }
     }
 
@@ -486,6 +494,39 @@ impl<T: 'static> TabBar<T> {
     pub fn tab_sizing(mut self, mode: TabSizing) -> Self {
         self.sizing = mode;
         self
+    }
+
+    /// The natural height of a **vertical** bar: the headers' own extent
+    /// plus whatever the non-scrolling slots (pinned strip, scroll
+    /// arrows, overflow dropdown, leading / trailing slot widgets) and
+    /// their spacings contribute.
+    ///
+    /// The outer stack can't answer this on its own: the scroll slot is
+    /// an `Expand::vertical`, which reports 0 at its natural size and
+    /// grows from surplus, so measuring the stack at an unbounded height
+    /// yields "everything except the tabs". Adding the header column's
+    /// own unbounded height back gives the whole bar — no duplicate
+    /// spacing arithmetic (the stack already counted it).
+    ///
+    /// Without this a vertical bar next to a flexible sibling (the
+    /// `Spacer` that pins a nav to the bottom of a sidebar) collapses to
+    /// 0 dp and its pills spill out of it.
+    fn natural_height_vertical(&self, width: Option<f32>, ctx: &LayoutContext) -> f32 {
+        let probe = SizeProposal {
+            width,
+            height: None,
+        };
+        let slots_h = self
+            .outer_stack_id
+            .and_then(|id| ctx.child_size(id, probe))
+            .map(|s| s.height)
+            .unwrap_or(0.0);
+        let headers_h = self
+            .header_row_id
+            .and_then(|id| ctx.child_size(id, probe))
+            .map(|s| s.height)
+            .unwrap_or(0.0);
+        slots_h + headers_h
     }
 
     /// Choose what every tab shows — icon, label, or both. See
@@ -506,6 +547,11 @@ impl<T: 'static> TabBar<T> {
     /// (tab labels or a slot widget) and never shrinks below this floor.
     /// Vertical pill heights stay at `theme.components.tab.editor_tab_height`
     /// regardless of this knob.
+    ///
+    /// Under [`TabSizing::Fill`] a **vertical** bar takes the width it is
+    /// offered outright, so this floor no longer applies to it; in a
+    /// **horizontal** `Fill` bar it still does (the tabs overflow into
+    /// scroll rather than squeeze below it).
     pub fn min_tab_width(mut self, dp: f32) -> Self {
         self.min_tab_width = dp.max(0.0);
         self
@@ -527,6 +573,10 @@ impl<T: 'static> TabBar<T> {
     /// In **vertical** orientation it caps the whole sidebar's width —
     /// see [`min_tab_width`](Self::min_tab_width) for the symmetric
     /// adapt-to-content rule.
+    ///
+    /// [`TabSizing::Fill`] ignores this cap in both orientations — filling
+    /// the bar is the point, and a cap would leave exactly the slack the
+    /// mode exists to remove.
     pub fn max_tab_width(mut self, dp: f32) -> Self {
         self.max_tab_width = dp.max(0.0);
         self
@@ -1578,6 +1628,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 ctx.add(col)
             }
         };
+        self.outer_stack_id = Some(root_id);
         // Resolve the active `TabStyle` and let it wrap the bar
         // content with the strip chrome — backdrop fill, content-pane
         // separator, drag-reorder drop indicator. Per-call override >
@@ -1898,23 +1949,35 @@ impl<T: 'static> Widget for TabBar<T> {
                 // to [min_tab_width, max_tab_width]. Probing the inner
                 // ScrollArea would just echo our own proposal back, so
                 // we measure the row directly.
-                let mut intrinsic_w = 0.0_f32;
-                for opt in [
-                    self.header_row_id,
-                    self.pinned_strip_id,
-                    self.bar_leading_slot_id,
-                    self.bar_trailing_slot_id,
-                ] {
-                    if let Some(id) = opt
-                        && let Some(s) = ctx.child_size(id, SizeProposal::unspecified())
-                    {
-                        intrinsic_w = intrinsic_w.max(s.width);
+                //
+                // Under `TabSizing::Fill` the bar instead takes the
+                // width it is offered (the sidebar's full width) and
+                // hands it down to the header column, which stretches
+                // every pill to it. An unbounded proposal has no width
+                // to fill, so it falls back to the intrinsic path.
+                let target = match (self.sizing, proposal.width) {
+                    (TabSizing::Fill, Some(p)) => p.max(0.0),
+                    _ => {
+                        let mut intrinsic_w = 0.0_f32;
+                        for opt in [
+                            self.header_row_id,
+                            self.pinned_strip_id,
+                            self.bar_leading_slot_id,
+                            self.bar_trailing_slot_id,
+                        ] {
+                            if let Some(id) = opt
+                                && let Some(s) = ctx.child_size(id, SizeProposal::unspecified())
+                            {
+                                intrinsic_w = intrinsic_w.max(s.width);
+                            }
+                        }
+                        let mut t = intrinsic_w.clamp(self.min_tab_width, self.max_tab_width);
+                        if let Some(p) = proposal.width {
+                            t = t.min(p).max(self.min_tab_width);
+                        }
+                        t
                     }
-                }
-                let mut target = intrinsic_w.clamp(self.min_tab_width, self.max_tab_width);
-                if let Some(p) = proposal.width {
-                    target = target.min(p).max(self.min_tab_width);
-                }
+                };
                 SizeProposal {
                     width: Some(target),
                     height: proposal.height,
@@ -1922,9 +1985,19 @@ impl<T: 'static> Widget for TabBar<T> {
             }
             TabBarOrientation::Horizontal => proposal,
         };
-        ctx.child_size(root_id, final_proposal)
-            .unwrap_or_else(|| final_proposal.resolve(0.0, 0.0))
-            .into()
+        let mut size = ctx
+            .child_size(root_id, final_proposal)
+            .unwrap_or_else(|| final_proposal.resolve(0.0, 0.0));
+        // Unbounded height + vertical: the outer stack reports 0 (its
+        // scroll slot is an `Expand::vertical`, which is 0-natural and
+        // sizes from surplus), which would collapse the bar to nothing
+        // beside a flexible sibling — a `Spacer` in a sidebar column.
+        // Report the tabs' own extent instead, so a vertical bar has a
+        // natural height like any other content widget.
+        if self.orientation == TabBarOrientation::Vertical && proposal.height.is_none() {
+            size.height = self.natural_height_vertical(final_proposal.width, ctx);
+        }
+        size.into()
     }
 
     fn place_children(
@@ -2017,16 +2090,25 @@ impl TabHeaderRow {
             return Vec::new();
         }
         match self.sizing {
-            TabSizing::Shared => {
+            TabSizing::Shared | TabSizing::Fill => {
                 let target = match self.axis {
                     TabBarOrientation::Horizontal => {
                         // Divide the viewport width across tabs
                         // (Firefox / Chrome convention) and clamp by
-                        // the layout-axis [min, max] knobs.
+                        // the layout-axis [min, max] knobs. `Fill`
+                        // drops the max cap: its whole point is to
+                        // consume the strip edge to edge rather than
+                        // leave trailing slack past `max_tab_width`.
+                        // The min still holds — below it the headers
+                        // overflow into scroll.
                         let total_spacing = self.spacing * (n.saturating_sub(1)) as f32;
                         let avail = viewport_main.unwrap_or(0.0).max(0.0);
                         let ideal = ((avail - total_spacing).max(0.0) / n as f32).max(0.0);
-                        ideal.clamp(self.min_extent, self.max_extent)
+                        if self.sizing == TabSizing::Fill {
+                            ideal.max(self.min_extent)
+                        } else {
+                            ideal.clamp(self.min_extent, self.max_extent)
+                        }
                     }
                     TabBarOrientation::Vertical => {
                         // Vertical sidebar pills are NOT viewport-
@@ -2035,7 +2117,10 @@ impl TabHeaderRow {
                         // (no native vertical mode) nor VS Code /
                         // IntelliJ do. Use the intrinsic per-tab
                         // height (`editor_tab_height`) so vertical
-                        // tabs match horizontal tabs in size.
+                        // tabs match horizontal tabs in size. `Fill`
+                        // is no different here: in a vertical bar it
+                        // stretches the pill *width* (see
+                        // `layout_response`), never the height.
                         self.tab_extent(ctx)
                     }
                 };
@@ -2130,16 +2215,27 @@ impl Widget for TabHeaderRow {
                 // [min_extent, max_extent]. Without this, the row
                 // would echo `proposal.width` and let the bar swallow
                 // whatever cross-axis space the parent gave it.
-                let intrinsic = self
-                    .header_ids
-                    .iter()
-                    .filter_map(|&id| ctx.child_size(id, SizeProposal::unspecified()))
-                    .map(|s| s.width)
-                    .fold(0.0_f32, f32::max);
-                let mut width = intrinsic.clamp(self.min_extent, self.max_extent);
-                if let Some(proposed) = proposal.width {
-                    width = width.min(proposed).max(self.min_extent);
-                }
+                //
+                // `Fill` wants exactly that echo, though: the pills
+                // span the width the bar is offered. Only when the
+                // proposal is unbounded (nothing to fill) does it fall
+                // back to the fit-to-widest-label width.
+                let width = match (self.sizing, proposal.width) {
+                    (TabSizing::Fill, Some(proposed)) => proposed.max(0.0),
+                    _ => {
+                        let intrinsic = self
+                            .header_ids
+                            .iter()
+                            .filter_map(|&id| ctx.child_size(id, SizeProposal::unspecified()))
+                            .map(|s| s.width)
+                            .fold(0.0_f32, f32::max);
+                        let mut w = intrinsic.clamp(self.min_extent, self.max_extent);
+                        if let Some(proposed) = proposal.width {
+                            w = w.min(proposed).max(self.min_extent);
+                        }
+                        w
+                    }
+                };
                 let extents = self.compute_extents(proposal.height, ctx);
                 let total = extents.iter().sum::<f32>() + total_spacing;
                 Size::new(width, total).into()

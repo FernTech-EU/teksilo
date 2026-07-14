@@ -15,6 +15,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_data::ListModel;
 
+use crate::primitives::{FixedSize, VStack};
 use crate::tab_widget::{
     TabBar, TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
 };
@@ -1721,6 +1722,248 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
         (target - intrinsic).abs() < 0.5,
         "expected ~{intrinsic} dp per tab (editor_tab_height), got {target}"
     );
+}
+
+/// The nav-sidebar shape the mode exists for: a bottom-pinned bar in a
+/// fixed-width column, which places the bar at the width the bar *asks
+/// for* (a `VStack` aligns, it does not stretch). `Shared` asks for its
+/// widest label and leaves the rest of the sidebar empty; `Fill` asks
+/// for the whole column, so the pills span it. Heights are untouched
+/// either way — in a vertical bar `Fill` acts on the cross axis.
+///
+/// Also covers the natural height: the bar sits beside a flexible
+/// `Spacer` with no height pin, and must still report its content
+/// extent (3 pills) rather than collapsing to the 0 dp its greedy
+/// scroll slot would otherwise report.
+#[test]
+fn vertical_fill_sizing_stretches_pills_to_sidebar_width() {
+    const SIDEBAR_W: f32 = 240.0;
+    const SIDEBAR_H: f32 = 400.0;
+    const PILL_H: f32 = 34.0;
+
+    fn sidebar(sizing: TabSizing) -> (WidgetTree, WidgetId) {
+        let model = ListModel::from_vec(vec![
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("A")), ()),
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("B")), ()),
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("C")), ()),
+        ]);
+        let delegate =
+            TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let bar_id = tree.add(
+            TabBar::vertical(model, delegate, Signal::new(None), |_, h: &TabHandle| h.id)
+                .tab_sizing(sizing)
+                .tab_bar_height(PILL_H)
+                .tab_spacing(0.0)
+                .show_scroll_arrows(false)
+                .show_overflow_dropdown(false),
+        );
+        // A `Spacer` above pins the nav to the sidebar's bottom — no
+        // height pin on the bar itself.
+        let spacer = tree.add(crate::primitives::Spacer::new());
+        let column = tree.add(VStack::new().add_child(spacer).add_child(bar_id));
+        let _sidebar = tree.add(
+            FixedSize::new()
+                .width(SIDEBAR_W)
+                .height(SIDEBAR_H)
+                .child_id(column),
+        );
+        tree.layout(SizeProposal::exact(SIDEBAR_W, SIDEBAR_H));
+        (tree, bar_id)
+    }
+
+    let (shared_tree, shared_bar) = sidebar(TabSizing::Shared);
+    let shared_w = shared_tree.bounds(shared_bar).width;
+    assert!(
+        shared_w < SIDEBAR_W - 1.0,
+        "Shared fits the widest label — it should not span the {SIDEBAR_W} dp sidebar; got {shared_w}"
+    );
+
+    let (tree, bar_id) = sidebar(TabSizing::Fill);
+    let bar = tree.bounds(bar_id);
+    assert!(
+        (bar.width - SIDEBAR_W).abs() < 0.5,
+        "the Fill bar takes the width it is offered, got {}",
+        bar.width
+    );
+    // Natural height beside a flexible sibling: 3 pills, and pushed to
+    // the bottom of the column by the Spacer.
+    assert!(
+        (bar.height - 3.0 * PILL_H).abs() < 0.5,
+        "expected the bar's content height (3 × {PILL_H}), got {}",
+        bar.height
+    );
+    assert!(
+        (bar.y + bar.height - SIDEBAR_H).abs() < 0.5,
+        "the Spacer should pin the nav to the sidebar bottom, got y={}",
+        bar.y
+    );
+
+    let header_row = data_source_header_row(&tree, bar_id);
+    let headers = tree.children(header_row);
+    assert_eq!(headers.len(), 3);
+    for &h in &headers {
+        let b = tree.bounds(h);
+        assert!(
+            (b.width - SIDEBAR_W).abs() < 1.0,
+            "every pill spans the sidebar under Fill: got {} in a {SIDEBAR_W} dp column",
+            b.width
+        );
+        // …and Fill did not touch the layout axis: pill height is still
+        // the per-tab extent, not viewport / 3.
+        assert!(
+            (b.height - PILL_H).abs() < 0.5,
+            "Fill must not stretch pill heights: got {}",
+            b.height
+        );
+    }
+}
+
+/// An unbounded width proposal (a `Center`, an `HStack` measuring the
+/// natural size) has nothing to fill — `Fill` must not collapse the bar
+/// to zero; it falls back to the `Shared` fit-to-widest-label width.
+#[test]
+fn vertical_fill_sizing_falls_back_to_intrinsic_width_when_unbounded() {
+    let tabs = || {
+        ListModel::from_vec(vec![
+            TabHandle::dynamic(
+                TabId::fresh(),
+                "doc",
+                TabInfo::new().title(label("Examples")),
+                (),
+            ),
+            TabHandle::dynamic(
+                TabId::fresh(),
+                "doc",
+                TabInfo::new().title(label("About")),
+                (),
+            ),
+        ])
+    };
+    let delegate =
+        || TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+    let unbounded = SizeProposal {
+        width: None,
+        height: Some(400.0),
+    };
+
+    let mut fill_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let fill_bar = fill_tree.add(
+        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| h.id)
+            .tab_sizing(TabSizing::Fill)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    fill_tree.layout(unbounded);
+
+    let mut shared_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let shared_bar = shared_tree.add(
+        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| h.id)
+            .tab_sizing(TabSizing::Shared)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    shared_tree.layout(unbounded);
+
+    let fill_w = fill_tree.bounds(fill_bar).width;
+    let shared_w = shared_tree.bounds(shared_bar).width;
+    assert!(fill_w > 0.0, "an unbounded Fill bar must not collapse");
+    assert!(
+        (fill_w - shared_w).abs() < 0.5,
+        "with no width to fill, Fill falls back to Shared: {fill_w} vs {shared_w}"
+    );
+}
+
+/// Horizontal `Fill` divides the viewport like `Shared` but drops the
+/// `max_tab_width` cap — the strip is filled edge to edge instead of
+/// leaving trailing slack.
+#[test]
+fn horizontal_fill_sizing_ignores_max_tab_width() {
+    let tabs = || {
+        ListModel::from_vec(vec![
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("A")), ()),
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("B")), ()),
+            TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("C")), ()),
+        ])
+    };
+    let delegate =
+        || TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(
+        TabBar::horizontal(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| {
+            h.id
+        })
+        .tab_sizing(TabSizing::Fill)
+        .min_tab_width(0.0)
+        .max_tab_width(120.0) // Shared would stop here, leaving 540 dp of slack
+        .tab_spacing(0.0)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(900.0, 60.0));
+
+    let header_row = data_source_header_row(&tree, bar_id);
+    let widths: Vec<f32> = tree
+        .children(header_row)
+        .iter()
+        .map(|&h| tree.bounds(h).width)
+        .collect();
+    for w in &widths {
+        assert!(
+            (w - 300.0).abs() < 1.0,
+            "expected 900/3 = 300 dp per tab under Fill (max ignored), got {widths:?}"
+        );
+    }
+}
+
+/// …but `min_tab_width` still holds under horizontal `Fill`: past the
+/// point where the tabs would squeeze below it, they overflow into the
+/// bar's scroll area instead.
+#[test]
+fn horizontal_fill_sizing_respects_min_tab_width() {
+    let handles: Vec<TabHandle> = (0..10)
+        .map(|i| {
+            TabHandle::dynamic(
+                TabId::fresh(),
+                "doc",
+                TabInfo::new().title(label(&format!("Tab {i}"))),
+                (),
+            )
+        })
+        .collect();
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let bar_id = tree.add(
+        TabBar::horizontal(
+            ListModel::from_vec(handles),
+            delegate,
+            Signal::new(None),
+            |_, h: &TabHandle| h.id,
+        )
+        .tab_sizing(TabSizing::Fill)
+        .min_tab_width(80.0)
+        .tab_spacing(0.0)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
+    );
+    // 300 dp / 10 tabs = 30 dp each — under the 80 dp floor.
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+
+    let header_row = data_source_header_row(&tree, bar_id);
+    let widths: Vec<f32> = tree
+        .children(header_row)
+        .iter()
+        .map(|&h| tree.bounds(h).width)
+        .collect();
+    for w in &widths {
+        assert!(
+            (w - 80.0).abs() < 1.0,
+            "Fill must not squeeze tabs below min_tab_width, got {widths:?}"
+        );
+    }
 }
 
 #[test]
