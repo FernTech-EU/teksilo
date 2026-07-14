@@ -357,16 +357,42 @@ impl Canvas {
     /// baking the stroke at a constant device-pixel width, so connectors stay
     /// crisp and uniform at any scene zoom.
     pub fn stroke_path(&mut self, path: &Path, color: Color, style: impl Into<StrokeStyle>) {
+        self.stroke_path_with_paint(path, Paint::Solid(color), style);
+    }
+
+    /// Stroke an arbitrary path outline with a paint — a solid color, or a
+    /// **gradient** (an SVG `stroke="url(#grad)"`, a gradient-ruled underline).
+    ///
+    /// Gradient geometry is in the same space as for a fill: **path-bounds-local
+    /// pixels**, `(0, 0)` at the top-left of `path.bounds()`. A stroke's drawn
+    /// rect is wider than that — the outline spills `style.width` beyond the
+    /// path on every side, and the shader normalizes the gradient against *that*
+    /// expanded rect — so the endpoints are re-based here. Without the shift a
+    /// stroke gradient would sit visibly offset from the identical fill gradient
+    /// on the same path, and by an amount that changes with the stroke width.
+    pub fn stroke_path_with_paint(
+        &mut self,
+        path: &Path,
+        paint: impl Into<Paint>,
+        style: impl Into<StrokeStyle>,
+    ) {
         let style = style.into();
-        let bounds = path.bounds().expand(style.width);
+        let path_bounds = path.bounds();
+        let bounds = path_bounds.expand(style.width);
+        let shifted = rebase_paint(
+            paint.into(),
+            path_bounds.x - bounds.x,
+            path_bounds.y - bounds.y,
+        );
+        let (color, paint_data) = paint_to_data(&shifted);
         let idx = self.frame.paths.len();
         self.frame.paths.push(PathEntry {
             path: path.clone(),
-            color: color.to_array(),
+            color,
             stroke_style: style,
             fill_rule: FillRule::Winding,
             bounds: bounds.to_array(),
-            paint_data: PaintData::Solid,
+            paint_data,
         });
         self.frame.draw_order.push(DrawCommand::Path(idx));
     }
@@ -967,6 +993,45 @@ impl std::fmt::Debug for DebugElide<'_> {
             std::fmt::Debug::fmt(&head, f)?;
             f.write_str("…")
         }
+    }
+}
+
+/// Translate a paint's gradient geometry by `(dx, dy)`.
+///
+/// Gradient coordinates are relative to the rect the shader normalizes against,
+/// and for a stroke that rect is the *expanded* one — see
+/// [`Canvas::stroke_path_with_paint`], the only caller. A solid paint has no
+/// geometry and passes through.
+fn rebase_paint(paint: Paint, dx: f32, dy: f32) -> Paint {
+    if dx == 0.0 && dy == 0.0 {
+        return paint;
+    }
+    let shift = |p: Point| Point::new(p.x + dx, p.y + dy);
+    match paint {
+        Paint::LinearGradient { start, end, stops } => Paint::LinearGradient {
+            start: shift(start),
+            end: shift(end),
+            stops,
+        },
+        Paint::RadialGradient {
+            center,
+            radius,
+            stops,
+        } => Paint::RadialGradient {
+            center: shift(center),
+            radius,
+            stops,
+        },
+        Paint::ConicGradient {
+            center,
+            start_angle,
+            stops,
+        } => Paint::ConicGradient {
+            center: shift(center),
+            start_angle,
+            stops,
+        },
+        other => other,
     }
 }
 

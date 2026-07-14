@@ -10,7 +10,7 @@
 //!
 //! | Extension | Validation | Runtime type |
 //! |-----------|-----------|--------------|
-//! | `.svg` | XML parse + `<svg>` root + viewBox | `&'static SvgIcon` |
+//! | `.svg` | Parsed with the real `SvgIcon` parser: it must parse **and** carry drawable geometry (see [`validate_svg`]) | `&'static SvgIcon` |
 //! | `.png` | Magic bytes + IHDR chunk | `&'static RasterIcon` |
 //! | `.webp` | RIFF + WEBP signature | `&'static RasterIcon` (static) or `&'static AnimatedIcon` (animated) |
 //!
@@ -92,50 +92,42 @@ fn detect_kind(path: &str) -> Option<ResourceKind> {
     }
 }
 
+/// Validate an SVG **with the very parser that will render it** — the one in
+/// `bastyde-canvas`, which the generated code calls at runtime.
+///
+/// This used to be a hand-rolled XML sniff: root element is `<svg>`, has a
+/// viewBox. Two whole classes of broken resource walked straight through it,
+/// and both failed later, further away, and less legibly:
+///
+/// 1. **Files the renderer draws as nothing.** An SVG whose only content is an
+///    embedded raster (`<image xlink:href="data:image/png;base64,…">` — what
+///    Inkscape writes when you "save" a bitmap, and what a surprising number of
+///    "scalable" app icons in the wild actually are) is a valid `<svg>` element
+///    with a viewBox. It passed, compiled, and rendered as a blank icon, with no
+///    diagnostic anywhere. The icon parser skips `<image>` (and `<text>`) by
+///    design; a document with nothing else in it has no geometry at all.
+///
+/// 2. **Files the runtime would panic on.** Malformed path data, an unparseable
+///    `transform`, a viewBox that isn't four numbers — none of them are visible
+///    to a root-element check, so `SvgIcon::parse(…).expect("validated at
+///    compile time")` in the generated code was making a promise this function
+///    hadn't kept.
+///
+/// Parsing for real closes both, and keeps the check honest as the parser grows:
+/// whatever `SvgIcon` can draw is exactly what `res!` accepts.
 fn validate_svg(data: &[u8], path: &str) -> std::result::Result<(), String> {
-    use quick_xml::Reader;
-    use quick_xml::events::Event;
-
     let text = std::str::from_utf8(data).map_err(|e| format!("{path}: not valid UTF-8: {e}"))?;
-    let mut reader = Reader::from_str(text);
-    let mut buf = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let name = e.local_name();
-                let name_str = std::str::from_utf8(name.as_ref()).unwrap_or("?");
-                if name_str != "svg" {
-                    return Err(format!(
-                        "{path}: root element is <{name_str}>, expected <svg>"
-                    ));
-                }
-                let mut has_viewbox = false;
-                let mut has_width = false;
-                let mut has_height = false;
-                for attr in e.attributes() {
-                    let attr = attr.map_err(|err| format!("{path}: XML parse error: {err}"))?;
-                    match attr.key.local_name().as_ref() {
-                        b"viewBox" => has_viewbox = true,
-                        b"width" => has_width = true,
-                        b"height" => has_height = true,
-                        _ => {}
-                    }
-                }
-                if !has_viewbox && (!has_width || !has_height) {
-                    return Err(format!(
-                        "{path}: missing viewBox and width/height attributes"
-                    ));
-                }
-                return Ok(());
-            }
-            Ok(Event::Eof) => {
-                return Err(format!("{path}: empty document, no <svg> root"));
-            }
-            Ok(_) => {} // skip declaration, comments, doctype, whitespace
-            Err(e) => return Err(format!("{path}: XML parse error: {e}")),
-        }
-        buf.clear();
+    let icon = bastyde_canvas::svg::SvgIcon::parse(text).map_err(|e| format!("{path}: {e}"))?;
+    if icon.is_empty() {
+        return Err(format!(
+            "{path}: parses as SVG but contains no vector geometry, so it would render as a \
+             blank icon. The icon renderer draws paths, not pixels: it skips <image> and <text>. \
+             If this file is an embedded bitmap in an XML wrapper (an <image> with a \
+             `data:image/png;base64,…` href — check with `grep -c '<path' <file>`), embed the \
+             bitmap itself with res!(\"…​.png\") instead, or export the artwork as real vector paths."
+        ));
     }
+    Ok(())
 }
 
 fn validate_png(data: &[u8], path: &str) -> std::result::Result<(), String> {
@@ -388,6 +380,52 @@ pub fn res(input: TokenStream) -> TokenStream {
 mod tests {
     use super::*;
 
+    // --- validate_svg -------------------------------------------------------
+
+    #[test]
+    fn svg_with_geometry_is_accepted() {
+        let svg = br#"<svg viewBox="0 0 24 24"><path d="M2 2L22 2L22 22Z"/></svg>"#;
+        assert!(validate_svg(svg, "ok.svg").is_ok());
+        // Geometry reached only through <use> counts — it renders.
+        let via_use = br##"<svg viewBox="0 0 24 24">
+            <defs><path id="p" d="M2 2L22 2L22 22Z"/></defs>
+            <use href="#p"/>
+        </svg>"##;
+        assert!(validate_svg(via_use, "use.svg").is_ok());
+    }
+
+    /// **The bitmap-in-a-costume case.** A "scalable" icon whose only content is
+    /// an embedded PNG is a valid `<svg>` with a viewBox — the old root-element
+    /// sniff accepted it, and it then rendered as a blank icon with no
+    /// diagnostic. It must fail the build instead, and say why.
+    #[test]
+    fn an_image_only_svg_is_rejected_as_having_no_geometry() {
+        let svg = br#"<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+            <g><image x="0" y="0" width="512" height="512"
+                xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg"/></g>
+        </svg>"#;
+        let err = validate_svg(svg, "logo.svg").unwrap_err();
+        assert!(
+            err.contains("no vector geometry") && err.contains("blank icon"),
+            "the error must name the problem, got: {err}"
+        );
+    }
+
+    /// The runtime does `SvgIcon::parse(…).expect("validated at compile time")`,
+    /// so anything the parser rejects has to be caught *here* — otherwise that
+    /// `expect` is a panic waiting for the first frame that draws the icon.
+    #[test]
+    fn files_the_parser_would_panic_on_are_rejected_at_compile_time() {
+        // Malformed path data.
+        assert!(validate_svg(br#"<svg viewBox="0 0 24 24"><path d="M x!"/></svg>"#, "b.svg").is_err());
+        // Not an SVG at all.
+        assert!(validate_svg(b"<html><body/></html>", "b.svg").is_err());
+        // No coordinate space to draw into.
+        assert!(validate_svg(br#"<svg><path d="M0 0L1 1Z"/></svg>"#, "b.svg").is_err());
+        // Not even text.
+        assert!(validate_svg(&[0xFF, 0xFE, 0x00], "b.svg").is_err());
+    }
+
     // --- validate_png -------------------------------------------------------
 
     #[test]
@@ -443,14 +481,29 @@ mod tests {
 
     #[test]
     fn svg_ok_viewbox() {
-        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"></svg>"#;
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/>
+        </svg>"#;
         assert!(validate_svg(xml, "ok.svg").is_ok());
     }
 
     #[test]
     fn svg_ok_width_height() {
-        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"></svg>"#;
+        // No viewBox: width/height establish the coordinate space instead.
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+            <rect width="24" height="24"/>
+        </svg>"#;
         assert!(validate_svg(xml, "ok.svg").is_ok());
+    }
+
+    /// An `<svg>` with nothing in it is well-formed and useless: it renders as a
+    /// blank icon. These two fixtures used to be the validator's *pass* cases —
+    /// they are the reason a bitmap-in-a-wrapper sailed through as well.
+    #[test]
+    fn an_empty_svg_is_rejected() {
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"></svg>"#;
+        let err = validate_svg(xml, "empty.svg").unwrap_err();
+        assert!(err.contains("no vector geometry"), "{err}");
     }
 
     #[test]
@@ -463,21 +516,21 @@ mod tests {
     #[test]
     fn svg_malformed_xml() {
         let err = validate_svg(b"<not closed", "f.svg").unwrap_err();
-        assert!(err.contains("XML parse error"), "{err}");
+        assert!(err.contains("XML"), "{err}");
     }
 
     #[test]
     fn svg_wrong_root() {
         let xml = b"<html><body></body></html>";
         let err = validate_svg(xml, "f.svg").unwrap_err();
-        assert!(err.contains("expected <svg>"), "{err}");
+        assert!(err.contains("no <svg> root"), "{err}");
     }
 
     #[test]
     fn svg_missing_viewbox_and_dimensions() {
-        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>"#;
         let err = validate_svg(xml, "f.svg").unwrap_err();
-        assert!(err.contains("missing viewBox"), "{err}");
+        assert!(err.contains("viewBox"), "{err}");
     }
 
     // --- validate_webp ------------------------------------------------------

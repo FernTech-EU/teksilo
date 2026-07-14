@@ -44,14 +44,26 @@ let _chevron = IconWidget::chevron_down(16.0)
 
 Whether an icon is rendered as a theme-tinted mask or in its original colors.
 
+Applies to every source an `IconWidget` can hold — raster *and* SVG. For an
+SVG the two modes select between the two representations the parser builds
+(see `bastyde_canvas::svg`): `Tintable` draws the merged
+silhouette in the widget's color, `FullColor` walks the
+document-ordered ops and honours each shape's own fill / stroke / gradient.
+
+The default is `Tintable`, which is what a UI glyph wants —
+it follows the theme into dark mode. Reach for
+`FullColor` for artwork whose colors *are* the content: a
+brand mark, a flag, a colored file-type badge. A `currentColor` shape inside
+full-color artwork still takes the widget's color, so the two are mixable.
+
 ```rust
 pub enum IconMode { /* variants */ }
 ```
 
 ### Variants
 
-- **`Tintable`** — Treat as alpha mask, tint with the widget's color property.
-- **`FullColor`** — Render original colors; widget color only controls opacity.
+- **`Tintable`** — Treat as an alpha mask: tint the whole icon with the widget's color.
+- **`FullColor`** — Render the icon's own colors; the widget color supplies `currentColor` and its alpha attenuates the result.
 
 ## `pub struct IconWidget`
 

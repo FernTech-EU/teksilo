@@ -17,4 +17,9 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
-quick-xml = { workspace = true }
+# The SVG validator parses candidate files with the *same* parser that renders
+# them (see `validate_svg`), so `res!` accepts exactly what `SvgIcon` can draw —
+# no second, looser notion of "valid SVG" to drift out of step. Safe as a
+# proc-macro dependency: bastyde-canvas is renderer-agnostic (no GPU, no wgpu)
+# and does not depend on this crate, so there is no cycle.
+bastyde-canvas = { workspace = true }

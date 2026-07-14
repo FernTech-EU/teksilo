@@ -365,8 +365,15 @@ pub struct PathEntry {
     /// `Solid` fills draw through the lean `quad_pipeline` (tinted by
     /// `color`); gradient variants draw through the dedicated
     /// `path_gradient` pipeline, which ignores `color` and instead
-    /// samples an analytic gradient using this data. Always `Solid` for
-    /// strokes (`stroke_style.width > 0.0`) — gradients are fills-only.
+    /// samples an analytic gradient using this data.
+    ///
+    /// Strokes may carry a gradient too (`Canvas::stroke_path_with_paint`): the
+    /// gradient pipeline samples the atlas coverage mask, and the mask is the
+    /// stroked outline rather than the filled interior — nothing else about the
+    /// draw changes. Note the gradient is normalized against `bounds`, which for
+    /// a stroke is the outline's *expanded* rect; the canvas re-bases the
+    /// gradient's coordinates accordingly, so callers always express them
+    /// relative to the path's own bounds.
     pub paint_data: PaintData,
 }
 

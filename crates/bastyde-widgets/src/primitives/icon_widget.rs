@@ -32,7 +32,7 @@
 
 use std::borrow::Cow;
 
-use bastyde_canvas::svg::SvgIcon;
+use bastyde_canvas::svg::{SvgDrawOp, SvgIcon};
 use bastyde_canvas::{
     AnimatedIcon, AnimatedQuadClass, Canvas, Path, PathCommand, Point, RasterIcon, Rect, Size,
     SizeProposal,
@@ -45,11 +45,24 @@ use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 use bastyde_tokens::{Color, Easing, TextRole};
 
 /// Whether an icon is rendered as a theme-tinted mask or in its original colors.
+///
+/// Applies to every source an [`IconWidget`] can hold — raster *and* SVG. For an
+/// SVG the two modes select between the two representations the parser builds
+/// (see [`bastyde_canvas::svg`]): [`Tintable`](Self::Tintable) draws the merged
+/// silhouette in the widget's color, [`FullColor`](Self::FullColor) walks the
+/// document-ordered ops and honours each shape's own fill / stroke / gradient.
+///
+/// The default is [`Tintable`](Self::Tintable), which is what a UI glyph wants —
+/// it follows the theme into dark mode. Reach for
+/// [`FullColor`](Self::FullColor) for artwork whose colors *are* the content: a
+/// brand mark, a flag, a colored file-type badge. A `currentColor` shape inside
+/// full-color artwork still takes the widget's color, so the two are mixable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconMode {
-    /// Treat as alpha mask, tint with the widget's color property.
+    /// Treat as an alpha mask: tint the whole icon with the widget's color.
     Tintable,
-    /// Render original colors; widget color only controls opacity.
+    /// Render the icon's own colors; the widget color supplies `currentColor`
+    /// and its alpha attenuates the result.
     FullColor,
 }
 
@@ -708,25 +721,47 @@ impl Widget for IconWidget {
                 }
             }
             IconSource::Svg(icon) => {
-                if color.a() > 0.0 {
-                    // Filled geometry (the default for most icons) +
-                    // even-odd / transparent fills + stroked geometry
-                    // (line-style icons). An icon may carry any mix.
-                    let fill = icon.to_path_in_rect(bounds);
-                    if !fill.is_empty() {
-                        canvas.fill_path(&fill, color);
-                    }
-                    for (path, rule, opacity) in icon.extra_fills_in_rect(bounds) {
-                        let c = color.with_alpha(color.a() * opacity);
-                        if !path.is_empty() && c.a() > 0.0 {
-                            canvas.fill_path_with_rule(&path, c, rule);
+                if color.a() <= 0.0 {
+                    return;
+                }
+                // Full-color artwork (a brand mark, a colored file-type icon)
+                // keeps its own paints and its document order — see
+                // `SvgIcon::draw_ops_in_rect`. A monochrome document is drawn
+                // through the tinted path either way: the result is identical,
+                // and the tinted path merges the whole icon into one fill.
+                if self.mode == IconMode::FullColor && !icon.is_monochrome() {
+                    for op in icon.draw_ops_in_rect(bounds, color) {
+                        match op {
+                            SvgDrawOp::Fill {
+                                path,
+                                fill_rule,
+                                paint,
+                            } => canvas.fill_path_with_rule(&path, paint, fill_rule),
+                            SvgDrawOp::Stroke { path, style, paint } => {
+                                canvas.stroke_path_with_paint(&path, paint, style)
+                            }
                         }
                     }
-                    for (path, style, opacity) in icon.stroked_paths_in_rect(bounds) {
-                        let c = color.with_alpha(color.a() * opacity);
-                        if !path.is_empty() && c.a() > 0.0 {
-                            canvas.stroke_path(&path, c, style);
-                        }
+                    return;
+                }
+
+                // Tinted: filled geometry (the default for most icons) +
+                // even-odd / transparent fills + stroked geometry (line-style
+                // icons). An icon may carry any mix.
+                let fill = icon.to_path_in_rect(bounds);
+                if !fill.is_empty() {
+                    canvas.fill_path(&fill, color);
+                }
+                for (path, rule, opacity) in icon.extra_fills_in_rect(bounds) {
+                    let c = color.with_alpha(color.a() * opacity);
+                    if !path.is_empty() && c.a() > 0.0 {
+                        canvas.fill_path_with_rule(&path, c, rule);
+                    }
+                }
+                for (path, style, opacity) in icon.stroked_paths_in_rect(bounds) {
+                    let c = color.with_alpha(color.a() * opacity);
+                    if !path.is_empty() && c.a() > 0.0 {
+                        canvas.stroke_path(&path, c, style);
                     }
                 }
             }
@@ -1168,5 +1203,171 @@ mod tests {
             red.to_array(),
             "explicit-color icons must NOT auto-dim when disabled — caller picked the literal, framework respects it"
         );
+    }
+
+    // ── Full-color SVG ──────────────────────────────────────────────────────
+
+    /// A two-color mark reaches the renderer as two paths carrying **its own**
+    /// colors, not the widget's — and in document order, so the shape authored
+    /// last paints last.
+    #[test]
+    fn full_color_svg_keeps_its_own_colors_in_document_order() {
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <rect width="24" height="24" fill="#5865F2"/>
+            <circle cx="12" cy="12" r="6" fill="#FFFFFF"/>
+        </svg>"##;
+        let mut tree = WidgetTree::new();
+        // A tint that appears nowhere in the artwork: if the widget ever leaks
+        // through, the assertion below names it.
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .mode(IconMode::FullColor)
+                .color(Color::from_hex("#FF0000")),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+
+        assert_eq!(frame.paths.len(), 2, "one path per authored shape");
+        assert_eq!(frame.paths[0].color, Color::from_hex("#5865F2").to_array());
+        assert_eq!(frame.paths[1].color, Color::from_hex("#FFFFFF").to_array());
+    }
+
+    /// The same artwork in the default `Tintable` mode is a single merged
+    /// silhouette in the widget's color — the pre-existing behaviour, which
+    /// full-color support must not disturb.
+    #[test]
+    fn tintable_mode_still_merges_a_colored_svg_into_one_tinted_path() {
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <rect width="24" height="24" fill="#5865F2"/>
+            <circle cx="12" cy="12" r="6" fill="#FFFFFF"/>
+        </svg>"##;
+        let mut tree = WidgetTree::new();
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .color(Color::from_hex("#FF0000")),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+
+        assert_eq!(frame.paths.len(), 1, "both shapes merge into one fill");
+        assert_eq!(
+            frame.paths[0].color,
+            Color::from_hex("#FF0000").to_array(),
+            "tintable ignores the artwork's colors and takes the widget's"
+        );
+    }
+
+    /// `currentColor` inside full-color artwork still follows the theme — the
+    /// mixed case: fixed brand colors plus one themed accent.
+    #[test]
+    fn current_color_follows_the_widget_inside_full_color_artwork() {
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <rect width="24" height="24" fill="#5865F2"/>
+            <rect width="8" height="8" fill="currentColor"/>
+        </svg>"##;
+        let mut tree = WidgetTree::new();
+        let accent = Color::from_hex("#00FF00");
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .mode(IconMode::FullColor)
+                .color(accent),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        assert_eq!(frame.paths[0].color, Color::from_hex("#5865F2").to_array());
+        assert_eq!(frame.paths[1].color, accent.to_array());
+    }
+
+    /// A gradient fill reaches the renderer as gradient `PaintData` — the
+    /// dedicated pipeline — rather than being flattened to a solid.
+    #[test]
+    fn a_gradient_fill_reaches_the_renderer_as_a_gradient() {
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <linearGradient id="g">
+              <stop offset="0" stop-color="#FF0000"/>
+              <stop offset="1" stop-color="#0000FF"/>
+            </linearGradient>
+            <rect width="24" height="24" fill="url(#g)"/>
+        </svg>"##;
+        let mut tree = WidgetTree::new();
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .mode(IconMode::FullColor)
+                .color(Color::BLACK),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        match &frame.paths[0].paint_data {
+            bastyde_canvas::PaintData::LinearGradient { start, end, stops } => {
+                assert_eq!(stops.len(), 2);
+                assert_eq!(stops[0].color.to_array(), [1.0, 0.0, 0.0, 1.0]);
+                // Rect-local: the ramp spans the icon's 24 dp box.
+                assert!(start[0].abs() < 0.01);
+                assert!((end[0] - 24.0).abs() < 0.01, "end {end:?}");
+            }
+            other => panic!("expected a linear gradient paint, got {other:?}"),
+        }
+    }
+
+    /// A gradient **stroke** is a gradient too — and its coordinates are
+    /// re-based onto the stroke's expanded bounds, so the ramp lands where the
+    /// identical fill gradient would. (Strokes were solid-only before.)
+    #[test]
+    fn a_gradient_stroke_is_rebased_onto_the_expanded_stroke_bounds() {
+        let svg = r##"<svg viewBox="0 0 24 24">
+            <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="24" y2="0">
+              <stop offset="0" stop-color="#FF0000"/>
+              <stop offset="1" stop-color="#0000FF"/>
+            </linearGradient>
+            <rect x="2" y="2" width="20" height="20" fill="none" stroke="url(#g)" stroke-width="4"/>
+        </svg>"##;
+        let mut tree = WidgetTree::new();
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .mode(IconMode::FullColor)
+                .color(Color::BLACK),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+
+        let entry = &frame.paths[0];
+        assert!(entry.stroke_style.width > 0.0, "must be a stroke");
+        match &entry.paint_data {
+            bastyde_canvas::PaintData::LinearGradient { start, end, .. } => {
+                // The ramp runs 0→24 in user space; the path sits at x=2, and the
+                // stroke expands its bounds by the 4 dp width — so relative to the
+                // rect the shader normalizes against, x=0 lands at +2 and x=24 at
+                // +26. Un-rebased it would read -2 / +22 and the gradient would sit
+                // visibly offset from the geometry.
+                assert!((start[0] - 2.0).abs() < 0.05, "start {start:?}");
+                assert!((end[0] - 26.0).abs() < 0.05, "end {end:?}");
+            }
+            other => panic!("expected a linear gradient stroke, got {other:?}"),
+        }
+    }
+
+    /// The widget's alpha attenuates full-color artwork without replacing its
+    /// colors (what `IconMode::FullColor` promises for a raster, now true for
+    /// vectors too).
+    #[test]
+    fn the_widget_alpha_dims_full_color_artwork() {
+        let svg = r##"<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#FF0000"/></svg>"##;
+        let mut tree = WidgetTree::new();
+        tree.add(
+            IconWidget::from_svg(svg)
+                .icon_size(24.0)
+                .mode(IconMode::FullColor)
+                .color(Color::new(0.0, 0.0, 0.0, 0.5)),
+        );
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        let c = frame.paths[0].color;
+        assert_eq!([c[0], c[1], c[2]], [1.0, 0.0, 0.0], "the red must survive");
+        assert!((c[3] - 0.5).abs() < 1e-5, "…at half alpha, got {}", c[3]);
     }
 }

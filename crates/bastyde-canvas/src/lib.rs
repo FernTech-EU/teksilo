@@ -26,7 +26,10 @@ pub use render_frame::{
     DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage,
     RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
-pub use svg::{SvgFill, SvgIcon, SvgParseError, SvgStroke};
+pub use svg::{
+    ResolvedGradient, SvgDrawOp, SvgFill, SvgIcon, SvgOp, SvgPaint, SvgParseError, SvgStop,
+    SvgStroke,
+};
 pub use text_backend::{
     AtlasInfo, EllipsisMode, GlyphValidation, HitTarget, MockTextBackend, TextBackend, TextLayout,
     TextLayoutSpan, TextOverflow, TextSpanKind, quantize_raster_scale,

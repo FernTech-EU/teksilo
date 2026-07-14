@@ -1124,9 +1124,13 @@ impl Renderer {
                                     };
                                     if matches!(entry.paint_data, bastyde_canvas::PaintData::Solid)
                                     {
-                                        // Solid fill (or any stroke — strokes are
-                                        // always Solid): the lean quad_pipeline,
-                                        // tinted by entry.color.
+                                        // Solid fill or solid stroke: the lean
+                                        // quad_pipeline, tinted by entry.color.
+                                        // (A gradient *stroke* takes the branch
+                                        // below — the pipeline choice follows the
+                                        // paint, not fill-vs-stroke; the coverage
+                                        // mask in the atlas is already whichever
+                                        // one this entry rasterized.)
                                         quad_source = Some(QuadSource::PathAtlas);
                                         let verts = path_quad_verts(
                                             entry,
