@@ -342,10 +342,11 @@ impl RichTextEngine {
     /// and `RichTextEngine::has_full_layout` disagree, which is
     /// a bug in one of them.
     ///
-    /// `show_highlights` selects the snapshot flavor: `false` pulls a clean
-    /// snapshot (no highlights) and skips the paint overlay, so a view that
-    /// has opted out of highlights relayouts a single block without ever
-    /// acquiring the document's syntax/search/spell formatting.
+    /// `mask` selects which highlight sessions this view renders: an empty mask pulls a clean
+    /// snapshot (no highlights), a full mask every session, a narrow one a chosen set — so two
+    /// panes over one document can relayout the same block with different find highlighting.
+    /// The (already-masked) paint overlay is re-applied unconditionally; an empty span set
+    /// simply clears any prior overlay.
     pub fn relayout_block_snapshot(
         &mut self,
         doc: &TextDocument,

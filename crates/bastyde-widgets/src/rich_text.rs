@@ -346,6 +346,11 @@ impl RichTextEditor {
         if st.highlight_mask != mask {
             st.highlight_mask = mask;
             st.needs_full_layout = true;
+            // A mask change fires no document event, so the AT-cache invalidation the
+            // event path does won't run — do it here. Dropping a metric session (syntax
+            // bold) out of this view changes what the AT tree should report, and a stale
+            // cached tree would keep announcing formatting the pane no longer draws.
+            st.invalidate_accessibility_cache();
         }
     }
 

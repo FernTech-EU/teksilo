@@ -5573,4 +5573,37 @@ mod affinity_tests {
             outer_y.get()
         );
     }
+
+    // ── B3: search-support methods ──────────────────────────────────
+
+    #[test]
+    fn select_range_selects_without_collapsing() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        let editor = RichTextEditor::read_only(doc);
+
+        let anchor = editor.cursor_anchor_signal();
+        let caret = editor.cursor_position_signal();
+        let has_sel = editor.has_selection();
+
+        // Select "world" (chars 6..11) — unlike set_caret_position, this must NOT collapse.
+        editor.select_range(6, 11);
+        assert!(has_sel.get(), "select_range must produce a real selection");
+        assert_eq!(anchor.get(), 6, "anchor at the range start");
+        assert_eq!(caret.get(), 11, "caret at the range end");
+        assert_eq!(editor.selected_text(), "world");
+
+        // set_caret_position, by contrast, collapses.
+        editor.set_caret_position(3);
+        assert!(!has_sel.get());
+    }
+
+    #[test]
+    fn focused_signal_reads_focus_state() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("text").unwrap();
+        let editor = RichTextEditor::read_only(doc);
+        // A freshly-built, unmounted editor holds no focus.
+        assert!(!editor.focused_signal().get());
+    }
 }

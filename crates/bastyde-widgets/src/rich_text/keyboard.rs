@@ -567,8 +567,12 @@ pub(super) fn range_window_rect(
             c[3].max(1.0),
         )
     };
-    let (ax, ay, ah) = to_window(st.engine.caret_rect(start, st.cursor_affinity));
-    let (bx, by, bh) = to_window(st.engine.caret_rect(end, st.cursor_affinity));
+    // A **fixed** affinity, not the live cursor's: these are arbitrary offsets unrelated to
+    // the caret, and reveal only needs a stable line — using `st.cursor_affinity` would place
+    // the rect on the wrong side of a soft-wrap boundary depending on where the caret happens
+    // to sit.
+    let (ax, ay, ah) = to_window(st.engine.caret_rect(start, CursorAffinity::Downstream));
+    let (bx, by, bh) = to_window(st.engine.caret_rect(end, CursorAffinity::Downstream));
 
     let x0 = ax.min(bx);
     let y0 = ay.min(by);

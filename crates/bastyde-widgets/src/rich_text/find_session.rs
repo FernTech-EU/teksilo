@@ -16,10 +16,25 @@
 //! [`session_id`](FindSession::session_id) in its mask (the default `all()` already shows it)
 //! and calling `select_range` / `reveal_range` on the current match.
 //!
+//! ## Staleness on edit
+//!
+//! Matches are **absolute char offsets**, frozen at [`set_query`](FindSession::set_query). An
+//! edit anywhere before a match shifts the text underneath those offsets, and text-document
+//! does **not** re-anchor a range session the way it re-anchors carets — so the boxes would
+//! drift onto the wrong characters. To make that impossible to forget, a `FindSession`
+//! subscribes to its document and marks itself stale on any content edit; the host calls
+//! [`refresh_if_stale`](FindSession::refresh_if_stale) (e.g. once per frame) to re-derive. The
+//! matcher is cheap over a single open document, and re-deriving is the same discipline the
+//! rest of search follows: never carry an offset across an edit.
+//!
 //! [`HighlightMask`]: bastyde_text::text_document::HighlightMask
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use bastyde_text::text_document::{
-    FindMatch, FindOptions, HighlightFormat, RangeHighlight, SessionId, TextDocument,
+    DocumentEvent, FindMatch, FindOptions, HighlightFormat, RangeHighlight, SessionId,
+    Subscription, TextDocument,
 };
 
 /// A search-highlight layer: the matches of a query, as a document range session, with the
@@ -32,6 +47,16 @@ pub struct FindSession {
     current: usize,
     current_format: HighlightFormat,
     other_format: HighlightFormat,
+    /// The last query + options, kept so [`refresh_if_stale`](Self::refresh_if_stale) can
+    /// re-run them after an edit without the caller re-passing them.
+    query: String,
+    options: FindOptions,
+    /// Set by the document subscription on any offset-moving edit; drained by
+    /// [`refresh_if_stale`](Self::refresh_if_stale). `Arc` because the `on_change` callback is
+    /// `Send + Sync`.
+    dirty: Arc<AtomicBool>,
+    /// Kept alive so the subscription lives as long as the session (dropping it unsubscribes).
+    _sub: Subscription,
 }
 
 impl FindSession {
@@ -46,6 +71,26 @@ impl FindSession {
         other_format: HighlightFormat,
     ) -> Self {
         let session = doc.add_range_session();
+        let dirty = Arc::new(AtomicBool::new(false));
+        let sub = {
+            let dirty = dirty.clone();
+            doc.on_change(move |event| {
+                // Only edits that MOVE char offsets stale the cached matches. Format- and
+                // highlight-only events leave positions where they were — and reacting to
+                // `HighlightPaintChanged` here would loop, since this session's own
+                // `set_session_ranges` emits exactly that.
+                if matches!(
+                    event,
+                    DocumentEvent::ContentsChanged { .. }
+                        | DocumentEvent::DocumentReset
+                        | DocumentEvent::BlockCountChanged(_)
+                        | DocumentEvent::FlowElementsInserted { .. }
+                        | DocumentEvent::FlowElementsRemoved { .. }
+                ) {
+                    dirty.store(true, Ordering::Relaxed);
+                }
+            })
+        };
         Self {
             doc: doc.clone(),
             session,
@@ -53,6 +98,10 @@ impl FindSession {
             current: 0,
             current_format,
             other_format,
+            query: String::new(),
+            options: FindOptions::default(),
+            dirty,
+            _sub: sub,
         }
     }
 
@@ -65,15 +114,44 @@ impl FindSession {
     /// Re-run `query` and highlight every match; the first becomes current. An empty query
     /// clears the highlighting.
     pub fn set_query(&mut self, query: &str, options: &FindOptions) {
-        self.matches = if query.is_empty() {
+        self.query = query.to_string();
+        self.options = options.clone();
+        self.rerun();
+        self.current = 0;
+        self.apply();
+    }
+
+    /// Re-derive the matches for the stored query **if** an edit has staled them since the last
+    /// run. Returns `true` if it re-derived (so the caller can request a repaint). Cheap to
+    /// call every frame: a no-op when nothing has changed.
+    ///
+    /// The current-match index is clamped, not reset — an edit should not throw away where the
+    /// writer was in the match list, only re-locate the matches.
+    pub fn refresh_if_stale(&mut self) -> bool {
+        if !self.dirty.swap(false, Ordering::Relaxed) {
+            return false;
+        }
+        self.rerun();
+        if self.current >= self.matches.len() {
+            self.current = self.matches.len().saturating_sub(1);
+        }
+        self.apply();
+        true
+    }
+
+    /// Run the stored query against the document now, into `self.matches`, and clear the dirty
+    /// flag. Does not touch `current` or push ranges — callers do that.
+    fn rerun(&mut self) {
+        self.matches = if self.query.is_empty() {
             Vec::new()
         } else {
             // Best-effort: a search that errors (e.g. a malformed regex) simply highlights
             // nothing, rather than propagating into a banner that just wanted to draw boxes.
-            self.doc.find_all(query, options).unwrap_or_default()
+            self.doc
+                .find_all(&self.query, &self.options)
+                .unwrap_or_default()
         };
-        self.current = 0;
-        self.apply();
+        self.dirty.store(false, Ordering::Relaxed);
     }
 
     /// How many matches the last query found.
@@ -114,8 +192,10 @@ impl FindSession {
 
     /// Clear all highlighting (the query went away, or the banner closed).
     pub fn clear(&mut self) {
+        self.query.clear();
         self.matches.clear();
         self.current = 0;
+        self.dirty.store(false, Ordering::Relaxed);
         self.apply();
     }
 
@@ -156,7 +236,7 @@ impl Drop for FindSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_text::text_document::{Color, FlowElement, FlowElementSnapshot, HighlightMask};
+    use bastyde_text::text_document::{Color, FlowElementSnapshot, HighlightMask};
 
     fn bg(color: Color) -> HighlightFormat {
         HighlightFormat {
@@ -241,6 +321,48 @@ mod tests {
         fs.set_query("", &FindOptions::default());
         assert!(paint_spans(&d).is_empty(), "cleared");
         assert_eq!(fs.match_count(), 0);
+    }
+
+    /// **The staleness fix.** An edit that shifts the text must not leave the highlights on the
+    /// old offsets — `refresh_if_stale` re-derives against the edited document.
+    #[test]
+    fn an_edit_stales_the_matches_and_refresh_re_derives_them() {
+        let d = doc("the cat sat");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("cat", &FindOptions::default());
+        let before = fs.current_match().unwrap();
+        assert_eq!(before.position, 4, "`cat` starts at char 4");
+
+        // Insert four chars at the very front: "cat" shifts to char 8.
+        d.set_plain_text("XXXXthe cat sat").unwrap();
+
+        // The old match is now stale. A refresh re-locates it.
+        assert!(
+            fs.refresh_if_stale(),
+            "the edit must have marked the session stale"
+        );
+        let after = fs.current_match().unwrap();
+        assert_eq!(after.position, 8, "the match followed the text it names");
+
+        // …and a second refresh with no edit is a cheap no-op.
+        assert!(!fs.refresh_if_stale());
+    }
+
+    /// A refresh whose re-run drops the match the writer was on clamps the index rather than
+    /// panicking or resetting to the top.
+    #[test]
+    fn refresh_clamps_the_current_index_when_matches_shrink() {
+        let d = doc("a a a");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("a", &FindOptions::default());
+        fs.next_match();
+        fs.next_match(); // current = 2 (the last)
+        assert_eq!(fs.current_index(), 2);
+
+        d.set_plain_text("a").unwrap(); // only one match now
+        assert!(fs.refresh_if_stale());
+        assert_eq!(fs.match_count(), 1);
+        assert_eq!(fs.current_index(), 0, "clamped to the one remaining match");
     }
 
     #[test]

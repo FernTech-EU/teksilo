@@ -781,10 +781,21 @@ impl EditorState {
         // changed. The next accessibility walk rebuilds both
         // lazily from a fresh `document.snapshot_flow()`.
         if a11y_snapshot_dirty {
-            *self.accessibility_flow_snapshot.borrow_mut() = None;
-            self.synthetic_to_element.borrow_mut().clear();
+            self.invalidate_accessibility_cache();
         }
 
         (had_events, single_pos)
+    }
+
+    /// Drop the cached accessibility snapshot so the next AT walk rebuilds it from a fresh
+    /// (masked) `flow_snapshot()`.
+    ///
+    /// The document-event path above invalidates this when the document changes; a **per-view**
+    /// change that fires no document event — a runtime `set_highlight_mask` that drops a
+    /// metric-affecting session (e.g. syntax bold) out of this pane's view — must invalidate it
+    /// too, or a screen reader keeps hearing formatting the pane has stopped rendering.
+    pub fn invalidate_accessibility_cache(&self) {
+        *self.accessibility_flow_snapshot.borrow_mut() = None;
+        self.synthetic_to_element.borrow_mut().clear();
     }
 }
