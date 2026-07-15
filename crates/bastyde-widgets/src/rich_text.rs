@@ -30,6 +30,7 @@
 
 mod clipboard;
 mod context_menu;
+mod find_session;
 mod frame_loop;
 mod hit_test;
 pub(crate) mod image_cache;
@@ -45,6 +46,7 @@ mod tests;
 pub use context_menu::{
     INTENT_COPY, INTENT_CUT, INTENT_PASTE, INTENT_PASTE_UNFORMATTED, INTENT_SELECT_ALL,
 };
+pub use find_session::FindSession;
 pub use hit_test::ContextTarget;
 pub use policy::{
     AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EDITOR_PRESET, EditCommandKind,
