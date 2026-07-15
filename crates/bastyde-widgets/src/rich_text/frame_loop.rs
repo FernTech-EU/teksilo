@@ -167,9 +167,15 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     } else if viewport_ready && let Some(pos) = single_pos {
         // Incremental path. Falls back to layout_full internally on
         // the first call (subtle-correctness item 25).
+        //
+        // Thread the SAME per-view mask the full-layout path uses (`state.flow_snapshot()` via
+        // `effective_mask`). This is the second, gateway-bypassing snapshot path: a mask
+        // applied only to `flow_snapshot()` would silently vanish on the next keystroke's
+        // incremental relayout, taking two panes' divergent find highlights with it.
+        let mask = state.effective_mask();
         match state
             .engine
-            .relayout_block_snapshot(&state.document, pos, state.show_highlights)
+            .relayout_block_snapshot(&state.document, pos, &mask)
         {
             Ok(block_id) => {
                 state.last_relayout_block_id = Some(block_id);

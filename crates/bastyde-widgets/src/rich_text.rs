@@ -331,6 +331,22 @@ impl RichTextEditor {
         self
     }
 
+    /// Set which highlight sessions **this view** renders, at runtime.
+    ///
+    /// [`HighlightMask::all`] shows every session on the document (the default);
+    /// [`HighlightMask::only`] shows a chosen set — which is how a per-editor find banner
+    /// keeps one pane's find highlighting out of another pane over the same document.
+    /// `show_highlights(false)` still overrides this to nothing.
+    ///
+    /// Forces a re-pull on the next tick so the change is visible immediately.
+    pub fn set_highlight_mask(&self, mask: bastyde_text::text_document::HighlightMask) {
+        let mut st = self.state.borrow_mut();
+        if st.highlight_mask != mask {
+            st.highlight_mask = mask;
+            st.needs_full_layout = true;
+        }
+    }
+
     /// Set the initial zoom factor (`1.0` = 100 %). Applied before the first
     /// layout pass. Use [`set_zoom_level`](Self::set_zoom_level) after the
     /// widget is mounted.
@@ -807,6 +823,53 @@ impl RichTextEditor {
             st.cursor_affinity = bastyde_text::CursorAffinity::Downstream;
         }
         sync_cursor_signals(&self.state);
+    }
+
+    // --- Search / find-banner support (B3) --------------------------------
+
+    /// Reactive signal — `true` while **this** editor holds keyboard focus.
+    ///
+    /// A per-editor find banner (Ctrl+F) targets whichever editor is focused, and the split
+    /// view has two of them; `focused_side` only names the Primary/Secondary *pane*, not which
+    /// editor. This is the per-editor answer, mirroring [`has_selection`](Self::has_selection).
+    pub fn focused_signal(&self) -> Signal<bool> {
+        self.state.borrow().focus_signal.clone()
+    }
+
+    /// Select the character range `[start, end)`, **without** collapsing — unlike
+    /// [`set_caret_position`](Self::set_caret_position), which always moves both ends together.
+    ///
+    /// The anchor lands at `start` and the caret (focus) at `end`, so the standard selection
+    /// highlight marks the range and a subsequent replace acts on it. Used to select a search
+    /// match. (The non-collapsing two-call shape is the same one the AccessKit
+    /// `SetTextSelection` handler uses.)
+    pub fn select_range(&self, start: usize, end: usize) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.cursor.set_position(start, MoveMode::MoveAnchor);
+            st.cursor.set_position(end, MoveMode::KeepAnchor);
+            // The caret sits at `end`; downstream affinity matches placement at a range end.
+            st.cursor_affinity = bastyde_text::CursorAffinity::Downstream;
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Scroll the character range `[start, end)` into view within the enclosing scroll area.
+    ///
+    /// Reveals an **arbitrary** offset range — the current search match — rather than the live
+    /// caret the follow-into-view path tracks, and works whether or not the editor is focused.
+    /// A no-op until the editor has a full layout.
+    pub fn reveal_range(
+        &self,
+        ctx: &mut bastyde_core::widget::EventContext,
+        start: usize,
+        end: usize,
+    ) {
+        let area = match self::keyboard::range_window_rect(&self.state.borrow(), start, end) {
+            Some(a) => a,
+            None => return,
+        };
+        ctx.ensure_visible(area);
     }
 
     // --- Character-format commands ----------------------------------------

@@ -545,6 +545,43 @@ pub(super) fn caret_window_rect(st: &EditorState) -> Option<bastyde_canvas::Rect
     ))
 }
 
+/// The **window-space** rectangle enclosing an arbitrary character range `[start, end)` — the
+/// union of the caret rects at its two ends, transformed into the same absolute space
+/// [`caret_window_rect`] uses (`viewport_origin` + engine-local − scroll).
+///
+/// Unlike [`caret_window_rect`], this takes explicit offsets (not the live cursor) and does
+/// **not** require focus — it exists so a search match can be scrolled into view whether or
+/// not the editor is focused. `None` before the first full layout.
+pub(super) fn range_window_rect(
+    st: &EditorState,
+    start: usize,
+    end: usize,
+) -> Option<bastyde_canvas::Rect> {
+    if !st.engine.has_full_layout() {
+        return None;
+    }
+    let to_window = |c: [f32; 4]| {
+        (
+            st.viewport_origin.x + c[0] - st.scroll_x.get(),
+            st.viewport_origin.y + c[1] - st.scroll_y.get(),
+            c[3].max(1.0),
+        )
+    };
+    let (ax, ay, ah) = to_window(st.engine.caret_rect(start, st.cursor_affinity));
+    let (bx, by, bh) = to_window(st.engine.caret_rect(end, st.cursor_affinity));
+
+    let x0 = ax.min(bx);
+    let y0 = ay.min(by);
+    let x1 = ax.max(bx);
+    let y1 = (ay + ah).max(by + bh);
+    Some(bastyde_canvas::Rect::new(
+        x0,
+        y0,
+        (x1 - x0).max(1.0),
+        (y1 - y0).max(ah.max(bh)),
+    ))
+}
+
 /// Report the caret's window-space rectangle to the platform so the OS IME
 /// candidate window tracks the insertion point. No-op when unfocused or the
 /// engine has not been laid out yet. Called whenever the caret moves.

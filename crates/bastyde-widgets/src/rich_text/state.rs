@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use bastyde_core::Signal;
 use bastyde_text::text_document::{
-    DocumentEvent, DocumentFragment, Subscription, TextCursor, TextDocument,
+    DocumentEvent, DocumentFragment, HighlightMask, Subscription, TextCursor, TextDocument,
 };
 use bastyde_text::{CursorAffinity, RichTextEngine, WrapMode};
 
@@ -117,6 +117,13 @@ pub(crate) struct EditorState {
     /// engine's per-block relayout. Default `true`; `read_only` defaults
     /// it to `false` (override either way via `RichTextEditor::show_highlights`).
     pub show_highlights: bool,
+
+    /// Which highlight sessions THIS view renders (`show_highlights` is the master switch
+    /// above it: `false` suppresses everything regardless of this mask). Default is
+    /// [`HighlightMask::all`] — every session on the document. A per-editor find banner sets
+    /// this to a narrower set so two panes over one shared document can highlight different
+    /// queries. See [`Self::effective_mask`].
+    pub highlight_mask: HighlightMask,
 
     /// `true` once the app explicitly set a text color via
     /// Last text color applied to the typesetter. Tracked so a theme
@@ -503,6 +510,7 @@ impl EditorState {
             pending_recolor: false,
             wrap_mode,
             show_highlights: true,
+            highlight_mask: HighlightMask::all(),
             last_text_color: None,
             follow_text_scale: true,
             last_font_scale: 1.0,
@@ -584,16 +592,25 @@ impl EditorState {
         changed
     }
 
-    /// Snapshot the document's flow in this view's highlight flavor: the full
-    /// snapshot when `show_highlights`, otherwise a clean snapshot carrying no
-    /// highlights at all. Every full-layout / a11y snapshot pull routes through
-    /// here so a bare view never observes the document's highlighting.
-    pub fn flow_snapshot(&self) -> bastyde_text::text_document::FlowSnapshot {
+    /// The sessions this view actually renders: its [`highlight_mask`](Self::highlight_mask),
+    /// or nothing at all when `show_highlights` is off (the master switch a bare preview flips
+    /// to stay clean).
+    pub fn effective_mask(&self) -> HighlightMask {
         if self.show_highlights {
-            self.document.snapshot_flow()
+            self.highlight_mask.clone()
         } else {
-            self.document.snapshot_flow_without_highlights()
+            HighlightMask::none()
         }
+    }
+
+    /// Snapshot the document's flow in this view's highlight flavor — only the sessions
+    /// [`effective_mask`](Self::effective_mask) admits. Every full-layout / a11y snapshot pull
+    /// routes through here, so a bare view never observes the document's highlighting and two
+    /// panes over one document can differ. (A11y correctness rides on the fact that paint-only
+    /// sessions — find, spell — never touch the text fragments the AT tree reads; only
+    /// metric-affecting sessions, e.g. syntax bold, reach it.)
+    pub fn flow_snapshot(&self) -> bastyde_text::text_document::FlowSnapshot {
+        self.document.snapshot_flow_masked(&self.effective_mask())
     }
 
     /// Drain the local event queue, classifying events for the layout

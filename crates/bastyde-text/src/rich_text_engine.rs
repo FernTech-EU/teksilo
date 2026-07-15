@@ -350,23 +350,15 @@ impl RichTextEngine {
         &mut self,
         doc: &TextDocument,
         block_position: usize,
-        show_highlights: bool,
+        mask: &text_document::HighlightMask,
     ) -> Result<usize, String> {
         if !self.has_full_layout() {
-            let flow = if show_highlights {
-                doc.snapshot_flow()
-            } else {
-                doc.snapshot_flow_without_highlights()
-            };
-            self.layout_full(&flow);
+            self.layout_full(&doc.snapshot_flow_masked(mask));
             return Ok(0);
         }
-        let mut snap = if show_highlights {
-            doc.snapshot_block_at_position(block_position)
-        } else {
-            doc.snapshot_block_at_position_without_highlights(block_position)
-        }
-        .ok_or_else(|| "no block at position".to_string())?;
+        let mut snap = doc
+            .snapshot_block_at_position_masked(block_position, mask)
+            .ok_or_else(|| "no block at position".to_string())?;
         // Fill per-editor default typography onto the (already-detached) block
         // snapshot before it reaches the typesetter — same non-destructive path
         // as `layout_full`.
@@ -388,14 +380,12 @@ impl RichTextEngine {
                  guarantee has_layout() && !layout_dirty_for_scale()",
             );
         }
-        // Re-apply the (possibly changed) paint overlay for just this block on
-        // top of its freshly-reshaped base. Empty spans clear any prior overlay.
-        // A highlights-off view skips this — the clean snapshot above carries no
-        // spans, and the freshly-reshaped base is already the desired bare look.
-        if show_highlights {
-            let spans = text_typeset::bridge::convert_paint_spans(&snap);
-            self.flow.apply_block_paint_spans(block_id, &spans);
-        }
+        // Re-apply the paint overlay for just this block on top of its freshly-reshaped base.
+        // The snapshot is already masked, so its paint spans are exactly what this view should
+        // show — and applying an EMPTY set (a mask that hides everything, or a session whose
+        // ranges just cleared) clears any prior overlay, which is the desired bare look.
+        let spans = text_typeset::bridge::convert_paint_spans(&snap);
+        self.flow.apply_block_paint_spans(block_id, &spans);
         Ok(block_id)
     }
 
@@ -632,7 +622,7 @@ mod tests {
         let doc = TextDocument::new();
         doc.set_plain_text("Hello").unwrap();
 
-        let result = engine.relayout_block_snapshot(&doc, 0, true);
+        let result = engine.relayout_block_snapshot(&doc, 0, &text_document::HighlightMask::all());
         assert!(result.is_ok());
         assert!(engine.has_full_layout());
     }
@@ -851,7 +841,7 @@ mod tests {
         // falls back to `layout_full` — no panic, no partial
         // update, no error. After the call the engine is back to
         // a consistent state.
-        let result = engine.relayout_block_snapshot(&doc, 0, true);
+        let result = engine.relayout_block_snapshot(&doc, 0, &text_document::HighlightMask::all());
         assert!(
             result.is_ok(),
             "relayout_block_snapshot must fall back to layout_full on scale dirty"
