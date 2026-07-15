@@ -214,6 +214,13 @@ pub(crate) struct EditorState {
     /// border without polling.
     pub focus_signal: Signal<bool>,
 
+    /// The wrapper widget's own id, stashed on every build so a held
+    /// [`EditorHandle`](super::EditorHandle) can move keyboard focus back to the
+    /// editor (e.g. a find banner returning focus to the prose on Escape). The
+    /// wrapper is the `.focusable(true)` node, so `request_focus` on it lands
+    /// exactly where a click would.
+    pub self_id: Option<bastyde_core::widget_id::WidgetId>,
+
     /// Sticky preferred X for vertical navigation. Set
     /// the first time Up/Down/PageUp/PageDown is pressed, preserved
     /// across further vertical presses so the cursor keeps trying to
@@ -526,6 +533,7 @@ impl EditorState {
             follow_caret_in_page: true,
             window_active: true,
             focus_signal: Signal::new(false),
+            self_id: None,
             event_queue,
             _event_subscription: subscription,
             image_cache: ImageCache::new(),

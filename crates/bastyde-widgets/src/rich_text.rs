@@ -1530,6 +1530,56 @@ impl std::fmt::Debug for EditorHandle {
 }
 
 impl EditorHandle {
+    // --- Search / find-banner support (B3, handle mirror) ------------------
+    //
+    // These mirror the same-named [`RichTextEditor`] methods (which operate on
+    // the same `state`), so a per-editor find banner built *above* the editor
+    // can drive selection / scroll-into-view on the current match through the
+    // handle it captured — the widget itself is long gone into the tree by then.
+
+    /// Reactive signal — `true` while **this** editor holds keyboard focus.
+    /// See [`RichTextEditor::focused_signal`].
+    pub fn focused_signal(&self) -> Signal<bool> {
+        self.state.borrow().focus_signal.clone()
+    }
+
+    /// Select the character range `[start, end)` without collapsing (anchor at
+    /// `start`, caret at `end`). See [`RichTextEditor::select_range`].
+    pub fn select_range(&self, start: usize, end: usize) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.cursor.set_position(start, MoveMode::MoveAnchor);
+            st.cursor.set_position(end, MoveMode::KeepAnchor);
+            st.cursor_affinity = bastyde_text::CursorAffinity::Downstream;
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Scroll the character range `[start, end)` into view. A no-op until the
+    /// editor has a full layout. See [`RichTextEditor::reveal_range`].
+    pub fn reveal_range(
+        &self,
+        ctx: &mut bastyde_core::widget::EventContext,
+        start: usize,
+        end: usize,
+    ) {
+        let area = match self::keyboard::range_window_rect(&self.state.borrow(), start, end) {
+            Some(a) => a,
+            None => return,
+        };
+        ctx.ensure_visible(area);
+    }
+
+    /// Move keyboard focus onto the editor. Lets a control built *above* the
+    /// editor — a find banner returning focus to the prose on Escape — put the
+    /// caret back where the user expects. A no-op until the editor has built at
+    /// least once (its wrapper id is stashed then).
+    pub fn focus(&self, ctx: &mut bastyde_core::widget::EventContext) {
+        if let Some(id) = self.state.borrow().self_id {
+            ctx.request_focus(id);
+        }
+    }
+
     // --- Character-format query / apply ------------------------------------
 
     /// Read the current character format at the caret. When a selection
@@ -2741,6 +2791,9 @@ impl Widget for RichTextEditor {
             let mut st = self.state.borrow_mut();
             st.frame_request = Some(ctx.frame_request_handle());
             st.frame_wake_at = Some(ctx.wake_at_handle());
+            // Remember this build's wrapper id — the `.focusable(true)` node — so a
+            // held handle can request focus back onto the editor.
+            st.self_id = Some(ctx.self_id());
         }
 
         // Kick off the first frame so the initial layout/paint runs
