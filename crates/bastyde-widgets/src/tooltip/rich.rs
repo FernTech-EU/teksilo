@@ -102,7 +102,25 @@ pub struct RichTooltipWidget {
     /// — and its [`DwellIndicator`] — don't apply: the indicator is
     /// suppressed in `build()`.
     is_cascade_child: bool,
+    /// The keys of every tooltip strictly above this one on the current
+    /// cascade path (root → … → this tooltip's parent). Threaded down so
+    /// `build()` can refuse to pre-create a nested child whose key is
+    /// already an ancestor — that would close a `[label](:key)` cycle
+    /// (e.g. `book → chapter → end-of-book → book`) and, because
+    /// pre-creation is eager and recursive, overflow the stack. Empty on
+    /// the root tooltip; each cascade child receives its parent's path
+    /// plus the parent's own key. See [`MAX_CASCADE_DEPTH`].
+    cascade_ancestors: Vec<String>,
 }
+
+/// Hard cap on cascade nesting depth. The `cascade_ancestors` visited-set
+/// already guarantees termination (no key repeats on a path, so depth is
+/// bounded by the registry size), but a large, densely cross-linked
+/// registry could still enumerate very long simple paths. This caps the
+/// eager pre-creation regardless of graph shape; a link deeper than this
+/// still renders as text but opens nothing. Realistic drill-down is one or
+/// two levels, so the ceiling is generous.
+const MAX_CASCADE_DEPTH: usize = 8;
 
 impl std::fmt::Debug for RichTooltipWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -126,6 +144,7 @@ impl RichTooltipWidget {
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
             is_cascade_child: false,
+            cascade_ancestors: Vec::new(),
         }
     }
 
@@ -143,6 +162,7 @@ impl RichTooltipWidget {
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
             is_cascade_child: false,
+            cascade_ancestors: Vec::new(),
         }
     }
 
@@ -153,6 +173,15 @@ impl RichTooltipWidget {
     /// mechanism (`RichTooltipWidget::build` pre-creates these).
     pub(crate) fn cascade_child(mut self) -> Self {
         self.is_cascade_child = true;
+        self
+    }
+
+    /// Record the cascade path (keys of every ancestor tooltip) this
+    /// tooltip hangs from, so `build()` can break `[label](:key)` cycles
+    /// and honour [`MAX_CASCADE_DEPTH`]. Internal to the cascade
+    /// mechanism — set by `build()` when it pre-creates a nested child.
+    pub(crate) fn with_cascade_ancestors(mut self, ancestors: Vec<String>) -> Self {
+        self.cascade_ancestors = ancestors;
         self
     }
 
@@ -237,13 +266,30 @@ impl Widget for RichTooltipWidget {
         }
         nested_keys.sort();
         nested_keys.dedup();
-        // Only pre-create for keys that actually exist in the registry.
-        let registered: Vec<String> = nested_keys
-            .into_iter()
-            .filter(|k| with_tooltip_registry(|r| r.get(k).is_some()).unwrap_or(false))
-            .collect();
+        // The cascade path handed to any child: this tooltip's ancestors
+        // plus its own key. Guards the eager, recursive pre-creation below
+        // against `[label](:key)` cycles (e.g. `book → chapter →
+        // end-of-book → book`), which would otherwise recurse forever and
+        // overflow the stack.
+        let mut child_ancestors = self.cascade_ancestors.clone();
+        child_ancestors.push(content.key.clone());
+        let at_depth_limit = child_ancestors.len() >= MAX_CASCADE_DEPTH;
+        // Pre-create only for keys that are registered, not already on the
+        // cascade path (cycle break — a link back to self or an ancestor is
+        // dropped), and within the depth budget.
+        let registered: Vec<String> = if at_depth_limit {
+            Vec::new()
+        } else {
+            nested_keys
+                .into_iter()
+                .filter(|k| !child_ancestors.contains(k))
+                .filter(|k| with_tooltip_registry(|r| r.get(k).is_some()).unwrap_or(false))
+                .collect()
+        };
         for key in &registered {
-            let nested = RichTooltipWidget::from_key(key.clone()).cascade_child();
+            let nested = RichTooltipWidget::from_key(key.clone())
+                .cascade_child()
+                .with_cascade_ancestors(child_ancestors.clone());
             let nested_id = ctx.add(nested);
             // Mark dormant immediately. `ctx.add` inserts widgets at
             // arena top-level (not as children of `self`), so without
@@ -700,5 +746,33 @@ mod tests {
             !nb.actions().contains(&Action::Focus),
             "non-sticky tooltip should not advertise Focus"
         );
+    }
+
+    #[test]
+    fn cyclic_cascade_links_do_not_overflow_the_stack() {
+        use crate::tooltip::registry::{_reset_tooltip_registry, install_tooltip_registry};
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::widget_tree::WidgetTree;
+        use std::cell::RefCell;
+
+        // The shape that used to overflow: a `[label](:key)` cycle
+        // `a → b → c → a`, plus a self-link `a → a`. Eager, recursive
+        // pre-creation of cascade children followed the cycle forever.
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![
+            TooltipContent::new("a", lit!("A cites [b](:b) and itself [a](:a)")),
+            TooltipContent::new("b", lit!("B cites [c](:c)")),
+            TooltipContent::new("c", lit!("C cites back to [a](:a)")),
+        ]);
+
+        let mut tree =
+            WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        // Reaching layout at all proves the visited-set guard terminated
+        // the cascade pre-creation instead of recursing to a stack overflow.
+        let id = tree.add(RichTooltipWidget::from_key("a"));
+        tree.layout(SizeProposal::with_width(400.0));
+        assert!(tree.bounds(id).height >= 0.0);
+
+        _reset_tooltip_registry();
     }
 }
