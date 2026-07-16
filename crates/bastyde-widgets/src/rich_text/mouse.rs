@@ -306,3 +306,67 @@ fn tap_select(state: &SharedState, pos: Point, kind: SelectionType) {
         sync_cursor_signals(state);
     }
 }
+
+/// Convert a **window**-space point (the coordinate a context-menu factory is
+/// handed by `show_context_menu_for`) into engine/body-local space. The body's
+/// top-left in the window is `viewport_origin`, so `window - viewport_origin`
+/// lands in the space `hit_test` expects — no `node_origin` term, because the
+/// input is already a window point (unlike [`to_engine_local`], whose input is
+/// wrapper-local).
+fn engine_local_of_window(state: &SharedState, window_position: Point) -> Point {
+    let st = state.borrow();
+    Point::new(
+        window_position.x - st.viewport_origin.x,
+        window_position.y - st.viewport_origin.y,
+    )
+}
+
+/// Reposition the caret to a right-click point **in window coordinates** when
+/// the click lands *outside* the current selection — the platform convention
+/// for "right-click, then Cut / Copy / Paste (/ add word) at the new caret". A
+/// click *inside* the selection preserves it, so the menu's Cut/Copy still act
+/// on the selection.
+///
+/// This has to run from inside the context-menu factory: the editor never sees
+/// the Secondary `PointerDown` through its own pointer handler, because
+/// `bastyde-core`'s `show_context_menu_for` consumes it (and returns early)
+/// before `dispatch_to_widget` is ever called. Mirrors the single-line
+/// [`TextInputField`](crate::primitives::text_input_field)'s behavior.
+pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_position: Point) {
+    let local = engine_local_of_window(state, window_position);
+    let hit = {
+        let st = state.borrow();
+        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+    };
+    let Some(hit) = hit else {
+        return;
+    };
+    {
+        let st = state.borrow();
+        if st.cursor.has_selection() {
+            let (lo, hi) = (st.cursor.selection_start(), st.cursor.selection_end());
+            if hit.position >= lo && hit.position <= hi {
+                // Click inside the selection — keep it so Cut/Copy act on it.
+                return;
+            }
+        }
+    }
+    {
+        let mut st = state.borrow_mut();
+        st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
+        st.cursor_affinity = hit.affinity;
+        st.preferred_x = None;
+        st.select_all_level = 0;
+        st.select_all_anchor_cell = None;
+    }
+    sync_cursor_signals(state);
+}
+
+/// Hit-test a **window**-space point to a document char offset — the primitive
+/// behind [`EditorHandle::offset_at_point`](super::EditorHandle::offset_at_point).
+/// `None` when the point resolves to no text.
+pub(super) fn offset_at_window_point(state: &SharedState, window_position: Point) -> Option<usize> {
+    let local = engine_local_of_window(state, window_position);
+    let st = state.borrow();
+    hit_test::hit_test_at(&st.engine, local, 0.0, 0.0).map(|hit| hit.position)
+}

@@ -1555,6 +1555,28 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    /// Hit-test a point — **in window coordinates**, as a
+    /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
+    /// document character offset. `None` when the point resolves to no text
+    /// (past the last glyph on an empty line, outside the body, etc.).
+    ///
+    /// Lets a custom context-menu factory resolve "the word under the pointer"
+    /// from the right-click position, since a bare right-click does not move the
+    /// caret on its own.
+    pub fn offset_at_point(&self, window_point: Point) -> Option<usize> {
+        mouse::offset_at_window_point(&self.state, window_point)
+    }
+
+    /// Reposition the caret to a right-click point (**window coordinates**)
+    /// unless the click lands inside the current selection (then the selection
+    /// is preserved). Call this at the top of a custom
+    /// [`context_menu`](RichTextEditor::context_menu) factory so the menu's Paste
+    /// — and any caret-relative action — operates where the user clicked, exactly
+    /// as the built-in menu and the single-line field do.
+    pub fn reposition_caret_for_context_menu(&self, window_point: Point) {
+        mouse::reposition_caret_for_context_menu(&self.state, window_point);
+    }
+
     /// Scroll the character range `[start, end)` into view. A no-op until the
     /// editor has a full layout. See [`RichTextEditor::reveal_range`].
     pub fn reveal_range(

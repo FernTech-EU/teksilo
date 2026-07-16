@@ -113,7 +113,13 @@ pub(super) fn default_factory(
     // `Some(menu)`, ignoring position and ctx. Callers needing a
     // position-aware menu install their own via
     // `RichTextEditor::context_menu`.
-    Box::new(move |_pos, _ctx| {
+    Box::new(move |pos, _ctx| {
+        // Reposition the caret to the click point (unless it lands inside the
+        // current selection) so Paste — and every other item — acts where the
+        // user right-clicked, matching the single-line field and the platform
+        // convention. Without this a right-click leaves the caret wherever it
+        // last was, and Paste inserted there instead of under the cursor.
+        super::mouse::reposition_caret_for_context_menu(&state, pos);
         let state_for_build = state.clone();
         Some(Box::new(build_menu(state_for_build, policy)) as Box<dyn Widget>)
     })

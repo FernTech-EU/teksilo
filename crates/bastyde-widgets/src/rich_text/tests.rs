@@ -2584,12 +2584,12 @@ fn editor_context_menu_slot_replaces_default_entirely() {
 
 #[test]
 fn editor_right_click_does_not_collapse_selection() {
-    // Right-click on an editor with a live selection must leave
-    // the selection intact so that the menu's Cut/Copy can act on
-    // it. The framework's `show_context_menu_for` intercepts
-    // Secondary PointerDown BEFORE bubbling to the editor's
-    // on_pointer_event, so the editor never sees it — no caret
-    // collapse.
+    // Right-click *inside* a live selection must leave it intact so the menu's
+    // Cut/Copy can act on it. Here the whole document is selected (Ctrl+A), so
+    // any click lands inside the selection — the context-menu factory's caret
+    // reposition sees `hit ∈ [selection]` and preserves it. (A right-click
+    // *outside* the selection instead collapses the caret to the click point —
+    // see `editor_right_click_outside_selection_repositions_caret`.)
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
 
     let doc = TextDocument::new();
@@ -2621,6 +2621,86 @@ fn editor_right_click_does_not_collapse_selection() {
         has_sel.get(),
         "right-click must preserve the existing selection"
     );
+}
+
+#[test]
+fn editor_right_click_outside_selection_repositions_caret() {
+    // A right-click *outside* the current selection collapses the caret to the
+    // click point — the platform convention that makes the menu's Paste (and
+    // "add word under cursor") act where the user clicked. This is the
+    // mechanism behind the paste-under-cursor fix: paste always inserts at the
+    // caret, so moving the caret to the click point is what makes paste land
+    // there.
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let has_sel = editor.has_selection();
+    let caret = editor.cursor_position_signal();
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    focus_editor(&mut tree, id);
+
+    // Select "world" (offsets 6..11), caret at the end.
+    handle.select_range(6, 11);
+    assert!(has_sel.get(), "precondition: a selection exists");
+
+    // Right-click at the far left — resolves to the very start, outside [6, 11].
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(1.0, 8.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        !has_sel.get(),
+        "right-click outside the selection must collapse it"
+    );
+    assert!(
+        caret.get() < 6,
+        "caret must move to the click point (got {})",
+        caret.get()
+    );
+}
+
+#[test]
+fn editor_offset_at_point_hit_tests_window_coordinates() {
+    // `EditorHandle::offset_at_point` maps a window-space point (as a
+    // context-menu factory receives it) to a document offset. A click at the
+    // far left lands near the start; a click far to the right lands near the
+    // end of the (single-line) content.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let len = "Hello world".chars().count();
+    let left = handle.offset_at_point(Point::new(2.0, 8.0));
+    let right = handle.offset_at_point(Point::new(60.0, 8.0));
+    assert!(
+        matches!(left, Some(n) if n <= len),
+        "a left-side click resolves to an in-bounds offset (got {left:?})"
+    );
+    assert!(
+        matches!(right, Some(n) if n <= len),
+        "a right-side click resolves to an in-bounds offset (got {right:?})"
+    );
+    if let (Some(l), Some(r)) = (left, right) {
+        assert!(r >= l, "offset grows left→right ({l} → {r})");
+    }
 }
 
 #[test]
