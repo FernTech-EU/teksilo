@@ -208,6 +208,10 @@ lay-min-size = min 160 × 32
 lay-max-size = clamped to ≤ 240 × 32, even with very long text inside
 lay-aspect-label = 16:9
 lay-centered = centered
+lay-column-flow-count = { $n } column{ $n ->
+        [one] { "" }
+       *[other] s
+    } — narrow the window to reflow
 lay-form-label-a = Label A
 lay-form-value-a = value A
 lay-form-label-b = Label B

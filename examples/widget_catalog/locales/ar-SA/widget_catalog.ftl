@@ -208,6 +208,11 @@ lay-min-size = حدّ أدنى ١٦٠ × ٣٢
 lay-max-size = مقيّد إلى ≤ ٢٤٠ × ٣٢ حتى مع نص طويل جدًا بداخله
 lay-aspect-label = ١٦:٩
 lay-centered = متمركز
+lay-column-flow-count = { $n ->
+        [one] عمود واحد
+        [two] عمودان
+       *[other] { $n } أعمدة
+    } — صغّر النافذة لإعادة التوزيع
 lay-form-label-a = التسمية أ
 lay-form-value-a = القيمة أ
 lay-form-label-b = التسمية ب

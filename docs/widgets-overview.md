@@ -70,6 +70,7 @@ slack distribution math, and worked examples.
 - [Grid](../crates/bastyde-widgets/src/primitives/grid.rs) — fixed/fr/auto track grid (`TrackSize`); explicit cell placement.
 - [Wrap](../crates/bastyde-widgets/src/primitives/wrap.rs) — flow layout that wraps to new rows when out of width.
 - [MasonryLayout](../crates/bastyde-widgets/src/primitives/masonry.rs) — variable-height grid packing into the shortest column (Pinterest-style).
+- [ColumnFlow](../crates/bastyde-widgets/src/primitives/column_flow.rs) — newspaper columns whose count follows the available width: drops a column and re-partitions every child as the width shrinks. Contiguous source-order runs, so reading and focus order stay correct at every count; `min`/`max_column_width`, `max_columns`, `column_rule`, opt-in `semantic_list`, reactive `column_count_signal()`. Pair with a `ScrollArea` for vertical overflow.
 - [FormLayout](../crates/bastyde-widgets/src/primitives/form_layout.rs) — labelled rows with column alignment for settings panels.
 - [Center](../crates/bastyde-widgets/src/primitives/center.rs) — centers a single child within the space it is given (fills a bounded axis, shrink-wraps an open one; `flex = 0`, so it does not claim stack slack — wrap in `Expand` for that).
 - [Expand](../crates/bastyde-widgets/src/primitives/expand.rs) — flex-basis-zero workhorse for ratio splits and full-bleed children.

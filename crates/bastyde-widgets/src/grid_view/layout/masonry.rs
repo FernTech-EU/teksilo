@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use bastyde_canvas::EdgeInsets;
 
-use super::columns::ColumnGeometry;
+use super::columns::{ColumnGeometry, geometry_for};
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
 type ExactHeightFn = Rc<dyn Fn(usize) -> f32>;
@@ -160,7 +160,7 @@ impl VirtualizedMasonry {
             sizing.tile_height().max(1.0)
         };
         Self {
-            columns: ColumnGeometry::new(sizing, col_gap, inset),
+            columns: geometry_for(sizing, col_gap, inset),
             exact_height,
             placement: RefCell::new(Placement::new(
                 estimated,

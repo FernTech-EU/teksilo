@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use bastyde_canvas::EdgeInsets;
 
-use super::columns::ColumnGeometry;
+use super::columns::{ColumnGeometry, geometry_for};
 use super::offsets::PrefixSumOffsets;
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
@@ -71,7 +71,7 @@ impl VariableRowGrid {
             sizing.tile_height().max(1.0)
         };
         Self {
-            columns: ColumnGeometry::new(sizing, col_gap, inset),
+            columns: geometry_for(sizing, col_gap, inset),
             row_gap: row_gap.max(0.0),
             estimated,
             exact_height,

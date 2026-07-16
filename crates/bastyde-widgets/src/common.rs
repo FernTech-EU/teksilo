@@ -10,6 +10,7 @@
 //! without dragging the underlying crate name (`jiff`) into the public
 //! surface.
 
+pub(crate) mod column_geometry;
 pub mod datetime;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;

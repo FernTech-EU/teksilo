@@ -1,39 +1,24 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Shared column geometry for grid strategies.
+//! [`GridSizing`] → [`WidthPolicy`] mapping for the grid strategies.
 //!
 //! Every strategy derives its column count and per-column `(x, width)` the
 //! same way from a [`GridSizing`]; only the *vertical* layout (uniform vs
-//! variable vs waterfall) differs. `ColumnGeometry` factors out that shared
-//! horizontal math.
+//! variable vs waterfall) differs. The horizontal math itself lives in
+//! [`crate::common::column_geometry`] — shared with `ColumnFlow`, which needs
+//! the identical `auto-fill` column-count rule but knows nothing about tiles.
+//! This module is only the `GridSizing`-shaped door onto it.
 
 use bastyde_canvas::EdgeInsets;
 
 use super::strategy::GridSizing;
+pub(crate) use crate::common::column_geometry::ColumnGeometry;
+use crate::common::column_geometry::WidthPolicy;
 
-/// How a column's width is determined.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum WidthPolicy {
-    /// Fixed tile width; tiles are not stretched.
-    Fixed(f32),
-    /// Explicit column count; tiles stretch to an equal share.
-    Count(usize),
-    /// Min tile width; tiles stretch to fill, clamped to `max`.
-    Adaptive { min: f32, max: Option<f32> },
-}
-
-/// Horizontal layout: column count + per-column geometry.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ColumnGeometry {
-    policy: WidthPolicy,
-    col_gap: f32,
-    inset: EdgeInsets,
-}
-
-impl ColumnGeometry {
-    pub(crate) fn new(sizing: GridSizing, col_gap: f32, inset: EdgeInsets) -> Self {
-        let policy = match sizing {
+impl From<GridSizing> for WidthPolicy {
+    fn from(sizing: GridSizing) -> Self {
+        match sizing {
             GridSizing::Fixed { width, .. } => WidthPolicy::Fixed(width),
             GridSizing::FixedColumnCount { count, .. } => WidthPolicy::Count(count.max(1)),
             GridSizing::Adaptive {
@@ -44,47 +29,66 @@ impl ColumnGeometry {
                 min: min_width,
                 max: max_width,
             },
-        };
-        Self {
-            policy,
-            col_gap: col_gap.max(0.0),
-            inset,
         }
     }
+}
 
-    /// Usable content width inside the leading/trailing insets.
-    pub(crate) fn available_width(&self, viewport_width: f32) -> f32 {
-        (viewport_width - self.inset.horizontal()).max(0.0)
-    }
+/// Build a [`ColumnGeometry`] from a [`GridSizing`]. The grid strategies'
+/// entry point; equivalent to `ColumnGeometry::from_policy(sizing.into(), ..)`.
+pub(crate) fn geometry_for(sizing: GridSizing, col_gap: f32, inset: EdgeInsets) -> ColumnGeometry {
+    ColumnGeometry::from_policy(sizing.into(), col_gap, inset)
+}
 
-    pub(crate) fn column_count(&self, viewport_width: f32) -> usize {
-        match self.policy {
-            WidthPolicy::Count(n) => n.max(1),
-            WidthPolicy::Fixed(w) | WidthPolicy::Adaptive { min: w, .. } => {
-                let avail = self.available_width(viewport_width);
-                if w <= 0.0 {
-                    return 1;
-                }
-                let n = ((avail + self.col_gap) / (w + self.col_gap)).floor() as i64;
-                n.max(1) as usize
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_maps_min_and_max() {
+        let p: WidthPolicy = GridSizing::Adaptive {
+            min_width: 200.0,
+            max_width: Some(400.0),
+            height: 50.0,
+        }
+        .into();
+        assert_eq!(
+            p,
+            WidthPolicy::Adaptive {
+                min: 200.0,
+                max: Some(400.0)
             }
-        }
+        );
     }
 
-    pub(crate) fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32) {
-        let cols = self.column_count(viewport_width).max(1);
-        let avail = self.available_width(viewport_width);
-        let stretched = (avail - self.col_gap * (cols as f32 - 1.0)) / cols as f32;
-        let col_w = match self.policy {
-            WidthPolicy::Fixed(w) => w,
-            WidthPolicy::Count(_) => stretched,
-            WidthPolicy::Adaptive { max, .. } => match max {
-                Some(mx) => stretched.min(mx),
-                None => stretched,
-            },
+    #[test]
+    fn fixed_maps_width_and_drops_height() {
+        let p: WidthPolicy = GridSizing::Fixed {
+            width: 120.0,
+            height: 90.0,
         }
-        .max(0.0);
-        let x = self.inset.leading + col as f32 * (col_w + self.col_gap);
-        (x, col_w)
+        .into();
+        assert_eq!(p, WidthPolicy::Fixed(120.0));
+    }
+
+    #[test]
+    fn fixed_column_count_clamps_zero_to_one() {
+        let p: WidthPolicy = GridSizing::FixedColumnCount {
+            count: 0,
+            height: 50.0,
+        }
+        .into();
+        assert_eq!(p, WidthPolicy::Count(1));
+    }
+
+    #[test]
+    fn geometry_for_matches_from_policy() {
+        let sizing = GridSizing::Adaptive {
+            min_width: 240.0,
+            max_width: None,
+            height: 50.0,
+        };
+        let g = geometry_for(sizing, 16.0, EdgeInsets::ZERO);
+        // floor((1000 + 16) / (240 + 16)) = 3
+        assert_eq!(g.column_count(1000.0), 3);
     }
 }

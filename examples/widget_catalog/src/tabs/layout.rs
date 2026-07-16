@@ -4,11 +4,12 @@
 //! Layout primitives tab — every container/spacing primitive in
 //! `bastyde_widgets::primitives`.
 
+use bastyde::i18n::tr_signal;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    AspectRatio, Badge, Button, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack,
-    MasonryLayout, MaxSize, MinSize, Padding, Panel, RectWidget, Spacer, Switcher, TextWidget,
-    TrackSize, VStack, Wrap, ZStack,
+    AspectRatio, Badge, Button, Center, ColumnFlow, Divider, Expand, FixedSize, FormLayout, Grid,
+    HStack, MasonryLayout, MaxSize, MinSize, Padding, Panel, RectWidget, Spacer, Switcher,
+    TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 
 use crate::shared::{Signals, color_cell, section, tab_header};
@@ -19,6 +20,20 @@ pub fn title() -> LocalizedString {
 
 pub fn refs() -> LocalizedString {
     tr!(tab_layout_refs())
+}
+
+/// A numbered card for the `ColumnFlow` demo. The number makes the reflow
+/// legible: narrow the window and watch 1..8 re-partition while still reading
+/// in order down each column.
+fn flow_card(n: u32, height: f32) -> impl Widget + 'static {
+    FixedSize::new()
+        .height(height)
+        .child(
+            Panel::new().background(SurfaceRole::AccentSubtle).child(
+                Center::new()
+                    .child(TextWidget::new(lit!(format!("{n}"))).style(TextStyleRole::SmallBold)),
+            ),
+        )
 }
 
 fn masonry_tile(height: f32) -> impl Widget + 'static {
@@ -107,6 +122,40 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .child(masonry_tile(80.0))
             .child(masonry_tile(50.0))
             .child(masonry_tile(70.0)),
+    );
+    // ColumnFlow: the column count follows the width, and every card is
+    // re-partitioned when a column is gained or lost. `column_count_signal`
+    // is bound at RepaintOnly (a label), which is the safe binding level —
+    // see the widget's docs.
+    let flow = ColumnFlow::new()
+        .min_column_width(90.0)
+        .max_columns(4)
+        .column_spacing(8.0)
+        .item_spacing(8.0)
+        .column_rule(1.0, BorderRole::Divider)
+        .semantic_list(true)
+        .child(flow_card(1, 44.0))
+        .child(flow_card(2, 60.0))
+        .child(flow_card(3, 36.0))
+        .child(flow_card(4, 52.0))
+        .child(flow_card(5, 40.0))
+        .child(flow_card(6, 68.0))
+        .child(flow_card(7, 32.0))
+        .child(flow_card(8, 48.0));
+    let flow_columns = flow.column_count_signal();
+    let flow_count_text: Signal<String> = tr_signal!(lay_column_flow_count(n = flow_columns));
+    let column_flow = section(
+        ctx,
+        lit!("ColumnFlow"),
+        VStack::new()
+            .spacing(6.0)
+            .child(
+                TextWidget::new(lit!(""))
+                    .text(flow_count_text)
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+            )
+            .child(flow),
     );
     let form = section(
         ctx,
@@ -252,6 +301,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .add_child(grid)
             .add_child(wrap)
             .add_child(masonry)
+            .add_child(column_flow)
             .add_child(form)
             .add_child(center)
             .add_child(expand)
@@ -409,6 +459,29 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     child: masonry_tile(80.0)
                     child: masonry_tile(50.0)
                     child: masonry_tile(70.0)
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("ColumnFlow")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                ColumnFlow {
+                    min_column_width: 90.0
+                    max_columns: 4usize
+                    column_spacing: 8.0
+                    item_spacing: 8.0
+                    semantic_list: true
+                    child: flow_card(1, 44.0)
+                    child: flow_card(2, 60.0)
+                    child: flow_card(3, 36.0)
+                    child: flow_card(4, 52.0)
+                    child: flow_card(5, 40.0)
+                    child: flow_card(6, 68.0)
+                    child: flow_card(7, 32.0)
+                    child: flow_card(8, 48.0)
                 }
             }
 

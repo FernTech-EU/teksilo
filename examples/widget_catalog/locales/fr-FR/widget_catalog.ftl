@@ -204,6 +204,10 @@ lay-min-size = min 160 × 32
 lay-max-size = limité à ≤ 240 × 32, même avec un texte très long à l'intérieur
 lay-aspect-label = 16:9
 lay-centered = centré
+lay-column-flow-count = { $n } colonne{ $n ->
+        [one] { "" }
+       *[other] s
+    } — rétrécissez la fenêtre pour voir la redistribution
 lay-form-label-a = Étiquette A
 lay-form-value-a = valeur A
 lay-form-label-b = Étiquette B

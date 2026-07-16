@@ -408,7 +408,104 @@ Each child is queried at column-width to get its real height, then placed under 
 
 **When to choose:** masonry over grid when item heights vary a lot and you don't mind that the visual row alignment is broken; grid over masonry when columns must align horizontally.
 
-### 5.4 `FormLayout` — two-column label / field
+### 5.4 `ColumnFlow` — responsive columns that reflow
+
+[crates/bastyde-widgets/src/primitives/column_flow.rs](../crates/bastyde-widgets/src/primitives/column_flow.rs)
+
+The newspaper model. Content runs down column 0, then down column 1. The column count is **derived from the available width** and `min_column_width`; when the width no longer affords *N* columns the layout drops to *N−1* and **every** child is re-partitioned across the survivors. Children are atomic — one child never straddles a column boundary.
+
+```rust
+ScrollArea::new().child(
+    ColumnFlow::new()
+        .min_column_width(240.0)   // as many ≥240 dp columns as fit
+        .max_columns(4)            // …but never more than 4
+        .column_spacing(16.0)
+        .item_spacing(12.0)
+        .children(articles.iter().map(|a| ArticleCard::new(a.clone()))),
+)
+```
+
+Pair it with a `ScrollArea` for vertical overflow: `ColumnFlow` reports its true content height (the tallest column), so the scroll extent comes out right.
+
+#### Reading order is the whole design
+
+Children are distributed as **contiguous runs in source order** — column 0 takes children `0..i`, column 1 takes `i..j`. So source order, visual reading order, and focus order are the same thing at every column count:
+
+```text
+ wide                            narrower
+┌────┐ ┌────┐ ┌────┐            ┌────┐ ┌────┐
+│ 1  │ │ 3  │ │ 5  │            │ 1  │ │ 4  │
+├────┤ ├────┤ ├────┤            ├────┤ ├────┤
+│ 2  │ │ 4  │ │ 6  │    ───►    │ 2  │ │ 5  │
+└────┘ └────┘ └────┘            ├────┤ ├────┤
+                                │ 3  │ │ 6  │
+                                └────┘ └────┘
+reading order: 1..6             reading order: 1..6
+```
+
+This is why `ColumnFlow` does **not** reuse `MasonryLayout`'s shortest-column packing: masonry interleaves children (child 4 may land above child 3), which divorces the visual order from the source order. Bastyde's focus traversal and its AccessKit walk both derive from tree order, so an interleaving layout would read out of order. WCAG 1.3.2 *Meaningful Sequence* names multi-column text as its first example and blesses exactly this column-major order.
+
+Because the order is right by construction, no `aria-flowto` is needed — that attribute is an advisory fallback for when the logical order is *wrong*, and it doesn't affect Tab order anyway.
+
+#### Balancing
+
+The partition minimises the tallest column, subject to keeping runs contiguous, and uses **exactly** *k* columns when there are at least *k* children. Six equal cards in three columns give `[2, 2, 2]`; four equal cards in three columns give `[2, 1, 1]` rather than `[2, 2, ∅]` — both have the same tallest column, but stranding a trailing column looks broken.
+
+Internally this bisects the column extent (greedy fill is the feasibility oracle) over a fixed iteration count. `layout_response` and `place_children` each run the search from scratch — there is no persisted partition state, following `MasonryLayout` — so the search is deterministic by construction and both hooks agree.
+
+#### Column width
+
+| Knob | Effect |
+| --- | --- |
+| `min_column_width(f32)` | The narrowest a column may be; sets the count. Defaults to 240 dp. CSS `column-width`, SwiftUI `GridItem(.adaptive(minimum:))`, Compose `GridCells.Adaptive(minSize)`. |
+| `max_columns(usize)` | Ceiling on the count however wide the layout gets. CSS's `column-count` *when paired with* `column-width`. |
+| `max_column_width(f32)` | The widest a column may be. Unset by default, so columns stretch to share the width evenly. |
+| `alignment(HAlignment)` | Where the block sits when `max_column_width` leaves leftover width. Defaults to `Leading`; RTL-aware. |
+
+Set `max_column_width` when few columns fit a large display — two columns on a 4K monitor are otherwise ~1900 dp wide and unreadable. It's the same reason KDE's `Kirigami.CardsLayout` pairs `minimumColumnWidth` with `maximumColumnWidth`.
+
+#### Reacting to the count
+
+`column_count_signal() -> Signal<usize>` publishes the live count, written from the layout pass behind an equality guard so it only fires on a real change.
+
+**Binding contract.** Safe for `RepaintOnly` / `AccessibilityOnly` consumers, and for `Relayout` consumers that do not feed back into this widget's own width. The count is a pure function of the width `ColumnFlow` is *given* — it never changes its own width, so it cannot oscillate on its own. But a `Relayout` consumer that resizes something which in turn resizes the `ColumnFlow` closes a feedback loop through the layout pass, which is what `Widget::place_children`'s own documentation warns against.
+
+#### Accessibility
+
+By default `ColumnFlow` emits a bare `Role::GenericContainer` carrying **no** properties, and the accessibility walker prunes it, promoting the children to its parent in source order. That is the right outcome: a layout primitive contributes geometry, not meaning, and the reading order is already correct. Setting *any* property here — even an orientation — would keep the node alive as AT noise. For a layout, maximum accessibility means being invisible to assistive tech while preserving order.
+
+Add semantics from the outside with the usual overrides:
+
+```rust
+ColumnFlow::new()
+    .children(cards)
+    .access_role(Role::Region)          // a landmark users can jump to
+    .access_label(tr!(latest_stories()))
+```
+
+Or opt into list semantics when the children genuinely are a list of peers:
+
+```rust
+ColumnFlow::new().semantic_list(true).children(cards)
+// container → Role::List; each child → Role::ListItem with
+// position_in_set / size_of_set, so AT announces "list, 30 items",
+// "item 5 of 30". Costs one node per child.
+```
+
+It is deliberately **not** `Role::Grid`: the ARIA grid pattern mandates arrow-key cell navigation and roving focus, which `GridView` implements and `ColumnFlow` does not. Claiming the role without the contract would lie to AT.
+
+#### Column rule
+
+`.column_rule(width, color)` draws a hairline centred in every inter-column gap — CSS `column-rule`. Decorative only; it emits no accessibility node. Pass `BorderRole::Divider` to track the theme.
+
+#### Two limitations worth knowing
+
+- **`ColumnFlow` is rigid** (`flex = 0`, `shrink = 0`). It adapts when width is decided *for* it — as a `VStack` child, inside a `ScrollArea`, at a window root. As an `HStack` **main-axis** child it gets its natural width and won't reflow; wrap it in `Expand` to claim main-axis width. Same as `Wrap`.
+- **It is not a CSS multicol port.** CSS `column-fill: balance` balances within a column height it computes from a *bounded* block size. `ColumnFlow` derives the column *count* from the width and lets the height run free. No CSS `column-fill` mode does that.
+
+**When to choose:** `ColumnFlow` when the column count should follow the width and items must read in order (article lists, card collections, settings panels). `MasonryLayout` when the count is fixed and dense packing beats reading order. `Grid` when cells must align in rows *and* columns. `GridView` when the items come from a `ListModel` and you need virtualization or cell-level keyboard navigation.
+
+### 5.5 `FormLayout` — two-column label / field
 
 [crates/bastyde-widgets/src/primitives/form_layout.rs](../crates/bastyde-widgets/src/primitives/form_layout.rs)
 
@@ -433,7 +530,7 @@ FormLayout::new()
 
 Row height is `max(label.height, field.height)`. The label column width is the widest label intrinsic — every row's label cell is sized to that uniform width, so the field columns line up vertically across all rows.
 
-### 5.5 `Switcher` — show one child at a time
+### 5.6 `Switcher` — show one child at a time
 
 [crates/bastyde-widgets/src/primitives/switcher.rs](../crates/bastyde-widgets/src/primitives/switcher.rs)
 
@@ -510,6 +607,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Tabular data with mixed track sizes | `Grid` |
 | Tag cloud / toolbar overflow | `Wrap` |
 | Pinterest-style heterogeneous cards | `MasonryLayout` |
+| Columns that follow the width and read in order | `ColumnFlow` |
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 

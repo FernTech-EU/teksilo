@@ -3,6 +3,7 @@
 
 pub mod aspect_ratio;
 pub mod center;
+pub mod column_flow;
 pub mod dead_zone;
 pub mod divider;
 pub mod expand;
@@ -40,6 +41,7 @@ pub mod zstack;
 
 pub use aspect_ratio::AspectRatio;
 pub use center::Center;
+pub use column_flow::ColumnFlow;
 pub use dead_zone::DeadZone;
 pub use divider::Divider;
 pub use expand::Expand;

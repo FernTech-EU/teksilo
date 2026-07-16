@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use bastyde_canvas::EdgeInsets;
 
-use super::columns::ColumnGeometry;
+use super::columns::{ColumnGeometry, geometry_for};
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
 /// Computed geometry for one section.
@@ -65,7 +65,7 @@ impl SectionedGrid {
         counts_fn: Rc<dyn Fn() -> Vec<usize>>,
     ) -> Self {
         Self {
-            columns: ColumnGeometry::new(sizing, col_gap, inset),
+            columns: geometry_for(sizing, col_gap, inset),
             tile_height: sizing.tile_height().max(0.0),
             row_gap: row_gap.max(0.0),
             header_height: header_height.max(0.0),
