@@ -49,7 +49,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
-use crate::primitives::{Center, HStack, IconWidget, TextWidget};
+use crate::primitives::{HStack, IconWidget, TextWidget};
 use crate::styles::recipe_segmented_control_style::{
     SEGMENTED_CONTROL_BORDER_WIDTH, SEGMENTED_CONTROL_HEIGHT, SEGMENTED_CONTROL_PADDING_HORIZONTAL,
     SEGMENTED_CONTROL_PADDING_VERTICAL,
@@ -264,7 +264,16 @@ impl Widget for SegmentCell {
         // content subtree so a screen reader doesn't double-announce the
         // label (an `access_hidden` flag alone would not prune the
         // descendant `TextWidget`/icon nodes).
-        let content_id = ctx.add(Center::new().child(row).access_exclude_subtree());
+        //
+        // The row is added *directly* (not wrapped in a `Center`): this cell's
+        // `place_children` measures it at the cell's bounded width and centres
+        // the result, so a `single_line` label truncates with an ellipsis to
+        // fit a narrow cell. A `Center` here would measure the row with an
+        // *unbounded* width — the label would then never see a `max_width`, so
+        // it could not ellipsize and would spill a few px past the (correctly
+        // sized) control whenever the segments are compressed below their
+        // label width.
+        let content_id = ctx.add(row.access_exclude_subtree());
         self.content_id = Some(content_id);
 
         // Optional hover tooltip (icon-only segments especially).
@@ -335,11 +344,24 @@ impl Widget for SegmentCell {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         if let Some(c) = children.first_mut() {
-            c.origin = bounds.origin();
-            c.size = bounds.size();
+            // Measure the label row at the cell's *bounded* width so a
+            // `single_line` label ellipsizes to fit the cell instead of
+            // overflowing it, then centre the hugged result in both axes.
+            // (A `Center` wrapper would measure the row unbounded and let a
+            // too-long label spill past the control — see `build`.)
+            let inner = ctx
+                .child_size(c.id, SizeProposal::with_width(bounds.width))
+                .unwrap_or_else(|| bounds.size());
+            let w = inner.width.min(bounds.width);
+            let h = inner.height.min(bounds.height);
+            c.origin = Point::new(
+                bounds.x + ((bounds.width - w) / 2.0).max(0.0),
+                bounds.y + ((bounds.height - h) / 2.0).max(0.0),
+            );
+            c.size = Size::new(w, h);
         }
     }
 
@@ -994,6 +1016,57 @@ mod tests {
             tree.active_overlays().len(),
             1,
             "tooltip should appear on hover over the tooltipped segment"
+        );
+    }
+
+    #[test]
+    fn narrow_control_keeps_labels_inside_its_bounds() {
+        // Regression: a `SegmentedControl` compressed below its label width
+        // must truncate its single-line labels with an ellipsis so they stay
+        // inside the control — not spill a few px past it. The cells used to
+        // wrap the label in a `Center`, which measures its child with an
+        // *unbounded* width, so the `single_line` label never saw a
+        // `max_width` and could not ellipsize; a too-long label then overflowed
+        // the (correctly sized) control.
+        fn max_right(tree: &WidgetTree, id: WidgetId) -> f32 {
+            let mut r = tree.bounds(id).right();
+            for c in tree.children(id) {
+                r = r.max(max_right(tree, c));
+            }
+            r
+        }
+
+        // A real text backend is required: `single_line` text only reports a
+        // shrink weight (so the stack truncates it) through the real layout
+        // path — the no-backend 8px/char fallback returns a rigid size and
+        // would let the label overflow regardless of the fix.
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        let sc = tree.add(SegmentedControl::new(selected).segments([
+            lit!("Full Synopsis"),
+            lit!("Full Chapter"),
+            lit!("Overview"),
+        ]));
+        // 120px across three cells is ~40px each — far narrower than any of
+        // these labels (13 chars ≈ 104px at 8px/char), so every one must
+        // ellipsize.
+        tree.layout(SizeProposal::exact(120.0, 40.0));
+
+        let control_right = tree.bounds(sc).right();
+        assert!(
+            control_right <= 120.5,
+            "the control must bound itself to the 120px window (right={control_right})"
+        );
+        let deepest = max_right(&tree, sc);
+        assert!(
+            deepest <= control_right + 0.5,
+            "a label spilled to x={deepest}, past the control's right edge \
+             {control_right}: single-line segment labels must ellipsize to fit \
+             their cell rather than overflow the control"
         );
     }
 }
