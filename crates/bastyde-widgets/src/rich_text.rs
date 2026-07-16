@@ -2072,6 +2072,16 @@ impl EditorHandle {
         self.state.borrow().format_version.clone()
     }
 
+    /// The **live** caret offset — reads `cursor.position()` directly, unbatched. Unlike
+    /// [`cursor_position_signal`](Self::cursor_position_signal), whose stored value lags one frame
+    /// behind a just-typed printable character (the insert is deferred to the frame loop and the
+    /// signal is only re-synced on the *next* caret event), this always reflects the true caret —
+    /// what a host that recomputes highlights on a frame tick must read. Mirrors
+    /// [`RichTextEditor::cursor_position`].
+    pub fn cursor_position(&self) -> usize {
+        self.state.borrow().cursor.position()
+    }
+
     /// Reactive caret position signal.
     pub fn cursor_position_signal(&self) -> Signal<usize> {
         self.state.borrow().cursor_position.clone()
