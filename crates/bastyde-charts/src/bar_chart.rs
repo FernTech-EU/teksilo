@@ -438,11 +438,19 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
         // behavior exactly.
         let palette = self.palette.get();
         let mut color_lookup: HashMap<SeriesId, (usize, Option<ColorProp>)> = HashMap::new();
+        // Per-point color overrides, keyed by `(series, point index)`. A bar
+        // whose datum sets a color uses it in preference to the series color.
+        let mut point_colors: HashMap<(SeriesId, usize), ColorProp> = HashMap::new();
         self.model.with_all_series(|views| {
             let mut vi = 0usize;
             for v in views {
                 if v.visible {
                     color_lookup.insert(v.id, (vi, v.color.cloned()));
+                    for (pi, d) in v.points.iter().enumerate() {
+                        if let Some(c) = &d.color {
+                            point_colors.insert((v.id, pi), c.clone());
+                        }
+                    }
                     vi += 1;
                 }
             }
@@ -452,8 +460,9 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 continue;
             };
             let (si, color_prop) = color_lookup.get(&m.series_id).cloned().unwrap_or((0, None));
-            let resolved_color = color_prop
-                .as_ref()
+            let resolved_color = point_colors
+                .get(&(m.series_id, m.point_idx))
+                .or(color_prop.as_ref())
                 .map(|c| c.resolve(theme, enabled))
                 .unwrap_or_else(|| palette.color_for(si, theme));
             let cfg = ChartFillContext {

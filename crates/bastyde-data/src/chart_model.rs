@@ -52,16 +52,25 @@ use bastyde_core::signal::Signal;
 
 use crate::chart_change::{ChartChange, SeriesId};
 
-/// One numeric data point at a category/x-axis position.
+/// One numeric data point at a category/x-axis position, with an optional
+/// per-point color that overrides the series color (bar charts only).
 #[derive(Debug, Clone)]
 pub struct ChartDatum<T> {
     pub category: T,
     pub value: f32,
+    pub color: Option<ColorProp>,
 }
 
 impl<T> ChartDatum<T> {
     pub fn new(category: T, value: f32) -> Self {
-        Self { category, value }
+        Self { category, value, color: None }
+    }
+
+    /// Override this point's color (a bar's fill). Ignored by line/pie charts,
+    /// which color by series.
+    pub fn with_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = Some(color.into());
+        self
     }
 }
 
@@ -744,6 +753,21 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn datum_with_color_sets_a_per_point_override() {
+        use bastyde_core::color_prop::ColorProp;
+        use bastyde_tokens::SurfaceRole;
+        let plain = ChartDatum::new("Q1".to_string(), 5.0);
+        assert!(plain.color.is_none(), "a plain datum has no color override");
+        let colored = ChartDatum::new("Q1".to_string(), 5.0).with_color(SurfaceRole::StatusError);
+        assert!(matches!(
+            colored.color,
+            Some(ColorProp::SurfaceRole(SurfaceRole::StatusError))
+        ));
+        // The 2-arg constructor is unchanged, so existing call sites still compile.
+        let _ = ChartDatum::new("Q2".to_string(), 1.0);
+    }
 
     fn sample() -> (ChartModel<String>, SeriesId, SeriesId) {
         let model = ChartModel::from_series_vec(vec![
