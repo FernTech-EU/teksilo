@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+pub mod embedded_fonts;
 pub mod shared_typesetter;
 pub mod typesetter_bridge;
 
@@ -13,6 +14,10 @@ pub mod typography_defaults;
 
 pub use shared_typesetter::SharedTypesetter;
 pub use typesetter_bridge::TypesetterBridge;
+#[cfg(feature = "fonts-arabic")]
+pub use embedded_fonts::noto_sans_arabic_bytes;
+#[cfg(feature = "fonts-hebrew")]
+pub use embedded_fonts::noto_sans_hebrew_bytes;
 
 pub use font_registrar::{EmbeddedInterRegistrar, FontFaceSpec, FontRegistrar, VecFontRegistrar};
 pub use rich_text_engine::{RichTextEngine, WrapMode};
