@@ -169,6 +169,14 @@ of its sub-widgets (e.g. tab-bar scroll arrows that must match
 the tab strip's `idle_text_role` regardless of hover state).
 Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
 
+It replaces the *interaction* cascade (idle / hover / press / focus),
+**not** the disabled substitution: a role passed here still resolves to
+`TextRole::Disabled` in a disabled subtree, like every other
+role-derived color (see `ColorProp::resolve`). That is what a disabled
+control should look like. When the tint is semantic *state* that stays
+true even though the button can't be pressed — a save/sync indicator, a
+validation badge — wrap it: `.icon_role(ColorProp::undimmed(role))`.
+
 #### `pub fn focusable(mut self, on: bool) -> Self`
 
 Whether the button takes keyboard focus. Default `true` —

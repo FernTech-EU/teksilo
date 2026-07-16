@@ -205,38 +205,11 @@ stores it as a `Signal<TabSizing>` so the widget can be
 retrofitted to reactive control via `Self::sizing`
 without breaking existing call sites.
 
-The three modes:
-
-| `TabSizing` | Horizontal bar | Vertical bar |
-| --- | --- | --- |
-| `Shared` (default) | viewport width ÷ tab count, clamped to `[min_tab_width, max_tab_width]` | pills fit the widest label (same clamp); uniform `editor_tab_height` |
-| `Independent` | each tab sizes to its content (icon + label + slots), same clamp | as `Shared` |
-| `Fill` | viewport width ÷ tab count with **no** `max_tab_width` cap — the strip is filled edge to edge | every pill takes the bar's **full width** — the nav-rail look |
-
-`Fill` needs a bounded width to fill: with an unbounded width proposal
-(inside a `Center`, or an `HStack` measuring the natural size) a vertical
-bar falls back to the `Shared` fit-to-label width. Beware the
-width-erasing wrapper — a `FixedSize` with only a *height* bound
-proposes `width: None` to its child, which hides the bar's width from
-it. A vertical bar reports its own content height (the pills' extent),
-so it needs no height pin even beside a flexible `Spacer`:
-
-```rust
-// A bottom-pinned nav rail whose pills span the sidebar.
-bati!(VStack {
-    child: branding
-    Spacer
-    child: TabBar::vertical(nav_model, delegate, selected, id_of)
-        .tab_sizing(TabSizing::Fill)
-        .tab_bar_height(34.0)
-})
-```
-
 #### `pub fn sizing(mut self, sizing: impl Into<Prop<TabSizing>>) -> Self`
 
 Bind the per-tab sizing strategy, statically or reactively —
-flipping a bound signal swaps between Shared / Independent / Fill live,
-with no rebuild on the parent's part. The signal is bound at
+flipping a bound signal swaps between Shared / Independent / Fill
+live, with no rebuild on the parent's part. The signal is bound at
 `BindingLevel::Rebuild` inside `build`;
 memoized panes survive the rebuild so per-tab state is
 preserved.

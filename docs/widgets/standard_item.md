@@ -70,7 +70,7 @@ the wrapper.
 
 ## Builder methods at a glance
 
-`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -188,6 +188,27 @@ Override the label's text color. Accepts `Color`, a role, or a
 
 Override the subtitle's text color. Default (unset) is
 `TextRole::Secondary`.
+
+#### `pub fn label_overflow(mut self, overflow: TextOverflow) -> Self`
+
+Truncate the primary label instead of wrapping it. Default (unset) is
+`TextOverflow::Wrap`.
+
+A wrapping label reports its full intrinsic width, so on a row too
+narrow to hold it the primary `HStack` is over-constrained and the
+`trailing_slot` is pushed past the row's edge.
+Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
+stay reachable: the label then shrinks and truncates within the row.
+
+#### `pub fn subtitle_overflow(mut self, overflow: TextOverflow) -> Self`
+
+Truncate the subtitle instead of wrapping it. Default (unset) is
+`TextOverflow::Wrap`.
+
+Same rationale as `label_overflow` — and the
+usual culprit, since subtitles carry long secondary text (file paths,
+URLs). `TextOverflow::Ellipsis(EllipsisMode::Middle)` suits a path: it
+keeps both the root and the file name legible.
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -339,6 +360,18 @@ Override the label's text color. Forwarded to the inner
 
 Override the subtitle's text color. Forwarded to the inner
 `StandardListItem` — see its `subtitle_color(...)`.
+
+#### `pub fn label_overflow(mut self, overflow: TextOverflow) -> Self`
+
+Truncate the primary label instead of wrapping it. Forwarded to the
+inner `StandardListItem` — see its
+`label_overflow`.
+
+#### `pub fn subtitle_overflow(mut self, overflow: TextOverflow) -> Self`
+
+Truncate the subtitle instead of wrapping it. Forwarded to the inner
+`StandardListItem` — see its
+`subtitle_overflow`.
 
 #### `pub fn style(mut self, style: impl bastyde_core::styles::StandardItemStyle) -> Self`
 

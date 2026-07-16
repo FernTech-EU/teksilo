@@ -190,6 +190,11 @@ width — the sidebar adapts to the widest piece of bar content
 Vertical pill heights stay at `theme.components.tab.editor_tab_height`
 regardless of this knob.
 
+Under `TabSizing::Fill` a **vertical** bar takes the width it is
+offered outright, so this floor no longer applies to it; in a
+**horizontal** `Fill` bar it still does (the tabs overflow into
+scroll rather than squeeze below it).
+
 #### `pub fn tab_bar_height(mut self, dp: f32) -> Self`
 
 Override the tab-strip cross-axis extent (the strip height for a
@@ -206,6 +211,10 @@ In **horizontal** orientation this clamps the **per-tab** width.
 In **vertical** orientation it caps the whole sidebar's width —
 see `min_tab_width` for the symmetric
 adapt-to-content rule.
+
+`TabSizing::Fill` ignores this cap in both orientations — filling
+the bar is the point, and a cap would leave exactly the slack the
+mode exists to remove.
 
 #### `pub fn tab_spacing(mut self, dp: f32) -> Self`
 

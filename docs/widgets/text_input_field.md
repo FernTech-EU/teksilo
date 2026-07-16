@@ -55,11 +55,37 @@ ctx.add(
 
 ## Builder methods at a glance
 
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
+`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `interaction`, `caret_position`, `caret_setter`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/text_input_field/index.html)
+
+## `pub enum InputPurpose`
+
+The semantic purpose of a text field, surfaced to assistive technology as
+a specialised AccessKit role (WCAG 1.3.5 Identify Input Purpose / EN 301 549).
+
+This is the in-framework-achievable part of SC 1.3.5: a screen reader
+announces "email, edit text" instead of a generic "edit text". The FULL
+HTML `autocomplete`-token vocabulary (`given-name`, `postal-code`,
+`cc-number`, …) that drives OS/browser autofill has **no representation in
+AccessKit 0.24** and therefore cannot be exposed from Bastyde — see
+`docs/a11y/a11y_issues.md`. Password entry is configured via
+`TextInputField::secure`, not here.
+
+```rust
+pub enum InputPurpose { /* variants */ }
+```
+
+### Variants
+
+- **`Normal`** — Ordinary free text (`Role::TextInput`).
+- **`Email`** — Email address (`Role::EmailInput`).
+- **`Phone`** — Telephone number (`Role::PhoneNumberInput`).
+- **`Url`** — URL (`Role::UrlInput`).
+- **`Number`** — Numeric entry — e.g. a quantity or code (`Role::NumberInput`).
+- **`Search`** — Search query (`Role::SearchInput`).
 
 ## `pub enum EchoMode`
 
@@ -228,6 +254,15 @@ shaper or glyph atlas while masked, and caret / selection /
 hit-test stay correct. Also defaults `allow_copy` to `false` and
 opts the focused node out of OS IME composition. Pair with
 `revealed` for a reveal toggle.
+
+#### `pub fn input_purpose(mut self, purpose: InputPurpose) -> Self`
+
+Declare the field's semantic `InputPurpose` (WCAG 1.3.5), which
+selects a specialised AccessKit role (`EmailInput`, `PhoneNumberInput`,
+…) so screen readers announce the field's kind. Ignored while `secure`
+(the password role wins). Does not change IME behaviour — winit's
+`ImePurpose` has no email/number/url variants — nor drive OS autofill,
+which AccessKit cannot express (see `docs/a11y/a11y_issues.md`).
 
 #### `pub fn echo_char(mut self, c: char) -> Self`
 

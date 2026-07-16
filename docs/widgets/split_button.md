@@ -33,7 +33,7 @@ let _w = SplitButton::new()
 
 ## Builder methods at a glance
 
-`new_static`, `item`, `separator`, `variant`, `style`, `text_style`, `text_role`, `enabled`, `initial_selected`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `chevron_tooltip`, `chevron_rich_tooltip`, `chevron_rich_tooltip_content`, `chevron_composite_tooltip`
+`new_static`, `item`, `separator`, `variant`, `icon`, `style`, `text_style`, `text_role`, `enabled`, `initial_selected`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `chevron_tooltip`, `chevron_rich_tooltip`, `chevron_rich_tooltip_content`, `chevron_composite_tooltip`
 
 ## API reference
 
@@ -95,6 +95,14 @@ pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 ```
 
+## `pub const SPLIT_BUTTON_ICON_LABEL_GAP`
+
+Gap between an optional main-region leading icon and the label.
+
+```rust
+pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
+```
+
 ## `pub struct SplitButton`
 
 A button split into a default-action region and a chevron dropdown region.
@@ -142,6 +150,14 @@ computing item indices for `initial_selected`.
 Set the visual style variant (filled, plain, ghost, …) for the entire
 button frame. Mirrors the same variants as
 `Button::variant`.
+
+#### `pub fn icon(mut self, icon: IconWidget) -> Self`
+
+Set a leading icon for the main (default-action) region, rendered before
+the label (mirrors `Button::icon` with
+`IconLocation::Leading`). Unlike the per-row `MenuItem::icon`s, this glyph
+is fixed regardless of which item is the current default — use it for a
+stable action affordance (e.g. a "＋" add glyph).
 
 #### `pub fn style(mut self, style: impl SplitButtonStyle) -> Self`
 

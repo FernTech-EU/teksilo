@@ -35,20 +35,57 @@ DropTarget::new()
     });
 ```
 
+# Multi-zone drops
+
+Beyond the single whole-bounds target, a `DropTarget` can expose up to five
+independently enable-able `DropRegion`s — `Center` / `Top` / `Bottom` /
+`Leading` / `Trailing` — each with its own optional hint, and route the drop
+by which zone the pointer released over. This is the VS Code-style
+"drop on the centre to add, drop on an edge to split" affordance
+(`DockingLayout` computes the same five zones by hand). Declare regions with
+`DropTarget::region`; the side zones share one `DropTarget::zone_size_factor`
+(`0.1..=1.0`, the fraction of the axis each edge strip occupies — `0.2` is the
+default fifth, `0.5` bisects) so you size them to the context. Route with
+`DropTarget::on_region_drop` (or observe `DropTarget::active_region_signal`).
+
+```ignore
+DropTarget::new()
+    .child(editor_pane)
+    .zone_size_factor(0.25)
+    .region(DropRegion::Center,   |z| z.hint(TextWidget::new(lit!("Add as tab"))))
+    .region(DropRegion::Leading,  |z| z.hint(TextWidget::new(lit!("Split left"))))
+    .region(DropRegion::Trailing, |z| z.hint(TextWidget::new(lit!("Split right"))))
+    .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
+```
+
+Declaring **any** region switches the target to exactly the declared regions;
+declaring none keeps the `Center`-only whole-bounds default (`.hint(w)` is
+sugar for `.region(DropRegion::Center, |z| z.hint(w))`). `Leading` / `Trailing`
+map to left / right — the framework surfaces no writing direction on the
+layout context yet, so RTL mirroring is a follow-up.
+
+Each zone can be **reactively enabled** with `z.enabled(signal)` (default
+`true`): a bound `Signal<bool>` disables the zone live — no rebuild — and its
+strip then falls through to the next-priority enabled zone (or `Center`, or
+rejects). A drop landing in a middle covered by no *enabled* zone is rejected;
+`on_region_drop` therefore only ever receives an enabled region.
+
 # Styling
 
-The highlight overlay + popup chrome is a Tier-3 `DropTargetStyle`; the
-default `RecipeDropTargetStyle`
-tracks the interaction state. Override per-call with `DropTarget::style` or
+The per-zone highlight overlay + hint chrome is a Tier-3 `DropTargetStyle`;
+the default `RecipeDropTargetStyle`
+paints the active zone (centre → frame only, so the wrapped content shows
+through; an edge strip → translucent fill + accent frame) and a full-bounds
+error border on reject. Override per-call with `DropTarget::style` or
 theme-wide via `theme.style_slots.drop_target`.
 
 # Accessibility
 
 The wrapper is a `Role::Group`. `Live` is intentionally **not** set on the
 group (that would announce every change to the wrapped child); instead the
-recipe scopes `Live::Polite` to the hint card so a screen reader announces
-the hint *appearing*. The hint is gated by `visible_when`, so it leaves the
-AT tree entirely while idle.
+recipe scopes `Live::Polite` to each hint card so a screen reader announces
+the active zone's hint *appearing*. Each hint is gated by `visible_when`, so a
+non-active zone's hint leaves the AT tree entirely.
 
 ## Keyboard accessibility is the caller's responsibility
 
@@ -70,11 +107,45 @@ drag-and-drop is a no-op). `DropZone` is the better choice when the drop
 
 ## Builder methods at a glance
 
-`child`, `child_id`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `on_drop`, `on_drop_typed`, `on_drag_leave`, `variant`, `style`
+`child`, `child_id`, `region`, `zone_size_factor`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `active_region_signal`, `on_drop`, `on_drop_typed`, `on_region_drop`, `on_drag_leave`, `variant`, `style`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](../api/bastyde_widgets/drop_target/index.html)
+
+## `pub struct DropRegionSpec`
+
+Per-region configuration for a multi-zone [`DropTarget`]: an optional hint
+plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
+land without a signature churn.
+
+```rust
+pub struct DropRegionSpec { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new() -> Self`
+
+An enabled spec with no hint.
+
+#### `pub fn hint(mut self, widget: impl Widget + 'static) -> Self`
+
+Widget shown (centered in this region's rect, inside a popup card) while
+a drag with an accepted payload hovers **this** region.
+
+#### `pub fn hint_id(mut self, id: WidgetId) -> Self`
+
+This region's hint content by pre-registered `WidgetId`.
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Whether this zone is active — static or signal-bound (default `true`). A
+bound `Signal<bool>` enables/disables the zone **live, without a rebuild**:
+while disabled the zone stops hit-testing (its area falls through to the
+next-priority enabled zone, or `Center`, or rejects), never highlights,
+and never shows its hint. The enabled state is resolved on every drag
+tick, so a `.set(false)` mid-drag takes effect on the next hover.
 
 ## `pub struct DropTarget`
 
@@ -99,14 +170,38 @@ The wrapped content — fills the bounds and is always visible.
 
 The wrapped content by pre-registered `WidgetId`.
 
+#### `pub fn region( mut self, region: DropRegion, f: impl FnOnce(DropRegionSpec) -> DropRegionSpec, ) -> Self`
+
+Enable and configure a drop `DropRegion`. Declaring **any** region
+switches the target to exactly the declared regions; declaring none
+leaves the implicit `Center`-only whole-bounds default. The spec closure
+configures the region (currently: an optional hint).
+
+```ignore
+DropTarget::new()
+    .child(editor)
+    .zone_size_factor(0.25)
+    .region(DropRegion::Center,   |z| z.hint(TextWidget::new(lit!("Add tab"))))
+    .region(DropRegion::Leading,  |z| z.hint(TextWidget::new(lit!("Split left"))))
+    .region(DropRegion::Trailing, |z| z.hint(TextWidget::new(lit!("Split right"))))
+    .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
+```
+
+#### `pub fn zone_size_factor(mut self, factor: f32) -> Self`
+
+The fraction of the axis each **side** zone occupies (clamped to
+`0.1..=1.0`). `0.2` is the default fifth; `0.5` bisects. Applies to all
+four edge zones in common; `Center` takes the leftover middle.
+
 #### `pub fn hint(mut self, widget: impl Widget + 'static) -> Self`
 
 Widget shown centered inside a popup card while a drag with an accepted
-payload hovers. Simple use: `TextWidget::new(lit!("Drop here"))`.
+payload hovers. Sugar for `.region(DropRegion::Center, |z| z.hint(w))` —
+the classic whole-bounds single-zone case.
 
 #### `pub fn hint_id(mut self, id: WidgetId) -> Self`
 
-Hint content by pre-registered `WidgetId`.
+Hint content by pre-registered `WidgetId` (Center region).
 
 #### `pub fn accept_any(mut self) -> Self`
 
@@ -153,6 +248,12 @@ custom visuals off this signal.
 
 Full three-state version of `Self::targeted_signal`.
 
+#### `pub fn active_region_signal(mut self, signal: Signal<Option<DropRegion>>) -> Self`
+
+The widget writes which `DropRegion` an *accepted* drag is currently
+over (`None` when idle, rejecting, or over a disabled middle). Drive
+custom per-zone visuals off this.
+
 #### `pub fn on_drop( mut self, f: impl FnMut(DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Handle a drop. Return `true` to accept, `false` to reject. Invoked only
@@ -162,6 +263,13 @@ when the accept filter passes.
 
 Ergonomic typed drop: implicitly sets `accept_typed::<T>()` and extracts
 the typed value before invoking `f`. Last-call-wins with `Self::on_drop`.
+
+#### `pub fn on_region_drop( mut self, f: impl FnMut(DropRegion, DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
+
+Region-aware drop: receives which `DropRegion` the pointer released
+over, plus the payload. Last-call-wins with `Self::on_drop` — when set,
+it is used instead of the plain `on_drop`. Invoked only when the accept
+filter passes; return `true` to accept.
 
 #### `pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self`
 

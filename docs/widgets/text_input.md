@@ -30,7 +30,7 @@ TextInput::new(search.clone())
 
 ## Builder methods at a glance
 
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `validator`, `caret_position`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
+`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `validator`, `caret_position`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
 
 ## API reference
 
@@ -153,6 +153,12 @@ Install an input mask (Qt grammar). Forwarded 1:1 to
 `TextInputField::input_mask`. Composing widgets like
 `DateEdit` use this to project the date format pattern
 onto the editing surface.
+
+#### `pub fn input_purpose( mut self, purpose: crate::primitives::text_input_field::InputPurpose, ) -> Self`
+
+Declare the field's semantic `InputPurpose`
+(WCAG 1.3.5), forwarded to the inner `TextInputField` to select a
+specialised AT role (e.g. `Role::EmailInput`).
 
 #### `pub fn validator( mut self, f: impl Fn(&str) -> crate::primitives::text_input_field::ValidationOutcome + 'static, ) -> Self`
 

@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `zoom`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `scroll_policy`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `set_zoom_level`, `get_zoom_level`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -139,11 +139,31 @@ snapshot (no highlights at all, even metric ones like keyword bold) and
 ignores paint-only highlight events entirely, so it does zero work when
 the shared document's search/spell highlights change.
 
+#### `pub fn set_highlight_mask(&self, mask: bastyde_text::text_document::HighlightMask)`
+
+Set which highlight sessions **this view** renders, at runtime.
+
+`HighlightMask::all` shows every session on the document (the default);
+`HighlightMask::only` shows a chosen set — which is how a per-editor find banner
+keeps one pane's find highlighting out of another pane over the same document.
+`show_highlights(false)` still overrides this to nothing.
+
+Forces a re-pull on the next tick so the change is visible immediately.
+
 #### `pub fn zoom(self, zoom: f32) -> Self`
 
 Set the initial zoom factor (`1.0` = 100 %). Applied before the first
 layout pass. Use `set_zoom_level` after the
 widget is mounted.
+
+#### `pub fn typography_defaults(self, defaults: EditorTypographyDefaults) -> Self`
+
+Set the initial non-destructive default typography (font family / line
+height / first-line indent) applied to runs and blocks that carry no
+explicit override. Applied before the first layout. These are display
+defaults — they never mutate the bound document (no undo entry, no
+`modified`); use `set_typography_defaults`
+or `EditorHandle::set_typography_defaults` to change them after mount.
 
 #### `pub fn background(self, color: impl Into<ColorProp>) -> Self`
 
@@ -184,6 +204,33 @@ Set the horizontal scroll-bar visibility policy.
 #### `pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
 Set the same scroll-bar visibility policy on both axes.
+
+#### `pub fn follow_caret_in_page(self, follow: bool) -> Self`
+
+Whether moving the caret also scrolls any *enclosing* scroll area to
+keep the caret on screen — the standard editor "caret stays visible as
+you type / navigate" behaviour. **On by default.**
+
+It fires only on a caret *move*, never on a plain wheel / scrollbar
+scroll, so the reader can still scroll freely away from the caret and the
+view holds until the caret next moves. This is what makes an editor that
+**grows** to its content with its own scroll suppressed (a flowing page
+inside an outer `ScrollArea`) track the caret at all — there the editor's
+internal caret-visibility is a no-op, so the enclosing-page follow is the
+only mechanism that reveals the caret. Pass `false` for the rare layout
+where a caret change must never move the surrounding page.
+
+#### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
+
+Set the wheel scroll-chaining behavior at the editor's boundary
+(default `OverscrollBehavior::Chain`). With `Chain`, a wheel event the
+editor can no longer absorb (already at the top/bottom, or content that
+fits so there is nothing to scroll) is declined so it bubbles to an
+ancestor scrollable — an editor embedded in a scrolling form/page lets
+the page scroll once the editor reaches its edge.
+`OverscrollBehavior::Contain` keeps the event at the editor instead.
+Mirrors the identical knob on `ScrollArea` / `ListView` / `TableView` /
+`GridView`.
 
 #### `pub fn min_lines(mut self, n: u32) -> Self`
 
@@ -414,11 +461,37 @@ can't know whether the caller wanted the upstream side of a
 wrap boundary, so we default to the same placement that
 existed before affinity was introduced.
 
+#### `pub fn focused_signal(&self) -> Signal<bool>`
+
+Reactive signal — `true` while **this** editor holds keyboard focus.
+
+A per-editor find banner (Ctrl+F) targets whichever editor is focused, and the split
+view has two of them; `focused_side` only names the Primary/Secondary *pane*, not which
+editor. This is the per-editor answer, mirroring `has_selection`.
+
+#### `pub fn select_range(&self, start: usize, end: usize)`
+
+Select the character range ``start, end)`, **without** collapsing — unlike
+[`set_caret_position``, which always moves both ends together.
+
+The anchor lands at `start` and the caret (focus) at `end`, so the standard selection
+highlight marks the range and a subsequent replace acts on it. Used to select a search
+match. (The non-collapsing two-call shape is the same one the AccessKit
+`SetTextSelection` handler uses.)
+
+#### `pub fn reveal_range( &self, ctx: &mut bastyde_core::widget::EventContext, start: usize, end: usize, )`
+
+Scroll the character range ``start, end)` into view within the enclosing scroll area.
+
+Reveals an **arbitrary** offset range — the current search match — rather than the live
+caret the follow-into-view path tracks, and works whether or not the editor is focused.
+A no-op until the editor has a full layout.
+
 #### `pub fn set_bold(&self, enabled: bool)`
 
 Apply **bold** to the current selection (or set the typing bold
 state when no selection is active). Pairs with
-`is_bold` and `toggle_bold`.
+[`is_bold`` and `toggle_bold`.
 
 #### `pub fn set_italic(&self, enabled: bool)`
 
@@ -670,6 +743,22 @@ over HTML over plain text — see
 
 Paste plain text only, stripping any rich payload.
 
+#### `pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool`
+
+Whether a paste would insert anything — `true` iff the system
+clipboard carries text **or** an HTML payload (the shapes
+`paste` can consume; an HTML-only clipboard pastes
+fine, so probing plain text alone would under-report).
+
+Clipboard contents are not reactively observable, so this is a
+**point-in-time query** rather than a `Signal`: pass the active
+`EventContext`. It probes
+the clipboard (an X11 HTML probe can round-trip to the selection
+owner), so a menu / toolbar builder should re-query when the menu
+opens, not per frame. Returns `false` when no clipboard backend
+is installed (headless or feature-off builds) — the same
+"silently no-op" degradation the paste path itself uses.
+
 #### `pub fn set_zoom_level(&self, zoom: f32)`
 
 Set the editor's zoom level. Re-lays out immediately; triggers
@@ -678,6 +767,15 @@ a repaint via the engine's dirty tracking on the next frame.
 #### `pub fn get_zoom_level(&self) -> f32`
 
 Current zoom level.
+
+#### `pub fn set_typography_defaults(&self, defaults: EditorTypographyDefaults)`
+
+Set the non-destructive default typography at runtime. Re-lays out and
+schedules a repaint. Never mutates the document.
+
+#### `pub fn get_typography_defaults(&self) -> EditorTypographyDefaults`
+
+Current default typography (see `typography_defaults`).
 
 #### `pub fn format_version(&self) -> Signal<u64>`
 
@@ -740,6 +838,15 @@ public API:
   per-column / remove operations, plus `is_in_table`
   for contextual UI enable state.
 * History — `undo` / `redo`.
+* Clipboard — `copy` / `cut` /
+  `paste` /
+  `paste_unformatted`, plus
+  `can_paste` for Paste enable-state — so a
+  context-menu factory (which can only capture a handle, never the
+  editor that owns it) can rebuild Cut / Copy / Paste /
+  Paste-Unformatted.
+* Selection — `select_all` /
+  `delete_selection`.
 * Reactive signal accessors —
   `format_version`,
   `cursor_position_signal`,
@@ -759,6 +866,28 @@ pub struct EditorHandle { /* fields */ }
 ```
 
 ### Methods
+
+#### `pub fn focused_signal(&self) -> Signal<bool>`
+
+Reactive signal — `true` while **this** editor holds keyboard focus.
+See `RichTextEditor::focused_signal`.
+
+#### `pub fn select_range(&self, start: usize, end: usize)`
+
+Select the character range `[start, end)` without collapsing (anchor at
+`start`, caret at `end`). See `RichTextEditor::select_range`.
+
+#### `pub fn reveal_range( &self, ctx: &mut bastyde_core::widget::EventContext, start: usize, end: usize, )`
+
+Scroll the character range `[start, end)` into view. A no-op until the
+editor has a full layout. See `RichTextEditor::reveal_range`.
+
+#### `pub fn focus(&self, ctx: &mut bastyde_core::widget::EventContext)`
+
+Move keyboard focus onto the editor. Lets a control built *above* the
+editor — a find banner returning focus to the prose on Escape — put the
+caret back where the user expects. A no-op until the editor has built at
+least once (its wrapper id is stashed then).
 
 #### `pub fn caret_char_format(&self) -> TextFormat`
 
@@ -797,6 +926,30 @@ a `FontPicker`.
 #### `pub fn set_font_size(&self, size: u32)`
 
 Set the font size (in points) for the current selection.
+
+#### `pub fn set_typography_defaults(&self, defaults: EditorTypographyDefaults)`
+
+Set the non-destructive default typography (font family / line height /
+first-line indent) filled onto runs and blocks with no explicit
+override. Unlike `set_font_family` /
+`set_font_size` — which mutate the selected text —
+this is a display-time default: it never touches the document, undo
+stack, or `modified` flag. Schedules a relayout + repaint.
+
+#### `pub fn get_typography_defaults(&self) -> EditorTypographyDefaults`
+
+Current default typography.
+
+#### `pub fn set_zoom_level(&self, zoom: f32)`
+
+Set the whole-editor zoom (`1.0` = 100 %), clamped to `[0.1, 10.0]`. A
+pure display transform (no document mutation). Schedules a relayout +
+repaint. The `EditorHandle` counterpart of
+`RichTextEditor::set_zoom_level`.
+
+#### `pub fn get_zoom_level(&self) -> f32`
+
+Current zoom level.
 
 #### `pub fn apply_text_format(&self, fmt: TextFormat)`
 
@@ -948,11 +1101,61 @@ Undo the most recent edit. No-op when the undo stack is empty.
 Redo the most recently undone edit. No-op when the redo stack
 is empty.
 
+#### `pub fn copy(&self, ctx: &bastyde_core::widget::EventContext)`
+
+Copy the current selection to the system clipboard (plain + HTML
+payloads). No-op when there is no selection. See
+`RichTextEditor::copy`.
+
+#### `pub fn cut(&self, ctx: &bastyde_core::widget::EventContext)`
+
+Cut the current selection: copy first, then remove. See
+`RichTextEditor::cut`.
+
+#### `pub fn paste(&self, ctx: &bastyde_core::widget::EventContext)`
+
+Paste from the system clipboard. Prefers an in-process fragment
+over HTML over plain text. See `RichTextEditor::paste`.
+
+#### `pub fn paste_unformatted(&self, ctx: &bastyde_core::widget::EventContext)`
+
+Paste plain text only, stripping any rich payload. See
+`RichTextEditor::paste_unformatted`.
+
+#### `pub fn can_paste(&self, ctx: &bastyde_core::widget::EventContext) -> bool`
+
+Whether a paste would insert anything — `true` iff the system
+clipboard carries text **or** an HTML payload. A point-in-time
+query (clipboard contents are not reactively observable), taking
+the active `EventContext`.
+Use it to drive a context-menu / toolbar Paste enable-state,
+re-querying on menu-open. Mirrors `RichTextEditor::can_paste`.
+
+#### `pub fn select_all(&self)`
+
+Select the entire document programmatically. Resets the Ctrl+A
+ladder so a subsequent Ctrl+A starts fresh at level 1. Mirrors
+`RichTextEditor::select_all`.
+
+#### `pub fn delete_selection(&self)`
+
+Delete the current selection. No-op when nothing is selected.
+Mirrors `RichTextEditor::delete_selection`.
+
 #### `pub fn format_version(&self) -> Signal<u64>`
 
 Bumps on every format-only document event (bold / italic /
 heading / alignment / list-style changes). See
 `RichTextEditor::format_version`.
+
+#### `pub fn cursor_position(&self) -> usize`
+
+The **live** caret offset — reads `cursor.position()` directly, unbatched. Unlike
+`cursor_position_signal`, whose stored value lags one frame
+behind a just-typed printable character (the insert is deferred to the frame loop and the
+signal is only re-synced on the *next* caret event), this always reflects the true caret —
+what a host that recomputes highlights on a frame tick must read. Mirrors
+`RichTextEditor::cursor_position`.
 
 #### `pub fn cursor_position_signal(&self) -> Signal<usize>`
 

@@ -31,7 +31,7 @@ let _w = ScrollArea::new()
 
 ## Builder methods at a glance
 
-`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `preferred_size`, `overscroll_behavior`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `max_scroll_x_signal`
+`child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `max_scroll_x_signal`
 
 ## API reference
 
@@ -144,6 +144,25 @@ Set the duration of the smooth scroll animation (default: 150ms).
 
 Set a preferred size returned when the parent proposes unconstrained
 dimensions. If not set, falls back to cached content size or 300×200.
+
+This overrides **both** axes. If you only want to cap the height and let
+the width follow the content — the usual case for a menu or popover, which
+must be as wide as its widest row — use `preferred_height` instead.
+Passing a width of `0.0` here does *not* mean "no preference": it means
+zero, and the scroll area will collapse.
+
+
+#### `pub fn preferred_height(mut self, height: f32) -> Self`
+
+Cap the height when the parent proposes an unconstrained one, while
+letting the **width** continue to follow the content.
+
+This is what a scrolling menu/popover wants: it must not grow taller than
+its viewport, but it must still be as wide as its widest item. Using
+`preferred_size` with a `0.0` width for this
+collapses the panel to its minimum width and clips every row — the parent
+proposes an unconstrained width (it is hugging its content), so the `0.0`
+is taken literally.
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 

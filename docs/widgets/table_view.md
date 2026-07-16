@@ -47,7 +47,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable_rows`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -215,6 +215,57 @@ the drop is refused. A row may also be forbidden from dragging at
 all (the source's `drag` gate). Cross-table / external drops arrive
 at `accept_drop` as `DragSource::Foreign`; a bare `ListModel`
 rejects them, an external source decides.
+
+#### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
+
+Make rows **droppable outside this view** — on a
+`DropTarget`, another data view, or the OS.
+
+A dragged row (or the whole selection, when the pressed row is part of a
+multi-selection) carries clones of its items in a public
+`RowDragData<T>`, so a foreign receiver can pull
+them out with `payload.get_typed::<RowDragData<T>>()` /
+`DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+also makes rows a drag source even without `reorderable_rows`.
+
+`mode` chooses what happens to the origin rows once a *foreign* target
+accepts them: `DragTransferMode::Move` removes them (via the source's
+`on_drag_out`, or `on_rows_transferred_out`),
+`DragTransferMode::Copy` leaves them. A same-view reorder is never a
+transfer, so `mode` never affects it. Requires `T: Clone`.
+
+#### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
+
+Additionally advertise the dragged rows as MIME data so they can be
+dropped on a `DropZone` or exported to another
+application / window via the OS. `f` maps the dragged items to
+`(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+app-specific `application/x-…`). Implies `exportable`
+(defaulting to `DragTransferMode::Move` if not already set). Requires
+`T: Clone`.
+
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Override how rows moved out to a foreign target are removed from this
+view. Receives the dragged rows' indices (descending-safe) and the live
+context. Without this, an `exportable`
+`Move` drag removes them through the source's
+`on_drag_out` (works out of the box for a `ListModel`).
+
+#### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
+
+Accept exported rows dropped from a **different** view or source without
+writing a custom `ListDataSource`. Pair with
+`on_rows_received`, which is handed the dropped
+items and the insertion index. (Same-view reorder is
+`reorderable_rows`; a custom `ListDataSource` can still
+accept foreign drops through its `can_accept`/`accept_drop` instead.)
+
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Handler for rows accepted via `accept_foreign_rows`:
+`(items, insertion_index, ctx)`. Insert them into your model at the
+index.
 
 #### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
 

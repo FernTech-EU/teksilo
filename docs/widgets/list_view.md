@@ -50,7 +50,7 @@ let _w = ListView::new(model, |_i, item, _selected| {
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
 
 ## API reference
 
@@ -160,6 +160,69 @@ reorders in place, an external source routes the move to its store. The
 hover indicator reflects the source's `can_accept` verdict, so a
 forbidden drop shows no insertion line. Keyboard equivalent:
 Alt+ArrowUp/Down.
+
+#### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
+
+Make rows **droppable outside this view** — on a
+`DropTarget`, another data view, or the OS.
+
+A dragged row (or the whole selection, when the pressed row is part of a
+multi-selection) carries clones of its items in a public
+`RowDragData<T>`, so a foreign receiver can pull
+them out with `payload.get_typed::<RowDragData<T>>()` /
+`DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+also makes rows a drag source even without `reorderable`.
+
+`mode` chooses what happens to the origin rows once a *foreign* target
+accepts them: `DragTransferMode::Move` removes them (via the source's
+`on_drag_out`, or `on_rows_transferred_out`),
+`DragTransferMode::Copy` leaves them. A same-view reorder is never a
+transfer, so `mode` never affects it. Requires `T: Clone`.
+
+**Move caveats.** The row is removed only when the drop is accepted by an
+in-app target *in the same window* (`DropOutcome::InApp { accepted: true }`)
+or the OS reports a genuine move. Shipped OS backends advertise **copy
+only**, so a drag exported to another application — or to another window
+of the same app — is treated as a *copy*: the origin row is kept and the
+receiver must own its own copy semantics. Also, for a `ListModel`-backed
+view (whose key *is* the row index) the move-out removes by the indices
+captured at drag-start; if a shared handle to the same model is mutated
+while the drag is in flight, those indices can point at different rows —
+use a keyed source, or `on_rows_transferred_out`
+with your own stable identity, for models that change mid-drag.
+
+#### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
+
+Additionally advertise the dragged rows as MIME data so they can be
+dropped on a `DropZone` or exported to another
+application / window via the OS. `f` maps the dragged items to
+`(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+app-specific `application/x-…`). Implies `exportable`
+(defaulting to `DragTransferMode::Move` if not already set). Requires
+`T: Clone`.
+
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Override how rows moved out to a foreign target are removed from this
+view. Receives the dragged rows' indices (descending-safe) and the live
+context. Without this, an `exportable`
+`Move` drag removes them through the source's
+`on_drag_out` (works out of the box for a `ListModel`).
+
+#### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
+
+Accept exported rows dropped from a **different** view or source without
+writing a custom `ListDataSource`. Pair with
+`on_rows_received`, which is handed the dropped
+items and the insertion index. (Same-view reorder is
+`reorderable`; a custom `ListDataSource` can still
+accept foreign drops through its `can_accept`/`accept_drop` instead.)
+
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Handler for rows accepted via `accept_foreign_rows`:
+`(items, insertion_index, ctx)`. Insert them into your model at the
+index.
 
 #### `pub fn on_activate( mut self, f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
 

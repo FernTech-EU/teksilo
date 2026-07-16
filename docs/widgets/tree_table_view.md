@@ -33,7 +33,7 @@ let _view = TreeTableView::new(model).row_height(28.0);
 
 ## Builder methods at a glance
 
-`from_projection`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`
+`from_projection`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`
 
 ## API reference
 
@@ -116,6 +116,76 @@ bottom = After). The move is cycle-guarded — dropping a node onto
 itself or into its own subtree is refused (no insertion line). Reorder
 is **suppressed while a sort is active**: with the visible order driven
 by the sort, a manual reorder would have no visible effect.
+
+#### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
+
+Make rows **droppable outside this view** — on a
+`DropTarget`, another data view, or the OS.
+
+A dragged row (or the whole selection, when the pressed row is part of a
+multi-selection) carries clones of its items in a public
+`RowDragData<T>`, so a foreign receiver can pull
+them out with `payload.get_typed::<RowDragData<T>>()` /
+`DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+also makes rows a drag source even without `reorderable`.
+
+`mode` chooses what happens to the origin rows once a *foreign* target
+accepts them: `DragTransferMode::Move` removes them — by default,
+directly from the underlying `TreeModel` (any dragged node that is a
+descendant of another dragged node is skipped, since removing the
+ancestor already removes it); override via
+`on_rows_transferred_out`.
+`DragTransferMode::Copy` leaves them. A same-view reorder is never a
+transfer, so `mode` never affects it. Requires `T: Clone`.
+
+#### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
+
+Additionally advertise the dragged rows as MIME data so they can be
+dropped on a `DropZone` or exported to another
+application / window via the OS. `f` maps the dragged items to
+`(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+app-specific `application/x-…`). Implies `exportable`
+(defaulting to `DragTransferMode::Move` if not already set). Requires
+`T: Clone`.
+
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut EventContext) + 'static, ) -> Self`
+
+Override how rows moved out to a foreign target are removed from this
+view. Receives the dragged rows' flat visible indices (as captured at
+drag-start) and the live context. Without this, an
+`exportable` `Move` drag
+removes the dragged nodes directly from the underlying `TreeModel`
+(leaf-first / descending — a dragged node that is a descendant of
+another dragged node is skipped, since removing the ancestor already
+removes its whole subtree).
+
+#### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
+
+Accept exported rows dropped from a **different** view or source
+without writing a custom source. Pair with
+`on_rows_received`, which is handed the
+dropped items and the target flat row index. (Same-view reorder is
+`reorderable`.)
+
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut EventContext) + 'static, ) -> Self`
+
+Handler for rows accepted via
+`accept_foreign_rows`: `(items, target
+flat row index, ctx)`. Insert them into your tree at/near the index.
+
+#### `pub fn on_foreign_drop( mut self, f: impl Fn(&DragPayload, NodeId, DropPosition, &mut EventContext) -> bool + 'static, ) -> Self`
+
+Raw escape hatch for a foreign drop. Unlike `ListView` / `TableView`,
+`TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
+than a pluggable source, so it cannot express foreign-accept purely
+through source capability closures (`can_accept` / `accept_drop`).
+This fires for **any** payload NOT recognized as this view's own row
+drag — a different view's `RowDragData<T>`, or a
+completely different payload type — dropped on a node: `(payload,
+target node, drop position, ctx) -> accepted`. Tried after
+`on_rows_received`, so the typed sugar wins
+when both are set and the payload happens to carry an exportable
+`RowDragData<T>`.
 
 #### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
 

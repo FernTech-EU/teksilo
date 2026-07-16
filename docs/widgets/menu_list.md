@@ -43,7 +43,7 @@ let _w = MenuList::new()
 
 ## Builder methods at a glance
 
-`type_ahead_timeout`, `attached_side`, `item`, `item_when`, `item_boxed_when`, `separator`, `max_visible_items`
+`type_ahead_timeout`, `attached_side`, `item`, `item_when`, `item_boxed_when`, `separator`, `header`, `max_visible_items`
 
 ## API reference
 
@@ -108,6 +108,15 @@ the row type is decided at runtime (e.g. a menu row that is either a
 #### `pub fn separator(mut self) -> Self`
 
 Add a separator line.
+
+#### `pub fn header(mut self, widget: impl Widget + 'static) -> Self`
+
+Add a non-interactive section caption (typically a `crate::GroupHeader`).
+Skipped by Arrow/Home/End navigation and type-ahead, exactly like
+`separator`. The caller passes any `impl Widget`, but it
+must expose its own accessible name/role via `accessibility()` (as
+`GroupHeader` does) or it is silently pruned from the AT tree as a
+content-free container.
 
 #### `pub fn max_visible_items(mut self, n: usize) -> Self`
 

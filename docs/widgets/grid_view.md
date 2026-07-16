@@ -29,7 +29,7 @@ GridView::new(model, |tc| {
 
 ## Builder methods at a glance
 
-`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `type_ahead_timeout`
+`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `type_ahead_timeout`
 
 ## API reference
 
@@ -237,6 +237,57 @@ is shown above the grid.
 Enable intra-grid drag reordering (and keyboard Alt+Arrow). The move is
 routed through the source's `accept_drop` (a built-in `ListModel`
 reorders via `move_item`; an external source applies its own command).
+
+#### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
+
+Make tiles **droppable outside this view** — on a
+`DropTarget`, another data view, or the OS.
+
+A dragged tile (or the whole selection, when the pressed tile is part of
+a multi-selection) carries clones of its items in a public
+`RowDragData<T>`, so a foreign receiver can pull
+them out with `payload.get_typed::<RowDragData<T>>()` /
+`DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+also makes tiles a drag source even without `reorderable`.
+
+`mode` chooses what happens to the origin rows once a *foreign* target
+accepts them: `DragTransferMode::Move` removes them (via the source's
+`on_drag_out`, or `on_rows_transferred_out`),
+`DragTransferMode::Copy` leaves them. A same-view reorder is never a
+transfer, so `mode` never affects it. Requires `T: Clone`.
+
+#### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
+
+Additionally advertise the dragged tiles as MIME data so they can be
+dropped on a `DropZone` or exported to another
+application / window via the OS. `f` maps the dragged items to
+`(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+app-specific `application/x-…`). Implies `exportable`
+(defaulting to `DragTransferMode::Move` if not already set). Requires
+`T: Clone`.
+
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Override how rows moved out to a foreign target are removed from this
+view. Receives the dragged rows' indices (descending-safe) and the live
+context. Without this, an `exportable`
+`Move` drag removes them through the source's
+`on_drag_out` (works out of the box for a `ListModel`).
+
+#### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
+
+Accept exported rows dropped from a **different** view or source without
+writing a custom `ListDataSource`. Pair with
+`on_rows_received`, which is handed the dropped
+items and the insertion index. (Same-view reorder is
+`reorderable`; a custom `ListDataSource` can still
+accept foreign drops through its `can_accept`/`accept_drop` instead.)
+
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
+
+Handler for rows accepted via `accept_foreign_rows`:
+`(items, insertion_index, ctx)`. Insert them into your model at the
+index.
 
 #### `pub fn on_item_drop( mut self, f: impl Fn( bastyde_core::drag_payload::DragPayload, usize, &mut bastyde_core::widget::EventContext, ) -> bool + 'static, ) -> Self`
 
