@@ -310,6 +310,11 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(true)` and this node holds keyboard focus, a `KeyDown`
+    /// bypasses shortcut resolution and is delivered straight to it (a
+    /// *keyboard capture* surface — terminals, game viewports). See
+    /// [`super::arena::WidgetNode::keyboard_capture`].
+    pub(crate) keyboard_capture: Option<bool>,
     /// When `Some(true)`, this node and its WHOLE subtree are invisible
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
@@ -353,6 +358,7 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            keyboard_capture: None,
             hit_transparent: None,
             context_menu_factory: None,
             focus_within: None,
@@ -604,6 +610,19 @@ impl HandlerSet {
     /// `arm_drag_observers`; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Mark this widget a **keyboard capture** surface: while it holds
+    /// focus, every `KeyDown` is delivered straight to its `on_key`
+    /// handler, bypassing shortcut → intent → action resolution. Use for
+    /// a terminal emulator that must forward `Ctrl+C` / `Ctrl+W` /
+    /// `Alt+<letter>` to a child process instead of triggering the host
+    /// app's shortcuts, a game viewport, or a modal text surface. Escape
+    /// and overlay back-navigation still run first, so an open overlay
+    /// can still be closed. See [`super::arena::WidgetNode::keyboard_capture`].
+    pub fn keyboard_capture(mut self, capture: bool) -> Self {
+        self.keyboard_capture = Some(capture);
         self
     }
 
@@ -953,6 +972,15 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::gesture_dead_zone`].
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.handler_set.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Mark this widget a keyboard capture surface: while focused, every
+    /// `KeyDown` bypasses shortcut resolution and reaches its `on_key`
+    /// handler (terminals, game viewports). See
+    /// [`HandlerSet::keyboard_capture`].
+    pub fn keyboard_capture(mut self, capture: bool) -> Self {
+        self.handler_set.keyboard_capture = Some(capture);
         self
     }
 
@@ -1582,6 +1610,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::gesture_dead_zone`].
     fn gesture_dead_zone(self, dead_zone: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
+    }
+
+    /// Mark this widget a keyboard capture surface (terminals, game
+    /// viewports): while focused, `KeyDown`s bypass shortcut resolution.
+    /// See [`HandlerSet::keyboard_capture`].
+    fn keyboard_capture(self, capture: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).keyboard_capture(capture)
     }
 
     /// Make this widget and its whole subtree invisible to pointer

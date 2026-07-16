@@ -1342,6 +1342,16 @@ impl WidgetTree {
     /// once. This is a repaint, not a relayout — geometry never changes when
     /// the window's active state flips (the caret keeps its space). Window
     /// focus changes are rare and user-driven, so the O(n) mark is cheap and
+    /// Mark every node paint-dirty (no relayout, no rebuild) so the next
+    /// render re-runs their `paint()`. This is the paint-cache invalidation an
+    /// off-thread source needs after posting a [`RepaintWindowRequest`](crate::RepaintWindowRequest):
+    /// a bare redraw request re-presents the cached frame, so a widget whose
+    /// content changed off the UI thread (a terminal's PTY output) must be
+    /// marked dirty for its `paint()` to run again.
+    pub fn mark_all_needs_paint_only(&mut self) {
+        self.arena.mark_all_needs_paint_only();
+    }
+
     /// strictly lighter than `set_theme`'s `mark_all_dirty` (layout + paint).
     pub fn set_window_active(&mut self, active: bool) {
         let now = std::time::Instant::now();
@@ -2496,6 +2506,9 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(keyboard_capture) = handler_set.keyboard_capture {
+                            node.keyboard_capture = keyboard_capture;
+                        }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
                         }
@@ -2640,6 +2653,9 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(keyboard_capture) = handler_set.keyboard_capture {
+                            node.keyboard_capture = keyboard_capture;
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;

@@ -249,6 +249,16 @@ impl WidgetTree {
             return;
         }
 
+        // Keyboard-capture surfaces (a terminal, a game viewport) opt out
+        // of shortcut resolution entirely while focused: they want every
+        // keystroke delivered raw so a host-app `Ctrl+C` shortcut can't
+        // steal the SIGINT the child process needs. The Escape / overlay
+        // back-navigation handled above still runs first, so an open
+        // overlay is still dismissable. Only a KeyDown is affected; KeyUp
+        // and IME already bypass the shortcut path.
+        let focus_captures_keys = matches!(&event, WidgetEvent::KeyDown { .. })
+            && self.focused.is_some_and(|f| self.is_keyboard_capture(f));
+
         // Shortcut → intent → action dispatch. A KeyDown whose chord
         // matches a registered enabled `Shortcut` whose scope contains
         // the focused widget is consumed here: the shortcut's
@@ -263,7 +273,7 @@ impl WidgetTree {
         // to invoke `on_activate` — this way a scope mismatch cannot
         // drop side effects the closure put into its ctx, because
         // the closure never runs.
-        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
+        if !focus_captures_keys && let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
             let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
             // Gather every same-chord candidate (owned fields) before any
             // mutable borrow of the registry, then pick the one whose scope
@@ -655,6 +665,16 @@ impl WidgetTree {
         self.arena
             .get(id)
             .map(|n| n.gesture_dead_zone)
+            .unwrap_or(false)
+    }
+
+    /// Whether `id` is a keyboard-capture surface — while focused it
+    /// receives every `KeyDown` raw, bypassing shortcut resolution. See
+    /// [`WidgetNode::keyboard_capture`](crate::arena::WidgetNode::keyboard_capture).
+    fn is_keyboard_capture(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .map(|n| n.keyboard_capture)
             .unwrap_or(false)
     }
 
@@ -3249,6 +3269,69 @@ mod tests {
             !on_key_fired.get(),
             "enabled shortcut must consume the KeyDown"
         );
+    }
+
+    #[test]
+    fn keyboard_capture_bypasses_shortcut() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // A focused keyboard-capture surface (e.g. a terminal) must receive
+        // Ctrl+S itself, even though an ENABLED global shortcut binds it — the
+        // whole point of GAP 1. A non-capturing widget must yield to the
+        // shortcut (the control case).
+        fn run(capture: bool) -> (bool, bool) {
+            let action_fired = Rc::new(Cell::new(false));
+            let on_key_fired = Rc::new(Cell::new(false));
+            let af = action_fired.clone();
+            let kf = on_key_fired.clone();
+
+            let mut tree = WidgetTree::new();
+            let widget = tree.add(
+                FillWidget::new()
+                    .focusable()
+                    .keyboard_capture(capture)
+                    .on_key(move |event, _ctx| {
+                        if matches!(
+                            event,
+                            WidgetEvent::KeyDown { key: Key::S, modifiers, .. } if modifiers.ctrl()
+                        ) {
+                            kf.set(true);
+                            return EventResponse::Handled;
+                        }
+                        EventResponse::Ignored
+                    }),
+            );
+            tree.push_action(
+                widget,
+                Action::new("app.save").on_invoke(move |_i, _c| af.set(true)),
+            );
+            tree.shortcut_registry_mut().register(
+                Shortcut::new("app.save")
+                    .primary(KeyStroke::ctrl(Key::S))
+                    .build(),
+            );
+
+            tree.layout(SizeProposal::exact(100.0, 50.0));
+            tree.focus(widget);
+            tree.press_key(Key::S, Modifiers::CTRL);
+            (action_fired.get(), on_key_fired.get())
+        }
+
+        // Capture on: the shortcut is bypassed, the widget sees the key.
+        let (action, on_key) = run(true);
+        assert!(
+            !action,
+            "keyboard_capture must suppress the shortcut action"
+        );
+        assert!(on_key, "keyboard_capture must deliver the raw KeyDown");
+
+        // Capture off (control): the shortcut consumes the key.
+        let (action, on_key) = run(false);
+        assert!(action, "without capture the shortcut must fire");
+        assert!(!on_key, "without capture the widget must not see the key");
     }
 
     #[test]

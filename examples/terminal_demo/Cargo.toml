@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "terminal-demo"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "terminal-demo"
+path = "src/main.rs"
+
+[dependencies]
+# `terminal` = the Console widget (portable-pty + alacritty_terminal); `clipboard`
+# so Ctrl+Shift+C / Ctrl+Shift+V work.
+bastyde = { workspace = true, features = ["terminal", "clipboard"] }

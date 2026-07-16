@@ -180,6 +180,7 @@ fn translate_named_key(key: winit::keyboard::NamedKey) -> Option<Key> {
         NamedKey::Tab => Some(Key::Tab),
         NamedKey::Backspace => Some(Key::Backspace),
         NamedKey::Delete => Some(Key::Delete),
+        NamedKey::Insert => Some(Key::Insert),
         NamedKey::ArrowUp => Some(Key::ArrowUp),
         NamedKey::ArrowDown => Some(Key::ArrowDown),
         NamedKey::ArrowLeft => Some(Key::ArrowLeft),
@@ -200,6 +201,18 @@ fn translate_named_key(key: winit::keyboard::NamedKey) -> Option<Key> {
         NamedKey::F10 => Some(Key::F10),
         NamedKey::F11 => Some(Key::F11),
         NamedKey::F12 => Some(Key::F12),
+        NamedKey::F13 => Some(Key::F13),
+        NamedKey::F14 => Some(Key::F14),
+        NamedKey::F15 => Some(Key::F15),
+        NamedKey::F16 => Some(Key::F16),
+        NamedKey::F17 => Some(Key::F17),
+        NamedKey::F18 => Some(Key::F18),
+        NamedKey::F19 => Some(Key::F19),
+        NamedKey::F20 => Some(Key::F20),
+        NamedKey::F21 => Some(Key::F21),
+        NamedKey::F22 => Some(Key::F22),
+        NamedKey::F23 => Some(Key::F23),
+        NamedKey::F24 => Some(Key::F24),
         // Caps Lock arrives as a discrete press/release. winit's
         // `ModifiersState` carries no lock state, so the window manager
         // tracks the active state itself on the key-down edge (drives

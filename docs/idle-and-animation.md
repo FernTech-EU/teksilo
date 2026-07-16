@@ -209,6 +209,37 @@ of the four gates. `ctx.prefers_reduced_motion()` is a fifth pre-gate
 for decorative motion: honor it, and you get the zero-motion
 accessibility behavior and a free idle win.
 
+## Off-thread repaint — `RepaintWindowRequest`
+
+`ctx.request_frame()` is the UI-thread way to ask for a redraw. But some
+widgets have content that changes on a **background thread**: a terminal
+emulator's PTY-reader thread, a video decoder, a streaming data source. Those
+threads can't touch the widget tree, and posting a bare wake-up is not enough —
+a plain redraw re-presents each node's *cached* paint frame, so the render
+walker never re-runs `paint()` for a node it still thinks is clean. Content that
+changed off the UI thread would never appear.
+
+`bastyde_core::RepaintWindowRequest { window_id }` is the off-thread analogue of
+`request_frame`. A background thread posts it through the poster:
+
+```rust
+// captured once, in `ctx.run_after_mount(...)`, where poster + window are both reachable:
+let poster = ectx.poster().cloned();               // Arc<dyn AppEventPoster>, Send
+let window_id = ectx.window().map(|w| w.id());      // BastydeWindowId, Copy
+
+// on the background thread, whenever off-thread content changed:
+poster.post_external(Box::new(RepaintWindowRequest { window_id }));
+```
+
+bastyde-app routes the request by marking that window's tree paint-dirty
+(`WidgetTree::mark_all_needs_paint_only()`) *before* the redraw, so the changed
+widget's `paint()` runs again. It **respects the zero-frame rule**: nothing is
+scheduled — a frame is drawn only when an actual off-thread event arrives, so an
+idle terminal (no output) still draws zero frames. Under a flood of off-thread
+events (e.g. `yes` piped into a terminal), coalesce: only post a request when one
+isn't already outstanding, since each mark-dirty is O(nodes). This mechanism was
+introduced for `bastyde-terminal`; see [terminal.md](terminal.md).
+
 ## Three animation paths — signal vs shader vs per-frame-effect
 
 Bastyde carries three motion paths that coexist. Pick by shape:

@@ -63,6 +63,23 @@ pub enum AppEvent {
     },
 }
 
+/// A generic, thread-safe "please repaint this window now" request, posted as
+/// an [`AppEvent::External`] payload from a background thread via
+/// [`AppEventPoster::post_external`](crate::AppEventPoster::post_external).
+///
+/// A bare redraw request re-presents each node's cached paint frame, so a
+/// widget whose content changed **off the UI thread** — a terminal emulator's
+/// PTY-reader thread, a video decoder, a streaming data source — would not have
+/// its `paint()` re-run. bastyde-app routes this request by marking the named
+/// window's tree paint-dirty ([`WidgetTree::mark_all_needs_paint_only`](crate::widget_tree::WidgetTree::mark_all_needs_paint_only))
+/// before the redraw, so the changed widget repaints. It is the off-thread
+/// analogue of `ctx.request_frame()` (which is UI-thread only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepaintWindowRequest {
+    /// The window whose tree should be marked paint-dirty and redrawn.
+    pub window_id: crate::window::BastydeWindowId,
+}
+
 impl std::fmt::Debug for AppEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

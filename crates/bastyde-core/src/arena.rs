@@ -148,6 +148,18 @@ pub struct WidgetNode {
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
+    /// When `true` and this widget holds keyboard focus, a `KeyDown` is
+    /// delivered straight to it **without** first running shortcut →
+    /// intent → action resolution. The node is a *keyboard capture*
+    /// surface: it wants every keystroke (including chords the host app
+    /// binds as `Shortcut`s — `Ctrl+C`, `Ctrl+W`, `Alt+<letter>`, …).
+    /// Used by a terminal emulator (which must forward `Ctrl+C` to the
+    /// child process, not trigger the app's copy shortcut), a game
+    /// viewport, or a vim-mode editor. Honored by `dispatch_event_impl`,
+    /// which skips the shortcut block for a focused capture node. Escape
+    /// and overlay back-navigation still run before the check, so an open
+    /// overlay can still be dismissed. Default `false`.
+    pub keyboard_capture: bool,
     /// When `true`, this widget AND its entire subtree are invisible to
     /// hit-testing: the recursion returns immediately without descending
     /// into children, so the point falls through to whatever sits
@@ -340,6 +352,7 @@ impl WidgetNode {
             ime: None,
             event_pass_through: false,
             gesture_dead_zone: false,
+            keyboard_capture: false,
             hit_transparent: false,
             opacity_prop: None,
             transform_prop: None,
@@ -1249,6 +1262,9 @@ impl WidgetArena {
             }
             if let Some(dead_zone) = handler_set.gesture_dead_zone {
                 node.gesture_dead_zone = dead_zone;
+            }
+            if let Some(keyboard_capture) = handler_set.keyboard_capture {
+                node.keyboard_capture = keyboard_capture;
             }
             if let Some(hit_transparent) = handler_set.hit_transparent {
                 node.hit_transparent = hit_transparent;

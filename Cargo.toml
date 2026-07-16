@@ -90,6 +90,15 @@ jiff = "0.2"
 text-document = { path = "../text-document/crates/public_api", version = "1.7.0" }
 text-typeset = { path = "../text-typeset", version = "1.6.1" }
 
+# Terminal engine (consumed only by the opt-in `bastyde-terminal` crate,
+# feature-gated so a default workspace build never pulls them). `portable-pty`
+# is WezTerm's cross-platform pseudo-terminal (ConPTY on Windows, openpty on
+# Unix); `alacritty_terminal` is Alacritty's standalone VT parser + grid +
+# scrollback model. Both are permissive-licensed (MIT / Apache-2.0), pure Rust,
+# and MPL-2.0-compatible. Pinned here per the workspace dependency convention.
+portable-pty = "0.9"
+alacritty_terminal = "0.26"
+
 # Internal crates
 bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.6.2" }
 bastyde-canvas = { path = "crates/bastyde-canvas", version = "0.6.2" }
@@ -119,6 +128,7 @@ bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.6.2" }
 bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.6.2" }
 bastyde-resources = { path = "crates/bastyde-resources", version = "0.6.2" }
 bastyde-webview = { path = "crates/bastyde-webview", version = "0.6.2" }
+bastyde-terminal = { path = "crates/bastyde-terminal", version = "0.6.2" }
 bastyde-automation = { path = "crates/bastyde-automation", version = "0.6.2" }
 bastyde-automation-mcp = { path = "crates/bastyde-automation-mcp", version = "0.6.2" }
 bastyde = { path = "crates/bastyde", version = "0.6.2" }

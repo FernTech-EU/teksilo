@@ -91,6 +91,13 @@ web-view-servo = ["web-view", "bastyde-webview/servo-backend"]
 # `features = ["servo-backend"]` and install `ServoBackend` explicitly.
 web-view-headless = ["dep:bastyde-webview", "bastyde-app/web-view"]
 
+# Embeddable terminal-emulator (`Terminal`) widget (`bastyde-terminal`), backed
+# by `portable-pty` (the PTY) + `alacritty_terminal` (the VT model). Off by
+# default — apps that don't embed a terminal pull neither a PTY layer nor a VT
+# parser. Unlike `web-view`, the terminal renders into the wgpu surface and
+# needs no `bastyde-app` event routing, so there is no `bastyde-app/terminal`.
+terminal = ["dep:bastyde-terminal", "bastyde-terminal/alacritty"]
+
 # Debug-only automation bridge. Adds `install_automation_bridge_in_debug()`
 # (re-exported here as `BastydeAppBuilderAutomationExt`, mirroring `toast` /
 # `web-view`) so `bastyde-automation-mcp --connect <sock>` can drive a live
@@ -192,6 +199,7 @@ bastyde-text = { path = "../bastyde-text", version = "0.6.2", optional = true, d
 bastyde-i18n = { workspace = true, optional = true }
 bastyde-inspector = { workspace = true, optional = true }
 bastyde-webview = { workspace = true, optional = true }
+bastyde-terminal = { workspace = true, optional = true }
 bastyde-automation = { workspace = true, optional = true }
 bastyde-resources = { workspace = true }
 bastyde-theme-material3 = { workspace = true, optional = true }

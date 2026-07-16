@@ -2551,6 +2551,23 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                                     self.dispatch_in_window(winit_id, evt, event_loop);
                                 }
                             }
+                        } else if let Some(req) =
+                            payload.downcast_ref::<bastyde_core::RepaintWindowRequest>()
+                        {
+                            // Off-thread "repaint this window" — e.g. a
+                            // terminal's PTY-reader thread whose bytes changed a
+                            // widget's content outside the UI thread. A bare
+                            // redraw re-presents the cached frame, so mark the
+                            // window's tree paint-dirty; the unconditional
+                            // `request_redraw_all()` below then re-runs the
+                            // changed widget's `paint()`.
+                            let winit_id =
+                                self.wm.bastyde_to_winit_map().get(&req.window_id).copied();
+                            if let Some(winit_id) = winit_id
+                                && let Some(managed) = self.wm.get_by_winit_mut(winit_id)
+                            {
+                                managed.tree.mark_all_needs_paint_only();
+                            }
                         }
                     }
                 }

@@ -115,6 +115,13 @@ pub mod toast_install;
 #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
 pub use bastyde_webview as web_view;
 
+/// Embeddable terminal-emulator [`Terminal`](bastyde_terminal::Terminal)
+/// widget. Re-exported as `bastyde::terminal`. The view is self-contained (it
+/// renders into the wgpu surface and needs no app wiring); the PTY + VT model
+/// are the default `portable-pty` + `alacritty_terminal` engine.
+#[cfg(feature = "terminal")]
+pub use bastyde_terminal as terminal;
+
 /// WebView install hook (extension trait on `BastydeAppBuilder`).
 #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
 pub mod webview_install;
@@ -245,6 +252,15 @@ pub mod prelude {
     pub use bastyde_webview::{
         WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId,
         WebViewRegistry, WebViewStyle,
+    };
+
+    // Terminal emulator (Console). The `Terminal` widget + its controller,
+    // colour scheme, command and style types come into scope so apps
+    // `use bastyde::prelude::*` and embed a shell.
+    #[cfg(feature = "terminal")]
+    pub use bastyde_terminal::{
+        BellStyle, ColorScheme, CursorStyle, Terminal, TerminalClosePolicy, TerminalCommand,
+        TerminalController, TerminalStyle,
     };
 
     // Automation bridge (debug-only). The extension trait adds

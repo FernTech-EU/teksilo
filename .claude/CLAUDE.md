@@ -51,6 +51,7 @@ cargo run -p native-menu                         # Native OS menu bar: one MenuM
 cargo run -p web-view-demo                       # Embedded WebView (wry by default) in a TabWidget: dormancy/visibility bridge + JS↔Rust IPC; --features servo adds the Wayland engine. Linux needs WebKitGTK dev deps — see docs/web-view.md "Linux build dependencies" (apt: libgtk-3-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev …)
 cargo run -p docking                             # DockingLayout: VS Code-style dockable IDE shell — centre editor + 4 collapsible/splittable/draggable sides, activity rail, per-corner ownership, drag-to-dock, Lock-layout toggle (DockPolicy) + disable-side, export/restore. See docs/docking.md
 cargo run -p close-confirmation                  # Window close / quit confirmation: per-window WindowConfig::on_close_requested guard (CloseResponse::Veto + close_window_forced re-issue) + can_close/on_close_blocked sugar. See docs/multi-window.md "Intercepting close / quit"
+cargo run -p terminal-demo                       # Terminal (Console): a real shell over a PTY (ConPTY/openpty), VT emulation by alacritty_terminal, view by Bastyde — colored output, cursor, scrollback, selection, Ctrl+C/Ctrl+Shift+C-V, mouse reporting, Role::Terminal a11y. Behind the umbrella `terminal` feature. See docs/terminal.md
 ```
 
 ## Tools
@@ -329,6 +330,21 @@ bastyde-webview         Embeddable `WebView` widget. The one widget that can't r
                      for tests / no-engine). Sits at the bastyde-widgets tier; depends only on
                      bastyde-core (the widget is self-contained — apps that don't embed web pay zero
                      compile time). See docs/web-view.md.
+bastyde-terminal        Embeddable terminal-emulator (`Terminal` / Console) widget. Bastyde owns the
+                     *view* (grid render, keyboard→byte encoding, mouse reporting, selection,
+                     `Role::Terminal` a11y, theming, lifecycle); the PTY + VT model are delegated to
+                     `portable-pty` (ConPTY/openpty) + `alacritty_terminal` behind the
+                     `TerminalEngine` trait (default backend feature `alacritty`; `MemoryEngine` for
+                     tests). Unlike webview it renders INTO the wgpu surface (full a11y/theming, no
+                     native subview). `TerminalController` (Weak handle, the ListModel pattern) drives
+                     it from anywhere + exposes reactive `title/cwd/child_running/columns/rows/…`
+                     signals; `ColorScheme` (16 ANSI + truecolor); Tier-3 `TerminalStyle`. Off by
+                     default (umbrella `terminal` feature). Introduced two reusable framework
+                     primitives: `WidgetBuilder::keyboard_capture(bool)` (a focused surface receives
+                     every KeyDown raw, bypassing shortcut resolution — so Ctrl+C reaches the child)
+                     and `RepaintWindowRequest { window_id }` (a thread-safe, bastyde-app-routed
+                     "repaint this window" for content changed off the UI thread — the PTY reader
+                     thread; the off-thread analogue of `ctx.request_frame()`). See docs/terminal.md.
 bastyde              Umbrella crate with re-exports and feature flags
 bastyde-resources       Resource handling and embedding infrastructure
 bastyde-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`
