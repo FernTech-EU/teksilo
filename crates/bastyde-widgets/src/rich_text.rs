@@ -2696,8 +2696,12 @@ impl Widget for RichTextEditorBody {
             if cache.is_none() {
                 // A bare view (show_highlights=false) builds its AT tree from a
                 // clean snapshot too, so screen readers never hear highlight-
-                // driven formatting that no sighted user sees.
-                *cache = Some(st.flow_snapshot());
+                // driven formatting that no sighted user sees. The paint-only
+                // overlay is skipped: the AT walk reads fragments, never the
+                // overlay, so computing a paint span per spell/find range here
+                // would be pure waste (it dominated the a11y rebuild on a large
+                // spell-checked document).
+                *cache = Some(st.flow_snapshot_for_a11y());
             }
             cache.as_ref().cloned()
         };

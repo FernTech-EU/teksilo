@@ -618,6 +618,19 @@ impl EditorState {
         self.document.snapshot_flow_masked(&self.effective_mask())
     }
 
+    /// The snapshot the accessibility tree is built from — same masked flavor as
+    /// [`flow_snapshot`](Self::flow_snapshot), but without the paint-only overlay
+    /// (`paint_highlights`). The AT walk reads the fragments and their geometry
+    /// and never the overlay, so this is byte-identical for its purposes while
+    /// skipping the per-block `extract_paint_spans` work — the dominant cost of
+    /// rebuilding the a11y tree over a document carrying a spell-checker's tens
+    /// of thousands of ranges. (Metric sessions still split fragments here, so a
+    /// syntax-bold run is reported to the reader exactly as before.)
+    pub fn flow_snapshot_for_a11y(&self) -> bastyde_text::text_document::FlowSnapshot {
+        self.document
+            .snapshot_flow_masked_no_paint(&self.effective_mask())
+    }
+
     /// Drain the local event queue, classifying events for the layout
     /// strategy. Returns `(had_events, pending_single_pos)`:
     /// `pending_single_pos` is `Some(pos)` only if every event in this
