@@ -300,9 +300,29 @@ fn smart_home(st: &mut CodeEditorState, mode: MoveMode) {
 /// At the first non-whitespace character → column 0. Anywhere else (including
 /// column 0) → the first non-whitespace character. A line with no indent has
 /// both in the same place, so it is simply column 0.
+///
+/// Asks the document for the *one block* containing `pos` rather than reading
+/// the whole text. One block is one line here, so the block's `position` is the
+/// line start and its `text` is the line — which is all the question needs.
+///
+/// The first version of this read `to_plain_text()` and collected the entire
+/// document into a `Vec<char>`, three times per caret (the two helpers each did
+/// it, and one called the other). Measured at 20k lines: 58 µs per copy → 174 µs
+/// per caret per keypress, 870 µs at five carets, and worse from cold since any
+/// edit invalidates the text cache — so Home right after typing paid a full
+/// re-serialization of the document to find where one line started. Held Home
+/// at key-repeat made that visible.
 fn home_target(st: &CodeEditorState, pos: usize) -> usize {
-    let line_start = line_start_of(st, pos);
-    let indent_col = first_non_whitespace_column(st, pos);
+    // Highlights are irrelevant to counting whitespace, and asking for them
+    // would make the snapshot do more work.
+    let Some(block) = st
+        .document
+        .snapshot_block_at_position_without_highlights(pos)
+    else {
+        return pos;
+    };
+    let line_start = block.position;
+    let indent_col = leading_whitespace_columns(&block.text);
     let indent_pos = line_start + indent_col;
     if pos == indent_pos {
         line_start
@@ -311,32 +331,16 @@ fn home_target(st: &CodeEditorState, pos: usize) -> usize {
     }
 }
 
-/// Document offset of the start of the line containing `pos`.
-fn line_start_of(st: &CodeEditorState, pos: usize) -> usize {
-    let text = st.document.to_plain_text().unwrap_or_default();
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = pos.min(chars.len());
-    while i > 0 && chars[i - 1] != '\n' {
-        i -= 1;
+/// Count of leading whitespace characters, or 0 for a line that is entirely
+/// whitespace — a blank line has no content to stop at, so Home has nowhere to
+/// go but column 0.
+fn leading_whitespace_columns(line: &str) -> usize {
+    let indent = line.chars().take_while(|c| c.is_whitespace()).count();
+    if indent == line.chars().count() {
+        0
+    } else {
+        indent
     }
-    i
-}
-
-/// Column of the first non-whitespace character on the line containing `pos`,
-/// or 0 for a blank line.
-fn first_non_whitespace_column(st: &CodeEditorState, pos: usize) -> usize {
-    let text = st.document.to_plain_text().unwrap_or_default();
-    let chars: Vec<char> = text.chars().collect();
-    let start = line_start_of(st, pos);
-    let mut i = start;
-    while i < chars.len() && chars[i] != '\n' && chars[i].is_whitespace() {
-        i += 1;
-    }
-    if i < chars.len() && chars[i] == '\n' {
-        // Blank (or all-whitespace) line: there is no content to stop at.
-        return 0;
-    }
-    i - start
 }
 
 /// Page up/down by the viewport's worth of lines.

@@ -38,6 +38,7 @@
 
 mod config;
 mod frame_loop;
+mod gutter;
 mod keyboard;
 mod mouse;
 mod policy;

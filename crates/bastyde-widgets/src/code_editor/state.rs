@@ -74,6 +74,16 @@ pub(crate) struct CodeEditorState {
     /// Number of carets, published so a status bar can show "3 cursors"
     /// without polling. `1` when only the primary is live.
     pub caret_count: Signal<usize>,
+    /// Total logical lines, i.e. blocks. Published so the gutter can size
+    /// itself to the widest number without asking the document.
+    ///
+    /// Maintained from `DocumentEvent::BlockCountChanged`, which carries the
+    /// count, rather than by calling `TextDocument::block_count()`. That call
+    /// claims to be O(1) and is not: it fetches every block, reads each one's
+    /// content from the rope, and word-counts it before returning the cached
+    /// number it already had. Seeded once here at construction, where paying it
+    /// exactly once is fine.
+    pub line_count: Signal<usize>,
     /// Fires once per drain batch that contained a genuine content edit.
     pub on_change: Option<Rc<dyn Fn()>>,
 
@@ -228,6 +238,9 @@ impl CodeEditorState {
         // debounce drain still renders correctly.
         let initial_can_undo = document.can_undo();
         let initial_can_redo = document.can_redo();
+        // The one place the expensive block_count() is acceptable: once, at
+        // construction. Every later change arrives via BlockCountChanged.
+        let initial_lines = document.block_count();
 
         Rc::new(RefCell::new(Self {
             document,
@@ -244,6 +257,7 @@ impl CodeEditorState {
             can_undo: Signal::new(initial_can_undo),
             can_redo: Signal::new(initial_can_redo),
             caret_count: Signal::new(1),
+            line_count: Signal::new(initial_lines),
             on_change: None,
             scroll_x: Signal::new(0.0),
             scroll_y: Signal::new(0.0),
@@ -423,6 +437,21 @@ impl CodeEditorState {
                 }
                 DocumentEvent::UndoRedoChanged { can_undo, can_redo } => {
                     self.pending_undo_redo = Some((can_undo, can_redo));
+                }
+                DocumentEvent::BlockCountChanged(count) => {
+                    // The event carries the count, which is the only affordable
+                    // way to know it: `TextDocument::block_count()` advertises
+                    // "O(1) — reads cached value" and then fetches every block,
+                    // reads each one's content from the rope, and splits it by
+                    // whitespace to count words before returning the cached
+                    // number it already had. A gutter sizing itself from that
+                    // per frame would word-count the document every frame.
+                    self.line_count.set_if_changed(count);
+                    // The line count changing means lines were added or removed,
+                    // which moves every line below them.
+                    self.needs_full_layout = true;
+                    single_pos = None;
+                    a11y_dirty = true;
                 }
                 _ => {
                     // Anything structural we do not model precisely: relayout.

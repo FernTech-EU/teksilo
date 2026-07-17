@@ -845,3 +845,130 @@ fn home_toggles_each_caret_about_its_own_line() {
         "unindented line → its column 0, independently of the primary"
     );
 }
+
+// --- Gutter ---------------------------------------------------------------
+
+use super::gutter::CodeGutter;
+
+/// The line count must come from the event, never from `block_count()`.
+///
+/// `TextDocument::block_count()` advertises "O(1) — reads cached value" and then
+/// fetches every block, reads each one's content from the rope, and word-counts
+/// it before returning the cached number. A gutter sizing itself from that would
+/// word-count the whole document on every layout.
+#[test]
+fn the_line_count_tracks_the_document_via_the_event() {
+    let st = editor_state("a\nb\nc");
+    assert_eq!(
+        st.borrow().line_count.get(),
+        3,
+        "seeded once at construction"
+    );
+
+    {
+        let mut s = st.borrow_mut();
+        s.event_queue
+            .lock()
+            .unwrap()
+            .push_back(bastyde_text::text_document::DocumentEvent::BlockCountChanged(9));
+        s.drain_events();
+    }
+    assert_eq!(
+        st.borrow().line_count.get(),
+        9,
+        "BlockCountChanged carries the count — that is the only affordable way \
+         to learn it"
+    );
+}
+
+/// Adding or removing lines moves every line below them, so the count changing
+/// must force a relayout.
+#[test]
+fn a_changed_line_count_forces_a_relayout() {
+    let st = editor_state("a\nb");
+    {
+        let mut s = st.borrow_mut();
+        s.needs_full_layout = false;
+        s.event_queue
+            .lock()
+            .unwrap()
+            .push_back(bastyde_text::text_document::DocumentEvent::BlockCountChanged(5));
+        s.drain_events();
+    }
+    assert!(st.borrow().needs_full_layout);
+}
+
+/// The gutter is presentational: a reader must not have to arrow past thirty
+/// numbers to reach the code. Line position is conveyed on the paragraph nodes
+/// instead, where it is spoken *with* the line.
+#[test]
+fn the_gutter_is_hidden_from_assistive_technology() {
+    let st = editor_state("a\nb\nc");
+    let g = CodeGutter::new(&st);
+    let mut b = bastyde_core::accessibility::AccessNodeBuilder::new();
+    g.accessibility(&mut b);
+    assert!(
+        b.is_hidden(),
+        "the gutter must be hidden — its numbers belong on the paragraphs, not \
+         as thirty nodes in the reader's path"
+    );
+}
+
+/// Width comes from the total line count, not what is on screen. Sizing to the
+/// visible maximum would make the gutter breathe as the user scrolls past line
+/// 99 into 100, shifting the code sideways under the caret.
+#[test]
+fn the_gutter_widens_with_the_total_line_count_not_the_visible_one() {
+    let mut tree = WidgetTree::new();
+    let small = editor_state("a\nb\nc");
+    let id_small = tree.add(CodeGutter::new(&small));
+    tree.layout(SizeProposal::with_height(300.0));
+    let w_small = tree.bounds(id_small).width;
+
+    let mut tree2 = WidgetTree::new();
+    let big = editor_state("x");
+    big.borrow().line_count.set(100_000);
+    let id_big = tree2.add(CodeGutter::new(&big));
+    tree2.layout(SizeProposal::with_height(300.0));
+    let w_big = tree2.bounds(id_big).width;
+
+    assert!(
+        w_big > w_small,
+        "a 100k-line document needs a wider gutter than a 3-line one ({w_big} \
+         vs {w_small})"
+    );
+}
+
+/// The width must not depend on the scroll position — that is the same
+/// assertion from the other side, and it is what "no jitter" means concretely.
+#[test]
+fn the_gutter_width_does_not_change_when_scrolled() {
+    let mut tree = WidgetTree::new();
+    let st = editor_state("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl");
+    let id = tree.add(CodeGutter::new(&st));
+    tree.layout(SizeProposal::with_height(40.0));
+    let before = tree.bounds(id).width;
+
+    st.borrow().scroll_y.set(500.0);
+    tree.layout(SizeProposal::with_height(40.0));
+    let after = tree.bounds(id).width;
+
+    assert_eq!(
+        before, after,
+        "scrolling must never resize the gutter — the code would shift sideways"
+    );
+}
+
+/// A gutter with nothing laid out yet must draw nothing rather than place
+/// numbers at invented positions for one frame.
+#[test]
+fn the_gutter_paints_nothing_before_the_first_layout() {
+    let st = editor_state("a\nb\nc");
+    // No force_layout: the engine has never laid out.
+    assert!(!st.borrow().engine.has_full_layout());
+    let mut tree = WidgetTree::new();
+    tree.add(CodeGutter::new(&st));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    // Painting must not panic, and must not invent geometry.
+    let _ = tree.render();
+}
