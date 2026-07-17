@@ -23,6 +23,7 @@ pub mod button;
 pub mod calendar;
 pub mod card;
 pub mod checkbox;
+pub mod code_editor;
 pub mod color_edit;
 pub mod color_picker;
 pub mod combo_box;
