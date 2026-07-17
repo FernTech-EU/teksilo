@@ -12,22 +12,22 @@ pub mod font_registrar;
 pub mod rich_text_engine;
 pub mod typography_defaults;
 
-pub use shared_typesetter::SharedTypesetter;
-pub use typesetter_bridge::TypesetterBridge;
 #[cfg(feature = "fonts-arabic")]
 pub use embedded_fonts::noto_sans_arabic_bytes;
 #[cfg(feature = "fonts-hebrew")]
 pub use embedded_fonts::noto_sans_hebrew_bytes;
+pub use shared_typesetter::SharedTypesetter;
+pub use typesetter_bridge::TypesetterBridge;
 
 pub use font_registrar::{EmbeddedInterRegistrar, FontFaceSpec, FontRegistrar, VecFontRegistrar};
 pub use rich_text_engine::{RichTextEngine, WrapMode};
 pub use typography_defaults::EditorTypographyDefaults;
 
 pub use text_typeset::{
-    CharacterGeometry, CursorAffinity, CursorDisplay, DecorationKind as TypesetterDecorationKind,
-    DecorationRect, FontFaceId, FontFamilyInfo, GlyphQuad as TypesetterGlyphQuad, HitRegion,
-    HitTestResult, ImageQuad, RenderFrame, TextFontService, WritingSystem,
-    WritingSystemIndexBuilder, WritingSystemSet,
+    BlockVisualInfo, CharacterGeometry, CursorAffinity, CursorDisplay,
+    DecorationKind as TypesetterDecorationKind, DecorationRect, FontFaceId, FontFamilyInfo,
+    GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad, RelayoutError,
+    RenderFrame, TextFontService, WritingSystem, WritingSystemIndexBuilder, WritingSystemSet,
 };
 
 pub use text_document;

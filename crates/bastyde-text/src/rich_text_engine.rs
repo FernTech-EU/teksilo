@@ -429,6 +429,93 @@ impl RichTextEngine {
         self.flow.set_cursor(cursor);
     }
 
+    /// Show several carets at once (multi-caret editing).
+    ///
+    /// Replaces the whole cursor set, so pass every caret each time — a lone
+    /// primary caret is `set_cursor`, which is the same thing with one entry.
+    pub fn set_cursors(&mut self, cursors: &[CursorDisplay]) {
+        self.flow.set_cursors(cursors);
+    }
+
+    // --- Streaming buffers (log / console views) --------------------------
+
+    /// Append one block to the tail of the existing layout.
+    ///
+    /// The incremental alternative to re-laying-out after content grows: a
+    /// full layout is O(N) in the whole document, so appending one line to a
+    /// 100 000-line buffer costs over a second, while this stays flat at the
+    /// cost of shaping the one new line. A view tailing output needs it; an
+    /// editor does not.
+    ///
+    /// Returns [`RelayoutError::ScaleDirty`] if the layout was shaped at a
+    /// different HiDPI scale than the service now reports — appending at the
+    /// new scale would leave the flow permanently mixed-scale. Re-run
+    /// [`layout_full`](Self::layout_full) first.
+    pub fn append_block(
+        &mut self,
+        params: &text_typeset::layout::block::BlockLayoutParams,
+    ) -> Result<(), text_typeset::RelayoutError> {
+        let mut bridge = self.shared.borrow_mut();
+        self.flow.add_block(bridge.service_mut(), params)
+    }
+
+    /// Drop the first `n` blocks, returning how many were removed.
+    ///
+    /// The eviction half of a bounded streaming buffer. Survivors keep their
+    /// absolute `y` and `content_height` is unchanged, so nothing below moves
+    /// and the viewport stays where the user put it — the vacated band at the
+    /// top simply becomes empty.
+    pub fn remove_leading(&mut self, n: usize) -> usize {
+        self.flow.remove_leading(n)
+    }
+
+    /// Shape only `window` of a much larger uniform-row document, placing each
+    /// row at `y = index * row_height`.
+    ///
+    /// Where [`append_block`](Self::append_block) makes *growing* a buffer
+    /// cheap, this makes *holding* a large one cheap: a resident shaped line
+    /// costs ~6.5 KB, so a fully laid-out 100 000-line buffer costs ~623 MB
+    /// against ~1 MB for a viewport-sized window. Rendering already culls to
+    /// the viewport, so shaping the remainder only ever cost memory.
+    ///
+    /// Correct only for genuinely uniform rows — one row = one unwrapped
+    /// visual line of exactly `row_height`, one font size, no per-row margins
+    /// (log/console output, monospaced code). Prose must use
+    /// [`layout_full`](Self::layout_full). `window` must be sorted ascending by
+    /// index. Both are checked in debug builds.
+    ///
+    /// Drops any paint overlay, like a full layout does — re-apply highlight
+    /// spans after re-windowing.
+    pub fn layout_window(
+        &mut self,
+        window: &[(usize, text_typeset::layout::block::BlockLayoutParams)],
+        total_rows: usize,
+        row_height: f32,
+    ) {
+        let mut bridge = self.shared.borrow_mut();
+        self.flow
+            .layout_window(bridge.service_mut(), window, total_rows, row_height);
+    }
+
+    /// Declare the document's total extent without shaping anything.
+    ///
+    /// Keeps the scrollbar honest when the row count changes outside the shaped
+    /// window — a line appended while the user is scrolled away from the tail.
+    /// Only meaningful for a flow driven by [`layout_window`](Self::layout_window).
+    pub fn set_uniform_extent(&mut self, total_rows: usize, row_height: f32) {
+        self.flow.set_uniform_extent(total_rows, row_height);
+    }
+
+    /// Visual position and height of a laid-out block.
+    ///
+    /// Answers only for *resident* blocks: under
+    /// [`layout_window`](Self::layout_window) everything outside the window is
+    /// unshaped and returns `None`, so derive off-window geometry
+    /// arithmetically from the row height instead.
+    pub fn block_visual_info(&self, block_id: usize) -> Option<text_typeset::BlockVisualInfo> {
+        self.flow.block_visual_info(block_id)
+    }
+
     // --- Hit testing / caret geometry ------------------------------------
 
     pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
@@ -638,6 +725,196 @@ mod tests {
         engine.with_render_frame(|_| {});
         let hit = engine.hit_test(5.0, 5.0);
         assert!(hit.is_some(), "hit test on laid out text must succeed");
+    }
+
+    // --- Streaming passthroughs -------------------------------------
+
+    /// One row of a streaming buffer, as a log view builds them: a single
+    /// unwrapped line with no margins, which is the uniform-row invariant
+    /// `layout_window` relies on.
+    fn row(block_id: usize, text: &str) -> text_typeset::layout::block::BlockLayoutParams {
+        use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
+        use text_typeset::layout::paragraph::Alignment;
+        use text_typeset::{UnderlineStyle, VerticalAlignment};
+
+        BlockLayoutParams {
+            block_id,
+            position: 0,
+            text: text.to_string(),
+            fragments: vec![FragmentParams {
+                text: text.to_string(),
+                offset: 0,
+                length: text.len(),
+                font_family: None,
+                font_weight: None,
+                font_bold: None,
+                font_italic: None,
+                font_point_size: None,
+                underline_style: UnderlineStyle::None,
+                overline: false,
+                strikeout: false,
+                is_link: false,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: None,
+                tooltip: None,
+                vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
+                features: Vec::new(),
+            }],
+            alignment: Alignment::Left,
+            // No margins, no wrapping: one row is exactly one visual line,
+            // which is what `layout_window`'s arithmetic placement requires.
+            top_margin: 0.0,
+            bottom_margin: 0.0,
+            left_margin: 0.0,
+            right_margin: 0.0,
+            text_indent: 0.0,
+            list_marker: String::new(),
+            list_indent: 0.0,
+            tab_positions: Vec::new(),
+            line_height_multiplier: None,
+            non_breakable_lines: true,
+            hyphenation: None,
+            checkbox: None,
+            background_color: None,
+        }
+    }
+
+    /// The whole point of the append path: growing the buffer must not re-shape
+    /// what is already in it, so the flow keeps every earlier row.
+    #[test]
+    fn append_block_extends_the_layout_without_rebuilding_it() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("first").unwrap();
+        engine.layout_full(&doc.snapshot_flow());
+        let height_before = engine.content_height();
+
+        engine.append_block(&row(999, "streamed line")).unwrap();
+
+        assert!(
+            engine.content_height() > height_before,
+            "the appended row must add height"
+        );
+        assert!(
+            engine.block_visual_info(999).is_some(),
+            "the appended row must be laid out and locatable"
+        );
+    }
+
+    /// Appending at a scale the layout was not shaped at would leave the flow
+    /// permanently mixed-scale, and — worse — stamping it as freshly laid out
+    /// would clear the caller's own staleness signal.
+    #[test]
+    fn append_block_refuses_a_stale_scale() {
+        let shared = SharedTypesetter::new_with_default_font();
+        let mut engine = RichTextEngine::from_shared(shared.clone());
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("first").unwrap();
+        engine.layout_full(&doc.snapshot_flow());
+
+        shared.set_scale_factor(2.0);
+
+        assert!(
+            matches!(
+                engine.append_block(&row(999, "streamed")),
+                Err(text_typeset::RelayoutError::ScaleDirty)
+            ),
+            "appending against a stale scale must be refused, not silently mixed"
+        );
+    }
+
+    /// Windowing is what keeps a large buffer affordable: only the window is
+    /// shaped, yet the flow still spans the whole document so the scrollbar
+    /// stays honest.
+    #[test]
+    fn layout_window_shapes_only_the_window_but_spans_the_document() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+
+        // Learn the true row height by shaping one row, as a caller must:
+        // `layout_window` asserts the height it is told matches what the row
+        // actually lays out to, so guessing it is not an option.
+        engine.append_block(&row(1, "probe")).unwrap();
+        let row_height = engine.block_visual_info(1).expect("probe row").height;
+
+        let window: Vec<_> = (500..510).map(|i| (i, row(i + 1, "line"))).collect();
+        engine.layout_window(&window, 100_000, row_height);
+
+        assert!(
+            engine.block_visual_info(501).is_some(),
+            "a row inside the window must be laid out"
+        );
+        assert!(
+            engine.block_visual_info(1).is_none(),
+            "a row outside the window must not be resident"
+        );
+        assert!(
+            (engine.content_height() - 100_000.0 * row_height).abs() < 1.0,
+            "content_height must span all 100k rows, not just the window"
+        );
+    }
+
+    /// The append/evict cycle a capped log view actually runs, composed through
+    /// this wrapper rather than the engine underneath it.
+    #[test]
+    fn append_and_evict_compose_into_a_bounded_buffer() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("line 0").unwrap();
+        engine.layout_full(&doc.snapshot_flow());
+
+        for i in 1..20 {
+            engine.append_block(&row(1000 + i, "line")).unwrap();
+        }
+        let evicted = engine.remove_leading(5);
+
+        assert_eq!(evicted, 5, "eviction must report what it actually removed");
+        assert!(
+            engine.block_visual_info(1001).is_none(),
+            "an evicted row must be gone"
+        );
+        assert!(
+            engine.block_visual_info(1019).is_some(),
+            "a surviving row must remain laid out"
+        );
+    }
+
+    /// Multi-caret rendering: every caret must be shown, not just the primary.
+    #[test]
+    fn set_cursors_renders_every_caret() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        engine.layout_full(&doc.snapshot_flow());
+
+        let caret = |p: usize| CursorDisplay {
+            position: p,
+            anchor: p,
+            affinity: text_typeset::CursorAffinity::Downstream,
+            visible: true,
+            selected_cells: Vec::new(),
+        };
+        engine.set_cursors(&[caret(0), caret(3), caret(6)]);
+
+        let carets = engine.with_render_frame(|frame| {
+            frame
+                .decorations
+                .iter()
+                .filter(|d| matches!(d.kind, text_typeset::DecorationKind::Cursor))
+                .count()
+        });
+        assert_eq!(carets, 3, "all three carets must render");
     }
 
     /// Two engines sharing one bridge keep independent viewports
