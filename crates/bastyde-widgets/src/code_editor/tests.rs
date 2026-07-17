@@ -2117,3 +2117,301 @@ fn a_plain_move_does_not_open_completion() {
         "arrowing onto a word must not open the popup"
     );
 }
+
+// --- LogView streaming ----------------------------------------------------
+
+mod log {
+    use super::*;
+    use crate::code_editor::log_stream::{self, LogStreamState};
+
+    /// A fresh streaming state with a usable viewport, ready to pump.
+    fn log_state() -> SharedState {
+        let doc = TextDocument::new();
+        let st = construct(
+            doc,
+            CODE_READ_ONLY_PRESET,
+            CodeConfig::default(),
+            WrapMode::None,
+        );
+        st.borrow_mut().log = Some(LogStreamState::new());
+        // A viewport a handful of rows tall, so follow / window tests have a real
+        // overflow to work against.
+        st.borrow_mut()
+            .sync_viewport(Rect::new(0.0, 0.0, 400.0, 100.0));
+        st
+    }
+
+    fn enqueue(st: &SharedState, lines: &[&str]) {
+        let s = st.borrow();
+        let mut q = s.log.as_ref().unwrap().pending.lock().unwrap();
+        for l in lines {
+            q.push_back((*l).to_string());
+        }
+    }
+
+    fn enqueue_owned(st: &SharedState, lines: impl IntoIterator<Item = String>) {
+        let s = st.borrow();
+        let mut q = s.log.as_ref().unwrap().pending.lock().unwrap();
+        for l in lines {
+            q.push_back(l);
+        }
+    }
+
+    fn pump(st: &SharedState) {
+        let mut s = st.borrow_mut();
+        log_stream::tick(&mut s, 0.016);
+    }
+
+    #[test]
+    fn appending_grows_the_line_count() {
+        let st = log_state();
+        enqueue(&st, &["one", "two", "three"]);
+        pump(&st);
+        assert_eq!(st.borrow().line_count.get(), 3);
+    }
+
+    /// The first append fills the document's initial empty block instead of
+    /// adding after it, so a fresh log does not open with a blank first line.
+    #[test]
+    fn the_first_line_is_not_preceded_by_a_blank() {
+        let st = log_state();
+        enqueue(&st, &["first"]);
+        pump(&st);
+        assert_eq!(st.borrow().line_count.get(), 1, "no phantom blank line 0");
+        let text = st
+            .borrow()
+            .document
+            .snapshot_block_at_position(0)
+            .unwrap()
+            .text;
+        assert_eq!(text, "first");
+    }
+
+    /// A streaming append must not force the O(n) full relayout the editor's
+    /// path takes — `drain_events` sets the re-window flag instead.
+    #[test]
+    fn a_streaming_append_does_not_force_a_full_relayout() {
+        let st = log_state();
+        st.borrow_mut().needs_full_layout = false;
+        enqueue(&st, &["a", "b"]);
+        pump(&st);
+        assert!(
+            !st.borrow().needs_full_layout,
+            "streaming must re-window, never force a full relayout"
+        );
+    }
+
+    /// The content height spans every line, not just the shaped window — what
+    /// keeps the scrollbar honest over an unshaped document.
+    #[test]
+    fn the_extent_spans_the_whole_document() {
+        let st = log_state();
+        enqueue_owned(&st, (0..1000).map(|i| format!("line {i}")));
+        pump(&st);
+
+        let s = st.borrow();
+        let row_h = s.log.as_ref().unwrap().row_height;
+        assert!(row_h > 0.0, "the row height must have been learned");
+        assert!(
+            (s.engine.content_height() - 1000.0 * row_h).abs() < 1.0,
+            "content_height must span all 1000 rows"
+        );
+    }
+
+    /// Following the tail sticks the view to the bottom as it grows.
+    #[test]
+    fn following_the_tail_sticks_to_the_bottom() {
+        let st = log_state();
+        enqueue_owned(&st, (0..200).map(|i| format!("line {i}")));
+        pump(&st);
+
+        let s = st.borrow();
+        assert!(s.max_scroll_y.get() > 0.0, "200 lines must overflow");
+        assert!(
+            (s.scroll_y.get() - s.max_scroll_y.get()).abs() < 2.0,
+            "a following view must be parked at the bottom"
+        );
+    }
+
+    /// Regression: follow-tail must survive a scrollback eviction that lands in
+    /// the same tick as new content. `was_at_bottom` is read before eviction
+    /// shifts `scroll_y`, so the view re-locks to the (new) bottom rather than
+    /// jumping to the top.
+    #[test]
+    fn following_survives_eviction() {
+        let st = log_state();
+        st.borrow_mut().log.as_mut().unwrap().scrollback_limit = Some(20);
+        // Reach a steady, at-bottom following state.
+        enqueue_owned(&st, (0..30).map(|i| format!("line {i}")));
+        pump(&st);
+        assert!(
+            (st.borrow().scroll_y.get() - st.borrow().max_scroll_y.get()).abs() < 2.0,
+            "precondition: following at the bottom"
+        );
+        // A burst large enough that growth and eviction fall in one tick.
+        enqueue_owned(&st, (30..400).map(|i| format!("line {i}")));
+        pump(&st);
+        let s = st.borrow();
+        assert!(
+            (s.scroll_y.get() - s.max_scroll_y.get()).abs() < 2.0,
+            "eviction+growth in one tick must not break follow: scroll_y={}, max={}",
+            s.scroll_y.get(),
+            s.max_scroll_y.get()
+        );
+    }
+
+    /// Scrolling up pauses the follow: a later append does not yank the view back
+    /// to the bottom.
+    #[test]
+    fn scrolling_up_pauses_the_follow() {
+        let st = log_state();
+        enqueue_owned(&st, (0..100).map(|i| format!("line {i}")));
+        pump(&st);
+        st.borrow().scroll_y.set(0.0);
+        pump(&st);
+        enqueue(&st, &["new one", "new two"]);
+        pump(&st);
+        assert!(
+            st.borrow().scroll_y.get() < 5.0,
+            "reading history must not be interrupted by new output"
+        );
+    }
+
+    /// With following off, appends never move the view even at the bottom.
+    #[test]
+    fn follow_disabled_holds_position() {
+        let st = log_state();
+        st.borrow_mut().log.as_mut().unwrap().follow_enabled = false;
+        enqueue_owned(&st, (0..200).map(|i| format!("line {i}")));
+        pump(&st);
+        assert!(
+            st.borrow().scroll_y.get() < 1.0,
+            "a non-following view holds at the top as it grows"
+        );
+    }
+
+    /// Windowing lands on the right rows after a scroll — the O(log n) position
+    /// chain (not the O(n) block walk) must still resolve the correct block.
+    #[test]
+    fn windowing_resolves_the_correct_rows_after_scroll() {
+        let st = log_state();
+        enqueue_owned(&st, (0..500).map(|i| format!("line {i}")));
+        pump(&st);
+        // Scroll to a known row and re-window.
+        let row_h = st.borrow().log.as_ref().unwrap().row_height;
+        st.borrow().scroll_y.set(250.0 * row_h);
+        pump(&st);
+        // The window anchor must point at the char position of row 250, whose
+        // block is "line 250".
+        let (arow, apos) = st.borrow().log.as_ref().unwrap().anchor.unwrap();
+        assert_eq!(arow, 250, "anchor row must match the scroll");
+        let text = st
+            .borrow()
+            .document
+            .snapshot_block_at_position(apos)
+            .unwrap()
+            .text;
+        assert_eq!(
+            text, "line 250",
+            "the anchor must resolve to the right block"
+        );
+    }
+
+    /// The scrollback cap evicts from the front; the buffer stays bounded.
+    #[test]
+    fn scrollback_limit_bounds_the_buffer() {
+        let st = log_state();
+        st.borrow_mut().log.as_mut().unwrap().scrollback_limit = Some(50);
+        enqueue_owned(&st, (0..1000).map(|i| format!("line {i}")));
+        pump(&st);
+        let count = st.borrow().line_count.get();
+        assert!(
+            (50..=50 + 256).contains(&count),
+            "bounded near the cap, was {count}"
+        );
+    }
+
+    /// Regression: a small cap is honoured tightly — the slack band scales down
+    /// with the cap, so a limit of 10 does not hold 266.
+    #[test]
+    fn a_small_scrollback_limit_is_honoured_tightly() {
+        let st = log_state();
+        st.borrow_mut().log.as_mut().unwrap().scrollback_limit = Some(10);
+        enqueue_owned(&st, (0..500).map(|i| format!("line {i}")));
+        pump(&st);
+        let count = st.borrow().line_count.get();
+        // slack = (10/4).clamp(1,256) = 2, so the cap band is [10, 12].
+        assert!(count <= 12, "a small cap must be tight, was {count}");
+    }
+
+    /// The severity classifier is consulted for the visible lines, with their
+    /// text — the hook a colouring log needs.
+    #[test]
+    fn the_severity_classifier_sees_line_text() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let st = log_state();
+        {
+            let seen = seen.clone();
+            st.borrow_mut().log.as_mut().unwrap().severity = Some(Rc::new(move |text: &str| {
+                seen.borrow_mut().push(text.to_string());
+                None
+            }));
+        }
+        enqueue(&st, &["alpha", "beta", "gamma"]);
+        pump(&st);
+        assert!(
+            seen.borrow().iter().any(|t| t == "alpha"),
+            "the classifier must see each visible line's text, saw {:?}",
+            seen.borrow()
+        );
+    }
+
+    /// The handle splits on newlines and drops a single trailing terminator.
+    #[test]
+    fn the_handle_splits_on_newlines() {
+        let st = log_state();
+        let handle = crate::code_editor::LogViewHandle::from_state_for_test(st.clone());
+        handle.append("a\nb\nc\n");
+        pump(&st);
+        assert_eq!(
+            st.borrow().line_count.get(),
+            3,
+            "three lines, no blank from the trailing newline"
+        );
+    }
+
+    /// Clearing empties the view and returns it to its pristine state, then
+    /// accepts content again with no phantom blank.
+    #[test]
+    fn clearing_resets_the_view() {
+        let st = log_state();
+        enqueue(&st, &["a", "b", "c"]);
+        pump(&st);
+        assert_eq!(st.borrow().line_count.get(), 3);
+
+        let handle = crate::code_editor::LogViewHandle::from_state_for_test(st.clone());
+        handle.clear();
+        pump(&st);
+        assert_eq!(
+            st.borrow().line_count.get(),
+            0,
+            "an emptied log has no lines"
+        );
+        assert!(st.borrow().log.as_ref().unwrap().pristine, "pristine again");
+        assert_eq!(st.borrow().scroll_y.get(), 0.0);
+
+        handle.append("after clear");
+        pump(&st);
+        assert_eq!(st.borrow().line_count.get(), 1);
+        let text = st
+            .borrow()
+            .document
+            .snapshot_block_at_position(0)
+            .unwrap()
+            .text;
+        assert_eq!(text, "after clear", "refill must not leave a blank line 0");
+    }
+}

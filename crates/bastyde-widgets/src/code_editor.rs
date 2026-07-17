@@ -42,6 +42,8 @@ mod config;
 mod frame_loop;
 mod gutter;
 mod keyboard;
+mod log_stream;
+mod log_view;
 mod mouse;
 mod policy;
 mod semantics;
@@ -53,6 +55,7 @@ mod tests;
 
 pub use completion::{CompletionContext, CompletionItem, CompletionKind};
 pub use config::{BracketPair, COMMON_BRACKETS, CodeConfig, IndentStyle};
+pub use log_view::{LogView, LogViewHandle};
 pub use policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET, CodeCommand};
 pub use widget::{CodeEditor, PlainTextEditor};
 

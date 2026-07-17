@@ -556,6 +556,55 @@ impl RichTextEngine {
         self.flow.set_uniform_extent(total_rows, row_height);
     }
 
+    /// Shape a window of a large uniform-row document from document block
+    /// snapshots, optionally tinting each row's text.
+    ///
+    /// The document-driven counterpart of [`layout_window`](Self::layout_window):
+    /// where that takes already-built `BlockLayoutParams`, this takes the
+    /// `(row index, block snapshot, optional whole-line colour)` a streaming log
+    /// or console view has on hand — a caller two crates up cannot build the
+    /// params itself (they need this flow's bridge options), so it hands over
+    /// snapshots and lets the engine convert them exactly as
+    /// [`layout_full`](Self::layout_full) would, applying this engine's
+    /// typography defaults so the two paths shape a given block identically.
+    ///
+    /// The tint sets every fragment's foreground colour — the whole-line
+    /// severity colour a log wants (an error line red); `None` leaves the row in
+    /// its document colours. Per-run colouring is out of scope here (use the
+    /// document's own highlight sessions). `rows` must be sorted ascending by
+    /// index. Like every windowed layout this reports `content_height` as
+    /// `total_rows * row_height`, so the scrollbar spans the whole document
+    /// even though only the window is shaped.
+    pub fn layout_window_from_snapshots(
+        &mut self,
+        rows: &[(usize, text_document::BlockSnapshot, Option<[f32; 4]>)],
+        total_rows: usize,
+        row_height: f32,
+    ) {
+        let fill = typography_defaults::needs_params_fill(&self.typography_defaults);
+        let window: Vec<(usize, text_typeset::layout::block::BlockLayoutParams)> = rows
+            .iter()
+            .map(|(idx, snap, tint)| {
+                let mut params = self.flow.block_params_for(snap);
+                if fill {
+                    typography_defaults::apply_to_block_params(
+                        &mut params,
+                        &self.typography_defaults,
+                    );
+                }
+                if let Some(color) = tint {
+                    for fragment in &mut params.fragments {
+                        fragment.foreground_color = Some(*color);
+                    }
+                }
+                (*idx, params)
+            })
+            .collect();
+        let mut bridge = self.shared.borrow_mut();
+        self.flow
+            .layout_window(bridge.service_mut(), &window, total_rows, row_height);
+    }
+
     /// Visual position and height of a laid-out block.
     ///
     /// Answers only for *resident* blocks: under
@@ -1007,6 +1056,67 @@ mod tests {
             engine.block_visual_info(1019).is_some(),
             "a surviving row must remain laid out"
         );
+    }
+
+    /// The document-driven windowing a `LogView` uses: hand the engine block
+    /// snapshots for the visible rows and it shapes the window, spanning the
+    /// whole document for the scrollbar. A caller two crates up can't build the
+    /// params, so it passes what it has — snapshots.
+    #[test]
+    fn layout_window_from_snapshots_shapes_the_window_from_document_blocks() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+
+        // A document standing in for a long log; window three of its blocks.
+        let doc = TextDocument::new();
+        doc.set_plain_text("alpha\nbeta\ngamma\ndelta\nepsilon")
+            .unwrap();
+
+        // Learn the row height by shaping one row (as the widget must).
+        engine.append_block(&row(1, "probe")).unwrap();
+        let row_height = engine.block_visual_info(1).expect("probe row").height;
+
+        let rows: Vec<(usize, text_document::BlockSnapshot, Option<[f32; 4]>)> = (0..3)
+            .map(|i| {
+                let blk = doc.block_by_number(i).expect("block");
+                (i, blk.snapshot(), None)
+            })
+            .collect();
+        engine.layout_window_from_snapshots(&rows, 5, row_height);
+
+        assert!(
+            (engine.content_height() - 5.0 * row_height).abs() < 1.0,
+            "content_height must span the whole document, not just the window"
+        );
+        // The probe row was outside the window, so it must not survive.
+        assert!(
+            engine.block_visual_info(1).is_none(),
+            "windowing drops rows outside the window"
+        );
+    }
+
+    /// A per-row tint must reach the shaped glyphs: the whole-line severity
+    /// colour a log paints an error line with.
+    #[test]
+    fn layout_window_from_snapshots_tints_a_row() {
+        let shared = SharedTypesetter::new_with_default_font();
+        let mut engine = RichTextEngine::from_shared(shared);
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("ERROR boom").unwrap();
+
+        engine.append_block(&row(1, "probe")).unwrap();
+        let row_height = engine.block_visual_info(1).expect("probe row").height;
+
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let blk = doc.block_by_number(0).expect("block");
+        engine.layout_window_from_snapshots(&[(0, blk.snapshot(), Some(red))], 1, row_height);
+
+        // Every glyph of the tinted row must carry the override colour.
+        let all_red = engine.with_render_frame(|frame| {
+            !frame.glyphs.is_empty() && frame.glyphs.iter().all(|g| g.color == red)
+        });
+        assert!(all_red, "the tint must colour every glyph of the row");
     }
 
     /// Multi-caret rendering: every caret must be shown, not just the primary.

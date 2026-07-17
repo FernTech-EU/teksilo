@@ -66,6 +66,13 @@ pub(crate) struct CodeEditorState {
     /// Completion provider, session, and the reactive surface the popup binds.
     pub completion: super::completion::CompletionState,
 
+    /// Streaming state, present only for a [`LogView`](super::LogView). Its
+    /// presence *is* the "this is a streaming view" flag: [`is_streaming`](Self::is_streaming)
+    /// checks it, and `drain_events` re-windows instead of relaying-out when it
+    /// is set. `None` for every editable editor, whose paths are then byte-for-byte
+    /// unchanged.
+    pub log: Option<super::log_stream::LogStreamState>,
+
     // --- Reactive surface --------------------------------------------------
     pub document_version: Signal<u64>,
     pub caret_visible: Signal<bool>,
@@ -260,6 +267,7 @@ impl CodeEditorState {
             policy,
             config,
             completion: super::completion::CompletionState::new(),
+            log: None,
             document_version: Signal::new(0),
             caret_visible,
             cursor_position: Signal::new(0),
@@ -343,6 +351,21 @@ impl CodeEditorState {
         changed
     }
 
+    /// Whether this is a streaming log view rather than an editor. Drives the
+    /// one branch in `drain_events` that keeps a per-line append off the O(n)
+    /// full-relayout path.
+    pub fn is_streaming(&self) -> bool {
+        self.log.is_some()
+    }
+
+    /// Ask the streaming layer to re-window on the next tick — the streaming
+    /// counterpart of setting `needs_full_layout`, cheap where that is O(n).
+    fn mark_rewindow(&mut self) {
+        if let Some(log) = self.log.as_mut() {
+            log.needs_rewindow = true;
+        }
+    }
+
     /// Every live caret, primary first.
     pub fn all_carets(&self) -> impl Iterator<Item = &TextCursor> {
         std::iter::once(&self.cursor).chain(self.extra_carets.iter())
@@ -412,6 +435,7 @@ impl CodeEditorState {
             return (false, None);
         }
 
+        let streaming = self.is_streaming();
         let mut single_pos: Option<usize> = None;
         let mut a11y_dirty = false;
         let mut saw_content_change = false;
@@ -426,7 +450,11 @@ impl CodeEditorState {
                     self.pending_text_changed = true;
                     saw_content_change = true;
                     a11y_dirty = true;
-                    if blocks_affected <= 1 && !self.needs_full_layout {
+                    if streaming {
+                        // A streaming append never relays out the whole buffer:
+                        // the tick re-windows the visible rows instead.
+                        self.mark_rewindow();
+                    } else if blocks_affected <= 1 && !self.needs_full_layout {
                         single_pos = Some(position);
                     } else {
                         self.needs_full_layout = true;
@@ -436,8 +464,12 @@ impl CodeEditorState {
                 DocumentEvent::FormatChanged { .. } => {
                     // A format change can alter glyph metrics, so it needs a
                     // reshape — unlike HighlightPaintChanged below.
-                    self.needs_full_layout = true;
-                    single_pos = None;
+                    if streaming {
+                        self.mark_rewindow();
+                    } else {
+                        self.needs_full_layout = true;
+                        single_pos = None;
+                    }
                     a11y_dirty = true;
                 }
                 DocumentEvent::HighlightPaintChanged { .. } => {
@@ -458,17 +490,31 @@ impl CodeEditorState {
                     // whitespace to count words before returning the cached
                     // number it already had. A gutter sizing itself from that
                     // per frame would word-count the document every frame.
-                    self.line_count.set_if_changed(count);
+                    //
+                    // A streaming view owns its own count (the stat undercounts
+                    // the document's initial block), so it is not published here.
+                    if !streaming {
+                        self.line_count.set_if_changed(count);
+                    }
                     // The line count changing means lines were added or removed,
                     // which moves every line below them.
-                    self.needs_full_layout = true;
-                    single_pos = None;
+                    if streaming {
+                        self.mark_rewindow();
+                    } else {
+                        self.needs_full_layout = true;
+                        single_pos = None;
+                    }
                     a11y_dirty = true;
                 }
                 _ => {
-                    // Anything structural we do not model precisely: relayout.
-                    self.needs_full_layout = true;
-                    single_pos = None;
+                    // Anything structural we do not model precisely: relayout,
+                    // or re-window when streaming.
+                    if streaming {
+                        self.mark_rewindow();
+                    } else {
+                        self.needs_full_layout = true;
+                        single_pos = None;
+                    }
                     a11y_dirty = true;
                 }
             }
