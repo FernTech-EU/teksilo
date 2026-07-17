@@ -36,6 +36,7 @@
 //! Guessing would be worse than not knowing — inserting `//` into a Python file
 //! corrupts it silently.
 
+mod clipboard;
 mod config;
 mod frame_loop;
 mod gutter;
@@ -44,12 +45,14 @@ mod mouse;
 mod policy;
 mod semantics;
 mod state;
+mod widget;
 
 #[cfg(test)]
 mod tests;
 
 pub use config::{BracketPair, COMMON_BRACKETS, CodeConfig, IndentStyle};
 pub use policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET, CodeCommand};
+pub use widget::{CodeEditor, PlainTextEditor};
 
 use std::rc::Rc;
 

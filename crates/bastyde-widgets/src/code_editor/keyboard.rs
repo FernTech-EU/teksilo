@@ -28,6 +28,7 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
+use super::clipboard;
 use super::policy::CodeCommand;
 use super::semantics;
 use super::state::{CodeEditorState, SharedState};
@@ -120,6 +121,24 @@ pub(super) fn handle_key(
             }
             Key::D if ctrl && !shift && filter.accepts(CodeCommand::DuplicateSelection) => {
                 semantics::duplicate(&mut st);
+                KeyAction::ClearPreferredX
+            }
+
+            // --- Clipboard ---
+            //
+            // Copy is not a mutation, so a read-only viewer's filter accepts it
+            // (and rejects Cut / Paste). With no selection, Copy and Cut act on
+            // the whole current line — the desktop convention.
+            Key::C if ctrl && filter.accepts(CodeCommand::Copy) => {
+                clipboard::copy(&st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            Key::X if ctrl && filter.accepts(CodeCommand::Cut) => {
+                clipboard::cut(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            Key::V if ctrl && filter.accepts(CodeCommand::Paste) => {
+                clipboard::paste(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
 

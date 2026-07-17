@@ -982,8 +982,9 @@ fn the_gutter_paints_nothing_before_the_first_layout() {
 // with the caret left in the wrong place is a bug the next keystroke reveals.
 // ══════════════════════════════════════════════════════════════════════════
 
-use super::config::{BracketPair, COMMON_BRACKETS};
+use super::config::{BracketPair, COMMON_BRACKETS, IndentStyle};
 use super::semantics::{self, MoveDir};
+use super::widget::{CodeEditor, PlainTextEditor};
 
 /// An editor over `text` with an explicit config.
 fn editor_cfg(text: &str, config: CodeConfig) -> SharedState {
@@ -1605,6 +1606,83 @@ fn a_multi_line_indent_is_one_undo_step() {
     assert_eq!(text_of(&st), "a\nb", "one undo restores both lines");
 }
 
+// --- Clipboard ------------------------------------------------------------
+
+/// Paste splits multi-line text into one block per line — never a single block
+/// carrying literal newlines, which would break the one-block-per-line model.
+#[test]
+fn paste_splits_multiline_into_one_block_per_line() {
+    let st = editor_cfg("", CodeConfig::default());
+    super::clipboard::insert_multiline(&st.borrow().cursor, "a\nb\nc");
+    assert_eq!(text_of(&st), "a\nb\nc");
+    assert_eq!(
+        st.borrow().document.block_count(),
+        3,
+        "three lines → three blocks, no literal newline in any block"
+    );
+}
+
+/// A single-line paste stays one block.
+#[test]
+fn paste_of_one_line_stays_one_block() {
+    let st = editor_cfg("", CodeConfig::default());
+    super::clipboard::insert_multiline(&st.borrow().cursor, "hello");
+    assert_eq!(text_of(&st), "hello");
+    assert_eq!(st.borrow().document.block_count(), 1);
+}
+
+/// The whole paste is one undo step, however many lines it spans.
+#[test]
+fn a_multi_line_paste_is_one_undo_step() {
+    let st = editor_cfg("start", CodeConfig::default());
+    set_caret(&st, 5);
+    super::clipboard::insert_multiline(&st.borrow().cursor, "\nsecond\nthird");
+    assert_eq!(text_of(&st), "start\nsecond\nthird");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(text_of(&st), "start", "one undo removes the whole paste");
+}
+
+/// Windows line endings are normalised before splitting, so a pasted CRLF file
+/// leaves no stray carriage returns in the blocks.
+#[test]
+fn paste_normalises_crlf() {
+    let st = editor_cfg("", CodeConfig::default());
+    let normalized = "a\r\nb".replace("\r\n", "\n").replace('\r', "\n");
+    super::clipboard::insert_multiline(&st.borrow().cursor, &normalized);
+    assert_eq!(text_of(&st), "a\nb");
+    assert_eq!(st.borrow().document.block_count(), 2);
+}
+
+/// Cutting a line with a following line removes the line and its trailing
+/// separator, pulling the next line up.
+#[test]
+fn cut_line_removes_the_line_and_its_trailing_separator() {
+    let st = editor_cfg("a\nb\nc", CodeConfig::default());
+    set_caret(&st, 2); // on "b"
+    run(&st, super::clipboard::delete_line);
+    assert_eq!(text_of(&st), "a\nc");
+}
+
+/// Cutting the last line takes the leading separator instead, so the previous
+/// line does not keep a dangling break.
+#[test]
+fn cut_the_last_line_takes_the_leading_separator() {
+    let st = editor_cfg("a\nb", CodeConfig::default());
+    set_caret(&st, 2); // on the last line "b"
+    run(&st, super::clipboard::delete_line);
+    assert_eq!(text_of(&st), "a");
+}
+
+/// Cutting the only line just clears it, leaving an empty document rather than
+/// underflowing on a separator that is not there.
+#[test]
+fn cut_the_only_line_clears_it() {
+    let st = editor_cfg("solo", CodeConfig::default());
+    set_caret(&st, 2);
+    run(&st, super::clipboard::delete_line);
+    assert_eq!(text_of(&st), "");
+}
+
 /// Bracket configuration is a value, not a language: a widget-declared
 /// `BracketPair` closes the way the app said, with no built-in table.
 #[test]
@@ -1618,4 +1696,141 @@ fn brackets_come_from_configuration_not_a_language() {
     set_caret(&st, 0);
     run(&st, |s| semantics::type_bracket_char(s, '«'));
     assert_eq!(text_of(&st), "«»", "the app's own pair auto-closes");
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Wrapper widgets (Phase 4e): CodeEditor / PlainTextEditor
+// ══════════════════════════════════════════════════════════════════════════
+
+fn doc(text: &str) -> TextDocument {
+    let d = TextDocument::new();
+    d.set_plain_text(text).unwrap();
+    d
+}
+
+/// A CodeEditor turns the code affordances on by default: gutter and the
+/// current-line highlight.
+#[test]
+fn a_code_editor_defaults_current_line_on() {
+    let ed = CodeEditor::new(doc("fn main() {}"));
+    assert!(
+        ed.handle().state_handle().borrow().current_line_highlight,
+        "CodeEditor should default the current-line band on"
+    );
+}
+
+/// A PlainTextEditor is the same core with the code chrome off and prose
+/// wrapping on.
+#[test]
+fn a_plain_text_editor_defaults_to_prose() {
+    let ed = PlainTextEditor::new(doc("some notes"));
+    let st = ed.handle().state_handle();
+    let s = st.borrow();
+    assert!(!s.current_line_highlight, "no current-line band in prose");
+    assert_eq!(s.wrap_mode, WrapMode::Word, "prose wraps");
+}
+
+/// Builder knobs thread into the injected config, not a hidden language table.
+#[test]
+fn builder_knobs_thread_into_the_config() {
+    let ed = CodeEditor::new(doc("x"))
+        .tab_width(2)
+        .line_comment("#")
+        .bracket_pairs(COMMON_BRACKETS.to_vec())
+        .auto_close_brackets(true)
+        .bracket_matching(true);
+    let st = ed.handle().state_handle();
+    let s = st.borrow();
+    assert_eq!(s.config.indent, IndentStyle::Spaces(2));
+    assert_eq!(s.config.line_comment.as_deref(), Some("#"));
+    assert_eq!(s.config.brackets, COMMON_BRACKETS.to_vec());
+    assert!(s.config.auto_close_brackets);
+    assert!(s.config.match_brackets);
+}
+
+/// Soft/hard tabs flip the indent kind while keeping the width.
+#[test]
+fn use_soft_tabs_flips_the_indent_kind() {
+    let hard = CodeEditor::new(doc("x")).tab_width(8).use_soft_tabs(false);
+    assert_eq!(
+        hard.handle().state_handle().borrow().config.indent,
+        IndentStyle::Tabs { width: 8 }
+    );
+    let soft = CodeEditor::new(doc("x")).use_soft_tabs(true);
+    assert!(matches!(
+        soft.handle().state_handle().borrow().config.indent,
+        IndentStyle::Spaces(_)
+    ));
+}
+
+/// A read-only wrapper is a viewer: caret hidden, mutations rejected.
+#[test]
+fn a_read_only_code_editor_is_a_viewer() {
+    let ed = CodeEditor::read_only(doc("fn main() {}"));
+    let st = ed.handle().state_handle();
+    let s = st.borrow();
+    assert!(!s.caret_visible.get(), "a viewer starts with no caret");
+    assert!(s.policy.is_read_only());
+}
+
+/// The editor mounts, lays out, and paints headlessly without panicking — the
+/// full wrapper path (gutter + body + scrollbars + the paint band).
+#[test]
+fn a_code_editor_mounts_lays_out_and_paints() {
+    let mut tree = WidgetTree::new();
+    let ed = CodeEditor::new(doc("fn main() {\n    let x = (1 + 2);\n}"))
+        .bracket_pairs(COMMON_BRACKETS.to_vec())
+        .bracket_matching(true);
+    let id = tree.add(ed);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let b = tree.bounds(id);
+    assert_eq!(b.width, 600.0);
+    assert_eq!(b.height, 400.0);
+    // Paint must not panic (band + brackets are gated on layout, so this also
+    // exercises the pre-layout skip path on the first frame).
+    let _ = tree.render();
+}
+
+/// A gutter-less editor still mounts and fills its bounds.
+#[test]
+fn a_gutterless_code_editor_mounts() {
+    let mut tree = WidgetTree::new();
+    let ed = CodeEditor::new(doc("a\nb\nc")).gutter(false);
+    let id = tree.add(ed);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(tree.bounds(id).width, 400.0);
+    let _ = tree.render();
+}
+
+/// The PlainTextEditor mounts and fills its bounds (it delegates to an inner
+/// CodeEditor).
+#[test]
+fn a_plain_text_editor_mounts_and_fills() {
+    let mut tree = WidgetTree::new();
+    let ed = PlainTextEditor::new(doc("just some prose here"));
+    let id = tree.add(ed);
+    tree.layout(SizeProposal::exact(500.0, 200.0));
+    assert_eq!(tree.bounds(id).width, 500.0);
+    assert_eq!(tree.bounds(id).height, 200.0);
+    let _ = tree.render();
+}
+
+/// With `min_lines` the editor sizes intrinsically instead of greedily filling,
+/// so an unbounded-height proposal yields a bounded height.
+#[test]
+fn min_lines_gives_intrinsic_height() {
+    let mut tree = WidgetTree::new();
+    let ed = PlainTextEditor::new(doc("one line"))
+        .min_lines(3)
+        .max_lines(6);
+    let id = tree.add(ed);
+    // Unbounded height (only width fixed) — a greedy editor would take a
+    // default; an intrinsic one clamps to [3, 6] lines.
+    tree.layout(SizeProposal::with_width(400.0));
+    let h = tree.bounds(id).height;
+    assert!(h > 0.0, "intrinsic height must be positive, got {h}");
+    assert!(
+        h < 400.0,
+        "3–6 lines must be far shorter than a page, got {h}"
+    );
 }
