@@ -29,6 +29,7 @@ use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::clipboard;
+use super::completion::{self, Trigger};
 use super::policy::CodeCommand;
 use super::semantics;
 use super::state::{CodeEditorState, SharedState};
@@ -78,6 +79,50 @@ pub(super) fn handle_key(
     } else {
         MoveMode::MoveAnchor
     };
+
+    // Ctrl+Space always requests completion, open or not.
+    if ctrl && matches!(key, Key::Space) {
+        completion::react(state, ctx, Trigger::Forced);
+        return EventResponse::Handled;
+    }
+
+    // While the completion popup is open it owns navigation, accept, and
+    // dismiss; other keys fall through to ordinary editing and re-filter it
+    // afterwards. The editor keeps focus throughout — the popup is a detached
+    // overlay, so these keys never reach it by bubbling; the editor drives it.
+    if state.borrow().completion.is_open() {
+        match key {
+            Key::ArrowDown if !ctrl && !alt => {
+                completion::move_selection(state, 1);
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
+            Key::ArrowUp if !ctrl && !alt => {
+                completion::move_selection(state, -1);
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
+            Key::PageDown => {
+                completion::move_selection(state, 5);
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
+            Key::PageUp => {
+                completion::move_selection(state, -5);
+                ctx.request_frame();
+                return EventResponse::Handled;
+            }
+            Key::Enter | Key::Tab if !shift && !ctrl => {
+                completion::accept_selected(state, ctx);
+                return EventResponse::Handled;
+            }
+            Key::Escape => {
+                completion::dismiss_suppress(state, ctx);
+                return EventResponse::Handled;
+            }
+            _ => {}
+        }
+    }
 
     let action = {
         let mut st = state.borrow_mut();
@@ -302,14 +347,51 @@ pub(super) fn handle_key(
         }
     };
 
-    match action {
+    let response = match action {
         KeyAction::Unhandled => EventResponse::Ignored,
         KeyAction::ClearPreferredX => {
             state.borrow_mut().preferred_x = None;
             caret_moved(state, ctx)
         }
         KeyAction::KeepPreferredX => caret_moved(state, ctx),
+    };
+
+    // Re-evaluate completion after a handled edit or move. `react` is a no-op
+    // without a provider, and only *typing* (or Ctrl+Space, handled above) opens
+    // a closed popup — an edit or move merely updates or dismisses an open one.
+    if action != KeyAction::Unhandled
+        && let Some(trigger) = completion_trigger(key, ctrl)
+    {
+        completion::react(state, ctx, trigger);
     }
+
+    response
+}
+
+/// How a handled key should drive completion, or `None` for keys that never do
+/// (Enter/Tab when the popup is closed).
+///
+/// Ctrl-chords are **not** ignored: Ctrl+A / Ctrl+Z / Ctrl+X / Ctrl+V / Ctrl+D /
+/// Ctrl+/ / add-caret all changed the document or selection, so an open popup
+/// must re-evaluate against the new state (and dismiss) — otherwise a following
+/// Enter would accept a stale suggestion against the wrong range. Ctrl+Space is
+/// handled earlier and never reaches here.
+fn completion_trigger(key: &Key, ctrl: bool) -> Option<Trigger> {
+    Some(match key {
+        Key::Backspace | Key::Delete | Key::Space => Trigger::Edited,
+        Key::ArrowLeft
+        | Key::ArrowRight
+        | Key::Home
+        | Key::End
+        | Key::ArrowUp
+        | Key::ArrowDown
+        | Key::PageUp
+        | Key::PageDown => Trigger::Moved,
+        // Any other Ctrl-chord that got here edited or moved; treat as an edit.
+        _ if ctrl => Trigger::Edited,
+        _ if key.to_char().is_some() => Trigger::Typed,
+        _ => return None,
+    })
 }
 
 /// The word-variant of a horizontal command when Ctrl is held.
@@ -644,8 +726,12 @@ pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
         let c = st
             .engine
             .caret_rect(st.cursor.position(), st.cursor_affinity);
+        // Subtract BOTH scroll axes: `caret_rect` returns content-local
+        // coordinates, and CodeEditor defaults to WrapMode::None, so horizontal
+        // scroll is the everyday state — omitting scroll_x misplaces the IME
+        // candidate window (and any caret-anchored popup) once scrolled right.
         bastyde_canvas::Rect::new(
-            st.viewport_origin.x + c[0],
+            st.viewport_origin.x + c[0] - st.scroll_x.get(),
             st.viewport_origin.y + c[1] - st.scroll_y.get(),
             c[2].max(1.0),
             c[3],
@@ -660,6 +746,25 @@ pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
     }
     state.borrow_mut().last_ime_area = Some(rect);
     ctx.set_ime_cursor_area(rect);
+}
+
+/// A document position's rectangle in absolute window (tree) coordinates, or
+/// `None` before a layout exists — the caret's `caret_rect` (content-local)
+/// shifted by the body's window origin and both scroll offsets, matching the
+/// paint path. Used to anchor a caret-relative popup (completion) at a chosen
+/// position, e.g. the start of the word being completed rather than the moving
+/// caret.
+pub(super) fn window_rect_at(st: &CodeEditorState, pos: usize) -> Option<bastyde_canvas::Rect> {
+    if !st.engine.has_full_layout() {
+        return None;
+    }
+    let c = st.engine.caret_rect(pos, st.cursor_affinity);
+    Some(bastyde_canvas::Rect::new(
+        st.viewport_origin.x + c[0] - st.scroll_x.get(),
+        st.viewport_origin.y + c[1] - st.scroll_y.get(),
+        c[2].max(1.0),
+        c[3],
+    ))
 }
 
 /// Drive `smart_home` from the test module without a synthetic KeyDown.

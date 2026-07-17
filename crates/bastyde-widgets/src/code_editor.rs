@@ -37,6 +37,7 @@
 //! corrupts it silently.
 
 mod clipboard;
+mod completion;
 mod config;
 mod frame_loop;
 mod gutter;
@@ -50,6 +51,7 @@ mod widget;
 #[cfg(test)]
 mod tests;
 
+pub use completion::{CompletionContext, CompletionItem, CompletionKind};
 pub use config::{BracketPair, COMMON_BRACKETS, CodeConfig, IndentStyle};
 pub use policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET, CodeCommand};
 pub use widget::{CodeEditor, PlainTextEditor};
@@ -111,6 +113,15 @@ impl Widget for CodeEditorBody {
             .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.document_version
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+
+        // The completion popup's open/selection state rides on this node's a11y
+        // (expanded / controls / active_descendant), so re-walk when it changes.
+        st.completion
+            .open
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+        st.completion
+            .selected
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
 
         // Scroll, caret motion, and selection are all repaint-only: none of
         // them changes this widget's size, so relayout would be waste.
@@ -328,6 +339,31 @@ impl Widget for CodeEditorBody {
         if matches!(st.policy.access_role, AccessibilityRole::Editor) {
             builder.add_action(Action::SetValue);
             builder.add_action(Action::ReplaceSelectedText);
+        }
+
+        // Completion popup — the ARIA combobox-with-listbox pattern (as ComboBox
+        // and SearchField): the editor keeps focus and carries has-popup +
+        // autocomplete, announces expanded (both branches, so it never sticks
+        // open), and — only while shown, or a stale reference can crash a screen
+        // reader — points controls at the listbox and active-descendant at the
+        // highlighted row.
+        if st.completion.has_provider() {
+            use bastyde_core::accessibility::widget_id_to_node_id;
+            use bastyde_core::accesskit::{AutoComplete, HasPopup};
+
+            let inner = builder.inner_mut();
+            inner.set_has_popup(HasPopup::Listbox);
+            inner.set_auto_complete(AutoComplete::List);
+            let open = st.completion.is_open();
+            inner.set_expanded(open);
+            if open {
+                if let Some(pid) = st.completion.panel_id {
+                    inner.push_controlled(widget_id_to_node_id(pid));
+                }
+                if let Some(row) = st.completion.active_row.get() {
+                    inner.set_active_descendant(widget_id_to_node_id(row));
+                }
+            }
         }
     }
 

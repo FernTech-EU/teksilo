@@ -130,6 +130,68 @@ fn char_before(st: &CodeEditorState, pos: usize) -> Option<char> {
     line.text.chars().nth(col - 1)
 }
 
+/// Whether `c` continues an identifier — the language-agnostic word-character
+/// rule the completion prefix scans on. Matches text-document's own `NextWord`
+/// fallback (`is_alphanumeric() || '_'`), deliberately *not* its Unicode
+/// word-segmentation (which fuses apostrophes and decimal points into a "word"
+/// — wrong for an identifier prefix).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The run of identifier characters immediately before `pos`, and the document
+/// position where it starts. Empty when the caret is not after a word character.
+///
+/// Stays within the one line (identifiers never span lines here). Positions are
+/// character indices, so the returned start is `line.start + column_of_word`.
+pub(super) fn word_prefix_before_caret(st: &CodeEditorState, pos: usize) -> (usize, String) {
+    let Some(line) = line_at(st, pos) else {
+        return (pos, String::new());
+    };
+    let col = pos - line.start;
+    let chars: Vec<char> = line.text.chars().collect();
+    let mut start = col.min(chars.len());
+    while start > 0 && is_word_char(chars[start - 1]) {
+        start -= 1;
+    }
+    (
+        line.start + start,
+        chars[start..col.min(chars.len())].iter().collect(),
+    )
+}
+
+/// The end of the identifier the caret at `pos` is within — `pos` plus the run
+/// of word characters that follow it on the line. Completion accepts the *whole*
+/// identifier, so a caret placed mid-word still replaces the trailing letters.
+pub(super) fn identifier_end(st: &CodeEditorState, pos: usize) -> usize {
+    let Some(line) = line_at(st, pos) else {
+        return pos;
+    };
+    let chars: Vec<char> = line.text.chars().collect();
+    let mut end = (pos - line.start).min(chars.len());
+    while end < chars.len() && is_word_char(chars[end]) {
+        end += 1;
+    }
+    line.start + end
+}
+
+/// Replace `[replace_start, replace_end]` with `insert` on the primary caret, as
+/// one edit — the completion accept. Because the range is always within one line
+/// (an identifier), this is a single same-block `insert_text`, hence one undo
+/// step, and the caret lands just after the inserted text. Single-caret: the
+/// caller guarantees no extra carets are live during completion.
+pub(super) fn accept_completion(
+    st: &mut CodeEditorState,
+    replace_start: usize,
+    replace_end: usize,
+    insert: &str,
+) {
+    st.cursor.set_position(replace_start, MoveMode::MoveAnchor);
+    st.cursor
+        .set_position(replace_end.max(replace_start), MoveMode::KeepAnchor);
+    let _ = st.cursor.insert_text(insert);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Caret indexing (0 = primary)
 // ─────────────────────────────────────────────────────────────────────────

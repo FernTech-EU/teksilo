@@ -1834,3 +1834,286 @@ fn min_lines_gives_intrinsic_height() {
         "3–6 lines must be far shorter than a page, got {h}"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// Completion (Phase 4e)
+// ══════════════════════════════════════════════════════════════════════════
+
+use super::completion::{self, CompletionContext, CompletionItem, CompletionKind, Trigger};
+
+/// A provider that always returns `labels`, ignoring the context.
+fn provider_of(labels: &[&str]) -> impl Fn(&CompletionContext) -> Vec<CompletionItem> + 'static {
+    let owned: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
+    move |_cx| {
+        owned
+            .iter()
+            .map(|l| CompletionItem::new(l.clone()))
+            .collect()
+    }
+}
+
+/// An editor with a completion provider, caret placed, ready to evaluate.
+fn completion_editor(text: &str, caret: usize, labels: &[&str]) -> SharedState {
+    let st = editor_cfg(text, CodeConfig::default());
+    st.borrow_mut().completion.provider = Some(std::rc::Rc::new(provider_of(labels)));
+    st.borrow().cursor.set_position(caret, MoveMode::MoveAnchor);
+    st
+}
+
+// --- Word prefix + accept -------------------------------------------------
+
+/// The prefix is the identifier run immediately before the caret, and its start
+/// position, stopping at a non-word character.
+#[test]
+fn word_prefix_extracts_the_identifier_before_the_caret() {
+    let st = editor_cfg("foo.bar", CodeConfig::default());
+    let (start, prefix) = semantics::word_prefix_before_caret(&st.borrow(), 7);
+    assert_eq!(prefix, "bar");
+    assert_eq!(start, 4, "starts after the dot");
+}
+
+/// A caret right after a non-word character has an empty prefix.
+#[test]
+fn word_prefix_is_empty_after_a_separator() {
+    let st = editor_cfg("foo.", CodeConfig::default());
+    let (start, prefix) = semantics::word_prefix_before_caret(&st.borrow(), 4);
+    assert_eq!(prefix, "");
+    assert_eq!(start, 4);
+}
+
+/// Underscores and digits continue an identifier; a dot does not.
+#[test]
+fn word_prefix_includes_underscores_and_digits() {
+    let st = editor_cfg("a1_b2", CodeConfig::default());
+    let (start, prefix) = semantics::word_prefix_before_caret(&st.borrow(), 5);
+    assert_eq!(prefix, "a1_b2");
+    assert_eq!(start, 0);
+}
+
+/// Accepting replaces the prefix with the inserted text, as one undo step.
+#[test]
+fn accept_replaces_the_prefix_in_one_undo_step() {
+    let st = editor_cfg("list.pu", CodeConfig::default());
+    st.borrow().cursor.set_position(7, MoveMode::MoveAnchor);
+    {
+        let mut s = st.borrow_mut();
+        semantics::accept_completion(&mut s, 5, 7, "push");
+    }
+    assert_eq!(text_of(&st), "list.push");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(
+        text_of(&st),
+        "list.pu",
+        "one undo restores the pre-accept text"
+    );
+}
+
+// --- Item types -----------------------------------------------------------
+
+/// A CompletionItem's inserted text defaults to its label; the builder overrides.
+#[test]
+fn completion_item_defaults_and_builders() {
+    let a = CompletionItem::new("foo");
+    assert_eq!(a.label, "foo");
+    assert_eq!(a.insert_text, "foo");
+    let b = CompletionItem::new("println")
+        .insert_text("println!()")
+        .detail("macro")
+        .kind(CompletionKind::Keyword);
+    assert_eq!(b.insert_text, "println!()");
+    assert_eq!(b.detail.as_deref(), Some("macro"));
+    assert_eq!(b.kind, CompletionKind::Keyword);
+}
+
+// --- Filtering ------------------------------------------------------------
+
+/// The typed prefix filters the candidate list (case-insensitive prefix match).
+#[test]
+fn typing_filters_the_candidate_list() {
+    let st = completion_editor("pre", 3, &["prefix", "press", "bar", "Preset"]);
+    completion::test_evaluate(&st, Trigger::Typed);
+    let labels = st.borrow().completion.test_labels();
+    assert_eq!(
+        labels,
+        vec!["prefix", "press", "Preset"],
+        "case-insensitive prefix match on 'pre'"
+    );
+}
+
+/// A prefix matching nothing yields an empty filtered list (the popup closes).
+#[test]
+fn a_prefix_matching_nothing_filters_to_empty() {
+    let st = completion_editor("xyz", 3, &["foo", "bar"]);
+    completion::test_evaluate(&st, Trigger::Typed);
+    assert!(st.borrow().completion.test_labels().is_empty());
+}
+
+/// A forced trigger (Ctrl+Space) with an empty prefix shows everything.
+#[test]
+fn forced_trigger_with_no_prefix_shows_all() {
+    let st = completion_editor("", 0, &["alpha", "beta", "gamma"]);
+    completion::test_evaluate(&st, Trigger::Forced);
+    assert_eq!(st.borrow().completion.test_labels().len(), 3);
+}
+
+/// An auto (typed) trigger does not fire without a provider — completion is
+/// strictly opt-in.
+#[test]
+fn no_provider_means_no_completion() {
+    let st = editor_cfg("pre", CodeConfig::default());
+    st.borrow().cursor.set_position(2, MoveMode::MoveAnchor);
+    assert!(!st.borrow().completion.has_provider());
+    assert!(st.borrow().completion.test_labels().is_empty());
+}
+
+// --- Selection ------------------------------------------------------------
+
+/// Arrowing the selection wraps around the filtered list.
+#[test]
+fn move_selection_wraps_around() {
+    let st = completion_editor("pre", 3, &["prefix", "press", "preset"]);
+    completion::test_evaluate(&st, Trigger::Typed);
+    assert_eq!(st.borrow().completion.selected.get(), 0);
+    completion::move_selection(&st, -1);
+    assert_eq!(
+        st.borrow().completion.selected.get(),
+        2,
+        "up from the top wraps to the end"
+    );
+    completion::move_selection(&st, 1);
+    assert_eq!(
+        st.borrow().completion.selected.get(),
+        0,
+        "down from the end wraps to the top"
+    );
+}
+
+// --- Panel widget ---------------------------------------------------------
+
+/// The panel mounts headlessly with a populated session and does not panic on
+/// layout or paint.
+#[test]
+fn the_completion_panel_mounts_with_a_session() {
+    let st = completion_editor("pre", 3, &["prefix", "press", "preset"]);
+    completion::test_evaluate(&st, Trigger::Typed);
+    st.borrow().completion.open.set(true);
+    let mut tree = WidgetTree::new();
+    tree.add(completion::CompletionPanel::new(&st));
+    tree.layout(SizeProposal::with_width(360.0));
+    let _ = tree.render();
+}
+
+/// An empty session paints nothing rather than an empty box.
+#[test]
+fn the_completion_panel_is_empty_without_a_session() {
+    let st = completion_editor("", 0, &["foo"]);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(completion::CompletionPanel::new(&st));
+    tree.layout(SizeProposal::with_width(360.0));
+    assert_eq!(tree.bounds(id).height, 0.0, "no rows → no height");
+}
+
+/// A CodeEditor with a provider mounts and exposes the popup a11y (has-popup),
+/// and one without does not claim completion at all.
+#[test]
+fn a_code_editor_with_completion_mounts() {
+    let mut tree = WidgetTree::new();
+    let ed = CodeEditor::new(doc("fn main() {}"))
+        .completion_provider(|_cx| vec![CompletionItem::new("main"), CompletionItem::new("map")]);
+    let id = tree.add(ed);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    assert_eq!(tree.bounds(id).width, 600.0);
+    let _ = tree.render();
+}
+
+// --- Review regression tests (adversarial-review fixes) -------------------
+
+/// A completion provider may reach back into the editor's shared state (via a
+/// captured handle) without panicking — it is called OUTSIDE the editor's
+/// borrow. Regression for the RefCell re-entrancy the review found.
+#[test]
+fn a_provider_may_read_the_editor_state_without_panicking() {
+    let st = editor_cfg("pre", CodeConfig::default());
+    st.borrow().cursor.set_position(3, MoveMode::MoveAnchor);
+    let probe = st.clone();
+    st.borrow_mut().completion.provider = Some(std::rc::Rc::new(move |_cx| {
+        // Would panic ("already mutably borrowed") if the provider ran while the
+        // editor state was borrowed.
+        let _ = probe.borrow().cursor.position();
+        vec![CompletionItem::new("prefix")]
+    }));
+    completion::test_evaluate(&st, Trigger::Typed);
+    assert_eq!(st.borrow().completion.test_labels(), vec!["prefix"]);
+}
+
+/// identifier_end extends past the caret through the rest of the word, so a
+/// mid-word accept replaces the whole identifier.
+#[test]
+fn identifier_end_extends_through_the_word() {
+    let st = editor_cfg("list.pushx", CodeConfig::default());
+    // caret after "pu" (position 7); the identifier "pushx" ends at 10.
+    assert_eq!(semantics::identifier_end(&st.borrow(), 7), 10);
+}
+
+/// Accepting with the caret mid-word replaces the entire identifier, not just up
+/// to the caret — no dangling tail. Regression for the review's stale-range bug.
+#[test]
+fn accept_replaces_the_whole_identifier_mid_word() {
+    let st = editor_cfg("list.puX", CodeConfig::default());
+    // caret after "pu" (pos 7), before the trailing "X" (a leftover letter).
+    st.borrow().cursor.set_position(7, MoveMode::MoveAnchor);
+    {
+        let mut s = st.borrow_mut();
+        let end = semantics::identifier_end(&s, 7);
+        semantics::accept_completion(&mut s, 5, end, "push");
+    }
+    assert_eq!(text_of(&st), "list.push", "the trailing X is replaced too");
+}
+
+/// Completion is single-caret: with extra carets active, it does not open (so
+/// accept can never silently discard the extra carets).
+#[test]
+fn completion_does_not_activate_with_multiple_carets() {
+    let st = completion_editor("pre", 3, &["prefix", "press"]);
+    let extra = st.borrow().document.cursor();
+    st.borrow_mut().extra_carets.push(extra);
+    completion::test_evaluate(&st, Trigger::Typed);
+    assert!(
+        st.borrow().completion.test_labels().is_empty(),
+        "no completion session while multiple carets are live"
+    );
+}
+
+/// Ctrl+Space (Forced) lifts an Escape suppression, so the popup reopens on the
+/// same word. Regression for the review's stuck-suppression bug.
+#[test]
+fn a_forced_trigger_lifts_escape_suppression() {
+    let st = completion_editor("pre", 3, &["prefix", "press"]);
+    // Suppress at the word start (position 0 — "pre" starts at 0).
+    st.borrow_mut().completion.test_set_suppressed(Some(0));
+    // A plain typed trigger stays suppressed.
+    completion::test_evaluate(&st, Trigger::Typed);
+    assert!(
+        st.borrow().completion.test_labels().is_empty(),
+        "suppressed: typing does not reopen"
+    );
+    // Ctrl+Space forces it open again.
+    completion::test_evaluate(&st, Trigger::Forced);
+    assert_eq!(
+        st.borrow().completion.test_labels(),
+        vec!["prefix", "press"],
+        "Forced lifts the suppression"
+    );
+}
+
+/// A caret move (Trigger::Moved) never opens a closed popup — only typing or a
+/// forced request does. So navigating onto a word does not spuriously suggest.
+#[test]
+fn a_plain_move_does_not_open_completion() {
+    let st = completion_editor("prefix", 6, &["prefix", "press"]);
+    completion::test_evaluate(&st, Trigger::Moved);
+    assert!(
+        st.borrow().completion.test_labels().is_empty(),
+        "arrowing onto a word must not open the popup"
+    );
+}

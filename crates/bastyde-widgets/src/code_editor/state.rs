@@ -63,6 +63,9 @@ pub(crate) struct CodeEditorState {
     pub policy: PolicyBundle,
     pub config: CodeConfig,
 
+    /// Completion provider, session, and the reactive surface the popup binds.
+    pub completion: super::completion::CompletionState,
+
     // --- Reactive surface --------------------------------------------------
     pub document_version: Signal<u64>,
     pub caret_visible: Signal<bool>,
@@ -256,6 +259,7 @@ impl CodeEditorState {
             extra_carets: Vec::new(),
             policy,
             config,
+            completion: super::completion::CompletionState::new(),
             document_version: Signal::new(0),
             caret_visible,
             cursor_position: Signal::new(0),

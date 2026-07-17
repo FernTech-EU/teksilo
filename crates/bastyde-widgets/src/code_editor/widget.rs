@@ -30,6 +30,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::TextDocument;
 use bastyde_text::{CursorAffinity, WrapMode};
 
+use super::completion::{self, CompletionContext, CompletionItem, CompletionPanel};
 use super::config::{BracketPair, CodeConfig, IndentStyle};
 use super::gutter::CodeGutter;
 use super::policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET};
@@ -325,6 +326,26 @@ impl CodeEditor {
         self
     }
 
+    /// Supply the completion candidates. The provider is called for the word
+    /// being completed and given a [`CompletionContext`]; the editor filters its
+    /// result by the live prefix, shows the popup, and replaces the word on
+    /// accept. Language-agnostic — the app knows the candidates, the editor knows
+    /// the mechanics. Without a provider there is no completion.
+    pub fn completion_provider(
+        self,
+        provider: impl Fn(&CompletionContext) -> Vec<CompletionItem> + 'static,
+    ) -> Self {
+        self.state.borrow_mut().completion.provider = Some(Rc::new(provider));
+        self
+    }
+
+    /// Whether typing an identifier character opens the completion popup
+    /// automatically (default `true`). When off, only `Ctrl+Space` opens it.
+    pub fn auto_complete(self, auto: bool) -> Self {
+        self.state.borrow_mut().completion.auto_trigger = auto;
+        self
+    }
+
     /// A cloneable handle to drive the editor from a toolbar, shortcut, or test.
     pub fn handle(&self) -> CodeEditorHandle {
         CodeEditorHandle::new(self.state.clone())
@@ -422,6 +443,9 @@ impl Widget for CodeEditor {
                         super::keyboard::report_ime_cursor_area(&state, ctx);
                     } else {
                         super::keyboard::clear_ime_preedit(&state);
+                        // A popup that outlived its editor's focus would float
+                        // detached — close it on blur.
+                        completion::close(&state, ctx);
                         let mut st = state.borrow_mut();
                         st.last_ime_area = None;
                         st.last_chase_pos = None;
@@ -523,6 +547,19 @@ impl Widget for CodeEditor {
             let id = ctx.add(h);
             self.h_scrollbar_id = Some(id);
             children.push(id);
+        }
+
+        // Completion popup content — pre-created and kept dormant (the ComboBox
+        // dropdown pattern), so it is never an orphan arena root and never
+        // ghost-paints while logically closed. `show_overlay` moves it to the
+        // overlay layer when completion opens.
+        if self.state.borrow().completion.has_provider() {
+            let panel_id = ctx.add(CompletionPanel::new(&self.state));
+            ctx.set_dormant(panel_id);
+            let open = self.state.borrow().completion.open.clone();
+            ctx.visible_when(panel_id, open);
+            self.state.borrow_mut().completion.panel_id = Some(panel_id);
+            children.push(panel_id);
         }
 
         // The `Auto` scrollbars appear only when there is overflow; those maxima
@@ -724,11 +761,15 @@ impl Widget for CodeEditor {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        let mut ids = Vec::with_capacity(4);
+        let mut ids = Vec::with_capacity(5);
         ids.extend(self.gutter_id);
         ids.extend(self.body_id);
         ids.extend(self.v_scrollbar_id);
         ids.extend(self.h_scrollbar_id);
+        // The completion popup (a dormant overlay node) — tracked here so it is
+        // not an orphan; positioned by the overlay manager when shown, skipped by
+        // `place_children` otherwise.
+        ids.extend(self.state.borrow().completion.panel_id);
         ids
     }
 
