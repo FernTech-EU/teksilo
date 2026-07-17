@@ -2744,6 +2744,36 @@ fn editor_replace_range_rewrites_the_span_and_leaves_the_caret_after_it() {
 }
 
 #[test]
+fn editor_selection_reports_both_ends_from_one_read() {
+    // `EditorHandle::selection` answers "is there a selection, and over what" from a
+    // single borrow — the pair a caller would otherwise have to assemble from a live
+    // `cursor_position()` and the lagging `cursor_anchor_signal()` mirror.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // A collapsed caret: both ends agree, which is how a caller detects "no selection".
+    handle.select_range(3, 3);
+    assert_eq!(handle.selection(), (3, 3), "no selection ⇒ anchor == position");
+
+    // A forward selection: anchor at the start, caret at the end.
+    handle.select_range(6, 11);
+    assert_eq!(handle.selection(), (6, 11));
+
+    // A backwards drag is reported unordered, exactly as the cursor holds it — the
+    // caller decides whether to sort. Losing this would hide right-to-left selections.
+    handle.select_range(11, 6);
+    assert_eq!(handle.selection(), (11, 6), "anchor may trail the caret");
+}
+
+#[test]
 fn editor_replace_range_uses_char_offsets_not_bytes() {
     // Offsets are character positions, the same space `cursor_position` and
     // `select_range` use. "café" is 4 chars but 5 bytes: a byte-indexed

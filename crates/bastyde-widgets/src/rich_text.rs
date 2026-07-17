@@ -1588,6 +1588,22 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    /// The live selection as `(anchor, position)`, unordered — `anchor` is where the
+    /// selection started, `position` is where the caret is, so a backwards drag
+    /// reports `anchor > position`. Equal values mean no selection.
+    ///
+    /// Both ends are read under a **single** borrow, so the pair cannot tear. That is
+    /// the reason to prefer this over pairing [`cursor_position`](Self::cursor_position)
+    /// with [`cursor_anchor_signal`](Self::cursor_anchor_signal): the former is a live
+    /// read of the cursor while the latter is a mirror refreshed on sync, so combining
+    /// them mixes two different moments in time and can invent — or miss — a selection
+    /// if the mirror lags. A caller deciding *"is there a selection, and over what"*
+    /// wants one consistent answer.
+    pub fn selection(&self) -> (usize, usize) {
+        let st = self.state.borrow();
+        (st.cursor.anchor(), st.cursor.position())
+    }
+
     /// Hit-test a point — **in window coordinates**, as a
     /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
     /// document character offset. `None` when the point resolves to no text
