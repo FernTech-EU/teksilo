@@ -2704,6 +2704,71 @@ fn editor_offset_at_point_hit_tests_window_coordinates() {
 }
 
 #[test]
+fn editor_replace_range_rewrites_the_span_and_leaves_the_caret_after_it() {
+    // `EditorHandle::replace_range` rewrites an arbitrary span (a spell-check
+    // correction picked from a context menu) as a typed-style edit: the text is
+    // replaced, the caret lands after the insertion, and it is one undo entry.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello wrld today").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let caret = editor.cursor_position_signal();
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Replace "wrld" (offsets 6..10) with "world".
+    handle.replace_range(6, 10, "world");
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "Hello world today",
+        "the span is rewritten, the surrounding text untouched"
+    );
+    assert_eq!(
+        caret.get(),
+        11,
+        "the caret sits just after the inserted text"
+    );
+
+    // One undo entry — the replacement is a single insert-over-selection, so a
+    // single Ctrl+Z restores the original word (not a half-deleted one).
+    handle.undo();
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "Hello wrld today",
+        "one undo restores the original span"
+    );
+}
+
+#[test]
+fn editor_replace_range_uses_char_offsets_not_bytes() {
+    // Offsets are character positions, the same space `cursor_position` and
+    // `select_range` use. "café" is 4 chars but 5 bytes: a byte-indexed
+    // implementation would cut the accented word apart here.
+    let doc = TextDocument::new();
+    doc.set_plain_text("café wrld").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // "wrld" is at char offsets 5..9 (byte offsets would be 6..10).
+    handle.replace_range(5, 9, "world");
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "café world",
+        "char offsets survive a multi-byte character earlier in the line"
+    );
+}
+
+#[test]
 fn read_only_editor_arrow_keys_survive_default_context_menu() {
     // Regression guard: installing the default context menu factory
     // must not disturb the read-only editor's navigation behaviour.

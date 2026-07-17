@@ -1555,6 +1555,39 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    /// Replace the character range `[start, end)` with `text`, leaving the caret
+    /// after the inserted text.
+    ///
+    /// The counterpart to [`select_range`](Self::select_range) for callers that
+    /// must *rewrite* a span rather than merely reveal it — a spell-check
+    /// correction picked from a context menu, an autocorrect, a
+    /// replace-this-occurrence action. It goes through the widget's **internal**
+    /// cursor, so the edit behaves exactly like typed text: it lands on the
+    /// editor's undo stack as one entry (the replacement is a single
+    /// insert-over-selection), fires the document's change notifications, and
+    /// leaves the caret where the user would expect it.
+    ///
+    /// Offsets are **character** positions, the same space
+    /// [`cursor_position`](Self::cursor_position) and `select_range` use. The
+    /// inserted text inherits the character format at `start`, so correcting a
+    /// word inside italic prose stays italic.
+    ///
+    /// Reaching through [`TextDocument::cursor`](bastyde_text::text_document::TextDocument::cursor)
+    /// instead would mutate the document behind the widget's back, leaving the
+    /// caret decoupled from the edit — use this.
+    pub fn replace_range(&self, start: usize, end: usize, text: &str) {
+        // Select, then insert over the selection — each step in its own borrow
+        // scope, mirroring `select_range` / `RichTextEditor::insert_text`. The
+        // insert must not run while a `borrow_mut` is held: it notifies document
+        // observers, which are free to read the state back.
+        self.select_range(start, end);
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_text(text);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
     /// Hit-test a point — **in window coordinates**, as a
     /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
     /// document character offset. `None` when the point resolves to no text
