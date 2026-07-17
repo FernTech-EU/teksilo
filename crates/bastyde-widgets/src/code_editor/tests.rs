@@ -1529,6 +1529,69 @@ fn bracket_match_needs_configured_pairs() {
 
 // --- Undo grouping --------------------------------------------------------
 
+/// A single-caret Enter is one undo step even though auto-indent makes it two
+/// mutations (the break and the carried indent) — "undo my Enter" must reverse
+/// both at once, not leave a stray blank indent behind.
+#[test]
+fn a_single_caret_enter_is_one_undo_step() {
+    let st = editor_cfg("    foo", CodeConfig::default());
+    set_caret(&st, 7);
+    run(&st, semantics::newline);
+    assert_eq!(text_of(&st), "    foo\n    ");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(
+        text_of(&st),
+        "    foo",
+        "one undo restores the pre-Enter text"
+    );
+}
+
+/// The bracket-block expansion is four mutations, and one undo reverses all of
+/// them.
+#[test]
+fn a_bracket_expand_enter_is_one_undo_step() {
+    let st = editor_cfg("{}", bracket_config());
+    set_caret(&st, 1);
+    run(&st, semantics::newline);
+    assert_eq!(text_of(&st), "{\n    \n}");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(text_of(&st), "{}", "one undo restores the collapsed pair");
+}
+
+/// A single-caret duplicate is one undo step (break + copied text undo
+/// together), not two.
+#[test]
+fn a_single_caret_duplicate_is_one_undo_step() {
+    let st = editor_cfg("foo", CodeConfig::default());
+    set_caret(&st, 1);
+    run(&st, semantics::duplicate);
+    assert_eq!(text_of(&st), "foo\nfoo");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(text_of(&st), "foo", "one undo removes the whole copy");
+}
+
+/// Surrounding a selection is one undo step, not one per inserted delimiter.
+#[test]
+fn a_single_caret_surround_is_one_undo_step() {
+    let st = editor_cfg("abc", bracket_config());
+    set_selection(&st, 0, 3);
+    run(&st, |s| semantics::type_bracket_char(s, '('));
+    assert_eq!(text_of(&st), "(abc)");
+    assert!(st.borrow().document.undo().is_ok());
+    assert_eq!(text_of(&st), "abc", "one undo strips both delimiters");
+}
+
+/// An unmatched opener whose scan must cross line boundaries to reach the end of
+/// the document reports no match — and, with the clamp-aware crossing, does so by
+/// terminating at end-of-document rather than spinning the last line to the cap.
+#[test]
+fn bracket_match_unmatched_opener_across_lines_terminates() {
+    let st = editor_cfg("(\na\nb", bracket_config());
+    set_caret(&st, 1); // just after the unmatched '('
+    let m = semantics::current_bracket_match(&st.borrow());
+    assert_eq!(m, None, "no closer anywhere below → no match");
+}
+
 /// A multi-line indent is one undo step, so undo restores the whole block in a
 /// single press rather than one line at a time.
 #[test]

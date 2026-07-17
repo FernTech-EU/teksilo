@@ -167,6 +167,18 @@ fn carets_back_to_front(st: &CodeEditorState) -> Vec<usize> {
     order
 }
 
+/// Indices of every caret sorted by descending *trailing edge* (selection end),
+/// so an operation that edits at or beyond a caret's selection cannot shift a
+/// caret still to be handled. The right order for anything that may act on a
+/// selection (surround, duplicate, type-over-a-selection); plain
+/// [`carets_back_to_front`] orders by the head, which is enough only when the
+/// edit is at the caret point.
+fn carets_by_trailing_edge(st: &CodeEditorState) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..=st.extra_carets.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(caret_span(st, i).1));
+    order
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Line-set operations: indent, dedent, comment
 // ─────────────────────────────────────────────────────────────────────────
@@ -450,32 +462,27 @@ pub(super) fn toggle_line_comment(st: &mut CodeEditorState) {
 /// can route every Enter through here regardless of configuration.
 pub(super) fn newline(st: &mut CodeEditorState) {
     let config = st.config.clone();
-    let multi = !st.extra_carets.is_empty();
-    if multi {
-        st.cursor.begin_edit_block();
-    }
+    // Always one undo step: even a single caret's break can be two mutations
+    // (break + carried indent) or four (bracket expansion), and "undo my Enter"
+    // must reverse all of them at once. Grouping a lone mutation is harmless.
+    st.cursor.begin_edit_block();
     for i in carets_back_to_front(st) {
         newline_one(st, i, &config);
     }
-    if multi {
-        st.cursor.end_edit_block();
-    }
+    st.cursor.end_edit_block();
     st.merge_collided_carets();
 }
 
 fn newline_one(st: &mut CodeEditorState, i: usize, config: &CodeConfig) {
     let pos = caret_pos(st, i);
-    let has_sel = {
-        let c = if i == 0 {
-            &st.cursor
-        } else {
-            &st.extra_carets[i - 1]
-        };
-        c.has_selection()
-    };
+    let (sel_start, sel_end) = caret_span(st, i);
+    let has_sel = sel_start != sel_end;
 
+    // The break lands at the selection start (insert_block deletes any selection
+    // then splits there), so the indentation to carry is that surviving line's —
+    // not the caret head's, which for a backward selection is a different line.
     let indent = if config.auto_indent {
-        line_at(st, pos)
+        line_at(st, sel_start)
             .map(|l| leading_whitespace(&l.text))
             .unwrap_or_default()
     } else {
@@ -525,23 +532,14 @@ fn newline_one(st: &mut CodeEditorState, i: usize, config: &CodeConfig) {
 /// the caret follows the copy at the same column, so a held key walks copies
 /// downward. Multi-caret duplicates each caret's line or selection.
 pub(super) fn duplicate(st: &mut CodeEditorState) {
-    let multi = !st.extra_carets.is_empty();
-    if multi {
-        st.cursor.begin_edit_block();
-    }
-    // Order by the trailing edge so a lower caret's positions survive a higher
-    // caret's insertion.
-    let mut order: Vec<usize> = (0..=st.extra_carets.len()).collect();
-    order.sort_by_key(|&i| {
-        let (_, e) = caret_span(st, i);
-        std::cmp::Reverse(e)
-    });
-    for i in order {
+    // Always one undo step: a single caret's duplicate is two mutations (break +
+    // copied text), which must undo together. Order by the trailing edge so a
+    // lower caret's positions survive a higher caret's insertion.
+    st.cursor.begin_edit_block();
+    for i in carets_by_trailing_edge(st) {
         duplicate_one(st, i);
     }
-    if multi {
-        st.cursor.end_edit_block();
-    }
+    st.cursor.end_edit_block();
     st.merge_collided_carets();
 }
 
@@ -717,17 +715,10 @@ pub(super) fn type_bracket_char(st: &mut CodeEditorState, ch: char) {
 /// Insert an opener: wrap a selection, or place the pair and sit between it.
 fn auto_close_open(st: &mut CodeEditorState, open: char, close: char) {
     let config = st.config.clone();
-    let multi = !st.extra_carets.is_empty();
-    if multi {
-        st.cursor.begin_edit_block();
-    }
-    // Descending by trailing edge so lower carets stay valid.
-    let mut order: Vec<usize> = (0..=st.extra_carets.len()).collect();
-    order.sort_by_key(|&i| {
-        let (_, e) = caret_span(st, i);
-        std::cmp::Reverse(e)
-    });
-    for i in order {
+    // Always one undo step: the surround branch is two inserts, which must undo
+    // together. Descending by trailing edge so lower carets stay valid.
+    st.cursor.begin_edit_block();
+    for i in carets_by_trailing_edge(st) {
         let (s, e) = caret_span(st, i);
         if s != e {
             // Surround the selection, keeping it selected.
@@ -756,29 +747,24 @@ fn auto_close_open(st: &mut CodeEditorState, open: char, close: char) {
             }
         }
     }
-    if multi {
-        st.cursor.end_edit_block();
-    }
+    st.cursor.end_edit_block();
     st.merge_collided_carets();
 }
 
 /// Insert a closer, or step over one already present (so the closer that
 /// auto-close inserted is not doubled when the user types it themselves).
 fn type_close(st: &mut CodeEditorState, close: char) {
+    // One mutation per caret, so a lone caret needs no grouping; group only when
+    // there are several. Trailing-edge order so a caret whose selection is
+    // replaced does not shift one still to be handled.
     let multi = !st.extra_carets.is_empty();
     if multi {
         st.cursor.begin_edit_block();
     }
-    for i in carets_back_to_front(st) {
+    for i in carets_by_trailing_edge(st) {
         let pos = caret_pos(st, i);
-        let has_sel = caret_pos(st, i) != {
-            let c = if i == 0 {
-                &st.cursor
-            } else {
-                &st.extra_carets[i - 1]
-            };
-            c.anchor()
-        };
+        let (s, e) = caret_span(st, i);
+        let has_sel = s != e;
         if !has_sel && char_after(st, pos) == Some(close) {
             caret_at(st, i).move_position(MoveOperation::Right, MoveMode::MoveAnchor, 1);
         } else {
@@ -930,6 +916,14 @@ fn match_from(st: &CodeEditorState, at: usize, ch: char) -> Option<usize> {
 /// Walk from `origin` counting `open`/`close` depth, returning the position that
 /// balances the delimiter at `origin`. `forward` scans toward the end of the
 /// document (matching an opener); otherwise toward the start.
+///
+/// Crossing a block boundary uses [`next_line`] (forward) and the in-range
+/// separator position (backward), both of which report the true end of the
+/// document — a plain `line_at` past the end would *clamp* to the last block and
+/// spin the last line under the scan until the cap, which is exactly the case an
+/// unmatched opener hits while you are still typing its partner. Each line's
+/// characters are collected once so indexing within a line is O(1) rather than a
+/// fresh `chars().nth(col)` per position.
 fn scan(
     st: &CodeEditorState,
     origin: usize,
@@ -940,24 +934,23 @@ fn scan(
     let mut depth = 0i32;
     let mut scanned = 0usize;
 
-    // Load the origin's block and walk character by character, crossing block
-    // boundaries by fetching the neighbour block's snapshot.
     let mut line = line_at(st, origin)?;
+    let mut chars: Vec<char> = line.text.chars().collect();
     let mut col = origin - line.start;
 
     loop {
         if scanned > MATCH_SCAN_CHAR_CAP {
             return None;
         }
-        if let Some(c) = char_in_line(&line, col) {
-            let pos = line.start + col;
+        if col < line.len {
+            let c = chars[col];
             if c == open {
                 depth += 1;
             } else if c == close {
                 depth -= 1;
             }
             if depth == 0 {
-                return Some(pos);
+                return Some(line.start + col);
             }
             scanned += 1;
         }
@@ -965,8 +958,8 @@ fn scan(
         if forward {
             col += 1;
             if col >= line.len {
-                let next_start = line.end() + 1;
-                line = line_at(st, next_start)?;
+                line = next_line(st, &line)?;
+                chars = line.text.chars().collect();
                 col = 0;
             }
         } else {
@@ -974,14 +967,19 @@ fn scan(
                 if line.start == 0 {
                     return None;
                 }
+                // The separator before this line is in range, so this never
+                // clamps.
                 line = line_at(st, line.start - 1)?;
-                col = line.len; // one past the end; the decrement below steps in
-                if col == 0 {
-                    // An empty line: skip to its predecessor next iteration.
+                chars = line.text.chars().collect();
+                if line.len == 0 {
+                    // An empty predecessor: step further back next iteration
+                    // rather than index into nothing.
                     continue;
                 }
+                col = line.len - 1;
+            } else {
+                col -= 1;
             }
-            col -= 1;
         }
     }
 }
