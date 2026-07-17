@@ -37,6 +37,9 @@
 //! corrupts it silently.
 
 mod config;
+mod frame_loop;
+mod keyboard;
+mod mouse;
 mod policy;
 mod state;
 

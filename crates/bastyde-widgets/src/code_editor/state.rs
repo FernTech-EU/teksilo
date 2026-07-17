@@ -151,9 +151,6 @@ pub(crate) struct CodeEditorState {
     /// not permanently pull the caret leftward.
     pub preferred_x: Option<f32>,
     pub cursor_affinity: CursorAffinity,
-    /// Whether Home has most recently gone to the first non-whitespace
-    /// character; the next Home goes to column 0. The smart-Home toggle.
-    pub home_at_indent: bool,
 
     // --- Appearance --------------------------------------------------------
     pub follow_text_scale: bool,
@@ -283,7 +280,6 @@ impl CodeEditorState {
             pending_undo_redo: None,
             preferred_x: None,
             cursor_affinity: CursorAffinity::default(),
-            home_at_indent: false,
             follow_text_scale: true,
             last_font_scale: 1.0,
             text_color_prop: None,
@@ -333,6 +329,37 @@ impl CodeEditorState {
         }
         self.extra_carets.clear();
         true
+    }
+
+    /// Drop secondary carets that sit where another caret already is.
+    ///
+    /// The invariant is "no two carets share a position", and it is
+    /// correctness rather than tidiness: two carets stacked on one offset each
+    /// insert the character typed, so the user gets `ZZ` for one keypress.
+    /// Collisions are not exotic — two carets on the same line both pressing
+    /// Home land on the same column, which is a thing people do constantly.
+    ///
+    /// It lives on the state rather than in the keyboard layer because *every*
+    /// mutation path has to hold it, including the ones the keyboard never
+    /// touches (a pointer alt-click, a programmatic caret move). A rule
+    /// enforced at only some of its call sites is not a rule.
+    ///
+    /// The primary always survives: it is the caret the accessibility tree
+    /// reports and the viewport chases.
+    pub fn merge_collided_carets(&mut self) {
+        if self.extra_carets.is_empty() {
+            return;
+        }
+        let mut seen = vec![self.cursor.position()];
+        self.extra_carets.retain(|c| {
+            let p = c.position();
+            if seen.contains(&p) {
+                false
+            } else {
+                seen.push(p);
+                true
+            }
+        });
     }
 
     /// Invalidate the cached accessibility snapshot. Called whenever the

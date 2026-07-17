@@ -32,7 +32,10 @@ mod clipboard;
 mod context_menu;
 mod find_session;
 mod frame_loop;
-mod hit_test;
+// `pub(crate)` so the code editor can reuse the hit-test wrapper rather than
+// re-deriving pointer-to-offset resolution. Both surfaces ask the same engine
+// the same question; the answer should not have two implementations.
+pub(crate) mod hit_test;
 pub(crate) mod image_cache;
 mod keyboard;
 mod mouse;

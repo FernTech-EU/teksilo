@@ -12,7 +12,7 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::widget::Widget;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_text::WrapMode;
-use bastyde_text::text_document::TextDocument;
+use bastyde_text::text_document::{MoveMode, TextDocument};
 
 use super::config::CodeConfig;
 use super::policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET};
@@ -460,3 +460,388 @@ fn construction_carries_the_injected_config() {
 }
 
 fn _assert_state_is_sized(_: &CodeEditorState) {}
+
+// --- Frame loop -----------------------------------------------------------
+
+use super::frame_loop;
+
+/// The tick must report "no more work" for an idle editor, or the tree never
+/// stops pumping frames and the app burns a core sitting still.
+#[test]
+fn an_idle_unfocused_editor_stops_asking_for_frames() {
+    let st = editor_state("fn main() {}");
+    force_layout(&st, 400.0, 300.0);
+    let more = frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert!(
+        !more,
+        "an idle editor must let the frame loop go quiet — Bastyde is \
+         draw-when-needed and this is what makes it so"
+    );
+}
+
+/// Typed characters are buffered and flushed by the tick, not applied on the
+/// keystroke — that is what collapses a burst into one relayout.
+#[test]
+fn the_tick_flushes_buffered_typing_into_the_document() {
+    let st = editor_state("");
+    force_layout(&st, 400.0, 300.0);
+    st.borrow_mut().pending_chars.push_str("let x = 1;");
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert_eq!(st.borrow().document.to_plain_text().unwrap(), "let x = 1;");
+    assert!(
+        st.borrow().pending_chars.is_empty(),
+        "the buffer must be drained, or the next tick types it again"
+    );
+}
+
+/// A burst of keystrokes must reach the document as ONE edit. If each character
+/// were applied separately the editor would relayout per keystroke, which is
+/// the difference between typing smoothly and typing in a large file at all.
+#[test]
+fn a_burst_of_typing_becomes_a_single_document_edit() {
+    let st = editor_state("");
+    force_layout(&st, 400.0, 300.0);
+    for c in "hello".chars() {
+        st.borrow_mut().pending_chars.push(c);
+    }
+    // One tick, one insert — evidenced by a single ContentsChanged reaching
+    // the queue rather than five.
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    let queued = st.borrow().event_queue.lock().unwrap().len();
+    assert!(
+        queued <= 1,
+        "a 5-character burst must produce at most one document event, got \
+         {queued} — per-keystroke relayout is what makes a big file unusable"
+    );
+}
+
+/// Drag auto-scroll integrates its velocity per tick, so the selection keeps
+/// growing while the pointer is held still past the edge.
+#[test]
+fn drag_auto_scroll_advances_over_time_and_keeps_the_loop_alive() {
+    let st = editor_state("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np");
+    force_layout(&st, 400.0, 40.0);
+    {
+        let mut s = st.borrow_mut();
+        s.viewport_width = 400.0;
+        s.viewport_height = 40.0;
+        s.drag_state = super::state::DragState::Selecting {
+            auto_scroll_v_per_s: 600.0,
+        };
+    }
+    let more = frame_loop::tick(&mut st.borrow_mut(), 0.1);
+    assert!(
+        more,
+        "an active auto-scroll must keep the frame loop pumping"
+    );
+    assert!(
+        st.borrow().scroll_y.get() > 0.0,
+        "velocity must integrate into an actual scroll"
+    );
+}
+
+/// A held button with no motion must NOT keep the loop pumping — otherwise
+/// resting the mouse after a click spins the CPU indefinitely.
+#[test]
+fn a_held_drag_with_no_velocity_lets_the_loop_idle() {
+    let st = editor_state("hello");
+    force_layout(&st, 400.0, 300.0);
+    st.borrow_mut().drag_state = super::state::DragState::Selecting {
+        auto_scroll_v_per_s: 0.0,
+    };
+    assert!(
+        !frame_loop::tick(&mut st.borrow_mut(), 0.016),
+        "holding the button still must not pump frames"
+    );
+}
+
+/// Scroll offsets are clamped to the live maxima each tick: deleting text
+/// shrinks the document, and an offset left past the new end parks the view in
+/// blank space below the last line.
+#[test]
+fn the_tick_clamps_a_scroll_offset_past_the_end() {
+    let st = editor_state("one line");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        s.viewport_width = 400.0;
+        s.viewport_height = 300.0;
+        s.scroll_y.set(5000.0);
+    }
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert_eq!(
+        st.borrow().scroll_y.get(),
+        0.0,
+        "a one-line document cannot scroll — the offset must be clamped back"
+    );
+}
+
+// --- Multi-caret editing --------------------------------------------------
+
+/// Insert at several carets at once. The back-to-front order is what makes this
+/// correct: applied ascending, the second insertion would land at an offset the
+/// first had already shifted.
+#[test]
+fn typing_with_several_carets_inserts_at_each_one() {
+    let st = editor_state("ab");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        // Carets at offset 0 and offset 1 (before 'a', before 'b').
+        s.cursor.set_position(0, MoveMode::MoveAnchor);
+        let extra = s.document.cursor();
+        extra.set_position(1, MoveMode::MoveAnchor);
+        s.extra_carets.push(extra);
+        s.pending_chars.push('X');
+    }
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert_eq!(
+        st.borrow().document.to_plain_text().unwrap(),
+        "XaXb",
+        "each caret must get the character — an ascending walk would shift the \
+         later carets and misplace them"
+    );
+}
+
+/// Multi-caret typing is one undo step: a user who typed into three places at
+/// once means all three when they press Ctrl+Z.
+#[test]
+fn multi_caret_typing_undoes_as_one_step() {
+    let st = editor_state("ab");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        s.cursor.set_position(0, MoveMode::MoveAnchor);
+        let extra = s.document.cursor();
+        extra.set_position(1, MoveMode::MoveAnchor);
+        s.extra_carets.push(extra);
+        s.pending_chars.push('X');
+    }
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert_eq!(st.borrow().document.to_plain_text().unwrap(), "XaXb");
+    let _ = st.borrow().document.undo();
+    assert_eq!(
+        st.borrow().document.to_plain_text().unwrap(),
+        "ab",
+        "one undo must revert the whole multi-caret insert, not one caret of it"
+    );
+}
+
+/// Consecutive single-caret typing across several ticks lands as one run of
+/// text, and text-document coalesces it into one undo step.
+///
+/// That coalescing is the document's, not ours, and it is the behaviour a user
+/// expects — Ctrl+Z after typing a word removes the word, not its last letter.
+/// Pinned here because the multi-caret path deliberately wraps its inserts in
+/// an explicit edit block, and this records that the single-caret path needs no
+/// such thing to get the same granularity.
+#[test]
+fn consecutive_typing_ticks_coalesce_into_one_undo_step() {
+    let st = editor_state("");
+    force_layout(&st, 400.0, 300.0);
+    st.borrow_mut().pending_chars.push('a');
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    st.borrow_mut().pending_chars.push('b');
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    assert_eq!(st.borrow().document.to_plain_text().unwrap(), "ab");
+
+    let _ = st.borrow().document.undo();
+    assert_eq!(
+        st.borrow().document.to_plain_text().unwrap(),
+        "",
+        "typing coalesces: one undo removes the run, which is what a user means \
+         by undoing their typing"
+    );
+}
+
+// --- Caret merging --------------------------------------------------------
+
+/// Two carets that collide must merge. Left stacked, the next character is
+/// inserted twice at one spot — which is why this is correctness, not tidiness.
+#[test]
+fn carets_that_collide_are_merged() {
+    let st = editor_state("hello world");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        s.cursor.set_position(3, MoveMode::MoveAnchor);
+        let extra = s.document.cursor();
+        extra.set_position(5, MoveMode::MoveAnchor);
+        s.extra_carets.push(extra);
+    }
+    // Both to the start of the same line: they now coincide.
+    {
+        let s = st.borrow_mut();
+        s.cursor.set_position(0, MoveMode::MoveAnchor);
+        s.extra_carets[0].set_position(0, MoveMode::MoveAnchor);
+    }
+    // Typing runs the merge via the insert path.
+    st.borrow_mut().pending_chars.push('Z');
+    frame_loop::tick(&mut st.borrow_mut(), 0.016);
+    let text = st.borrow().document.to_plain_text().unwrap();
+    assert_eq!(
+        text, "Zhello world",
+        "two carets at one offset must insert one character, not two — got {text:?}"
+    );
+}
+
+// --- Alt-click ------------------------------------------------------------
+
+/// Alt-click adds a caret; Alt-clicking it again removes it — the undo for a
+/// click that landed wrong.
+#[test]
+fn alt_click_adds_then_removes_a_caret() {
+    let st = editor_state("hello world");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        s.cursor.set_position(0, MoveMode::MoveAnchor);
+        super::mouse::add_caret_at(&mut s, 6);
+        assert_eq!(s.extra_carets.len(), 1);
+        super::mouse::add_caret_at(&mut s, 6);
+        assert_eq!(
+            s.extra_carets.len(),
+            0,
+            "alt-clicking an existing caret must remove it"
+        );
+    }
+}
+
+/// Alt-clicking the primary caret is a no-op: removing it would leave the
+/// editor with nowhere to type.
+#[test]
+fn alt_click_on_the_primary_caret_is_ignored() {
+    let st = editor_state("hello");
+    let mut s = st.borrow_mut();
+    s.cursor.set_position(2, MoveMode::MoveAnchor);
+    super::mouse::add_caret_at(&mut s, 2);
+    assert!(
+        s.extra_carets.is_empty(),
+        "the primary caret must survive an alt-click on itself"
+    );
+    assert_eq!(s.all_carets().count(), 1);
+}
+
+// --- IME ------------------------------------------------------------------
+
+/// A cancelled composition must leave the document exactly as it was — the
+/// tentative text was never the user's.
+#[test]
+fn a_cancelled_composition_leaves_the_document_clean() {
+    let st = editor_state("ab");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let mut s = st.borrow_mut();
+        s.cursor.set_position(1, MoveMode::MoveAnchor);
+        // Simulate a landed preedit.
+        let start = s.cursor.position();
+        let _ = s.cursor.insert_text("ん");
+        let end = s.cursor.position();
+        s.ime_preedit = Some("ん".to_string());
+        s.ime_preedit_range = Some(start..end);
+    }
+    assert_eq!(st.borrow().document.to_plain_text().unwrap(), "aんb");
+    super::keyboard::clear_ime_preedit(&st);
+    assert_eq!(
+        st.borrow().document.to_plain_text().unwrap(),
+        "ab",
+        "cancelling must remove the tentative text — leaving it would make an \
+         abandoned composition permanent"
+    );
+    assert!(st.borrow().ime_preedit.is_none());
+    assert!(st.borrow().ime_preedit_range.is_none());
+}
+
+/// A stale preedit range must not delete the wrong text when the document
+/// shrank underneath it (an undo, a programmatic edit).
+#[test]
+fn a_stale_preedit_range_cannot_delete_past_the_end() {
+    let st = editor_state("ab");
+    {
+        let mut s = st.borrow_mut();
+        // A range describing a document that no longer exists.
+        s.ime_preedit_range = Some(100..200);
+        s.ime_preedit = Some("x".to_string());
+    }
+    super::keyboard::clear_ime_preedit(&st);
+    assert_eq!(
+        st.borrow().document.to_plain_text().unwrap(),
+        "ab",
+        "a stale range must clamp to the live length rather than corrupt"
+    );
+}
+
+// --- Smart Home -----------------------------------------------------------
+
+/// Home goes to the first non-whitespace character; Home again goes to column
+/// 0. Derived from the caret's position, not a remembered flag — so it is
+/// still right after the caret was moved by a click or programmatically.
+#[test]
+fn home_toggles_between_the_indent_and_column_zero() {
+    let st = editor_state("    indented");
+    force_layout(&st, 400.0, 300.0);
+
+    // From the end of the line, Home lands on the first real character.
+    st.borrow().cursor.set_position(12, MoveMode::MoveAnchor);
+    super::keyboard::smart_home_for_test(&st);
+    assert_eq!(
+        st.borrow().cursor.position(),
+        4,
+        "Home must land on the content, not the margin — that is where the \
+         caret is wanted nine times out of ten"
+    );
+
+    // Already there: Home again goes to the true start.
+    super::keyboard::smart_home_for_test(&st);
+    assert_eq!(
+        st.borrow().cursor.position(),
+        0,
+        "a second Home must reach column 0, or re-indenting is impossible"
+    );
+
+    // And back again — the toggle is symmetric.
+    super::keyboard::smart_home_for_test(&st);
+    assert_eq!(st.borrow().cursor.position(), 4);
+}
+
+/// A line with no indent has both targets in the same place, so Home is simply
+/// column 0 and never appears to do nothing.
+#[test]
+fn home_on_an_unindented_line_goes_to_column_zero() {
+    let st = editor_state("flush");
+    force_layout(&st, 400.0, 300.0);
+    st.borrow().cursor.set_position(3, MoveMode::MoveAnchor);
+    super::keyboard::smart_home_for_test(&st);
+    assert_eq!(st.borrow().cursor.position(), 0);
+    // Already at 0: stays there rather than jumping somewhere surprising.
+    super::keyboard::smart_home_for_test(&st);
+    assert_eq!(st.borrow().cursor.position(), 0);
+}
+
+/// Each caret toggles about *its own* line. A single remembered flag would
+/// drive every caret off whatever the primary happened to be doing.
+#[test]
+fn home_toggles_each_caret_about_its_own_line() {
+    let st = editor_state("    alpha\nbeta");
+    force_layout(&st, 400.0, 300.0);
+    {
+        let s = st.borrow_mut();
+        // Primary at the end of the indented line; extra at the end of the
+        // unindented one.
+        s.cursor.set_position(9, MoveMode::MoveAnchor);
+    }
+    {
+        let mut s = st.borrow_mut();
+        let extra = s.document.cursor();
+        extra.set_position(14, MoveMode::MoveAnchor);
+        s.extra_carets.push(extra);
+    }
+    super::keyboard::smart_home_for_test(&st);
+    let s = st.borrow();
+    assert_eq!(s.cursor.position(), 4, "indented line → its indent");
+    assert_eq!(
+        s.extra_carets[0].position(),
+        10,
+        "unindented line → its column 0, independently of the primary"
+    );
+}
