@@ -436,6 +436,7 @@ fn paint_widget_cached(
             prefers_reduced_motion: a11y_prefs.reduced_motion,
             prefers_large_text: a11y_prefs.large_text,
             window_active: a11y_prefs.window_active,
+            clip_bounds,
         };
 
         let bounds = arena.bounds(id);
@@ -574,6 +575,7 @@ fn paint_widget_cached(
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,
                 window_active: a11y_prefs.window_active,
+                clip_bounds,
             };
             node.widget.after_paint(&view, &ctx);
         }
@@ -615,6 +617,7 @@ fn paint_widget_cached(
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,
                 window_active: a11y_prefs.window_active,
+                clip_bounds,
             };
             let bounds = arena.bounds(id);
             let node = arena.get(id).expect("node id is active (guarded above)");

@@ -58,6 +58,18 @@ pub struct PaintContext<'a> {
     /// per-widget signal binding is required to keep a paint-time read correct.
     /// `true` in headless test contexts.
     pub window_active: bool,
+    /// The accumulated clip rectangle this widget is painted within — the
+    /// intersection of every `clips_children` ancestor's bounds (a `ScrollArea`
+    /// viewport, a `MaxSize`, …), in the same screen space as the widget's own
+    /// `bounds`. `None` when no ancestor clips (the widget can paint anywhere).
+    ///
+    /// The paint walker already computes this to skip fully-offscreen subtrees;
+    /// surfacing it lets a widget that is laid out larger than its visible slot
+    /// — an editor at full document height inside an outer `ScrollArea`
+    /// ("bastard mode") — window its own expensive work to `clip ∩ bounds`
+    /// instead of processing the whole document. Correct under arbitrary
+    /// nesting, since it is the intersection of *all* clipping ancestors.
+    pub clip_bounds: Option<Rect>,
 }
 
 /// Read-only view of the widget tree's geometry passed to

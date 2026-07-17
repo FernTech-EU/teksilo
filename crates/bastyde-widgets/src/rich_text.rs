@@ -45,6 +45,8 @@ mod state;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_tests;
 
 pub use context_menu::{
     INTENT_COPY, INTENT_CUT, INTENT_PASTE, INTENT_PASTE_UNFORMATTED, INTENT_SELECT_ALL,
@@ -429,6 +431,28 @@ impl RichTextEditor {
     /// Set the horizontal scroll-bar visibility policy.
     pub fn h_scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.h_scroll_policy = policy;
+        self
+    }
+
+    /// Window paint-time culling to the accumulated ancestor clip rather than
+    /// this editor's own bounds.
+    ///
+    /// Enable this **only** for an editor deliberately laid out at its full
+    /// document height inside an outer [`ScrollArea`](crate::ScrollArea)
+    /// (`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "bastard
+    /// mode". Such an editor's own viewport spans the whole document, so the
+    /// viewport-derived render cull keeps nothing; this makes it cull to the
+    /// visible clip band instead, so a huge document only rasterizes the rows on
+    /// screen. Correct under nested ScrollAreas (the clip is the intersection of
+    /// all clipping ancestors), and positioning / hit-testing are unaffected.
+    ///
+    /// A normal self-scrolling editor already culls correctly from its own scroll
+    /// offset and doesn't need this — leave it **off** (the default). (The window
+    /// is computed relative to the editor's own scroll offset as well, so enabling
+    /// it on a self-scroller degrades to a correct-but-redundant cull rather than
+    /// rendering the wrong rows.)
+    pub fn window_to_clip(self, on: bool) -> Self {
+        self.state.borrow_mut().window_to_clip = on;
         self
     }
 
@@ -2533,6 +2557,39 @@ impl Widget for RichTextEditorBody {
         // apply any further offset beyond the widget origin.
         let scroll_y_logical = st.scroll_y.get();
         st.engine.set_scroll_offset(scroll_y_logical);
+
+        // Window the render to the visible clip when opted in (bastard mode).
+        // The editor is laid out at its full document height inside an outer
+        // ScrollArea, so its own viewport spans the whole document and the
+        // viewport-derived cull keeps everything. `ctx.clip_bounds` is the
+        // accumulated ancestor clip — the intersection of every clipping
+        // ancestor, so this is correct under nested ScrollAreas — mapped into
+        // the editor's content space to the band actually on screen. A
+        // half-viewport margin each side pre-renders content just off-screen so
+        // scrolling never flashes a blank edge. Positioning and hit-testing are
+        // untouched: `set_render_window` overrides culling only, and
+        // `scroll_offset` stays as set above.
+        let render_window = if st.window_to_clip {
+            ctx.clip_bounds.map(|clip| {
+                // `clip` and `bounds` are screen-space; the render cull works in
+                // logical (pre-zoom) content space (block Y positions are pre-zoom,
+                // scaled only by `apply_zoom` afterwards), so divide through by the
+                // engine zoom — matching text-typeset's own `effective_vh = vh/zoom`.
+                // The visible band's top in content space is the editor's own scroll
+                // offset plus however far its top sits above the clip: in bastard
+                // mode `scroll_offset` is pinned to 0, but including it keeps the
+                // window correct (rather than mis-culling) even for a self-scrolling
+                // editor, so this can't silently render the wrong rows.
+                let zoom = st.engine.zoom().max(0.0001);
+                let vis_top = (scroll_y_logical + (clip.y - bounds.y) / zoom).max(0.0);
+                let vis_h = (clip.height / zoom).max(0.0);
+                let margin = vis_h * 0.5;
+                ((vis_top - margin).max(0.0), vis_h + 2.0 * margin)
+            })
+        } else {
+            None
+        };
+        st.engine.set_render_window(render_window);
 
         // Captured before the split-borrow below (which holds `st` mutably
         // for the rest of the method) so the preedit underline pass can

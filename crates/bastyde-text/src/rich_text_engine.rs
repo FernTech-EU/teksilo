@@ -194,6 +194,19 @@ impl RichTextEngine {
         self.flow.set_scroll_offset(offset);
     }
 
+    /// Restrict render culling to the content-space band `[top, top + height]`
+    /// instead of the viewport-derived window, without moving glyph positions or
+    /// hit-testing. `None` restores the default. See
+    /// [`text_typeset::DocumentFlow::set_render_window`].
+    pub fn set_render_window(&mut self, window: Option<(f32, f32)>) {
+        self.flow.set_render_window(window);
+    }
+
+    /// The active render window, if any.
+    pub fn render_window(&self) -> Option<(f32, f32)> {
+        self.flow.render_window()
+    }
+
     pub fn set_selection_color(&mut self, color: [f32; 4]) {
         self.flow.set_selection_color(color);
     }

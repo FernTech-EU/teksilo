@@ -119,6 +119,15 @@ pub(crate) struct EditorState {
     /// it to `false` (override either way via `RichTextEditor::show_highlights`).
     pub show_highlights: bool,
 
+    /// Window the render to the accumulated ancestor clip instead of this
+    /// widget's own bounds. `false` by default: a normal self-scrolling editor
+    /// culls correctly from its own `scroll_y`. An editor laid out at full
+    /// document height inside an outer `ScrollArea` ("bastard mode") sets this
+    /// `true` so paint-time culling follows the visible clip band rather than
+    /// the whole-document viewport. Read in `paint()`; drives
+    /// `engine.set_render_window`. See [`RichTextEditor::window_to_clip`].
+    pub window_to_clip: bool,
+
     /// Which highlight sessions THIS view renders (`show_highlights` is the master switch
     /// above it: `false` suppresses everything regardless of this mask). Default is
     /// [`HighlightMask::all`] — every session on the document. A per-editor find banner sets
@@ -516,6 +525,7 @@ impl EditorState {
             pending_recolor: false,
             wrap_mode,
             show_highlights: true,
+            window_to_clip: false,
             highlight_mask: HighlightMask::all(),
             last_text_color: None,
             follow_text_scale: true,
