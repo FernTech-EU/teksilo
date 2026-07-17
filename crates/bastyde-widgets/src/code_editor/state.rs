@@ -74,6 +74,13 @@ pub(crate) struct CodeEditorState {
     /// Number of carets, published so a status bar can show "3 cursors"
     /// without polling. `1` when only the primary is live.
     pub caret_count: Signal<usize>,
+    /// The pair of document positions of the bracket next to the primary caret
+    /// and its match, or `None`. Maintained only when `config.match_brackets`
+    /// is on — it is the language-agnostic *computation* of the match, published
+    /// reactively so a status surface or the paint layer can read it; the
+    /// highlight rectangle is drawn with the current-line band in the paint
+    /// phase, since both are "paint at a document position" and belong together.
+    pub bracket_match: Signal<Option<(usize, usize)>>,
     /// Total logical lines, i.e. blocks. Published so the gutter can size
     /// itself to the widest number without asking the document.
     ///
@@ -257,6 +264,7 @@ impl CodeEditorState {
             can_undo: Signal::new(initial_can_undo),
             can_redo: Signal::new(initial_can_redo),
             caret_count: Signal::new(1),
+            bracket_match: Signal::new(None),
             line_count: Signal::new(initial_lines),
             on_change: None,
             scroll_x: Signal::new(0.0),

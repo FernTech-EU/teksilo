@@ -42,6 +42,7 @@ mod gutter;
 mod keyboard;
 mod mouse;
 mod policy;
+mod semantics;
 mod state;
 
 #[cfg(test)]
@@ -406,6 +407,18 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     let count_sig = st.caret_count.clone();
     let caret_vis = st.caret_visible.clone();
 
+    // Recompute the bracket match at the single choke point every caret move
+    // passes through — but only when the app asked for it, so a plain-text
+    // editor or a document with no configured pairs pays nothing. The scan reads
+    // the document while it is borrowed here; the resulting signal is written
+    // after the borrow drops, with the rest.
+    let bracket_sig = st.bracket_match.clone();
+    let bracket_val = if st.config.match_brackets {
+        semantics::current_bracket_match(&st)
+    } else {
+        None
+    };
+
     // Restart the blink so the caret stays lit through a held arrow key rather
     // than toggling mid-motion. `restart` deliberately does not write the
     // signal — see its docs — so the caller does, below, outside the borrow.
@@ -423,6 +436,7 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     anchor_sig.set_if_changed(anchor);
     sel_sig.set_if_changed(has_sel);
     count_sig.set_if_changed(count);
+    bracket_sig.set_if_changed(bracket_val);
     if blink_reset {
         caret_vis.set_if_changed(true);
     }
@@ -456,6 +470,14 @@ impl CodeEditorHandle {
     /// Live caret count — `1` unless multi-caret editing is active.
     pub fn caret_count(&self) -> bastyde_core::Signal<usize> {
         self.state.borrow().caret_count.clone()
+    }
+
+    /// The bracket next to the caret and its match, as document positions, or
+    /// `None`. Populated only when the editor was configured with
+    /// `match_brackets` and bracket pairs; a status surface can bind it, or an
+    /// app can read it to drive its own overlay.
+    pub fn bracket_match(&self) -> bastyde_core::Signal<Option<(usize, usize)>> {
+        self.state.borrow().bracket_match.clone()
     }
 
     pub fn has_selection(&self) -> bastyde_core::Signal<bool> {

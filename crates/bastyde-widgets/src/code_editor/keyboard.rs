@@ -29,6 +29,7 @@ use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::policy::CodeCommand;
+use super::semantics;
 use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
@@ -70,6 +71,7 @@ pub(super) fn handle_key(
     let shift = modifiers.shift();
     // Treat Super as Ctrl so ⌘-chords work on macOS without a second table.
     let ctrl = modifiers.ctrl() || modifiers.super_key();
+    let alt = modifiers.alt();
     let mode = if shift {
         MoveMode::KeepAnchor
     } else {
@@ -81,6 +83,46 @@ pub(super) fn handle_key(
         let filter = st.policy.command_filter;
 
         match key {
+            // --- Code semantics (config-driven) ---
+            //
+            // Placed first so the Alt / Ctrl+Alt arrow chords are claimed here
+            // before the plain-navigation arrows below would swallow them. Each
+            // is gated by its own command so a read-only viewer rejects the
+            // mutating ones and the chord falls through — Alt+Up in a viewer is
+            // just Up, which the navigation arm then handles.
+            Key::ArrowUp if ctrl && alt && filter.accepts(CodeCommand::AddCaretAbove) => {
+                semantics::add_caret_above(&mut st);
+                KeyAction::KeepPreferredX
+            }
+            Key::ArrowDown if ctrl && alt && filter.accepts(CodeCommand::AddCaretBelow) => {
+                semantics::add_caret_below(&mut st);
+                KeyAction::KeepPreferredX
+            }
+            Key::ArrowUp if alt && filter.accepts(CodeCommand::MoveLineUp) => {
+                semantics::move_lines(&mut st, semantics::MoveDir::Up);
+                KeyAction::ClearPreferredX
+            }
+            Key::ArrowDown if alt && filter.accepts(CodeCommand::MoveLineDown) => {
+                semantics::move_lines(&mut st, semantics::MoveDir::Down);
+                KeyAction::ClearPreferredX
+            }
+            Key::Tab if !shift && filter.accepts(CodeCommand::IndentLines) => {
+                semantics::indent_or_tab(&mut st);
+                KeyAction::ClearPreferredX
+            }
+            Key::Tab if shift && filter.accepts(CodeCommand::DedentLines) => {
+                semantics::dedent(&mut st);
+                KeyAction::ClearPreferredX
+            }
+            Key::Character('/') if ctrl && filter.accepts(CodeCommand::ToggleLineComment) => {
+                semantics::toggle_line_comment(&mut st);
+                KeyAction::ClearPreferredX
+            }
+            Key::D if ctrl && !shift && filter.accepts(CodeCommand::DuplicateSelection) => {
+                semantics::duplicate(&mut st);
+                KeyAction::ClearPreferredX
+            }
+
             // --- Horizontal ---
             Key::ArrowLeft if filter.accepts(nav_or_word(ctrl, CodeCommand::MoveLeft)) => {
                 let op = if ctrl {
@@ -161,8 +203,15 @@ pub(super) fn handle_key(
 
             // --- Deletion ---
             Key::Backspace if filter.accepts(CodeCommand::DeletePrev) => {
-                delete_at_every_caret(&mut st, Direction::Backward, ctrl);
-                KeyAction::ClearPreferredX
+                // Backspace between an empty auto-closed pair (`(|)`) deletes
+                // both in one keystroke; otherwise the ordinary delete runs.
+                // Never on a word-delete (Ctrl held), which is a different verb.
+                if !ctrl && semantics::try_pair_backspace(&mut st) {
+                    KeyAction::ClearPreferredX
+                } else {
+                    delete_at_every_caret(&mut st, Direction::Backward, ctrl);
+                    KeyAction::ClearPreferredX
+                }
             }
             Key::Delete if filter.accepts(CodeCommand::DeleteNext) => {
                 delete_at_every_caret(&mut st, Direction::Forward, ctrl);
@@ -171,10 +220,12 @@ pub(super) fn handle_key(
 
             // --- Newline ---
             //
-            // Plain break only. Auto-indent is a 4d concern: it reads the
-            // config, and this handler must be correct with no config at all.
+            // Routed through the semantics layer, which carries the line's
+            // indentation and opens a bracket block where the caret sits between
+            // a pair. With neither configured it is a plain break, so this is
+            // correct with no config at all.
             Key::Enter if filter.accepts(CodeCommand::InsertNewline) => {
-                insert_block_at_every_caret(&mut st);
+                semantics::newline(&mut st);
                 KeyAction::ClearPreferredX
             }
 
@@ -210,6 +261,14 @@ pub(super) fn handle_key(
                         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
                         if clean.is_empty() {
                             KeyAction::Unhandled
+                        } else if semantics::wants_bracket_handling(&st, &clean) {
+                            // A configured bracket with auto-closing on takes the
+                            // document-aware path (auto-close / type-over /
+                            // surround); everything else stays on the batched
+                            // fast path, so plain typing pays nothing.
+                            let ch = clean.chars().next().expect("non-empty");
+                            semantics::type_bracket_char(&mut st, ch);
+                            KeyAction::ClearPreferredX
                         } else {
                             st.pending_chars.push_str(&clean);
                             KeyAction::ClearPreferredX
@@ -408,23 +467,6 @@ fn delete_one(st: &mut CodeEditorState, i: usize, dir: Direction, by_word: bool)
             let _ = c.delete_char();
         }
     }
-}
-
-/// Break the line at every caret, back-to-front.
-fn insert_block_at_every_caret(st: &mut CodeEditorState) {
-    let multi = !st.extra_carets.is_empty();
-    if multi {
-        st.cursor.begin_edit_block();
-    }
-    let mut order: Vec<usize> = (0..=st.extra_carets.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(caret_pos(st, i)));
-    for i in order {
-        let _ = caret_at(st, i).insert_block();
-    }
-    if multi {
-        st.cursor.end_edit_block();
-    }
-    st.merge_collided_carets();
 }
 
 fn caret_pos(st: &CodeEditorState, i: usize) -> usize {
