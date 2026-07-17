@@ -35,12 +35,12 @@ use bastyde_core::signal::Signal;
 /// Caret blink half-period — the time between on/off toggles, so a full
 /// on→off→on cycle takes twice this. 500 ms is the common desktop default
 /// (Qt's default `QApplication::cursorFlashTime` is 1000 ms *per cycle*).
-pub(crate) const CARET_BLINK_INTERVAL: f32 = 0.5;
+const CARET_BLINK_INTERVAL: f32 = 0.5;
 
 /// Debounce window for coalesced signal emission (`text_changed`,
 /// `format_changed`, `undo_redo_changed`). Rapid typing must not hammer
 /// every toolbar observer once per keystroke.
-pub(crate) const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
+const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
 
 /// How the caret is presented on a text surface.
 ///
@@ -78,12 +78,22 @@ impl CaretBlink {
         Self { last_toggle: None }
     }
 
-    /// Restart the blink phase with the caret **on**.
+    /// Restart the blink phase, so the next toggle is a full interval away.
     ///
     /// Call on focus gain and after every caret move: a caret that happens to
-    /// be mid-off when the user moves it reads as a dropped keystroke, so
-    /// every editor restarts the phase on motion rather than letting the
-    /// toggle land wherever it falls.
+    /// be mid-off when the user moves it reads as a dropped keystroke, so every
+    /// editor restarts the phase on motion rather than letting the toggle land
+    /// wherever it falls.
+    ///
+    /// **Does not itself show the caret** — the caller must set
+    /// `caret_visible` alongside this. That split is deliberate rather than an
+    /// oversight: `sync_cursor_signals` has to publish the signal *after*
+    /// dropping its `RefCell` borrow of the editor state (a `Signal::set` fans
+    /// out to observers synchronously, and an observer that reaches back into
+    /// the widget would panic on the live borrow), so this type cannot own the
+    /// write. Restarting without also setting `caret_visible` leaves the caret
+    /// dark for up to one full interval after a cursor move — the exact
+    /// symptom this method exists to prevent.
     pub(crate) fn restart(&mut self) {
         self.last_toggle = Some(Instant::now());
     }
@@ -261,19 +271,12 @@ impl ScrollMetrics {
         viewport_ratio_x: &Signal<f32>,
         viewport_ratio_y: &Signal<f32>,
     ) {
-        set_if_changed(max_scroll_x, self.max_x);
-        set_if_changed(max_scroll_y, self.max_y);
-        set_if_changed(viewport_ratio_x, self.ratio_x);
-        set_if_changed(viewport_ratio_y, self.ratio_y);
-        set_if_changed(scroll_x, scroll_x.get().clamp(0.0, self.max_x));
-        set_if_changed(scroll_y, scroll_y.get().clamp(0.0, self.max_y));
-    }
-}
-
-/// Write `value` only if it differs from the signal's current value.
-pub(crate) fn set_if_changed(signal: &Signal<f32>, value: f32) {
-    if (signal.get() - value).abs() > f32::EPSILON {
-        signal.set(value);
+        max_scroll_x.set_if_changed(self.max_x);
+        max_scroll_y.set_if_changed(self.max_y);
+        viewport_ratio_x.set_if_changed(self.ratio_x);
+        viewport_ratio_y.set_if_changed(self.ratio_y);
+        scroll_x.set_if_changed(scroll_x.get().clamp(0.0, self.max_x));
+        scroll_y.set_if_changed(scroll_y.get().clamp(0.0, self.max_y));
     }
 }
 
@@ -365,19 +368,39 @@ mod tests {
         assert!(!visible.get(), "a static caret hides when inactive");
     }
 
+    /// `restart` buys the caret a full interval of stillness. This is what
+    /// keeps it lit while the user holds an arrow key: every move restarts the
+    /// phase, so the toggle never lands mid-motion.
     #[test]
-    fn restart_shows_the_caret_immediately_on_the_next_tick() {
+    fn restart_delays_the_next_toggle_by_a_full_interval() {
+        let mut blink = CaretBlink::new();
+        let visible = Signal::new(true);
+        // Phase is already one interval old: the next tick would toggle.
+        blink.last_toggle =
+            Some(Instant::now() - Duration::from_secs_f32(CARET_BLINK_INTERVAL + 0.01));
+        blink.restart();
+        blink.tick(CaretPolicy::Blinking, true, &visible, None);
+        assert!(
+            visible.get(),
+            "restart must push the pending toggle out by a full interval, else \
+             the caret blinks off mid-keystroke"
+        );
+    }
+
+    /// The counterpart to the doc contract: `restart` deliberately does not
+    /// write `caret_visible` (the caller must, outside its state borrow). A
+    /// caller that forgets leaves the caret dark for an interval, so pin the
+    /// split here rather than let a reader assume either way.
+    #[test]
+    fn restart_does_not_itself_show_the_caret() {
         let mut blink = CaretBlink::new();
         let visible = Signal::new(false);
         blink.restart();
         blink.tick(CaretPolicy::Blinking, true, &visible, None);
         assert!(
             !visible.get(),
-            "restart seeds the phase; it does not itself toggle"
+            "restart seeds the phase only — showing the caret is the caller's"
         );
-        // The phase is fresh, so no toggle can land within the interval.
-        blink.tick(CaretPolicy::Blinking, true, &visible, None);
-        assert!(!visible.get());
     }
 
     #[test]
@@ -422,6 +445,37 @@ mod tests {
         assert_eq!(
             m.ratio_y, 1.0,
             "an empty document must show a full thumb, not a zero-height one"
+        );
+    }
+
+    /// The limits and ratios are what every scroll bar binds to. Without this,
+    /// dropping a publish line leaves all 14 tests here green and surfaces
+    /// only as an unrelated rich-text affinity test failing — which sends the
+    /// next maintainer debugging the wrong subsystem.
+    #[test]
+    fn publish_writes_every_limit_and_ratio_signal() {
+        let (sx, sy) = (Signal::new(0.0), Signal::new(0.0));
+        let (mx, my) = (Signal::new(0.0), Signal::new(0.0));
+        let (rx, ry) = (Signal::new(1.0), Signal::new(1.0));
+        // 400x200 of content in a 100x100 viewport: overflows on both axes.
+        let m = ScrollMetrics::compute(200.0, 400.0, 1.0, 100.0, 100.0);
+        m.publish(&sx, &sy, &mx, &my, &rx, &ry);
+
+        assert_eq!(
+            mx.get(),
+            300.0,
+            "horizontal limit must reach the scroll bar"
+        );
+        assert_eq!(my.get(), 100.0, "vertical limit must reach the scroll bar");
+        assert!(
+            (rx.get() - 0.25).abs() < 1e-6,
+            "horizontal thumb ratio must reach the scroll bar, got {}",
+            rx.get()
+        );
+        assert!(
+            (ry.get() - 0.5).abs() < 1e-6,
+            "vertical thumb ratio must reach the scroll bar, got {}",
+            ry.get()
         );
     }
 

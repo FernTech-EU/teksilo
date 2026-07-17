@@ -447,16 +447,37 @@ impl RichTextEngine {
     /// cost of shaping the one new line. A view tailing output needs it; an
     /// editor does not.
     ///
-    /// Returns [`RelayoutError::ScaleDirty`] if the layout was shaped at a
-    /// different HiDPI scale than the service now reports — appending at the
-    /// new scale would leave the flow permanently mixed-scale. Re-run
-    /// [`layout_full`](Self::layout_full) first.
+    /// Returns [`ScaleDirty`](text_typeset::RelayoutError::ScaleDirty) if the
+    /// layout was shaped at a different HiDPI scale than the service now
+    /// reports — appending at the new scale would leave the flow permanently
+    /// mixed-scale. Re-run [`layout_full`](Self::layout_full) first.
+    ///
+    /// Honours [`set_typography_defaults`](Self::set_typography_defaults) on
+    /// the block's unset fields, exactly as `layout_full` does — otherwise a
+    /// view that laid out its first screen with `layout_full` and grew with
+    /// this would shape the two halves in different fonts.
     pub fn append_block(
         &mut self,
         params: &text_typeset::layout::block::BlockLayoutParams,
     ) -> Result<(), text_typeset::RelayoutError> {
+        let filled = self.fill_defaults(params);
         let mut bridge = self.shared.borrow_mut();
-        self.flow.add_block(bridge.service_mut(), params)
+        self.flow.add_block(bridge.service_mut(), &filled)
+    }
+
+    /// Apply this engine's typography defaults to a block's unset fields,
+    /// borrowing the caller's params untouched when no default could apply.
+    fn fill_defaults<'p>(
+        &self,
+        params: &'p text_typeset::layout::block::BlockLayoutParams,
+    ) -> std::borrow::Cow<'p, text_typeset::layout::block::BlockLayoutParams> {
+        if typography_defaults::needs_params_fill(&self.typography_defaults) {
+            let mut owned = params.clone();
+            typography_defaults::apply_to_block_params(&mut owned, &self.typography_defaults);
+            std::borrow::Cow::Owned(owned)
+        } else {
+            std::borrow::Cow::Borrowed(params)
+        }
     }
 
     /// Drop the first `n` blocks, returning how many were removed.
@@ -486,15 +507,31 @@ impl RichTextEngine {
     ///
     /// Drops any paint overlay, like a full layout does — re-apply highlight
     /// spans after re-windowing.
+    ///
+    /// Honours [`set_typography_defaults`](Self::set_typography_defaults) on
+    /// each row's unset fields, exactly as `layout_full` does. This is not
+    /// cosmetic here: a `line_height` default applied to some rows and not
+    /// others would break the uniform-row invariant this method's arithmetic
+    /// placement depends on.
     pub fn layout_window(
         &mut self,
         window: &[(usize, text_typeset::layout::block::BlockLayoutParams)],
         total_rows: usize,
         row_height: f32,
     ) {
+        let filled: std::borrow::Cow<[(usize, text_typeset::layout::block::BlockLayoutParams)]> =
+            if typography_defaults::needs_params_fill(&self.typography_defaults) {
+                let mut owned = window.to_vec();
+                for (_, params) in &mut owned {
+                    typography_defaults::apply_to_block_params(params, &self.typography_defaults);
+                }
+                std::borrow::Cow::Owned(owned)
+            } else {
+                std::borrow::Cow::Borrowed(window)
+            };
         let mut bridge = self.shared.borrow_mut();
         self.flow
-            .layout_window(bridge.service_mut(), window, total_rows, row_height);
+            .layout_window(bridge.service_mut(), &filled, total_rows, row_height);
     }
 
     /// Declare the document's total extent without shaping anything.
@@ -784,6 +821,76 @@ mod tests {
             checkbox: None,
             background_color: None,
         }
+    }
+
+    /// A streaming view sets a default font once on the engine and then grows
+    /// itself with `append_block`. If the append path ignored the default that
+    /// `layout_full` honours, the view's first screen and everything appended
+    /// after it would render in two different fonts, with nothing reporting it.
+    #[test]
+    fn append_block_honours_the_engine_typography_defaults() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        engine.set_typography_defaults(EditorTypographyDefaults {
+            font_family: Some("Streaming Face".to_string()),
+            line_height: 1.5,
+            ..EditorTypographyDefaults::default()
+        });
+
+        // The row a log view builds: family unset, so the engine's default
+        // must fill it — exactly as it fills a `layout_full` snapshot.
+        let params = row(1, "streamed line");
+        assert!(params.fragments[0].font_family.is_none());
+        assert!(params.line_height_multiplier.is_none());
+
+        let filled = engine.fill_defaults(&params);
+        assert_eq!(
+            filled.fragments[0].font_family.as_deref(),
+            Some("Streaming Face"),
+            "an appended row must inherit the engine's default family, or the \
+             view renders in two fonts"
+        );
+        assert_eq!(
+            filled.line_height_multiplier,
+            Some(1.5),
+            "an appended row must inherit the default line height — a row that \
+             is a different height than the windowed rows breaks the uniform-row \
+             invariant that layout_window's placement arithmetic depends on"
+        );
+    }
+
+    /// A caller that set the family explicitly outranks the engine default —
+    /// filling is for *unset* fields, matching `apply_to_block`'s contract.
+    #[test]
+    fn append_block_does_not_override_an_explicit_font() {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_typography_defaults(EditorTypographyDefaults {
+            font_family: Some("Default Face".to_string()),
+            ..EditorTypographyDefaults::default()
+        });
+
+        let mut params = row(1, "explicit");
+        params.fragments[0].font_family = Some("Chosen Face".to_string());
+
+        let filled = engine.fill_defaults(&params);
+        assert_eq!(
+            filled.fragments[0].font_family.as_deref(),
+            Some("Chosen Face"),
+            "an explicitly-set family must win over the engine default"
+        );
+    }
+
+    /// With no defaults set the params are passed through untouched — the
+    /// streaming path must not pay a clone per appended line for nothing.
+    #[test]
+    fn append_block_does_not_clone_when_no_default_applies() {
+        let engine = RichTextEngine::private_default();
+        let params = row(1, "untouched");
+        assert!(
+            matches!(engine.fill_defaults(&params), std::borrow::Cow::Borrowed(_)),
+            "a default-free engine must borrow the caller's params, not clone \
+             them once per appended line"
+        );
     }
 
     /// The whole point of the append path: growing the buffer must not re-shape

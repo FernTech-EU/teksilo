@@ -365,6 +365,42 @@ impl<T: Clone + 'static> Signal<T> {
             .expect("cannot set() on a derived Signal — it is read-only");
     }
 
+    /// Set a new value only if it differs from the current one, returning
+    /// whether it changed.
+    ///
+    /// [`set`](Self::set) has no equality check by design — it writes and fans
+    /// out to every observer unconditionally. That is the right default for a
+    /// signal carrying a value whose identity matters, but it makes a
+    /// *republish* of an unchanged value cost a full observer walk. On a
+    /// per-frame path that is pure waste: the text editors' scroll-metric step
+    /// republishes four signals every tick and measured ~5% of frame CPU in
+    /// `set<f32>` before its call sites were guarded by hand.
+    ///
+    /// This is also exactly the guard the [`try_set`](Self::try_set) docs
+    /// prescribe for reactive writes that might cycle, so reach for this rather
+    /// than open-coding `if sig.get() != v { sig.set(v) }` — it is the same
+    /// thing, named, and it cannot be forgotten at one call site out of four.
+    ///
+    /// Equality is `PartialEq`, not an epsilon. For floats that is deliberate:
+    /// a tolerance like `f32::EPSILON` is the machine epsilon *near 1.0*, so
+    /// past a magnitude of about 1.0 the smallest representable step already
+    /// exceeds it and the comparison silently degrades into exact inequality
+    /// anyway — while near zero it would suppress writes that genuinely
+    /// changed. A caller that truly wants a tolerance wants a domain-specific
+    /// one, and should say so at its own call site.
+    ///
+    /// Panics on a derived (read-only) signal, like [`set`](Self::set).
+    pub fn set_if_changed(&self, value: T) -> bool
+    where
+        T: PartialEq,
+    {
+        if self.get() == value {
+            return false;
+        }
+        self.set(value);
+        true
+    }
+
     /// Fallible [`set`](Self::set): returns [`SignalAccessError::ReadOnly`]
     /// for a derived signal instead of panicking.
     ///
@@ -1213,6 +1249,55 @@ mod tests {
         });
         s.set(42);
         assert!(called.get());
+    }
+
+    /// The whole reason `set_if_changed` exists: `set` fans out to every
+    /// observer even when the value is identical, which on a per-frame
+    /// republish path is pure waste.
+    #[test]
+    fn set_if_changed_does_not_notify_when_the_value_is_identical() {
+        use std::cell::Cell;
+        let s = Signal::new(7);
+        let calls = Rc::new(Cell::new(0));
+        let c = calls.clone();
+        let _handle = s.observe(move |_| c.set(c.get() + 1));
+
+        assert!(
+            !s.set_if_changed(7),
+            "an identical write must report no change"
+        );
+        assert_eq!(calls.get(), 0, "an identical write must not walk observers");
+
+        assert!(
+            s.set_if_changed(8),
+            "a differing write must report a change"
+        );
+        assert_eq!(calls.get(), 1, "a differing write must notify");
+        assert_eq!(s.get(), 8);
+    }
+
+    /// Guarding a write is what breaks an A→B→A observer cycle, which the
+    /// `try_set` docs prescribe and which callers previously hand-rolled.
+    #[test]
+    fn set_if_changed_settles_a_two_signal_feedback_loop() {
+        let a = Signal::new(0);
+        let b = Signal::new(0);
+        let _ha = {
+            let b = b.clone();
+            a.observe(move |v| {
+                b.set_if_changed(*v);
+            })
+        };
+        let _hb = {
+            let a = a.clone();
+            b.observe(move |v| {
+                a.set_if_changed(*v);
+            })
+        };
+        // Without the equality guard this recurses until the depth guard trips.
+        a.set(5);
+        assert_eq!(b.get(), 5);
+        assert_eq!(a.get(), 5);
     }
 
     #[test]

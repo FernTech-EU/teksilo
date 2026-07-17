@@ -122,6 +122,51 @@ pub(crate) fn apply_to_block(block: &mut BlockSnapshot, d: &EditorTypographyDefa
     }
 }
 
+/// Whether [`apply_to_block_params`] would change anything.
+///
+/// Narrower than [`needs_snapshot_fill`] on purpose: by the time a block is
+/// `BlockLayoutParams`, the indent and margin defaults have already been
+/// resolved to concrete `f32`s, so only the two fields that still carry an
+/// unset state can be defaulted. Checking those two avoids cloning a block on
+/// the streaming hot path for a default that could not apply to it.
+pub(crate) fn needs_params_fill(d: &EditorTypographyDefaults) -> bool {
+    d.font_family.is_some() || (d.line_height - 1.0).abs() > f32::EPSILON
+}
+
+/// Fill `d`'s defaults into one already-converted block's unset fields.
+///
+/// The `BlockLayoutParams`-level counterpart of [`apply_to_block`], for the
+/// streaming paths ([`RichTextEngine::append_block`] /
+/// [`layout_window`](RichTextEngine::layout_window)) that shape params directly
+/// rather than going through a `FlowSnapshot`. Without it those paths would
+/// ignore the engine's typography defaults that `layout_full` honours, and a
+/// view that laid out its first screen with `layout_full` and grew with
+/// `append_block` would render the two halves in different fonts.
+///
+/// Only `font_family` and `line_height_multiplier` are filled, because they are
+/// the only fields still `Option` at this level. `text_indent` / `top_margin` /
+/// `bottom_margin` were resolved during the snapshot→params conversion, so a
+/// caller constructing params owns them outright — which is also what the
+/// uniform-row invariant needs, since it requires them to be zero.
+///
+/// [`RichTextEngine::append_block`]: crate::RichTextEngine::append_block
+/// [`RichTextEngine::layout_window`]: crate::RichTextEngine::layout_window
+pub(crate) fn apply_to_block_params(
+    params: &mut text_typeset::layout::block::BlockLayoutParams,
+    d: &EditorTypographyDefaults,
+) {
+    if params.line_height_multiplier.is_none() {
+        params.line_height_multiplier = Some(d.line_height);
+    }
+    if let Some(family) = &d.font_family {
+        for frag in &mut params.fragments {
+            if frag.font_family.is_none() {
+                frag.font_family = Some(family.clone());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

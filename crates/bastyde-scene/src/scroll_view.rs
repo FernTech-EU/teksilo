@@ -356,15 +356,6 @@ fn resolve_show(policy: ScrollBarPolicy, axis_allowed: bool, max: f32) -> bool {
         }
 }
 
-/// Guarded write — only notify observers when the value actually changed
-/// (mirrors `ScrollArea::place_children`). Prevents re-dirtying the bar
-/// children on every relayout that reaches this node with identical metrics.
-fn set_if_changed(sig: &Signal<f32>, v: f32) {
-    if (sig.get() - v).abs() > f32::EPSILON {
-        sig.set(v);
-    }
-}
-
 impl Widget for SceneScrollView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // First build only: move the view in and create the bars.
@@ -479,12 +470,12 @@ impl Widget for SceneScrollView {
 
         // Publish metrics (guarded). Writing `scroll_pos_*` triggers the
         // bar→pan effect, whose guard absorbs the round-trip.
-        set_if_changed(&self.max_scroll_x, m.max_x);
-        set_if_changed(&self.max_scroll_y, m.max_y);
-        set_if_changed(&self.viewport_ratio_x, m.ratio_x);
-        set_if_changed(&self.viewport_ratio_y, m.ratio_y);
-        set_if_changed(&self.scroll_pos_x, m.pos_x);
-        set_if_changed(&self.scroll_pos_y, m.pos_y);
+        self.max_scroll_x.set_if_changed(m.max_x);
+        self.max_scroll_y.set_if_changed(m.max_y);
+        self.viewport_ratio_x.set_if_changed(m.ratio_x);
+        self.viewport_ratio_y.set_if_changed(m.ratio_y);
+        self.scroll_pos_x.set_if_changed(m.pos_x);
+        self.scroll_pos_y.set_if_changed(m.pos_y);
 
         // Place the SceneView filling the (possibly gutter-reduced) area.
         // A reserved vertical gutter sits on the right in LTR but on the left

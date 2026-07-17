@@ -22,7 +22,7 @@
 //! as `tick()` returns `false`.
 
 use super::state::{DragState, EditorState};
-use crate::common::editor_runtime::{ScrollMetrics, set_if_changed};
+use crate::common::editor_runtime::ScrollMetrics;
 
 pub(crate) const SCROLLBAR_THICKNESS: f32 = 12.0;
 
@@ -212,14 +212,20 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     {
         drag_active = true;
         let new_y = (state.scroll_y.get() + auto_scroll_v_per_s * delta).clamp(0.0, max_y);
-        set_if_changed(&state.scroll_y, new_y);
+        state.scroll_y.set_if_changed(new_y);
     }
 
     // Publish limits + ratios and clamp the live offsets (subtle-correctness
-    // #2 and #5): deleting text must not leave us scrolled past the end. Runs
-    // after the drag step so the clamp stays last, exactly as before — the
-    // drag block reads the local `max_y`, never the signal, so publishing the
-    // limits here rather than above is not observable.
+    // #2 and #5): deleting text must not leave us scrolled past the end.
+    //
+    // Runs after the drag step so the clamp stays last, as it was before the
+    // publish moved into `ScrollMetrics`. The drag block reads the local
+    // `max_y` rather than the signal, so it cannot see the reorder, and
+    // end-of-tick values are unchanged. It is not *entirely* invisible though:
+    // `Signal::set` fans out synchronously, so a `max_scroll_y` observer that
+    // reads `scroll_y` back now sees the post-drag value where it used to see
+    // the pre-drag one. Today the only observer is a Relayout binding that
+    // just marks dirty; a future synchronous observer would inherit this.
     metrics.publish(
         &state.scroll_x,
         &state.scroll_y,
