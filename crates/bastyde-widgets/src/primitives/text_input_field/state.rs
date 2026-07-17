@@ -21,6 +21,7 @@ use bastyde_text::text_document::{DocumentEvent, Subscription, TextCursor, TextD
 use bastyde_text::{RichTextEngine, WrapMode};
 
 use super::{AtRevealPolicy, EchoMode};
+use crate::common::editor_runtime::{CaretBlink, Debounce};
 use crate::rich_text::image_cache::ImageCache;
 
 /// Type-erased action closure, identical to the one in `button.rs`.
@@ -62,7 +63,9 @@ pub(crate) struct TextInputState {
     pub frame_request: Option<Rc<Cell<bool>>>,
     pub frame_wake_at: Option<Rc<Cell<Option<std::time::Instant>>>>,
     /// Wall-clock of the last caret blink toggle.
-    pub blink_last_toggle: Option<std::time::Instant>,
+    /// Caret blink phase — shared with the other text surfaces, see
+    /// [`common::editor_runtime::CaretBlink`](crate::common::editor_runtime::CaretBlink).
+    pub blink: CaretBlink,
 
     // ── Horizontal scroll ───────────────────────────────────────────
     /// Pixel offset applied via canvas translation when text overflows
@@ -80,7 +83,9 @@ pub(crate) struct TextInputState {
     pub deferred_text_update: Option<String>,
 
     // ── Debounce ────────────────────────────────────────────────────
-    pub debounce_timer: f32,
+    /// Coalescing window — shared with the other text surfaces, see
+    /// [`common::editor_runtime::Debounce`](crate::common::editor_runtime::Debounce).
+    pub debounce: Debounce,
     pub pending_undo_redo: Option<(bool, bool)>,
 
     // ── Document event subscription ─────────────────────────────────
@@ -258,14 +263,14 @@ impl TextInputState {
             can_redo: Signal::new(initial_can_redo),
             frame_request: None,
             frame_wake_at: None,
-            blink_last_toggle: None,
+            blink: CaretBlink::new(),
             scroll_x: 0.0,
             viewport_width: 0.0,
             viewport_origin: Point::ZERO,
             pending_chars: String::new(),
             pending_text_changed: false,
             deferred_text_update: None,
-            debounce_timer: 1.0, // already expired so first tick flushes immediately
+            debounce: Debounce::new(), // starts expired so the first tick flushes
             pending_undo_redo: None,
             event_queue,
             _event_subscription: subscription,
@@ -467,7 +472,7 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     // Reset blink phase so the caret pops on immediately after movement.
     drop(st);
     let mut st = state.borrow_mut();
-    st.blink_last_toggle = Some(std::time::Instant::now());
+    st.blink.restart();
     st.caret_visible.set(true);
 }
 

@@ -155,22 +155,12 @@ impl CommandFilter {
     }
 }
 
-/// How the caret is presented. `read_only` hides the caret entirely
-/// (`Hidden`); custom presets may use `StaticVisible` for a focusable
-/// surface that shows a cursor without animation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CaretPolicy {
-    /// Caret blinks while the widget has focus (editor preset).
-    Blinking,
-    /// Caret visible but not blinking. Use for focusable surfaces that
-    /// need a visible insertion point without distracting animation —
-    /// e.g. a custom read-only editor the user can navigate and copy
-    /// but that must not suggest editability. Neither built-in preset
-    /// uses this value; construct a custom `PolicyBundle` to opt in.
-    StaticVisible,
-    /// Caret not rendered at all (read-only preset).
-    Hidden,
-}
+// How the caret is presented. Defined in `common::editor_runtime` beside the
+// blink state machine that interprets it — all three text surfaces
+// (RichTextEditor / TextInputField / CodeEditor) feed the same machine, so the
+// enum can't belong to any one of them. Re-exported here because
+// `rich_text::CaretPolicy` is its public name.
+pub use crate::common::editor_runtime::CaretPolicy;
 
 /// Drives the AccessKit role selection in `Widget::accessibility()`. The
 /// editor preset reports `MultilineTextInput` and handles

@@ -2928,14 +2928,14 @@ impl Widget for RichTextEditor {
                     if show && !st.caret_visible.get() {
                         st.caret_visible.set(true);
                     }
-                    st.blink_last_toggle = None;
+                    st.blink.reset();
                 } else {
                     // Deactivated: hide the caret synchronously (the frame loop
                     // may not tick while the window is inactive).
                     if st.caret_visible.get() {
                         st.caret_visible.set(false);
                     }
-                    st.blink_last_toggle = None;
+                    st.blink.reset();
                 }
                 if let Some(handle) = &st.frame_request {
                     handle.set(true);
@@ -2969,7 +2969,7 @@ impl Widget for RichTextEditor {
                     // (focus-aware border / ring) re-renders.
                     st.focus_signal.set(gained);
                     if gained && matches!(st.policy.caret_policy, CaretPolicy::Blinking) {
-                        st.blink_last_toggle = Some(std::time::Instant::now());
+                        st.blink.restart();
                         st.caret_visible.set(true);
                     }
                     drop(st);
@@ -3338,16 +3338,15 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     let anc_sig = st.cursor_anchor.clone();
     let sel_sig = st.has_selection.clone();
     let caret_vis_sig = st.caret_visible.clone();
-    // Reset the blink phase on every cursor mutation: a steady-visible
+    // Restart the blink phase on every cursor mutation: a steady-visible
     // caret while typing or holding an arrow key, blinking only
     // resumes after the user stops moving. Mirrors focus-gain behavior
-    // (see the FocusChanged handler around rich_text.rs:2041). The
-    // frame loop reads `blink_last_toggle` each tick and toggles only
-    // after CARET_BLINK_INTERVAL elapses, so resetting it here delays
-    // the next toggle by a full interval.
+    // (see the FocusChanged handler around rich_text.rs:2041). The frame
+    // loop only toggles once a full interval has elapsed since the phase
+    // start, so restarting here delays the next toggle by a full interval.
     let blink_reset = st.has_focus && matches!(st.policy.caret_policy, CaretPolicy::Blinking);
     if blink_reset {
-        st.blink_last_toggle = Some(std::time::Instant::now());
+        st.blink.restart();
     }
     drop(st);
     pos_sig.set(pos);

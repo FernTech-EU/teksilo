@@ -23,6 +23,7 @@ use bastyde_text::{CursorAffinity, RichTextEngine, WrapMode};
 
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
+use crate::common::editor_runtime::{CaretBlink, Debounce};
 
 pub(crate) type SharedState = Rc<RefCell<EditorState>>;
 
@@ -245,14 +246,11 @@ pub(crate) struct EditorState {
     /// in the commit message that introduced this field.
     pub cursor_affinity: CursorAffinity,
 
-    /// Wall-clock instant of the last caret-visibility toggle, or
-    /// `None` if the caret has never blinked (first focus / reset).
-    /// Compared against `Instant::now()` on every frame-loop tick so
-    /// the blink rate is independent of frame cadence: if ticks are
-    /// skipped, delayed, or clamped, the next tick catches up on
-    /// the missed toggles and the visible rhythm stays locked to
-    /// `CARET_BLINK_INTERVAL` wall-clock seconds.
-    pub blink_last_toggle: Option<std::time::Instant>,
+    /// Caret blink phase. Wall-clock driven, so the visible rhythm stays
+    /// locked to real seconds no matter how the frame scheduler behaves.
+    /// Shared with the other text surfaces — see
+    /// [`common::editor_runtime::CaretBlink`](crate::common::editor_runtime::CaretBlink).
+    pub blink: CaretBlink,
 
     /// Shared handle into `WidgetTree::frame_tick_requested`. Stashed
     /// here so the frame-tick effect can chain-request another tick
@@ -314,11 +312,12 @@ pub(crate) struct EditorState {
     /// back a fresh empty `Ime::Preedit` — a self-sustaining feedback loop.
     pub last_ime_area: Option<bastyde_canvas::Rect>,
 
-    /// Seconds since the last debounce drain. Starts at `1.0`
-    /// (already expired) so the very first frame after construction
-    /// publishes `can_undo`/`can_redo` immediately without having to
-    /// wait 150 ms.
-    pub debounce_timer: f32,
+    /// Coalescing window for `text_changed` / `format_changed` /
+    /// `undo_redo_changed`. Starts already-expired so the first frame
+    /// publishes `can_undo`/`can_redo` without a 150 ms wait. Shared with the
+    /// other text surfaces — see
+    /// [`common::editor_runtime::Debounce`](crate::common::editor_runtime::Debounce).
+    pub debounce: Debounce,
 
     /// Set whenever the document mutated this frame (insert, delete,
     /// format). Drained and emitted as `on_text_changed` command once
@@ -539,7 +538,7 @@ impl EditorState {
             image_cache: ImageCache::new(),
             preferred_x: None,
             cursor_affinity: CursorAffinity::default(),
-            blink_last_toggle: None,
+            blink: CaretBlink::new(),
             frame_request: None,
             frame_wake_at: None,
             pending_chars: String::new(),
@@ -547,11 +546,9 @@ impl EditorState {
             ime_preedit_range: None,
             last_chase_pos: None,
             last_ime_area: None,
-            // Godot reference starts `debounce_timer` at 1.0 (already
-            // expired, > 0.15 s window) so the first tick flushes the
-            // initial state immediately instead of waiting 150 ms for
-            // the first visible update.
-            debounce_timer: 1.0,
+            // `Debounce::new` starts already-expired so the first tick
+            // flushes initial state instead of waiting out a window.
+            debounce: Debounce::new(),
             pending_text_changed: false,
             pending_format_changed: false,
             pending_undo_redo: None,

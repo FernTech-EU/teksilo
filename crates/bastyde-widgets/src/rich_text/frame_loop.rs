@@ -21,21 +21,10 @@
 //! draw-when-needed: an unfocused, idle viewer stops pumping as soon
 //! as `tick()` returns `false`.
 
-use super::policy::CaretPolicy;
 use super::state::{DragState, EditorState};
+use crate::common::editor_runtime::{ScrollMetrics, set_if_changed};
 
 pub(crate) const SCROLLBAR_THICKNESS: f32 = 12.0;
-/// Caret blink half-period (time between on/off toggles), measured
-/// against wall-clock time so the visible cadence is independent of
-/// frame pacing. 500 ms ≈ a full 1 s blink cycle, the common editor
-/// default.
-pub(crate) const CARET_BLINK_INTERVAL: f32 = 0.5;
-
-/// Debounce window for coalesced signal emission (text_changed,
-/// format_changed, undo_redo_changed). Matches the godot reference
-/// (rich_text_edit.rs:401). Non-debounced events — document_loaded,
-/// selection_changed, caret_changed — fire immediately.
-pub(crate) const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
 
 /// Run one frame-tick step. `delta` is the time since the previous
 /// tick in seconds (clamped by the tree). Returns `true` when another
@@ -59,64 +48,18 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // Step 2: drain the per-widget event queue populated by on_change.
     let (had_events, single_pos) = state.drain_events();
 
-    // Caret blink driven by wall-clock time. Every tick we compare
-    // `Instant::now()` with `blink_last_toggle` and toggle whenever
-    // the elapsed time exceeds `CARET_BLINK_INTERVAL`. If frame
-    // pumps are irregular the blink catches up on the next tick —
-    // the visible cadence stays locked to real seconds regardless
-    // of how the frame scheduler behaves.
-    // The caret blinks only when the widget is focused AND the host window is
-    // active — a caret in an inactive window is hidden, the universal desktop
-    // convention (Qt / Cocoa / Win32 / GTK).
-    let blinking_active = state.has_focus
-        && state.window_active
-        && matches!(state.policy.caret_policy, CaretPolicy::Blinking);
-    if blinking_active {
-        let now = std::time::Instant::now();
-        let interval = std::time::Duration::from_secs_f32(CARET_BLINK_INTERVAL);
-        match state.blink_last_toggle {
-            None => {
-                state.blink_last_toggle = Some(now);
-            }
-            Some(last) if now.saturating_duration_since(last) >= interval => {
-                state.blink_last_toggle = Some(now);
-                let was = state.caret_visible.get();
-                state.caret_visible.set(!was);
-            }
-            _ => {}
-        }
-        // Schedule a one-shot wake-up at the next blink toggle so the
-        // event loop can idle in `WaitUntil` between toggles instead
-        // of being forced into `Poll` mode. Without this, returning
-        // `true` from this tick keeps `any_frame_requested=true` which
-        // burns CPU pumping frames at the OS's max rate (observed
-        // ~90 fps) between the 500 ms toggle events.
-        if let (Some(last), Some(wake)) = (state.blink_last_toggle, &state.frame_wake_at) {
-            let next = last + interval;
-            let merged = match wake.get() {
-                Some(existing) if existing <= next => existing,
-                _ => next,
-            };
-            wake.set(Some(merged));
-        }
-    } else {
-        state.blink_last_toggle = None;
-        if matches!(state.policy.caret_policy, CaretPolicy::Blinking)
-            && (!state.has_focus || !state.window_active)
-        {
-            // Unfocused or window inactive: caret off.
-            if state.caret_visible.get() {
-                state.caret_visible.set(false);
-            }
-        } else if matches!(state.policy.caret_policy, CaretPolicy::StaticVisible) {
-            // A static caret shows only while focused AND the window is active;
-            // it hides in an inactive window like the blinking one.
-            let should_show = state.has_focus && state.window_active;
-            if state.caret_visible.get() != should_show {
-                state.caret_visible.set(should_show);
-            }
-        }
-    }
+    // Caret blink — see `common::editor_runtime::CaretBlink`. Driven by
+    // wall-clock time (not accumulated delta) so the cadence stays locked to
+    // real seconds under irregular frame pacing, and gated on
+    // `has_focus && window_active` because a caret in an inactive window is
+    // hidden on every desktop platform.
+    let caret_active = state.has_focus && state.window_active;
+    let policy = state.policy.caret_policy;
+    let caret_visible = state.caret_visible.clone();
+    let wake = state.frame_wake_at.clone();
+    state
+        .blink
+        .tick(policy, caret_active, &caret_visible, wake.as_ref());
 
     // Step 3: forward the viewport to the typesetter.
     //
@@ -235,42 +178,19 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     }
 
     // Step 7: update scroll signals from current content metrics.
-    let content_height = state.engine.content_height();
-    let max_content_width = state.engine.max_content_width();
-    let zoom = state.engine.zoom();
-
-    let max_y = (content_height * zoom - viewport_height).max(0.0);
-    let max_x = (max_content_width * zoom - viewport_width).max(0.0);
-    // Guard each Signal::set with a change-check. Signal::set clones and
-    // invokes every observer callback unconditionally (no internal
-    // PartialEq skip), so setting an unchanged value still fans out to
-    // every subscriber — scrollbars, layout-listeners, etc. — and was
-    // visible as ~5% of CPU in `set<f32>` / `try_set<f32>` on the
-    // flamegraph. This matches the pattern already used for `scroll_y`
-    // below.
-    if (state.max_scroll_y.get() - max_y).abs() > f32::EPSILON {
-        state.max_scroll_y.set(max_y);
-    }
-    if (state.max_scroll_x.get() - max_x).abs() > f32::EPSILON {
-        state.max_scroll_x.set(max_x);
-    }
-
-    let ratio_y = if content_height > 0.0 && viewport_height > 0.0 {
-        (viewport_height / (content_height * zoom)).clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    let ratio_x = if max_content_width > 0.0 && viewport_width > 0.0 {
-        (viewport_width / (max_content_width * zoom)).clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    if (state.viewport_ratio_y.get() - ratio_y).abs() > f32::EPSILON {
-        state.viewport_ratio_y.set(ratio_y);
-    }
-    if (state.viewport_ratio_x.get() - ratio_x).abs() > f32::EPSILON {
-        state.viewport_ratio_x.set(ratio_x);
-    }
+    // See `common::editor_runtime::ScrollMetrics` — the publish step guards
+    // every Signal::set with a change-check (Signal::set has no internal
+    // PartialEq skip, so an unchanged write still fans out to every scroll bar
+    // and layout listener; that showed as ~5% of frame CPU) and clamps the
+    // live offsets to the fresh maxima.
+    let metrics = ScrollMetrics::compute(
+        state.engine.content_height(),
+        state.engine.max_content_width(),
+        state.engine.zoom(),
+        viewport_width,
+        viewport_height,
+    );
+    let max_y = metrics.max_y;
 
     // Drag-select auto-scroll. While the user is dragging near the
     // top or bottom viewport edge, `mouse::handle_pointer_event`
@@ -292,21 +212,22 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     {
         drag_active = true;
         let new_y = (state.scroll_y.get() + auto_scroll_v_per_s * delta).clamp(0.0, max_y);
-        if (new_y - state.scroll_y.get()).abs() > f32::EPSILON {
-            state.scroll_y.set(new_y);
-        }
+        set_if_changed(&state.scroll_y, new_y);
     }
 
-    // Clamp scroll offsets to the fresh maxima (subtle-correctness #2
-    // and #5): deleting text must not leave us scrolled past the end.
-    let clamped_y = state.scroll_y.get().clamp(0.0, max_y);
-    if (clamped_y - state.scroll_y.get()).abs() > f32::EPSILON {
-        state.scroll_y.set(clamped_y);
-    }
-    let clamped_x = state.scroll_x.get().clamp(0.0, max_x);
-    if (clamped_x - state.scroll_x.get()).abs() > f32::EPSILON {
-        state.scroll_x.set(clamped_x);
-    }
+    // Publish limits + ratios and clamp the live offsets (subtle-correctness
+    // #2 and #5): deleting text must not leave us scrolled past the end. Runs
+    // after the drag step so the clamp stays last, exactly as before — the
+    // drag block reads the local `max_y`, never the signal, so publishing the
+    // limits here rather than above is not observable.
+    metrics.publish(
+        &state.scroll_x,
+        &state.scroll_y,
+        &state.max_scroll_x,
+        &state.max_scroll_y,
+        &state.viewport_ratio_x,
+        &state.viewport_ratio_y,
+    );
 
     // Step 8 (NEW for M8b): debounce drain. Coalesces rapid bursts
     // of text/format/undo-redo change notifications into one
@@ -320,9 +241,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // emission (`on_text_changed`, `on_format_changed`,
     // `on_undo_redo_changed`) is Phase B and will thread a
     // command queue through the effect.
-    state.debounce_timer += delta;
-    let debounce_ready = state.debounce_timer >= DEBOUNCE_WINDOW_SECS;
-    if debounce_ready {
+    if state.debounce.tick(delta) {
         if state.pending_text_changed || state.pending_format_changed {
             // The `document_version` signal was bumped inside
             // `drain_events` already — toolbars bound to that get
@@ -339,7 +258,6 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
                 state.can_redo.set(cr);
             }
         }
-        state.debounce_timer = 0.0;
     }
     let debounce_work_pending = state.pending_text_changed
         || state.pending_format_changed

@@ -88,11 +88,12 @@ use self::state::{SharedState, TextInputConfig, TextInputState, sync_cursor_sign
 pub use self::mask::{InputMask, MaskClass, MaskError, MaskPosition};
 pub use self::validator::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 
-/// Caret blink half-period (same as RichTextEditor).
-const CARET_BLINK_INTERVAL: f32 = 0.5;
-
-/// Debounce window for coalesced signal emission.
-const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
+// The caret blink period and the debounce window are shared with every other
+// text surface — see `common::editor_runtime`. They used to be re-declared
+// here as private constants ("same as RichTextEditor", said the comment),
+// which is exactly the kind of duplication that drifts silently: two carets
+// blinking at different rates is invisible to tests and obvious to users.
+use crate::common::editor_runtime::CaretPolicy;
 
 /// Horizontal scroll margin in pixels. The caret stays at least this
 /// far from the left/right edge of the viewport.
@@ -1074,14 +1075,14 @@ impl Widget for TextInputField {
                     if st.has_focus && !st.caret_visible.get() {
                         st.caret_visible.set(true);
                     }
-                    st.blink_last_toggle = None;
+                    st.blink.reset();
                 } else {
                     // Deactivated: hide the caret synchronously (the frame loop
                     // may not tick while the window is inactive).
                     if st.caret_visible.get() {
                         st.caret_visible.set(false);
                     }
-                    st.blink_last_toggle = None;
+                    st.blink.reset();
                 }
                 if let Some(handle) = &st.frame_request {
                     handle.set(true);
@@ -1144,7 +1145,7 @@ impl Widget for TextInputField {
                 }
                 let mut blur_callback: Option<Rc<CommandFactory>> = None;
                 if gained {
-                    st.blink_last_toggle = Some(std::time::Instant::now());
+                    st.blink.restart();
                     st.caret_visible.set(true);
                     let is_keyboard = !hovered_for_focus.get();
                     drop(st);
@@ -1641,35 +1642,17 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
     // in an inactive window (the universal desktop convention). The else-branch
     // below then turns it off, since `!blinking_active` now also covers the
     // window-inactive case.
-    let blinking_active = state.has_focus && state.window_active;
-    if blinking_active {
-        let now = std::time::Instant::now();
-        let interval = std::time::Duration::from_secs_f32(CARET_BLINK_INTERVAL);
-        match state.blink_last_toggle {
-            None => {
-                state.blink_last_toggle = Some(now);
-            }
-            Some(last) if now.saturating_duration_since(last) >= interval => {
-                state.blink_last_toggle = Some(now);
-                let was = state.caret_visible.get();
-                state.caret_visible.set(!was);
-            }
-            _ => {}
-        }
-        if let (Some(last), Some(wake)) = (state.blink_last_toggle, &state.frame_wake_at) {
-            let next = last + interval;
-            let merged = match wake.get() {
-                Some(existing) if existing <= next => existing,
-                _ => next,
-            };
-            wake.set(Some(merged));
-        }
-    } else {
-        state.blink_last_toggle = None;
-        if state.caret_visible.get() {
-            state.caret_visible.set(false);
-        }
-    }
+    let caret_active = state.has_focus && state.window_active;
+    let caret_visible = state.caret_visible.clone();
+    let wake = state.frame_wake_at.clone();
+    // A single-line field always blinks (no read-only/static presets), so it
+    // hands the shared machine a fixed `Blinking` policy.
+    state.blink.tick(
+        CaretPolicy::Blinking,
+        caret_active,
+        &caret_visible,
+        wake.as_ref(),
+    );
 
     if state.needs_full_layout && state.viewport_width > 0.0 {
         state.layout_full_masked();
@@ -1684,9 +1667,7 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
         }
     }
 
-    state.debounce_timer += delta;
-    let debounce_ready = state.debounce_timer >= DEBOUNCE_WINDOW_SECS;
-    if debounce_ready {
+    if state.debounce.tick(delta) {
         if state.pending_text_changed {
             state.pending_text_changed = false;
         }
@@ -1698,7 +1679,6 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
                 state.can_redo.set(cr);
             }
         }
-        state.debounce_timer = 0.0;
     }
     let debounce_work = state.pending_text_changed || state.pending_undo_redo.is_some();
 

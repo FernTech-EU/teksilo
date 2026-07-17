@@ -12,6 +12,7 @@
 
 pub(crate) mod column_geometry;
 pub mod datetime;
+pub(crate) mod editor_runtime;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
 pub(crate) mod scroll;
