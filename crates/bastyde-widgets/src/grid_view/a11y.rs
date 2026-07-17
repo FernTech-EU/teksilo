@@ -29,6 +29,9 @@ pub(crate) struct TileA11y {
     position: usize,  // 1-based flat index
     total: usize,     // logical item count
     selected: bool,
+    /// Concise per-item name (`GridView::tile_a11y_label`); `None` leaves the
+    /// cell's name to its contents.
+    name: Option<String>,
 }
 
 impl TileA11y {
@@ -39,6 +42,7 @@ impl TileA11y {
         position_1based: usize,
         total: usize,
         selected: bool,
+        name: Option<String>,
     ) -> Self {
         Self {
             child,
@@ -47,6 +51,7 @@ impl TileA11y {
             position: position_1based,
             total,
             selected,
+            name,
         }
     }
 }
@@ -77,6 +82,9 @@ impl Widget for TileA11y {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::GridCell);
+        if let Some(name) = &self.name {
+            builder.set_name(name.clone());
+        }
         builder.set_selected(self.selected);
         builder.set_position_in_set(self.position);
         builder.set_size_of_set(self.total);

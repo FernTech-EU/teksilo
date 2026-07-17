@@ -161,7 +161,14 @@ pub struct GridView<T: 'static> {
     delegate: TileDelegate<T>,
 
     // Layout configuration (consumed when the strategy is first built).
+    /// The resolved tile sizing. When `sizing_signal` is set (a reactive
+    /// `.sizing(signal)`), `build()` refreshes this from the signal and rebuilds
+    /// the cached strategy on change — the slider-driven live-resize path.
     sizing: GridSizing,
+    /// Reactive tile sizing, if bound via `.sizing(impl Into<Prop<GridSizing>>)`.
+    /// `None` for the static `.sizing(GridSizing::…)` / `.tile_size` / `.column_count`
+    /// sugar. Mirrors `TabWidget`'s `sizing: Option<Signal<TabSizing>>`.
+    sizing_signal: Option<Signal<GridSizing>>,
     col_gap: f32,
     row_gap: f32,
     inset: EdgeInsets,
@@ -248,6 +255,11 @@ pub struct GridView<T: 'static> {
     type_ahead_timeout: std::time::Duration,
     #[allow(clippy::type_complexity)]
     type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
+    /// Per-tile accessible name — sets each `GridCell`'s `Node::label` so a
+    /// screen reader announces a concise item name ("Title, Type") instead of
+    /// only the grid coordinates. `None` leaves the cell name to its contents.
+    #[allow(clippy::type_complexity)]
+    tile_a11y_label: Option<Rc<dyn Fn(usize) -> String>>,
 
     // Empty / loading state
     #[allow(clippy::type_complexity)]
@@ -332,6 +344,7 @@ impl<T: 'static> GridView<T> {
                 max_width: None,
                 height: 120.0,
             },
+            sizing_signal: None,
             col_gap: 8.0,
             row_gap: 8.0,
             inset: EdgeInsets::ZERO,
@@ -364,6 +377,7 @@ impl<T: 'static> GridView<T> {
             tile_context_menu: None,
             type_ahead_timeout: std::time::Duration::from_millis(500),
             type_ahead_label: None,
+            tile_a11y_label: None,
             empty_view: None,
             loading_view: None,
             is_loading: None,
@@ -399,14 +413,24 @@ impl<T: 'static> GridView<T> {
     // ── Tile sizing & layout ────────────────────────────────────────────
 
     /// Set the tile sizing / column-count policy.
-    pub fn sizing(mut self, sizing: GridSizing) -> Self {
-        self.sizing = sizing;
+    ///
+    /// Accepts a plain [`GridSizing`] (static) **or** a `Signal<GridSizing>`
+    /// (reactive). A bound signal is observed at [`BindingLevel::Rebuild`]: when
+    /// it changes, `build()` rebuilds the cached layout strategy and reflows —
+    /// the internal `scroll_y` / `focused_index` / selection are field signals on
+    /// the same widget instance, so they survive the rebuild (no scroll jump).
+    /// This is the card-size-slider path; mirrors [`TabWidget::sizing`].
+    pub fn sizing(mut self, sizing: impl Into<Prop<GridSizing>>) -> Self {
+        let sig = sizing.into().as_signal();
+        self.sizing = sig.get();
+        self.sizing_signal = Some(sig);
         self
     }
 
     /// Sugar for [`GridSizing::Fixed`] — every tile is exactly `width` × `height`.
     pub fn tile_size(mut self, width: f32, height: f32) -> Self {
         self.sizing = GridSizing::Fixed { width, height };
+        self.sizing_signal = None;
         self
     }
 
@@ -416,6 +440,7 @@ impl<T: 'static> GridView<T> {
             count,
             height: tile_height,
         };
+        self.sizing_signal = None;
         self
     }
 
@@ -821,6 +846,15 @@ impl<T: 'static> GridView<T> {
         self
     }
 
+    /// Supply a per-item accessible name applied to each tile's `GridCell`
+    /// (`Node::label`), so a screen reader announces a concise item name in
+    /// addition to the row/column position. Without it, the cell's name is left
+    /// to its contents.
+    pub fn tile_a11y_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self {
+        self.tile_a11y_label = Some(Rc::new(f));
+        self
+    }
+
     /// Type-ahead reset timeout (default 500 ms; `ZERO` disables).
     pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.type_ahead_timeout = timeout;
@@ -890,6 +924,19 @@ impl<T: 'static> Widget for GridView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
+
+        // Reactive tile sizing (the card-size slider): observe the bound signal
+        // at Rebuild, and when its value changes, drop the cached strategy so
+        // `ensure_strategy` rebuilds it with the new sizing and the grid reflows.
+        // Done before `ensure_strategy` so this build already uses the new value.
+        if let Some(ref sig) = self.sizing_signal {
+            sig.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            let next = sig.get();
+            if self.sizing != next {
+                self.sizing = next;
+                self.strategy = None;
+            }
+        }
 
         let strategy = self.ensure_strategy();
 
@@ -1235,6 +1282,7 @@ impl<T: 'static> Widget for GridView<T> {
                 on_tile_activate: self.on_tile_activate.clone(),
                 activate_on: self.activate_on,
                 tile_context_menu: self.tile_context_menu.clone(),
+                tile_a11y_label: self.tile_a11y_label.clone(),
                 reorderable: self.reorderable,
                 model_id: self.model_id,
                 scope_owner: ctx.self_id(),

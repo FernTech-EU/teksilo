@@ -430,6 +430,26 @@ fn tiles_have_gridcell_role() {
     assert_eq!(info.role(), bastyde_core::accesskit::Role::GridCell);
 }
 
+#[test]
+fn tile_a11y_label_names_each_gridcell() {
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .tile_a11y_label(|i| format!("Item {i}")),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    // Each cell announces the app-supplied concise name, not just its coordinates.
+    assert_eq!(tree.accessibility_node(t[0]).name(), Some("Item 0"));
+    assert_eq!(tree.accessibility_node(t[1]).name(), Some("Item 1"));
+    assert_eq!(
+        tree.accessibility_node(t[0]).role(),
+        bastyde_core::accesskit::Role::GridCell
+    );
+}
+
 // ── Phase 2: variable row heights + anchoring ───────────────────────────
 
 #[test]
@@ -884,4 +904,60 @@ fn on_selection_changed_fires() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     selection.select(2);
     assert!(fired.get() >= 1, "on_selection_changed should fire");
+}
+
+#[test]
+fn reactive_sizing_signal_reflows_and_preserves_scroll() {
+    // `.sizing(Signal<GridSizing>)` drives a live card-size change: mutating the
+    // signal reflows the columns, and — because it is a Rebuild on the SAME grid
+    // instance — the internal `scroll_y` field signal survives (no jump to top).
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let sizing = Signal::new(GridSizing::Fixed {
+        width: 100.0,
+        height: 50.0,
+    });
+    let mut tree = WidgetTree::new();
+    let gv = GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0))).sizing(sizing.clone());
+    let scroll = gv.scroll_y_signal().clone();
+    let id = tree.add(gv);
+
+    // Width 400, 100-wide tiles → 3 columns: tiles 0,1,2 share row 0.
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    let row_delta = tree.bounds(t[2]).y - tree.bounds(t[0]).y;
+    assert!(
+        row_delta.abs() < 0.01,
+        "3 columns expected — tile 2 on row 0 with tile 0, Δy = {row_delta}"
+    );
+
+    // Grow the tiles to 190 wide → only 2 columns now: tile 2 wraps to row 1
+    // (one row-stride below tile 0). Positions compared relatively so the check
+    // is independent of any scroll offset.
+    sizing.set(GridSizing::Fixed {
+        width: 190.0,
+        height: 50.0,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let t = tiles(&tree, id);
+    let row_delta = tree.bounds(t[2]).y - tree.bounds(t[0]).y;
+    assert!(
+        (row_delta - 58.0).abs() < 0.01,
+        "after resize to 2 columns, tile 2 should wrap to row 1 (Δy ≈ 58), got {row_delta}"
+    );
+
+    // Scroll preservation: with content far taller than the viewport, scroll
+    // down, then change the sizing again. Because the reflow is a rebuild on the
+    // SAME grid instance, the `scroll_y` field signal is retained (no jump).
+    scroll.set(60.0);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    sizing.set(GridSizing::Fixed {
+        width: 100.0,
+        height: 50.0,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        (scroll.get() - 60.0).abs() < 0.01,
+        "scroll_y should survive the sizing change, got {}",
+        scroll.get()
+    );
 }

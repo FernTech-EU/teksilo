@@ -94,6 +94,9 @@ pub(crate) struct GridBodyPane<T: 'static> {
             ) -> Option<Box<dyn Widget>>,
         >,
     >,
+    /// Per-tile accessible name for the `GridCell` (see `GridView::tile_a11y_label`).
+    #[allow(clippy::type_complexity)]
+    pub(crate) tile_a11y_label: Option<Rc<dyn Fn(usize) -> String>>,
     pub(crate) reorderable: bool,
     pub(crate) model_id: ViewId,
     /// Cross-widget export / foreign-receive machinery, shared with
@@ -281,6 +284,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             let Some(widget) = widget else { continue };
 
             let inner_id = ctx.add_boxed(widget);
+            let a11y_name = self.tile_a11y_label.as_ref().map(|f| f(i));
             let tile_id = ctx.add(TileA11y::new(
                 inner_id,
                 row + 1,
@@ -288,6 +292,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 i + 1,
                 total,
                 selected,
+                a11y_name,
             ));
 
             // Selection click. Returns Ignored so the gesture arena still

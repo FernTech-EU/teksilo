@@ -46,6 +46,15 @@ A pluggable `GridLayoutStrategy` drives virtualization; three ship:
 Sugar: `.tile_size(w, h)`, `.column_count(n, h)`. Spacing: `.column_spacing`,
 `.row_spacing`, `.spacing` (both), `.content_inset(EdgeInsets)`.
 
+**Reactive sizing.** `.sizing(...)` accepts `impl Into<Prop<GridSizing>>`, so it
+takes a plain `GridSizing` **or** a `Signal<GridSizing>`. A bound signal is
+observed at `BindingLevel::Rebuild`: changing it rebuilds the cached layout
+strategy and reflows the grid — the internal `scroll_y` / `focused_index` /
+selection are field signals on the same widget instance, so they survive the
+rebuild (no scroll jump). This is the "card-size slider" path — drive a
+`Signal<GridSizing>` from a `Slider` and the tiles resize live. (`.tile_size` /
+`.column_count` set a static size and clear any bound signal.)
+
 ### Variable heights under virtualization
 
 Off-screen tiles aren't built, so their heights are unknown. Two paths:
@@ -178,6 +187,11 @@ The container emits `Role::Grid` with the **logical** `row_count` /
 with 1-based `row_index` / `column_index` + `pos_in_set` / `size_of_set`.
 Section headers are `Role::RowHeader`. Screen readers announce "row R, column
 C — N of M" and the selection count.
+
+`.tile_a11y_label(|index| String)` sets each `GridCell`'s accessible **name**
+(e.g. `"Title, Type"`) so a screen reader announces a concise item name in
+addition to the row/column position; without it the cell name is left to its
+contents.
 
 ## Tests
 
