@@ -642,4 +642,55 @@ mod tests {
             "dragging a deeply-nested tappable child must start the ancestor drag"
         );
     }
+
+    #[test]
+    fn click_on_tap_child_then_hover_does_not_start_ancestor_drag() {
+        // Regression: press+RELEASE on a descendant tap child (no drag), THEN
+        // move the mouse with no button held. Arming the ancestor drag on the
+        // press fed the ancestor's DragRecognizer a `Down`; the release must
+        // clear that armed state, or the *next* hover move crosses the drag
+        // threshold and starts a phantom drag. This is the corkboard bug: a
+        // card's read-only RichTextEditor captures the press as an interactive
+        // child, and a later hover-move dragged the card.
+        use crate::gesture::DragPhase;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let drag_started = Rc::new(Cell::new(false));
+        let d = drag_started.clone();
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(move |_p, _c| { /* select */ }));
+        let _parent = tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Click (press then release at the same point — the tap resolves).
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // Now hover somewhere (no button down). Must NOT start the drag.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(85.0, 25.0),
+        });
+        assert!(
+            !drag_started.get(),
+            "a hover after a click must not start a phantom ancestor drag"
+        );
+    }
 }

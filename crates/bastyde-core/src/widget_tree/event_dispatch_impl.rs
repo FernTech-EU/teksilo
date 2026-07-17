@@ -430,9 +430,13 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
-                // The pointer sequence ends here — discard any armed ancestor
-                // drag observers (the gesture resolved as a tap / release).
-                self.drag_observers.clear();
+                // The pointer sequence ends here — feed the `Up` to any armed
+                // ancestor drag observers so their recognizer clears the press
+                // origin it recorded on the press. Without this, a press that
+                // an interactive descendant captured (a card's editor, a row's
+                // button) leaves the ancestor's DragRecognizer armed, and the
+                // next hover move starts a phantom drag. Also discards the list.
+                self.release_drag_observers(&event, &mut *ops);
                 if let Some(captured) = self.pointer_captured_by {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
                     self.pointer_captured_by = None;
@@ -590,7 +594,19 @@ impl WidgetTree {
             return false;
         };
 
-        let dismissed = self.overlay_manager.dismiss_all();
+        // Clear stale transient overlays (other menus / popovers) before mounting
+        // the new menu, but KEEP any overlay that *contains* the right-clicked
+        // widget — otherwise a right-click inside a modal editor would tear down
+        // the modal it lives in (dismiss_all did exactly that). The context menu
+        // then mounts on top of its host overlay.
+        let keep: std::collections::HashSet<WidgetId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .map(|o| o.content_id)
+            .filter(|&content_id| self.is_descendant_of(owner_id, content_id))
+            .collect();
+        let dismissed = self.overlay_manager.dismiss_except(&keep);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
 
         let content_id = self.add_boxed(menu_widget);
@@ -732,6 +748,32 @@ impl WidgetTree {
             current = self.arena.parent(id);
         }
         self.drag_observers = observers;
+    }
+
+    /// The pointer sequence ended (a tap / plain release) WITHOUT the armed
+    /// ancestor drag latching. Feed the terminating `Up` to each armed ancestor
+    /// so its `DragRecognizer` clears the press origin it recorded when it was
+    /// armed on `PointerDown` — otherwise a later *hover* move would cross the
+    /// drag threshold and start a phantom drag. This matters because the press
+    /// was captured by an interactive descendant (e.g. a card's read-only
+    /// `RichTextEditor`), so the ancestor's own arena never saw this `Up` on
+    /// its own and its recognizer would stay armed indefinitely. Also discards
+    /// the observer list.
+    pub(super) fn release_drag_observers(
+        &mut self,
+        up_event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if self.drag_observers.is_empty() {
+            return;
+        }
+        let observers = std::mem::take(&mut self.drag_observers);
+        for id in &observers {
+            // An `Up` while the recognizer is not mid-drag resolves it to
+            // `Failed` and clears `down_position` — no gesture is produced, so
+            // this only tidies recognizer state.
+            self.observe_drag_on_ancestor(*id, up_event, ops);
+        }
     }
 
     /// On a captured `PointerMove`, feed the move to each armed ancestor drag
@@ -4467,6 +4509,63 @@ mod tests {
             recorded.get(),
             None,
             "an unmounted id must not trigger a scroll"
+        );
+    }
+
+    #[test]
+    fn context_menu_inside_a_modal_keeps_the_modal() {
+        // Regression: right-clicking a widget that lives inside an open modal must
+        // open its context menu WITHOUT tearing down the modal. `show_context_menu_for`
+        // used to `dismiss_all()`, which closed the very overlay hosting the editor.
+        use crate::event::{Modifiers, PointerButton, WidgetEvent};
+        use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+        use crate::test_widgets::{FillWidget, StackWidget};
+
+        let mut tree = WidgetTree::new();
+        // A container standing in for the modal's content subtree, with the editor
+        // (a right-clickable widget) inside it.
+        let modal_content = tree.add(StackWidget::new());
+        let _editor = tree.add_child(
+            modal_content,
+            FillWidget::new()
+                .context_menu(|_pos, _ctx| Some(Box::new(FillWidget::new()) as Box<dyn Widget>)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let modal = tree.overlay_manager.show(OverlayRequest {
+            content_id: modal_content,
+            anchor: modal_content,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::EscapeKey,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        // Give the overlay real bounds so the right-click hit-tests inside it.
+        tree.overlay_manager
+            .stack
+            .iter_mut()
+            .find(|o| o.id == modal)
+            .unwrap()
+            .bounds = Rect::new(0.0, 0.0, 200.0, 100.0);
+        assert_eq!(tree.overlay_manager.len(), 1);
+
+        // Right-click the editor inside the modal.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            tree.overlay_manager.active_ids().contains(&modal),
+            "the modal must survive opening a context menu inside it"
+        );
+        assert_eq!(
+            tree.overlay_manager.len(),
+            2,
+            "the context menu should now be open on top of the surviving modal"
         );
     }
 }

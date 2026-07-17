@@ -875,6 +875,36 @@ impl OverlayManager {
         content_ids
     }
 
+    /// Dismiss every overlay whose content is **not** in `keep`, running each
+    /// dismissed overlay's `on_dismiss`. Used when opening a context menu: any
+    /// overlay that *contains* the right-clicked widget (e.g. the modal the editor
+    /// lives in) is kept, so the menu doesn't tear down its own host.
+    pub fn dismiss_except(&mut self, keep: &std::collections::HashSet<WidgetId>) -> Vec<WidgetId> {
+        let dismissed: Vec<WidgetId> = self
+            .stack
+            .iter()
+            .filter(|o| !keep.contains(&o.content_id))
+            .map(|o| o.content_id)
+            .collect();
+        if dismissed.is_empty() {
+            return dismissed;
+        }
+        // Clone callbacks before mutating the stack, then run them after the
+        // borrow is released (they may touch the arena) — mirrors `dismiss_all`.
+        let callbacks: Vec<OverlayDismissCallback> = self
+            .stack
+            .iter()
+            .filter(|o| !keep.contains(&o.content_id))
+            .filter_map(|o| o.on_dismiss.clone())
+            .collect();
+        self.stack.retain(|o| keep.contains(&o.content_id));
+        self.bump_version();
+        for cb in callbacks {
+            cb();
+        }
+        dismissed
+    }
+
     /// Whether there are any active overlays.
     pub fn is_empty(&self) -> bool {
         self.stack.is_empty()
