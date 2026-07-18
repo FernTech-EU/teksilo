@@ -293,9 +293,7 @@ impl Widget for LogView {
             });
         ctx.apply_self_handlers(handlers);
 
-        let body = LogViewBody {
-            state: self.state.clone(),
-        };
+        let body = log_body_for(&self.state);
         let body_id = ctx.add(body);
         self.body_id = Some(body_id);
 
@@ -490,6 +488,15 @@ impl std::fmt::Debug for LogViewBody {
     }
 }
 
+/// Mount a log body over an existing state — the `body_for` analogue for the
+/// read-only streaming face. Used by `LogView::build` and by tests that drive
+/// the log body directly.
+pub(crate) fn log_body_for(state: &SharedState) -> LogViewBody {
+    LogViewBody {
+        state: state.clone(),
+    }
+}
+
 impl Widget for LogViewBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
@@ -509,14 +516,25 @@ impl Widget for LogViewBody {
             log.a11y_version
                 .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         }
-        // Scroll and selection are repaint-only.
+        // Scroll is repaint-only.
         for sig in [&st.scroll_x, &st.scroll_y] {
             sig.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         }
+        // The log is read-only, but it still supports selection — that is what
+        // makes its text copyable through AT. A selection change moves the caret
+        // and anchor without moving the window, so the `a11y_version` binding
+        // above does not fire; bind the caret signals at `AccessibilityOnly` too
+        // so a within-window selection re-walks and the reported selection
+        // tracks it. `has_selection` is derived from caret/anchor, so those two
+        // cover every selection change.
         st.cursor_position
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.cursor_position
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.cursor_anchor
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.cursor_anchor
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.has_selection
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
 

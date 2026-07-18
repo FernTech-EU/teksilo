@@ -127,15 +127,27 @@ impl Widget for CodeEditorBody {
             .selected
             .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
 
-        // Scroll, caret motion, and selection are all repaint-only: none of
-        // them changes this widget's size, so relayout would be waste.
+        // Scroll never changes the AT tree, so it is repaint-only.
         for sig in [&st.scroll_x, &st.scroll_y] {
             sig.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         }
+        // Caret and selection are repaint-only for geometry — they never change
+        // this widget's size — but they ALSO change what the a11y walk reports
+        // via `set_text_selection_to`. A caret-only move (arrow key, click,
+        // drag-select) emits no document event, so `document_version` never
+        // bumps; without an `AccessibilityOnly` binding here `a11y_dirty` would
+        // never flip and a screen reader would hear the caret frozen at the last
+        // edit. Binding one signal at two levels is the same pattern
+        // `document_version` uses above. `has_selection` is derived from the
+        // caret and anchor, so binding those two covers every selection change.
         st.cursor_position
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.cursor_position
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.cursor_anchor
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.cursor_anchor
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.has_selection
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         // A caret added or removed changes what is drawn but not the layout.

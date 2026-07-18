@@ -466,6 +466,50 @@ fn roles(
         .collect()
 }
 
+/// Pull the reported caret (the selection focus) out of an AccessKit
+/// `TreeUpdate` and resolve it back to an absolute document offset via the
+/// state's synthetic-run map — the resolution an AT client performs. Returns
+/// `None` when no node in the update reported a text selection.
+fn resolved_caret(update: &bastyde_core::accesskit::TreeUpdate, st: &SharedState) -> Option<usize> {
+    let sel = update.nodes.iter().find_map(|(_, n)| n.text_selection())?;
+    let borrow = st.borrow();
+    let map = borrow.synthetic_to_element.borrow();
+    map.get(&sel.focus.node)
+        .map(|er| er.absolute_start + sel.focus.character_index)
+}
+
+/// A caret-only move (no edit) must re-walk the accessibility tree so the
+/// reported selection tracks the caret. The a11y walk reads the *live* cursor,
+/// so this can only regress at the binding level: the caret signals must be
+/// bound `AccessibilityOnly`, not repaint-only — otherwise `a11y_dirty` never
+/// flips, `sync_accessibility` returns the stale cached tree, and a screen
+/// reader hears the caret frozen at the last edit.
+#[test]
+fn a_caret_move_alone_rewalks_the_accessibility_selection() {
+    let st = editor_state("hello world");
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(body_for(&st, None, None));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Baseline walk with the caret at 0 — this fills the cached AT tree.
+    let base = tree.sync_accessibility();
+    assert_eq!(resolved_caret(&base, &st), Some(0), "baseline caret at 0");
+
+    // Move the caret to 5 with NO edit, exactly as an arrow key does: mutate the
+    // cursor, then publish the caret signals.
+    st.borrow().cursor.set_position(5, MoveMode::MoveAnchor);
+    super::sync_cursor_signals(&st);
+    // The layout pass drains the AccessibilityOnly binding into `a11y_dirty`.
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let after = tree.sync_accessibility();
+    assert_eq!(
+        resolved_caret(&after, &st),
+        Some(5),
+        "the AT selection must follow a caret-only move (0 = stale cached tree)",
+    );
+}
+
 /// Each line becomes a `Role::Paragraph` with at least one `Role::TextRun`.
 #[test]
 fn the_walk_emits_a_paragraph_and_runs_per_line() {
@@ -2315,6 +2359,40 @@ mod log {
             .unwrap()
             .text;
         assert_eq!(text, "first");
+    }
+
+    /// The log is read-only but still tracks selection for copy. A selection
+    /// change inside the visible window moves the caret without moving the
+    /// window, so the log's `a11y_version` does not fire — the caret signals'
+    /// own `AccessibilityOnly` binding is what must re-walk the tree here.
+    #[test]
+    fn selecting_within_the_window_rewalks_the_accessibility_selection() {
+        let st = log_state();
+        enqueue(&st, &["alpha", "bravo", "charlie"]);
+        pump(&st);
+
+        let mut tree = WidgetTree::new();
+        let _ = tree.add(crate::code_editor::log_view::log_body_for(&st));
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+
+        let base = tree.sync_accessibility();
+        assert_eq!(
+            super::resolved_caret(&base, &st),
+            Some(0),
+            "baseline caret at 0"
+        );
+
+        // Select inside the first visible line ("alpha", chars 0..5).
+        st.borrow().cursor.set_position(2, MoveMode::MoveAnchor);
+        crate::code_editor::sync_cursor_signals(&st);
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+
+        let after = tree.sync_accessibility();
+        assert_eq!(
+            super::resolved_caret(&after, &st),
+            Some(2),
+            "the log's AT selection must follow a within-window caret move",
+        );
     }
 
     /// A streaming append must not force the O(n) full relayout the editor's
