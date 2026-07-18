@@ -2310,16 +2310,27 @@ impl Widget for RichTextEditorBody {
                     bastyde_core::binding::BindingLevel::RepaintOnly,
                 );
             }
-            cursor_position.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                bastyde_core::binding::BindingLevel::RepaintOnly,
-            );
-            cursor_anchor.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                bastyde_core::binding::BindingLevel::RepaintOnly,
-            );
+            // Caret and anchor are repaint-only for geometry, but they ALSO
+            // change what the a11y walk reports via `set_text_selection_to`. A
+            // caret-only move (arrow key, click, drag-select) emits no document
+            // event, so `document_version` never bumps; without an
+            // `AccessibilityOnly` binding here `a11y_dirty` never flips and a
+            // screen reader hears the caret frozen at the last edit. Bind both
+            // levels — the two-level pattern `document_version` uses. Selecting
+            // moves the caret and/or anchor, so `has_selection` (derived from
+            // them) needs no separate a11y binding.
+            for signal in [&cursor_position, &cursor_anchor] {
+                signal.bind_to(
+                    self_id,
+                    ctx.binding_registry(),
+                    bastyde_core::binding::BindingLevel::RepaintOnly,
+                );
+                signal.bind_to(
+                    self_id,
+                    ctx.binding_registry(),
+                    bastyde_core::binding::BindingLevel::AccessibilityOnly,
+                );
+            }
             has_selection.bind_to(
                 self_id,
                 ctx.binding_registry(),

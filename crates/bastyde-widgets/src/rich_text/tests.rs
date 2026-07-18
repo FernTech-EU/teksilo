@@ -2910,6 +2910,59 @@ fn accessibility_emits_paragraph_and_text_run_children() {
     assert!(has_text_run, "editor must emit at least one TextRun child");
 }
 
+/// Pull the reported caret (the selection focus) out of a `TreeUpdate` as an
+/// opaque `(node, char index)` pair — enough to tell whether it moved between
+/// two walks, without depending on the run-id derivation.
+fn reported_caret(
+    update: &bastyde_core::accesskit::TreeUpdate,
+) -> Option<(bastyde_core::accesskit::NodeId, usize)> {
+    update.nodes.iter().find_map(|(_, n)| {
+        n.text_selection()
+            .map(|s| (s.focus.node, s.focus.character_index))
+    })
+}
+
+/// A caret-only move (no edit) must re-walk the accessibility tree so the
+/// reported selection tracks the caret. The walk reads the *live* cursor, so
+/// this regresses only at the binding level: without an `AccessibilityOnly`
+/// binding on the caret signals, `a11y_dirty` never flips on a plain arrow key,
+/// `sync_accessibility` returns the stale cached tree, and a screen reader hears
+/// the caret frozen at the last edit.
+#[test]
+fn a_caret_move_alone_rewalks_the_accessibility_selection() {
+    use bastyde_core::event::{Key, Modifiers};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Anchor the caret at the line start, then take the baseline walk that fills
+    // the cached AT tree.
+    press_key(&mut tree, Key::Home, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let base = reported_caret(&tree.sync_accessibility());
+    assert!(
+        base.is_some(),
+        "a focused editor must report a text selection"
+    );
+
+    // One arrow right — a pure caret move, no edit.
+    press_key(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let after = reported_caret(&tree.sync_accessibility());
+
+    assert!(
+        after.is_some() && after != base,
+        "the AT selection must follow a caret-only move (before {base:?}, after \
+         {after:?} — equal means the walk returned the stale cached tree)"
+    );
+}
+
 #[test]
 fn accessibility_text_run_carries_value_and_character_lengths() {
     // The TextRun for plain ASCII "foo" must carry `value = "foo"`
