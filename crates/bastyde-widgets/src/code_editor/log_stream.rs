@@ -52,6 +52,14 @@ pub(crate) type SeverityFn = Rc<dyn Fn(&str) -> Option<Color>>;
 /// scroll reveals already-shaped rows rather than a one-frame blank band.
 const OVERSCAN_ROWS: usize = 8;
 
+/// How long a `total`-only change — an append or eviction while the reader is
+/// scrolled away from the tail, so the visible window holds — may wait before the
+/// accessibility tree is re-walked to refresh the per-line "of N" count. It
+/// bounds the staleness of that count without rebuilding the whole app AT tree on
+/// every off-window line (which, during a flood, is every frame). See
+/// [`bump_a11y_if_window_changed`].
+pub(crate) const A11Y_TOTAL_REFRESH_SECS: f32 = 1.0;
+
 /// How close to the bottom still counts as "at the bottom" for tail-following,
 /// in logical pixels — a hair of slack so sub-pixel scroll maxima don't read as
 /// "scrolled up" and silently stop the follow.
@@ -110,19 +118,26 @@ pub(crate) struct LogStreamState {
     /// last row and misplace the scrollbar. This is maintained directly from the
     /// appends and evictions instead, and published to `line_count`.
     pub total: usize,
-    /// Bumped only when the *visible window* changes — the accessibility tree
-    /// binds this at `AccessibilityOnly` instead of `scroll_y` / `document_version`
-    /// so it re-walks (a whole-tree rebuild, since the framework has no per-widget
-    /// a11y dirty tracking) only when the exposed lines actually change: a scroll
-    /// crossing a row, a following-tail append, or an eviction. A pixel-scroll that
-    /// stays on the same rows, or a tail append while scrolled away, does not. See
+    /// Bumped when the accessibility tree must re-walk — the a11y tree binds this
+    /// at `AccessibilityOnly` instead of `scroll_y` / `document_version` so the
+    /// whole-tree rebuild (the framework has no per-widget a11y dirty tracking)
+    /// happens only when what a reader can perceive changes: the visible window
+    /// (a scroll crossing a row, a following-tail append, an eviction) — bumped
+    /// immediately — or the total line count while the window holds — bumped on a
+    /// throttle. A pixel-scroll that stays on the same rows does not bump. See
     /// [`bump_a11y_if_window_changed`].
     pub a11y_version: Signal<u64>,
-    /// The `(first, count)` the a11y tree was last built for, to detect a real
-    /// window change. Deliberately excludes `total`: the per-line "of N" count
-    /// then lags a tail append while scrolled up, which refreshes on the next
-    /// scroll — cheap staleness against a per-append whole-tree rebuild.
-    pub last_a11y_sig: Option<(usize, usize)>,
+    /// The `(first, count, total)` the a11y tree was last built for. A change in
+    /// `(first, count)` — the visible window — re-walks immediately. A change in
+    /// `total` alone (an append or eviction while the reader is scrolled away from
+    /// the tail) re-walks on the [`A11Y_TOTAL_REFRESH_SECS`] throttle, so the
+    /// per-line "of N" count stays accurate to within that interval without a
+    /// whole-tree rebuild on every off-window line.
+    pub last_a11y_sig: Option<(usize, usize, usize)>,
+    /// Frame time accumulated since a `total`-only change became pending (the
+    /// window held but the document grew or shrank). Drives the throttle above;
+    /// reset to zero whenever the a11y tree is (re)built or the total is current.
+    pub a11y_total_lag: f32,
 }
 
 impl LogStreamState {
@@ -140,6 +155,7 @@ impl LogStreamState {
             total: 0,
             a11y_version: Signal::new(0),
             last_a11y_sig: None,
+            a11y_total_lag: 0.0,
         }
     }
 }
@@ -238,9 +254,10 @@ pub(crate) fn tick(st: &mut CodeEditorState, delta: f32) -> bool {
         &st.viewport_ratio_y,
     );
 
-    // 10. Re-walk the accessibility tree only if the visible window changed —
-    //     after the scroll has settled (follow-tail / drag), so `first` is final.
-    bump_a11y_if_window_changed(st);
+    // 10. Re-walk the accessibility tree if the visible window changed (now, so
+    //     `first` is final after the scroll settled) or the total drifted past the
+    //     throttle while scrolled away.
+    bump_a11y_if_window_changed(st, delta);
 
     content_changed || had_events || drag_active || windowed
 }
@@ -334,13 +351,9 @@ fn enforce_scrollback(st: &mut CodeEditorState) -> bool {
 /// when there is nothing to show (no rows, or no row height learned yet). Shared
 /// by the render window, the a11y window, and the a11y-change check, so the three
 /// always agree on which rows are visible.
-fn window_bounds(st: &CodeEditorState) -> Option<(usize, usize, usize)> {
+fn window_bounds(st: &CodeEditorState, row_h: f32) -> Option<(usize, usize, usize)> {
     let total = st.log.as_ref().map_or(0, |l| l.total);
-    if total == 0 {
-        return None;
-    }
-    let row_h = current_row_height(st);
-    if row_h <= 0.0 {
+    if total == 0 || row_h <= 0.0 {
         return None;
     }
     let first = ((st.scroll_y.get() / row_h).floor() as usize).min(total - 1);
@@ -357,7 +370,7 @@ pub(crate) fn ensure_window(st: &mut CodeEditorState, force: bool) -> bool {
     if row_h <= 0.0 {
         return false;
     }
-    let Some((first, count, total)) = window_bounds(st) else {
+    let Some((first, count, total)) = window_bounds(st, row_h) else {
         // Nothing appended yet — the document's lone empty block is not a row.
         st.engine.set_uniform_extent(0, row_h);
         if let Some(l) = st.log.as_mut() {
@@ -416,7 +429,7 @@ pub(crate) fn a11y_window(
     usize,
     Vec<bastyde_text::text_document::BlockSnapshot>,
 ) {
-    let Some((first, count, total)) = window_bounds(st) else {
+    let Some((first, count, total)) = window_bounds(st, current_row_height(st)) else {
         let total = st.log.as_ref().map_or(0, |l| l.total);
         return (0, total, Vec::new());
     };
@@ -438,19 +451,54 @@ pub(crate) fn a11y_window(
     (first, total, snaps)
 }
 
-/// Bump `a11y_version` when the visible window changed, so the accessibility tree
-/// re-walks only then. Compares the current `(first, count)` to the last one the
-/// tree was built for — a scroll that stays on the same rows, or a tail append
-/// while scrolled away, leaves it unchanged and triggers no rebuild.
-fn bump_a11y_if_window_changed(st: &mut CodeEditorState) {
-    let sig = window_bounds(st).map(|(first, count, _total)| (first, count));
-    let version = match st.log.as_mut() {
-        Some(l) if l.last_a11y_sig != sig => {
-            l.last_a11y_sig = sig;
-            l.a11y_version.clone()
-        }
-        _ => return,
+/// Decide whether the accessibility tree must re-walk this frame and, if so, bump
+/// `a11y_version`. Two triggers against the `(first, count, total)` the tree was
+/// last built for:
+///
+/// - The **visible window** `(first, count)` changed — a scroll crossing a row, a
+///   following-tail append, an eviction. Re-walk immediately: different lines are
+///   on screen.
+/// - The **total** changed while the window held — an append or eviction while the
+///   reader is scrolled away from the tail. Re-walking on every such line would
+///   rebuild the whole app AT tree at frame rate for a count the reader is not
+///   looking at, so it is refreshed on the [`A11Y_TOTAL_REFRESH_SECS`] throttle
+///   instead: the per-line "of N" stays accurate to within that interval. `delta`
+///   is the frame time driving the throttle.
+///
+/// A pixel-scroll that stays on the same rows changes neither and does not re-walk.
+fn bump_a11y_if_window_changed(st: &mut CodeEditorState, delta: f32) {
+    let Some((first, count, total)) = window_bounds(st, current_row_height(st)) else {
+        return;
     };
+    let Some(l) = st.log.as_mut() else {
+        return;
+    };
+
+    let window_changed = l
+        .last_a11y_sig
+        .is_none_or(|(f, c, _)| (f, c) != (first, count));
+    let total_changed = l.last_a11y_sig.is_none_or(|(_, _, t)| t != total);
+
+    let refresh = if window_changed {
+        true
+    } else if total_changed {
+        // The window held but the document grew or shrank off-screen: let the
+        // announced total drift for at most one throttle interval, then refresh.
+        l.a11y_total_lag += delta;
+        l.a11y_total_lag >= A11Y_TOTAL_REFRESH_SECS
+    } else {
+        false
+    };
+    // Keep the debt only while a total change is pending-but-not-yet-refreshed.
+    if refresh || !total_changed {
+        l.a11y_total_lag = 0.0;
+    }
+    if !refresh {
+        return;
+    }
+
+    l.last_a11y_sig = Some((first, count, total));
+    let version = l.a11y_version.clone();
     // Set outside the mutable borrow: the AccessibilityOnly observers this wakes
     // only flip the tree's a11y-dirty flag, never re-enter the state.
     version.set(version.get() + 1);

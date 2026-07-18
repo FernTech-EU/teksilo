@@ -2659,9 +2659,12 @@ mod log {
 
     /// The a11y tree re-walk is driven by the visible window, not by raw scroll /
     /// append signals: a following append and a row-crossing scroll bump
-    /// `a11y_version`, but a tail append while scrolled away and a sub-row pixel
-    /// scroll do not — so a streaming log does not rebuild the whole app AT tree
-    /// on every pixel or every off-window line.
+    /// `a11y_version`, but a single tail append while scrolled away and a sub-row
+    /// pixel scroll do not — so a streaming log does not rebuild the whole app AT
+    /// tree on every pixel or every off-window line. (An off-window append does
+    /// refresh the total on a throttle — see
+    /// [`the_total_count_refreshes_on_a_throttle_while_scrolled_away`] — but not
+    /// within the sub-second span this test exercises.)
     #[test]
     fn a11y_version_bumps_only_when_the_window_changes() {
         let st = log_state();
@@ -2702,6 +2705,40 @@ mod log {
         assert!(
             ver.get() > v3,
             "crossing to a new row must bump a11y_version"
+        );
+    }
+
+    /// While scrolled away from the tail the a11y tree is not re-walked per
+    /// off-window line, but the per-line "of N" total is not frozen either: once
+    /// the throttle interval elapses, the next off-window append refreshes it with
+    /// a single bump — so a reader in the history hears a roughly-current total.
+    #[test]
+    fn the_total_count_refreshes_on_a_throttle_while_scrolled_away() {
+        let st = log_state();
+        enqueue_owned(&st, (0..200).map(|i| format!("line {i}")));
+        pump(&st);
+        // Scroll to the top and settle — no longer following the tail.
+        st.borrow().scroll_y.set(0.0);
+        pump(&st);
+        let ver = st.borrow().log.as_ref().unwrap().a11y_version.clone();
+
+        // A single off-window append does not re-walk: window unchanged, throttle
+        // not yet elapsed.
+        let v0 = ver.get();
+        enqueue(&st, &["off-window"]);
+        pump(&st);
+        assert_eq!(ver.get(), v0, "one off-window append must not re-walk");
+
+        // Once more than the throttle interval has accrued, the next off-window
+        // append refreshes the total with a single bump.
+        enqueue(&st, &["later"]);
+        {
+            let mut s = st.borrow_mut();
+            log_stream::tick(&mut s, log_stream::A11Y_TOTAL_REFRESH_SECS + 0.1);
+        }
+        assert!(
+            ver.get() > v0,
+            "an off-window append past the throttle must refresh the total"
         );
     }
 }
