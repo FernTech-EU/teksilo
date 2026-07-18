@@ -2007,6 +2007,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "code_editor"
+version = "0.6.2"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5835,6 +5842,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 dependencies = [
  "value-bag",
+]
+
+[[package]]
+name = "log_view"
+version = "0.6.2"
+dependencies = [
+ "bastyde",
 ]
 
 [[package]]

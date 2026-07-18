@@ -60,6 +60,8 @@
 - [Splitter](splitter.md)
 - [Docking layout](docking.md)
 - [Table & tree-table views](table-view.md)
+- [Code & plain-text editors](code-editor.md)
+- [Log view (streaming)](log-view.md)
 - [Tab widget](tab-widget.md)
 - [Font picker](font-picker.md)
 - [Charts](charts.md)

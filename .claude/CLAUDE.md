@@ -25,6 +25,8 @@ cargo run -p multi_window                      # Multi-window demo
 cargo run -p recent_projects                   # MRU/persistence demo
 cargo run -p rich_text_editor                  # Rich text editing
 cargo run -p rich_text_viewer                  # Rich text viewing
+cargo run -p code_editor                       # CodeEditor: gutter, current-line band, bracket auto-close/match, Ctrl+/ comment, smart Tab, Ctrl+D multi-caret, Alt+arrows move-line, injected language-agnostic highlighter + completion. Also PlainTextEditor. See docs/code-editor.md
+cargo run -p log_view                          # LogView: read-only append-only tail-following streaming view — windowed layout (only the visible rows shaped, ~4 MB flat at 100k+ lines), derived follow-tail, scrollback cap, injected per-line severity colour, windowed a11y. See docs/log-view.md
 cargo run -p font-picker                       # FontPicker: list/search/filter all installed fonts (per-row in-font samples, script + monospaced filters), live preview
 cargo run -p spin_box                          # Numeric input demo
 cargo run -p password-field                    # Secure/password input (reveal toggle, masking, caps-lock)

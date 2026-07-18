@@ -24,6 +24,10 @@ pub mod calendar;
 pub mod card;
 pub mod checkbox;
 pub mod code_editor;
+pub use code_editor::{
+    BracketPair, COMMON_BRACKETS, CodeConfig, CodeEditor, CodeEditorHandle, CompletionContext,
+    CompletionItem, CompletionKind, IndentStyle, LogView, LogViewHandle, PlainTextEditor,
+};
 pub mod color_edit;
 pub mod color_picker;
 pub mod combo_box;

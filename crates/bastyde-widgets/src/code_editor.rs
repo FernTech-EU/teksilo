@@ -513,6 +513,12 @@ impl CodeEditorHandle {
         self.state.borrow().cursor.position()
     }
 
+    /// The primary caret's document position as a reactive signal — bind it in a
+    /// status bar to show "column N" that tracks every caret move, not only edits.
+    pub fn cursor_position_signal(&self) -> bastyde_core::Signal<usize> {
+        self.state.borrow().cursor_position.clone()
+    }
+
     /// Live caret count — `1` unless multi-caret editing is active.
     pub fn caret_count(&self) -> bastyde_core::Signal<usize> {
         self.state.borrow().caret_count.clone()
