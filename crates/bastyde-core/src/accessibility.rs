@@ -922,6 +922,45 @@ impl AccessNodeBuilder {
         false
     }
 
+    /// Set 1-based position-in-set / size-of-set on a previously-pushed
+    /// synthetic child (a paragraph, "line 42 of 200").
+    ///
+    /// AccessKit exposes `position_in_set` / `size_of_set` on every node, but
+    /// [`set_position_in_set`](Self::set_position_in_set) /
+    /// [`set_size_of_set`](Self::set_size_of_set) only touch the widget's own
+    /// node. This reaches a collected child by NodeId, the same way
+    /// [`set_paragraph_as_heading`](Self::set_paragraph_as_heading) does.
+    /// Returns whether the child was found.
+    pub fn set_child_position_in_set(
+        &mut self,
+        node_id: NodeId,
+        position: usize,
+        size: usize,
+    ) -> bool {
+        self.with_collected_node(node_id, |node| {
+            node.set_position_in_set(position);
+            node.set_size_of_set(size);
+        })
+    }
+
+    /// Link a run of `Role::TextRun` children as one visual line, so assistive
+    /// technology navigating by line treats them as a continuous line rather
+    /// than fracturing at each formatting or chunk boundary.
+    ///
+    /// Sets each run's `next_on_line` to its successor and each successor's
+    /// `previous_on_line` to its predecessor (AccessKit's doubly-linked
+    /// same-line chain); the first run keeps no `previous_on_line` and the last
+    /// no `next_on_line`, which is how the consumer detects the line's ends. A
+    /// slice of zero or one is a no-op. Every id must be a run pushed earlier via
+    /// [`push_text_run_child`](Self::push_text_run_child).
+    pub fn link_runs_on_line(&mut self, run_ids: &[NodeId]) {
+        for pair in run_ids.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            self.with_collected_node(a, |node| node.set_next_on_line(b));
+            self.with_collected_node(b, |node| node.set_previous_on_line(a));
+        }
+    }
+
     /// Push a `Role::TextRun` child under `parent_node` (usually a
     /// paragraph NodeId returned from `push_paragraph_child`, but
     /// may also be the widget's own node for inline editors).
@@ -963,9 +1002,19 @@ impl AccessNodeBuilder {
             );
             return NodeId(0);
         };
-        // Mix `fragment_offset` into the element_id bits so sub-runs
-        // of a highlight-split source element get unique NodeIds.
-        let mixed_element = element_id ^ ((fragment_offset as u64) << 32);
+        // Give sub-runs of one source element (a highlight split, or a run
+        // chunked to stay under the AccessKit word-start cap) distinct NodeIds.
+        // A plain `element_id ^ (fragment_offset << 32)` would XOR the offset
+        // into the very bits `element_id` already uses to encode the owning
+        // block, so a chunk at offset 255 in block A could alias a whole-line run
+        // in a block whose id is `A ^ 255`. Hashing the offset across all 64 bits
+        // removes that structure; `fragment_offset == 0` (the whole-run common
+        // case) stays a no-op, so those NodeIds are unchanged.
+        let mixed_element = if fragment_offset == 0 {
+            element_id
+        } else {
+            fnv_mix_u64(element_id, fragment_offset as u64, 0)
+        };
         let node_id = synthetic_node_id(owner, mixed_element, SyntheticKind::TextRun);
         let mut node = Node::new(Role::TextRun);
         node.set_value(value);
@@ -1235,6 +1284,95 @@ mod tests {
         let nid = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
         assert_eq!(nid.0 & SYNTHETIC_BIT, SYNTHETIC_BIT);
         assert!(is_synthetic(nid));
+    }
+
+    #[test]
+    fn link_runs_on_line_chains_runs_both_ways() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        let para = b.push_paragraph_child(1);
+        let run = |b: &mut AccessNodeBuilder, off: usize| {
+            b.push_text_run_child(
+                para,
+                10,
+                off,
+                "abc".to_string(),
+                vec![1, 1, 1],
+                None,
+                None,
+                None,
+                TextRunAttributes::default(),
+            )
+        };
+        let (r0, r1, r2) = (run(&mut b, 0), run(&mut b, 3), run(&mut b, 6));
+        b.link_runs_on_line(&[r0, r1, r2]);
+
+        let (_id, _n, children) = b.build(fake_widget(1));
+        let node = |id| {
+            children
+                .iter()
+                .find(|(i, _)| *i == id)
+                .map(|(_, n)| n)
+                .unwrap()
+        };
+        // First run: forward only. Middle: both. Last: back only.
+        assert_eq!(node(r0).previous_on_line(), None);
+        assert_eq!(node(r0).next_on_line(), Some(r1));
+        assert_eq!(node(r1).previous_on_line(), Some(r0));
+        assert_eq!(node(r1).next_on_line(), Some(r2));
+        assert_eq!(node(r2).previous_on_line(), Some(r1));
+        assert_eq!(node(r2).next_on_line(), None);
+    }
+
+    /// A chunk at a non-zero offset in one element must not collide with a
+    /// whole run in another element, even when the two element ids differ by
+    /// exactly the low-byte XOR of the chunk offset — the aliasing the old
+    /// `element_id ^ (offset << 32)` mix allowed.
+    #[test]
+    fn a_chunk_offset_does_not_alias_another_elements_run() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        let para = b.push_paragraph_child(1);
+        // `synth_element_id` encodes the block id in bits 32-61.
+        let elem_a: u64 = 0xABCD_u64 << 32;
+        let elem_b: u64 = (0xABCD_u64 ^ 255) << 32;
+        let run = |b: &mut AccessNodeBuilder, elem: u64, off: usize| {
+            b.push_text_run_child(
+                para,
+                elem,
+                off,
+                "x".to_string(),
+                vec![1],
+                None,
+                None,
+                None,
+                TextRunAttributes::default(),
+            )
+        };
+        let a_chunk = run(&mut b, elem_a, 255); // offset-255 chunk in block A
+        let b_whole = run(&mut b, elem_b, 0); // whole run in block B = A ^ 255
+        assert_ne!(
+            a_chunk, b_whole,
+            "a chunk offset must not alias another block's run NodeId"
+        );
+    }
+
+    #[test]
+    fn set_child_position_in_set_numbers_a_paragraph() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        let para = b.push_paragraph_child(5);
+        assert!(b.set_child_position_in_set(para, 42, 200));
+        assert!(
+            !b.set_child_position_in_set(NodeId(999), 1, 1),
+            "an unknown child is not found"
+        );
+
+        let (_id, _n, children) = b.build(fake_widget(1));
+        let p = children
+            .iter()
+            .find(|(i, _)| *i == para)
+            .map(|(_, n)| n)
+            .unwrap();
+        assert_eq!(p.position_in_set(), Some(42));
+        assert_eq!(p.size_of_set(), Some(200));
     }
 
     #[test]

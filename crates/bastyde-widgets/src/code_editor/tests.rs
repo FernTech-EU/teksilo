@@ -402,7 +402,10 @@ fn an_editable_body_reports_a_multiline_text_input() {
     use bastyde_core::accesskit::{Action, Role};
     let st = editor_state("fn main() {}");
     let body = body_for(&st, None, None);
-    let mut b = bastyde_core::accessibility::AccessNodeBuilder::new();
+    // The walk derives synthetic ids from an owner widget, as the real tree does.
+    let mut b = bastyde_core::accessibility::AccessNodeBuilder::for_widget(
+        bastyde_core::widget_id::WidgetId::default(),
+    );
     body.accessibility(&mut b);
     assert_eq!(b.role(), Role::MultilineTextInput);
     assert!(b.actions().contains(&Action::SetValue));
@@ -417,7 +420,9 @@ fn a_viewer_reports_a_text_range_capable_role_and_no_set_value() {
     use bastyde_core::accesskit::{Action, Role};
     let st = viewer_state("2026-07-17 INFO ready");
     let body = body_for(&st, None, None);
-    let mut b = bastyde_core::accessibility::AccessNodeBuilder::new();
+    let mut b = bastyde_core::accessibility::AccessNodeBuilder::for_widget(
+        bastyde_core::widget_id::WidgetId::default(),
+    );
     body.accessibility(&mut b);
     assert_eq!(b.role(), Role::Document);
     assert!(
@@ -428,6 +433,131 @@ fn a_viewer_reports_a_text_range_capable_role_and_no_set_value() {
         b.actions().contains(&Action::SetTextSelection),
         "a viewer must still support selection — that is what makes its text \
          readable and copyable through AT"
+    );
+}
+
+/// Build the body's accessibility subtree and return its collected children
+/// (the paragraph and text-run nodes).
+fn a11y_children(
+    st: &SharedState,
+) -> Vec<(
+    bastyde_core::accesskit::NodeId,
+    bastyde_core::accesskit::Node,
+)> {
+    use bastyde_core::widget_id::WidgetId;
+    let body = body_for(st, None, None);
+    let mut b = bastyde_core::accessibility::AccessNodeBuilder::for_widget(WidgetId::default());
+    body.accessibility(&mut b);
+    let (_id, _node, children) = b.build(WidgetId::default());
+    children
+}
+
+fn roles(
+    children: &[(
+        bastyde_core::accesskit::NodeId,
+        bastyde_core::accesskit::Node,
+    )],
+    role: bastyde_core::accesskit::Role,
+) -> Vec<&bastyde_core::accesskit::Node> {
+    children
+        .iter()
+        .filter(|(_, n)| n.role() == role)
+        .map(|(_, n)| n)
+        .collect()
+}
+
+/// Each line becomes a `Role::Paragraph` with at least one `Role::TextRun`.
+#[test]
+fn the_walk_emits_a_paragraph_and_runs_per_line() {
+    use bastyde_core::accesskit::Role;
+    let st = editor_state("alpha\nbeta\ngamma");
+    let children = a11y_children(&st);
+    assert_eq!(
+        roles(&children, Role::Paragraph).len(),
+        3,
+        "one paragraph a line"
+    );
+    assert!(
+        roles(&children, Role::TextRun).len() >= 3,
+        "at least one run a line"
+    );
+}
+
+/// Every paragraph is numbered in the set ("line 2 of 3") — carried on the line,
+/// not spoken from a gutter.
+#[test]
+fn each_line_is_numbered_in_the_set() {
+    use bastyde_core::accesskit::Role;
+    let st = editor_state("one\ntwo\nthree");
+    let children = a11y_children(&st);
+    let paras = roles(&children, Role::Paragraph);
+    assert_eq!(paras.len(), 3);
+    for (i, p) in paras.iter().enumerate() {
+        assert_eq!(p.position_in_set(), Some(i + 1), "1-based line number");
+        assert_eq!(p.size_of_set(), Some(3), "of the total line count");
+    }
+}
+
+/// Each line's last run ends with the newline AccessKit's line-navigation
+/// contract requires.
+#[test]
+fn each_line_ends_with_a_newline() {
+    use bastyde_core::accesskit::Role;
+    let st = editor_state("a\nb\nc");
+    let children = a11y_children(&st);
+    let runs = roles(&children, Role::TextRun);
+    assert_eq!(runs.len(), 3, "single-char lines: one run each");
+    for run in runs {
+        assert!(
+            run.value().is_some_and(|v| v.ends_with('\n')),
+            "the line's last run must end with the newline, got {:?}",
+            run.value()
+        );
+    }
+}
+
+/// A run longer than 255 characters is split into linked runs, so its word
+/// starts (character indices stored as u8) never overflow and word navigation
+/// keeps working past character 255.
+#[test]
+fn a_long_line_is_split_into_linked_runs() {
+    use bastyde_core::accesskit::Role;
+    let long: String = "x".repeat(600);
+    let st = editor_state(&long);
+    let children = a11y_children(&st);
+    let runs = roles(&children, Role::TextRun);
+    assert!(
+        runs.len() >= 3,
+        "600 chars must split into >=3 runs, got {}",
+        runs.len()
+    );
+    assert!(runs[0].next_on_line().is_some(), "first run links forward");
+    assert!(
+        runs.last().unwrap().previous_on_line().is_some(),
+        "last run links back"
+    );
+    for run in &runs {
+        assert!(
+            run.character_lengths().len() <= 256,
+            "a chunk (plus its optional newline) stays within the cap"
+        );
+    }
+}
+
+/// The synthetic map an AT SetTextSelection resolves through points each run at
+/// the right document position.
+#[test]
+fn the_selection_map_locates_runs_in_the_document() {
+    let st = editor_state("hello\nworld");
+    let _ = a11y_children(&st); // populates synthetic_to_element as a side effect
+    let s = st.borrow();
+    let map = s.synthetic_to_element.borrow();
+    let world = map.values().find(|r| r.text == "world");
+    assert!(world.is_some(), "the 'world' run must be mapped");
+    assert_eq!(
+        world.unwrap().absolute_start,
+        6,
+        "at the block's document start"
     );
 }
 
@@ -2413,5 +2543,39 @@ mod log {
             .unwrap()
             .text;
         assert_eq!(text, "after clear", "refill must not leave a blank line 0");
+    }
+
+    /// The log's accessibility tree is windowed like its render: a 1000-line log
+    /// emits only the visible lines as paragraphs, so an append re-walks the AT
+    /// tree in O(window), not O(document).
+    #[test]
+    fn the_a11y_tree_is_windowed() {
+        use bastyde_core::accesskit::Role;
+        use bastyde_core::widget_id::WidgetId;
+
+        let st = log_state();
+        enqueue_owned(&st, (0..1000).map(|i| format!("line {i}")));
+        pump(&st);
+
+        let mut b = bastyde_core::accessibility::AccessNodeBuilder::for_widget(WidgetId::default());
+        crate::code_editor::a11y::build_log_a11y(&st.borrow(), &mut b);
+        let (_id, _n, children) = b.build(WidgetId::default());
+
+        let paras: Vec<_> = children
+            .iter()
+            .filter(|(_, n)| n.role() == Role::Paragraph)
+            .map(|(_, n)| n)
+            .collect();
+        assert!(!paras.is_empty(), "some visible lines are exposed");
+        assert!(
+            paras.len() < 100,
+            "the tree is windowed, not all 1000 lines: got {}",
+            paras.len()
+        );
+        assert_eq!(
+            paras[0].size_of_set(),
+            Some(1000),
+            "a line is 'N of 1000', not 'N of window'"
+        );
     }
 }

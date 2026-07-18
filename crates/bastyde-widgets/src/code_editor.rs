@@ -36,6 +36,7 @@
 //! Guessing would be worse than not knowing — inserting `//` into a Python file
 //! corrupts it silently.
 
+mod a11y;
 mod clipboard;
 mod completion;
 mod config;
@@ -286,6 +287,25 @@ impl Widget for CodeEditorBody {
         let scroll_y = st.scroll_y.get();
         st.engine.set_scroll_offset(scroll_y);
 
+        // Cull the render to the visible clip band when the editor is laid out at
+        // full document height inside an outer scroller (opt-in, off by default).
+        // `clip_bounds` is the on-screen slice an ancestor clip leaves visible; we
+        // map it into content space and render only that band (plus a half-viewport
+        // margin), the same window the rich text editor uses. Never moves glyph
+        // positions or hit-testing — it only limits what is emitted.
+        let render_window = if st.window_to_clip {
+            ctx.clip_bounds.map(|clip| {
+                let zoom = st.engine.zoom().max(0.0001);
+                let vis_top = (scroll_y + (clip.y - bounds.y) / zoom).max(0.0);
+                let vis_h = (clip.height / zoom).max(0.0);
+                let margin = vis_h * 0.5;
+                ((vis_top - margin).max(0.0), vis_h + 2.0 * margin)
+            })
+        } else {
+            None
+        };
+        st.engine.set_render_window(render_window);
+
         canvas.set_clip(bounds);
 
         let pending_full = std::mem::replace(&mut st.pending_full_render, false);
@@ -322,27 +342,11 @@ impl Widget for CodeEditorBody {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use crate::common::editor_runtime::AccessibilityRole;
-        use bastyde_core::accesskit::{Action, Role};
-
         let st = self.state.borrow();
-        builder.set_role(match st.policy.access_role {
-            AccessibilityRole::Editor => Role::MultilineTextInput,
-            AccessibilityRole::Document => Role::Document,
-        });
-        if st.policy.is_read_only() {
-            builder.set_read_only();
-        }
 
-        // The paragraph/run walk and selection reporting land in 4g; the role
-        // and actions are here so the node is classifiable from the first frame.
-        builder.add_action(Action::Focus);
-        builder.add_action(Action::ScrollIntoView);
-        builder.add_action(Action::SetTextSelection);
-        if matches!(st.policy.access_role, AccessibilityRole::Editor) {
-            builder.add_action(Action::SetValue);
-            builder.add_action(Action::ReplaceSelectedText);
-        }
+        // Role, read-only, the paragraph/run tree, selection reporting, and the
+        // text actions — the walk shared with the log view (full-document here).
+        a11y::build_editor_a11y(&st, builder);
 
         // Completion popup — the ARIA combobox-with-listbox pattern (as ComboBox
         // and SearchField): the editor keeps focus and carries has-popup +

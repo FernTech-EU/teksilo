@@ -162,6 +162,17 @@ impl CodeEditor {
         self
     }
 
+    /// Cull the render to the visible clip band (default `false`). Turn on only
+    /// for an editor deliberately laid out at full document height inside an
+    /// outer `ScrollArea` (`v_scroll_policy(AlwaysOff)` + `min_lines(1)`): the
+    /// body's bounds then span the whole document, and this renders only the
+    /// on-screen slice instead of every line. A normally-scrolling editor already
+    /// renders just a viewport's worth, so it needs nothing.
+    pub fn window_to_clip(self, on: bool) -> Self {
+        self.state.borrow_mut().window_to_clip = on;
+        self
+    }
+
     /// Minimum visible height in lines — switches the editor from greedy (fill
     /// the proposal) to intrinsic sizing (grow with content up to `max_lines`,
     /// then scroll). The composer pattern.
@@ -477,6 +488,12 @@ impl Widget for CodeEditor {
             .on_triple_tap({
                 let state = self.state.clone();
                 move |event, ctx| super::mouse::handle_triple_tap(&state, event.position, ctx)
+            })
+            .on_access_action_request({
+                let state = self.state.clone();
+                move |action, target, data, ctx| {
+                    super::a11y::handle_access_action(&state, action, target, data, ctx)
+                }
             });
         ctx.apply_self_handlers(handlers);
 

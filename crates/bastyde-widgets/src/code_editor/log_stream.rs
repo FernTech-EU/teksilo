@@ -367,6 +367,49 @@ pub(crate) fn ensure_window(st: &mut CodeEditorState, force: bool) -> bool {
     true
 }
 
+/// The visible window's block snapshots for the accessibility walk, read-only.
+///
+/// Returns `(first_row, total_rows, snapshots)`. The log's a11y tree is
+/// *windowed* like its render: emitting a paragraph per line of a 100k-line
+/// buffer on every append (each append re-walks the AT tree) would be O(N) per
+/// line. This resolves the same visible range the render uses — through the
+/// cached anchor, without mutating it — so the AT tree tracks what is on screen.
+pub(crate) fn a11y_window(
+    st: &CodeEditorState,
+) -> (
+    usize,
+    usize,
+    Vec<bastyde_text::text_document::BlockSnapshot>,
+) {
+    let total = st.log.as_ref().map_or(0, |l| l.total);
+    if total == 0 {
+        return (0, 0, Vec::new());
+    }
+    let row_h = current_row_height(st);
+    if row_h <= 0.0 {
+        return (0, total, Vec::new());
+    }
+    let first = ((st.scroll_y.get() / row_h).floor() as usize).min(total - 1);
+    let visible = (st.viewport_height / row_h).ceil() as usize + 1;
+    let count = (visible + OVERSCAN_ROWS).min(total - first).max(1);
+    let anchor = st.log.as_ref().and_then(|l| l.anchor);
+    let Some(mut pos) = resolve_row_position(&st.document, first, anchor) else {
+        return (first, total, Vec::new());
+    };
+    let mut snaps = Vec::with_capacity(count);
+    for _ in 0..count {
+        let Some(snap) = st
+            .document
+            .snapshot_block_at_position_without_highlights(pos)
+        else {
+            break;
+        };
+        pos = snap.position + snap.length + 1;
+        snaps.push(snap);
+    }
+    (first, total, snaps)
+}
+
 /// Gather `(row, snapshot, tint)` for `count` rows from `first`, chaining forward
 /// by character position — each row is one O(log n) rope-backed snapshot, not the
 /// O(n) block walk `TextBlock::next` would be — and refreshing the `(row, char

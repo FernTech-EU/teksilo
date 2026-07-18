@@ -284,6 +284,12 @@ impl Widget for LogView {
             .on_triple_tap({
                 let state = self.state.clone();
                 move |event, ctx| super::mouse::handle_triple_tap(&state, event.position, ctx)
+            })
+            .on_access_action_request({
+                let state = self.state.clone();
+                move |action, target, data, ctx| {
+                    super::a11y::handle_access_action(&state, action, target, data, ctx)
+                }
             });
         ctx.apply_self_handlers(handlers);
 
@@ -495,7 +501,12 @@ impl Widget for LogViewBody {
             .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.document_version
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        // Scroll and selection are repaint-only.
+        // Scroll repaints — and, vertically, re-walks the accessibility tree:
+        // the log's AT tree is windowed to the visible lines, so it must follow
+        // the scroll or a screen reader would read the lines that used to be on
+        // screen. (Horizontal scroll never changes which lines are visible.)
+        st.scroll_y
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         for sig in [&st.scroll_x, &st.scroll_y] {
             sig.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         }
@@ -612,17 +623,14 @@ impl Widget for LogViewBody {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use bastyde_core::accesskit::{Action, Live, Role};
+        use bastyde_core::accesskit::Live;
 
         let st = self.state.borrow();
-        // A viewer, not an editor: `Document` keeps caret + selection reportable
-        // to a screen reader (a `Log`/`Code` role would not). The paragraph/run
-        // tree lands with the shared a11y walk in the next phase.
-        builder.set_role(Role::Document);
-        builder.set_read_only();
-        builder.add_action(Action::Focus);
-        builder.add_action(Action::ScrollIntoView);
-        builder.add_action(Action::SetTextSelection);
+        // Role::Document (a viewer — `Document` keeps caret + selection reportable
+        // where `Log`/`Code` would not), read-only, and the *windowed* paragraph/
+        // run tree: only the visible lines, so an append re-walks O(window), not
+        // O(document).
+        super::a11y::build_log_a11y(&st, builder);
 
         // A log that asked for it announces its new lines. Off by default —
         // `announce_appends` is the opt-in.

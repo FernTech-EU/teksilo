@@ -139,6 +139,12 @@ pub(crate) struct CodeEditorState {
     /// reshaping — a colour never changes a glyph advance.
     pub pending_recolor: bool,
     pub wrap_mode: WrapMode,
+    /// Cull the render to the visible clip band (opt-in). Meaningful only when
+    /// the editor is laid out at full document height inside an outer scroller,
+    /// where the body's own bounds span the whole document and the on-screen
+    /// slice is a narrow clip — then this renders only the visible band. Off by
+    /// default: a normally-scrolling editor already renders a viewport's worth.
+    pub window_to_clip: bool,
 
     // --- Shared runtime ----------------------------------------------------
     pub blink: CaretBlink,
@@ -295,6 +301,7 @@ impl CodeEditorState {
             pending_full_render: true,
             pending_recolor: false,
             wrap_mode,
+            window_to_clip: false,
             blink: CaretBlink::new(),
             debounce: Debounce::new(),
             has_focus: false,
@@ -409,6 +416,18 @@ impl CodeEditorState {
                 true
             }
         });
+    }
+
+    /// The flow snapshot the accessibility walk reads.
+    ///
+    /// Uses the document's no-paint variant: the AT tree walks fragments, never
+    /// the paint overlay, so computing a paint span per highlight range here
+    /// would be pure waste (it dominated the a11y rebuild on a large highlighted
+    /// document). A code editor always renders every highlight session, so the
+    /// mask is `all` — there is no show/hide-highlights toggle to honour.
+    pub fn flow_snapshot_for_a11y(&self) -> bastyde_text::text_document::FlowSnapshot {
+        self.document
+            .snapshot_flow_masked_no_paint(&bastyde_text::text_document::HighlightMask::all())
     }
 
     /// Invalidate the cached accessibility snapshot. Called whenever the
