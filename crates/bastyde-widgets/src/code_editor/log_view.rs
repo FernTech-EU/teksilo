@@ -496,17 +496,20 @@ impl Widget for LogViewBody {
         let registry = ctx.binding_registry();
         let st = self.state.borrow();
 
-        // An append repaints and re-walks the accessibility tree.
-        st.document_version
-            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+        // An append repaints. It does NOT drive the accessibility rebuild — the
+        // AT tree is whole-tree (no per-widget dirty tracking), so binding a
+        // 100k-line streaming log's per-append version to it would re-walk the
+        // entire app tree at frame rate. Instead the tree re-walks on the log's
+        // own `a11y_version`, bumped only when the *visible window* changes: a
+        // scroll crossing a row, a following-tail append, an eviction — never a
+        // pixel-scroll on the same rows or a tail append while scrolled away.
         st.document_version
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        // Scroll repaints — and, vertically, re-walks the accessibility tree:
-        // the log's AT tree is windowed to the visible lines, so it must follow
-        // the scroll or a screen reader would read the lines that used to be on
-        // screen. (Horizontal scroll never changes which lines are visible.)
-        st.scroll_y
-            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+        if let Some(log) = st.log.as_ref() {
+            log.a11y_version
+                .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+        }
+        // Scroll and selection are repaint-only.
         for sig in [&st.scroll_x, &st.scroll_y] {
             sig.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         }

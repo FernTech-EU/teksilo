@@ -2578,4 +2578,52 @@ mod log {
             "a line is 'N of 1000', not 'N of window'"
         );
     }
+
+    /// The a11y tree re-walk is driven by the visible window, not by raw scroll /
+    /// append signals: a following append and a row-crossing scroll bump
+    /// `a11y_version`, but a tail append while scrolled away and a sub-row pixel
+    /// scroll do not — so a streaming log does not rebuild the whole app AT tree
+    /// on every pixel or every off-window line.
+    #[test]
+    fn a11y_version_bumps_only_when_the_window_changes() {
+        let st = log_state();
+        enqueue_owned(&st, (0..200).map(|i| format!("line {i}")));
+        pump(&st);
+        let ver = st.borrow().log.as_ref().unwrap().a11y_version.clone();
+
+        // Following the tail: an append advances the window -> bump.
+        let v0 = ver.get();
+        enqueue(&st, &["new"]);
+        pump(&st);
+        assert!(ver.get() > v0, "a following append must bump a11y_version");
+
+        // Scroll up and settle (no longer following).
+        st.borrow().scroll_y.set(0.0);
+        pump(&st);
+        let v1 = ver.get();
+        // A tail append now leaves the visible window unchanged.
+        enqueue(&st, &["another"]);
+        pump(&st);
+        assert_eq!(
+            ver.get(),
+            v1,
+            "a tail append while scrolled away must not bump"
+        );
+
+        // A sub-row pixel scroll stays on the same first row.
+        let row_h = st.borrow().log.as_ref().unwrap().row_height;
+        let v2 = ver.get();
+        st.borrow().scroll_y.set(row_h * 0.3);
+        pump(&st);
+        assert_eq!(ver.get(), v2, "a sub-row pixel scroll must not bump");
+
+        // Crossing to a new first row changes the window.
+        let v3 = ver.get();
+        st.borrow().scroll_y.set(row_h * 5.0);
+        pump(&st);
+        assert!(
+            ver.get() > v3,
+            "crossing to a new row must bump a11y_version"
+        );
+    }
 }

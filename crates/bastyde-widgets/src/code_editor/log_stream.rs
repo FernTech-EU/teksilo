@@ -33,6 +33,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use bastyde_core::Signal;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{MoveMode, SelectionType};
@@ -109,6 +110,19 @@ pub(crate) struct LogStreamState {
     /// last row and misplace the scrollbar. This is maintained directly from the
     /// appends and evictions instead, and published to `line_count`.
     pub total: usize,
+    /// Bumped only when the *visible window* changes — the accessibility tree
+    /// binds this at `AccessibilityOnly` instead of `scroll_y` / `document_version`
+    /// so it re-walks (a whole-tree rebuild, since the framework has no per-widget
+    /// a11y dirty tracking) only when the exposed lines actually change: a scroll
+    /// crossing a row, a following-tail append, or an eviction. A pixel-scroll that
+    /// stays on the same rows, or a tail append while scrolled away, does not. See
+    /// [`bump_a11y_if_window_changed`].
+    pub a11y_version: Signal<u64>,
+    /// The `(first, count)` the a11y tree was last built for, to detect a real
+    /// window change. Deliberately excludes `total`: the per-line "of N" count
+    /// then lags a tail append while scrolled up, which refreshes on the next
+    /// scroll — cheap staleness against a per-append whole-tree rebuild.
+    pub last_a11y_sig: Option<(usize, usize)>,
 }
 
 impl LogStreamState {
@@ -124,6 +138,8 @@ impl LogStreamState {
             needs_rewindow: true,
             pristine: true,
             total: 0,
+            a11y_version: Signal::new(0),
+            last_a11y_sig: None,
         }
     }
 }
@@ -222,6 +238,10 @@ pub(crate) fn tick(st: &mut CodeEditorState, delta: f32) -> bool {
         &st.viewport_ratio_y,
     );
 
+    // 10. Re-walk the accessibility tree only if the visible window changed —
+    //     after the scroll has settled (follow-tail / drag), so `first` is final.
+    bump_a11y_if_window_changed(st);
+
     content_changed || had_events || drag_active || windowed
 }
 
@@ -310,6 +330,25 @@ fn enforce_scrollback(st: &mut CodeEditorState) -> bool {
     true
 }
 
+/// The visible window `(first, count, total)` for the current scroll, or `None`
+/// when there is nothing to show (no rows, or no row height learned yet). Shared
+/// by the render window, the a11y window, and the a11y-change check, so the three
+/// always agree on which rows are visible.
+fn window_bounds(st: &CodeEditorState) -> Option<(usize, usize, usize)> {
+    let total = st.log.as_ref().map_or(0, |l| l.total);
+    if total == 0 {
+        return None;
+    }
+    let row_h = current_row_height(st);
+    if row_h <= 0.0 {
+        return None;
+    }
+    let first = ((st.scroll_y.get() / row_h).floor() as usize).min(total - 1);
+    let visible = (st.viewport_height / row_h).ceil() as usize + 1;
+    let count = (visible + OVERSCAN_ROWS).min(total - first).max(1);
+    Some((first, count, total))
+}
+
 /// Shape the rows the viewport can show, and only those. Returns whether it
 /// actually (re)shaped. Also called from the body's paint, where the scroll
 /// offset is authoritative, so it must be idempotent for an unchanged window.
@@ -318,8 +357,7 @@ pub(crate) fn ensure_window(st: &mut CodeEditorState, force: bool) -> bool {
     if row_h <= 0.0 {
         return false;
     }
-    let total = st.log.as_ref().map_or(0, |l| l.total);
-    if total == 0 {
+    let Some((first, count, total)) = window_bounds(st) else {
         // Nothing appended yet — the document's lone empty block is not a row.
         st.engine.set_uniform_extent(0, row_h);
         if let Some(l) = st.log.as_mut() {
@@ -327,10 +365,7 @@ pub(crate) fn ensure_window(st: &mut CodeEditorState, force: bool) -> bool {
             l.row_height = row_h;
         }
         return false;
-    }
-    let first = ((st.scroll_y.get() / row_h).floor() as usize).min(total - 1);
-    let visible = (st.viewport_height / row_h).ceil() as usize + 1;
-    let count = (visible + OVERSCAN_ROWS).min(total - first).max(1);
+    };
 
     let (needs_flag, same_window, same_height) = {
         let l = st.log.as_ref();
@@ -381,17 +416,10 @@ pub(crate) fn a11y_window(
     usize,
     Vec<bastyde_text::text_document::BlockSnapshot>,
 ) {
-    let total = st.log.as_ref().map_or(0, |l| l.total);
-    if total == 0 {
-        return (0, 0, Vec::new());
-    }
-    let row_h = current_row_height(st);
-    if row_h <= 0.0 {
+    let Some((first, count, total)) = window_bounds(st) else {
+        let total = st.log.as_ref().map_or(0, |l| l.total);
         return (0, total, Vec::new());
-    }
-    let first = ((st.scroll_y.get() / row_h).floor() as usize).min(total - 1);
-    let visible = (st.viewport_height / row_h).ceil() as usize + 1;
-    let count = (visible + OVERSCAN_ROWS).min(total - first).max(1);
+    };
     let anchor = st.log.as_ref().and_then(|l| l.anchor);
     let Some(mut pos) = resolve_row_position(&st.document, first, anchor) else {
         return (first, total, Vec::new());
@@ -408,6 +436,24 @@ pub(crate) fn a11y_window(
         snaps.push(snap);
     }
     (first, total, snaps)
+}
+
+/// Bump `a11y_version` when the visible window changed, so the accessibility tree
+/// re-walks only then. Compares the current `(first, count)` to the last one the
+/// tree was built for — a scroll that stays on the same rows, or a tail append
+/// while scrolled away, leaves it unchanged and triggers no rebuild.
+fn bump_a11y_if_window_changed(st: &mut CodeEditorState) {
+    let sig = window_bounds(st).map(|(first, count, _total)| (first, count));
+    let version = match st.log.as_mut() {
+        Some(l) if l.last_a11y_sig != sig => {
+            l.last_a11y_sig = sig;
+            l.a11y_version.clone()
+        }
+        _ => return,
+    };
+    // Set outside the mutable borrow: the AccessibilityOnly observers this wakes
+    // only flip the tree's a11y-dirty flag, never re-enter the state.
+    version.set(version.get() + 1);
 }
 
 /// Gather `(row, snapshot, tint)` for `count` rows from `first`, chaining forward
