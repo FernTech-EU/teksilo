@@ -99,6 +99,11 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
         mutating: true,
     },
     ToolDescriptor {
+        name: "right_click",
+        description: "Right-click a node (secondary button at its point) to open its context menu.",
+        mutating: true,
+    },
+    ToolDescriptor {
         name: "inject_key",
         description: "Inject a key press (with optional modifiers) to the focused widget.",
         mutating: true,
@@ -163,5 +168,5 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
 ];
 
-/// The number of tools in the catalog (26).
+/// The number of tools in the catalog (27).
 pub const TOOL_COUNT: usize = TOOL_CATALOG.len();

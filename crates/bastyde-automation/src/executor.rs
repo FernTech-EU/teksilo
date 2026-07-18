@@ -152,6 +152,21 @@ pub fn execute(
             }
             finish_settle(tree, ops, settle)
         }
+        AutomationOp::RightClick { node } => {
+            // Resolve the node's pointer point (prefers its own AT bounds, so a
+            // synthetic child — scene item, rich-text run — is right-clicked at
+            // its own centre, not its owning widget's), then drive a real
+            // Secondary press+release. That runs the same `PointerDown`
+            // → `show_context_menu_for` path a user's right-click does, so the
+            // widget's `.context_menu(..)` factory opens.
+            let update = tree.sync_accessibility();
+            let Some(p) = node_point(tree, &update, *node) else {
+                return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
+            };
+            tree.pointer_down_button(p, bastyde_core::PointerButton::Secondary);
+            tree.pointer_up_button(p, bastyde_core::PointerButton::Secondary);
+            finish_settle(tree, ops, settle)
+        }
         AutomationOp::InjectKey {
             key,
             ctrl,

@@ -494,6 +494,25 @@ impl WidgetTree {
                             crate::focus::FocusOrigin::Programmatic,
                             &mut *ops,
                         );
+                    } else if *action == accesskit::Action::ShowContextMenu {
+                        // A "show context menu" AT action — a screen reader's
+                        // menu key, or an automation `right_click` /
+                        // `invoke_action(node, "show_context_menu")` — first
+                        // offers itself to the node's own `on_access_action`
+                        // handlers. If none consume it, fall through to the very
+                        // same machinery a Secondary `PointerDown` drives, so a
+                        // widget's `.context_menu(..)` factory opens without the
+                        // caller having to synthesise a right-click. The AT
+                        // action carries no point, so anchor the menu at the
+                        // node's centre. Without this, the AT action was a silent
+                        // no-op for every widget that wires its menu through the
+                        // factory (i.e. all of them) — see `show_context_menu_for`.
+                        let handled =
+                            self.dispatch_to_widget_returning_handled(id, &event, &mut *ops);
+                        if !handled {
+                            let position = self.arena.bounds(id).center();
+                            self.show_context_menu_for(id, position, &mut *ops);
+                        }
                     } else {
                         self.dispatch_to_widget(id, &event, &mut *ops);
                     }

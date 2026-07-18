@@ -104,7 +104,7 @@ bridge — the method is the identity. The GUI-free DTO toolkit is available as
 
 The server binary builds from `cargo build -p bastyde-automation-mcp`.
 
-## Tool surface (24 tools)
+## Tool surface (27 tools)
 
 Mutating tools accept an optional `settle` argument (see the settle model
 below); query tools don't. Node ids come from `snapshot_tree` / `find_node`
@@ -125,8 +125,8 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 **Drive (AT actions)** — `invoke_action`, `focus_node`, `set_value`,
 `expand`, `collapse`, `scroll`
 
-**Synthetic input** — `inject_pointer`, `inject_key`, `type_text`,
-`type_ime`, `drag_node`
+**Synthetic input** — `inject_pointer`, `right_click`, `inject_key`,
+`type_text`, `type_ime`, `drag_node`
 
 **Introspection** — `get_overlays`, `get_shortcuts`, `list_live_regions`,
 `pull_announcements`
@@ -153,6 +153,38 @@ widget's `Debug` repr (its constructor parameters). Layout nodes are keyed by
 the **same** node-id space as the AT tools, so when a widget appears in both,
 the two records share an `id` and can be correlated. (Coordinates are logical
 window-relative pixels, identical to the AT `bounds`.)
+
+### Right-click & context menus
+
+Bastyde context menus are attached with the `.context_menu(factory)` builder
+and open on a **Secondary `PointerDown`** — a real right-click. To open one from
+automation, use the node-based **`right_click`** tool:
+
+```jsonc
+// 1. Find the row / cell / item you want the menu for.
+find_node { "role": "Row", "label": "report.pdf" }   // → { "node": 123 }
+// 2. Right-click it — injects a secondary press+release at its centre.
+right_click { "node": 123 }
+// 3. Read the menu that opened, then pick an item.
+get_overlays                                          // → { "count": 1, … }
+find_node { "role": "MenuItem", "label": "Rename" }  // → { "node": 456 }
+invoke_action { "node": 456, "action": "click" }
+```
+
+Equivalent alternatives, in order of preference:
+
+- **`right_click(node)`** — the clearest verb; no coordinate math. Preferred.
+- **`invoke_action(node, "show_context_menu")`** — the `ShowContextMenu` AT
+  action. It routes to the same `.context_menu(..)` factory (unless the widget
+  wires its *own* `ShowContextMenu` handler, which then wins). This is exactly
+  what a screen reader's "show context menu" does.
+- **`inject_pointer(x, y, button="secondary")`** — the low-level path. Only
+  reach for it when you need a menu at a *specific point* rather than a node's
+  centre; you must supply coordinates yourself (from a node's `bounds`).
+
+After any of these, **settle** runs automatically, so the very next
+`snapshot_tree` / `get_overlays` / `find_node` sees the mounted menu. Dismiss it
+with `inject_key { "key": "escape" }` or by clicking elsewhere.
 
 ### Multi-window routing
 

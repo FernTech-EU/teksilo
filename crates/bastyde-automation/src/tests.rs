@@ -38,6 +38,13 @@ struct Probe {
     accept_set_value: bool,
     opens_window: bool,
     tristate_mixed: bool,
+    /// Attach a `.context_menu(..)` factory that mounts a `Role::Menu` child
+    /// labelled "context-menu" — the fixture for right-click / ShowContextMenu.
+    has_context_menu: bool,
+    /// When true, also advertise + explicitly handle `Action::ShowContextMenu`
+    /// (bumping `clicks`) so a test can prove the widget's own handler wins over
+    /// the factory fallback.
+    handles_show_context_menu: bool,
     clicks: Signal<u64>,
     taps: Signal<u64>,
     typed: Signal<String>,
@@ -63,6 +70,8 @@ impl Probe {
             accept_set_value: false,
             opens_window: false,
             tristate_mixed: false,
+            has_context_menu: false,
+            handles_show_context_menu: false,
             clicks: Signal::new(0),
             taps: Signal::new(0),
             typed: Signal::new(String::new()),
@@ -87,6 +96,17 @@ impl Probe {
         self.tristate_mixed = true;
         self
     }
+    /// Attach a context-menu factory (see [`Probe::has_context_menu`]).
+    fn with_context_menu(mut self) -> Self {
+        self.has_context_menu = true;
+        self
+    }
+    /// Advertise + explicitly handle `Action::ShowContextMenu` in the widget's
+    /// own handler (see [`Probe::handles_show_context_menu`]).
+    fn handling_show_context_menu(mut self) -> Self {
+        self.handles_show_context_menu = true;
+        self
+    }
 }
 
 impl Widget for Probe {
@@ -105,6 +125,7 @@ impl Widget for Probe {
         let value_sig = self.value.clone();
         let accept_set = self.accept_set_value;
         let opens_window = self.opens_window;
+        let handles_show = self.handles_show_context_menu;
         let taps = self.taps.clone();
         let typed = self.typed.clone();
         let received = self.received.clone();
@@ -135,6 +156,12 @@ impl Widget for Probe {
                     }
                     EventResponse::Handled
                 }
+                accesskit::Action::ShowContextMenu if handles_show => {
+                    // Prove the widget's own handler wins over the factory
+                    // fallback: bump `clicks` and claim the action.
+                    clicks.set(clicks.get() + 1);
+                    EventResponse::Handled
+                }
                 _ => EventResponse::Ignored,
             })
             .on_tap(move |_e: &TapEvent, _ctx| {
@@ -157,6 +184,11 @@ impl Widget for Probe {
                 }
                 EventResponse::Ignored
             });
+        if self.has_context_menu {
+            handlers = handlers.context_menu(|_pos, _ctx| {
+                Some(Box::new(Probe::new(accesskit::Role::Menu, "context-menu")) as Box<dyn Widget>)
+            });
+        }
         ctx.apply_self_handlers(handlers);
         Vec::new()
     }
@@ -181,6 +213,9 @@ impl Widget for Probe {
         builder.add_action(accesskit::Action::Click);
         if self.accept_set_value {
             builder.add_action(accesskit::Action::SetValue);
+        }
+        if self.handles_show_context_menu {
+            builder.add_action(accesskit::Action::ShowContextMenu);
         }
     }
 }
@@ -981,9 +1016,132 @@ fn dto_round_trips_through_json() {
     assert_eq!(back, reply);
 }
 
+// ---------------------------------------------------------------------------
+// Right-click / context menus
+// ---------------------------------------------------------------------------
+
+/// Run `GetOverlays` and return the active-overlay count.
+fn overlay_count(tree: &mut WidgetTree, ops: &mut RecordingWindowOps) -> u64 {
+    let reply = execute(tree, ops, &AutomationOp::GetOverlays, &default_settle());
+    let AutomationReply::Ok { data } = reply else {
+        panic!("get_overlays: {reply:?}");
+    };
+    data["count"].as_u64().expect("count field")
+}
+
 #[test]
-fn tool_catalog_has_26_entries() {
-    assert_eq!(crate::mcp_schema::TOOL_COUNT, 26);
+fn right_click_opens_the_context_menu_factory() {
+    let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "Row").with_context_menu());
+    let mut ops = RecordingWindowOps::new();
+
+    assert_eq!(overlay_count(&mut tree, &mut ops), 0, "no overlay before");
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::RightClick { node: node_ref(id) },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "right_click ok: {reply:?}");
+
+    assert_eq!(
+        overlay_count(&mut tree, &mut ops),
+        1,
+        "context menu overlay opened by right_click"
+    );
+    assert_valid(&mut tree);
+
+    // The mounted menu is visible in the AT snapshot.
+    let found = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::FindNode {
+            role: Some("Menu".into()),
+            label: None,
+        },
+        &default_settle(),
+    );
+    let AutomationReply::Ok { data } = found else {
+        panic!("{found:?}");
+    };
+    assert!(data["node"].as_u64().is_some(), "menu node found: {data}");
+}
+
+#[test]
+fn right_click_on_missing_node_is_not_found() {
+    let (mut tree, _id) = laid_out(Probe::new(accesskit::Role::Button, "Row").with_context_menu());
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::RightClick { node: 999_999 },
+        &default_settle(),
+    );
+    assert!(
+        matches!(reply, AutomationReply::Err { ref code, .. } if code == codes::NOT_FOUND),
+        "expected NOT_FOUND, got {reply:?}"
+    );
+}
+
+#[test]
+fn show_context_menu_action_opens_the_factory_menu() {
+    // The framework a11y route: `invoke_action(node, "show_context_menu")` on a
+    // widget that wires its menu via `.context_menu(..)` (and does NOT handle the
+    // AT action itself) now opens the menu — it used to be a silent no-op.
+    let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "Row").with_context_menu());
+    let mut ops = RecordingWindowOps::new();
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InvokeAction {
+            node: node_ref(id),
+            action: "show_context_menu".into(),
+        },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "invoke show_context_menu ok: {reply:?}");
+    assert_eq!(
+        overlay_count(&mut tree, &mut ops),
+        1,
+        "show_context_menu AT action opened the factory menu"
+    );
+}
+
+#[test]
+fn show_context_menu_prefers_the_widgets_own_handler() {
+    // A widget that explicitly handles `Action::ShowContextMenu` wins over the
+    // factory fallback: its handler fires and NO factory overlay is mounted.
+    let probe = Probe::new(accesskit::Role::Button, "Row")
+        .with_context_menu()
+        .handling_show_context_menu();
+    let clicks = probe.clicks.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(probe);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let mut ops = RecordingWindowOps::new();
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InvokeAction {
+            node: node_ref(id),
+            action: "show_context_menu".into(),
+        },
+        &default_settle(),
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(clicks.get(), 1, "the widget's own handler fired");
+    assert_eq!(
+        overlay_count(&mut tree, &mut ops),
+        0,
+        "handler consumed the action — factory fallback skipped"
+    );
+}
+
+#[test]
+fn tool_catalog_has_27_entries() {
+    assert_eq!(crate::mcp_schema::TOOL_COUNT, 27);
     // Names are unique.
     let mut names: Vec<&str> = crate::mcp_schema::TOOL_CATALOG
         .iter()

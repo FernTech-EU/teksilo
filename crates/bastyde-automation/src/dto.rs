@@ -389,6 +389,13 @@ pub enum AutomationOp {
         #[serde(default)]
         button: PointerButtonDto,
     },
+    /// Right-click a node: a synthetic Secondary press+release at the node's
+    /// point, which drives the framework's context-menu machinery
+    /// (`.context_menu(..)` factory). The node-based, coordinate-free way to
+    /// open a context menu — see the `right_click` tool.
+    RightClick {
+        node: NodeRef,
+    },
     InjectKey {
         key: String,
         #[serde(default)]

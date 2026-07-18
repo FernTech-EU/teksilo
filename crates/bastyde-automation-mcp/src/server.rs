@@ -117,7 +117,9 @@ pub struct InvokeParams {
     pub window_id: Option<u64>,
     pub node: u64,
     /// AT action name, e.g. click, focus, expand, collapse, set_value,
-    /// increment, decrement, show_context_menu.
+    /// increment, decrement, show_context_menu. `show_context_menu` opens the
+    /// node's context menu (same result as the `right_click` tool, which is the
+    /// clearer verb for that).
     pub action: String,
     pub settle: Option<SettleArg>,
 }
@@ -146,7 +148,9 @@ pub struct InjectPointerParams {
     pub y: f32,
     /// click (default), down, up, or move.
     pub action: Option<String>,
-    /// primary (default), secondary, middle, back, forward.
+    /// primary (default), secondary, middle, back, forward. `secondary` is a
+    /// right-click (opens a context menu); prefer the node-based `right_click`
+    /// tool for that so you don't have to compute a point.
     pub button: Option<String>,
     pub settle: Option<SettleArg>,
 }
@@ -465,6 +469,27 @@ impl AutomationServer {
                 action: pointer_action(&p.action),
                 button: pointer_button(&p.button),
             },
+            settle,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Right-click a node to open its context menu. Injects a secondary (right) \
+                       button press+release at the node's centre — the node-based, coordinate-free \
+                       way to trigger a widget's context menu. Prefer this over inject_pointer with \
+                       button=secondary. After it settles, call get_overlays or snapshot_tree to \
+                       read the opened menu (a Menu/MenuItem subtree), then invoke_action(item, \
+                       \"click\") to pick an item."
+    )]
+    pub(crate) async fn right_click(
+        &self,
+        Parameters(p): Parameters<NodeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let settle = settle_spec(&p.settle);
+        self.run(
+            p.window_id,
+            AutomationOp::RightClick { node: p.node },
             settle,
         )
         .await
