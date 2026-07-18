@@ -228,7 +228,7 @@ const PITCH: f32 = 10.0;
 ///
 /// A 45° band drawn across a region of height `c` has a **bounding box** of
 /// roughly `(c + PITCH) x c` — it slides one pixel sideways for every pixel down.
-/// [`PathAtlas`](bastyde_render) rasterizes a path by its bounding box and only
+/// `bastyde-render`'s `PathAtlas` rasterizes a path by its bounding box and only
 /// *composites* it through the clip, so `set_clip` does nothing to shrink the
 /// bitmap: a band drawn across a tall strip in one piece is a quadratic raster.
 ///

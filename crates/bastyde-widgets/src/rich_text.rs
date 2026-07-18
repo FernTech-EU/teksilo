@@ -340,8 +340,10 @@ impl RichTextEditor {
 
     /// Set which highlight sessions **this view** renders, at runtime.
     ///
-    /// [`HighlightMask::all`] shows every session on the document (the default);
-    /// [`HighlightMask::only`] shows a chosen set — which is how a per-editor find banner
+    /// [`HighlightMask::all`](bastyde_text::text_document::HighlightMask::all) shows every
+    /// session on the document (the default);
+    /// [`HighlightMask::only`](bastyde_text::text_document::HighlightMask::only) shows a
+    /// chosen set — which is how a per-editor find banner
     /// keeps one pane's find highlighting out of another pane over the same document.
     /// `show_highlights(false)` still overrides this to nothing.
     ///

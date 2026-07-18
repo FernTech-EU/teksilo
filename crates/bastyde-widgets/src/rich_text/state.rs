@@ -125,7 +125,8 @@ pub(crate) struct EditorState {
     /// document height inside an outer `ScrollArea` ("bastard mode") sets this
     /// `true` so paint-time culling follows the visible clip band rather than
     /// the whole-document viewport. Read in `paint()`; drives
-    /// `engine.set_render_window`. See [`RichTextEditor::window_to_clip`].
+    /// `engine.set_render_window`. See
+    /// [`RichTextEditor::window_to_clip`](crate::rich_text::RichTextEditor::window_to_clip).
     pub window_to_clip: bool,
 
     /// Which highlight sessions THIS view renders (`show_highlights` is the master switch

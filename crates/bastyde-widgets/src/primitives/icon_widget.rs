@@ -1356,7 +1356,8 @@ mod tests {
     /// vectors too).
     #[test]
     fn the_widget_alpha_dims_full_color_artwork() {
-        let svg = r##"<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#FF0000"/></svg>"##;
+        let svg =
+            r##"<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#FF0000"/></svg>"##;
         let mut tree = WidgetTree::new();
         tree.add(
             IconWidget::from_svg(svg)

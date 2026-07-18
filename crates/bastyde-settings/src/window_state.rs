@@ -10,7 +10,7 @@
 //! directly from memory without touching disk. On load, the file is
 //! migrated through [`Migrator`] steps (currently v1 → v2: `maximized:
 //! bool` → `placement: WindowPlacement`) before deserializing, and
-//! corrupt files are quarantined automatically by [`SettingsFile`].
+//! corrupt files are quarantined automatically by [`SettingsFile`](crate::SettingsFile).
 //!
 //! ## `record` is debounced, not synchronous
 //!
@@ -318,7 +318,7 @@ fn apply_window_op(windows: &mut Vec<PerWindowState>, op: &WindowOp) {
 /// Entries are [`PerWindowState`], keyed by a stable string label. [`state_for`]
 /// reads straight from memory with no I/O.
 ///
-/// ## Why this is debounced, unlike [`SettingsFile`]
+/// ## Why this is debounced, unlike [`SettingsFile`](crate::SettingsFile)
 ///
 /// `SettingsFile`'s `mutate` is a *synchronous* locked read-modify-write, which
 /// is right for a document written rarely (a settings change; one record per
@@ -329,7 +329,7 @@ fn apply_window_op(windows: &mut Vec<PerWindowState>, op: &WindowOp) {
 /// dragging visibly janky.
 ///
 /// So this service owns its own [`DebouncedWriter`] and schedules a
-/// [`WindowOp`] patch per `record`, exactly like [`crate::PersistedListModel`]:
+/// `WindowOp` patch per `record`, exactly like [`crate::PersistedListModel`]:
 /// in-memory state updates instantly (so `state_for` is always current), and
 /// the burst collapses into **one** locked read-merge-write at the debounce
 /// deadline. Frequent writes ⇒ debounced patch; rare writes ⇒ synchronous

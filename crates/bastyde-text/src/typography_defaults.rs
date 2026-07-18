@@ -137,7 +137,7 @@ pub(crate) fn needs_params_fill(d: &EditorTypographyDefaults) -> bool {
 ///
 /// The `BlockLayoutParams`-level counterpart of [`apply_to_block`], for the
 /// streaming paths ([`RichTextEngine::append_block`] /
-/// [`layout_window`](RichTextEngine::layout_window)) that shape params directly
+/// [`layout_window`](crate::RichTextEngine::layout_window)) that shape params directly
 /// rather than going through a `FlowSnapshot`. Without it those paths would
 /// ignore the engine's typography defaults that `layout_full` honours, and a
 /// view that laid out its first screen with `layout_full` and grew with
@@ -150,7 +150,6 @@ pub(crate) fn needs_params_fill(d: &EditorTypographyDefaults) -> bool {
 /// uniform-row invariant needs, since it requires them to be zero.
 ///
 /// [`RichTextEngine::append_block`]: crate::RichTextEngine::append_block
-/// [`RichTextEngine::layout_window`]: crate::RichTextEngine::layout_window
 pub(crate) fn apply_to_block_params(
     params: &mut text_typeset::layout::block::BlockLayoutParams,
     d: &EditorTypographyDefaults,

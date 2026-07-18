@@ -3,7 +3,7 @@
 
 //! The code-flavoured editing operations.
 //!
-//! Everything here reads [`CodeConfig`](super::CodeConfig), which is why it is
+//! Everything here reads [`CodeConfig`], which is why it is
 //! not in `keyboard.rs`: that module must stay correct for *any* configuration,
 //! including none, so the part that consults the injected indent width, comment
 //! token, and bracket pairs is quarantined here. The keyboard layer decides

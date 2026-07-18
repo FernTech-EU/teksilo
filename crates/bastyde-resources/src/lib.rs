@@ -10,7 +10,7 @@
 //!
 //! | Extension | Validation | Runtime type |
 //! |-----------|-----------|--------------|
-//! | `.svg` | Parsed with the real `SvgIcon` parser: it must parse **and** carry drawable geometry (see [`validate_svg`]) | `&'static SvgIcon` |
+//! | `.svg` | Parsed with the real `SvgIcon` parser: it must parse **and** carry drawable geometry (see `validate_svg`) | `&'static SvgIcon` |
 //! | `.png` | Magic bytes + IHDR chunk | `&'static RasterIcon` |
 //! | `.webp` | RIFF + WEBP signature | `&'static RasterIcon` (static) or `&'static AnimatedIcon` (animated) |
 //!
@@ -417,7 +417,13 @@ mod tests {
     #[test]
     fn files_the_parser_would_panic_on_are_rejected_at_compile_time() {
         // Malformed path data.
-        assert!(validate_svg(br#"<svg viewBox="0 0 24 24"><path d="M x!"/></svg>"#, "b.svg").is_err());
+        assert!(
+            validate_svg(
+                br#"<svg viewBox="0 0 24 24"><path d="M x!"/></svg>"#,
+                "b.svg"
+            )
+            .is_err()
+        );
         // Not an SVG at all.
         assert!(validate_svg(b"<html><body/></html>", "b.svg").is_err());
         // No coordinate space to draw into.

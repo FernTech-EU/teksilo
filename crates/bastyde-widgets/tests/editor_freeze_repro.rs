@@ -70,7 +70,12 @@ const WORD: &str = "lorem";
 fn spell_format() -> HighlightFormat {
     HighlightFormat {
         underline_style: Some(UnderlineStyle::SpellCheckUnderline),
-        underline_color: Some(Color { red: 220, green: 50, blue: 50, alpha: 255 }),
+        underline_color: Some(Color {
+            red: 220,
+            green: 50,
+            blue: 50,
+            alpha: 255,
+        }),
         ..Default::default()
     }
 }
@@ -86,14 +91,22 @@ fn word_ranges(text: &str) -> Vec<RangeHighlight> {
     for (i, ch) in text.char_indices() {
         if ch == ' ' || ch == '\n' {
             if let Some(s) = start.take() {
-                out.push(RangeHighlight { start: s, length: i - s, format: fmt.clone() });
+                out.push(RangeHighlight {
+                    start: s,
+                    length: i - s,
+                    format: fmt.clone(),
+                });
             }
         } else if start.is_none() {
             start = Some(i);
         }
     }
     if let Some(s) = start {
-        out.push(RangeHighlight { start: s, length: text.len() - s, format: fmt.clone() });
+        out.push(RangeHighlight {
+            start: s,
+            length: text.len() - s,
+            format: fmt.clone(),
+        });
     }
     out
 }
@@ -257,7 +270,8 @@ fn run_config(label: &'static str, text: &str, load: bool) -> Row {
 }
 
 fn opt(v: Option<f64>) -> String {
-    v.map(|x| format!("{x:9.2}")).unwrap_or_else(|| "        —".to_string())
+    v.map(|x| format!("{x:9.2}"))
+        .unwrap_or_else(|| "        —".to_string())
 }
 
 // A manual perf harness, not a CI guard: it prints per-frame timings and drives
@@ -285,7 +299,17 @@ fn editor_freeze_profile() {
     eprintln!("editor freeze profile — all times in ms, one focused RichTextEditor, bastard mode");
     eprintln!(
         "{:<20} {:>7} {:>8} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9}",
-        "config", "ranges", "content", "render", "a11y", "render", "a11y", "render", "a11y", "render", "a11y",
+        "config",
+        "ranges",
+        "content",
+        "render",
+        "a11y",
+        "render",
+        "a11y",
+        "render",
+        "a11y",
+        "render",
+        "a11y",
     );
     eprintln!(
         "{:<20} {:>7} {:>8} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9}",
@@ -308,7 +332,9 @@ fn editor_freeze_profile() {
         );
     }
     eprintln!();
-    eprintln!("a11y COLD split — snapshot (no-paint) vs the rest of the build (walk/geometry/diff):");
+    eprintln!(
+        "a11y COLD split — snapshot (no-paint) vs the rest of the build (walk/geometry/diff):"
+    );
     for r in &rows {
         eprintln!(
             "  {:<20} a11y_snapshot={:>8.2}   a11y_build_total={:>8.2}   walk≈{:>8.2}",

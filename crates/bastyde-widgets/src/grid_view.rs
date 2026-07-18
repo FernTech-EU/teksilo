@@ -419,7 +419,8 @@ impl<T: 'static> GridView<T> {
     /// it changes, `build()` rebuilds the cached layout strategy and reflows —
     /// the internal `scroll_y` / `focused_index` / selection are field signals on
     /// the same widget instance, so they survive the rebuild (no scroll jump).
-    /// This is the card-size-slider path; mirrors [`TabWidget::sizing`].
+    /// This is the card-size-slider path; mirrors
+    /// [`TabWidget::sizing`](crate::TabWidget::sizing).
     pub fn sizing(mut self, sizing: impl Into<Prop<GridSizing>>) -> Self {
         let sig = sizing.into().as_signal();
         self.sizing = sig.get();

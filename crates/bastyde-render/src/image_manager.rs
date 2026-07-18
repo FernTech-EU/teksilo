@@ -6,7 +6,7 @@
 //! Every image is uploaded with a full **mip chain** and sampled trilinearly, so
 //! a large source drawn small (a 512 px app icon in a 25 dp title bar, a photo
 //! in a thumbnail strip) resolves cleanly instead of aliasing. See
-//! [`crate::mipmap`] for how the chain is built — and for the two things that
+//! the `mipmap` module for how the chain is built — and for the two things that
 //! make it correct rather than merely present (linear-light averaging, and
 //! premultiplied filtering so transparent texels can't darken their
 //! neighbours).

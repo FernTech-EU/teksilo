@@ -371,7 +371,8 @@ impl SvgIcon {
             // Gradient geometry is expressed relative to the path's own bounds
             // (the space the canvas normalizes a path gradient against), so it
             // has to be re-based per op, after the fit.
-            let paint = resolve_draw_paint(&op.paint, current, op.opacity, &transform, scale, &path);
+            let paint =
+                resolve_draw_paint(&op.paint, current, op.opacity, &transform, scale, &path);
             if paint_is_invisible(&paint) {
                 continue;
             }
@@ -729,10 +730,7 @@ enum PaintRef {
     Color(Color),
     /// `url(#id)`, plus the optional fallback color CSS allows after it
     /// (`fill="url(#grad) red"`) for when the reference doesn't resolve.
-    Ref {
-        id: String,
-        fallback: Option<Color>,
-    },
+    Ref { id: String, fallback: Option<Color> },
 }
 
 impl PaintRef {
@@ -2767,7 +2765,8 @@ mod tests {
         </svg>"##;
         assert!(SvgIcon::parse(svg).unwrap().is_monochrome());
         // A stated color — even black — is a color, and full-color must honour it.
-        let colored = r##"<svg viewBox="0 0 24 24"><rect width="8" height="8" fill="black"/></svg>"##;
+        let colored =
+            r##"<svg viewBox="0 0 24 24"><rect width="8" height="8" fill="black"/></svg>"##;
         assert!(!SvgIcon::parse(colored).unwrap().is_monochrome());
     }
 

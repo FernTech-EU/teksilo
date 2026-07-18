@@ -6,8 +6,8 @@
 //! The third face of the editor core, and the one that is *not* an editor. A
 //! program writes to it, forever, faster than a person types; a person only
 //! reads, scrolls, selects, and copies. That inversion is why it does not share
-//! the editor's frame step — the details are in [`log_stream`](super::log_stream)
-//! — but it *is* the same [`CodeEditorState`](super::state::CodeEditorState), so
+//! the editor's frame step — the details are in [`log_stream`]
+//! — but it *is* the same [`CodeEditorState`], so
 //! selection, copy, scrolling, theming, and accessibility come for free and
 //! cannot drift from the editors'.
 //!

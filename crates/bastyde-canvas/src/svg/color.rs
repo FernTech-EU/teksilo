@@ -145,11 +145,7 @@ fn parse_hsl_fn(args: &str) -> Option<Color> {
     } else if let Some(r) = h_raw.strip_suffix("rad") {
         r.trim().parse::<f32>().ok()?.to_degrees()
     } else {
-        h_raw
-            .trim_end_matches("deg")
-            .trim()
-            .parse::<f32>()
-            .ok()?
+        h_raw.trim_end_matches("deg").trim().parse::<f32>().ok()?
     };
     let pct = |s: &str| -> Option<f32> {
         Some(
@@ -266,7 +262,13 @@ mod tests {
         approx(parse_color("#f00").unwrap(), 1.0, 0.0, 0.0, 1.0);
         approx(parse_color("#FF0000").unwrap(), 1.0, 0.0, 0.0, 1.0);
         // Shorthand doubles each nibble: #f80 == #ff8800, NOT #f08000.
-        approx(parse_color("#f80").unwrap(), 1.0, 0x88 as f32 / 255.0, 0.0, 1.0);
+        approx(
+            parse_color("#f80").unwrap(),
+            1.0,
+            0x88 as f32 / 255.0,
+            0.0,
+            1.0,
+        );
         approx(parse_color("#00ff0080").unwrap(), 0.0, 1.0, 0.0, 0.502);
         approx(parse_color("#0f08").unwrap(), 0.0, 1.0, 0.0, 0.533);
         assert!(parse_color("#12345").is_none());
@@ -276,18 +278,54 @@ mod tests {
     #[test]
     fn rgb_and_rgba_functions() {
         approx(parse_color("rgb(255, 0, 0)").unwrap(), 1.0, 0.0, 0.0, 1.0);
-        approx(parse_color("rgba(0,255,0,0.5)").unwrap(), 0.0, 1.0, 0.0, 0.5);
-        approx(parse_color("rgb(100%, 0%, 0%)").unwrap(), 1.0, 0.0, 0.0, 1.0);
+        approx(
+            parse_color("rgba(0,255,0,0.5)").unwrap(),
+            0.0,
+            1.0,
+            0.0,
+            0.5,
+        );
+        approx(
+            parse_color("rgb(100%, 0%, 0%)").unwrap(),
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+        );
         // Modern space-separated syntax with a slash alpha.
-        approx(parse_color("rgb(0 0 255 / 25%)").unwrap(), 0.0, 0.0, 1.0, 0.25);
+        approx(
+            parse_color("rgb(0 0 255 / 25%)").unwrap(),
+            0.0,
+            0.0,
+            1.0,
+            0.25,
+        );
         assert!(parse_color("rgb(1, 2)").is_none());
     }
 
     #[test]
     fn hsl_functions() {
-        approx(parse_color("hsl(0, 100%, 50%)").unwrap(), 1.0, 0.0, 0.0, 1.0);
-        approx(parse_color("hsl(120deg 100% 50%)").unwrap(), 0.0, 1.0, 0.0, 1.0);
-        approx(parse_color("hsla(240, 100%, 50%, 0.5)").unwrap(), 0.0, 0.0, 1.0, 0.5);
+        approx(
+            parse_color("hsl(0, 100%, 50%)").unwrap(),
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+        );
+        approx(
+            parse_color("hsl(120deg 100% 50%)").unwrap(),
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+        );
+        approx(
+            parse_color("hsla(240, 100%, 50%, 0.5)").unwrap(),
+            0.0,
+            0.0,
+            1.0,
+            0.5,
+        );
     }
 
     #[test]

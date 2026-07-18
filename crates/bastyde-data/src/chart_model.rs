@@ -63,7 +63,11 @@ pub struct ChartDatum<T> {
 
 impl<T> ChartDatum<T> {
     pub fn new(category: T, value: f32) -> Self {
-        Self { category, value, color: None }
+        Self {
+            category,
+            value,
+            color: None,
+        }
     }
 
     /// Override this point's color (a bar's fill). Ignored by line/pie charts,

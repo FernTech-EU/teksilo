@@ -13,14 +13,15 @@
 //! Every read and every write goes through the exclusive advisory lock on
 //! `<path>.lock` (see [`crate::lock`]):
 //!
-//! * [`load`](Self::load) acquires the lock, reads + migrates the file
+//! * [`load`](SettingsFile::load) acquires the lock, reads + migrates the file
 //!   fresh, and retains the [`Migrator`] for the handle's whole lifetime —
-//!   not just for this one read — because [`mutate`](Self::mutate),
-//!   [`replace`](Self::replace), [`reload_if_stale`](Self::reload_if_stale)
+//!   not just for this one read — because [`mutate`](SettingsFile::mutate),
+//!   [`replace`](SettingsFile::replace),
+//!   [`reload_if_stale`](SettingsFile::reload_if_stale)
 //!   and [`reload_from_disk`](crate::Reloadable::reload_from_disk) all need
 //!   to re-migrate a peer's still-older on-disk schema on demand, not just
 //!   once at construction.
-//! * [`mutate`](Self::mutate) and [`replace`](Self::replace) perform a
+//! * [`mutate`](SettingsFile::mutate) and [`replace`](SettingsFile::replace) perform a
 //!   **locked read-modify-write**: acquire the lock, re-read + re-migrate
 //!   the file from disk *under the lock*, apply the caller's change to that
 //!   fresh value, write it back atomically, refresh the in-memory snapshot,
@@ -34,7 +35,7 @@
 //!   burst to coalesce. Contrast [`crate::SettingsStore`] and
 //!   [`crate::PersistedListModel`], which write far more often and keep
 //!   the debounce.
-//! * [`reload_if_stale`](Self::reload_if_stale) and
+//! * [`reload_if_stale`](SettingsFile::reload_if_stale) and
 //!   [`reload_from_disk`](crate::Reloadable::reload_from_disk) are how
 //!   *reads* pick up a peer's change — a cheap mtime/len check, escalating
 //!   to a full re-read only when something actually moved.
@@ -162,7 +163,7 @@ where
     /// startup.
     ///
     /// On a genuine parse failure (the bytes are not valid TOML at all,
-    /// surviving [`MAX_READ_ATTEMPTS`] retries) the offending file is
+    /// surviving `MAX_READ_ATTEMPTS` retries) the offending file is
     /// renamed to `<path>.broken-<ts>` and the returned `SettingsFile`
     /// starts from `T::default()` — the file really is corrupt, and the
     /// quarantine lets the next launch start clean instead of repeatedly

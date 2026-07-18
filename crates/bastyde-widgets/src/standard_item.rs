@@ -1200,7 +1200,9 @@ mod tests {
             StandardTreeItem::new(lit!(
                 "A very long chapter title that cannot possibly fit this row"
             ))
-            .label_overflow(TextOverflow::Ellipsis(bastyde_canvas::EllipsisMode::Trailing))
+            .label_overflow(TextOverflow::Ellipsis(
+                bastyde_canvas::EllipsisMode::Trailing,
+            ))
             .trailing_slot(crate::button::Button::new(lit!("Open"))),
         );
         tree.layout(SizeProposal::exact(ROW_W, 56.0));

@@ -114,7 +114,7 @@ pub enum NotificationArchiveError {
 /// mutating it directly would update the live `ListModel` but never
 /// touch disk. Each method updates both variants identically from the
 /// caller's point of view (id-keyed, matching
-/// [`NotificationEntry`]'s [`Keyed`] impl), so
+/// [`NotificationEntry`]'s [`Keyed`](bastyde_settings::Keyed) impl), so
 /// `NotificationArchiveModel` never has to branch on which backend it
 /// holds.
 enum ArchiveBackend {

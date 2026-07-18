@@ -43,7 +43,7 @@
 //!
 //! ## Reload and the re-entrancy guard
 //!
-//! [`Reloadable::reload_from_disk`](crate::Reloadable::reload_from_disk)
+//! [`Reloadable::reload_from_disk`]
 //! pushes a peer's on-disk change straight into the already-handed-out
 //! `Signal<T>` for that key — see [`SignalCell::apply_external`]'s doc
 //! comment for why that requires capturing the concrete `T` at

@@ -160,7 +160,7 @@ impl PathAtlas {
     /// How many paths have been skipped for being too large to ever fit the atlas.
     ///
     /// Each one is a path that simply was not drawn. Non-zero means some geometry is
-    /// rasterizing bigger than [`max_size`](Self::max_size) — upstream, that is a
+    /// rasterizing bigger than `max_size` — upstream, that is a
     /// layout that has run away (an overlay spanning a whole scrolled document, a
     /// shape scaled by a runaway transform), and it is worth chasing rather than
     /// leaving as a hole in the frame.

@@ -1849,19 +1849,23 @@ fn vertical_fill_sizing_falls_back_to_intrinsic_width_when_unbounded() {
 
     let mut fill_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let fill_bar = fill_tree.add(
-        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| h.id)
-            .tab_sizing(TabSizing::Fill)
-            .show_scroll_arrows(false)
-            .show_overflow_dropdown(false),
+        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| {
+            h.id
+        })
+        .tab_sizing(TabSizing::Fill)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
     );
     fill_tree.layout(unbounded);
 
     let mut shared_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let shared_bar = shared_tree.add(
-        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| h.id)
-            .tab_sizing(TabSizing::Shared)
-            .show_scroll_arrows(false)
-            .show_overflow_dropdown(false),
+        TabBar::vertical(tabs(), delegate(), Signal::new(None), |_, h: &TabHandle| {
+            h.id
+        })
+        .tab_sizing(TabSizing::Shared)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
     );
     shared_tree.layout(unbounded);
 

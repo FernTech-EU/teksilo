@@ -2761,7 +2761,11 @@ fn editor_selection_reports_both_ends_from_one_read() {
 
     // A collapsed caret: both ends agree, which is how a caller detects "no selection".
     handle.select_range(3, 3);
-    assert_eq!(handle.selection(), (3, 3), "no selection ⇒ anchor == position");
+    assert_eq!(
+        handle.selection(),
+        (3, 3),
+        "no selection ⇒ anchor == position"
+    );
 
     // A forward selection: anchor at the start, caret at the end.
     handle.select_range(6, 11);

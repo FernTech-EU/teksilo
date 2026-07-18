@@ -112,7 +112,11 @@ impl GradientDef {
     /// `None` when the gradient can't paint: no stops at all, or a degenerate
     /// `objectBoundingBox` (a zero-width/height shape, whose unit square has
     /// nowhere to map to).
-    pub(crate) fn resolve(&self, bbox: Rect, to_view_box: &Transform2D) -> Option<ResolvedGradient> {
+    pub(crate) fn resolve(
+        &self,
+        bbox: Rect,
+        to_view_box: &Transform2D,
+    ) -> Option<ResolvedGradient> {
         if self.stops.is_empty() {
             return None;
         }
@@ -137,8 +141,14 @@ impl GradientDef {
         let stops = if self.stops.len() == 1 {
             let only = self.stops[0];
             vec![
-                SvgStop { offset: 0.0, ..only },
-                SvgStop { offset: 1.0, ..only },
+                SvgStop {
+                    offset: 0.0,
+                    ..only
+                },
+                SvgStop {
+                    offset: 1.0,
+                    ..only
+                },
             ]
         } else {
             self.stops.clone()
@@ -227,7 +237,8 @@ fn parse_gradient<'a>(
             None => t.parse::<f32>().ok(),
         }
     };
-    let get = |name: &str, span: f32| -> Option<f32> { el.attribute(name).and_then(|v| axis(v, span)) };
+    let get =
+        |name: &str, span: f32| -> Option<f32> { el.attribute(name).and_then(|v| axis(v, span)) };
 
     // The diagonal is what SVG normalizes a radial `r="50%"` against.
     let diag = ((view_box.width.powi(2) + view_box.height.powi(2)) / 2.0).sqrt();
@@ -250,9 +261,7 @@ fn parse_gradient<'a>(
             cy: get("cy", view_box.height)
                 .or(icy)
                 .unwrap_or_else(|| default(0.5, view_box.height)),
-            r: get("r", diag)
-                .or(ir)
-                .unwrap_or_else(|| default(0.5, diag)),
+            r: get("r", diag).or(ir).unwrap_or_else(|| default(0.5, diag)),
         }
     } else {
         // Defaults: left-to-right across the object's box.
