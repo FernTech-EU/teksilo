@@ -167,7 +167,7 @@ preserves the restored rect as you cross through `Maximized` /
 | Variant | Meaning |
 |---|---|
 | `Native` | OS-provided title bar, borders, resize handles. Default |
-| `CustomChrome` | No native title bar; a `PlatformTitleBarHost` is attached so the app can paint its own. Falls back to `Native` on X11 |
+| `CustomChrome` | No native title bar; a `PlatformTitleBarHost` is attached so the app can paint its own. On X11, falls back to `Native` when the window manager lacks `_NET_WM_MOVERESIZE` (see [title-bar.md](title-bar.md)) |
 | `None` | Borderless, no host — splash screens, popups, fully chrome-less embeds |
 
 ### `ModalConfig`

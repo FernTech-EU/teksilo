@@ -41,7 +41,9 @@ fn main() {
                                 .leading(TextWidget::new(lit!("  My App")))
                                 .center(TextWidget::new(lit!("drag · double-click to maximize"))),
                         ),
-                        // X11 (and some stubs) don't support custom chrome.
+                        // Some configurations have no backend — e.g. X11 with a window manager
+// that lacks `_NET_WM_MOVERESIZE`, where a borderless window could not
+// be moved. Always handle the `None` arm.
                         None => Box::new(TextWidget::new(lit!(
                             "(custom chrome unsupported — native decorations)",
                         ))),
@@ -65,7 +67,7 @@ fn main() {
 Two entry points matter:
 
 1. [`WindowConfig::decorations(DecorationsMode::CustomChrome)`](../crates/bastyde-core/src/window/config.rs) — opts the window into custom chrome.
-2. [`WidgetTree::title_bar_host()`](../crates/bastyde-core/src/widget_tree.rs) — returns `Option<Rc<dyn PlatformTitleBarHost>>`. `None` means *either* the app didn't opt in *or* the platform has no backend (X11). Always handle both arms; a fallback view keeps the app usable on the unsupported path.
+2. [`WidgetTree::title_bar_host()`](../crates/bastyde-core/src/widget_tree.rs) — returns `Option<Rc<dyn PlatformTitleBarHost>>`. `None` means *either* the app didn't opt in *or* the platform has no backend for this window (X11 without a `_NET_WM_MOVERESIZE`-capable window manager). Always handle both arms; a fallback view keeps the app usable on the unsupported path.
 
 Working demo: [`examples/title_bar_demo/src/main.rs`](../examples/title_bar_demo/src/main.rs) — `cargo run -p title-bar-demo`.
 
@@ -110,15 +112,41 @@ The widget is identical everywhere; the host decides what renders where. `TitleB
 
 | Capability | Wayland | macOS | Windows | X11 |
 |---|---|---|---|---|
-| `custom_chrome` supported | yes | yes | yes | no — `title_bar_host()` returns `None` |
-| `reserved_leading_inset()` | `ZERO` | ~78×22 (traffic-light cluster) | `ZERO` | — |
-| `renders_custom_controls()` | `true` | **`false`** | `true` | — |
-| `needs_custom_resize_handles()` | `true` | **`false`** | **`false`** (OS handles via `WM_NCHITTEST`) | — |
-| `begin_drag()` | winit `drag_window` | winit `drag_window` | winit `drag_window` | — |
-| `begin_resize(edge)` | winit `drag_resize_window` | `Unsupported` (NSWindow handles edges) | winit `drag_resize_window` | — |
-| `show_window_menu(at)` | xdg-shell `show_window_menu` | no-op (`Ok(())`) | `SendMessage(WM_SYSCOMMAND, SC_KEYMENU)` | — |
-| `update_hit_regions(&HitRegions)` | no-op | no-op | snapshot stored for `WM_NCHITTEST` (logical→physical converted via `GetDpiForWindow`) | — |
-| Snap-layout flyout (Win11) | n/a | n/a | yes — proc returns `HTMAXBUTTON` for the maximize-button rect | — |
+| `custom_chrome` supported | yes | yes | yes | yes, **if the WM implements `_NET_WM_MOVERESIZE`** |
+| `reserved_leading_inset()` | `ZERO` | ~78×22 (traffic-light cluster) | `ZERO` | `ZERO` |
+| `renders_custom_controls()` | `true` | **`false`** | `true` | `true` |
+| `needs_custom_resize_handles()` | `true` | **`false`** | **`false`** (OS handles via `WM_NCHITTEST`) | `true` |
+| `begin_drag()` | winit `drag_window` | winit `drag_window` | winit `drag_window` | winit `drag_window` (EWMH `_NET_WM_MOVERESIZE`) |
+| `begin_resize(edge)` | winit `drag_resize_window` | `Unsupported` (NSWindow handles edges) | winit `drag_resize_window` | winit `drag_resize_window` |
+| `has_window_menu()` | `true` | `true` | `true` | **`false`** — no OS menu exists; `TitleBar` builds its own |
+| `show_window_menu(at)` | xdg-shell `show_window_menu` | no-op (`Ok(())`) | `SendMessage(WM_SYSCOMMAND, SC_KEYMENU)` | `Unsupported` (never called) |
+| `update_hit_regions(&HitRegions)` | no-op | no-op | snapshot stored for `WM_NCHITTEST` (logical→physical converted via `GetDpiForWindow`) | no-op |
+| Snap-layout flyout (Win11) | n/a | n/a | yes — proc returns `HTMAXBUTTON` for the maximize-button rect | n/a |
+
+### X11: conditional support, and the window menu
+
+X11 has no protocol for "the client draws its own frame". Decorations are
+switched off with `_MOTIF_WM_HINTS`, after which `_NET_WM_MOVERESIZE` is the
+**only** way the window can be moved or resized — so a window manager that does
+not implement it would leave the window borderless *and* immovable. Bastyde
+therefore probes before committing: it reads `_NET_SUPPORTED` (after validating
+`_NET_SUPPORTING_WM_CHECK` with the spec's two-step self-pointing handshake) on
+a short-lived connection of its own, once per process, *before* the window is
+created — because the decoration flag has to be chosen at `WindowAttributes`
+time. If the probe fails, or no EWMH window manager is running,
+`title_bar_host()` returns `None` and the app keeps native decorations.
+
+There is also no *system window menu* on X11: winit's `show_window_menu` is an
+empty stub there and `_GTK_SHOW_WINDOW_MENU` is not implemented by KWin
+([KDE bug 454756](https://bugs.kde.org/show_bug.cgi?id=454756)). Rather than
+leave right-click dead, `has_window_menu()` reports `false` and `TitleBar`
+builds an ordinary Bastyde menu (Restore / Maximize / Minimize / Close) driving
+the same `WindowState::placement` signals its buttons use. Any future platform
+without an OS menu gets the same fallback for free.
+
+Going borderless does **not** cost keyboard window management: Alt+F7 / Alt+F8
+and the WM's own window-menu shortcut are global window-manager bindings,
+independent of who draws the frame.
 
 On macOS, because `renders_custom_controls()` is `false`, `WindowControls` never enters the tree — the OS's native traffic lights are what you see.
 
@@ -227,7 +255,7 @@ On Wayland and (eventually) Windows, a borderless window has no OS-drawn frame, 
 match tree.title_bar_host() {
     Some(host) if host.needs_custom_resize_handles() =>
         tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner)),
-    _ => inner,                            // macOS, X11, or no host
+    _ => inner,                            // macOS, or no host
 }
 ```
 

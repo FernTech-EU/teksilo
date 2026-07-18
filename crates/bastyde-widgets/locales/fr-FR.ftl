@@ -353,3 +353,11 @@ font-picker-placeholder = Choisir une police…
 # via bastyde::install_toast).
 settings-write-failed-toast-title = Impossible d'enregistrer les paramètres
 settings-write-failed-toast-body = Échec de l'enregistrement de { $file } après { $attempts } tentatives ; { $dropped } modification(s) en attente abandonnée(s). { $message }
+
+# Menu fenêtre de repli, ouvert par un clic droit sur une TitleBar
+# personnalisée là où l'OS n'en fournit pas (X11). Voir en-US.ftl pour le
+# contexte complet et crates/bastyde-widgets/src/title_bar/window_menu.rs.
+window-menu-restore = Restaurer
+window-menu-maximize = Agrandir
+window-menu-minimize = Réduire
+window-menu-close = Fermer

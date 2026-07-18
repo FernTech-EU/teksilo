@@ -437,7 +437,7 @@ impl WidgetTree {
         }
 
         // Ask the platform to start a native OS drag. If it can't (no backend
-        // / X11 / test sink), leave the in-app session intact — current
+        // / test sink), leave the in-app session intact — current
         // behavior: the drag can still come back into the window.
         if !ops.begin_os_drag(data, None) {
             return false;
@@ -2254,6 +2254,17 @@ mod tests {
     struct RecordingWindowOps {
         started: std::rc::Rc<std::cell::RefCell<Vec<crate::drag_payload::OutboundDragData>>>,
         succeed: bool,
+        cancels: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl RecordingWindowOps {
+        fn new(succeed: bool) -> Self {
+            Self {
+                started: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                succeed,
+                cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            }
+        }
     }
     impl crate::window::WindowOps for RecordingWindowOps {
         fn open_window(
@@ -2284,6 +2295,9 @@ mod tests {
             self.started.borrow_mut().push(data);
             self.succeed
         }
+        fn cancel_os_drag(&mut self) {
+            self.cancels.set(self.cancels.get() + 1);
+        }
     }
 
     fn exportable_payload() -> crate::drag_payload::DragPayload {
@@ -2296,6 +2310,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();
@@ -2336,6 +2351,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();
@@ -2358,13 +2374,70 @@ mod tests {
     }
 
     #[test]
+    fn escape_during_an_escalated_drag_asks_the_platform_to_cancel() {
+        // The in-app session is gone once the platform accepts the hand-off,
+        // so this cannot ride the `active_drag` Escape path. Routing it through
+        // `WindowOps` (rather than special-casing it in a backend's own event
+        // loop) is what makes it observable here at all.
+        let mut ops = RecordingWindowOps::new(true);
+        let cancels = ops.cancels.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, exportable_payload());
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops); // escalate
+        assert_eq!(tree.outbound_drag_source, Some(source));
+
+        tree.dispatch_event_with_ops(
+            crate::event::WidgetEvent::KeyDown {
+                key: crate::event::Key::Escape,
+                modifiers: crate::event::Modifiers::NONE,
+                text: None,
+            },
+            &mut ops,
+        );
+        assert_eq!(cancels.get(), 1, "the platform must be asked to cancel");
+        assert_eq!(
+            tree.outbound_drag_source,
+            Some(source),
+            "the session stays until the backend reports its terminal outcome — \
+             tearing it down here would drop the source's on_drag_ended"
+        );
+    }
+
+    #[test]
+    fn escape_without_an_os_drag_does_not_touch_the_platform() {
+        let mut ops = RecordingWindowOps::new(true);
+        let cancels = ops.cancels.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.dispatch_event_with_ops(
+            crate::event::WidgetEvent::KeyDown {
+                key: crate::event::Key::Escape,
+                modifiers: crate::event::Modifiers::NONE,
+                text: None,
+            },
+            &mut ops,
+        );
+        assert_eq!(cancels.get(), 0);
+    }
+
+    #[test]
     fn no_backend_keeps_session_active_on_leave() {
-        // begin_os_drag returns false (no outbound backend / X11): the in-app
+        // begin_os_drag returns false (no outbound backend): the in-app
         // drag stays active so the user can drag back in — current behavior.
         let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             succeed: false,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();
@@ -2387,6 +2460,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();
@@ -2467,6 +2541,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let got_typed = Rc::new(Cell::new(0_u32));
@@ -2559,6 +2634,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         // Window A: starts and escalates.
@@ -2630,6 +2706,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();
@@ -2676,6 +2753,7 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             succeed: true,
+            cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
 
         let mut tree = WidgetTree::new();

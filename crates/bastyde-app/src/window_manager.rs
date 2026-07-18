@@ -566,16 +566,36 @@ impl WindowManager {
 
         // When the application opts into custom chrome, suppress the
         // server-side decorations on platforms where they're entirely
-        // client-drawn (Wayland). On Windows we keep `with_decorations(true)`
-        // because the M4 recipe relies on the native frame still being present
-        // (DwmExtendFrameIntoClientArea + WM_NCCALCSIZE), and on macOS the
-        // M3 recipe sets the relevant attributes via `WindowAttributesExtMacOS`
-        // — neither needs the toggle here.
+        // client-drawn (Wayland, X11). On Windows we keep
+        // `with_decorations(true)` because the M4 recipe relies on the native
+        // frame still being present (DwmExtendFrameIntoClientArea +
+        // WM_NCCALCSIZE), and on macOS the M3 recipe sets the relevant
+        // attributes via `WindowAttributesExtMacOS` — neither needs the toggle
+        // here.
+        //
+        // The window system has to be predicted from the environment rather
+        // than read off a handle, because this decision is made *before* the
+        // window exists. `active_window_system` mirrors winit's own precedence
+        // exactly so the two cannot disagree.
+        //
+        // X11 additionally requires a window manager that implements
+        // `_NET_WM_MOVERESIZE`: without server-side decorations that is the
+        // only way the window can be moved or resized, so shipping a
+        // borderless window to a WM that lacks it would strand the user. The
+        // probe is cached per process and `X11Host::new` consults the same
+        // answer, so the decoration flag and the host can't diverge.
         #[cfg(all(unix, not(target_os = "macos")))]
-        if wants_custom_chrome
-            && bastyde_platform::active_window_system() == bastyde_platform::WindowSystem::Wayland
-        {
-            window_attrs = window_attrs.with_decorations(false);
+        if wants_custom_chrome {
+            let suppress_decorations = match bastyde_platform::active_window_system() {
+                bastyde_platform::WindowSystem::Wayland => true,
+                bastyde_platform::WindowSystem::X11 => {
+                    bastyde_platform::x11::capabilities().supports_custom_chrome()
+                }
+                bastyde_platform::WindowSystem::Unknown => false,
+            };
+            if suppress_decorations {
+                window_attrs = window_attrs.with_decorations(false);
+            }
         }
 
         // macOS custom chrome: let the widget tree paint under the titlebar
@@ -962,6 +982,12 @@ impl WindowManager {
             bastyde_core::raw_handle::ParentHandle::from_window(managed.platform_window.window())
         {
             handle.attach(bastyde_id, parent, poster);
+            // Seed the backend's scale factor. X11 needs it to report drop
+            // positions in window-logical coordinates (its protocol is
+            // physical-pixel only, with no per-window DPI to query); every
+            // other backend ignores it. Kept current by the
+            // `ScaleFactorChanged` arm in `app.rs`.
+            handle.set_scale_factor(bastyde_id, managed.platform_window.window().scale_factor());
         }
     }
 
@@ -1921,8 +1947,8 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
     ) -> bool {
         use bastyde_platform::external_dnd::ExternalDndHandle;
         // Outbound drag is wired only if the app installed the external-DnD
-        // service. Without it (X11, or no `install_external_dnd`), decline so
-        // the framework keeps the in-app drag alive.
+        // service. Without it, decline so the framework keeps the in-app drag
+        // alive.
         let Some(handle) = self
             .wm
             .app_context_template()
@@ -1931,6 +1957,17 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
             return false;
         };
         handle.begin_drag(self.current_id, &data, image.as_ref())
+    }
+
+    fn cancel_os_drag(&mut self) {
+        use bastyde_platform::external_dnd::ExternalDndHandle;
+        if let Some(handle) = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+        {
+            handle.cancel_drag(self.current_id);
+        }
     }
 }
 

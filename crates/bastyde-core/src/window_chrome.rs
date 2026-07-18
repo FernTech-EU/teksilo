@@ -50,7 +50,23 @@ pub trait PlatformTitleBarHost {
 
     /// Show the system window menu at the given client-area position. Wayland
     /// only; other platforms return `Ok(())` and do nothing.
+    ///
+    /// Only meaningful when [`Self::has_window_menu`] is `true`.
     fn show_window_menu(&self, at: Point) -> Result<(), PlatformError>;
+
+    /// Whether the platform can show a system window menu at all.
+    ///
+    /// `false` means [`Self::show_window_menu`] has nothing to call and the
+    /// title bar should build its **own** menu instead, so right-clicking the
+    /// bar is not simply dead. X11 is the case that motivates this: winit's
+    /// `show_window_menu` is an empty stub there, and `_GTK_SHOW_WINDOW_MENU`
+    /// — the only cross-desktop request for it — is not implemented by KWin
+    /// (KDE bug 454756), so there is no OS menu to ask for.
+    ///
+    /// Defaults to `true`, which is correct for every platform that has one.
+    fn has_window_menu(&self) -> bool {
+        true
+    }
 
     /// Publish the current rectangles of the title bar's interactive
     /// sub-regions. The widget tree publishes them in **logical**
@@ -165,7 +181,8 @@ pub struct TitleBarHostCallbacks {
 
 impl TitleBarHostCallbacks {
     /// Callbacks that do nothing. Useful for tests and for platform stubs
-    /// that never construct a host (e.g. X11).
+    /// that never construct a host (a headless build, or X11 with no
+    /// EWMH-capable window manager).
     pub fn noop() -> Self {
         Self {
             request_close: Rc::new(|| {}),
@@ -262,7 +279,8 @@ pub enum ResizeEdge {
 #[derive(Debug, thiserror::Error)]
 pub enum PlatformError {
     /// The current platform / window system does not support custom chrome
-    /// at all (e.g. X11) or does not support a specific operation (e.g.
+    /// at all (e.g. X11 without an EWMH window manager) or does not support a
+    /// specific operation (e.g.
     /// `begin_resize` on macOS, where winit lacks `drag_resize_window`).
     #[error("operation not supported on this platform")]
     Unsupported,

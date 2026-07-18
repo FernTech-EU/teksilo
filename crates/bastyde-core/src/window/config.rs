@@ -324,7 +324,8 @@ impl WindowConfig {
 
     /// Chrome mode. `Native` draws OS decorations; `CustomChrome`
     /// constructs a [`PlatformTitleBarHost`](crate::PlatformTitleBarHost)
-    /// (falls back to `Native` on X11); `None` is borderless.
+    /// (on X11, falls back to `Native` when the window manager lacks
+    /// `_NET_WM_MOVERESIZE`); `None` is borderless.
     pub fn decorations(mut self, mode: DecorationsMode) -> Self {
         self.decorations = mode;
         self

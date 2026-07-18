@@ -4,11 +4,14 @@
 //! Per-platform implementations of [`bastyde_core::PlatformTitleBarHost`].
 //!
 //! Each backend lives in its own submodule under `title_bar_host/`. The
-//! [`create_title_bar_host`] factory picks the right one based on the
-//! current platform and the underlying window system. On unsupported
-//! configurations (currently X11) it logs a warning and returns
-//! [`PlatformError::Unsupported`]; the application is then expected to
-//! fall back to native server-side decorations.
+//! [`create_title_bar_host`] factory picks the right one based on the current
+//! platform and — on unix — the window's live display handle. When no backend
+//! can serve the window it returns [`PlatformError::Unsupported`] and the
+//! application falls back to native server-side decorations.
+//!
+//! X11 is supported, but conditionally: custom chrome there depends on the
+//! window manager implementing `_NET_WM_MOVERESIZE`, since a borderless window
+//! has no other way to be moved or resized. See `title_bar_host/x11.rs`.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -54,9 +57,16 @@ pub use windows::WindowsHost;
 pub use x11::X11Host;
 
 /// Construct a title bar host for the given winit window. Returns
-/// [`PlatformError::Unsupported`] when running on a window system that
-/// cannot support custom chrome (currently: X11, and any non-Wayland Linux
-/// where the window system cannot be detected).
+/// [`PlatformError::Unsupported`] when the window system cannot support custom
+/// chrome — on X11 that means no EWMH window manager, or one without
+/// `_NET_WM_MOVERESIZE`.
+///
+/// On unix the backend is chosen from the window's **live**
+/// `RawDisplayHandle`, not from the environment. `WAYLAND_DISPLAY` and
+/// `DISPLAY` are both set in essentially every modern session, so only the
+/// handle can say which backend winit actually created — and using one source
+/// of truth here keeps the title bar and the DnD backend from ever disagreeing
+/// about the same window.
 ///
 /// The host borrows an `Arc` clone of the window so it can keep calling
 /// winit (`drag_window`, `set_minimized`, ...) for the lifetime of the
@@ -79,21 +89,29 @@ pub fn create_title_bar_host(
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        use crate::window_system::{WindowSystem, active_window_system};
-        match active_window_system() {
+        use winit::raw_window_handle::HasDisplayHandle;
+
+        use crate::window_system::{WindowSystem, window_system_for_display_handle};
+
+        let display = window
+            .display_handle()
+            .map_err(|e| PlatformError::Os(e.to_string()))?;
+
+        match window_system_for_display_handle(&display.as_raw()) {
             WindowSystem::Wayland => WaylandHost::new(window, callbacks)
                 .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>),
             WindowSystem::X11 => {
-                eprintln!(
-                    "bastyde-platform: custom TitleBar is not supported on X11; \
-                     falling back to native server-side decorations"
-                );
-                Err(PlatformError::Unsupported)
+                // `X11Host::new` refuses when the window manager can't service
+                // `_NET_WM_MOVERESIZE`; the caller then keeps native
+                // decorations. The same probe already gated
+                // `with_decorations(false)` at window-creation time, so the two
+                // decisions agree.
+                X11Host::new(window, callbacks).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
             }
             WindowSystem::Unknown => {
                 eprintln!(
-                    "bastyde-platform: could not detect window system; \
-                     custom TitleBar disabled"
+                    "bastyde-platform: window reports neither an X11 nor a Wayland \
+                     display handle; custom TitleBar disabled"
                 );
                 Err(PlatformError::Unsupported)
             }

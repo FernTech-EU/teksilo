@@ -381,3 +381,13 @@ font-picker-placeholder = Select a font…
 # blip, so the toast is Error severity and persistent (no auto-dismiss).
 settings-write-failed-toast-title = Settings couldn't be saved
 settings-write-failed-toast-body = { $file } failed to save after { $attempts } attempts; { $dropped } queued change(s) discarded. { $message }
+
+# Fallback window menu, opened by right-clicking a custom TitleBar on
+# platforms with no OS window menu (X11 — winit's show_window_menu is a stub
+# there and KWin does not implement _GTK_SHOW_WINDOW_MENU). See
+# crates/bastyde-widgets/src/title_bar/window_menu.rs. Restore and Maximize
+# are mutually exclusive; only one is shown at a time.
+window-menu-restore = Restore
+window-menu-maximize = Maximize
+window-menu-minimize = Minimize
+window-menu-close = Close

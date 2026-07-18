@@ -133,3 +133,13 @@ wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 libc = "0.2"
+# X11: the EWMH capability probe (custom title bar) and the XDND backend.
+# Default features only — that is a pure-Rust `RustConnection` over its own
+# socket, with no `libxcb` linkage and no `unsafe`. We deliberately do NOT
+# reuse winit's connection (X11 has no equivalent of libwayland's multi-queue
+# model, so two readers on one fd would race on sequence numbers).
+#
+# Keep this on the same 0.13.x line winit resolves, so the dependency stays
+# unified and cargo does not build two copies. `just check-x11rb-unified` (and
+# the CI job of the same name) fails the build if it ever forks.
+x11rb = "0.13"

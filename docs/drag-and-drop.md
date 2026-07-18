@@ -14,8 +14,8 @@ Three distinct user stories share the same mechanics in Bastyde:
 
 1. **Intra-widget reordering** — drag a row inside a list or a node inside a tree. No serialisation; the payload is a typed Rust value.
 2. **Inter-widget transfer** — drag a row from one list into another, or drop a file shortcut onto a bookmarks bar. Also a typed payload, possibly with a MIME-annotated byte representation for adapter layers.
-3. **External (OS) drops** — accept files / text / URLs dragged in from a file manager or another app. Built on the same primitives plus a per-OS `ExternalDndBackend`. **Inbound is shipped** (macOS verified; Windows OLE + Wayland `wl_data_device` cfg-gated; X11 no-op) — see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app) and the `DropZone` widget.
-4. **External (OS) export** — drag a file / text / URL *out* of a Bastyde window into another application. **Shipped** (macOS verified; Wayland verified; Windows / X11 decline gracefully) — the source needs no new API: a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window. See [§11.5](#115-outbound-export-app--os).
+3. **External (OS) drops** — accept files / text / URLs dragged in from a file manager or another app. Built on the same primitives plus a per-OS `ExternalDndBackend`. **Inbound is shipped** on every desktop target (macOS verified; Windows OLE, Wayland `wl_data_device` and X11 XDND cfg-gated) — see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app) and the `DropZone` widget.
+4. **External (OS) export** — drag a file / text / URL *out* of a Bastyde window into another application. **Shipped** on every desktop target (macOS and Wayland verified; Windows OLE and X11 XDND cfg-gated) — the source needs no new API: a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window. See [§11.5](#115-outbound-export-app--os).
 
 All flows reuse the same payload type, the same handler set, and the same gesture recognizer. Only the source of the events differs (in-app gesture vs. OS backend).
 
@@ -338,13 +338,63 @@ registered on creation and revoked on close.
 | Platform | Inbound backend | Outbound (export) | Notes |
 |---|---|---|---|
 | **macOS** | `NSDraggingDestination` on a transparent overlay `NSView` | `NSDraggingSource` on the same overlay | Full position + files + text + URLs. Both directions verified. |
-| **Windows** | OLE `IDropTarget` (`RevokeDragDrop` winit's, then `RegisterDragDrop` ours) | declines (no `IDropSource` yet) | Inbound: full position + formats. |
+| **Windows** | OLE `IDropTarget` (`RevokeDragDrop` winit's, then `RegisterDragDrop` ours) | OLE `IDropSource` + `DoDragDrop` (deferred off the dispatch that armed it) | Inbound: full position + formats. |
 | **Wayland** | `wl_data_device` from the seat | `wl_data_source` + `start_drag` | No winit conflict (winit leaves Wayland DnD unimplemented). Both directions verified. |
-| **X11** | No-op | declines | Out of scope; the `DropZone` Browse button keeps it usable. |
+| **X11** | XDND v5 via an `XdndProxy` helper window | XDND source: owns `XdndSelection`, polls the pointer, serves the selection (incl. `INCR`) | Full position + arbitrary MIME types. See §11.3.1. |
 
 winit's own `DroppedFile` / `HoveredFile` events are *not* used: they carry no
 cursor position, files only, and nothing on Wayland — insufficient for a
 drop-zone widget that must hit-test position.
+
+#### 11.3.1 X11: why a proxy window, and why no pointer grab
+
+Two things about X11 shape the backend, and both are worth knowing before
+reading [`external_dnd/x11.rs`](../crates/bastyde-platform/src/external_dnd/x11.rs).
+
+**Inbound needs `XdndProxy`.** XDND messages are `ClientMessage`s sent with an
+empty event mask, which the X protocol delivers *only* to the client that
+created the destination window. winit created the toplevel and pumps its own
+connection, and exposes no hook into its X event stream (`WindowExtX11` is an
+empty trait) — so a second connection cannot see them, and winit's own built-in
+XDND handling (files only, no position) cannot be turned off. The spec's own
+answer is `XdndProxy`: a window may name another window that "should be checked
+for `XdndAware` and should receive all the client messages". Bastyde creates a
+1×1 `InputOnly` helper window on its own connection, marks it `XdndAware` and
+self-pointing `XdndProxy` (the spec's stale-proxy guard), and points the
+toplevel's `XdndProxy` at it. GTK 3/4, Qt 5/6 and Java/AWT all honour this with
+the same validation, covering every mainstream toolkit and file manager.
+
+**Outbound needs no pointer grab.** An XDND source conventionally grabs the
+pointer to keep receiving motion over other applications' windows. Bastyde
+cannot: X11 pointer grabs are exclusive per client, and the `ButtonPress` that
+started the drag already gave winit's connection an implicit grab lasting until
+release — `GrabPointer` from the backend would return `AlreadyGrabbed` *every*
+time, not occasionally. It does not need one: `QueryPointer` is unaffected by
+grabs and reports both position and button state, so the drag is driven by
+polling the backend's own connection while the button is held.
+
+Coordinates are converted root-physical → window-logical using the scale factor
+pushed down by the app layer (`ExternalDndGuard::set_scale_factor`), since X11
+has no per-window DPI to query the way Win32's `GetDpiForWindow` does.
+
+Two protocol details are easy to get wrong and are worth stating explicitly.
+When a target names an `XdndProxy`, only the *address* changes: messages go to
+the proxy but must still name the real window in the `window` field, or a proxy
+fronting several windows cannot route the drop (the bug Chromium tracks as
+crbug.com/41278320). Conversely, target→source replies (`XdndStatus`,
+`XdndFinished`) name the **source** — the recipient — with our own window in
+`data[0]`; GTK routes replies by `xclient.window` and discards anything else.
+
+Target resolution is cached on the root-child that the `QueryPointer` each tick
+already performs reports, so staying over one window costs a single round trip
+rather than the dozens a full tree descent plus per-ancestor property reads
+would.
+
+**Known limitation.** A source that ignores `XdndProxy` — a hand-rolled XDND
+client; no mainstream toolkit does — reaches winit's built-in handler instead,
+whose events Bastyde does not consume, so such a drop is ignored rather than
+delivered. Raw Xt/Motif clients speak `_MOTIF_DRAG_*`, not XDND, and were never
+reachable.
 
 ### 11.4 The `DropZone` widget
 
@@ -419,7 +469,9 @@ reports `OsCopy` (the OS's view), not `InApp` — drops that never left report
 (triggering event from `NSApp.currentEvent`); Wayland uses `wl_data_source` +
 `wl_data_device.start_drag` with a button-press serial captured from a `wl_pointer`
 bound on the DnD thread (the `Drop` handler skips the pipe-read for a self-drag to
-avoid a single-thread deadlock). Windows / X11 decline (`begin_drag` returns
+avoid a single-thread deadlock); X11 owns `XdndSelection` from its proxy window
+and polls the pointer rather than grabbing it (§11.3.1). No target declines
+(`begin_drag` returns
 `false`) and the framework keeps the in-app drag alive. Demo: the "Drag OUT" rows
 and "Internal drop target" in `cargo run -p file-drop`.
 
@@ -618,8 +670,8 @@ subtree). See the integration tests in
 ## 13. Non-goals — what DnD does NOT do yet
 
 - **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export. (A data-view `.exportable(Move)` drag therefore behaves as a copy across the window boundary — see §12.4.)
-- **Windows / X11 outbound export.** `begin_os_drag` declines on these targets (no `IDropSource` / X11 source yet); the in-app drag simply stays alive when the pointer leaves. Re-addable behind the same `ExternalDndGuard::begin_drag` surface.
-- **X11 inbound OS drops.** Out of scope for now (no-op backend); the `DropZone` Browse fallback covers it. Re-addable behind the same `ExternalDndBackend` trait.
+- **A drag icon on X11.** XDND has no drag image in the wire protocol; GTK and Qt each create their own override-redirect window and reposition it per motion, which needs an ARGB visual and a running compositor to avoid drawing a black rectangle. Bastyde changes the cursor instead, so `DragImageData` is ignored on X11.
+- **Non-`XdndProxy` X11 sources.** See §11.3.1 — a source that ignores the proxy reaches winit's built-in handler and its drop is not delivered. No mainstream toolkit is affected.
 - **`Opacity` primitive for previews.** The current `DragPreview` uses a raised surface — no transparency. Opacity is a separate widget-primitive enhancement.
 - **Public `preview_builder(..)` on ListView / TreeView.** Today the preview is always a delegate-built `DragPreview`. Apps that need a differently-styled preview have to re-implement the full reorderable widget or wait for the builder API.
 

@@ -333,6 +333,23 @@ impl WidgetTree {
             // scoped binding outside the focused subtree — fall through.
         }
 
+        // Escape during an OS drag we escalated. There is no `active_drag`
+        // any more — `try_escalate_to_os_drag` took it when the platform
+        // accepted the hand-off — so this cannot live in the block below, but
+        // it is the same user gesture and belongs on the same path rather than
+        // being special-cased in the event loop of whichever backend needs it.
+        if self.outbound_drag_source.is_some()
+            && let WidgetEvent::KeyDown {
+                key: Key::Escape, ..
+            } = &event
+        {
+            ops.cancel_os_drag();
+            // Deliberately no `return`: the backend answers asynchronously with
+            // a terminal `DragEnded`, which is what actually tears the session
+            // down via `handle_os_drag_ended`. Swallowing the key here would
+            // also stop Escape from closing whatever else is open.
+        }
+
         // --- Active drag session handling ---
         if self.active_drag.is_some() {
             match &event {

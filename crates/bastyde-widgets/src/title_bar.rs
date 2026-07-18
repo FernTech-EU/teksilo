@@ -47,6 +47,7 @@ mod controls;
 mod drag_region;
 mod resize_strip;
 mod window_frame;
+mod window_menu;
 
 pub use controls::{ControlAction, ControlButton, WindowControls, WindowControlsLayout};
 pub use drag_region::DragRegion;
@@ -241,7 +242,10 @@ impl Widget for TitleBar {
             Some(PendingChild::Deferred(child)) => DragRegion::with_child(self.host.clone(), child),
             Some(PendingChild::Id(id)) => DragRegion::with_child_id(self.host.clone(), id),
             None => DragRegion::new(self.host.clone()),
-        };
+        }
+        // Only consulted when the platform has no OS window menu and the drag
+        // region therefore builds its own (X11); see `title_bar/window_menu.rs`.
+        .close_action(self.close_action.clone());
         let drag_region_id = ctx.add(drag_region);
         self.drag_region_id.set(Some(drag_region_id));
 

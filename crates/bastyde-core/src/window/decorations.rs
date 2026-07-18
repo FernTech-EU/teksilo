@@ -18,7 +18,9 @@ pub enum DecorationsMode {
     /// [`PlatformTitleBarHost`](crate::PlatformTitleBarHost) is
     /// constructed and attached to the tree so the app can paint its
     /// own chrome. Falls back to `Native` on window systems that do
-    /// not support custom chrome (currently X11).
+    /// not support custom chrome — on X11 that means a window manager without
+    /// `_NET_WM_MOVERESIZE`, since a borderless window would otherwise be
+    /// impossible to move or resize.
     CustomChrome,
     /// No decorations at all — neither OS chrome nor a host. Use for
     /// splash screens, borderless popups, or fully chrome-less embeds.

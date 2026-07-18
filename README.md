@@ -202,7 +202,7 @@ Reference documents live in `docs/`. Good entry points:
 What is not yet shipped:
 
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
-- **X11 custom title bars.** Wayland, Windows, and macOS backends ship. On X11 the custom-chrome operations return `PlatformError::Unsupported` rather than failing silently, and the window falls back to native server-side decorations.
+- **X11 verification breadth.** The X11 custom title bar and drag-and-drop backends ship and are covered by protocol tests, but live verification has been done against KWin (via XWayland) and, in CI, Openbox. Other window managers are untested, and there is no run against a standalone Xorg server. A window manager without `_NET_WM_MOVERESIZE` is detected up front and keeps native decorations rather than producing an immovable window.
 - **Mobile and web.** Linux and Windows are the primary targets. No mobile or web targets.
 - **API stability.** Pre-1.0; breaking changes are expected between minor versions.
 

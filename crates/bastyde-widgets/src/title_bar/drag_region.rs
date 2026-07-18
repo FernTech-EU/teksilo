@@ -42,6 +42,10 @@ pub struct DragRegion {
     host: Rc<dyn PlatformTitleBarHost>,
     pending_child: Option<PendingChild>,
     child_id: Option<WidgetId>,
+    /// Forwarded from [`TitleBar::close_action`](crate::TitleBar::close_action)
+    /// so the fallback menu's Close entry does exactly what the close *button*
+    /// does. Unused when the platform has its own window menu.
+    close_action: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,
 }
 
 impl std::fmt::Debug for DragRegion {
@@ -59,6 +63,7 @@ impl DragRegion {
             host,
             pending_child: None,
             child_id: None,
+            close_action: None,
         }
     }
 
@@ -69,6 +74,7 @@ impl DragRegion {
             host,
             pending_child: Some(PendingChild::Deferred(child)),
             child_id: None,
+            close_action: None,
         }
     }
 
@@ -80,7 +86,19 @@ impl DragRegion {
             host,
             pending_child: Some(PendingChild::Id(id)),
             child_id: None,
+            close_action: None,
         }
+    }
+
+    /// Forward the title bar's close-action override, so the fallback window
+    /// menu's Close entry matches the close button. No effect on platforms
+    /// that provide their own window menu.
+    pub fn close_action(
+        mut self,
+        action: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,
+    ) -> Self {
+        self.close_action = action;
+        self
     }
 }
 
@@ -101,7 +119,14 @@ impl Widget for DragRegion {
         let host_drag = self.host.clone();
         let host_pointer = self.host.clone();
 
-        let handlers = HandlerSet::new()
+        // Right-click opens the window menu. Where the OS provides one we ask
+        // for it; where it does not (X11 — see `window_menu`), we build our
+        // own via the framework's context-menu factory, which handles the
+        // at-pointer overlay, dismissal, and focus for us.
+        let has_os_window_menu = self.host.has_window_menu();
+        let close_action = self.close_action.clone();
+
+        let mut handlers = HandlerSet::new()
             .on_drag(move |phase, _ctx| {
                 if let DragPhase::Started {
                     button: PointerButton::Primary,
@@ -122,6 +147,11 @@ impl Widget for DragRegion {
                 }
             })
             .on_pointer_event(move |evt, _ctx| {
+                if !has_os_window_menu {
+                    // The context-menu factory below owns the secondary
+                    // button; consuming it here would suppress the menu.
+                    return EventResponse::Ignored;
+                }
                 if let WidgetEvent::PointerDown {
                     button: PointerButton::Secondary,
                     position,
@@ -133,6 +163,12 @@ impl Widget for DragRegion {
                 }
                 EventResponse::Ignored
             });
+
+        if !has_os_window_menu {
+            handlers = handlers.context_menu(move |_at, ctx| {
+                super::window_menu::build_window_menu(ctx, close_action.clone())
+            });
+        }
 
         ctx.apply_self_handlers(handlers);
 

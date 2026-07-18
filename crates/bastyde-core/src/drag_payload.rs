@@ -68,6 +68,47 @@ impl OutboundDragData {
     pub fn is_empty(&self) -> bool {
         self.mime.is_empty() && self.files.is_empty() && self.text.is_none() && self.uris.is_empty()
     }
+
+    /// Render [`Self::files`] and [`Self::uris`] as a `text/uri-list` payload
+    /// (RFC 2483) — the inverse of [`ExternalDropData::from_uri_list`].
+    ///
+    /// Paths are percent-encoded, which is not cosmetic: an un-encoded `#`
+    /// starts a comment line, an un-encoded CR/LF splits one path into two,
+    /// and a filename that genuinely contains `%20` would come back as a
+    /// space. Lines are CRLF-terminated including the last, as the RFC
+    /// specifies and as GTK and Qt both expect.
+    pub fn to_uri_list(&self) -> String {
+        let mut list = String::new();
+        for path in &self.files {
+            list.push_str("file://");
+            list.push_str(&percent_encode_path(&path.to_string_lossy()));
+            list.push_str("\r\n");
+        }
+        for uri in &self.uris {
+            // Already a URI: the caller encoded it (or it came from the OS
+            // that way), so re-encoding would double-escape every `%`.
+            list.push_str(uri);
+            list.push_str("\r\n");
+        }
+        list
+    }
+}
+
+/// Percent-encode a filesystem path for a `file:` URI. `/` stays a separator;
+/// everything outside RFC 3986's unreserved set is escaped byte-wise, so
+/// non-ASCII names encode as UTF-8 and decode back through
+/// [`percent_decode`] unchanged.
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Optional drag image for an OS drag (RGBA8, top-left origin, premultiplied
@@ -626,6 +667,58 @@ mod tests {
         assert_eq!(percent_decode("caf%C3%A9"), "café");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("a%2"), "a%2");
+    }
+
+    #[test]
+    fn uri_list_uses_crlf_and_terminates_the_last_line() {
+        let data = OutboundDragData {
+            files: vec![PathBuf::from("/tmp/a.txt")],
+            ..Default::default()
+        };
+        assert_eq!(data.to_uri_list(), "file:///tmp/a.txt\r\n");
+    }
+
+    /// The characters that would otherwise corrupt the list format itself:
+    /// `#` starts a comment line, CR/LF split one path into two.
+    #[cfg(not(windows))]
+    #[test]
+    fn uri_list_escapes_characters_that_would_break_the_format() {
+        let data = OutboundDragData {
+            files: vec![PathBuf::from("/tmp/a#b c.txt")],
+            ..Default::default()
+        };
+        let list = data.to_uri_list();
+        assert_eq!(list, "file:///tmp/a%23b%20c.txt\r\n");
+        // ...and it survives the round trip as one file with its real name.
+        let parsed = ExternalDropData::from_uri_list(&list);
+        assert_eq!(parsed.files, vec![PathBuf::from("/tmp/a#b c.txt")]);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn uri_list_round_trips_non_ascii_and_literal_percent() {
+        // A filename containing a literal "%20" must not decode back to a
+        // space — that only round-trips if the encoder escaped the `%`.
+        let files = vec![
+            PathBuf::from("/tmp/café.txt"),
+            PathBuf::from("/tmp/100%20.txt"),
+        ];
+        let data = OutboundDragData {
+            files: files.clone(),
+            ..Default::default()
+        };
+        let parsed = ExternalDropData::from_uri_list(&data.to_uri_list());
+        assert_eq!(parsed.files, files);
+    }
+
+    #[test]
+    fn uri_list_passes_urls_through_without_re_encoding() {
+        // Re-encoding an already-encoded URI would double every `%`.
+        let data = OutboundDragData {
+            uris: vec!["https://example.com/a%2Bb".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(data.to_uri_list(), "https://example.com/a%2Bb\r\n");
     }
 
     #[cfg(not(windows))]

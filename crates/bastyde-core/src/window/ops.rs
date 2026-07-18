@@ -103,7 +103,8 @@ pub trait WindowOps {
     ///
     /// Returns `true` if a native drag session actually started. The default
     /// (standalone / test sink, and platforms without an outbound backend,
-    /// e.g. X11) returns `false`, in which case the framework cancels the drag
+    /// a headless build, or a target with no drop-target implementation)
+    /// returns `false`, in which case the framework cancels the drag
     /// — the pre-existing "pointer left the window ⇒ drag cancels" behavior.
     fn begin_os_drag(
         &mut self,
@@ -112,6 +113,19 @@ pub trait WindowOps {
     ) -> bool {
         false
     }
+
+    /// Abandon an OS drag started by [`Self::begin_os_drag`] (the user pressed
+    /// Escape).
+    ///
+    /// Only backends that drive the drag themselves can honour this. macOS and
+    /// Windows hand the drag to a modal OS loop that owns Escape already, and
+    /// Wayland's compositor does the same; X11 tracks the pointer on its own
+    /// connection, so without this its drags could only end by releasing the
+    /// button. The backend still reports the terminal `DropOutcome` either way,
+    /// so the source widget's `on_drag_ended` fires exactly once regardless.
+    ///
+    /// Default: no-op.
+    fn cancel_os_drag(&mut self) {}
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

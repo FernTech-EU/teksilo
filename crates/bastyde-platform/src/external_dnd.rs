@@ -29,17 +29,19 @@
 //! placed inside a layout needs the drop position to hit-test which zone
 //! received the drop, so the real backends sit below winit on the raw
 //! platform APIs (OLE `IDropTarget` on Windows, `NSDraggingDestination` on
-//! macOS, `wl_data_device` on Wayland), all of which provide position and
-//! arbitrary data formats. X11 is out of scope and uses [`NoopExternalDndBackend`].
+//! macOS, `wl_data_device` on Wayland, XDND on X11), all of which provide
+//! position and arbitrary data formats. [`NoopExternalDndBackend`] is left for
+//! targets with no drop-target implementation at all.
 //!
 //! # Threading
 //!
-//! All four platform drop targets deliver their callbacks on the UI thread,
-//! so backends post events synchronously from there. The payload is still
-//! routed through [`bastyde_core::AppEventPoster::post_external`] (the same
-//! channel as file dialogs) so the borrow of the window's tree happens in one
+//! The macOS and Windows drop targets deliver their callbacks on the UI
+//! thread; the Wayland and X11 backends run a dedicated per-window dispatch
+//! thread on their own protocol connection. Either way the payload is routed
+//! through [`bastyde_core::AppEventPoster::post_external`] (the same channel as
+//! file dialogs) so the borrow of the window's tree happens in one
 //! well-defined place in the event loop rather than re-entrantly inside a
-//! platform callback.
+//! platform callback — and so a backend thread never touches the tree at all.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -59,6 +61,8 @@ mod macos;
 mod wayland;
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod x11;
 
 // ============================================================
 // ExternalDragEvent
@@ -135,6 +139,61 @@ pub struct OutboundOsDragRequest {
 }
 
 // ============================================================
+// Outbound payload → MIME, shared by the platform backends
+// ============================================================
+
+/// MIME types to advertise for an outbound payload, in a stable order.
+///
+/// Shared by the Wayland and X11 backends (and available to any future one) so
+/// an app exports the same set of types no matter which display server it
+/// happens to be running under.
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(dead_code, reason = "only the unix backends export via MIME today")
+)]
+pub(crate) fn outbound_mimes(data: &OutboundDragData) -> Vec<String> {
+    let mut mimes: Vec<String> = data.mime.keys().cloned().collect();
+    // Canonical types derived from the structured fields, if not already
+    // present in the explicit mime map.
+    if (!data.files.is_empty() || !data.uris.is_empty())
+        && !mimes.iter().any(|m| m == "text/uri-list")
+    {
+        mimes.push("text/uri-list".to_string());
+    }
+    if data.text.is_some() && !mimes.iter().any(|m| m == "text/plain") {
+        mimes.push("text/plain".to_string());
+    }
+    mimes
+}
+
+/// Bytes for a given advertised MIME type.
+///
+/// An explicit entry in [`OutboundDragData::mime`] always wins — the app said
+/// exactly what those bytes are. Otherwise the canonical types are rendered
+/// from the structured fields.
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(dead_code, reason = "only the unix backends export via MIME today")
+)]
+pub(crate) fn outbound_bytes(data: &OutboundDragData, mime_type: &str) -> Vec<u8> {
+    if let Some(bytes) = data.mime.get(mime_type) {
+        return bytes.clone();
+    }
+    match mime_type {
+        // `to_uri_list` percent-encodes, which matters: an un-encoded `#` in a
+        // filename starts a comment line and an un-encoded newline splits one
+        // path into two. It is the exact inverse of
+        // `ExternalDropData::from_uri_list`, so a drag between two Bastyde
+        // windows round-trips filenames unchanged.
+        "text/uri-list" => data.to_uri_list().into_bytes(),
+        "text/plain" | "text/plain;charset=utf-8" => {
+            data.text.clone().unwrap_or_default().into_bytes()
+        }
+        _ => Vec::new(),
+    }
+}
+
+// ============================================================
 // ExternalDndBackend trait + registration guard
 // ============================================================
 
@@ -161,6 +220,31 @@ pub trait ExternalDndGuard {
     fn begin_drag(&self, _data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
         false
     }
+
+    /// Tell the backend this window's HiDPI scale factor.
+    ///
+    /// [`ExternalDragEvent`] positions are **window-logical**, but X11 speaks
+    /// only physical pixels and — unlike Win32's `GetDpiForWindow` or AppKit's
+    /// point space — offers no per-window scale to divide by. So the app layer
+    /// pushes winit's own answer down: once at attach, and again on every
+    /// `ScaleFactorChanged` (dragging the window to a monitor with a different
+    /// scale mid-drag would otherwise start reporting drops at the wrong
+    /// place).
+    ///
+    /// Default no-op: every other backend gets the scale from the OS.
+    fn set_scale_factor(&self, _scale: f64) {}
+
+    /// Cancel an in-flight outbound OS drag (the user pressed Escape).
+    ///
+    /// Only meaningful for backends that drive the drag themselves rather than
+    /// handing it to a modal OS loop. X11 does — it tracks the pointer on its
+    /// own connection — so it has no OS-level Escape handling to inherit, and
+    /// without this the drag could only end by releasing the button.
+    ///
+    /// The backend MUST still post the terminal
+    /// [`ExternalDragEvent::DragEnded`] exactly as it would for any other
+    /// ending, so the source widget's `on_drag_ended` fires once either way.
+    fn cancel_drag(&self) {}
 
     /// Run a previously-requested **blocking** outbound drag for this window,
     /// synchronously. Called by [`ExternalDndHandle::run_pending_outbound_drag`]
@@ -270,6 +354,22 @@ impl ExternalDndHandle {
     /// Number of currently-attached windows. Test/diagnostic helper.
     pub fn attached_count(&self) -> usize {
         self.inner.guards.borrow().len()
+    }
+
+    /// Tell `window_id`'s backend the window's current HiDPI scale factor.
+    /// See [`ExternalDndGuard::set_scale_factor`]. No-op if not attached.
+    pub fn set_scale_factor(&self, window_id: BastydeWindowId, scale: f64) {
+        if let Some(guard) = self.inner.guards.borrow().get(&window_id) {
+            guard.set_scale_factor(scale);
+        }
+    }
+
+    /// Cancel an in-flight outbound OS drag for `window_id` (the user pressed
+    /// Escape). See [`ExternalDndGuard::cancel_drag`]. No-op if not attached.
+    pub fn cancel_drag(&self, window_id: BastydeWindowId) {
+        if let Some(guard) = self.inner.guards.borrow().get(&window_id) {
+            guard.cancel_drag();
+        }
     }
 
     /// Start a native OS (outbound) drag for `window_id`, delegating to that
@@ -452,11 +552,45 @@ impl ExternalDndBackend for MemoryExternalDndBackend {
 // Default backend factory
 // ============================================================
 
+/// Routes each window to the Wayland or X11 backend by its live display
+/// handle.
+///
+/// Both are compiled in on Linux/BSD and both are reachable at runtime — an
+/// app can be an X11 client in a Wayland session (XWayland), and `DISPLAY` is
+/// set in essentially every Wayland session, so the environment cannot decide
+/// this. The handle can: it *is* the backend winit created.
+#[cfg(all(unix, not(target_os = "macos")))]
+struct UnixExternalDndBackend {
+    wayland: wayland::WaylandExternalDndBackend,
+    x11: x11::X11ExternalDndBackend,
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl ExternalDndBackend for UnixExternalDndBackend {
+    fn attach(
+        &mut self,
+        parent: ParentHandle,
+        window_id: BastydeWindowId,
+        poster: Arc<dyn AppEventPoster>,
+    ) -> Box<dyn ExternalDndGuard> {
+        // One shared discriminator, also used by the title-bar host factory, so
+        // the two subsystems can never disagree about the same window.
+        match crate::window_system::window_system_for_display_handle(&parent.raw_display_handle()) {
+            crate::window_system::WindowSystem::Wayland => {
+                self.wayland.attach(parent, window_id, poster)
+            }
+            crate::window_system::WindowSystem::X11 => self.x11.attach(parent, window_id, poster),
+            crate::window_system::WindowSystem::Unknown => Box::new(NoopDndGuard),
+        }
+    }
+}
+
 /// The default external-drag backend for the current target.
 ///
-/// Windows / macOS / Wayland get their raw platform backends; X11 and every
-/// other target get [`NoopExternalDndBackend`]. `BastydeAppBuilder::install_external_dnd`
-/// uses this.
+/// Every desktop target now has a real backend: OLE on Windows,
+/// `NSDraggingDestination` on macOS, `wl_data_device` on Wayland, XDND on X11.
+/// [`NoopExternalDndBackend`] remains for targets with no drop-target
+/// implementation at all. `BastydeAppBuilder::install_external_dnd` uses this.
 pub fn default_backend() -> Box<dyn ExternalDndBackend> {
     #[cfg(target_os = "macos")]
     {
@@ -466,11 +600,12 @@ pub fn default_backend() -> Box<dyn ExternalDndBackend> {
     {
         Box::new(windows::WindowsExternalDndBackend::new())
     }
-    // Linux: the Wayland backend self-detects the surface type and is a no-op
-    // under X11 (it returns an inert guard when the display isn't Wayland).
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        Box::new(wayland::WaylandExternalDndBackend::new())
+        Box::new(UnixExternalDndBackend {
+            wayland: wayland::WaylandExternalDndBackend::new(),
+            x11: x11::X11ExternalDndBackend::new(),
+        })
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", unix)))]
     {

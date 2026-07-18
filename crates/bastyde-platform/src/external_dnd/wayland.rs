@@ -52,6 +52,7 @@ use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 
 use super::{
     ExternalDndBackend, ExternalDndEventPayload, ExternalDndGuard, ExternalDragEvent, NoopDndGuard,
+    outbound_bytes, outbound_mimes,
 };
 
 /// Command sent from the (main-thread) guard to the DnD dispatch thread to
@@ -196,47 +197,9 @@ impl DndState {
     }
 }
 
-/// MIME types to advertise for an outbound payload, in a stable order.
-fn outbound_mimes(data: &OutboundDragData) -> Vec<String> {
-    let mut mimes: Vec<String> = data.mime.keys().cloned().collect();
-    // Canonical types derived from the structured fields, if not already
-    // present in the explicit mime map.
-    if (!data.files.is_empty() || !data.uris.is_empty())
-        && !mimes.iter().any(|m| m == "text/uri-list")
-    {
-        mimes.push("text/uri-list".to_string());
-    }
-    if data.text.is_some() && !mimes.iter().any(|m| m == "text/plain") {
-        mimes.push("text/plain".to_string());
-    }
-    mimes
-}
-
-/// Bytes for a given advertised MIME type.
-fn outbound_bytes(data: &OutboundDragData, mime_type: &str) -> Vec<u8> {
-    if let Some(bytes) = data.mime.get(mime_type) {
-        return bytes.clone();
-    }
-    match mime_type {
-        "text/uri-list" => {
-            let mut list = String::new();
-            for f in &data.files {
-                list.push_str("file://");
-                list.push_str(&f.to_string_lossy());
-                list.push_str("\r\n");
-            }
-            for u in &data.uris {
-                list.push_str(u);
-                list.push_str("\r\n");
-            }
-            list.into_bytes()
-        }
-        "text/plain" | "text/plain;charset=utf-8" => {
-            data.text.clone().unwrap_or_default().into_bytes()
-        }
-        _ => Vec::new(),
-    }
-}
+// `outbound_mimes` / `outbound_bytes` are shared with the X11 backend from
+// `super` — an app must export the same bytes under the same MIME types
+// whichever Linux display server it happens to be running on.
 
 // The registry is driven by `GlobalList`; this impl is just the required bound.
 impl Dispatch<WlRegistry, GlobalListContents> for DndState {

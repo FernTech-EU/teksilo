@@ -1246,6 +1246,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "winit",
+ "x11rb",
 ]
 
 [[package]]

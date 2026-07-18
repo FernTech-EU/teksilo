@@ -1202,7 +1202,8 @@ impl WidgetTree {
 
     /// Get the platform title bar host, if one was attached. Returns `None`
     /// when the application did not opt into custom chrome, or when the
-    /// platform does not support it (e.g. X11).
+    /// platform does not support it (X11 without an EWMH-capable window
+    /// manager, or a headless build).
     pub fn title_bar_host(&self) -> Option<Rc<dyn crate::PlatformTitleBarHost>> {
         self.title_bar_host.clone()
     }

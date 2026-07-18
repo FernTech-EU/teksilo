@@ -37,13 +37,14 @@ env:
 jobs:
   ci:
     name: CI
-    needs: [test-linux, test-cross, check, rustfmt, clippy, docs, spdx]
+    needs: [test-linux, test-x11, test-cross, check, rustfmt, clippy, docs, spdx]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed
         run: |
           if [[ "${{ needs.test-linux.result }}" != "success" ]] || \
+             [[ "${{ needs.test-x11.result }}" != "success" ]] || \
              [[ "${{ needs.test-cross.result }}" != "success" ]] || \
              [[ "${{ needs.check.result }}" != "success" ]] || \
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
@@ -86,6 +87,73 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # The X11 backends (XDND drag-and-drop, the EWMH title-bar probe) can only be
+  # exercised against a real X server: there is no in-process X server or
+  # protocol double for Rust, so their `#[ignore]`d tests are invisible to the
+  # ordinary `cargo test` above. Openbox is deliberately a *different, minimal*
+  # EWMH implementation from the KWin/Mutter desktops these are developed
+  # against — it is the only cross-window-manager data point in the matrix.
+  test-x11:
+    name: Test (X11)
+    needs: test-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Install X server and window manager
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb openbox x11-utils
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+
+      # A single x11rb in the graph. Bastyde and winit both depend on it, and a
+      # version fork would silently double the X11 code in every binary and make
+      # any future type shared across the boundary fail to compile.
+      - name: Assert a single x11rb version
+        run: |
+          versions=$(cargo tree --workspace -i x11rb --depth 0 2>/dev/null \
+                     | grep -oE '^x11rb v[0-9.]+' | sort -u)
+          echo "$versions"
+          [ "$(echo "$versions" | wc -l)" -eq 1 ] || {
+            echo "::error::x11rb has forked into multiple versions"; exit 1; }
+
+      - name: Build tests
+        run: cargo test -p bastyde-platform --no-run
+
+      # Xvfb alone has NO window manager, which would turn every EWMH assertion
+      # into a silent pass rather than a failure — openbox is what makes the
+      # title-bar probe meaningful. The probe test asserts
+      # `_NET_SUPPORTING_WM_CHECK` resolves *before* asserting anything else, so
+      # a WM that failed to start fails the job loudly.
+      - name: Run X11 tests (Xvfb + openbox)
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1280x1024x24 &
+          for _ in $(seq 1 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+          openbox &
+          sleep 1
+          xprop -root _NET_SUPPORTING_WM_CHECK
+          # WAYLAND_DISPLAY must be empty so Bastyde's window-system detection
+          # (which mirrors winit's precedence) resolves to X11.
+          WAYLAND_DISPLAY= cargo test -p bastyde-platform -- --ignored --test-threads=1
 
   test-cross:
     name: Test (${{ matrix.name }})

@@ -1969,10 +1969,27 @@ impl BastydeAppHandler {
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let mut bastyde_id = None;
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.translation_state.set_scale_factor(scale_factor);
                     managed.platform_window.set_scale_factor(scale_factor);
                     managed.tree.set_device_scale_factor(scale_factor as f32);
+                    bastyde_id = Some(managed.bastyde_id);
+                }
+                // Keep the external-DnD backend's idea of the scale current:
+                // dragging the window onto a monitor with a different scale
+                // mid-drag would otherwise start reporting drops at the wrong
+                // place (X11 only — see `ExternalDndGuard::set_scale_factor`).
+                if let Some(bastyde_id) = bastyde_id
+                    && let Some(handle) = self
+                        .wm
+                        .app_context_template()
+                        .and_then(|t| {
+                            t.app_state::<bastyde_platform::external_dnd::ExternalDndHandle>()
+                        })
+                        .cloned()
+                {
+                    handle.set_scale_factor(bastyde_id, scale_factor);
                 }
                 #[cfg(feature = "text")]
                 {
