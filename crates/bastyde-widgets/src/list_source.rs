@@ -395,26 +395,88 @@ mod anchor_tests {
     }
 
     #[test]
-    fn a_builtin_flat_source_has_no_identity_to_anchor_to() {
-        // Documents a real limit rather than asserting a wish. `ListModel::key_at`
-        // returns the INDEX (a Vec row is its position), and
-        // `SortFilterListModel` deliberately leaves `key_at` defaulted to None
-        // ("selection over a sort/filter projection is positional, not by
-        // identity"). So anchors over either degrade to fixed, and the flat
-        // views' anchoring only becomes live for a custom keyed source.
+    fn a_sort_filter_projection_anchor_survives_a_filter_change() {
+        // The flat fragility in practice: a filter changes underneath handlers
+        // that were built against the previous projection. `SortFilterListModel`
+        // keys rows by their SOURCE index, which reprojection does not renumber,
+        // so the anchor tracks its row to the new visible position.
+        let proj = Rc::new(
+            SortFilterListModel::new(ListModel::from_vec(vec![10_i64, 20, 30])).with_predicate(
+                "v",
+                |t| {
+                    let drop: i64 = t.parse().unwrap_or(i64::MIN);
+                    Box::new(move |r: &i64| *r != drop)
+                },
+            ),
+        );
+        let list = ListSource::from_data_source_rc(proj.clone());
+        let anchor = list.anchor(2); // value 30, source index 2
+        assert_eq!(anchor.index(), Some(2));
+
+        // Filter out the FIRST row: 30 slides to visible index 1.
+        proj.set_filter("v", "10");
+        assert_eq!(
+            anchor.index(),
+            Some(1),
+            "the anchor must follow its row across the reprojection"
+        );
+
+        // Filter out the anchored row itself: the handler must no-op, not act
+        // on whichever row now sits at its old position.
+        proj.clear_filters();
+        proj.set_filter("v", "30");
+        assert_eq!(anchor.index(), None);
+        assert!(!anchor.is_live());
+    }
+
+    #[test]
+    fn keyed_selection_over_a_projection_now_works_and_prunes_filtered_rows() {
+        // Same root cause as the anchor: with `key_at` defaulted to None, a
+        // `KeyedSelectionModel` over a projection pruned EVERY key (nothing
+        // could ever be found), so keyed selection was silently inert here.
+        // Pin both the fix and the semantics it exposes.
+        use bastyde_data::{KeyedSelectionModel, SelectionMode};
+
+        let proj = Rc::new(
+            SortFilterListModel::new(ListModel::from_vec(vec![10_i64, 20, 30])).with_predicate(
+                "v",
+                |t| {
+                    let drop: i64 = t.parse().unwrap_or(i64::MIN);
+                    Box::new(move |r: &i64| *r != drop)
+                },
+            ),
+        );
+        let keyed = KeyedSelectionModel::<usize>::new(SelectionMode::Multi);
+        keyed.select(2); // source index of value 30
+
+        // Presence is resolvable now, which it was not before.
+        assert_eq!(
+            ListDataSource::key_at(proj.as_ref(), 2),
+            Some(2),
+            "a visible row reports its source index"
+        );
+        assert!(keyed.is_selected(&2));
+
+        // Filtering the row away makes it unresolvable: a pruning consumer
+        // drops it. Documented rather than assumed -- unlike the tree side,
+        // where `contains_key` checks the raw tree so a collapsed row keeps
+        // its selection, a flat projection has no "hidden but present" notion.
+        proj.set_filter("v", "30");
+        assert_eq!(
+            ListDataSource::index_of(proj.as_ref(), &2),
+            None,
+            "the filtered-out row has no visible position"
+        );
+    }
+
+    #[test]
+    fn a_bare_list_model_has_no_identity_to_anchor_to() {
+        // Documents a real limit rather than asserting a wish: `ListModel` is a
+        // Vec, so a row IS its position and `key_at` returns the index. Anchors
+        // over one degrade to fixed -- no worse than capturing the index.
         let bare = ListSource::from_model(ListModel::from_vec(vec![1, 2, 3]));
         let a = bare.anchor(1);
         assert_eq!(a.index(), Some(1));
-
-        let proj = Rc::new(SortFilterListModel::new(ListModel::from_vec(vec![1, 2, 3])));
-        let list = ListSource::from_data_source_rc(proj.clone());
-        let anchor = list.anchor(2);
-        assert_eq!(anchor.index(), Some(2));
-        proj.set_filter("nope", "x"); // no predicate registered: no-op, but bumps
-        assert_eq!(
-            anchor.index(),
-            Some(2),
-            "a keyless projection yields a fixed anchor -- see the module note"
-        );
+        assert!(a.is_live());
     }
 }

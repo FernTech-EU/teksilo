@@ -487,9 +487,32 @@ impl<T: 'static> Clone for SortFilterListModel<T> {
 
 impl<T: 'static> ListDataSource for SortFilterListModel<T> {
     type Item = T;
-    // Selection over a sort/filter projection is positional, not by identity —
-    // `key_at` is left defaulted (None), so use the index-based `SelectionModel`.
+    /// The **source index** behind a visible row.
+    ///
+    /// This is the strongest identity a flat projection can offer: the
+    /// underlying `ListModel` has none of its own (a `Vec` row *is* its
+    /// position). It is stable across every sort/filter reprojection, which is
+    /// what a projection actually does to rows, so a
+    /// [`RowAnchor`](../../bastyde_widgets/data_views/struct.RowAnchor.html)
+    /// built over this view tracks its row when a filter changes underneath it.
+    ///
+    /// It is **not** stable across an upstream mutation: an insert, remove or
+    /// move renumbers every source index at or above its change point (see the
+    /// divergence note in `rebuild`). Anchors only have to survive the window
+    /// between a change and the rebuild it schedules, and an upstream mutation
+    /// is exactly what forces that rebuild — but a handler firing inside that
+    /// window may still resolve to a neighbour. That is no worse than the
+    /// captured index it replaced, and strictly better for the sort/filter case.
     type Key = usize;
+
+    fn key_at(&self, index: usize) -> Option<usize> {
+        self.source_index_of(index)
+    }
+
+    fn index_of(&self, key: &usize) -> Option<usize> {
+        // O(1) after the first call in a projection epoch (lazy reverse index).
+        self.visible_index_of(*key)
+    }
 
     fn len(&self) -> usize {
         self.inner.borrow().visible_to_source.len()

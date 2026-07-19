@@ -426,12 +426,14 @@ pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 /// `key_at` at its `None` default) get a fixed anchor that always reports the
 /// index it was built with — no worse than capturing the index directly.
 ///
-/// **The built-in flat sources have no identity**, so anchors over them are
-/// fixed: `ListModel::key_at` returns the index (a `Vec` row *is* its
-/// position) and `SortFilterListModel` leaves `key_at` defaulted to `None` by
-/// design. Flat anchoring therefore only becomes live for a custom
-/// `ListDataSource` with a real `Key`. The tree sources all carry identity, so
-/// anchors there track properly.
+/// A bare `ListModel` has no identity to offer (a `Vec` row *is* its position),
+/// so anchors over one are fixed. `SortFilterListModel` keys rows by their
+/// **source index**, which no sort/filter reprojection renumbers — so anchors
+/// over a projection do track their row across a filter change, which is the
+/// flat fragility in practice. They can still mis-resolve inside the window
+/// between an *upstream* insert/remove and the rebuild it schedules, since that
+/// does renumber source indices; no worse than the captured index they replace.
+/// The tree sources all carry real identity.
 ///
 /// **Precondition: keys must be unique.** Resolution falls back to a lookup by
 /// key, which returns the *first* match, so a source handing out duplicate keys
