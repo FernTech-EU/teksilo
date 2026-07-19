@@ -291,11 +291,13 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let leading_id = if is_tree_column {
                     let indent_px = entry.depth as f32 * indent_per_level;
                     let source_for_twist = source.clone();
-                    let twist_flat_idx = flat_idx;
+                    let twist_anchor = source.anchor(flat_idx);
                     let twist = ctx.add(
                         TwistArrow::new(cp::TREE_TWIST_SIZE, entry.has_children, entry.is_expanded)
                             .on_click(move |_ctx| {
-                                source_for_twist.toggle_at(twist_flat_idx);
+                                if let Some(i) = twist_anchor.index() {
+                                    source_for_twist.toggle_at(i);
+                                }
                             }),
                     );
                     // Build inside-out so each `ctx.add` happens
@@ -360,7 +362,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 )
             {
                 let sel_for_click = sel.clone();
-                let row_index_for_click = flat_idx;
+                let click_anchor = source.anchor(flat_idx);
                 let focused_for_click = self.focused_cell.clone();
                 // Deferred collapse: pressing an ALREADY-selected row (no
                 // modifiers) keeps the whole (multi-)selection so it can be
@@ -389,6 +391,13 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // writes on a click. Keep the existing column; the ring stays
                         // hidden (gated on the pointer/keyboard `focus_visible`
                         // modality).
+                        // Resolve the row's CURRENT position once: rows above
+                        // may have appeared or vanished since this handler was
+                        // built, and a gone row must not hand its click to
+                        // whoever took its slot.
+                        let Some(row_index_for_click) = click_anchor.index() else {
+                            return EventResponse::Ignored;
+                        };
                         let col = focused_for_click.get().map(|(_, c)| c).unwrap_or(0);
                         focused_for_click.set(Some((row_index_for_click, col)));
                         if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
@@ -422,8 +431,10 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // Reached only on a click WITHOUT a drag (an active
                         // drag consumes PointerUp). Collapse the deferred
                         // multi-selection to the clicked row.
-                        if pending_collapse.replace(false) {
-                            sel_for_click.select(row_index_for_click);
+                        if pending_collapse.replace(false)
+                            && let Some(row) = click_anchor.index()
+                        {
+                            sel_for_click.select(row);
                         }
                         EventResponse::Ignored
                     }
@@ -552,13 +563,25 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
             if let Some(ref cb) = self.on_row_activate {
                 let cb = cb.clone();
-                let activate_index = flat_idx;
+                // Anchored: a row that moved (or vanished) between build and
+                // click must not activate whichever row took its slot.
+                let activate_anchor = source.anchor(flat_idx);
                 let handlers = match self.activate_on {
                     crate::data_views::ActivateOn::SingleClick => {
-                        HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
+                        let a = activate_anchor;
+                        HandlerSet::new().on_tap(move |_tap, ctx| {
+                            if let Some(i) = a.index() {
+                                cb(i, ctx);
+                            }
+                        })
                     }
                     crate::data_views::ActivateOn::DoubleClick => {
-                        HandlerSet::new().on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
+                        let a = activate_anchor;
+                        HandlerSet::new().on_double_tap(move |_tap, ctx| {
+                            if let Some(i) = a.index() {
+                                cb(i, ctx);
+                            }
+                        })
                     }
                 };
                 ctx.apply_handlers(tree_row_id, handlers);

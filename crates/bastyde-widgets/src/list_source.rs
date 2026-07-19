@@ -195,9 +195,20 @@ pub(crate) struct ListSource<T: 'static> {
     /// `None` for a genuine full change. Raw `ListModel`s report `None` —
     /// their observers already get fine-grained `DataChange` variants.
     pub(crate) first_changed_fn: Rc<dyn Fn() -> Option<usize>>,
+    /// Resolve `index` to a [`RowAnchor`](crate::data_views::RowAnchor) that
+    /// survives row movement. Keyless sources (a bare `ListModel`, or one that
+    /// leaves `key_at` at its `None` default) get a fixed anchor.
+    pub(crate) anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
     /// Erased DnD + lazy capability protocol (source-owned validation +
     /// windowing). Inert for `from_cloning_accessors` sources.
     pub(crate) dnd: DndLazy,
+}
+
+impl<T: 'static> ListSource<T> {
+    /// A movement-proof handle to the row at `index`.
+    pub(crate) fn anchor(&self, index: usize) -> crate::data_views::RowAnchor {
+        (self.anchor_fn)(index)
+    }
 }
 
 impl<T: 'static> ListSource<T> {
@@ -210,6 +221,9 @@ impl<T: 'static> ListSource<T> {
         let m6 = model.clone();
         let m7 = model.clone();
         Self {
+            // A bare `ListModel` has no row identity, so an anchor can only
+            // report the index it was built with.
+            anchor_fn: Rc::new(crate::data_views::RowAnchor::fixed),
             len_fn: Rc::new(move || m1.len()),
             with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
             with_item_str_fn: Rc::new(move |index, f| m6.with_item(index, |item| f(item))),
@@ -241,7 +255,20 @@ impl<T: 'static> ListSource<T> {
         let s4 = s.clone();
         let s5 = s.clone();
         let s6 = s.clone();
+        let s7 = s.clone();
         Self {
+            anchor_fn: Rc::new(move |index| match s7.key_at(index) {
+                Some(key) => {
+                    let src = s7.clone();
+                    crate::data_views::RowAnchor::new(Rc::new(move || {
+                        if src.key_at(index).as_ref() == Some(&key) {
+                            return Some(index);
+                        }
+                        src.index_of(&key)
+                    }))
+                }
+                None => crate::data_views::RowAnchor::fixed(index),
+            }),
             len_fn: Rc::new(move || s1.len()),
             with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
             with_item_str_fn: Rc::new(move |index, f| s5.with_item(index, |item| f(item))),
@@ -272,6 +299,8 @@ impl<T: 'static> ListSource<T> {
         let item_at_str = item_at.clone();
         let item_at_read = item_at.clone();
         Self {
+            // Accessor-backed sources expose no identity.
+            anchor_fn: Rc::new(crate::data_views::RowAnchor::fixed),
             len_fn,
             with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(f)),
             with_item_str_fn: Rc::new(move |index, f| item_at_str(index).as_ref().map(f)),

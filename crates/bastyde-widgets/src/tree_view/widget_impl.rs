@@ -745,6 +745,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     let sel_click = self.row_selection.clone();
                     let click_index = i;
                     let source_click = self.source.clone();
+                    let click_anchor = self.source.anchor(i);
                     let fi_click = self.focused_index.clone();
                     let has_children = item_has_children && self.row_click_expands;
                     // Deferred collapse: pressing an already-selected row keeps
@@ -831,8 +832,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // gesture pre-empts it (once active_drag is
                                 // set, PointerUp is routed to handle_drag_drop
                                 // and never reaches this widget).
-                                if has_children {
-                                    source_click.toggle_at(click_index);
+                                // Anchored: rows above may have shifted since
+                                // this handler was built, so resolve the row's
+                                // current position rather than trusting the
+                                // captured index.
+                                if has_children
+                                    && let Some(cur) = click_anchor.index()
+                                {
+                                    source_click.toggle_at(cur);
                                 }
                                 bastyde_core::event::EventResponse::Ignored
                             }
@@ -848,7 +855,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     // moves on arrow navigation.
                     if let Some(ref cb) = self.on_activate {
                         let cb = cb.clone();
-                        let activate_index = i;
+                        let a = self.source.anchor(i);
                         let handlers = match self.activate_on {
                             crate::data_views::ActivateOn::SingleClick => {
                                 HandlerSet::new().on_tap(move |tap, _ctx| {
@@ -862,11 +869,17 @@ impl<T: 'static> Widget for TreeView<T> {
                                     if tap.modifiers.ctrl() || tap.modifiers.shift() {
                                         return;
                                     }
-                                    cb(activate_index)
+                                    if let Some(cur) = a.index() {
+                                        cb(cur)
+                                    }
                                 })
                             }
                             crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
-                                .on_double_tap(move |_tap, _ctx| cb(activate_index)),
+                                .on_double_tap(move |_tap, _ctx| {
+                                    if let Some(cur) = a.index() {
+                                        cb(cur)
+                                    }
+                                }),
                         };
                         ctx.apply_handlers(child_id, handlers);
                     }

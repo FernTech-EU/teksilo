@@ -207,6 +207,10 @@ pub(crate) struct TreeSource<T: 'static> {
     /// Alt+Arrow sibling reorder: `(index, down) -> new flat index` (or `None`
     /// if at an edge / rejected). The key-typed sibling logic stays internal.
     keyboard_reorder_fn: Rc<dyn Fn(usize, bool) -> Option<usize>>,
+    /// Resolve `index` to a [`RowAnchor`](crate::data_views::RowAnchor) that
+    /// survives row movement. Captures the source's key at build time; the key
+    /// stays inside the closure, so `TreeSource<T>` remains key-agnostic.
+    anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
     version_fn: Rc<dyn Fn() -> Signal<u64>>,
     first_changed_fn: Rc<dyn Fn() -> Option<usize>>,
     pub(crate) dnd: TreeDndLazy,
@@ -217,7 +221,8 @@ impl<T: 'static> TreeSource<T> {
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let dnd = TreeDndLazy::from_source(s.clone());
-        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12) = (
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -233,6 +238,19 @@ impl<T: 'static> TreeSource<T> {
         );
         Self {
             visible_count_fn: Rc::new(move || s1.visible_count()),
+            anchor_fn: Rc::new(move |index| match s13.key_at(index) {
+                Some(key) => {
+                    let src = s13.clone();
+                    crate::data_views::RowAnchor::new(Rc::new(move || {
+                        // Fast path: the captured slot still holds this row.
+                        if src.key_at(index).as_ref() == Some(&key) {
+                            return Some(index);
+                        }
+                        src.flat_index_of(&key)
+                    }))
+                }
+                None => crate::data_views::RowAnchor::fixed(index),
+            }),
             with_row_fn: Rc::new(move |index, build| {
                 s2.with_entry(index, |item, entry| {
                     let meta = TreeRowMeta {
@@ -337,6 +355,11 @@ impl<T: 'static> TreeSource<T> {
         }
     }
 
+    /// A movement-proof handle to the row at `index`.
+    pub(crate) fn anchor(&self, index: usize) -> crate::data_views::RowAnchor {
+        (self.anchor_fn)(index)
+    }
+
     pub(crate) fn visible_count(&self) -> usize {
         (self.visible_count_fn)()
     }
@@ -403,11 +426,94 @@ impl<T: 'static> TreeSource<T> {
             is_expanded: false,
         });
         let src = self_rc.clone();
+        // Anchored, not index-captured: the chevron keeps toggling ITS row even
+        // if rows above it appear or vanish before the click lands, and no-ops
+        // if the row is gone rather than toggling whoever took its place.
+        let anchor = self_rc.anchor(index);
         TreeRow {
             depth: meta.depth,
             has_children: meta.has_children,
             is_expanded: meta.is_expanded,
-            toggle: Rc::new(move |_ctx| src.toggle_at(index)),
+            toggle: Rc::new(move |_ctx| {
+                if let Some(i) = anchor.index() {
+                    src.toggle_at(i);
+                }
+            }),
         }
+    }
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::*;
+    use bastyde_data::{TreeDataSlice, TreeRow};
+
+    fn slice_of(keys: &[u64]) -> TreeDataSlice<u64, u64> {
+        let slice = TreeDataSlice::<u64, u64>::new();
+        let owned: Vec<u64> = keys.to_vec();
+        slice.set_source(move || {
+            owned
+                .iter()
+                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .collect()
+        });
+        slice.reload();
+        slice
+    }
+
+    #[test]
+    fn an_anchor_follows_its_row_when_rows_shift_above_it() {
+        // Row 30 starts at index 2. After two rows are inserted above it, a
+        // captured index would point at a different row entirely; the anchor
+        // resolves to 30's new position.
+        let slice = slice_of(&[10, 20, 30]);
+        let src = Rc::new(TreeSource::from_data_source(Rc::new(slice.clone())));
+        let anchor = src.anchor(2);
+        assert_eq!(anchor.index(), Some(2));
+
+        let shifted: Vec<u64> = vec![1, 2, 10, 20, 30];
+        slice.set_source(move || {
+            shifted
+                .iter()
+                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .collect()
+        });
+        slice.reload();
+
+        assert_eq!(
+            anchor.index(),
+            Some(4),
+            "the anchor must track row 30 to its new index, not stay at 2"
+        );
+    }
+
+    #[test]
+    fn an_anchor_reports_none_once_its_row_is_gone() {
+        // Deleting the row must make the handler a no-op, not redirect it onto
+        // whichever row slid into the vacated slot.
+        let slice = slice_of(&[10, 20, 30]);
+        let src = Rc::new(TreeSource::from_data_source(Rc::new(slice.clone())));
+        let anchor = src.anchor(1); // row 20
+
+        let remaining: Vec<u64> = vec![10, 30];
+        slice.set_source(move || {
+            remaining
+                .iter()
+                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .collect()
+        });
+        slice.reload();
+
+        assert_eq!(anchor.index(), None, "row 20 is gone");
+        assert!(!anchor.is_live());
+    }
+
+    #[test]
+    fn a_keyless_source_degrades_to_a_fixed_anchor() {
+        // No identity available: the anchor is no worse than capturing the
+        // index, and must not pretend the row vanished.
+        let anchor = crate::data_views::RowAnchor::fixed(7);
+        assert_eq!(anchor.index(), Some(7));
+        assert!(anchor.is_live());
     }
 }

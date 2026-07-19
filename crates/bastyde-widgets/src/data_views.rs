@@ -408,6 +408,59 @@ pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 ///
 /// Shared by `TreeView` and `TreeTableView` so both render the same affordance
 /// for the same source verdict.
+/// A stable handle to a row in a data view.
+///
+/// Per-row event handlers (a chevron toggle, a click, an activation) are built
+/// once and then live as long as the row widget does, so capturing the flat
+/// index they were built at is fragile: expanding a branch above, applying a
+/// filter, or sorting shifts every index below, and the stale handler would act
+/// on whatever row moved into that slot.
+///
+/// A `RowAnchor` closes over the row's **source-owned identity** instead and
+/// resolves the row's *current* position on demand. The key never surfaces in
+/// the anchor's type — it is captured inside the resolver, so views stay
+/// key-agnostic ([`TreeSource`](crate::tree_source::TreeSource) and
+/// [`ListSource`](crate::list_source::ListSource) both erase it).
+///
+/// Sources without identity (a bare `ListModel`, or any source that leaves
+/// `key_at` at its `None` default) get a fixed anchor that always reports the
+/// index it was built with — no worse than capturing the index directly.
+#[derive(Clone)]
+pub struct RowAnchor {
+    resolve: Rc<dyn Fn() -> Option<usize>>,
+}
+
+impl RowAnchor {
+    /// Build an identity-backed anchor from a resolver.
+    pub(crate) fn new(resolve: Rc<dyn Fn() -> Option<usize>>) -> Self {
+        Self { resolve }
+    }
+
+    /// An anchor for a source with no identity: always reports `index`.
+    pub(crate) fn fixed(index: usize) -> Self {
+        Self {
+            resolve: Rc::new(move || Some(index)),
+        }
+    }
+
+    /// The row's current flat index, or `None` if it no longer exists in the
+    /// source (it was deleted, or filtered away).
+    pub fn index(&self) -> Option<usize> {
+        (self.resolve)()
+    }
+
+    /// Whether the row still exists.
+    pub fn is_live(&self) -> bool {
+        self.index().is_some()
+    }
+}
+
+impl std::fmt::Debug for RowAnchor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RowAnchor").field(&self.index()).finish()
+    }
+}
+
 /// Tint for the "drop into this container" row highlight. Defined once so the
 /// `DropFeedback` handed to the framework and the widget's own paint cannot
 /// drift into two different colors on the same row.
