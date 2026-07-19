@@ -223,6 +223,7 @@
 - [DataChange](data-collections/data_change.md)
 - [ItemKey](data-collections/dnd_types.md)
 - [KeyedSelectionModel](data-collections/keyed_selection_model.md)
+- [KeyedTreeCheckedModel](data-collections/keyed_tree_checked_model.md)
 - [ListDataSource](data-collections/list_data_source.md)
 - [ListModel](data-collections/list_model.md)
 - [SelectionModel](data-collections/selection_model.md)
@@ -230,8 +231,10 @@
 - [SortFilterTreeModel](data-collections/sort_filter_tree_model.md)
 - [TreeChange](data-collections/tree_change.md)
 - [TreeCheckedModel](data-collections/tree_checked_model.md)
+- [TreeDataSlice](data-collections/tree_data_slice.md)
 - [TreeDataSource](data-collections/tree_data_source.md)
 - [TreeModel](data-collections/tree_model.md)
+- [TreeRowFilter](data-collections/tree_row_filter.md)
 - [TreeSlice](data-collections/tree_slice.md)
 <!-- END GENERATED DATA-COLLECTIONS -->
 

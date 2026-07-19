@@ -403,6 +403,27 @@ impl RowSelection {
 /// were already captured. The source erasure supplies it.
 pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 
+/// Active drag-drop feedback a tree data view paints itself: a between-rows
+/// insertion line (Before/After) or a highlighted row (an into-container drop).
+///
+/// Shared by `TreeView` and `TreeTableView` so both render the same affordance
+/// for the same source verdict.
+/// Tint for the "drop into this container" row highlight. Defined once so the
+/// `DropFeedback` handed to the framework and the widget's own paint cannot
+/// drift into two different colors on the same row.
+pub(crate) fn drop_into_tint() -> bastyde_tokens::Color {
+    bastyde_tokens::Color::from_rgba(0.25, 0.47, 0.85, 0.25)
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum DropViz {
+    /// Horizontal insertion line at `y`, spanning `width`.
+    Line { y: f32, width: f32 },
+    /// Highlighted target row `[top, top + height]`, spanning `width` — the
+    /// "drop into this folder" affordance.
+    Rect { top: f32, height: f32, width: f32 },
+}
+
 /// The reusable export / foreign-drop machinery shared by all five data views:
 /// the config fields, the drag-start payload build (selection set already
 /// resolved by the caller), the foreign-receive sugar, and the `on_drag_ended`

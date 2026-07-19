@@ -35,7 +35,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{NodeId, SelectionMode, SortFilterTreeModel};
+use bastyde_data::{DragEligibility, SelectionMode};
 
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::data_views::{RowSelection, ViewId};
@@ -44,6 +44,7 @@ use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
 use crate::table_view::body::{BodyRow, SharedColumnWidths};
 use crate::table_view::body_pane::CellRowPreview;
+use crate::tree_source::TreeSource;
 use crate::table_view::column::{CellContext, Column};
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
 
@@ -53,7 +54,9 @@ const BUFFER_ROWS: usize = 5;
 /// (indent + twist + cells, wrapped in `BodyRow` + `TreeRowA11y`) and
 /// their per-row click handlers.
 pub(crate) struct TreeBodyPane<T: 'static> {
-    pub(crate) proxy: SortFilterTreeModel<T>,
+    /// Erased row access — index-keyed, so the pane works over any
+    /// `TreeDataSource`, not just a `TreeModel`-backed projection.
+    pub(crate) source: Rc<TreeSource<T>>,
 
     pub(crate) columns: Vec<Column<T>>,
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
@@ -124,7 +127,7 @@ impl<T: 'static> TreeBodyPane<T> {
         self.row_metrics.borrow_mut().visible_range(
             self.scroll_y.get(),
             self.viewport_height.get(),
-            self.proxy.visible_count(),
+            self.source.visible_count(),
             BUFFER_ROWS,
         )
     }
@@ -133,7 +136,7 @@ impl<T: 'static> TreeBodyPane<T> {
 impl<T: 'static> std::fmt::Debug for TreeBodyPane<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeBodyPane")
-            .field("rows", &self.proxy.visible_count())
+            .field("rows", &self.source.visible_count())
             .field("columns", &self.columns.len())
             .finish()
     }
@@ -159,7 +162,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // ancestor). The pre-split TreeTableView had no buffer-exit
         // observer at all — scrolling past the buffer left stale rows
         // until the next unrelated rebuild.
-        let proxy_for_scroll = self.proxy.clone();
+        let source_for_scroll = self.source.clone();
         let vp_h = self.viewport_height.clone();
         let (initial_start, initial_end) = self.visible_range();
         self.prev_built_start.set(initial_start);
@@ -170,7 +173,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             let pbe = self.prev_built_end.clone();
             let metrics = self.row_metrics.clone();
             move |y| {
-                let count = proxy_for_scroll.visible_count();
+                let count = source_for_scroll.visible_count();
                 let (visible_start, visible_end) =
                     metrics.borrow_mut().visible_range(*y, vp_h.get(), count, 0);
                 if visible_start < pbs.get() || visible_end > pbe.get() {
@@ -222,7 +225,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         let (start, end) = self.visible_range();
         let display_indices = self.display_indices.borrow().clone();
         let columns = self.columns.clone();
-        let proxy = self.proxy.clone();
+        let source = self.source.clone();
         let selection = self.selection.clone();
         let cell_selection = self.cell_selection.clone();
         let selection_mode = self.selection_mode;
@@ -234,7 +237,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // not this pane — see TableView's body pane for the rationale.
         ctx.begin_view_focus_for(self.drag_anchor);
         for flat_idx in start..end {
-            let entry = match proxy.entry_at(flat_idx) {
+            let entry = match source.meta(flat_idx) {
                 Some(e) => e,
                 None => continue,
             };
@@ -276,7 +279,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
                 // Build the cell delegate widget.
                 let inner_widget =
-                    proxy.with_entry(flat_idx, |item, _| (col.cell)(item, &cell_ctx));
+                    source.with_row(flat_idx, &|item, _meta| (col.cell)(item, &cell_ctx));
                 let inner_widget = match inner_widget {
                     Some(w) => w,
                     None => continue,
@@ -287,12 +290,12 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 // twist arrow.
                 let leading_id = if is_tree_column {
                     let indent_px = entry.depth as f32 * indent_per_level;
-                    let twist_node_id = entry.node_id;
-                    let proxy_for_twist = proxy.clone();
+                    let source_for_twist = source.clone();
+                    let twist_flat_idx = flat_idx;
                     let twist = ctx.add(
                         TwistArrow::new(cp::TREE_TWIST_SIZE, entry.has_children, entry.is_expanded)
                             .on_click(move |_ctx| {
-                                proxy_for_twist.toggle(twist_node_id);
+                                source_for_twist.toggle_at(twist_flat_idx);
                             }),
                     );
                     // Build inside-out so each `ctx.add` happens
@@ -433,11 +436,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             // pressed row. Export clones/MIME are built only when the view
             // opted in via `.exportable(..)` / `.export_external(..)`.
             let is_drag_source = self.export.is_drag_source(self.reorderable);
-            if is_drag_source {
+        // Per-row drag eligibility is the SOURCE's call (a locked/trashed row
+        // may refuse to move), mirroring `TreeView`. Without this a source's
+        // `set_drag_policy` would be silently overridden by the view.
+        let drag_gate = self.source.dnd.drag_fn.clone();
+            if is_drag_source && drag_gate(flat_idx) == DragEligibility::CanDrag {
                 let drag_model_id = self.model_id;
                 let anchor = self.drag_anchor;
                 let preview_flat = flat_idx;
-                let proxy_for_preview = proxy.clone();
+                let source_for_preview = source.clone();
                 let columns_for_preview = columns.clone();
                 let display_for_preview = display_indices.clone();
                 let widths_for_preview = self.column_widths.clone();
@@ -445,7 +452,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let tree_pos_for_preview = tree_display_pos;
                 let sel_for_drag = selection.clone();
                 let export_for_drag = self.export.clone();
-                let proxy_for_drag = proxy.clone();
+                let source_for_drag = source.clone();
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
                         // Selection-aware dragged set: the whole selection
@@ -464,9 +471,9 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // through the projection (skips a row that isn't
                         // currently resident — the shared `build_payload`
                         // drops it so `rows`/`items` stay index-aligned).
-                        let proxy_r = proxy_for_drag.clone();
+                        let src_r = source_for_drag.clone();
                         let read = move |i: usize, f: &mut dyn FnMut(&T)| {
-                            proxy_r.with_entry(i, |item, _entry| f(item)).is_some()
+                            (src_r.read_item_fn)(i, f)
                         };
 
                         // Snapshot-out: resolve the dragged flat indices to
@@ -479,22 +486,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // pre-order — an ancestor always precedes its
                         // descendants) is safely skipped instead of the
                         // stale-key panic `TreeModel::remove` would raise.
-                        let proxy_s = proxy_for_drag.clone();
-                        let snapshot_out: crate::data_views::SnapshotOutFn =
-                            Rc::new(move |indices: &[usize]| {
-                                let nodes: Vec<NodeId> = indices
-                                    .iter()
-                                    .filter_map(|&i| proxy_s.visible_node_id(i))
-                                    .collect();
-                                let proxy2 = proxy_s.clone();
-                                Box::new(move || {
-                                    for n in &nodes {
-                                        if proxy2.tree().with_item(*n, |_| ()).is_some() {
-                                            proxy2.tree().remove(*n);
-                                        }
-                                    }
-                                }) as Box<dyn Fn()>
-                            });
+                        let snapshot_out = source_for_drag.dnd.snapshot_out_fn.clone();
 
                         let payload = export_for_drag.build_payload(
                             drag_model_id,
@@ -510,8 +502,16 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         let widths = widths_for_preview.borrow().clone();
                         let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
                         let total_w = widths.iter().sum::<f32>().max(120.0);
-                        let cells: Vec<Box<dyn Widget>> = proxy_for_preview
-                            .with_entry(preview_flat, |item, e| {
+                        let mut cells: Vec<Box<dyn Widget>> = Vec::new();
+                        // Both halves must come from the same row: if the meta
+                        // is missing the row is not really resident, so build no
+                        // preview rather than one at a fabricated depth 0.
+                        let preview_meta = source_for_preview.meta(preview_flat);
+                        (source_for_preview.read_item_fn)(preview_flat, &mut |item| {
+                            let Some(e) = preview_meta else {
+                                return;
+                            };
+                            cells = {
                                 display_for_preview
                                     .iter()
                                     .enumerate()
@@ -531,8 +531,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                                         (col.cell)(item, &cell_ctx)
                                     })
                                     .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
+                            };
+                        });
                         if cells.is_empty() {
                             ctx.start_drag(anchor, payload);
                             return;
@@ -594,7 +594,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // content above the viewport stays put. Measurements are
         // collected with NO metrics borrow held.
         if self.row_metrics.borrow().needs_measure() {
-            let count = self.proxy.visible_count();
+            let count = self.source.visible_count();
             let pre_total = self.row_metrics.borrow_mut().total_height(count);
             let mut measured = Vec::with_capacity(children.len());
             for (i, child) in children.iter().enumerate() {

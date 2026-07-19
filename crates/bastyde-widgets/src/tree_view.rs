@@ -133,16 +133,7 @@ type RowDelegate<T> = dyn Fn(usize, &T, &TreeRowMeta, bool) -> Box<dyn Widget>;
 /// })
 /// .item_height(28.0);
 /// ```
-/// Active drag-drop feedback the `TreeView` paints itself: a between-rows
-/// insertion line (Before/After) or a highlighted row (an into-container drop).
-#[derive(Clone, Copy, PartialEq)]
-enum DropViz {
-    /// Horizontal insertion line at `y`, spanning `width`.
-    Line { y: f32, width: f32 },
-    /// Highlighted target row `[top, top + height]`, spanning `width` — the
-    /// "drop into this folder" affordance.
-    Rect { top: f32, height: f32, width: f32 },
-}
+use crate::data_views::DropViz;
 
 pub struct TreeView<T: 'static> {
     /// Index-keyed erased backing — the built-in `TreeSlice` or an external

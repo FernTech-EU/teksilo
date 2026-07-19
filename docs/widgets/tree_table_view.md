@@ -17,6 +17,33 @@ selection / expand rebuilds are never deferred mid-thumb-drag. Three row-height
 modes: uniform (`row_height`, fast path), exact per-flat-index callback
 (`row_height_fn`), and auto-measured (`auto_row_height` — grows to tallest cell).
 
+## Common patterns
+
+**A checkbox column.** Selection and "checked" are different things — a
+checkbox column wants its own state, with parent/child propagation. Build it
+from `TreeCheckedModel` over the same tree
+the view projects.
+
+A cell delegate receives `(&T, &CellContext)` and **`CellContext` carries no
+node identity** — only `row_index`. So
+capture the projection and resolve the row's `NodeId` through it:
+
+```ignore
+let proxy = SortFilterTreeModel::new(tree);
+let checks = TreeCheckedModel::new(proxy.tree());
+let for_cells = proxy.clone();
+let col = Column::new("done", lit!("Done"), move |_item, cx: &CellContext| {
+    match for_cells.visible_node_id(cx.row_index) {
+        Some(node) => Box::new(Checkbox::new(checks.check_state(node))) as Box<dyn Widget>,
+        None => Box::new(Spacer::new()),
+    }
+});
+```
+
+For a tree whose identity is a domain key rather than a `NodeId`, use
+`KeyedTreeCheckedModel` instead — it
+survives a full re-source, which a `NodeId`-keyed set cannot.
+
 ## Accessibility
 
 Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
@@ -33,7 +60,7 @@ let _view = TreeTableView::new(model).row_height(28.0);
 
 ## Builder methods at a glance
 
-`from_projection`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`
+`from_projection`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`, `empty_view`, `clear_sort`, `scroll_to_row`, `ensure_row_visible`, `set_column_width`, `set_column_widths`, `set_column_order`, `column_pinning_signal`, `set_column_pinning`, `begin_edit`, `end_edit`
 
 ## API reference
 
@@ -52,6 +79,33 @@ pub struct TreeTableView<T: 'static> { /* fields */ }
 #### `pub fn from_projection(proxy: SortFilterTreeModel<T>) -> Self`
 
 Wrap a `SortFilterTreeModel<T>`.
+Wrap a `SortFilterTreeModel<T>`.
+
+#### `pub fn from_source<S: TreeDataSource<Item = T> + 'static>(source: S) -> Self`
+
+Build a tree table over any `TreeDataSource` — an external source of
+truth (a Qleany entity store, a database, a virtual filesystem) carrying
+its own `Key`, so it needs no `TreeModel` mirror.
+
+This is the tree-table sibling of
+`TreeView::from_source`. Because the
+source owns identity, its expand state (and a keyed selection) survive a
+full re-source — which a `TreeModel` mirror cannot guarantee, since
+`NodeId`s are reassigned on rebuild.
+
+The `NodeId`-typed methods (`expand`,
+`projection`, `keyed_selection`)
+do not apply here and no-op; drive expansion through the source itself.
+Row drag-reorder is not yet wired on this path.
+
+#### `pub fn from_source_keyed<S: TreeDataSource<Item = T> + 'static>( source: S, keyed: KeyedSelectionModel<S::Key>, ) -> Self where S::Key: bastyde_data::ItemKey,`
+
+Like `from_source` but with **keyed** selection:
+the `KeyedSelectionModel<S::Key>` tracks rows by source identity, so it
+survives expand / collapse, sort / filter and a full re-source. Pruning
+consults the source's `contains_key`, so a collapsed-but-present row
+keeps its selection. The view stays `TreeTableView<T>` — the `Key` is
+captured here.
 
 #### `pub fn new(model: TreeModel<T>) -> Self`
 
@@ -107,8 +161,10 @@ reordered by the user.
 
 #### `pub fn reorderable(mut self, enabled: bool) -> Self`
 
-Enable drag-to-reorder of rows (pointer drag + keyboard
-Alt+ArrowUp/Down).
+Enable drag-to-reorder of **rows** (pointer drag + keyboard
+Alt+ArrowUp/Down). Distinct from
+`Column::reorderable`, which reorders
+*columns* and defaults to `true`; this defaults to `false`.
 
 A drop reparents/reorders the dragged node in the underlying
 `TreeModel` (top third of a row = Before, middle = Into / make-child,
@@ -175,7 +231,13 @@ flat row index, ctx)`. Insert them into your tree at/near the index.
 
 #### `pub fn on_foreign_drop( mut self, f: impl Fn(&DragPayload, NodeId, DropPosition, &mut EventContext) -> bool + 'static, ) -> Self`
 
-Raw escape hatch for a foreign drop. Unlike `ListView` / `TableView`,
+Raw escape hatch for a foreign drop.
+
+**Projection path only.** This hook is `NodeId`-typed and predates
+`from_source`; over an external source there is no
+`NodeId` to hand it, so it never fires. Prefer
+`accept_foreign_rows` +
+`on_rows_received`, which are source-agnostic. Unlike `ListView` / `TableView`,
 `TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
 than a pluggable source, so it cannot express foreign-accept purely
 through source capability closures (`can_accept` / `accept_drop`).
@@ -243,7 +305,8 @@ Show or hide the column header row (default `true`).
 
 #### `pub fn selection_mode(mut self, mode: TableSelectionMode) -> Self`
 
-Set the row/cell selection mode (default `RowSingle`).
+Set the row/cell selection mode (default
+`TableSelectionMode::MultiRow`).
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
@@ -259,6 +322,10 @@ node identity, so it survives expand / collapse, sort / filter, and node
 moves — and stays consistent if two views share the projection. Pruned
 of deleted nodes on each projection change. Mutually exclusive with
 `selection` (last one set wins).
+Only meaningful on the `from_projection` /
+`new` paths, whose identity *is* `NodeId`; a no-op over an
+external source, which carries its own key — use
+`from_source_keyed` there.
 
 #### `pub fn cell_selection(mut self, sel: CellSelectionModel) -> Self`
 
@@ -333,9 +400,35 @@ Viewport-to-content height ratio — drives the scrollbar thumb size.
 
 Active sort state: `Some((col_id, direction))` or `None` for unsorted.
 
+**This is the header's state, not the data's.** Clicking a sort header
+writes here; nothing reorders rows until you bind this onto the backing
+projection yourself:
+
+```ignore
+let proxy = SortFilterTreeModel::new(tree)
+    .with_comparator("name", |a: &Row, b: &Row| a.name.cmp(&b.name));
+proxy.sort_signal(view.sort_signal().clone());
+```
+
+The binding is deliberately not automatic: a projection may already
+carry preset comparators, predicates, and a filter mode, and adopting
+the view's empty signal at construction would clobber them.
+
 #### `pub fn filters_signal(&self) -> &Signal<HashMap<String, String>>`
 
 Active per-column filters keyed by column id.
+
+Like `sort_signal`, this holds the header's state
+only — bind it onto the projection to actually filter rows:
+
+```ignore
+let proxy = SortFilterTreeModel::new(tree)
+    .with_predicate("name", |t| {
+        let needle = t.to_string();
+        Box::new(move |r: &Row| r.name.contains(&needle))
+    });
+proxy.filters_signal(view.filters_signal().clone());
+```
 
 #### `pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>>`
 
@@ -353,10 +446,14 @@ Keyboard-focused cell as `(row, display_column_index)`, or `None`.
 
 Cell currently being edited as `(row, display_column_index)`, or `None`.
 
-#### `pub fn projection(&self) -> &SortFilterTreeModel<T>`
+#### `pub fn projection(&self) -> Option<&SortFilterTreeModel<T>>`
 
 Access the underlying `SortFilterTreeModel` (for programmatic sort /
 filter / expand outside of the builder API).
+`None` when the view was built from an external
+`TreeDataSource` via
+`from_source` — there is no `TreeModel`-backed
+projection to hand back in that case.
 
 #### `pub fn expand(&self, node: NodeId)`
 
@@ -395,3 +492,59 @@ Programmatically sort by `col_id` (pass `None` to clear the sort).
 Set or clear the filter text for a single column.
 
 #### `pub fn clear_filters(&self)`
+
+#### `pub fn empty_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
+
+Widget shown when no rows are visible — an empty tree, or a filter
+that matched nothing. Without one, the body region is simply blank.
+
+#### `pub fn clear_sort(&self)`
+
+Clear the active sort.
+
+#### `pub fn scroll_to_row(&self, row: usize)`
+
+Scroll so that `row` is aligned to the top of the viewport. A no-op
+before the first layout pass.
+
+#### `pub fn ensure_row_visible(&self, row: usize)`
+
+Scroll the minimum distance needed to make `row` visible. A no-op
+before the first layout pass, when the viewport height is not yet known.
+
+#### `pub fn set_column_width(&self, col_id: &str, width: f32)`
+
+Set or remove a single column's user-resized width override.
+A non-positive `width` removes the entry (the column reverts to
+its declared width policy).
+
+#### `pub fn set_column_widths(&self, widths: HashMap<String, f32>)`
+
+Replace the full width-override map (typically used to restore
+a persisted layout).
+
+#### `pub fn set_column_order(&self, order: Vec<String>)`
+
+Replace the column-order list. Ids not declared on this table
+are silently dropped on the next layout pass.
+
+#### `pub fn column_pinning_signal(&self) -> &Signal<HashMap<String, PinnedSide>>`
+
+Current column pinning overrides, keyed by column id. Wins over
+each column's declared `Column::pinned`.
+
+#### `pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide)`
+
+Pin or unpin a single column. `PinnedSide::None` removes the
+override, reverting the column to its declared pinning.
+
+#### `pub fn begin_edit(&self, row: usize, col_id: &str)`
+
+Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`
+isn't a currently-displayed column, or if `row` is outside the visible
+range — an out-of-range target would otherwise strand `editing_cell` on
+a row nothing can match.
+
+#### `pub fn end_edit(&self)`
+
+Close the active cell editor without committing (the field's `on_blur` still fires).

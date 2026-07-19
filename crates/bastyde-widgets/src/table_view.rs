@@ -49,6 +49,7 @@ pub mod body_pane;
 pub mod column;
 pub mod filter;
 pub mod header;
+pub mod imperative;
 pub mod keyboard;
 pub mod layout;
 pub mod row_navigator;
@@ -279,7 +280,7 @@ pub struct TableView<T: 'static> {
     /// focused row).
     #[allow(clippy::type_complexity)]
     on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
-    reorderable_rows: bool,
+    reorderable: bool,
     /// Active row-drop insertion indicator `(body_local_y, width)` —
     /// `body_local_y` is measured from the body band top (below the
     /// header). Set by `on_drag_hover` when the source accepts the
@@ -330,6 +331,10 @@ pub struct TableView<T: 'static> {
     /// to classify a drop position.
     pane_boundaries: Rc<RefCell<PaneBoundaries>>,
     viewport_height: Rc<Cell<f32>>,
+    /// Set on the first `place_children`. Until then `viewport_height` still
+    /// holds its construction placeholder, so viewport-relative imperatives
+    /// (`ensure_row_visible`) would scroll against a size that was never real.
+    laid_out: Rc<Cell<bool>>,
     /// The row-area's absolute (window) rect (below the header), cached by
     /// `place_children`. Threaded into the keyboard handler so it can chase the
     /// focused row into any *enclosing* scroll area via
@@ -483,7 +488,7 @@ impl<T: 'static> TableView<T> {
             on_cell_edit_request: None,
             filters_signal: Signal::new(HashMap::new()),
             on_row_activate: None,
-            reorderable_rows: false,
+            reorderable: false,
             drop_feedback: Signal::new(None),
             activate_on: crate::data_views::ActivateOn::default(),
             header_row_id: None,
@@ -498,6 +503,7 @@ impl<T: 'static> TableView<T> {
             display_indices: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
             viewport_height: Rc::new(Cell::new(600.0)),
+            laid_out: Rc::new(Cell::new(false)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             header_strip_width: Rc::new(Cell::new(0.0)),
             resize_state: Rc::new(std::cell::RefCell::new(None)),
@@ -677,8 +683,10 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Enable drag-to-reorder of rows (pointer drag + keyboard
-    /// Alt+ArrowUp/Down).
+    /// Enable drag-to-reorder of **rows** (pointer drag + keyboard
+    /// Alt+ArrowUp/Down). Distinct from
+    /// [`Column::reorderable`](crate::Column::reorderable), which reorders
+    /// *columns* and defaults to `true`; this defaults to `false`.
     ///
     /// The move is routed through the backing source's `accept_drop`: a
     /// `ListModel` reorders in place, an external source routes the move to
@@ -688,9 +696,17 @@ impl<T: 'static> TableView<T> {
     /// all (the source's `drag` gate). Cross-table / external drops arrive
     /// at `accept_drop` as `DragSource::Foreign`; a bare `ListModel`
     /// rejects them, an external source decides.
-    pub fn reorderable_rows(mut self, enabled: bool) -> Self {
-        self.reorderable_rows = enabled;
+    pub fn reorderable(mut self, enabled: bool) -> Self {
+        self.reorderable = enabled;
         self
+    }
+
+    /// Renamed to [`reorderable`](Self::reorderable), matching `ListView`,
+    /// `GridView`, `TreeView` and `TreeTableView` — this was the only view in
+    /// the family spelling it differently.
+    #[deprecated(since = "0.6.3", note = "renamed to `reorderable`")]
+    pub fn reorderable_rows(self, enabled: bool) -> Self {
+        self.reorderable(enabled)
     }
 
     /// Make rows **droppable outside this view** — on a
@@ -701,7 +717,7 @@ impl<T: 'static> TableView<T> {
     /// [`RowDragData<T>`](crate::RowDragData), so a foreign receiver can pull
     /// them out with `payload.get_typed::<RowDragData<T>>()` /
     /// `DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
-    /// also makes rows a drag source even without [`reorderable_rows`](Self::reorderable_rows).
+    /// also makes rows a drag source even without [`reorderable`](Self::reorderable).
     ///
     /// `mode` chooses what happens to the origin rows once a *foreign* target
     /// accepts them: [`DragTransferMode::Move`] removes them (via the source's
@@ -748,7 +764,7 @@ impl<T: 'static> TableView<T> {
     /// writing a custom `ListDataSource`. Pair with
     /// [`on_rows_received`](Self::on_rows_received), which is handed the dropped
     /// items and the insertion index. (Same-view reorder is
-    /// [`reorderable_rows`](Self::reorderable_rows); a custom `ListDataSource` can still
+    /// [`reorderable`](Self::reorderable); a custom `ListDataSource` can still
     /// accept foreign drops through its `can_accept`/`accept_drop` instead.)
     pub fn accept_foreign_rows(mut self, accept: bool) -> Self {
         self.export.accept_foreign_rows = accept;
@@ -914,21 +930,21 @@ impl<T: 'static> TableView<T> {
         &self.editing_cell
     }
 
-    /// Begin editing the cell `(row, col_id)`. Resolves `col_id` to the
-    /// current display position and sets `editing_cell`. Silently
-    /// no-ops if `col_id` doesn't exist.
+    /// Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`
+    /// isn't a currently-displayed column, or if `row` is outside the visible
+    /// range — an out-of-range target would otherwise strand `editing_cell` on
+    /// a row nothing can match.
     pub fn begin_edit(&self, row: usize, col_id: &str) {
-        if let Some((display_pos, _)) = self
-            .columns
-            .iter()
-            .enumerate()
-            .find(|(_, c)| c.id == col_id)
-        {
-            // Find the display position from the live display order.
-            let display = self.display_indices.borrow();
-            if let Some(pos) = display.iter().position(|&i| i == display_pos) {
-                self.editing_cell.set(Some((row, pos)));
-            }
+        let display = self.display_indices.borrow();
+        if let Some(target) = imperative::resolve_edit_target(
+            row,
+            col_id,
+            &self.columns,
+            &display,
+            (self.len_fn)(),
+        ) {
+            drop(display);
+            self.editing_cell.set(Some(target));
         }
     }
 
@@ -957,13 +973,7 @@ impl<T: 'static> TableView<T> {
     /// Set or clear the filter text for a single column. An empty `text` removes
     /// the entry for `col_id` (same as clearing the filter for that column).
     pub fn set_filter(&self, col_id: &str, text: &str) {
-        let mut m = self.filters_signal.get();
-        if text.is_empty() {
-            m.remove(col_id);
-        } else {
-            m.insert(col_id.to_string(), text.to_string());
-        }
-        self.filters_signal.set(m);
+        imperative::set_filter(&self.filters_signal, col_id, text);
     }
 
     /// Remove all active column filters.
@@ -973,11 +983,10 @@ impl<T: 'static> TableView<T> {
 
     // ── Imperative API ─────────────────────────────────────────────────
 
-    /// Scroll so that `row` is aligned to the top of the viewport.
+    /// Scroll so that `row` is aligned to the top of the viewport. A no-op
+    /// before the first layout pass.
     pub fn scroll_to_row(&self, row: usize) {
-        let target = self.row_metrics.borrow_mut().row_top(row);
-        let max = self.max_scroll_y.get();
-        self.scroll_y.set(target.clamp(0.0, max));
+        imperative::scroll_to_row(row, &self.row_metrics, &self.scroll_y, &self.max_scroll_y);
     }
 
     /// Set the active sort imperatively. Equivalent to writing to
@@ -996,13 +1005,7 @@ impl<T: 'static> TableView<T> {
     /// A non-positive `width` removes the entry (the column reverts to
     /// its declared width policy).
     pub fn set_column_width(&self, col_id: &str, width: f32) {
-        let mut m = self.column_widths_signal.get();
-        if width.is_finite() && width > 0.0 {
-            m.insert(col_id.to_string(), width);
-        } else {
-            m.remove(col_id);
-        }
-        self.column_widths_signal.set(m);
+        imperative::set_column_width(&self.column_widths_signal, col_id, width);
     }
 
     /// Replace the full width-override map (typically used to restore
@@ -1019,13 +1022,7 @@ impl<T: 'static> TableView<T> {
 
     /// Pin or unpin a single column.
     pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide) {
-        let mut m = self.column_pinning_signal.get();
-        if matches!(side, PinnedSide::None) {
-            m.remove(col_id);
-        } else {
-            m.insert(col_id.to_string(), side);
-        }
-        self.column_pinning_signal.set(m);
+        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side);
     }
 
     /// Effective pinning for a column — `column_pinning_signal` wins
@@ -1086,18 +1083,17 @@ impl<T: 'static> TableView<T> {
         out
     }
 
-    /// Scroll the minimum distance needed to make `row` visible.
+    /// Scroll the minimum distance needed to make `row` visible. A no-op
+    /// before the first layout pass, when the viewport height is not yet known.
     pub fn ensure_row_visible(&self, row: usize) {
-        let scroll = self.scroll_y.get();
-        let new_scroll = self.row_metrics.borrow_mut().scroll_for_ensure_visible(
+        imperative::ensure_row_visible(
             row,
-            scroll,
+            &self.row_metrics,
+            &self.scroll_y,
+            &self.max_scroll_y,
             self.viewport_height.get(),
-            self.max_scroll_y.get(),
+            self.laid_out.get(),
         );
-        if (new_scroll - scroll).abs() > f32::EPSILON {
-            self.scroll_y.set(new_scroll);
-        }
     }
 
     // ── Internals ──────────────────────────────────────────────────────
@@ -1445,6 +1441,10 @@ impl<T: 'static> Widget for TableView<T> {
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
             col_count: display_indices_now.len().max(1),
+            // Flat table: no tree column exists. `FlatNavigator` reports no
+            // children and never expands, so this value is inert — it only has
+            // to be a position the cursor can actually occupy.
+            tree_column_display_pos: 0,
             focused_cell: self.focused_cell.clone(),
             selection_mode: self.selection_mode,
             selection: self.row_selection.clone(),
@@ -1490,7 +1490,7 @@ impl<T: 'static> Widget for TableView<T> {
         let len_fn_for_drop = self.len_fn.clone();
         let feedback_for_drop = self.drop_feedback.clone();
         let export_for_drop = self.export.clone();
-        let reorderable_rows_for_drop = self.reorderable_rows;
+        let reorderable_for_drop = self.reorderable;
 
         let feedback_for_leave = self.drop_feedback.clone();
         let scroll_for_tick = self.scroll_y.clone();
@@ -1504,7 +1504,7 @@ impl<T: 'static> Widget for TableView<T> {
         // other key falls through to the shared navigator (cell/row
         // movement, edit, etc.).
         let mut shared_key = keyboard::build_key_handler(key_cfg);
-        let reorderable_kbd = self.reorderable_rows;
+        let reorderable_kbd = self.reorderable;
         let accept_drop_kbd = self.dnd.accept_drop_fn.clone();
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
@@ -1600,7 +1600,7 @@ impl<T: 'static> Widget for TableView<T> {
         // reorder its own rows or accept foreign ones (mirrors ListView).
         // Column reorder lives entirely on the header strip
         // (`attach_header_reorder_handlers`) and is untouched by this gate.
-        if self.export.is_drop_target(self.reorderable_rows) {
+        if self.export.is_drop_target(self.reorderable) {
             handlers = handlers
                 .on_drag_hover(move |payload, position, _ctx| {
                     // Column reorder is handled by the header strip; only
@@ -1659,9 +1659,9 @@ impl<T: 'static> Widget for TableView<T> {
                         .is_some_and(|rd| rd.source == view_id);
                     // Route the drop to the source's accept_drop first. A
                     // same-view reorder only happens when the table is
-                    // `reorderable_rows`; a foreign payload is the source's
+                    // `reorderable`; a foreign payload is the source's
                     // call (a bare ListModel rejects it).
-                    if (reorderable_rows_for_drop || !is_same_view)
+                    if (reorderable_for_drop || !is_same_view)
                         && let Some((target, position_kind)) = flat_insertion_target(ins, len)
                         && (accept_drop_for_drop)(&payload, target, position_kind, view_id)
                     {
@@ -1820,7 +1820,7 @@ impl<T: 'static> Widget for TableView<T> {
                 viewport_height: self.viewport_height.clone(),
                 editing_cell: self.editing_cell.clone(),
                 focused_cell: self.focused_cell.clone(),
-                reorderable_rows: self.reorderable_rows,
+                reorderable: self.reorderable,
                 export: self.export.clone(),
                 snapshot_out_fn: self.dnd.snapshot_out_fn.clone(),
                 view_id: self.model_id,
@@ -1887,6 +1887,8 @@ impl<T: 'static> Widget for TableView<T> {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);
+        // Viewport-relative imperatives are meaningful from here on.
+        self.laid_out.set(true);
         Size::new(width, height).into()
     }
 

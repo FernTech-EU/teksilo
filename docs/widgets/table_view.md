@@ -47,7 +47,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -202,10 +202,12 @@ on the focused cell. Receives `(row_index, col_id, ctx)`.
 
 Hook fired when the user presses Enter on the focused row.
 
-#### `pub fn reorderable_rows(mut self, enabled: bool) -> Self`
+#### `pub fn reorderable(mut self, enabled: bool) -> Self`
 
-Enable drag-to-reorder of rows (pointer drag + keyboard
-Alt+ArrowUp/Down).
+Enable drag-to-reorder of **rows** (pointer drag + keyboard
+Alt+ArrowUp/Down). Distinct from
+`Column::reorderable`, which reorders
+*columns* and defaults to `true`; this defaults to `false`.
 
 The move is routed through the backing source's `accept_drop`: a
 `ListModel` reorders in place, an external source routes the move to
@@ -215,6 +217,12 @@ the drop is refused. A row may also be forbidden from dragging at
 all (the source's `drag` gate). Cross-table / external drops arrive
 at `accept_drop` as `DragSource::Foreign`; a bare `ListModel`
 rejects them, an external source decides.
+
+#### `pub fn reorderable_rows(self, enabled: bool) -> Self`
+
+Renamed to `reorderable`, matching `ListView`,
+`GridView`, `TreeView` and `TreeTableView` — this was the only view in
+the family spelling it differently.
 
 #### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
 
@@ -226,7 +234,7 @@ multi-selection) carries clones of its items in a public
 `RowDragData<T>`, so a foreign receiver can pull
 them out with `payload.get_typed::<RowDragData<T>>()` /
 `DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
-also makes rows a drag source even without `reorderable_rows`.
+also makes rows a drag source even without `reorderable`.
 
 `mode` chooses what happens to the origin rows once a *foreign* target
 accepts them: `DragTransferMode::Move` removes them (via the source's
@@ -258,7 +266,7 @@ Accept exported rows dropped from a **different** view or source without
 writing a custom `ListDataSource`. Pair with
 `on_rows_received`, which is handed the dropped
 items and the insertion index. (Same-view reorder is
-`reorderable_rows`; a custom `ListDataSource` can still
+`reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
 #### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut bastyde_core::widget::EventContext) + 'static, ) -> Self`
@@ -386,9 +394,10 @@ swap in an editor widget when matched.
 
 #### `pub fn begin_edit(&self, row: usize, col_id: &str)`
 
-Begin editing the cell `(row, col_id)`. Resolves `col_id` to the
-current display position and sets `editing_cell`. Silently
-no-ops if `col_id` doesn't exist.
+Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`
+isn't a currently-displayed column, or if `row` is outside the visible
+range — an out-of-range target would otherwise strand `editing_cell` on
+a row nothing can match.
 
 #### `pub fn end_edit(&self)`
 
@@ -421,7 +430,8 @@ Remove all active column filters.
 
 #### `pub fn scroll_to_row(&self, row: usize)`
 
-Scroll so that `row` is aligned to the top of the viewport.
+Scroll so that `row` is aligned to the top of the viewport. A no-op
+before the first layout pass.
 
 #### `pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection)`
 
@@ -454,4 +464,5 @@ Pin or unpin a single column.
 
 #### `pub fn ensure_row_visible(&self, row: usize)`
 
-Scroll the minimum distance needed to make `row` visible.
+Scroll the minimum distance needed to make `row` visible. A no-op
+before the first layout pass, when the viewport height is not yet known.

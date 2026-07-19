@@ -30,6 +30,17 @@ use crate::data_views::RowSelection;
 pub(crate) struct KeyHandlerConfig {
     pub navigator: Rc<dyn RowNavigator>,
     pub col_count: usize,
+    /// Display position of the tree column — the one hosting the twist and
+    /// indent gutter, and therefore the only column where ArrowLeft/ArrowRight
+    /// collapse/expand instead of moving the cursor.
+    ///
+    /// Resolved per rebuild by the owning widget, because
+    /// [`TreeTableView::tree_column`] names a column *id* while user
+    /// drag-reorder moves its *display* position — the two diverge the moment
+    /// either is used. `TableView` passes `0`: its `FlatNavigator` reports
+    /// `has_children`/`is_expanded` as false and `toggle_expanded` as a no-op,
+    /// so the comparison can never lead anywhere.
+    pub tree_column_display_pos: usize,
     pub focused_cell: Signal<Option<(usize, usize)>>,
     pub selection_mode: TableSelectionMode,
     pub selection: Option<RowSelection>,
@@ -129,7 +140,7 @@ pub(crate) fn build_key_handler(
         // under LTR the collapsed chevron points right (ArrowRight
         // expands, ArrowLeft collapses); under RTL it points left, so the
         // two arrows swap.
-        let on_tree_column = col == 0; // tree column is the leading column
+        let on_tree_column = col == cfg.tree_column_display_pos;
         let is_collapse_key = if rtl {
             matches!(key, Key::ArrowRight)
         } else {

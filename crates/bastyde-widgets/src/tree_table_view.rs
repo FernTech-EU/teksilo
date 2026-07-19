@@ -15,6 +15,33 @@
 //! modes: uniform (`row_height`, fast path), exact per-flat-index callback
 //! (`row_height_fn`), and auto-measured (`auto_row_height` — grows to tallest cell).
 //!
+//! ## Common patterns
+//!
+//! **A checkbox column.** Selection and "checked" are different things — a
+//! checkbox column wants its own state, with parent/child propagation. Build it
+//! from [`TreeCheckedModel`](bastyde_data::TreeCheckedModel) over the same tree
+//! the view projects.
+//!
+//! A cell delegate receives `(&T, &CellContext)` and **`CellContext` carries no
+//! node identity** — only [`row_index`](crate::CellContext::row_index). So
+//! capture the projection and resolve the row's `NodeId` through it:
+//!
+//! ```ignore
+//! let proxy = SortFilterTreeModel::new(tree);
+//! let checks = TreeCheckedModel::new(proxy.tree());
+//! let for_cells = proxy.clone();
+//! let col = Column::new("done", lit!("Done"), move |_item, cx: &CellContext| {
+//!     match for_cells.visible_node_id(cx.row_index) {
+//!         Some(node) => Box::new(Checkbox::new(checks.check_state(node))) as Box<dyn Widget>,
+//!         None => Box::new(Spacer::new()),
+//!     }
+//! });
+//! ```
+//!
+//! For a tree whose identity is a domain key rather than a `NodeId`, use
+//! [`KeyedTreeCheckedModel`](bastyde_data::KeyedTreeCheckedModel) instead — it
+//! survives a full re-source, which a `NodeId`-keyed set cannot.
+//!
 //! ## Accessibility
 //!
 //! Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
@@ -47,7 +74,6 @@ use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::tree_data_source::{tree_apply_reorder, tree_is_desc_or_self};
 use bastyde_data::{
     DropPosition, KeyedSelectionModel, NodeId, SelectionModel, SortDirection, SortFilterTreeModel,
     TreeFilterMode, TreeModel,
@@ -67,61 +93,68 @@ use crate::table_view::column::{
     Column, ColumnResizePolicy, EditTrigger, GridLines, PinnedSide, TabTraversal,
 };
 use crate::table_view::header::{HeaderCell, HeaderRow, ResizeStateHandle};
+use crate::table_view::imperative;
 use crate::table_view::keyboard;
 use crate::table_view::layout;
 use crate::table_view::row_navigator::RowNavigator;
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
+use crate::data_views::{DropViz, drop_into_tint};
+use crate::tree_source::TreeSource;
+use bastyde_data::{DropResponse, TreeDataSource};
 
 const BUFFER_ROWS: usize = 5;
 const SCROLLBAR_THICKNESS: f32 = 12.0;
 
-/// Hierarchical projection navigator. Adapts
-/// [`SortFilterTreeModel`]'s
-/// flat-list view to the [`RowNavigator`] interface used by the
-/// shared keyboard handler.
+/// Hierarchical row navigator. Adapts a [`TreeSource`]'s flat-list view to the
+/// [`RowNavigator`] interface used by the shared keyboard handler.
+///
+/// Index-keyed throughout, so it works over any [`TreeDataSource`] — a
+/// `SortFilterTreeModel` over a `TreeModel`, or an external store carrying its
+/// own `Key`.
 pub(crate) struct TreeNavigator<T: 'static> {
-    proxy: SortFilterTreeModel<T>,
+    source: Rc<TreeSource<T>>,
 }
 
 impl<T: 'static> TreeNavigator<T> {
-    pub(crate) fn new(proxy: SortFilterTreeModel<T>) -> Self {
-        Self { proxy }
+    pub(crate) fn new(source: Rc<TreeSource<T>>) -> Self {
+        Self { source }
     }
 }
 
 impl<T: 'static> RowNavigator for TreeNavigator<T> {
     fn row_count(&self) -> usize {
-        self.proxy.visible_count()
+        self.source.visible_count()
     }
 
     fn depth(&self, row: usize) -> Option<usize> {
-        self.proxy.entry_at(row).map(|e| e.depth)
+        self.source.meta(row).map(|m| m.depth)
     }
 
     fn has_children(&self, row: usize) -> bool {
-        self.proxy
-            .entry_at(row)
-            .map(|e| e.has_children)
-            .unwrap_or(false)
+        self.source.meta(row).map(|m| m.has_children).unwrap_or(false)
     }
 
     fn is_expanded(&self, row: usize) -> bool {
-        self.proxy
-            .entry_at(row)
-            .map(|e| e.is_expanded)
-            .unwrap_or(false)
+        self.source.meta(row).map(|m| m.is_expanded).unwrap_or(false)
     }
 
     fn toggle_expanded(&self, row: usize) {
-        if let Some(node) = self.proxy.visible_node_id(row) {
-            self.proxy.toggle(node);
-        }
+        self.source.toggle_at(row);
     }
 }
 
 /// Hierarchical multi-column widget. See module documentation.
 pub struct TreeTableView<T: 'static> {
-    proxy: SortFilterTreeModel<T>,
+    /// Erased row access — every read (counts, entries, expansion, DnD,
+    /// keyboard reorder) goes through here, so the widget works over any
+    /// [`TreeDataSource`] and never needs to know the source's `Key`.
+    source: Rc<TreeSource<T>>,
+    /// Present only on the [`from_projection`](Self::from_projection) /
+    /// [`new`](Self::new) paths. It backs the `NodeId`-typed public API
+    /// ([`expand`](Self::expand), [`projection`](Self::projection), …), which is
+    /// meaningless for an external source carrying its own key — those methods
+    /// no-op when this is `None`.
+    proxy: Option<SortFilterTreeModel<T>>,
 
     columns: Vec<Column<T>>,
     /// Column id hosting the twist + indent. `None` defaults to the
@@ -187,11 +220,20 @@ pub struct TreeTableView<T: 'static> {
     type_ahead_timeout: Duration,
     /// Persistent type-ahead buffer (survives the per-keystroke rebuild).
     type_ahead: Rc<crate::common::type_ahead::TypeAheadState>,
+    /// Widget shown in place of the rows when nothing is visible — an empty
+    /// tree, or a filter that matched nothing.
+    #[allow(clippy::type_complexity)]
+    empty_view: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    /// Set on the first `place_children`. Until then `viewport_height` still
+    /// holds its construction placeholder, so viewport-relative imperatives
+    /// (`ensure_row_visible`) would scroll against a size that was never real.
+    laid_out: Rc<Cell<bool>>,
 
     // Build state
     header_row_id: Option<WidgetId>,
     body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
+    empty_id: Option<WidgetId>,
     /// Pane-local rebuild trigger + buffered range, owned here so they
     /// survive `TreeTableView` rebuilds (each rebuild constructs a fresh
     /// `TreeBodyPane` struct that inherits these handles).
@@ -210,7 +252,7 @@ pub struct TreeTableView<T: 'static> {
     reorderable: bool,
     /// Active row-drop insertion indicator `(body_local_y, width)`. Set by
     /// `on_drag_hover`, cleared on leave / drop, read by `paint`.
-    drop_feedback: Signal<Option<(f32, f32)>>,
+    drop_feedback: Signal<Option<DropViz>>,
 
     /// Whether activation is a single or double click (default `DoubleClick`).
     activate_on: crate::data_views::ActivateOn,
@@ -273,11 +315,67 @@ pub struct TreeTableView<T: 'static> {
 
 impl<T: 'static> TreeTableView<T> {
     /// Wrap a `SortFilterTreeModel<T>`.
+    /// Wrap a `SortFilterTreeModel<T>`.
     pub fn from_projection(proxy: SortFilterTreeModel<T>) -> Self {
+        let source = Rc::new(TreeSource::from_data_source(Rc::new(proxy.clone())));
+        Self::assemble(source, Some(proxy))
+    }
+
+    /// Build a tree table over any [`TreeDataSource`] — an external source of
+    /// truth (a Qleany entity store, a database, a virtual filesystem) carrying
+    /// its own `Key`, so it needs no `TreeModel` mirror.
+    ///
+    /// This is the tree-table sibling of
+    /// [`TreeView::from_source`](crate::TreeView::from_source). Because the
+    /// source owns identity, its expand state (and a keyed selection) survive a
+    /// full re-source — which a `TreeModel` mirror cannot guarantee, since
+    /// `NodeId`s are reassigned on rebuild.
+    ///
+    /// The `NodeId`-typed methods ([`expand`](Self::expand),
+    /// [`projection`](Self::projection), [`keyed_selection`](Self::keyed_selection))
+    /// do not apply here and no-op; drive expansion through the source itself.
+    /// Row drag-reorder is not yet wired on this path.
+    pub fn from_source<S: TreeDataSource<Item = T> + 'static>(source: S) -> Self {
+        Self::assemble(Rc::new(TreeSource::from_data_source(Rc::new(source))), None)
+    }
+
+    /// Like [`from_source`](Self::from_source) but with **keyed** selection:
+    /// the `KeyedSelectionModel<S::Key>` tracks rows by source identity, so it
+    /// survives expand / collapse, sort / filter and a full re-source. Pruning
+    /// consults the source's `contains_key`, so a collapsed-but-present row
+    /// keeps its selection. The view stays `TreeTableView<T>` — the `Key` is
+    /// captured here.
+    pub fn from_source_keyed<S: TreeDataSource<Item = T> + 'static>(
+        source: S,
+        keyed: KeyedSelectionModel<S::Key>,
+    ) -> Self
+    where
+        S::Key: bastyde_data::ItemKey,
+    {
+        let s = Rc::new(source);
+        let key_at = {
+            let s = s.clone();
+            Rc::new(move |i| s.key_at(i)) as Rc<dyn Fn(usize) -> Option<S::Key>>
+        };
+        let len = {
+            let s = s.clone();
+            Rc::new(move || s.visible_count()) as Rc<dyn Fn() -> usize>
+        };
+        let contains = {
+            let s = s.clone();
+            Rc::new(move |k: &S::Key| s.contains_key(k)) as Rc<dyn Fn(&S::Key) -> bool>
+        };
+        let mut view = Self::assemble(Rc::new(TreeSource::from_data_source(s)), None);
+        view.row_selection = Some(RowSelection::from_keyed(keyed, key_at, len, contains));
+        view
+    }
+
+    fn assemble(source: Rc<TreeSource<T>>, proxy: Option<SortFilterTreeModel<T>>) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let table_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         Self {
+            source,
             proxy,
             columns: Vec::new(),
             tree_column_id: None,
@@ -322,9 +420,12 @@ impl<T: 'static> TreeTableView<T> {
             view_focused: Signal::new(true),
             focus_visible: Signal::new(false),
             editing_cell: Signal::new(None),
+            empty_view: None,
+            laid_out: Rc::new(Cell::new(false)),
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
+            empty_id: None,
             pane_version: Signal::new(0_u64),
             pane_built_start: Rc::new(Cell::new(0)),
             pane_built_end: Rc::new(Cell::new(0)),
@@ -413,8 +514,10 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
-    /// Enable drag-to-reorder of rows (pointer drag + keyboard
-    /// Alt+ArrowUp/Down).
+    /// Enable drag-to-reorder of **rows** (pointer drag + keyboard
+    /// Alt+ArrowUp/Down). Distinct from
+    /// [`Column::reorderable`](crate::Column::reorderable), which reorders
+    /// *columns* and defaults to `true`; this defaults to `false`.
     ///
     /// A drop reparents/reorders the dragged node in the underlying
     /// `TreeModel` (top third of a row = Before, middle = Into / make-child,
@@ -505,7 +608,13 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
-    /// Raw escape hatch for a foreign drop. Unlike `ListView` / `TableView`,
+    /// Raw escape hatch for a foreign drop.
+    ///
+    /// **Projection path only.** This hook is `NodeId`-typed and predates
+    /// [`from_source`](Self::from_source); over an external source there is no
+    /// `NodeId` to hand it, so it never fires. Prefer
+    /// [`accept_foreign_rows`](Self::accept_foreign_rows) +
+    /// [`on_rows_received`](Self::on_rows_received), which are source-agnostic. Unlike `ListView` / `TableView`,
     /// `TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
     /// than a pluggable source, so it cannot express foreign-accept purely
     /// through source capability closures (`can_accept` / `accept_drop`).
@@ -608,7 +717,8 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
-    /// Set the row/cell selection mode (default `RowSingle`).
+    /// Set the row/cell selection mode (default
+    /// [`TableSelectionMode::MultiRow`]).
     pub fn selection_mode(mut self, mode: TableSelectionMode) -> Self {
         self.selection_mode = mode;
         self
@@ -628,19 +738,26 @@ impl<T: 'static> TreeTableView<T> {
     /// moves — and stays consistent if two views share the projection. Pruned
     /// of deleted nodes on each projection change. Mutually exclusive with
     /// [`selection`](Self::selection) (last one set wins).
+    /// Only meaningful on the [`from_projection`](Self::from_projection) /
+    /// [`new`](Self::new) paths, whose identity *is* `NodeId`; a no-op over an
+    /// external source, which carries its own key — use
+    /// [`from_source_keyed`](Self::from_source_keyed) there.
     pub fn keyed_selection(mut self, keyed: KeyedSelectionModel<NodeId>) -> Self {
+        let Some(proxy) = self.proxy.clone() else {
+            return self;
+        };
         let key_at = {
-            let p = self.proxy.clone();
+            let p = proxy.clone();
             Rc::new(move |i| p.visible_node_id(i)) as Rc<dyn Fn(usize) -> Option<NodeId>>
         };
         let len = {
-            let p = self.proxy.clone();
+            let p = proxy.clone();
             Rc::new(move || p.visible_count()) as Rc<dyn Fn() -> usize>
         };
         // A collapsed-but-present node must NOT be pruned, so existence is
         // checked against the tree, not the (visible) projection window.
         let contains = {
-            let p = self.proxy.clone();
+            let p = proxy;
             Rc::new(move |n: &NodeId| p.tree().with_item(*n, |_| ()).is_some())
                 as Rc<dyn Fn(&NodeId) -> bool>
         };
@@ -726,7 +843,9 @@ impl<T: 'static> TreeTableView<T> {
     /// clone mutates the shared inner — effectively persisting the
     /// choice on `self.proxy`.
     pub fn filter_mode(self, mode: TreeFilterMode) -> Self {
-        let _ = self.proxy.clone().filter_mode(mode);
+        if let Some(p) = &self.proxy {
+            let _ = p.clone().filter_mode(mode);
+        }
         self
     }
 
@@ -748,11 +867,37 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     /// Active sort state: `Some((col_id, direction))` or `None` for unsorted.
+    ///
+    /// **This is the header's state, not the data's.** Clicking a sort header
+    /// writes here; nothing reorders rows until you bind this onto the backing
+    /// projection yourself:
+    ///
+    /// ```ignore
+    /// let proxy = SortFilterTreeModel::new(tree)
+    ///     .with_comparator("name", |a: &Row, b: &Row| a.name.cmp(&b.name));
+    /// proxy.sort_signal(view.sort_signal().clone());
+    /// ```
+    ///
+    /// The binding is deliberately not automatic: a projection may already
+    /// carry preset comparators, predicates, and a filter mode, and adopting
+    /// the view's empty signal at construction would clobber them.
     pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>> {
         &self.sort_signal
     }
 
     /// Active per-column filters keyed by column id.
+    ///
+    /// Like [`sort_signal`](Self::sort_signal), this holds the header's state
+    /// only — bind it onto the projection to actually filter rows:
+    ///
+    /// ```ignore
+    /// let proxy = SortFilterTreeModel::new(tree)
+    ///     .with_predicate("name", |t| {
+    ///         let needle = t.to_string();
+    ///         Box::new(move |r: &Row| r.name.contains(&needle))
+    ///     });
+    /// proxy.filters_signal(view.filters_signal().clone());
+    /// ```
     pub fn filters_signal(&self) -> &Signal<HashMap<String, String>> {
         &self.filters_signal
     }
@@ -779,35 +924,49 @@ impl<T: 'static> TreeTableView<T> {
 
     /// Access the underlying `SortFilterTreeModel` (for programmatic sort /
     /// filter / expand outside of the builder API).
-    pub fn projection(&self) -> &SortFilterTreeModel<T> {
-        &self.proxy
+    /// `None` when the view was built from an external
+    /// [`TreeDataSource`](bastyde_data::TreeDataSource) via
+    /// [`from_source`](Self::from_source) — there is no `TreeModel`-backed
+    /// projection to hand back in that case.
+    pub fn projection(&self) -> Option<&SortFilterTreeModel<T>> {
+        self.proxy.as_ref()
     }
 
     // ── Imperative API ─────────────────────────────────────────────────
 
     /// Expand the subtree rooted at `node`.
     pub fn expand(&self, node: NodeId) {
-        self.proxy.expand(node);
+        if let Some(p) = &self.proxy {
+            p.expand(node);
+        }
     }
 
     /// Collapse the subtree rooted at `node`.
     pub fn collapse(&self, node: NodeId) {
-        self.proxy.collapse(node);
+        if let Some(p) = &self.proxy {
+            p.collapse(node);
+        }
     }
 
     /// Toggle the expand/collapse state of `node`.
     pub fn toggle(&self, node: NodeId) {
-        self.proxy.toggle(node);
+        if let Some(p) = &self.proxy {
+            p.toggle(node);
+        }
     }
 
     /// Expand all nodes in the tree.
     pub fn expand_all(&self) {
-        self.proxy.expand_all();
+        if let Some(p) = &self.proxy {
+            p.expand_all();
+        }
     }
 
     /// Collapse all nodes in the tree.
     pub fn collapse_all(&self) {
-        self.proxy.collapse_all();
+        if let Some(p) = &self.proxy {
+            p.collapse_all();
+        }
     }
 
     /// Move keyboard focus to the cell at `(row, col)`.
@@ -838,6 +997,94 @@ impl<T: 'static> TreeTableView<T> {
 
     pub fn clear_filters(&self) {
         self.filters_signal.set(HashMap::new());
+    }
+
+    /// Widget shown when no rows are visible — an empty tree, or a filter
+    /// that matched nothing. Without one, the body region is simply blank.
+    pub fn empty_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+        self.empty_view = Some(Rc::new(f));
+        self
+    }
+
+    /// Clear the active sort.
+    pub fn clear_sort(&self) {
+        self.sort_signal.set(None);
+    }
+
+    /// Scroll so that `row` is aligned to the top of the viewport. A no-op
+    /// before the first layout pass.
+    pub fn scroll_to_row(&self, row: usize) {
+        if !self.laid_out.get() {
+            return;
+        }
+        imperative::scroll_to_row(row, &self.row_metrics, &self.scroll_y, &self.max_scroll_y);
+    }
+
+    /// Scroll the minimum distance needed to make `row` visible. A no-op
+    /// before the first layout pass, when the viewport height is not yet known.
+    pub fn ensure_row_visible(&self, row: usize) {
+        imperative::ensure_row_visible(
+            row,
+            &self.row_metrics,
+            &self.scroll_y,
+            &self.max_scroll_y,
+            self.viewport_height.get(),
+            self.laid_out.get(),
+        );
+    }
+
+    /// Set or remove a single column's user-resized width override.
+    /// A non-positive `width` removes the entry (the column reverts to
+    /// its declared width policy).
+    pub fn set_column_width(&self, col_id: &str, width: f32) {
+        imperative::set_column_width(&self.column_widths_signal, col_id, width);
+    }
+
+    /// Replace the full width-override map (typically used to restore
+    /// a persisted layout).
+    pub fn set_column_widths(&self, widths: HashMap<String, f32>) {
+        self.column_widths_signal.set(widths);
+    }
+
+    /// Replace the column-order list. Ids not declared on this table
+    /// are silently dropped on the next layout pass.
+    pub fn set_column_order(&self, order: Vec<String>) {
+        self.column_order_signal.set(order);
+    }
+
+    /// Current column pinning overrides, keyed by column id. Wins over
+    /// each column's declared [`Column::pinned`].
+    pub fn column_pinning_signal(&self) -> &Signal<HashMap<String, PinnedSide>> {
+        &self.column_pinning_signal
+    }
+
+    /// Pin or unpin a single column. [`PinnedSide::None`] removes the
+    /// override, reverting the column to its declared pinning.
+    pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide) {
+        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side);
+    }
+
+    /// Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`
+    /// isn't a currently-displayed column, or if `row` is outside the visible
+    /// range — an out-of-range target would otherwise strand `editing_cell` on
+    /// a row nothing can match.
+    pub fn begin_edit(&self, row: usize, col_id: &str) {
+        let display = self.display_indices.borrow();
+        if let Some(target) = imperative::resolve_edit_target(
+            row,
+            col_id,
+            &self.columns,
+            &display,
+            self.source.visible_count(),
+        ) {
+            drop(display);
+            self.editing_cell.set(Some(target));
+        }
+    }
+
+    /// Close the active cell editor without committing (the field's `on_blur` still fires).
+    pub fn end_edit(&self) {
+        self.editing_cell.set(None);
     }
 
     // ── Internals ──────────────────────────────────────────────────────
@@ -924,7 +1171,7 @@ impl<T: 'static> TreeTableView<T> {
 impl<T: 'static> std::fmt::Debug for TreeTableView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeTableView")
-            .field("rows", &self.proxy.visible_count())
+            .field("rows", &self.source.visible_count())
             .field("columns", &self.columns.len())
             .field("tree_column", &self.tree_column_id)
             .field("scroll_bar_style", &self.scroll_bar_style)
@@ -1009,14 +1256,14 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // it (e.g. above an expand/collapse point) stay valid.
         let v_for_proj = version.clone();
         let proj_ver = Rc::new(Cell::new(0_u64));
-        ctx.effect(&self.proxy.version_signal(), {
+        ctx.effect(&self.source.version_signal(), {
             let metrics = self.row_metrics.clone();
-            let proxy = self.proxy.clone();
+            let src = self.source.clone();
             let row_sel = self.row_selection.clone();
             move |_| {
                 metrics
                     .borrow_mut()
-                    .apply_divergence(proxy.first_changed_index(), proxy.visible_count());
+                    .apply_divergence(src.first_changed_index(), src.visible_count());
                 // Drop any keyed selection whose node was deleted (no-op for
                 // the index model). Cheap; runs on every projection change.
                 if let Some(ref rs) = row_sel {
@@ -1096,19 +1343,24 @@ impl<T: 'static> Widget for TreeTableView<T> {
             Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
         };
 
-        let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.proxy.clone()));
+        let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.source.clone()));
         // Type-ahead resolver: read the visible row's item text through the
         // projection (`None` if the flat index isn't currently visible).
         let type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>> =
             self.type_ahead_label.clone().map(|user| {
-                let proxy = self.proxy.clone();
-                Rc::new(move |i: usize| proxy.with_entry(i, |item, _entry| user(item)))
+                let src = self.source.clone();
+                Rc::new(move |i: usize| src.with_row_str(i, &|item| user(item)))
                     as Rc<dyn Fn(usize) -> Option<String>>
             });
 
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
             col_count: display_indices.len().max(1),
+            // The same resolved position the twist and indent gutter render at
+            // (see `tree_display_pos` above), so the arrow keys keep following
+            // the chevron when `.tree_column()` or a user column-reorder moves
+            // it off the leading position.
+            tree_column_display_pos: tree_display_pos,
             focused_cell: self.focused_cell.clone(),
             selection_mode: self.selection_mode,
             selection: self.row_selection.clone(),
@@ -1136,7 +1388,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // through to the navigator (cell/row movement, expand/collapse, edit).
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorderable_kbd = self.reorderable;
-        let proxy_kbd = self.proxy.clone();
+        let source_kbd = self.source.clone();
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
         let sort_kbd = self.sort_signal.clone();
@@ -1155,47 +1407,19 @@ impl<T: 'static> Widget for TreeTableView<T> {
                         .as_ref()
                         .and_then(|s| s.selected_indices().first().copied())
                 });
+                // Sibling reorder + the "follow the moved row" bookkeeping live
+                // in the source (key-typed there, so it works for an external
+                // store too) and hand back the row's new flat index.
                 if let Some(flat_idx) = row
-                    && let Some(node) = proxy_kbd.visible_node_id(flat_idx)
+                    && let Some(new_flat) =
+                        source_kbd.keyboard_reorder(flat_idx, matches!(key, Key::ArrowDown))
                 {
-                    let tree = proxy_kbd.tree();
-                    let parent = tree.parent(node);
-                    let siblings: Vec<NodeId> = match parent {
-                        Some(p) => tree.children(p),
-                        None => (0..tree.root_count()).map(|i| tree.root(i)).collect(),
-                    };
-                    let pos = siblings.iter().position(|&n| n == node).unwrap_or(0);
-                    let moved = match key {
-                        Key::ArrowUp if pos > 0 => {
-                            match parent {
-                                Some(p) => tree.move_node(node, p, pos - 1),
-                                None => tree.move_to_root(node, pos - 1),
-                            }
-                            true
-                        }
-                        Key::ArrowDown if pos + 1 < siblings.len() => {
-                            match parent {
-                                Some(p) => tree.move_node(node, p, pos + 1),
-                                None => tree.move_to_root(node, pos + 1),
-                            }
-                            true
-                        }
-                        _ => false,
-                    };
-                    if moved {
-                        let count = proxy_kbd.visible_count();
-                        for new_flat in 0..count {
-                            if proxy_kbd.visible_node_id(new_flat) == Some(node) {
-                                let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
-                                focused_kbd.set(Some((new_flat, col)));
-                                if let Some(ref s) = sel_kbd {
-                                    s.select(new_flat);
-                                }
-                                break;
-                            }
-                        }
-                        return EventResponse::Handled;
+                    let col = focused_kbd.get().map(|(_, c)| c).unwrap_or(0);
+                    focused_kbd.set(Some((new_flat, col)));
+                    if let Some(ref s) = sel_kbd {
+                        s.select(new_flat);
                     }
+                    return EventResponse::Handled;
                 }
             }
             shared_key(event, ctx)
@@ -1251,9 +1475,22 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // (accept_foreign_rows / on_foreign_drop). Registered whenever ANY
         // of the three capabilities is enabled — a foreign-receive-only view
         // (reorderable == false) still needs to be a drop target.
+        // NOTE: row DnD is still `NodeId`-typed, so it is registered only on the
+        // projection path. A source-backed view (`from_source`) gets every other
+        // capability but no built-in row drag yet — routing this through
+        // `source.dnd.{can_accept,accept_drop}_fn` (as `TreeView` already does)
+        // is a follow-up, because those closures also carry Into/Before/After
+        // redirect semantics this widget does not model yet.
+        // Row DnD: same-view reorder/reparent plus foreign receive, both routed
+        // through the source's `can_accept` / `accept_drop` capability closures
+        // — so this works over a `TreeModel`-backed projection AND an external
+        // `TreeDataSource`, exactly like `TreeView`. Drop zones are the row's
+        // thirds (Before / Into / After); the source's verdict decides the
+        // effective position and may `Redirect` (e.g. Into-a-leaf becomes
+        // After). Suppressed while sorted, where a manual order has no meaning.
         if self.export.is_drop_target(self.reorderable) || self.on_foreign_drop.is_some() {
             let my_model_id = self.model_id;
-            let proxy_hover = self.proxy.clone();
+            let source_for_hover = self.source.clone();
             let metrics_for_hover = self.row_metrics.clone();
             let scroll_for_hover = self.scroll_y.clone();
             let header_h_for_hover = header_h;
@@ -1262,16 +1499,23 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let reorderable_hover = self.reorderable;
             let export_for_hover = self.export.clone();
             let has_foreign_hook_hover = self.on_foreign_drop.is_some();
+            let bounds_for_hover = self.body_bounds.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                // Real body width, so the affordance spans the actual row area
+                // rather than a placeholder.
+                let viz_width = bounds_for_hover.get().width.max(1.0);
+                let count = source_for_hover.visible_count();
+                if count == 0 {
+                    feedback_for_hover.set(None);
+                    return bastyde_core::DropFeedback::NoFeedback;
+                }
                 let rd = payload.get_typed::<RowDragData<T>>();
                 let is_same_view = rd.is_some_and(|r| r.source == my_model_id);
                 let reorder_ok =
                     is_same_view && reorderable_hover && sort_for_hover.get().is_none();
                 // The typed `accept_foreign_rows`/`on_rows_received` path can
                 // only consume an EXPORT payload (items present); the raw
-                // `on_foreign_drop` hook can take any foreign payload. Gate the
-                // "drop allowed" affordance accordingly so a reorder-only drag
-                // doesn't show a false insertion line.
+                // `on_foreign_drop` hook takes any foreign payload.
                 let foreign_ok = !is_same_view
                     && (has_foreign_hook_hover
                         || export_for_hover.accepts_foreign_export(payload, my_model_id));
@@ -1281,71 +1525,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 }
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y - header_h_for_hover + scroll;
-                let count = proxy_hover.visible_count();
-                let (insertion_top, row_idx) = {
+                let (insertion_top, row_idx, row_top, row_h) = {
                     let mut m = metrics_for_hover.borrow_mut();
                     m.resize(count);
                     let ins = m.insertion_index(content_y);
-                    (m.row_top(ins), m.row_at(content_y))
+                    let r = m.row_at(content_y);
+                    (m.row_top(ins), r, m.row_top(r), m.row_height(r))
                 };
-                // A same-view reorder is valid unless it targets one of the
-                // dragged nodes or a node inside one of their subtrees (a
-                // cycle) — invalid shows NO line. A foreign drop has no
-                // tree-structural constraint (the raw/typed receive handlers
-                // decide at commit time).
-                let valid = match rd {
-                    Some(rd_ref) if reorder_ok => {
-                        proxy_hover.visible_node_id(row_idx).is_some_and(|t| {
-                            !rd_ref.rows.iter().any(|&r| {
-                                proxy_hover.visible_node_id(r).is_some_and(|sn| {
-                                    t == sn || tree_is_desc_or_self(&proxy_hover.tree(), t, sn)
-                                })
-                            })
-                        })
-                    }
-                    _ => foreign_ok,
-                };
-                if valid {
-                    let insertion_y = insertion_top - scroll;
-                    feedback_for_hover.set(Some((insertion_y, 400.0)));
-                    bastyde_core::DropFeedback::InsertionLine {
-                        y: insertion_y,
-                        width: 400.0,
-                    }
-                } else {
-                    feedback_for_hover.set(None);
-                    bastyde_core::DropFeedback::NoFeedback
-                }
-            });
-
-            let drop_model_id = self.model_id;
-            let proxy_drop = self.proxy.clone();
-            let metrics_for_drop = self.row_metrics.clone();
-            let scroll_for_drop = self.scroll_y.clone();
-            let header_h_for_drop = header_h;
-            let feedback_for_drop = self.drop_feedback.clone();
-            let sort_for_drop = self.sort_signal.clone();
-            let reorderable_drop = self.reorderable;
-            let on_foreign_for_drop = self.on_foreign_drop.clone();
-            let export_for_drop = self.export.clone();
-            handlers = handlers.on_drop(move |mut payload, position, ctx| {
-                feedback_for_drop.set(None);
-                let scroll = scroll_for_drop.get().max(0.0);
-                let content_y = position.y - header_h_for_drop + scroll;
-                let (flat_idx, row_top, row_h) = {
-                    let mut m = metrics_for_drop.borrow_mut();
-                    m.resize(proxy_drop.visible_count());
-                    let idx = m.row_at(content_y);
-                    (idx, m.row_top(idx), m.row_height(idx))
-                };
-                let Some(target_node) = proxy_drop.visible_node_id(flat_idx) else {
-                    return false;
-                };
-                // Drop zone within the row: top third = Before, middle = Into
-                // (make child), bottom = After. tree_apply_reorder refuses a
-                // cycle without panicking.
                 let y_in_row = content_y - row_top;
-                let third = row_h / 3.0;
+                let third = (row_h / 3.0).max(f32::EPSILON);
                 let drop_pos = if y_in_row < third {
                     DropPosition::Before
                 } else if y_in_row > 2.0 * third {
@@ -1353,89 +1541,122 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 } else {
                     DropPosition::Into
                 };
+                // The source owns the structural verdict — including the cycle
+                // guard (a node may not land inside its own subtree), which used
+                // to be re-derived here against the `TreeModel`.
+                let effective = if reorder_ok {
+                    match (source_for_hover.dnd.can_accept_fn)(
+                        payload, row_idx, drop_pos, my_model_id,
+                    ) {
+                        DropResponse::Reject => {
+                            if !foreign_ok {
+                                feedback_for_hover.set(None);
+                                return bastyde_core::DropFeedback::NoFeedback;
+                            }
+                            DropPosition::Before
+                        }
+                        DropResponse::Accept => drop_pos,
+                        DropResponse::Redirect(p) => p,
+                    }
+                } else {
+                    // A foreign source has no Into/reparent semantics to honor.
+                    DropPosition::Before
+                };
+                if effective == DropPosition::Into {
+                    let top = row_top - scroll;
+                    feedback_for_hover.set(Some(DropViz::Rect {
+                        top,
+                        height: row_h,
+                        width: viz_width,
+                    }));
+                    bastyde_core::DropFeedback::HighlightRect {
+                        rect: Rect::new(0.0, top, viz_width, row_h),
+                        color: drop_into_tint(),
+                    }
+                } else {
+                    let insertion_y = insertion_top - scroll;
+                    feedback_for_hover.set(Some(DropViz::Line {
+                        y: insertion_y,
+                        width: viz_width,
+                    }));
+                    bastyde_core::DropFeedback::InsertionLine {
+                        y: insertion_y,
+                        width: viz_width,
+                    }
+                }
+            });
 
+            let drop_model_id = self.model_id;
+            let source_for_drop = self.source.clone();
+            let metrics_for_drop = self.row_metrics.clone();
+            let scroll_for_drop = self.scroll_y.clone();
+            let header_h_for_drop = header_h;
+            let feedback_for_drop = self.drop_feedback.clone();
+            let sort_for_drop = self.sort_signal.clone();
+            let reorderable_drop = self.reorderable;
+            let on_foreign_for_drop = self.on_foreign_drop.clone();
+            let proxy_for_foreign_hook = self.proxy.clone();
+            let export_for_drop = self.export.clone();
+            handlers = handlers.on_drop(move |mut payload, position, ctx| {
+                feedback_for_drop.set(None);
+                let count = source_for_drop.visible_count();
+                if count == 0 {
+                    return false;
+                }
+                let scroll = scroll_for_drop.get().max(0.0);
+                let content_y = position.y - header_h_for_drop + scroll;
+                let (flat_idx, row_top, row_h, ins) = {
+                    let mut m = metrics_for_drop.borrow_mut();
+                    m.resize(count);
+                    let idx = m.row_at(content_y);
+                    let ins = m.insertion_index(content_y);
+                    (idx, m.row_top(idx), m.row_height(idx), ins)
+                };
+                let y_in_row = content_y - row_top;
+                let third = (row_h / 3.0).max(f32::EPSILON);
+                let drop_pos = if y_in_row < third {
+                    DropPosition::Before
+                } else if y_in_row > 2.0 * third {
+                    DropPosition::After
+                } else {
+                    DropPosition::Into
+                };
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_model_id);
-
-                if is_same_view {
-                    if !reorderable_drop || sort_for_drop.get().is_some() {
-                        return false;
-                    }
-                    let Some(rd) = payload.get_typed::<RowDragData<T>>() else {
-                        return false;
-                    };
-                    let source_nodes: Vec<NodeId> = rd
-                        .rows
-                        .iter()
-                        .filter_map(|&r| proxy_drop.visible_node_id(r))
-                        .collect();
-                    if source_nodes.is_empty() {
-                        return false;
-                    }
-                    let tree = proxy_drop.tree();
-                    // Reject the WHOLE same-table drop if the target lands
-                    // inside (or on) ANY dragged node's subtree — matches the
-                    // hover's "invalid" verdict, which checks every dragged
-                    // row (not just the top-level movers). Without this, a
-                    // multi-row drag whose target is inside only ONE dragged
-                    // subtree would silently apply a partial reparent (the
-                    // node containing the target fails cycle-check inside
-                    // `tree_apply_reorder`, but the others still move).
-                    if source_nodes
-                        .iter()
-                        .any(|&n| tree_is_desc_or_self(&tree, target_node, n))
-                    {
-                        return false;
-                    }
-                    let applied = if source_nodes.len() == 1 {
-                        tree_apply_reorder(&tree, source_nodes[0], target_node, drop_pos)
-                    } else {
-                        // Multi-row: drop any dragged node that is a
-                        // descendant of another dragged node (moving an
-                        // ancestor already carries its subtree), then
-                        // reparent the remaining top-level nodes to the
-                        // target one at a time, re-anchoring after each move
-                        // — NodeIds are stable across moves.
-                        let top: Vec<NodeId> = source_nodes
-                            .iter()
-                            .copied()
-                            .filter(|&n| {
-                                !source_nodes.iter().any(|&other| {
-                                    other != n && tree_is_desc_or_self(&tree, n, other)
-                                })
-                            })
-                            .collect();
-                        let mut anchor = target_node;
-                        let mut pos = drop_pos;
-                        let mut moved = false;
-                        for &node in &top {
-                            if node == anchor {
-                                continue;
-                            }
-                            if tree_apply_reorder(&tree, node, anchor, pos) {
-                                moved = true;
-                                anchor = node;
-                                pos = DropPosition::After;
-                            }
-                        }
-                        moved
-                    };
-                    if applied {
+                if is_same_view && (!reorderable_drop || sort_for_drop.get().is_some()) {
+                    return false;
+                }
+                // The source applies the move (cycle-guarded, undo-aware for an
+                // external store) and reports whether it took. Gated exactly as
+                // `TreeView` does, so a foreign payload the source does NOT
+                // recognise still reaches the `on_rows_received` sugar below.
+                if (reorderable_drop || !is_same_view)
+                    && (source_for_drop.dnd.accept_drop_fn)(
+                        &payload,
+                        flat_idx,
+                        drop_pos,
+                        drop_model_id,
+                    )
+                {
+                    if is_same_view {
                         export_for_drop.note_self_reorder();
                     }
-                    return applied;
-                }
-
-                // Foreign: the shared typed sugar first (peek-before-take
-                // internally, so a shape mismatch doesn't consume the
-                // payload out from under the raw fallback below), then the
-                // raw escape hatch.
-                if export_for_drop.foreign_receive(&mut payload, drop_model_id, flat_idx, ctx) {
                     return true;
                 }
-                if let Some(cb) = on_foreign_for_drop.as_ref() {
-                    return cb(&payload, target_node, drop_pos, ctx);
+                // Foreign payload: the typed receive sugar first, then the raw
+                // escape hatch.
+                if export_for_drop.foreign_receive(&mut payload, drop_model_id, ins, ctx) {
+                    return true;
+                }
+                // `on_foreign_drop` predates the source path and is
+                // `NodeId`-typed, so it only fires when there is a projection to
+                // resolve the target node through.
+                if let Some(ref hook) = on_foreign_for_drop
+                    && let Some(ref p) = proxy_for_foreign_hook
+                    && let Some(node) = p.visible_node_id(flat_idx)
+                {
+                    return hook(&payload, node, drop_pos, ctx);
                 }
                 false
             });
@@ -1490,6 +1711,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.header_row_id = None;
         self.body_pane_id = None;
         self.scrollbar_id = None;
+        self.empty_id = None;
 
         // Header strip.
         if self.show_header {
@@ -1535,10 +1757,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // scrollbar, so buffer-exit / selection / editing / expand
         // rebuilds target the pane and are never deferred by the
         // gesture-capture protection during a thumb drag.
-        let row_count = self.proxy.visible_count();
+        let row_count = self.source.visible_count();
         if row_count > 0 {
             let pane = body_pane::TreeBodyPane::<T> {
-                proxy: self.proxy.clone(),
+                source: self.source.clone(),
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
@@ -1565,6 +1787,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 row_entries: Vec::new(),
             };
             self.body_pane_id = Some(ctx.add(pane));
+        } else if let Some(ref f) = self.empty_view {
+            // Empty state — an empty tree, or a filter that matched nothing.
+            self.empty_id = Some(ctx.add_boxed(f()));
         }
 
         // Scrollbar.
@@ -1590,6 +1815,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if let Some(id) = self.body_pane_id {
             children.push(id);
         }
+        if let Some(id) = self.empty_id {
+            children.push(id);
+        }
         if let Some(id) = self.scrollbar_id {
             children.push(id);
         }
@@ -1608,6 +1836,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);
+        // Viewport-relative imperatives are meaningful from here on.
+        self.laid_out.set(true);
         Size::new(width, height).into()
     }
 
@@ -1631,7 +1861,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let total_height = self
             .row_metrics
             .borrow_mut()
-            .total_height(self.proxy.visible_count());
+            .total_height(self.source.visible_count());
         let max_y = (total_height - body_height).max(0.0);
         self.max_scroll_y.set(max_y);
         let ratio = if total_height > 0.0 {
@@ -1692,6 +1922,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
             next += 1;
         }
 
+        // Empty-state child fills the body region (below the header).
+        if self.empty_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                child.origin = Point::new(band_left, body_origin_y);
+                child.size = Size::new(body_width, body_height);
+            }
+            next += 1;
+        }
+
         // Scrollbar — alongside the body, below the header.
         if self.scrollbar_id.is_some() {
             if let Some(child) = children.get_mut(next) {
@@ -1739,7 +1978,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         // Visible row window for the paint passes — offset-table-driven
         // so variable heights paint correctly.
-        let row_count = self.proxy.visible_count();
+        let row_count = self.source.visible_count();
         let (first_visible, last_visible) =
             self.row_metrics
                 .borrow_mut()
@@ -1867,14 +2106,25 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         // Row-drop insertion indicator (source-accepted positions only — a
         // forbidden hover clears the signal). `y` is stored body-local.
-        if let Some((y, _width)) = self.drop_feedback.get() {
-            let line_color = BorderRole::Focused.resolve(colors);
-            let thickness = 2.0_f32;
-            let line_y = body_origin_y + y - thickness * 0.5;
-            canvas.fill_rect(
-                Rect::new(content_left, line_y, body_width_for_paint, thickness),
-                line_color,
-            );
+        match self.drop_feedback.get() {
+            Some(DropViz::Line { y, .. }) => {
+                let line_color = BorderRole::Focused.resolve(colors);
+                let thickness = 2.0_f32;
+                let line_y = body_origin_y + y - thickness * 0.5;
+                canvas.fill_rect(
+                    Rect::new(content_left, line_y, body_width_for_paint, thickness),
+                    line_color,
+                );
+            }
+            // "Drop into this container" — highlight the whole target row, the
+            // same affordance `TreeView` paints for an `Into` verdict.
+            Some(DropViz::Rect { top, height, .. }) => {
+                canvas.fill_rect(
+                    Rect::new(content_left, body_origin_y + top, body_width_for_paint, height),
+                    drop_into_tint(),
+                );
+            }
+            None => {}
         }
 
         canvas.clear_clip();
@@ -1905,7 +2155,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if let Some(ref label) = self.a11y_label {
             builder.set_name(label.resolve_now());
         }
-        let row_count = self.proxy.visible_count() + if self.show_header { 1 } else { 0 };
+        let row_count = self.source.visible_count() + if self.show_header { 1 } else { 0 };
         let col_count = self.columns.len();
         let n = builder.inner_mut();
         n.set_row_count(row_count);
@@ -1923,6 +2173,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if let Some(id) = self.body_pane_id {
             out.push(id);
         }
+        if let Some(id) = self.empty_id {
+            out.push(id);
+        }
         if let Some(id) = self.scrollbar_id {
             out.push(id);
         }
@@ -1936,8 +2189,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // WCAG 1.3.2 (audit G17): read the column-header row FIRST, then the
         // body, even though `build()` / `children()` list the body first so it
         // paints beneath the header. Same id set as `children()`, reordered.
-        let out: Vec<WidgetId> = [self.header_row_id, self.body_pane_id, self.scrollbar_id]
-            .into_iter()
+        let out: Vec<WidgetId> = [
+            self.header_row_id,
+            self.body_pane_id,
+            self.empty_id,
+            self.scrollbar_id,
+        ]
+        .into_iter()
             .flatten()
             .collect();
         if out.is_empty() { None } else { Some(out) }
@@ -2274,6 +2532,605 @@ mod tests {
             bastyde_core::event::Modifiers::NONE,
         );
         assert_eq!(proxy.visible_count(), 2);
+    }
+
+    /// Rows for the external-source tests: an indent-ordered stream keyed by a
+    /// domain id, the shape `TreeDataSlice` derives a hierarchy from.
+    fn slice_rows() -> Vec<bastyde_data::TreeRow<u64, &'static str>> {
+        use bastyde_data::TreeRow;
+        vec![
+            TreeRow { key: 1, item: "docs", depth: 0 },
+            TreeRow { key: 2, item: "readme", depth: 1 },
+            TreeRow { key: 3, item: "guide", depth: 1 },
+            TreeRow { key: 4, item: "src", depth: 0 },
+        ]
+    }
+
+    fn external_slice() -> bastyde_data::TreeDataSlice<u64, &'static str> {
+        let slice = bastyde_data::TreeDataSlice::<u64, &'static str>::new();
+        slice.set_source(slice_rows);
+        slice.reload();
+        slice
+    }
+
+    #[test]
+    fn from_source_renders_an_external_tree_without_a_tree_model() {
+        // The point of `from_source`: no `TreeModel` mirror anywhere. The slice
+        // owns identity (`u64`), derives the hierarchy from row depths, and the
+        // table reads it through the erased `TreeDataSource`.
+        let slice = external_slice();
+        slice.expand(&1);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(slice.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(slice.visible_count(), 4, "docs + 2 children + src");
+
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert!(
+            tt.projection().is_none(),
+            "a source-backed view has no TreeModel projection to expose"
+        );
+        assert!(tt.body_pane_id.is_some(), "rows rendered from the source");
+    }
+
+    #[test]
+    fn from_source_keyed_selection_survives_a_full_resource() {
+        // The property a `TreeModel` mirror cannot offer: `NodeId`s are
+        // reassigned on rebuild, but a domain key is not — so a keyed selection
+        // still points at the same row after the source is re-materialised.
+        let slice = external_slice();
+        slice.expand(&1);
+        let keyed = KeyedSelectionModel::<u64>::new(bastyde_data::SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let _id = tree.add(
+            TreeTableView::from_source_keyed(slice.clone(), keyed.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        keyed.select(3); // "guide"
+        assert!(keyed.is_selected(&3));
+
+        // Re-source from scratch — every row is rebuilt.
+        slice.reload();
+        assert!(
+            keyed.is_selected(&3),
+            "a domain-keyed selection must survive a re-source"
+        );
+    }
+
+    #[test]
+    fn from_source_supports_drag_reorder_like_the_tree_view() {
+        // Parity check: a source-backed table reorders through the source's own
+        // `accept_drop`, the same path `TreeView` uses — no `TreeModel`, no
+        // `NodeId` anywhere. Here the slice commits the move into its own store.
+        use bastyde_canvas::Point;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        // The store the slice re-sources from; the reorder mutates it.
+        let order: Rc<RefCell<Vec<u64>>> = Rc::new(RefCell::new(vec![1, 4]));
+        let slice = bastyde_data::TreeDataSlice::<u64, &'static str>::new();
+        {
+            let order = order.clone();
+            slice.set_source(move || {
+                let names: std::collections::HashMap<u64, &'static str> =
+                    [(1, "docs"), (4, "src")].into_iter().collect();
+                order
+                    .borrow()
+                    .iter()
+                    .map(|k| bastyde_data::TreeRow {
+                        key: *k,
+                        item: names[k],
+                        depth: 0,
+                    })
+                    .collect()
+            });
+        }
+        {
+            let order = order.clone();
+            // Domain policy: apply the move to the backing store.
+            slice.set_reorder(move |dragged, target, _pos| {
+                let mut o = order.borrow_mut();
+                let Some(from) = o.iter().position(|k| *k == dragged) else {
+                    return false;
+                };
+                let item = o.remove(from);
+                let to = o.iter().position(|k| *k == target).map_or(o.len(), |i| i + 1);
+                o.insert(to, item);
+                true
+            });
+        }
+        // An external source must opt into dragging: `TreeDataSlice::drag`
+        // defaults to `NoDrag` (pinned by its own `drag_default_is_nodrag`).
+        slice.set_drag_policy(|_| bastyde_data::DragEligibility::CanDrag);
+        slice.reload();
+        assert_eq!(*order.borrow(), vec![1, 4], "docs, src");
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_source(slice.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+
+        // Drag docs (flat 0) onto the bottom third of src (flat 1) → After src.
+        let h = cp::HEADER_HEIGHT;
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
+        assert_eq!(
+            *order.borrow(),
+            vec![4, 1],
+            "the source applied the reorder: src now precedes docs"
+        );
+    }
+
+    #[test]
+    fn a_source_that_forbids_dragging_a_row_is_honored() {
+        // The source owns drag eligibility. A view that ignored it would happily
+        // move a row the store considers locked.
+        use bastyde_canvas::Point;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let order: Rc<RefCell<Vec<u64>>> = Rc::new(RefCell::new(vec![1, 4]));
+        let slice = bastyde_data::TreeDataSlice::<u64, &'static str>::new();
+        {
+            let order = order.clone();
+            slice.set_source(move || {
+                let names: std::collections::HashMap<u64, &'static str> =
+                    [(1, "docs"), (4, "src")].into_iter().collect();
+                order
+                    .borrow()
+                    .iter()
+                    .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                    .collect()
+            });
+        }
+        {
+            let order = order.clone();
+            slice.set_reorder(move |dragged, target, _pos| {
+                let mut o = order.borrow_mut();
+                let Some(from) = o.iter().position(|k| *k == dragged) else {
+                    return false;
+                };
+                let item = o.remove(from);
+                let to = o.iter().position(|k| *k == target).map_or(o.len(), |i| i + 1);
+                o.insert(to, item);
+                true
+            });
+        }
+        // Row 1 ("docs") is pinned in place by the store.
+        slice.set_drag_policy(|k| {
+            if *k == 1 {
+                bastyde_data::DragEligibility::NoDrag
+            } else {
+                bastyde_data::DragEligibility::CanDrag
+            }
+        });
+        slice.reload();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_source(slice.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+
+        let h = cp::HEADER_HEIGHT;
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
+        assert_eq!(
+            *order.borrow(),
+            vec![1, 4],
+            "a NoDrag row must not move, even onto a valid target"
+        );
+    }
+
+    #[test]
+    fn drop_on_the_middle_third_reparents_into_the_target() {
+        // The Into zone: dropping on a row's middle third makes the dragged node
+        // that row's child, rather than a sibling before/after it.
+        use bastyde_canvas::Point;
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        proxy.collapse_all(); // roots only: docs@0, src@1
+        let docs = proxy.tree().root(0);
+        let src = proxy.tree().root(1);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        let h = cp::HEADER_HEIGHT;
+        // Drag docs (flat 0) onto the MIDDLE third of src (flat 1, [h+20, h+40])
+        // → Into src.
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 30.0),
+        );
+        assert_eq!(proxy.tree().root_count(), 1, "docs is no longer a root");
+        assert_eq!(
+            proxy.tree().parent(docs),
+            Some(src),
+            "docs became a child of src"
+        );
+    }
+
+    #[test]
+    fn an_active_sort_suppresses_drag_reorder() {
+        // With the visible order driven by a sort, a manual reorder would have no
+        // visible effect — so it must be refused outright rather than silently
+        // mutating the tree behind the sort.
+        use bastyde_canvas::Point;
+        let proxy = SortFilterTreeModel::new(sample_tree())
+            .with_comparator("name", |a: &&'static str, b: &&'static str| a.cmp(b));
+        proxy.collapse_all();
+        let docs = proxy.tree().root(0);
+        let src = proxy.tree().root(1);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .reorderable(true)
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_sort(Some("name"), SortDirection::Ascending);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+
+        let h = cp::HEADER_HEIGHT;
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
+        assert_eq!(proxy.tree().root(0), docs, "structure unchanged while sorted");
+        assert_eq!(proxy.tree().root(1), src, "structure unchanged while sorted");
+    }
+
+    #[test]
+    fn default_selection_mode_is_multi_row() {
+        // The doc claimed `RowSingle` — a variant that does not exist. Pin the
+        // real default behaviorally so prose can't drift from it again:
+        // Shift+ArrowDown twice extends to 3 rows, which only MultiRow allows.
+        use bastyde_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(wide_tree(10));
+        let selection = bastyde_data::SelectionModel::new(bastyde_data::SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        selection.select(0);
+        tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+        tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+        assert_eq!(
+            selection.selection_signal().get().len(),
+            3,
+            "default mode must extend a multi-row selection"
+        );
+    }
+
+    #[test]
+    fn empty_view_renders_when_the_tree_has_no_rows() {
+        let proxy = SortFilterTreeModel::new(TreeModel::<&'static str>::new());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .empty_view(|| Box::new(crate::primitives::TextWidget::new(lit!("Nothing here"))))
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert!(tt.empty_id.is_some(), "placeholder should be built");
+        assert!(tt.body_pane_id.is_none(), "no body pane for zero rows");
+    }
+
+    #[test]
+    fn empty_view_appears_when_live_rows_drop_to_zero() {
+        // The transition case: rows exist, the widget is live, then a filter
+        // removes them all. The body pane must be torn down and the
+        // placeholder built — constructing already-empty (the two tests below)
+        // never exercises that path.
+        let proxy = SortFilterTreeModel::new(sample_tree()).with_predicate("name", |t| {
+            let needle = t.to_string();
+            Box::new(move |r: &&'static str| r.contains(&needle))
+        });
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .empty_view(|| Box::new(crate::primitives::TextWidget::new(lit!("No matches"))))
+                .row_height(20.0),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert!(tt.body_pane_id.is_some(), "starts with a body pane");
+            assert!(tt.empty_id.is_none(), "no placeholder while rows exist");
+        }
+
+        proxy.set_filter("name", "zzz-no-such-row");
+        tree.layout(proposal);
+        assert_eq!(proxy.visible_count(), 0);
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert!(
+            tt.empty_id.is_some(),
+            "placeholder must appear once rows drop to zero"
+        );
+        assert!(tt.body_pane_id.is_none(), "stale body pane must be gone");
+    }
+
+    #[test]
+    fn empty_view_renders_when_a_filter_matches_nothing() {
+        // The other half of the empty state: rows exist, but none survive the
+        // filter. Without this the user sees a blank pane and no explanation.
+        let proxy = SortFilterTreeModel::new(sample_tree())
+            .with_predicate("name", |t| {
+                let needle = t.to_string();
+                Box::new(move |r: &&'static str| r.contains(&needle))
+            });
+        proxy.set_filter("name", "zzz-no-such-row");
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .empty_view(|| Box::new(crate::primitives::TextWidget::new(lit!("No matches"))))
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(proxy.visible_count(), 0);
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert!(tt.empty_id.is_some());
+    }
+
+    #[test]
+    fn scroll_to_row_and_ensure_row_visible_move_the_offset() {
+        let proxy = SortFilterTreeModel::new(wide_tree(100));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+
+        // Aligns the row to the top: row 50 × 20 px.
+        tt.scroll_to_row(50);
+        assert!((tt.scroll_y_signal().get() - 1000.0).abs() < 1.0);
+
+        // Already-visible row: minimum scroll means no movement.
+        let before = tt.scroll_y_signal().get();
+        tt.ensure_row_visible(51);
+        assert!((tt.scroll_y_signal().get() - before).abs() < f32::EPSILON);
+
+        // Off-screen upward: scrolls back just far enough.
+        tt.ensure_row_visible(10);
+        assert!((tt.scroll_y_signal().get() - 200.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn begin_edit_resolves_a_column_id_and_end_edit_clears() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+
+        tt.begin_edit(1, "size");
+        assert_eq!(tt.editing_cell_signal().get(), Some((1, 1)));
+        tt.end_edit();
+        assert_eq!(tt.editing_cell_signal().get(), None);
+
+        // Unknown id is a silent no-op, not a panic or a bogus position.
+        tt.begin_edit(0, "no-such-column");
+        assert_eq!(tt.editing_cell_signal().get(), None);
+
+        // An out-of-range row is refused too: without the bounds check this
+        // stranded `editing_cell` on a row nothing could ever match, and only
+        // an explicit `end_edit` would clear it.
+        tt.begin_edit(9999, "name");
+        assert_eq!(tt.editing_cell_signal().get(), None);
+
+        // ...and a refused call must not clobber a live editor.
+        tt.begin_edit(1, "size");
+        tt.begin_edit(9999, "size");
+        assert_eq!(tt.editing_cell_signal().get(), Some((1, 1)));
+    }
+
+    #[test]
+    fn column_imperatives_write_their_signals() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+
+        tt.set_column_width("name", 123.0);
+        assert_eq!(tt.column_widths_signal().get().get("name"), Some(&123.0));
+        // A non-positive width removes the override rather than pinning 0 px.
+        tt.set_column_width("name", 0.0);
+        assert!(!tt.column_widths_signal().get().contains_key("name"));
+
+        // Order and pinning must actually reach `display_order()`, not just sit
+        // in a signal nothing reads. Columns are declared name(0), size(1).
+        assert_eq!(tt.display_order(), vec![0, 1], "declaration order initially");
+
+        tt.set_column_order(vec!["size".into(), "name".into()]);
+        assert_eq!(tt.column_order_signal().get(), vec!["size", "name"]);
+        assert_eq!(
+            tt.display_order(),
+            vec![1, 0],
+            "set_column_order must reorder the display, not only the signal"
+        );
+
+        // Pinning outranks the order list: a Leading-pinned column sorts into
+        // the leading band regardless of where the order puts it.
+        tt.set_column_pinning("name", PinnedSide::Leading);
+        assert_eq!(
+            tt.column_pinning_signal().get().get("name"),
+            Some(&PinnedSide::Leading)
+        );
+        assert_eq!(
+            tt.display_order(),
+            vec![0, 1],
+            "set_column_pinning must pull the pinned column back to the front"
+        );
+        tt.set_column_pinning("name", PinnedSide::None);
+        assert!(!tt.column_pinning_signal().get().contains_key("name"));
+        assert_eq!(
+            tt.display_order(),
+            vec![1, 0],
+            "clearing the pin restores the order list's arrangement"
+        );
+
+        tt.set_sort(Some("name"), SortDirection::Ascending);
+        assert!(tt.sort_signal().get().is_some());
+        tt.clear_sort();
+        assert_eq!(tt.sort_signal().get(), None);
+    }
+
+    #[test]
+    fn arrow_expand_collapse_follows_a_non_leading_tree_column() {
+        // Regression: the key handler hardcoded `col == 0` as "the tree
+        // column", so designating any other column via `.tree_column()` moved
+        // the twist visually but left ArrowLeft/ArrowRight expanding nothing.
+        // Here the tree column is "size", at display position 1.
+        use bastyde_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .add_column(size_col())
+                .tree_column("size")
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+
+        // Off the tree column: the arrows are pure cursor movement, so the
+        // visible set must not change.
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(
+            proxy.visible_count(),
+            2,
+            "ArrowRight off the tree column must not expand"
+        );
+
+        // On the tree column (display position 1): expand, then collapse.
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 1);
+        }
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 4, "docs expands to reveal 2 children");
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 2, "docs collapses again");
     }
 
     #[test]

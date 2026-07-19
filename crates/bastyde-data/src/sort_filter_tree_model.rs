@@ -70,7 +70,8 @@ use bastyde_core::signal::Signal;
 
 use crate::sort_filter_list_model::SortDirection;
 use crate::tree_change::{NodeId, TreeChange};
-use crate::tree_data_source::{FlatEntry, TreeDataSource};
+use crate::dnd_types::{DragEligibility, DragSource, DropCommit, DropQuery, DropResponse};
+use crate::tree_data_source::{FlatEntry, TreeDataSource, tree_apply_reorder, tree_is_desc_or_self};
 use crate::tree_model::TreeModel;
 
 /// Filter strategy used by [`SortFilterTreeModel`].
@@ -483,6 +484,47 @@ impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
             self.expand(*key);
         } else {
             self.collapse(*key);
+        }
+    }
+
+    fn drag(&self, _key: &NodeId) -> DragEligibility {
+        DragEligibility::CanDrag
+    }
+
+    /// Same-view reorder is allowed unless it would create a cycle — a node may
+    /// not land on itself or inside its own subtree. Mirrors [`TreeSlice`]; both
+    /// project the same `TreeModel`, so both owe callers the same verdict.
+    fn can_accept(&self, query: &DropQuery<'_, NodeId>) -> DropResponse {
+        match &query.source {
+            DragSource::SameView { key: source } => {
+                if *source == query.target
+                    || tree_is_desc_or_self(&self.tree(), query.target, *source)
+                {
+                    DropResponse::Reject
+                } else {
+                    DropResponse::Accept
+                }
+            }
+            DragSource::Foreign { .. } => DropResponse::Reject,
+        }
+    }
+
+    fn accept_drop(&self, commit: DropCommit<'_, NodeId>) -> bool {
+        match commit.source {
+            DragSource::SameView { key: source } => {
+                tree_apply_reorder(&self.tree(), source, commit.target, commit.position)
+            }
+            DragSource::Foreign { .. } => false,
+        }
+    }
+
+    fn on_drag_out(&self, key: &NodeId) {
+        // Source-side completion for a foreign move: drop the node (and its
+        // subtree) accepted elsewhere. Re-check existence first — an earlier
+        // removal in the same batch could have already freed this node, and
+        // `TreeModel::remove` panics on a stale key.
+        if self.tree().with_item(*key, |_| ()).is_some() {
+            self.tree().remove(*key);
         }
     }
 }

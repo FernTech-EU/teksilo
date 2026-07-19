@@ -1492,8 +1492,8 @@ fn enter_invokes_on_row_activate() {
 }
 
 #[test]
-fn reorderable_rows_on_list_model_lays_out_cleanly() {
-    // `reorderable_rows(true)` over a `ListModel` source: the move is
+fn reorderable_on_list_model_lays_out_cleanly() {
+    // `reorderable(true)` over a `ListModel` source: the move is
     // routed through the source's `accept_drop` (a `ListModel` reorders in
     // place). This smoke test documents the contract — the table compiles
     // and lays out cleanly with reorder enabled.
@@ -1503,7 +1503,7 @@ fn reorderable_rows_on_list_model_lays_out_cleanly() {
             .add_column(id_col())
             .add_column(name_col())
             .row_height(20.0)
-            .reorderable_rows(true),
+            .reorderable(true),
     );
     tree.layout(SizeProposal {
         width: Some(400.0),
@@ -2718,7 +2718,7 @@ fn row_drop_insertion_with_variable_heights() {
             .add_column(name_col())
             .show_header(false)
             .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
-            .reorderable_rows(true),
+            .reorderable(true),
     );
     tree.layout(SizeProposal {
         width: Some(400.0),
@@ -2832,7 +2832,7 @@ fn reorder_drag_routes_to_source_accept_drop_without_mutating() {
         .add_column(name_col())
         .show_header(false)
         .row_height_fn(move |i| heights.get(i).copied().unwrap_or(40.0))
-        .reorderable_rows(true),
+        .reorderable(true),
     );
     tree.layout(SizeProposal {
         width: Some(400.0),

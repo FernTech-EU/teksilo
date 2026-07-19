@@ -140,7 +140,7 @@ Column::new("id", "ID", |row, ctx| Box::new(TextWidget::new(lit!(row.id.to_strin
     .sortable(true)
     .filterable(true)                  // exposes the filter popover affordance
     .resizable(true)                   // default true
-    .reorderable(true)                 // default true
+    .reorderable(true)                 // COLUMN drag-reorder; default true
     .pinned(PinnedSide::Leading)       // Leading | None | Trailing
     .truncation(TruncationPolicy::Ellipsis);
 ```
@@ -406,7 +406,9 @@ insertion line shows an accepted landing; a `Reject` suppresses it),
 and commits via the source's `accept_drop` on release — there is no
 `on_row_drop` callback.
 
-**TableView.** Set `.reorderable_rows(true)`; a row drag emits the
+**TableView.** Set `.reorderable(true)` **on the table** (distinct from
+`Column::reorderable`, which reorders columns and defaults to `true`; the
+table-level flag reorders *rows* and defaults to `false`); a row drag emits the
 shared `RowDrag { source_index, source_view_id }`. An intra-table
 reorder is a `DragSource::SameView` the source's `accept_drop` applies
 (a `ListModel<T>` reorders in place); a cross-table or external drop

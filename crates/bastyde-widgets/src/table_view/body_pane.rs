@@ -77,7 +77,7 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) editing_cell: Signal<Option<(usize, usize)>>,
     pub(crate) focused_cell: Signal<Option<(usize, usize)>>,
 
-    pub(crate) reorderable_rows: bool,
+    pub(crate) reorderable: bool,
     /// Cross-widget export / foreign-receive machinery, cloned in from the
     /// owning `TableView` — builds the drag-start payload here; the
     /// self-reorder flag and removal-thunk stash are Rc-backed, so mutations
@@ -231,7 +231,7 @@ impl<T: 'static> Widget for BodyPane<T> {
         // Rows become a drag source when reorderable OR exportable — the
         // export path makes a row draggable-out even when same-view
         // reordering is disabled.
-        let is_drag_source = self.export.is_drag_source(self.reorderable_rows);
+        let is_drag_source = self.export.is_drag_source(self.reorderable);
 
         // Key the row focus scope on the table's focusable root (`drag_anchor`),
         // not this pane — keyboard focus lands on the root, so a `StandardItem`
