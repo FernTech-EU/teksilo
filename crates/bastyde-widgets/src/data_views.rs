@@ -461,6 +461,37 @@ impl std::fmt::Debug for RowAnchor {
     }
 }
 
+/// Keep an open cell editor pointing at the row it was opened on.
+///
+/// `editing_cell` is a `(row, col)` pair that outlives rebuilds, so rows
+/// appearing or vanishing above an open editor would slide it onto a different
+/// row. The anchor is captured the first time an open editor is seen and
+/// re-resolved on every later rebuild: the row index is rewritten when it moved,
+/// and the editor closes outright when its row is gone — better than silently
+/// editing whoever took the slot.
+pub(crate) fn reconcile_editing_row(
+    editing_cell: &bastyde_core::signal::Signal<Option<(usize, usize)>>,
+    slot: &Rc<std::cell::RefCell<Option<RowAnchor>>>,
+    anchor_of: &dyn Fn(usize) -> RowAnchor,
+) {
+    let Some((row, col)) = editing_cell.get() else {
+        *slot.borrow_mut() = None;
+        return;
+    };
+    let existing = slot.borrow().clone();
+    match existing {
+        None => *slot.borrow_mut() = Some(anchor_of(row)),
+        Some(anchor) => match anchor.index() {
+            Some(cur) if cur != row => editing_cell.set(Some((cur, col))),
+            Some(_) => {}
+            None => {
+                editing_cell.set(None);
+                *slot.borrow_mut() = None;
+            }
+        },
+    }
+}
+
 /// Tint for the "drop into this container" row highlight. Defined once so the
 /// `DropFeedback` handed to the framework and the widget's own paint cannot
 /// drift into two different colors on the same row.

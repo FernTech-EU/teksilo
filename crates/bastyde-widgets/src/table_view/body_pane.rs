@@ -88,6 +88,13 @@ pub(crate) struct BodyPane<T: 'static> {
     /// and returns a removal thunk. Threaded straight from the owning
     /// `TableView`'s `dnd` bundle.
     pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
+    /// Resolve a row index to a movement-proof handle. Threaded from the
+    /// owning `TableView`'s source, like `snapshot_out_fn`, because the pane
+    /// gets erased closures rather than the source itself.
+    pub(crate) anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
+    /// Anchor slot for the row with an open cell editor (Rc-shared with the
+    /// owning `TableView`, so it survives this pane being rebuilt).
+    pub(crate) editing_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
     /// Stable, kind-tagged id of the owning `TableView` instance — stamped
     /// into the `RowDragData` payload so the source can tell a same-view
     /// reorder from a foreign drop.
@@ -147,6 +154,13 @@ impl<T: 'static> std::fmt::Debug for BodyPane<T> {
 
 impl<T: 'static> Widget for BodyPane<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // The pane rebuilds on BOTH an editing change and a data change, so
+        // this is the one place that sees every transition an open editor has
+        // to survive.
+        let anchor_fn = self.anchor_fn.clone();
+        crate::data_views::reconcile_editing_row(&self.editing_cell, &self.editing_anchor, &|i| {
+            anchor_fn(i)
+        });
         // Self-rebuild trigger. A persistent field (not `ctx.signal`)
         // so the realization re-check in `place_children` can bump it
         // after measurement.
@@ -386,7 +400,7 @@ impl<T: 'static> Widget for BodyPane<T> {
             // editor and dropping focus mid-click.
             let mut row_handlers = HandlerSet::new();
             if let Some(ref sel) = self.selection {
-                let row_index_for_click = row_idx;
+                let click_anchor = (self.anchor_fn)(row_idx);
                 let sel_for_click = sel.clone();
                 let editing_for_click = self.editing_cell.clone();
                 if matches!(
@@ -404,6 +418,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                             modifiers,
                             ..
                         } => {
+                        // Resolve the row's CURRENT position: rows may have
+                        // shifted since this handler was built.
+                        let Some(row_index_for_click) = click_anchor.index() else {
+                            return bastyde_core::event::EventResponse::Ignored;
+                        };
                             if editing_for_click.get().is_some() {
                                 return bastyde_core::event::EventResponse::Ignored;
                             }
@@ -458,8 +477,10 @@ impl<T: 'static> Widget for BodyPane<T> {
                             // Reached only on a click WITHOUT a drag (an
                             // active drag consumes PointerUp). Collapse the
                             // deferred multi-selection to the clicked row.
-                            if pending_collapse.replace(false) {
-                                sel_for_click.select(row_index_for_click);
+                            if pending_collapse.replace(false)
+                                && let Some(row) = click_anchor.index()
+                            {
+                                sel_for_click.select(row);
                             }
                             bastyde_core::event::EventResponse::Ignored
                         }
@@ -559,13 +580,24 @@ impl<T: 'static> Widget for BodyPane<T> {
             // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
             if let Some(ref cb) = self.on_row_activate {
                 let cb = cb.clone();
-                let activate_index = row_idx;
+                // Anchored: a row that moved (or vanished) between build and
+                // click must not activate whoever took its slot.
+                let a = (self.anchor_fn)(row_idx);
                 let handlers = match self.activate_on {
                     crate::data_views::ActivateOn::SingleClick => {
-                        HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
+                        let a = a.clone();
+                        HandlerSet::new().on_tap(move |_tap, ctx| {
+                            if let Some(cur) = a.index() {
+                                cb(cur, ctx)
+                            }
+                        })
                     }
                     crate::data_views::ActivateOn::DoubleClick => {
-                        HandlerSet::new().on_double_tap(move |_tap, ctx| cb(activate_index, ctx))
+                        HandlerSet::new().on_double_tap(move |_tap, ctx| {
+                            if let Some(cur) = a.index() {
+                                cb(cur, ctx)
+                            }
+                        })
                     }
                 };
                 ctx.apply_handlers(row_id, handlers);

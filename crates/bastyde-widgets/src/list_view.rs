@@ -1292,7 +1292,7 @@ impl<T: 'static> Widget for ListView<T> {
                 // Ctrl+click toggles, Shift+click extends range.
                 if let Some(ref sel) = self.row_selection {
                     let sel_click = sel.clone();
-                    let click_index = i;
+                    let click_anchor = self.source.anchor(i);
                     let fi_click = self.focused_index.clone();
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
@@ -1311,14 +1311,20 @@ impl<T: 'static> Widget for ListView<T> {
                                 // the defer-collapse-on-already-selected rule; it
                                 // returns false (skip the nav-cursor move) when an
                                 // interactive child claimed the press.
+                                // Resolve the row's CURRENT position: rows above
+                                // may have shifted since this handler was built,
+                                // and a deleted row must not hand its click on.
+                                let Some(row) = click_anchor.index() else {
+                                    return bastyde_core::event::EventResponse::Ignored;
+                                };
                                 if crate::data_views::deferred_select::on_down(
                                     &sel_click,
-                                    click_index,
+                                    row,
                                     *modifiers,
                                     &pending_collapse,
                                     ctx,
                                 ) {
-                                    fi_click.set(Some(click_index));
+                                    fi_click.set(Some(row));
                                 }
                                 // Ignored so the gesture arena still arms the
                                 // DragRecognizer for drag-to-reorder.
@@ -1328,12 +1334,14 @@ impl<T: 'static> Widget for ListView<T> {
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                crate::data_views::deferred_select::on_up(
-                                    &sel_click,
-                                    click_index,
-                                    &pending_collapse,
-                                    ctx,
-                                );
+                                if let Some(row) = click_anchor.index() {
+                                    crate::data_views::deferred_select::on_up(
+                                        &sel_click,
+                                        row,
+                                        &pending_collapse,
+                                        ctx,
+                                    );
+                                }
                                 bastyde_core::event::EventResponse::Ignored
                             }
                             _ => bastyde_core::event::EventResponse::Ignored,
@@ -1347,13 +1355,25 @@ impl<T: 'static> Widget for ListView<T> {
                 // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
                 if let Some(ref cb) = self.on_activate {
                     let cb = cb.clone();
-                    let activate_index = i;
+                    // Anchored: a row that moved (or vanished) between build and
+                    // click must not activate whoever took its slot.
+                    let a = self.source.anchor(i);
                     let handlers = match self.activate_on {
                         crate::data_views::ActivateOn::SingleClick => {
-                            HandlerSet::new().on_tap(move |_tap, ctx| cb(activate_index, ctx))
+                            let a = a.clone();
+                            HandlerSet::new().on_tap(move |_tap, ctx| {
+                                if let Some(cur) = a.index() {
+                                    cb(cur, ctx)
+                                }
+                            })
                         }
-                        crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
-                            .on_double_tap(move |_tap, ctx| cb(activate_index, ctx)),
+                        crate::data_views::ActivateOn::DoubleClick => {
+                            HandlerSet::new().on_double_tap(move |_tap, ctx| {
+                                if let Some(cur) = a.index() {
+                                    cb(cur, ctx)
+                                }
+                            })
+                        }
                     };
                     ctx.apply_handlers(child_id, handlers);
                 }

@@ -228,6 +228,9 @@ pub struct TreeTableView<T: 'static> {
     /// holds its construction placeholder, so viewport-relative imperatives
     /// (`ensure_row_visible`) would scroll against a size that was never real.
     laid_out: Rc<Cell<bool>>,
+    /// Anchor for the row with an open cell editor, so the editor follows its
+    /// row instead of its index. See `reconcile_editing_row`.
+    editing_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     // Build state
     header_row_id: Option<WidgetId>,
@@ -422,6 +425,7 @@ impl<T: 'static> TreeTableView<T> {
             editing_cell: Signal::new(None),
             empty_view: None,
             laid_out: Rc::new(Cell::new(false)),
+            editing_anchor: Rc::new(RefCell::new(None)),
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
@@ -1087,6 +1091,11 @@ impl<T: 'static> TreeTableView<T> {
         self.editing_cell.set(None);
     }
 
+
+    fn row_anchor(&self, index: usize) -> crate::data_views::RowAnchor {
+        self.source.anchor(index)
+    }
+
     // ── Internals ──────────────────────────────────────────────────────
 
     fn effective_row_height(&self) -> f32 {
@@ -1708,6 +1717,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         ctx.apply_self_handlers(handlers);
 
         // ── Build children ────────────────────────────────────────────
+
         self.header_row_id = None;
         self.body_pane_id = None;
         self.scrollbar_id = None;
@@ -1761,6 +1771,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if row_count > 0 {
             let pane = body_pane::TreeBodyPane::<T> {
                 source: self.source.clone(),
+                editing_anchor: self.editing_anchor.clone(),
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
@@ -2831,6 +2842,83 @@ mod tests {
         );
         assert_eq!(proxy.tree().root(0), docs, "structure unchanged while sorted");
         assert_eq!(proxy.tree().root(1), src, "structure unchanged while sorted");
+    }
+
+    #[test]
+    fn an_open_cell_editor_follows_its_row_and_closes_if_the_row_vanishes() {
+        // `editing_cell` is a (row, col) pair that outlives rebuilds. Without
+        // reconciliation, filtering a row away above an open editor slides the
+        // editor onto a different row and silently edits the wrong item.
+        let slice = bastyde_data::TreeDataSlice::<u64, &'static str>::new();
+        let all: Vec<u64> = vec![1, 2, 3];
+        slice.set_source(move || {
+            let names: std::collections::HashMap<u64, &'static str> =
+                [(1, "one"), (2, "two"), (3, "three")].into_iter().collect();
+            all.iter()
+                .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                .collect()
+        });
+        slice.reload();
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(slice.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        let proposal = SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        };
+        tree.layout(proposal);
+
+        // Edit row 2 ("three" sits at index 2).
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.begin_edit(2, "name");
+            assert_eq!(tt.editing_cell_signal().get(), Some((2, 0)));
+        }
+        tree.layout(proposal); // captures the anchor
+
+        // Drop the FIRST row: "three" is now at index 1.
+        let fewer: Vec<u64> = vec![2, 3];
+        slice.set_source(move || {
+            let names: std::collections::HashMap<u64, &'static str> =
+                [(2, "two"), (3, "three")].into_iter().collect();
+            fewer
+                .iter()
+                .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                .collect()
+        });
+        slice.reload();
+        tree.layout(proposal);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(
+                tt.editing_cell_signal().get(),
+                Some((1, 0)),
+                "the editor must follow its row to index 1, not stay on index 2"
+            );
+        }
+
+        // Now delete the edited row itself: the editor must close, not move.
+        let last: Vec<u64> = vec![2];
+        slice.set_source(move || {
+            last.iter()
+                .map(|k| bastyde_data::TreeRow { key: *k, item: "two", depth: 0 })
+                .collect()
+        });
+        slice.reload();
+        tree.layout(proposal);
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.editing_cell_signal().get(),
+            None,
+            "the editor must close when its row is gone"
+        );
     }
 
     #[test]

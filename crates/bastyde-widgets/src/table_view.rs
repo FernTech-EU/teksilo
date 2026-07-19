@@ -202,6 +202,11 @@ pub struct TableView<T: 'static> {
     /// can forbid a drop by returning `DropResponse::Reject` (the view
     /// then paints no insertion line).
     dnd: DndLazy,
+    /// Resolve a row index to a movement-proof handle (see `RowAnchor`).
+    anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
+    /// Anchor for the row with an open cell editor, so the editor follows its
+    /// row instead of its index. See `reconcile_editing_row`.
+    editing_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     // Configuration
     columns: Vec<Column<T>>,
@@ -375,12 +380,40 @@ pub struct TableView<T: 'static> {
     enabled: Prop<bool>,
 }
 
+/// Build the anchor factory for a keyed source: capture the row's key now,
+/// resolve its current index later. Keyless sources fall back to a fixed anchor.
+fn anchor_factory<S: ListDataSource<Item = T> + 'static, T: 'static>(
+    s: Rc<S>,
+) -> Rc<dyn Fn(usize) -> crate::data_views::RowAnchor> {
+    Rc::new(move |index| match s.key_at(index) {
+        Some(key) => {
+            let src = s.clone();
+            crate::data_views::RowAnchor::new(Rc::new(move || {
+                if src.key_at(index).as_ref() == Some(&key) {
+                    return Some(index);
+                }
+                src.index_of(&key)
+            }))
+        }
+        None => crate::data_views::RowAnchor::fixed(index),
+    })
+}
+
 impl<T: 'static> TableView<T> {
     /// Wrap a `ListModel<T>`.
     pub fn new(model: ListModel<T>) -> Self {
         let dnd = DndLazy::from_source(Rc::new(model.clone()));
         let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_list_model(model);
-        Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
+        // A bare `ListModel` exposes no row identity.
+        let anchor_fn = Rc::new(crate::data_views::RowAnchor::fixed) as Rc<dyn Fn(usize) -> _>;
+        Self::create(
+            len_fn,
+            with_item_fn,
+            observe_fn,
+            first_changed_fn,
+            dnd,
+            anchor_fn,
+        )
     }
 
     /// Wrap any `ListDataSource<Item = T>` (e.g. a
@@ -392,8 +425,16 @@ impl<T: 'static> TableView<T> {
     pub fn from_source<S: ListDataSource<Item = T>>(source: S) -> Self {
         let s = Rc::new(source);
         let dnd = DndLazy::from_source(s.clone());
+        let anchor_fn = anchor_factory::<S, T>(s.clone());
         let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_data_source::<S, T>(s);
-        Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd)
+        Self::create(
+            len_fn,
+            with_item_fn,
+            observe_fn,
+            first_changed_fn,
+            dnd,
+            anchor_fn,
+        )
     }
 
     /// Wrap any `ListDataSource<Item = T>` with **keyed** row selection. The
@@ -426,10 +467,23 @@ impl<T: 'static> TableView<T> {
                 as Rc<dyn Fn(&S::Key) -> bool>
         };
         let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        let anchor_fn = anchor_factory::<S, T>(s.clone());
         let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_data_source::<S, T>(s);
-        let mut view = Self::create(len_fn, with_item_fn, observe_fn, first_changed_fn, dnd);
+        let mut view = Self::create(
+            len_fn,
+            with_item_fn,
+            observe_fn,
+            first_changed_fn,
+            dnd,
+            anchor_fn,
+        );
         view.row_selection = Some(row_selection);
         view
+    }
+
+
+    fn row_anchor(&self, index: usize) -> crate::data_views::RowAnchor {
+        (self.anchor_fn)(index)
     }
 
     fn create(
@@ -438,6 +492,7 @@ impl<T: 'static> TableView<T> {
         observe_fn: ObserveFn,
         first_changed_fn: FirstChangedFn,
         dnd: DndLazy,
+        anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
     ) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
@@ -448,6 +503,8 @@ impl<T: 'static> TableView<T> {
             observe_fn,
             first_changed_fn,
             dnd,
+            anchor_fn,
+            editing_anchor: Rc::new(RefCell::new(None)),
             columns: Vec::new(),
             row_height: None,
             height_source: HeightSource::Uniform,
@@ -1823,6 +1880,8 @@ impl<T: 'static> Widget for TableView<T> {
                 reorderable: self.reorderable,
                 export: self.export.clone(),
                 snapshot_out_fn: self.dnd.snapshot_out_fn.clone(),
+                anchor_fn: self.anchor_fn.clone(),
+                editing_anchor: self.editing_anchor.clone(),
                 view_id: self.model_id,
                 drag_anchor: ctx.self_id(),
                 on_row_activate: self.on_row_activate.clone(),

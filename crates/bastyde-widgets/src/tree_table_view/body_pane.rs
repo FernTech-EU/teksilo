@@ -57,6 +57,9 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// Erased row access — index-keyed, so the pane works over any
     /// `TreeDataSource`, not just a `TreeModel`-backed projection.
     pub(crate) source: Rc<TreeSource<T>>,
+    /// Anchor slot for the row with an open cell editor (Rc-shared with the
+    /// owning `TreeTableView`, so it survives this pane being rebuilt).
+    pub(crate) editing_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     pub(crate) columns: Vec<Column<T>>,
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
@@ -144,6 +147,14 @@ impl<T: 'static> std::fmt::Debug for TreeBodyPane<T> {
 
 impl<T: 'static> Widget for TreeBodyPane<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // The pane rebuilds on BOTH an editing change and a projection change,
+        // so this is the one place that sees every transition an open editor
+        // has to survive.
+        let src = self.source.clone();
+        crate::data_views::reconcile_editing_row(&self.editing_cell, &self.editing_anchor, &|i| {
+            src.anchor(i)
+        });
+
         // Self-rebuild trigger (persistent handle — see field doc).
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
