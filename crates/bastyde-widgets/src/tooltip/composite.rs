@@ -53,6 +53,9 @@ pub struct CompositeTooltipWidget {
     body: Option<Box<dyn Widget>>,
     body_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
+    /// The `ScrollArea` wrapping the body. Kept only so `layout_response` can discount its
+    /// placeholder intrinsic height — see there.
+    scrolled_id: Option<WidgetId>,
     access_label: Option<String>,
     max_width_override: Option<f32>,
     max_height_override: Option<f32>,
@@ -84,6 +87,7 @@ impl CompositeTooltipWidget {
             body: None,
             body_id: None,
             root_child_id: None,
+            scrolled_id: None,
             access_label: None,
             max_width_override: None,
             max_height_override: None,
@@ -198,6 +202,8 @@ impl Widget for CompositeTooltipWidget {
                 .scroll_bar_thumb_color(TextRole::TooltipText),
         );
 
+        self.scrolled_id = Some(scrolled);
+
         let padded = ctx.add(
             Padding::symmetric(
                 tt::COMPOSITE_TOOLTIP_PADDING_VERTICAL,
@@ -260,14 +266,67 @@ impl Widget for CompositeTooltipWidget {
         let max_h = self
             .max_height_override
             .unwrap_or(tt::COMPOSITE_TOOLTIP_MAX_HEIGHT);
-        let clamped = SizeProposal {
-            width: Some(proposal.width.map(|w| w.min(max_w)).unwrap_or(max_w)),
-            height: Some(proposal.height.map(|h| h.min(max_h)).unwrap_or(max_h)),
+        // `max_width` / `max_height` are *maxima*, so measure what the content wants and
+        // clamp the result — do NOT propose the maximum as an exact size.
+        //
+        // Proposing it was the bug: the body sits inside a `ScrollArea` (below) whose
+        // horizontal policy is `AlwaysOff`, so it fills whatever width it is handed, and the
+        // wrapper chain likewise takes the offered height. A tooltip holding a 202x16 dp row
+        // therefore painted as a 480x244 dp slab, and neither a smaller `max_width` nor a
+        // smaller `max_height` could make it hug — they only moved the number it filled to.
+        //
+        // Two passes, because width and height are not independent: measuring unbounded
+        // gives text its single-line length, and a body clamped narrower than that needs to
+        // be re-measured to learn how tall it becomes once it wraps.
+        let unbounded = SizeProposal {
+            width: None,
+            height: None,
         };
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, clamped))
-            .unwrap_or_else(|| Size::new(0.0, 0.0))
-            .into()
+        let Some(natural) = self.root_child_id.and_then(|id| ctx.child_size(id, unbounded)) else {
+            return Size::new(0.0, 0.0).into();
+        };
+        let avail_w = proposal.width.unwrap_or(f32::INFINITY).min(max_w);
+        let w = natural.width.min(avail_w);
+        let h = self
+            .root_child_id
+            .and_then(|id| {
+                ctx.child_size(
+                    id,
+                    SizeProposal {
+                        width: Some(w),
+                        height: None,
+                    },
+                )
+            })
+            .map(|s| s.height)
+            .unwrap_or(natural.height);
+
+        // Height needs one more correction. A `ScrollArea` is a viewport: asked for its
+        // intrinsic height it answers with a fixed placeholder (200 dp) rather than its
+        // content's, because a viewport's whole job is to be smaller than what it holds. The
+        // body sits inside one, so the measurement above says 244 dp for a 16 dp row.
+        //
+        // Discount the scroll area's own answer and substitute the body's. Expressed as a
+        // difference rather than by re-adding the padding and footer by hand, so it stays
+        // right if the chrome around the body ever changes.
+        let h = match (self.scrolled_id, self.body_id) {
+            (Some(scrolled), Some(body)) => {
+                let at_width = SizeProposal {
+                    width: Some(w),
+                    height: None,
+                };
+                match (
+                    ctx.child_size(scrolled, at_width),
+                    ctx.child_size(body, at_width),
+                ) {
+                    (Some(vp), Some(content)) => (h - vp.height + content.height).max(0.0),
+                    _ => h,
+                }
+            }
+            _ => h,
+        };
+        let avail_h = proposal.height.unwrap_or(f32::INFINITY).min(max_h);
+        Size::new(w, h.min(avail_h)).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -467,4 +526,62 @@ mod tests {
             "composite must preserve children so the reused body id stays valid across rebuild"
         );
     }
+
+    /// `max_width` / `max_height` are maxima, not the size to fill.
+    ///
+    /// They used to be proposed to the content as an exact size, and since the body sits in
+    /// a `ScrollArea` that fills what it is handed, every composite tooltip painted at the
+    /// maximum: a one-line body rendered as a 480x480 slab. Lowering either maximum only
+    /// changed the number it filled to, so there was no way to get a tooltip that fit its
+    /// content. Pin the hugging directly.
+    #[test]
+    fn a_short_composite_tooltip_hugs_its_content() {
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add_boxed(Box::new(
+            CompositeTooltipWidget::new().content(TextWidget::new(lit!("Hi"))),
+        ));
+        // An overlay proposes generously; the tooltip must not ask for all of it.
+        // Measured, not `bounds()`: the widget under test is the tree root and so is
+        // *placed* at the proposal whatever it reports.
+        tree.layout(SizeProposal::exact(1200.0, 900.0));
+        let s = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(1200.0),
+                height: Some(900.0),
+            })
+            .expect("the tooltip reports a size");
+        assert!(
+            s.width < 200.0,
+            "a two-letter body should not ask for a {}dp-wide tooltip",
+            s.width
+        );
+        assert!(
+            s.height < 120.0,
+            "a one-line body should not ask for a {}dp-tall tooltip",
+            s.height
+        );
+    }
+
+    /// …and a body larger than the maxima is still bounded by them.
+    #[test]
+    fn a_long_composite_tooltip_is_capped_by_its_maximum() {
+        let long = "word ".repeat(400);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add_boxed(Box::new(
+            CompositeTooltipWidget::new()
+                .content(TextWidget::new(lit!(long)))
+                .max_width(240.0)
+                .max_height(160.0),
+        ));
+        tree.layout(SizeProposal::exact(1200.0, 900.0));
+        let s = tree
+            .measure_root_intrinsic(SizeProposal {
+                width: Some(1200.0),
+                height: Some(900.0),
+            })
+            .expect("the tooltip reports a size");
+        assert!(s.width <= 240.5, "width {} exceeds its maximum", s.width);
+        assert!(s.height <= 160.5, "height {} exceeds its maximum", s.height);
+    }
 }
+
