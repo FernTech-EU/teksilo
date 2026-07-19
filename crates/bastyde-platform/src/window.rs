@@ -72,6 +72,7 @@ impl PlatformWindow {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                ..Default::default()
             })
             .await
             .expect("no compatible wgpu adapter available");
@@ -111,6 +112,9 @@ impl PlatformWindow {
                 .unwrap_or(wgpu::CompositeAlphaMode::Auto),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            // `Auto` reproduces wgpu's pre-30 behaviour: sRGB for the
+            // non-`Rgba16Float` formats we select above.
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &surface_config);
 
@@ -157,6 +161,7 @@ impl PlatformWindow {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                ..Default::default()
             })
             .await
             .expect("no compatible wgpu adapter available");
@@ -195,6 +200,9 @@ impl PlatformWindow {
                 .unwrap_or(wgpu::CompositeAlphaMode::Auto),
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            // `Auto` reproduces wgpu's pre-30 behaviour: sRGB for the
+            // non-`Rgba16Float` formats we select above.
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &surface_config);
 
@@ -288,7 +296,7 @@ impl PlatformWindow {
         self.renderer
             .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
 
-        output.present();
+        self.renderer.queue().present(output);
         FrameOutcome::Rendered
     }
 

@@ -14,6 +14,7 @@ pub async fn create_test_renderer(
             power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: None,
             force_fallback_adapter: false,
+            ..Default::default()
         })
         .await
         .ok()?;
@@ -95,7 +96,9 @@ pub fn read_texture_rgba(
         .expect("map_async callback dropped")
         .expect("map_async failed");
 
-    let mapped = slice.get_mapped_range();
+    let mapped = slice
+        .get_mapped_range()
+        .expect("mapped range unavailable after a successful map_async");
     let mut pixels = vec![0u8; (width * height * bytes_per_pixel) as usize];
     for row in 0..height as usize {
         let src_offset = row * padded_bytes_per_row as usize;

@@ -2458,7 +2458,7 @@ fn create_rect_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<RectVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -2473,7 +2473,7 @@ fn create_rect_pipeline(
                         format: wgpu::VertexFormat::Float32x4,
                     },
                 ],
-            }],
+            })],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -2515,7 +2515,7 @@ fn create_sdf_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<SdfVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -2575,7 +2575,7 @@ fn create_sdf_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
                         format: wgpu::VertexFormat::Float32x4, // gradient_offsets
                     },
                 ],
-            }],
+            })],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -2642,7 +2642,7 @@ fn create_quad_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<QuadVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -2667,7 +2667,7 @@ fn create_quad_pipeline(
                         format: wgpu::VertexFormat::Uint32, // flags (bit 0 = color glyph)
                     },
                 ],
-            }],
+            })],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -2718,7 +2718,7 @@ fn create_path_gradient_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<crate::vertex::PathGradientVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -2774,7 +2774,7 @@ fn create_path_gradient_pipeline(
                         format: wgpu::VertexFormat::Float32x4, // gradient_offsets
                     },
                 ],
-            }],
+            })],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -2819,7 +2819,7 @@ fn create_shadow_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
+            buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<ShadowVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
@@ -2854,7 +2854,7 @@ fn create_shadow_pipeline(
                         format: wgpu::VertexFormat::Float32x4, // shape_offset
                     },
                 ],
-            }],
+            })],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -3018,7 +3018,7 @@ fn create_anim_proc_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[anim_quad_vertex_layout()],
+            buffers: &[Some(anim_quad_vertex_layout())],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -3078,7 +3078,7 @@ fn create_anim_sprite_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[anim_quad_vertex_layout()],
+            buffers: &[Some(anim_quad_vertex_layout())],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
