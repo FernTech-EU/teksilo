@@ -809,6 +809,27 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Insert a fragment parsed from djot at the widget's caret.
+    /// Replaces any selection. Uses text-document's
+    /// [`TextCursor::insert_djot`](bastyde_text::text_document::TextCursor::insert_djot),
+    /// which parses the djot into a `DocumentFragment` and inserts it — so
+    /// unlike [`insert_text`](Self::insert_text), block-level source really
+    /// does produce new blocks rather than literal newlines in one paragraph.
+    pub fn insert_djot(&self, djot: &str) {
+        let st = self.state.borrow();
+        let _ = st.cursor.insert_djot(djot);
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Split the current block at the widget's caret, as pressing Enter does.
+    pub fn insert_block(&self) {
+        let st = self.state.borrow();
+        let _ = st.cursor.insert_block();
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
     /// Insert an inline image by logical resource name. `width` and
     /// `height` are in logical pixels.
     pub fn insert_image(&self, name: &str, width: u32, height: u32) {
@@ -1615,6 +1636,67 @@ impl EditorHandle {
             let _ = st.cursor.insert_text(text);
         }
         sync_cursor_signals(&self.state);
+    }
+
+    /// Insert plain text at the caret, replacing any selection. The
+    /// [`EditorHandle`] counterpart of
+    /// [`RichTextEditor::insert_text`](RichTextEditor::insert_text), for callers
+    /// that hold only a handle — a toolbar button or a global menu command.
+    pub fn insert_text(&self, text: &str) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_text(text);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a fragment parsed from djot at the caret, replacing any selection.
+    ///
+    /// Unlike [`insert_text`](Self::insert_text), which drops its bytes into the
+    /// current block verbatim (a `\n` becomes literal content, not a new
+    /// paragraph), this parses block-level djot into a `DocumentFragment`, so
+    /// inserting a standalone paragraph really does create one.
+    pub fn insert_djot(&self, djot: &str) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_djot(djot);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Split the current block at the caret, as pressing Enter does.
+    pub fn insert_block(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_block();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert `text` as a **paragraph of its own** at the caret: split here, fill
+    /// the new block, split again, so whatever followed the caret continues in a
+    /// third block.
+    ///
+    /// Deliberately one call rather than three. Composing
+    /// `insert_block` + `insert_text` + `insert_block` from outside re-enters the
+    /// widget three times, and an application that rebuilds its editor in
+    /// response to the first change notification is left driving a handle that
+    /// no longer points at the mounted widget — the split lands and the text
+    /// silently does not. Doing the whole edit under a single borrow, with one
+    /// signal sync at the end, makes it atomic from the caller's side.
+    /// Returns `false` if any step failed, leaving the document as far as it
+    /// got. Steps are **not** attempted after a failure: filling and re-splitting
+    /// on top of a split that did not happen produces a mangled paragraph rather
+    /// than a partial one, and the caller has no way to tell.
+    pub fn insert_paragraph(&self, text: &str) -> bool {
+        let ok = {
+            let st = self.state.borrow();
+            st.cursor.insert_block().is_ok()
+                && st.cursor.insert_text(text).is_ok()
+                && st.cursor.insert_block().is_ok()
+        };
+        sync_cursor_signals(&self.state);
+        ok
     }
 
     /// The live selection as `(anchor, position)`, unordered — `anchor` is where the

@@ -5839,3 +5839,127 @@ mod affinity_tests {
         assert!(!editor.focused_signal().get());
     }
 }
+
+// --- programmatic block insertion via EditorHandle -------------------------
+
+#[test]
+fn editor_handle_insert_text_keeps_a_newline_inside_one_block() {
+    // The baseline this exists to contrast with: `insert_text` drops its bytes
+    // into the current block verbatim, so a `\n` becomes literal content rather
+    // than a paragraph break. A caller that wants a new paragraph cannot get one
+    // this way — hence `insert_djot` / `insert_block`.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    handle.insert_text("\nsecond");
+
+    let djot = doc.to_djot().unwrap_or_default();
+    assert!(
+        !djot.contains("\n\n"),
+        "insert_text must not create a second block, got:\n{djot}"
+    );
+}
+
+#[test]
+fn editor_handle_insert_block_splits_the_current_block() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("firstsecond").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    handle.insert_block();
+
+    let djot = doc.to_djot().unwrap_or_default();
+    assert!(
+        djot.contains("first\n\nsecond"),
+        "insert_block must split into two paragraphs, got:\n{djot}"
+    );
+}
+
+#[test]
+fn editor_handle_insert_djot_merges_a_single_paragraph_at_the_caret() {
+    // A one-paragraph fragment joins the block the caret is in — leading blank
+    // lines in the source are whitespace to the parser, not a forced split. Use
+    // `insert_block` to get a paragraph boundary; see the test below.
+    //
+    // The source is ESCAPED (`\* \* \*`) because bare `* * *` is a djot thematic
+    // break, which the document model does not represent and the parser drops.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    handle.insert_djot("\\* \\* \\*");
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("* * *"),
+        "the escaped marker's literal text must survive, got:\n{plain}"
+    );
+}
+
+#[test]
+fn editor_handle_insert_djot_carries_a_multi_block_fragment() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    handle.insert_djot("one\n\ntwo");
+
+    let djot = doc.to_djot().unwrap_or_default();
+    assert!(
+        djot.contains("\n\n"),
+        "a two-block fragment must produce two blocks, got:\n{djot}"
+    );
+}
+
+#[test]
+fn insert_paragraph_lands_a_marker_on_its_own_line() {
+    // The exact recipe an "insert scene break" command uses: split at the caret,
+    // type the marker into the new block, then split again so the prose that
+    // followed the caret continues in its own paragraph. Plain `insert_text` is
+    // right here — the marker is literal text, and the djot escaping that keeps
+    // it from parsing as a thematic break is applied automatically on save.
+    let doc = TextDocument::new();
+    doc.set_plain_text("beforeafter").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(6, 6);
+    handle.insert_paragraph("* * *");
+
+    let djot = doc.to_djot().unwrap_or_default();
+    assert!(
+        djot.contains("before\n\n\\* \\* \\*\n\nafter"),
+        "marker must be its own paragraph between the halves, got:\n{djot}"
+    );
+}
+
+#[test]
+fn an_unescaped_thematic_break_is_dropped_by_the_parser() {
+    // Pins the reason the inserter escapes. If text-document ever grows a real
+    // thematic-break block this test will fail loudly, which is the signal to
+    // revisit how the marker is represented.
+    let doc = TextDocument::new();
+    doc.set_plain_text("first").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.select_range(5, 5);
+    handle.insert_djot("\n\n* * *\n");
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        !plain.contains("* * *"),
+        "an unescaped thematic break is expected to be dropped, got:\n{plain}"
+    );
+}
+
+

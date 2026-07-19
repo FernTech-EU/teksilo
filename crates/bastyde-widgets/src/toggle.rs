@@ -69,6 +69,9 @@ pub struct Toggle {
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Optional composite tooltip body (arbitrary widget tree).
     composite_tooltip_content: Option<Box<dyn Widget>>,
+    /// The accessible name comes from a sibling label wired after mount — see
+    /// [`Toggle::labelled_externally`].
+    labelled_externally: bool,
 }
 
 impl Toggle {
@@ -89,6 +92,7 @@ impl Toggle {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
+            labelled_externally: false,
         }
     }
 
@@ -96,6 +100,20 @@ impl Toggle {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// Declare that this toggle's accessible name comes from a **sibling label
+    /// widget**, wired by a container after mount (`FormLayout::line` does this
+    /// via `access_labelled_by`).
+    ///
+    /// Without it the debug assertion below fires even though the toggle *is*
+    /// properly labelled: the `labelled_by` relation is pushed post-mount, so
+    /// `accessibility()` cannot see it and every form-hosted toggle looks
+    /// nameless. Setting `.label(..)` instead would satisfy the assert but
+    /// render the text a second time, beside a label column that already has it.
+    pub fn labelled_externally(mut self) -> Self {
+        self.labelled_externally = true;
         self
     }
 
@@ -391,7 +409,7 @@ impl Widget for Toggle {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         debug_assert!(
-            self.label.is_some(),
+            self.label.is_some() || self.labelled_externally,
             "Toggle is missing an accessible label — \
              screen readers will announce \"switch\" with no context. \
              Call .label(...) when constructing the widget."
