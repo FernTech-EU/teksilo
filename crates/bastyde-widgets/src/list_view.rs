@@ -1334,13 +1334,19 @@ impl<T: 'static> Widget for ListView<T> {
                                 button: bastyde_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                if let Some(row) = click_anchor.index() {
-                                    crate::data_views::deferred_select::on_up(
+                                // `on_up` owns clearing `pending_collapse`, so
+                                // a vanished row must still clear it — leaving
+                                // it set would collapse the selection on an
+                                // unrelated later release — but must not select
+                                // an index that no longer exists.
+                                match click_anchor.index() {
+                                    Some(row) => crate::data_views::deferred_select::on_up(
                                         &sel_click,
                                         row,
                                         &pending_collapse,
                                         ctx,
-                                    );
+                                    ),
+                                    None => pending_collapse.set(false),
                                 }
                                 bastyde_core::event::EventResponse::Ignored
                             }
@@ -1367,13 +1373,12 @@ impl<T: 'static> Widget for ListView<T> {
                                 }
                             })
                         }
-                        crate::data_views::ActivateOn::DoubleClick => {
-                            HandlerSet::new().on_double_tap(move |_tap, ctx| {
+                        crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
+                            .on_double_tap(move |_tap, ctx| {
                                 if let Some(cur) = a.index() {
                                     cb(cur, ctx)
                                 }
-                            })
-                        }
+                            }),
                     };
                     ctx.apply_handlers(child_id, handlers);
                 }

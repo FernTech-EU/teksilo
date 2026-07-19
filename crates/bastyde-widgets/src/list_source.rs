@@ -328,3 +328,93 @@ impl<T: 'static> ListSource<T> {
         self.len() == 0
     }
 }
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::*;
+    use bastyde_core::ObserverHandle;
+    use bastyde_data::{DataChange, ListModel, SortFilterListModel};
+
+    /// A flat source with REAL identity: rows carry an id independent of their
+    /// position. This is the only shape a flat anchor can actually track --
+    /// see `a_builtin_flat_source_has_no_identity_to_anchor_to` below.
+    struct KeyedRows {
+        rows: std::cell::RefCell<Vec<(u64, &'static str)>>,
+        model: ListModel<u64>,
+    }
+
+    impl KeyedRows {
+        fn new(ids: &[u64]) -> Self {
+            Self {
+                rows: std::cell::RefCell::new(ids.iter().map(|k| (*k, "row")).collect()),
+                model: ListModel::from_vec(ids.to_vec()),
+            }
+        }
+        fn set(&self, ids: &[u64]) {
+            *self.rows.borrow_mut() = ids.iter().map(|k| (*k, "row")).collect();
+        }
+    }
+
+    impl ListDataSource for KeyedRows {
+        type Item = u64;
+        type Key = u64;
+        fn len(&self) -> usize {
+            self.rows.borrow().len()
+        }
+        fn with_item<R>(&self, index: usize, f: impl FnOnce(&u64) -> R) -> Option<R> {
+            self.rows.borrow().get(index).map(|(k, _)| f(k))
+        }
+        fn key_at(&self, index: usize) -> Option<u64> {
+            self.rows.borrow().get(index).map(|(k, _)| *k)
+        }
+        fn index_of(&self, key: &u64) -> Option<usize> {
+            self.rows.borrow().iter().position(|(k, _)| k == key)
+        }
+        fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
+            self.model.observe_changes(f)
+        }
+    }
+
+    #[test]
+    fn a_keyed_flat_source_anchor_follows_its_row() {
+        let src = Rc::new(KeyedRows::new(&[10, 20, 30]));
+        let list = ListSource::from_data_source_rc(src.clone());
+        let anchor = list.anchor(2); // row 30
+        assert_eq!(anchor.index(), Some(2));
+
+        src.set(&[1, 2, 10, 20, 30]); // two rows inserted above
+        assert_eq!(
+            anchor.index(),
+            Some(4),
+            "the anchor must track row 30 to its new index"
+        );
+
+        src.set(&[10, 20]); // row 30 removed
+        assert_eq!(anchor.index(), None);
+        assert!(!anchor.is_live());
+    }
+
+    #[test]
+    fn a_builtin_flat_source_has_no_identity_to_anchor_to() {
+        // Documents a real limit rather than asserting a wish. `ListModel::key_at`
+        // returns the INDEX (a Vec row is its position), and
+        // `SortFilterListModel` deliberately leaves `key_at` defaulted to None
+        // ("selection over a sort/filter projection is positional, not by
+        // identity"). So anchors over either degrade to fixed, and the flat
+        // views' anchoring only becomes live for a custom keyed source.
+        let bare = ListSource::from_model(ListModel::from_vec(vec![1, 2, 3]));
+        let a = bare.anchor(1);
+        assert_eq!(a.index(), Some(1));
+
+        let proj = Rc::new(SortFilterListModel::new(ListModel::from_vec(vec![1, 2, 3])));
+        let list = ListSource::from_data_source_rc(proj.clone());
+        let anchor = list.anchor(2);
+        assert_eq!(anchor.index(), Some(2));
+        proj.set_filter("nope", "x"); // no predicate registered: no-op, but bumps
+        assert_eq!(
+            anchor.index(),
+            Some(2),
+            "a keyless projection yields a fixed anchor -- see the module note"
+        );
+    }
+}

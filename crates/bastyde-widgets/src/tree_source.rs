@@ -454,7 +454,11 @@ mod anchor_tests {
         slice.set_source(move || {
             owned
                 .iter()
-                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -475,7 +479,11 @@ mod anchor_tests {
         slice.set_source(move || {
             shifted
                 .iter()
-                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -499,7 +507,11 @@ mod anchor_tests {
         slice.set_source(move || {
             remaining
                 .iter()
-                .map(|k| TreeRow { key: *k, item: *k, depth: 0 })
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -515,5 +527,47 @@ mod anchor_tests {
         let anchor = crate::data_views::RowAnchor::fixed(7);
         assert_eq!(anchor.index(), Some(7));
         assert!(anchor.is_live());
+    }
+
+    #[test]
+    fn an_editing_reconcile_converges_in_one_pass() {
+        // `reconcile_editing_row` writes `editing_cell` from inside a pane's
+        // build. That is safe only because it settles: once the row index has
+        // been corrected, a second pass must write nothing. Pin that, so the
+        // write-during-build never becomes a rebuild loop.
+        use bastyde_core::signal::Signal;
+        use std::cell::RefCell;
+
+        let slice = slice_of(&[10, 20, 30]);
+        let src = Rc::new(TreeSource::from_data_source(Rc::new(slice.clone())));
+        let editing: Signal<Option<(usize, usize)>> = Signal::new(Some((2, 0)));
+        let slot = Rc::new(RefCell::new(None));
+        let anchor_of = |i: usize| src.anchor(i);
+
+        // Pass 1 captures the anchor for row 30.
+        crate::data_views::reconcile_editing_row(&editing, &slot, &anchor_of);
+        assert_eq!(editing.get(), Some((2, 0)));
+
+        // Row 30 moves to index 4.
+        let shifted: Vec<u64> = vec![1, 2, 10, 20, 30];
+        slice.set_source(move || {
+            shifted
+                .iter()
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
+                .collect()
+        });
+        slice.reload();
+
+        crate::data_views::reconcile_editing_row(&editing, &slot, &anchor_of);
+        assert_eq!(editing.get(), Some((4, 0)), "corrected once");
+
+        // The settling pass must be a no-op.
+        let before = editing.get();
+        crate::data_views::reconcile_editing_row(&editing, &slot, &anchor_of);
+        assert_eq!(editing.get(), before, "second pass must write nothing");
     }
 }

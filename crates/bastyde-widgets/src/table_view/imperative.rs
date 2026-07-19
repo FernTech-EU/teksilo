@@ -72,11 +72,7 @@ pub(crate) fn ensure_row_visible(
 /// Set or remove a single column's user-resized width override. A non-positive
 /// or non-finite `width` removes the entry, reverting the column to its
 /// declared width policy.
-pub(crate) fn set_column_width(
-    signal: &Signal<HashMap<String, f32>>,
-    col_id: &str,
-    width: f32,
-) {
+pub(crate) fn set_column_width(signal: &Signal<HashMap<String, f32>>, col_id: &str, width: f32) {
     let mut m = signal.get();
     if width.is_finite() && width > 0.0 {
         m.insert(col_id.to_string(), width);

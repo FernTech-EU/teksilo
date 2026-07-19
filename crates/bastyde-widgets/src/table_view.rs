@@ -481,11 +481,6 @@ impl<T: 'static> TableView<T> {
         view
     }
 
-
-    fn row_anchor(&self, index: usize) -> crate::data_views::RowAnchor {
-        (self.anchor_fn)(index)
-    }
-
     fn create(
         len_fn: LenFn,
         with_item_fn: WithItemFn<T>,
@@ -993,13 +988,9 @@ impl<T: 'static> TableView<T> {
     /// a row nothing can match.
     pub fn begin_edit(&self, row: usize, col_id: &str) {
         let display = self.display_indices.borrow();
-        if let Some(target) = imperative::resolve_edit_target(
-            row,
-            col_id,
-            &self.columns,
-            &display,
-            (self.len_fn)(),
-        ) {
+        if let Some(target) =
+            imperative::resolve_edit_target(row, col_id, &self.columns, &display, (self.len_fn)())
+        {
             drop(display);
             self.editing_cell.set(Some(target));
         }

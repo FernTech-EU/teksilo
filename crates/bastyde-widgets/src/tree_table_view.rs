@@ -86,6 +86,7 @@ use crate::styles::recipe_table_style as cp;
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId, ViewKind};
+use crate::data_views::{DropViz, drop_into_tint};
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::table_view::body::SharedColumnWidths;
@@ -98,7 +99,6 @@ use crate::table_view::keyboard;
 use crate::table_view::layout;
 use crate::table_view::row_navigator::RowNavigator;
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
-use crate::data_views::{DropViz, drop_into_tint};
 use crate::tree_source::TreeSource;
 use bastyde_data::{DropResponse, TreeDataSource};
 
@@ -131,11 +131,17 @@ impl<T: 'static> RowNavigator for TreeNavigator<T> {
     }
 
     fn has_children(&self, row: usize) -> bool {
-        self.source.meta(row).map(|m| m.has_children).unwrap_or(false)
+        self.source
+            .meta(row)
+            .map(|m| m.has_children)
+            .unwrap_or(false)
     }
 
     fn is_expanded(&self, row: usize) -> bool {
-        self.source.meta(row).map(|m| m.is_expanded).unwrap_or(false)
+        self.source
+            .meta(row)
+            .map(|m| m.is_expanded)
+            .unwrap_or(false)
     }
 
     fn toggle_expanded(&self, row: usize) {
@@ -1091,11 +1097,6 @@ impl<T: 'static> TreeTableView<T> {
         self.editing_cell.set(None);
     }
 
-
-    fn row_anchor(&self, index: usize) -> crate::data_views::RowAnchor {
-        self.source.anchor(index)
-    }
-
     // ── Internals ──────────────────────────────────────────────────────
 
     fn effective_row_height(&self) -> f32 {
@@ -1555,7 +1556,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 // to be re-derived here against the `TreeModel`.
                 let effective = if reorder_ok {
                     match (source_for_hover.dnd.can_accept_fn)(
-                        payload, row_idx, drop_pos, my_model_id,
+                        payload,
+                        row_idx,
+                        drop_pos,
+                        my_model_id,
                     ) {
                         DropResponse::Reject => {
                             if !foreign_ok {
@@ -2131,7 +2135,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
             // same affordance `TreeView` paints for an `Into` verdict.
             Some(DropViz::Rect { top, height, .. }) => {
                 canvas.fill_rect(
-                    Rect::new(content_left, body_origin_y + top, body_width_for_paint, height),
+                    Rect::new(
+                        content_left,
+                        body_origin_y + top,
+                        body_width_for_paint,
+                        height,
+                    ),
                     drop_into_tint(),
                 );
             }
@@ -2207,8 +2216,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
             self.scrollbar_id,
         ]
         .into_iter()
-            .flatten()
-            .collect();
+        .flatten()
+        .collect();
         if out.is_empty() { None } else { Some(out) }
     }
 
@@ -2550,10 +2559,26 @@ mod tests {
     fn slice_rows() -> Vec<bastyde_data::TreeRow<u64, &'static str>> {
         use bastyde_data::TreeRow;
         vec![
-            TreeRow { key: 1, item: "docs", depth: 0 },
-            TreeRow { key: 2, item: "readme", depth: 1 },
-            TreeRow { key: 3, item: "guide", depth: 1 },
-            TreeRow { key: 4, item: "src", depth: 0 },
+            TreeRow {
+                key: 1,
+                item: "docs",
+                depth: 0,
+            },
+            TreeRow {
+                key: 2,
+                item: "readme",
+                depth: 1,
+            },
+            TreeRow {
+                key: 3,
+                item: "guide",
+                depth: 1,
+            },
+            TreeRow {
+                key: 4,
+                item: "src",
+                depth: 0,
+            },
         ]
     }
 
@@ -2659,7 +2684,10 @@ mod tests {
                     return false;
                 };
                 let item = o.remove(from);
-                let to = o.iter().position(|k| *k == target).map_or(o.len(), |i| i + 1);
+                let to = o
+                    .iter()
+                    .position(|k| *k == target)
+                    .map_or(o.len(), |i| i + 1);
                 o.insert(to, item);
                 true
             });
@@ -2714,7 +2742,11 @@ mod tests {
                 order
                     .borrow()
                     .iter()
-                    .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                    .map(|k| bastyde_data::TreeRow {
+                        key: *k,
+                        item: names[k],
+                        depth: 0,
+                    })
                     .collect()
             });
         }
@@ -2726,7 +2758,10 @@ mod tests {
                     return false;
                 };
                 let item = o.remove(from);
-                let to = o.iter().position(|k| *k == target).map_or(o.len(), |i| i + 1);
+                let to = o
+                    .iter()
+                    .position(|k| *k == target)
+                    .map_or(o.len(), |i| i + 1);
                 o.insert(to, item);
                 true
             });
@@ -2840,8 +2875,16 @@ mod tests {
             Point::new(40.0, h + 10.0),
             Point::new(40.0, h + 38.0),
         );
-        assert_eq!(proxy.tree().root(0), docs, "structure unchanged while sorted");
-        assert_eq!(proxy.tree().root(1), src, "structure unchanged while sorted");
+        assert_eq!(
+            proxy.tree().root(0),
+            docs,
+            "structure unchanged while sorted"
+        );
+        assert_eq!(
+            proxy.tree().root(1),
+            src,
+            "structure unchanged while sorted"
+        );
     }
 
     #[test]
@@ -2855,7 +2898,11 @@ mod tests {
             let names: std::collections::HashMap<u64, &'static str> =
                 [(1, "one"), (2, "two"), (3, "three")].into_iter().collect();
             all.iter()
-                .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                .map(|k| bastyde_data::TreeRow {
+                    key: *k,
+                    item: names[k],
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -2888,7 +2935,11 @@ mod tests {
                 [(2, "two"), (3, "three")].into_iter().collect();
             fewer
                 .iter()
-                .map(|k| bastyde_data::TreeRow { key: *k, item: names[k], depth: 0 })
+                .map(|k| bastyde_data::TreeRow {
+                    key: *k,
+                    item: names[k],
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -2907,7 +2958,11 @@ mod tests {
         let last: Vec<u64> = vec![2];
         slice.set_source(move || {
             last.iter()
-                .map(|k| bastyde_data::TreeRow { key: *k, item: "two", depth: 0 })
+                .map(|k| bastyde_data::TreeRow {
+                    key: *k,
+                    item: "two",
+                    depth: 0,
+                })
                 .collect()
         });
         slice.reload();
@@ -3021,11 +3076,10 @@ mod tests {
     fn empty_view_renders_when_a_filter_matches_nothing() {
         // The other half of the empty state: rows exist, but none survive the
         // filter. Without this the user sees a blank pane and no explanation.
-        let proxy = SortFilterTreeModel::new(sample_tree())
-            .with_predicate("name", |t| {
-                let needle = t.to_string();
-                Box::new(move |r: &&'static str| r.contains(&needle))
-            });
+        let proxy = SortFilterTreeModel::new(sample_tree()).with_predicate("name", |t| {
+            let needle = t.to_string();
+            Box::new(move |r: &&'static str| r.contains(&needle))
+        });
         proxy.set_filter("name", "zzz-no-such-row");
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
@@ -3137,7 +3191,11 @@ mod tests {
 
         // Order and pinning must actually reach `display_order()`, not just sit
         // in a signal nothing reads. Columns are declared name(0), size(1).
-        assert_eq!(tt.display_order(), vec![0, 1], "declaration order initially");
+        assert_eq!(
+            tt.display_order(),
+            vec![0, 1],
+            "declaration order initially"
+        );
 
         tt.set_column_order(vec!["size".into(), "name".into()]);
         assert_eq!(tt.column_order_signal().get(), vec!["size", "name"]);
@@ -3216,7 +3274,11 @@ mod tests {
             tt.set_focused_cell(0, 1);
         }
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(proxy.visible_count(), 4, "docs expands to reveal 2 children");
+        assert_eq!(
+            proxy.visible_count(),
+            4,
+            "docs expands to reveal 2 children"
+        );
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
         assert_eq!(proxy.visible_count(), 2, "docs collapses again");
     }

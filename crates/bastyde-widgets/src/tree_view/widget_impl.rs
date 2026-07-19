@@ -836,9 +836,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // this handler was built, so resolve the row's
                                 // current position rather than trusting the
                                 // captured index.
-                                if has_children
-                                    && let Some(cur) = click_anchor.index()
-                                {
+                                if has_children && let Some(cur) = click_anchor.index() {
                                     source_click.toggle_at(cur);
                                 }
                                 bastyde_core::event::EventResponse::Ignored

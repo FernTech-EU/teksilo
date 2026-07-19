@@ -44,9 +44,9 @@ use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
 use crate::table_view::body::{BodyRow, SharedColumnWidths};
 use crate::table_view::body_pane::CellRowPreview;
-use crate::tree_source::TreeSource;
 use crate::table_view::column::{CellContext, Column};
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
+use crate::tree_source::TreeSource;
 
 const BUFFER_ROWS: usize = 5;
 
@@ -248,6 +248,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // not this pane — see TableView's body pane for the rationale.
         ctx.begin_view_focus_for(self.drag_anchor);
         for flat_idx in start..end {
+            // One anchor per row, cloned into each handler: building three
+            // would allocate three closures (each capturing an Rc to the source
+            // and a cloned key) on every rebuild, and rebuilds fire on every
+            // filter keystroke.
+            let row_anchor = source.anchor(flat_idx);
             let entry = match source.meta(flat_idx) {
                 Some(e) => e,
                 None => continue,
@@ -302,7 +307,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let leading_id = if is_tree_column {
                     let indent_px = entry.depth as f32 * indent_per_level;
                     let source_for_twist = source.clone();
-                    let twist_anchor = source.anchor(flat_idx);
+                    let twist_anchor = row_anchor.clone();
                     let twist = ctx.add(
                         TwistArrow::new(cp::TREE_TWIST_SIZE, entry.has_children, entry.is_expanded)
                             .on_click(move |_ctx| {
@@ -373,7 +378,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 )
             {
                 let sel_for_click = sel.clone();
-                let click_anchor = source.anchor(flat_idx);
+                let click_anchor = row_anchor.clone();
                 let focused_for_click = self.focused_cell.clone();
                 // Deferred collapse: pressing an ALREADY-selected row (no
                 // modifiers) keeps the whole (multi-)selection so it can be
@@ -458,10 +463,10 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             // pressed row. Export clones/MIME are built only when the view
             // opted in via `.exportable(..)` / `.export_external(..)`.
             let is_drag_source = self.export.is_drag_source(self.reorderable);
-        // Per-row drag eligibility is the SOURCE's call (a locked/trashed row
-        // may refuse to move), mirroring `TreeView`. Without this a source's
-        // `set_drag_policy` would be silently overridden by the view.
-        let drag_gate = self.source.dnd.drag_fn.clone();
+            // Per-row drag eligibility is the SOURCE's call (a locked/trashed row
+            // may refuse to move), mirroring `TreeView`. Without this a source's
+            // `set_drag_policy` would be silently overridden by the view.
+            let drag_gate = self.source.dnd.drag_fn.clone();
             if is_drag_source && drag_gate(flat_idx) == DragEligibility::CanDrag {
                 let drag_model_id = self.model_id;
                 let anchor = self.drag_anchor;
@@ -494,9 +499,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // currently resident — the shared `build_payload`
                         // drops it so `rows`/`items` stay index-aligned).
                         let src_r = source_for_drag.clone();
-                        let read = move |i: usize, f: &mut dyn FnMut(&T)| {
-                            (src_r.read_item_fn)(i, f)
-                        };
+                        let read =
+                            move |i: usize, f: &mut dyn FnMut(&T)| (src_r.read_item_fn)(i, f);
 
                         // Snapshot-out: resolve the dragged flat indices to
                         // stable `NodeId`s NOW, at drag-start, so the
@@ -576,7 +580,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let cb = cb.clone();
                 // Anchored: a row that moved (or vanished) between build and
                 // click must not activate whichever row took its slot.
-                let activate_anchor = source.anchor(flat_idx);
+                let activate_anchor = row_anchor.clone();
                 let handlers = match self.activate_on {
                     crate::data_views::ActivateOn::SingleClick => {
                         let a = activate_anchor;

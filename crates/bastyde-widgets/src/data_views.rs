@@ -425,6 +425,18 @@ pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 /// Sources without identity (a bare `ListModel`, or any source that leaves
 /// `key_at` at its `None` default) get a fixed anchor that always reports the
 /// index it was built with — no worse than capturing the index directly.
+///
+/// **The built-in flat sources have no identity**, so anchors over them are
+/// fixed: `ListModel::key_at` returns the index (a `Vec` row *is* its
+/// position) and `SortFilterListModel` leaves `key_at` defaulted to `None` by
+/// design. Flat anchoring therefore only becomes live for a custom
+/// `ListDataSource` with a real `Key`. The tree sources all carry identity, so
+/// anchors there track properly.
+///
+/// **Precondition: keys must be unique.** Resolution falls back to a lookup by
+/// key, which returns the *first* match, so a source handing out duplicate keys
+/// would silently redirect an anchor onto a different row — the very failure
+/// this type exists to prevent.
 #[derive(Clone)]
 pub struct RowAnchor {
     resolve: Rc<dyn Fn() -> Option<usize>>,
@@ -456,8 +468,12 @@ impl RowAnchor {
 }
 
 impl std::fmt::Debug for RowAnchor {
+    /// Deliberately does NOT resolve: the resolver reads the source's
+    /// interior-mutable state, so a `{:?}` from inside code already holding a
+    /// borrow (a `set_source` closure, a reorder callback, a debugger's
+    /// pretty-printer) would panic on a `RefCell` conflict.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RowAnchor").field(&self.index()).finish()
+        f.write_str("RowAnchor(..)")
     }
 }
 
@@ -469,6 +485,12 @@ impl std::fmt::Debug for RowAnchor {
 /// re-resolved on every later rebuild: the row index is rewritten when it moved,
 /// and the editor closes outright when its row is gone — better than silently
 /// editing whoever took the slot.
+///
+/// Called from each body pane's `build`, which is the only place that sees both
+/// an editing change and a data change. It can therefore write `editing_cell`
+/// while that pane is building; the write is idempotent and converges in one
+/// extra pass (the next reconcile finds `cur == row` and writes nothing), which
+/// `an_editing_reconcile_converges_in_one_pass` pins.
 pub(crate) fn reconcile_editing_row(
     editing_cell: &bastyde_core::signal::Signal<Option<(usize, usize)>>,
     slot: &Rc<std::cell::RefCell<Option<RowAnchor>>>,

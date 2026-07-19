@@ -68,10 +68,12 @@ use std::rc::Rc;
 use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
+use crate::dnd_types::{DragEligibility, DragSource, DropCommit, DropQuery, DropResponse};
 use crate::sort_filter_list_model::SortDirection;
 use crate::tree_change::{NodeId, TreeChange};
-use crate::dnd_types::{DragEligibility, DragSource, DropCommit, DropQuery, DropResponse};
-use crate::tree_data_source::{FlatEntry, TreeDataSource, tree_apply_reorder, tree_is_desc_or_self};
+use crate::tree_data_source::{
+    FlatEntry, TreeDataSource, tree_apply_reorder, tree_is_desc_or_self,
+};
 use crate::tree_model::TreeModel;
 
 /// Filter strategy used by [`SortFilterTreeModel`].

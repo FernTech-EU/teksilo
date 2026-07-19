@@ -398,9 +398,11 @@ impl<T: 'static> Widget for BodyPane<T> {
             // the cell's `TextInput`) don't change the selection — a
             // selection change would re-emit the row, destroying the
             // editor and dropping focus mid-click.
+            // One anchor per row, cloned into each handler (see the tree pane).
+            let row_anchor = (self.anchor_fn)(row_idx);
             let mut row_handlers = HandlerSet::new();
             if let Some(ref sel) = self.selection {
-                let click_anchor = (self.anchor_fn)(row_idx);
+                let click_anchor = row_anchor.clone();
                 let sel_for_click = sel.clone();
                 let editing_for_click = self.editing_cell.clone();
                 if matches!(
@@ -418,11 +420,6 @@ impl<T: 'static> Widget for BodyPane<T> {
                             modifiers,
                             ..
                         } => {
-                        // Resolve the row's CURRENT position: rows may have
-                        // shifted since this handler was built.
-                        let Some(row_index_for_click) = click_anchor.index() else {
-                            return bastyde_core::event::EventResponse::Ignored;
-                        };
                             if editing_for_click.get().is_some() {
                                 return bastyde_core::event::EventResponse::Ignored;
                             }
@@ -436,6 +433,13 @@ impl<T: 'static> Widget for BodyPane<T> {
                                 pending_collapse.set(false);
                                 return bastyde_core::event::EventResponse::Ignored;
                             }
+                            // Resolve the row's CURRENT position only after the
+                            // guards above have run — the interactive-child
+                            // branch clears stale deferred-collapse state, and
+                            // returning before it would strand that flag.
+                            let Some(row_index_for_click) = click_anchor.index() else {
+                                return bastyde_core::event::EventResponse::Ignored;
+                            };
                             // Nav-cursor sync (`focused_cell`) is handled by the
                             // per-cell pointer handler above, which fires on any
                             // cell click in every mode — so a row click here already
@@ -582,7 +586,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let cb = cb.clone();
                 // Anchored: a row that moved (or vanished) between build and
                 // click must not activate whoever took its slot.
-                let a = (self.anchor_fn)(row_idx);
+                let a = row_anchor.clone();
                 let handlers = match self.activate_on {
                     crate::data_views::ActivateOn::SingleClick => {
                         let a = a.clone();
