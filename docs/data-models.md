@@ -206,6 +206,46 @@ In `None` mode every operation is a no-op; widgets can construct a disabled sele
 
 The selection is stored as flat indices into the view. For a `TreeView`, those are indices into the `TreeSlice`'s flat list — which means expanding or collapsing a parent changes which `NodeId`s those indices correspond to. Widgets translate at interaction time (e.g., on Ctrl+click): take the clicked `FlatEntry.node_id`, find its current flat index via the slice, then call `selection.toggle(index)`. Alternative designs where selection stores `NodeId`s directly have their own trade-offs (expansion doesn't lose selection, but the signal type changes per-widget); keeping selection index-based keeps the type uniform.
 
+### 5.1 `RowAnchor` — surviving the shift
+
+Everything above is about where the *cursor* is. There is a second, quieter
+consequence of storing positions: a row's **event handlers** are built once and
+then live as long as the row widget does. If they capture the flat index they
+were built at, expanding a branch above them, applying a filter, or sorting
+shifts every index below — and a stale handler acts on whatever row moved into
+that slot. A chevron toggles the wrong branch; a click selects a neighbour; an
+open cell editor slides onto a different row.
+
+`RowAnchor` closes over the row's **source-owned identity** instead and resolves
+the row's *current* position on demand — the captured slot when it still holds
+that key, else a lookup by key, else `None` when the row is gone. The key never
+surfaces in the anchor's type: it is captured inside the resolver, so
+`TreeSource` / `ListSource` keep erasing it and the four views stay
+key-agnostic. That erasure is load-bearing — it is what lets `TreeTableView`
+accept any `TreeDataSource` at all, and a `Key` type parameter would have had
+to unwind it.
+
+All four data views anchor their per-row handlers this way, and the two table
+views additionally re-resolve `editing_cell` on each rebuild, so an open editor
+follows its row and **closes** if that row disappears rather than editing its
+replacement.
+
+What a source can offer decides how much this buys:
+
+| Source | Identity | Anchors |
+| --- | --- | --- |
+| `TreeSlice`, `TreeDataSlice`, `SortFilterTreeModel` | real (`NodeId` / domain key) | track fully |
+| `SortFilterListModel` | the row's **source index** | tracks across any sort/filter reprojection |
+| `ListModel`, accessor-backed sources | none — a `Vec` row *is* its position | fixed (no worse than a captured index) |
+
+Two limits worth stating plainly. Keys must be **unique**: resolution falls back
+to a lookup returning the first match, so duplicate keys would redirect an
+anchor onto another row — the very failure the type exists to prevent. And a
+`SortFilterListModel`'s source index is renumbered by an *upstream*
+insert/remove/move, so an anchor can mis-resolve inside the window between that
+mutation and the rebuild it schedules; sort/filter-only rebuilds never renumber,
+which is the case that actually bites in a UI.
+
 ## 6. `CheckedModel` and `TreeCheckedModel` — per-row checkbox state
 
 Selection (where the cursor is) and checkedness (which rows are *marked*) are orthogonal axes — Outlook / Files-app convention. So checkbox state lives in its own type pair, parallel to `SelectionModel`:

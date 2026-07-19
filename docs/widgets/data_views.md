@@ -124,3 +124,57 @@ Number of dragged rows.
 #### `pub fn is_empty(&self) -> bool`
 
 Whether no rows are carried (never true for a real drag).
+
+## `pub struct RowAnchor`
+
+Active drag-drop feedback a tree data view paints itself: a between-rows
+insertion line (Before/After) or a highlighted row (an into-container drop).
+
+Shared by `TreeView` and `TreeTableView` so both render the same affordance
+for the same source verdict.
+A stable handle to a row in a data view.
+
+Per-row event handlers (a chevron toggle, a click, an activation) are built
+once and then live as long as the row widget does, so capturing the flat
+index they were built at is fragile: expanding a branch above, applying a
+filter, or sorting shifts every index below, and the stale handler would act
+on whatever row moved into that slot.
+
+A `RowAnchor` closes over the row's **source-owned identity** instead and
+resolves the row's *current* position on demand. The key never surfaces in
+the anchor's type — it is captured inside the resolver, so views stay
+key-agnostic (`TreeSource` and
+`ListSource` both erase it).
+
+Sources without identity (a bare `ListModel`, or any source that leaves
+`key_at` at its `None` default) get a fixed anchor that always reports the
+index it was built with — no worse than capturing the index directly.
+
+A bare `ListModel` has no identity to offer (a `Vec` row *is* its position),
+so anchors over one are fixed. `SortFilterListModel` keys rows by their
+**source index**, which no sort/filter reprojection renumbers — so anchors
+over a projection do track their row across a filter change, which is the
+flat fragility in practice. They can still mis-resolve inside the window
+between an *upstream* insert/remove and the rebuild it schedules, since that
+does renumber source indices; no worse than the captured index they replace.
+The tree sources all carry real identity.
+
+**Precondition: keys must be unique.** Resolution falls back to a lookup by
+key, which returns the *first* match, so a source handing out duplicate keys
+would silently redirect an anchor onto a different row — the very failure
+this type exists to prevent.
+
+```rust
+pub struct RowAnchor { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn index(&self) -> Option<usize>`
+
+The row's current flat index, or `None` if it no longer exists in the
+source (it was deleted, or filtered away).
+
+#### `pub fn is_live(&self) -> bool`
+
+Whether the row still exists.
