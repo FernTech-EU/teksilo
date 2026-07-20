@@ -282,7 +282,10 @@ impl Widget for CompositeTooltipWidget {
             width: None,
             height: None,
         };
-        let Some(natural) = self.root_child_id.and_then(|id| ctx.child_size(id, unbounded)) else {
+        let Some(natural) = self
+            .root_child_id
+            .and_then(|id| ctx.child_size(id, unbounded))
+        else {
             return Size::new(0.0, 0.0).into();
         };
         let avail_w = proposal.width.unwrap_or(f32::INFINITY).min(max_w);
@@ -584,4 +587,3 @@ mod tests {
         assert!(s.height <= 160.5, "height {} exceeds its maximum", s.height);
     }
 }
-
