@@ -35,9 +35,9 @@ pub(crate) struct KeyHandlerConfig {
     /// collapse/expand instead of moving the cursor.
     ///
     /// Resolved per rebuild by the owning widget, because
-    /// [`TreeTableView::tree_column`] names a column *id* while user
-    /// drag-reorder moves its *display* position — the two diverge the moment
-    /// either is used. `TableView` passes `0`: its `FlatNavigator` reports
+    /// [`TreeTableView::tree_column`](crate::TreeTableView::tree_column) names
+    /// a column *id* while user drag-reorder moves its *display* position —
+    /// the two diverge the moment either is used. `TableView` passes `0`: its `FlatNavigator` reports
     /// `has_children`/`is_expanded` as false and `toggle_expanded` as a no-op,
     /// so the comparison can never lead anywhere.
     pub tree_column_display_pos: usize,

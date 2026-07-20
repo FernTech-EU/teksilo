@@ -494,8 +494,9 @@ impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
     }
 
     /// Same-view reorder is allowed unless it would create a cycle — a node may
-    /// not land on itself or inside its own subtree. Mirrors [`TreeSlice`]; both
-    /// project the same `TreeModel`, so both owe callers the same verdict.
+    /// not land on itself or inside its own subtree. Mirrors
+    /// [`TreeSlice`](crate::TreeSlice); both project the same `TreeModel`, so
+    /// both owe callers the same verdict.
     fn can_accept(&self, query: &DropQuery<'_, NodeId>) -> DropResponse {
         match &query.source {
             DragSource::SameView { key: source } => {

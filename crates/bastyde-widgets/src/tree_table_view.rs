@@ -355,7 +355,8 @@ impl<T: 'static> TreeTableView<T> {
     /// do not apply here and no-op; drive expansion through the source itself.
     ///
     /// Row drag-reorder **is** wired on this path: a drop routes through the source's
-    /// own `drag` / `can_accept` / `accept_drop`, exactly as [`TreeView`] does — so the
+    /// own `drag` / `can_accept` / `accept_drop`, exactly as
+    /// [`TreeView`](crate::TreeView) does — so the
     /// source owns both the cycle guard and the commit. Note that
     /// [`TreeDataSlice::drag`](bastyde_data::TreeDataSlice) defaults to `NoDrag`: an
     /// external source must opt its rows in before anything can be dragged.
@@ -951,7 +952,7 @@ impl<T: 'static> TreeTableView<T> {
     /// Access the underlying `SortFilterTreeModel` (for programmatic sort /
     /// filter / expand outside of the builder API).
     /// `None` when the view was built from an external
-    /// [`TreeDataSource`](bastyde_data::TreeDataSource) via
+    /// [`bastyde_data::TreeDataSource`] via
     /// [`from_source`](Self::from_source) — there is no `TreeModel`-backed
     /// projection to hand back in that case.
     pub fn projection(&self) -> Option<&SortFilterTreeModel<T>> {
