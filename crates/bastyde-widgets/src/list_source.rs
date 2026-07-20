@@ -14,6 +14,7 @@
 //! source's `can_accept` / `accept_drop` / `row_state` / … . The `Key` type
 //! therefore never escapes into the (key-less) `ListView<T>`.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use bastyde_core::ObserverHandle;
@@ -42,6 +43,13 @@ pub(crate) struct DndLazy {
     /// reshuffle mid-drag; removal runs in descending-index order so an
     /// index-keyed model (`ListModel`, whose key *is* the index) stays valid.
     pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
+    /// Resolve + stash the dragged rows' stable keys for a **synthetic**
+    /// same-view payload built outside `RowExport::build_payload` (the keyboard
+    /// Alt+Arrow reorder). Pointer drags stash through
+    /// [`snapshot_out_fn`](Self::snapshot_out_fn) at drag-start. The same-view
+    /// accept path reads identity exclusively from this stash — see
+    /// [`can_accept_fn`](Self::can_accept_fn).
+    pub(crate) stash_drag_keys_fn: Rc<dyn Fn(&[usize])>,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -61,7 +69,23 @@ impl DndLazy {
     /// doesn't fold into a `ListSource` — but the DnD + lazy protocol is
     /// identical and shared from here).
     pub(crate) fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
-        let (s1, s2, s3, s4, s5, s6, s7, s8) = (
+        // Stable keys of the rows in the in-flight same-view drag, resolved
+        // from flat indices ONCE at payload construction (`snapshot_out_fn`
+        // for pointer drags, `stash_drag_keys_fn` for synthetic keyboard
+        // payloads). The accept path reads identity from here rather than
+        // re-resolving `RowDragData::rows` at hover/drop time: those indices
+        // freeze at drag-start, and the source can reflow mid-drag (a
+        // spring-load auto-expand, a peer write) — whichever rows slid into
+        // the stale slots must not stand in for the dragged ones.
+        let drag_keys: Rc<RefCell<Option<Vec<S::Key>>>> = Rc::new(RefCell::new(None));
+        let (keys_ca, keys_ad, keys_snap, keys_stash) = (
+            drag_keys.clone(),
+            drag_keys.clone(),
+            drag_keys.clone(),
+            drag_keys,
+        );
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -83,14 +107,21 @@ impl DndLazy {
                 if let Some(rd) = payload.get_typed::<RowDragData<T>>()
                     && rd.source == view_id
                 {
-                    // Can't drop a selection onto one of its own rows.
-                    if rd.rows.contains(&target_index) {
-                        return DropResponse::Reject;
-                    }
-                    // Homogeneous flat reorder: the first dragged row is a fair
-                    // representative for the hover verdict (all move as a block).
-                    let Some(source_key) = rd.rows.first().and_then(|&i| s2.key_at(i)) else {
-                        return DropResponse::Reject;
+                    let source_key = {
+                        let stash = keys_ca.borrow();
+                        let Some(keys) = stash.as_ref().filter(|k| !k.is_empty()) else {
+                            debug_assert!(false, "same-view drag without a drag-start key stash");
+                            return DropResponse::Reject;
+                        };
+                        // Can't drop a selection onto one of its own rows —
+                        // by key, so the check survives a mid-drag reflow.
+                        if keys.contains(&target_key) {
+                            return DropResponse::Reject;
+                        }
+                        // Homogeneous flat reorder: the first dragged row is
+                        // a fair representative for the hover verdict (all
+                        // move as a block).
+                        keys[0].clone()
                     };
                     return s2.can_accept(&DropQuery {
                         source: DragSource::SameView { key: source_key },
@@ -111,11 +142,15 @@ impl DndLazy {
                 if let Some(rd) = payload.get_typed::<RowDragData<T>>()
                     && rd.source == view_id
                 {
-                    if rd.rows.contains(&target_index) {
+                    // Consume the drag-start stash (a construction path that
+                    // forgot to stash then fails loudly on its next drop
+                    // instead of silently reusing a previous drag's keys).
+                    let taken = keys_ad.borrow_mut().take();
+                    let Some(keys) = taken.filter(|k| !k.is_empty()) else {
+                        debug_assert!(false, "same-view drop without a drag-start key stash");
                         return false;
-                    }
-                    let keys: Vec<S::Key> = rd.rows.iter().filter_map(|&i| s3.key_at(i)).collect();
-                    if keys.is_empty() {
+                    };
+                    if keys.contains(&target_key) {
                         return false;
                     }
                     // One call handles both single- and multi-row reorder; the
@@ -129,12 +164,15 @@ impl DndLazy {
                 })
             }),
             snapshot_out_fn: Rc::new(move |indices: &[usize]| {
-                // Resolve stable keys NOW (descending index order for the
-                // index-keyed case); the returned thunk removes them later.
+                // Resolve stable keys NOW: they feed both the same-view accept
+                // path (via the drag-key stash) and the returned removal thunk
+                // (descending index order so an index-keyed model stays valid
+                // during removal).
                 let mut pairs: Vec<(usize, S::Key)> = indices
                     .iter()
                     .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
                     .collect();
+                *keys_snap.borrow_mut() = Some(pairs.iter().map(|(_, k)| k.clone()).collect());
                 pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
                 let s = s4.clone();
                 Box::new(move || {
@@ -142,6 +180,10 @@ impl DndLazy {
                         s.on_drag_out(k);
                     }
                 }) as Box<dyn Fn()>
+            }),
+            stash_drag_keys_fn: Rc::new(move |indices: &[usize]| {
+                *keys_stash.borrow_mut() =
+                    Some(indices.iter().filter_map(|&i| s9.key_at(i)).collect());
             }),
             row_state_fn: Rc::new(move |index| s5.row_state(index)),
             request_window_fn: Rc::new(move |range| s6.request_window(range)),
@@ -158,6 +200,7 @@ impl DndLazy {
             can_accept_fn: Rc::new(|_, _, _, _| DropResponse::Reject),
             accept_drop_fn: Rc::new(|_, _, _, _| false),
             snapshot_out_fn: Rc::new(|_: &[usize]| Box::new(|| {}) as Box<dyn Fn()>),
+            stash_drag_keys_fn: Rc::new(|_: &[usize]| {}),
             row_state_fn: Rc::new(|_| RowState::Ready),
             request_window_fn: Rc::new(|_| {}),
             can_fetch_more_fn: Rc::new(|| false),
@@ -326,6 +369,161 @@ impl<T: 'static> ListSource<T> {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod drag_identity_tests {
+    use super::*;
+    use bastyde_core::ObserverHandle;
+    use bastyde_data::{
+        DataChange, DragEligibility, DropPosition, DropQuery, DropResponse, ListModel,
+    };
+    use std::cell::RefCell;
+
+    use crate::data_views::{RowDragData, ViewId, ViewKind};
+
+    /// A keyed flat source that records every `reorder_within` call, so the
+    /// tests can assert WHICH rows the erasure asked it to move.
+    struct RecordingRows {
+        rows: RefCell<Vec<u64>>,
+        model: ListModel<u64>,
+        reorders: RefCell<Vec<(Vec<u64>, u64, DropPosition)>>,
+    }
+
+    impl RecordingRows {
+        fn new(ids: &[u64]) -> Self {
+            Self {
+                rows: RefCell::new(ids.to_vec()),
+                model: ListModel::from_vec(ids.to_vec()),
+                reorders: RefCell::new(Vec::new()),
+            }
+        }
+        fn set(&self, ids: &[u64]) {
+            *self.rows.borrow_mut() = ids.to_vec();
+        }
+    }
+
+    impl ListDataSource for RecordingRows {
+        type Item = u64;
+        type Key = u64;
+        fn len(&self) -> usize {
+            self.rows.borrow().len()
+        }
+        fn with_item<R>(&self, index: usize, f: impl FnOnce(&u64) -> R) -> Option<R> {
+            self.rows.borrow().get(index).map(f)
+        }
+        fn key_at(&self, index: usize) -> Option<u64> {
+            self.rows.borrow().get(index).copied()
+        }
+        fn index_of(&self, key: &u64) -> Option<usize> {
+            self.rows.borrow().iter().position(|k| k == key)
+        }
+        fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle {
+            self.model.observe_changes(f)
+        }
+        fn drag(&self, _key: &u64) -> DragEligibility {
+            DragEligibility::CanDrag
+        }
+        fn can_accept(&self, _query: &DropQuery<'_, u64>) -> DropResponse {
+            DropResponse::Accept
+        }
+        fn reorder_within(&self, sources: &[u64], target: &u64, position: DropPosition) -> bool {
+            self.reorders
+                .borrow_mut()
+                .push((sources.to_vec(), *target, position));
+            true
+        }
+    }
+
+    fn same_view_payload(view_id: ViewId, rows: Vec<usize>) -> DragPayload {
+        DragPayload::typed(RowDragData::<u64> {
+            source: view_id,
+            rows,
+            items: None,
+        })
+    }
+
+    #[test]
+    fn a_reorder_moves_the_rows_dragged_not_the_slots_they_left() {
+        // Row 30 is grabbed at index 2, then the source reflows mid-drag (a
+        // peer write / spring-load shape): a row appears above it. The drop
+        // must move row 30 — not row 20, which now occupies index 2.
+        let src = Rc::new(RecordingRows::new(&[10, 20, 30]));
+        let list = ListSource::from_data_source_rc(src.clone());
+        let vid = ViewId::next(ViewKind::List);
+
+        // Drag-start, exactly as `RowExport::build_payload` does.
+        let _thunk = (list.dnd.snapshot_out_fn)(&[2]);
+        let payload = same_view_payload(vid, vec![2]);
+
+        src.set(&[999, 10, 20, 30]);
+
+        assert_eq!(
+            (list.dnd.can_accept_fn)(&payload, 0, DropPosition::Before, vid),
+            DropResponse::Accept
+        );
+        assert!((list.dnd.accept_drop_fn)(
+            &payload,
+            0,
+            DropPosition::Before,
+            vid
+        ));
+        assert_eq!(
+            src.reorders.borrow().as_slice(),
+            &[(vec![30], 999, DropPosition::Before)],
+            "the dragged row's key must move, not whichever row slid into its old index"
+        );
+    }
+
+    #[test]
+    fn a_reflowed_own_row_still_rejects_a_drop_onto_itself() {
+        // After the mid-drag reflow the dragged row sits at a NEW index; the
+        // own-row rejection must follow it there (an index comparison against
+        // the drag-start slot would wave the drop through).
+        let src = Rc::new(RecordingRows::new(&[10, 20, 30]));
+        let list = ListSource::from_data_source_rc(src.clone());
+        let vid = ViewId::next(ViewKind::List);
+
+        let _thunk = (list.dnd.snapshot_out_fn)(&[2]); // row 30
+        let payload = same_view_payload(vid, vec![2]);
+
+        src.set(&[999, 10, 20, 30]); // row 30 now at index 3
+
+        assert_eq!(
+            (list.dnd.can_accept_fn)(&payload, 3, DropPosition::Before, vid),
+            DropResponse::Reject
+        );
+        assert!(!(list.dnd.accept_drop_fn)(
+            &payload,
+            3,
+            DropPosition::Before,
+            vid
+        ));
+        assert!(src.reorders.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_synthetic_keyboard_payload_stashes_at_construction() {
+        // The Alt+Arrow path builds its payload outside `build_payload`; the
+        // explicit stash call is what arms the accept path for it.
+        let src = Rc::new(RecordingRows::new(&[10, 20, 30]));
+        let list = ListSource::from_data_source_rc(src.clone());
+        let vid = ViewId::next(ViewKind::List);
+
+        (list.dnd.stash_drag_keys_fn)(&[1]);
+        let payload = same_view_payload(vid, vec![1]);
+
+        assert!((list.dnd.accept_drop_fn)(
+            &payload,
+            2,
+            DropPosition::After,
+            vid
+        ));
+        assert_eq!(
+            src.reorders.borrow().as_slice(),
+            &[(vec![20], 30, DropPosition::After)]
+        );
     }
 }
 

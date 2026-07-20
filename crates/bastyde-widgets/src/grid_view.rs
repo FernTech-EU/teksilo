@@ -1091,7 +1091,12 @@ impl<T: 'static> Widget for GridView<T> {
             view_id: self.model_id,
             make_reorder_payload: {
                 let model_id = self.model_id;
+                let stash = self.source.dnd.stash_drag_keys_fn.clone();
                 Rc::new(move |idx| {
+                    // Synthetic same-view payloads must stash the dragged
+                    // row's key at construction — the accept path resolves
+                    // identity from the stash, never from `rows`.
+                    (stash)(&[idx]);
                     DragPayload::typed(RowDragData::<T> {
                         source: model_id,
                         rows: vec![idx],

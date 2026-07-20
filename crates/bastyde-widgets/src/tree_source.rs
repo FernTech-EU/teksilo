@@ -17,6 +17,7 @@
 //! The only built-in-vs-external difference — the `NodeId`-typed `TreeRowContext`
 //! handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use bastyde_core::drag_payload::DragPayload;
@@ -80,6 +81,12 @@ pub(crate) struct TreeDndLazy {
     /// reshuffle mid-drag (spring-load auto-expand), since the stable `NodeId`s
     /// were already captured.
     pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
+    /// Resolve + stash the dragged rows' stable node keys for a **synthetic**
+    /// same-view payload built outside `RowExport::build_payload`. Pointer
+    /// drags stash through [`snapshot_out_fn`](Self::snapshot_out_fn) at
+    /// drag-start; the same-view accept path reads identity exclusively from
+    /// this stash — see [`can_accept_fn`](Self::can_accept_fn).
+    pub(crate) stash_drag_keys_fn: Rc<dyn Fn(&[usize])>,
     /// Whether the row at `index` is loaded.
     pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     /// Nudge the source to load a visible range.
@@ -92,7 +99,23 @@ pub(crate) struct TreeDndLazy {
 
 impl TreeDndLazy {
     fn from_source<T: 'static, S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
-        let (s1, s2, s3, s4, s5, s6, s7, s8) = (
+        // Stable node keys of the in-flight same-view drag, resolved from flat
+        // indices ONCE at payload construction (`snapshot_out_fn` for pointer
+        // drags, `stash_drag_keys_fn` for synthetic keyboard payloads). The
+        // accept path reads identity from here rather than re-resolving
+        // `RowDragData::rows` at hover/drop time: a tree's flat indices
+        // reshuffle mid-drag (the spring-load auto-expand is triggered by the
+        // very hover that precedes the drop), and whichever nodes slid into
+        // the stale slots must not stand in for the dragged ones.
+        let drag_keys: Rc<RefCell<Option<Vec<S::Key>>>> = Rc::new(RefCell::new(None));
+        let (keys_ca, keys_ad, keys_snap, keys_stash) = (
+            drag_keys.clone(),
+            drag_keys.clone(),
+            drag_keys.clone(),
+            drag_keys,
+        );
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -114,11 +137,18 @@ impl TreeDndLazy {
                 if let Some(rd) = payload.get_typed::<RowDragData<T>>()
                     && rd.source == view_id
                 {
-                    if rd.rows.contains(&target_index) {
-                        return DropResponse::Reject;
-                    }
-                    let Some(source_key) = rd.rows.first().and_then(|&i| s2.key_at(i)) else {
-                        return DropResponse::Reject;
+                    let source_key = {
+                        let stash = keys_ca.borrow();
+                        let Some(keys) = stash.as_ref().filter(|k| !k.is_empty()) else {
+                            debug_assert!(false, "same-view drag without a drag-start key stash");
+                            return DropResponse::Reject;
+                        };
+                        // Own-row rejection by key, so it survives a mid-drag
+                        // reflow.
+                        if keys.contains(&target_key) {
+                            return DropResponse::Reject;
+                        }
+                        keys[0].clone()
                     };
                     return s2.can_accept(&DropQuery {
                         source: DragSource::SameView { key: source_key },
@@ -139,11 +169,15 @@ impl TreeDndLazy {
                 if let Some(rd) = payload.get_typed::<RowDragData<T>>()
                     && rd.source == view_id
                 {
-                    if rd.rows.contains(&target_index) {
+                    // Consume the drag-start stash (a construction path that
+                    // forgot to stash then fails loudly on its next drop
+                    // instead of silently reusing a previous drag's keys).
+                    let taken = keys_ad.borrow_mut().take();
+                    let Some(keys) = taken.filter(|k| !k.is_empty()) else {
+                        debug_assert!(false, "same-view drop without a drag-start key stash");
                         return false;
-                    }
-                    let keys: Vec<S::Key> = rd.rows.iter().filter_map(|&i| s3.key_at(i)).collect();
-                    if keys.is_empty() {
+                    };
+                    if keys.contains(&target_key) {
                         return false;
                     }
                     // `reorder_within` drops descendants-of-selected and keeps
@@ -157,10 +191,13 @@ impl TreeDndLazy {
                 })
             }),
             snapshot_out_fn: Rc::new(move |indices: &[usize]| {
+                // Resolves stable keys NOW: they feed both the same-view accept
+                // path (via the drag-key stash) and the returned removal thunk.
                 let mut pairs: Vec<(usize, S::Key)> = indices
                     .iter()
                     .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
                     .collect();
+                *keys_snap.borrow_mut() = Some(pairs.iter().map(|(_, k)| k.clone()).collect());
                 pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
                 let s = s4.clone();
                 Box::new(move || {
@@ -168,6 +205,10 @@ impl TreeDndLazy {
                         s.on_drag_out(k);
                     }
                 }) as Box<dyn Fn()>
+            }),
+            stash_drag_keys_fn: Rc::new(move |indices: &[usize]| {
+                *keys_stash.borrow_mut() =
+                    Some(indices.iter().filter_map(|&i| s9.key_at(i)).collect());
             }),
             row_state_fn: Rc::new(move |index| s5.row_state(index)),
             request_window_fn: Rc::new(move |range| s6.request_window(range)),
@@ -440,6 +481,120 @@ impl<T: 'static> TreeSource<T> {
                 }
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod drag_identity_tests {
+    use super::*;
+    use bastyde_data::{TreeDataSlice, TreeRow};
+    use std::cell::RefCell;
+
+    use crate::data_views::{RowDragData, ViewId, ViewKind};
+
+    fn slice_of(keys: &[u64]) -> TreeDataSlice<u64, u64> {
+        let slice = TreeDataSlice::<u64, u64>::new();
+        let owned: Vec<u64> = keys.to_vec();
+        slice.set_source(move || {
+            owned
+                .iter()
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
+                .collect()
+        });
+        slice.reload();
+        slice
+    }
+
+    fn reshape(slice: &TreeDataSlice<u64, u64>, keys: &[u64]) {
+        let owned: Vec<u64> = keys.to_vec();
+        slice.set_source(move || {
+            owned
+                .iter()
+                .map(|k| TreeRow {
+                    key: *k,
+                    item: *k,
+                    depth: 0,
+                })
+                .collect()
+        });
+        slice.reload();
+    }
+
+    fn same_view_payload(view_id: ViewId, rows: Vec<usize>) -> DragPayload {
+        DragPayload::typed(RowDragData::<u64> {
+            source: view_id,
+            rows,
+            items: None,
+        })
+    }
+
+    #[test]
+    fn a_reorder_moves_the_node_dragged_not_the_slot_it_left() {
+        // Node 30 is grabbed at flat index 2, then the tree reflows mid-drag —
+        // the exact shape a spring-load auto-expand produces, since the dwell
+        // that expands a collapsed branch happens during the very drag. The
+        // drop must move node 30, not whichever node now sits at index 2.
+        let slice = slice_of(&[10, 20, 30]);
+        let recorded: Rc<RefCell<Vec<(u64, u64, DropPosition)>>> =
+            Rc::new(RefCell::new(Vec::new()));
+        let rec = recorded.clone();
+        slice.set_reorder(move |dragged, target, pos| {
+            rec.borrow_mut().push((dragged, target, pos));
+            true
+        });
+        let src = Rc::new(TreeSource::from_data_source(Rc::new(slice.clone())));
+        let vid = ViewId::next(ViewKind::Tree);
+
+        let _thunk = (src.dnd.snapshot_out_fn)(&[2]); // drag-start on node 30
+        let payload = same_view_payload(vid, vec![2]);
+
+        reshape(&slice, &[1, 2, 10, 20, 30]); // rows appear above mid-drag
+
+        assert_eq!(
+            (src.dnd.can_accept_fn)(&payload, 0, DropPosition::Before, vid),
+            DropResponse::Accept
+        );
+        assert!((src.dnd.accept_drop_fn)(
+            &payload,
+            0,
+            DropPosition::Before,
+            vid
+        ));
+        assert_eq!(
+            recorded.borrow().as_slice(),
+            &[(30, 1, DropPosition::Before)],
+            "the dragged node's key must move, not whichever node slid into its old index"
+        );
+    }
+
+    #[test]
+    fn a_reflowed_own_node_still_rejects_a_drop_onto_itself() {
+        // After the mid-drag reflow the dragged node sits at a NEW flat index;
+        // the own-row rejection must follow it there.
+        let slice = slice_of(&[10, 20, 30]);
+        slice.set_reorder(|_, _, _| true);
+        let src = Rc::new(TreeSource::from_data_source(Rc::new(slice.clone())));
+        let vid = ViewId::next(ViewKind::Tree);
+
+        let _thunk = (src.dnd.snapshot_out_fn)(&[2]); // node 30
+        let payload = same_view_payload(vid, vec![2]);
+
+        reshape(&slice, &[1, 2, 10, 20, 30]); // node 30 now at index 4
+
+        assert_eq!(
+            (src.dnd.can_accept_fn)(&payload, 4, DropPosition::Before, vid),
+            DropResponse::Reject
+        );
+        assert!(!(src.dnd.accept_drop_fn)(
+            &payload,
+            4,
+            DropPosition::Before,
+            vid
+        ));
     }
 }
 

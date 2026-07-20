@@ -113,8 +113,12 @@ pub struct RowDragData<T: 'static> {
     /// Identity of the view that started the drag.
     pub source: ViewId,
     /// The dragged rows as the origin view's flat visible indices at
-    /// drag-start, ascending. Meaningful to the origin (for same-view
-    /// reorder); a foreign consumer should read [`items`](Self::items) instead.
+    /// drag-start, ascending. Informational (row count, app callbacks): the
+    /// origin's accept path resolves the dragged rows' **stable keys** at
+    /// drag-start and never re-reads these indices at hover/drop time — they
+    /// go stale the moment the source reflows mid-drag (a spring-load
+    /// auto-expand, a peer write). A foreign consumer should read
+    /// [`items`](Self::items) instead.
     pub rows: Vec<usize>,
     /// Clones of the dragged items, `rows`-ordered. `None` for a reorder-only
     /// (non-exportable) drag.

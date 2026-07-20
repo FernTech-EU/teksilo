@@ -1568,6 +1568,7 @@ impl<T: 'static> Widget for TableView<T> {
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorderable_kbd = self.reorderable;
         let accept_drop_kbd = self.dnd.accept_drop_fn.clone();
+        let stash_kbd = self.dnd.stash_drag_keys_fn.clone();
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
         let len_kbd = self.len_fn.clone();
@@ -1597,6 +1598,11 @@ impl<T: 'static> Widget for TableView<T> {
                             _ => None,
                         };
                         if let Some((target, position, dest)) = mv {
+                            // Synthetic same-view payloads must stash the
+                            // dragged row's key at construction — the accept
+                            // path resolves identity from the stash, never
+                            // from `rows`.
+                            (stash_kbd)(&[idx]);
                             let payload =
                                 bastyde_core::drag_payload::DragPayload::typed(RowDragData::<T> {
                                     source: view_id,

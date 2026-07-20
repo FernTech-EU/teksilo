@@ -861,6 +861,7 @@ impl<T: 'static> Widget for ListView<T> {
         {
             let len_for_key = self.source.len_fn.clone();
             let accept_drop_for_key = self.source.dnd.accept_drop_fn.clone();
+            let stash_for_key = self.source.dnd.stash_drag_keys_fn.clone();
             let view_id_for_key = self.model_id;
             let sel_for_key = self.row_selection.clone();
             let activate_key = self.on_activate.clone();
@@ -958,6 +959,11 @@ impl<T: 'static> Widget for ListView<T> {
                                 _ => None,
                             };
                             if let Some((target, position, dest)) = mv {
+                                // Synthetic same-view payloads must stash the
+                                // dragged row's key at construction — the
+                                // accept path resolves identity from the
+                                // stash, never from `rows`.
+                                (stash_for_key)(&[idx]);
                                 let payload = DragPayload::typed(RowDragData::<T> {
                                     source: view_id_for_key,
                                     rows: vec![idx],
