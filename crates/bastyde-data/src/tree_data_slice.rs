@@ -112,7 +112,7 @@ type DragPolicyFn<K> = Rc<dyn Fn(&K) -> DragEligibility>;
 /// `Rc` cycle).
 type DropResolverFn<K, T> = Rc<dyn Fn(&K, &K, &T, DropPosition) -> Option<DropPosition>>;
 /// Row source: produces the whole indent-ordered stream for the current state.
-type SourceFn<K, T> = Box<dyn Fn() -> Vec<TreeRow<K, T>>>;
+type SourceFn<K, T> = Rc<dyn Fn() -> Vec<TreeRow<K, T>>>;
 
 /// Internal, fully-derived representation of one row.
 struct Row<K, T> {
@@ -218,7 +218,7 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
     /// Install the row source (`rows::load`). [`reload`](Self::reload) and a
     /// committed drop call it to re-materialise the tree.
     pub fn set_source(&self, f: impl Fn() -> Vec<TreeRow<K, T>> + 'static) {
-        *self.inner.source.borrow_mut() = Some(Box::new(f));
+        *self.inner.source.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Install the reorder command (`dragged, target, position -> applied`).
@@ -269,14 +269,17 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
     where
         T: PartialEq,
     {
-        let rows = {
+        // Clone the handle out and drop the borrow before invoking: the
+        // app-supplied loader may call back into this slice (even re-install
+        // the source), which would otherwise hit a re-entrant borrow.
+        let f = {
             let src = self.inner.source.borrow();
             match src.as_ref() {
-                Some(f) => f(),
+                Some(f) => f.clone(),
                 None => return,
             }
         };
-        self.set_rows(rows);
+        self.set_rows(f());
     }
 
     /// Replace the rows with a freshly-sourced stream, preserving per-view
@@ -1303,6 +1306,27 @@ mod tests {
             position: DropPosition::Before,
         });
         assert!(ok);
+    }
+
+    #[test]
+    fn source_closure_can_call_back_into_the_slice() {
+        // Same shape as the reorder-closure regression above, on the loader
+        // path: `reload` used to hold a `Ref` on the source `RefCell` while
+        // invoking the loader, so a loader that re-installed the source (a
+        // one-shot loader swapping itself for the steady-state one) hit a
+        // `BorrowMutError`.
+        let slice = TreeDataSlice::<u64, &'static str>::new();
+        let reentrant = slice.clone();
+        slice.set_source(move || {
+            reentrant.set_source(Vec::new);
+            vec![TreeRow {
+                key: 1,
+                item: "root",
+                depth: 0,
+            }]
+        });
+        slice.reload();
+        assert_eq!(slice.visible_count(), 1);
     }
 
     #[test]
