@@ -89,11 +89,14 @@ use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId, Vie
 use crate::data_views::{DropViz, drop_into_tint};
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
+use crate::table_view::ColumnReorderDragData;
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
     Column, ColumnResizePolicy, EditTrigger, GridLines, PinnedSide, TabTraversal,
 };
-use crate::table_view::header::{HeaderCell, HeaderRow, ResizeStateHandle};
+use crate::table_view::header::{
+    HeaderCell, HeaderRow, ResizeStateHandle, attach_header_reorder_handlers,
+};
 use crate::table_view::imperative;
 use crate::table_view::keyboard;
 use crate::table_view::layout;
@@ -305,6 +308,10 @@ pub struct TreeTableView<T: 'static> {
     /// [`EventContext::ensure_visible`](bastyde_core::widget::EventContext::ensure_visible).
     body_bounds: Rc<Cell<Rect>>,
     resize_state: ResizeStateHandle,
+    /// Width of the header strip (= the column band) snapshotted by
+    /// `place_children`. Mirrors `TableView::header_strip_width` — the
+    /// column-reorder drop handler needs it to mirror the drop x under RTL.
+    header_strip_width: Rc<Cell<f32>>,
     /// Stable id grouping the column-header reorder/resize drag (an
     /// unrelated mechanism to the row DnD below — see `table_view::header`).
     table_id: usize,
@@ -482,6 +489,7 @@ impl<T: 'static> TreeTableView<T> {
             middle_viewport_width: Rc::new(Cell::new(600.0)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             resize_state: Rc::new(RefCell::new(None)),
+            header_strip_width: Rc::new(Cell::new(0.0)),
             table_id,
             model_id: ViewId::next(ViewKind::TreeTable),
             export: crate::data_views::RowExport::default(),
@@ -1706,6 +1714,17 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let has_foreign_hook_hover = self.on_foreign_drop.is_some();
             let bounds_for_hover = self.body_bounds.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                // Column reorder is handled by the header strip
+                // (`attach_header_reorder_handlers`); only row-level drops
+                // get an insertion/into affordance here. Without this bail,
+                // a `ColumnReorderDragData` dragged past the header into the
+                // body would fall through to `on_foreign_drop` (which
+                // accepts any payload type) and paint a row-drop visual for
+                // a drag the header strip is already handling.
+                if payload.has_typed::<ColumnReorderDragData>() {
+                    feedback_for_hover.set(None);
+                    return bastyde_core::DropFeedback::NoFeedback;
+                }
                 // Real body width, so the affordance spans the actual row area
                 // rather than a placeholder.
                 let viz_width = bounds_for_hover.get().width.max(1.0);
@@ -1807,6 +1826,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let export_for_drop = self.export.clone();
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 feedback_for_drop.set(None);
+                // See the matching bail in `on_drag_hover` above — a column
+                // reorder drop is the header strip's, never the body's
+                // (`on_foreign_drop` would otherwise swallow it).
+                if payload.has_typed::<ColumnReorderDragData>() {
+                    return false;
+                }
                 let count = source_for_drop.visible_count();
                 if count == 0 {
                     return false;
@@ -1963,7 +1988,30 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 *self.pane_boundaries.borrow(),
                 self.scroll_x.clone(),
             );
-            self.header_row_id = Some(ctx.add(header_row));
+            // Wire reorder drag-target handlers on the header strip — the
+            // shared drop-target half of the mechanism `HeaderCell` already
+            // escalates a press into (see `table_view::header`). The tree
+            // column reorders like any other column: it carries no special
+            // case here, since `tree_display_pos` (re-resolved from
+            // `display_indices` on every rebuild — see below) is what makes
+            // the indent/twist gutter and Left/Right expand-collapse follow
+            // it wherever the drop lands, including into the leading- or
+            // trailing-pinned pane.
+            let header_row_id = ctx.add(header_row);
+            attach_header_reorder_handlers(
+                ctx,
+                header_row_id,
+                self.table_id,
+                self.column_widths.clone(),
+                self.display_indices.clone(),
+                self.pane_boundaries.clone(),
+                self.column_order_signal.clone(),
+                self.column_pinning_signal.clone(),
+                self.columns.iter().map(|c| c.id.clone()).collect(),
+                self.header_strip_width.clone(),
+                self.scroll_x.clone(),
+            );
+            self.header_row_id = Some(header_row_id);
         }
 
         // Body rows live in a TreeBodyPane — a sibling of the
@@ -2133,6 +2181,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         } else {
             bounds.x + bounds.width - SCROLLBAR_THICKNESS
         };
+        // The header strip spans the band; snapshot its width for the
+        // reorder-drop handler's RTL mirror (see `TableView::place_children`).
+        self.header_strip_width.set(body_width);
 
         let overrides = self.column_widths_signal.get();
         let display = self.display_indices.borrow().clone();
@@ -5403,6 +5454,407 @@ mod tests {
             tt_scroll_x(&tree, id),
             0.0,
             "ensure-column-visible must scroll left back to 0 for column 0"
+        );
+    }
+
+    // ── Column header drag-to-reorder ───────────────────────────────────
+    //
+    // `HeaderCell` escalates a header press into a `ColumnReorderDragData`
+    // drag past a 5px threshold (`table_view::header`); the drop-target
+    // half — hover feedback, insertion-slot math, pane classification,
+    // `column_order_signal`/`column_pinning_signal` writes — is
+    // `header::attach_header_reorder_handlers`, shared verbatim with
+    // `TableView` (moved there by this commit, not duplicated). These
+    // tests drive the mechanism end-to-end through real pointer events
+    // (`drag`, defined above for row reorder — the header strip is just
+    // another drop target) rather than the imperative
+    // `set_column_order`/`set_column_pinning` setters already covered
+    // above, and additionally confirm the tree column carries no special
+    // case through the shared path: its indent/twist gutter and the
+    // ArrowLeft/Right expand-collapse binding both re-resolve from
+    // `display_indices` on every rebuild, so they follow it to wherever a
+    // drag lands it — including into a pinned pane, same as any other
+    // column.
+
+    /// Column `id` at a distinct `width`, so a header/body cell's bounds
+    /// alone identify which column it is after a reorder.
+    fn reorder_col(id: &'static str, width: f32) -> Column<&'static str> {
+        Column::<&'static str>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(crate::primitives::TextWidget::new(lit!(*row)))
+        })
+        .width(ColumnWidth::Fixed(width))
+    }
+
+    /// Four unpinned columns "a" (60px, the default tree column since it's
+    /// declared first), "b" (70px), "c" (80px), "d" (90px) — over
+    /// `sample_tree()` (2 visible roots, "docs" has children).
+    fn build_tt_reorder_table() -> (WidgetTree, WidgetId, SortFilterTreeModel<&'static str>) {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(reorder_col("a", 60.0))
+                .add_column(reorder_col("b", 70.0))
+                .add_column(reorder_col("c", 80.0))
+                .add_column(reorder_col("d", 90.0))
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        (tree, id, proxy)
+    }
+
+    /// Whether `id` or any descendant is a `TwistArrow` — the indent/twist
+    /// gutter `TreeBodyPane` wraps around whichever cell is currently the
+    /// tree column. Identified by `widget_type_name` (a plain `type_name`
+    /// readout, no opt-in needed) rather than `widget_as_any` downcast,
+    /// since `TwistArrow` — a layout-only primitive nobody has needed to
+    /// downcast before — doesn't override `Widget::as_any`.
+    fn tt_subtree_has_twist_arrow(tree: &WidgetTree, id: WidgetId) -> bool {
+        if tree.widget_type_name(id) == Some("bastyde_widgets::primitives::twist_arrow::TwistArrow")
+        {
+            return true;
+        }
+        tree.children(id)
+            .into_iter()
+            .any(|c| tt_subtree_has_twist_arrow(tree, c))
+    }
+
+    #[test]
+    fn header_drag_reorders_column_before_an_earlier_sibling() {
+        // Drag "d" (display 3) to a slot strictly inside the unpinned band
+        // (before "b") — a plain reorder with no pane-boundary side effect.
+        let (mut tree, id, _proxy) = build_tt_reorder_table();
+        let header = tt_header_row_cells(&tree, id);
+        assert_eq!(header.len(), 4);
+        let from = tree.bounds(header[3]).center(); // "d"
+        let to = bastyde_canvas::Point::new(65.0, from.y); // inside "b"'s leading half
+        drag(&mut tree, from, to);
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(
+                tt.column_order_signal().get(),
+                vec![
+                    "a".to_string(),
+                    "d".to_string(),
+                    "b".to_string(),
+                    "c".to_string()
+                ],
+                "dropping \"d\" before \"b\" must write [a, d, b, c]"
+            );
+            assert_eq!(
+                tt.column_pinning_signal().get().get("d"),
+                None,
+                "a mid-band drop must not pin the moved column"
+            );
+        }
+
+        // display_indices re-derive: a fresh layout must actually reflow
+        // the header cells into the new order (Fixed widths, so an exact
+        // width sequence identifies each column unambiguously).
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let after = tt_header_row_cells(&tree, id);
+        let widths: Vec<f32> = after.iter().map(|&c| tree.bounds(c).width).collect();
+        assert!(
+            widths
+                .iter()
+                .zip([60.0, 90.0, 70.0, 80.0])
+                .all(|(&w, want)| (w - want).abs() < 0.5),
+            "header cells must reflow to widths [60, 90, 70, 80], got {widths:?}"
+        );
+    }
+
+    #[test]
+    fn header_drag_to_the_leading_edge_pins_the_dropped_column() {
+        // The pane-boundary classification in `attach_header_reorder_handlers`
+        // (`insertion_display_idx <= panes.leading_count`) is the exact same
+        // code TableView's header shares — dropping at the very leading
+        // edge pins the dragged column Leading, growing the leading pane.
+        let (mut tree, id, _proxy) = build_tt_reorder_table();
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[3]).center(); // "d"
+        let to = bastyde_canvas::Point::new(5.0, from.y); // before "a"
+        drag(&mut tree, from, to);
+
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.column_order_signal().get(),
+            vec![
+                "d".to_string(),
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string()
+            ],
+        );
+        assert_eq!(
+            tt.column_pinning_signal().get().get("d").copied(),
+            Some(PinnedSide::Leading),
+            "dropping at the leading edge must pin the column, same as TableView"
+        );
+    }
+
+    #[test]
+    fn header_drag_reorder_remaps_focused_and_editing_cell_to_follow_their_columns() {
+        // `focused_cell` / `editing_cell` store `(row, display_position)` —
+        // `imperative::remap_cell_state` (already exercised by the
+        // `column_pinning_remaps_*` tests above via the imperative setters)
+        // must fire the same way when the reorder arrives through a real
+        // header drag.
+        let (mut tree, id, _proxy) = build_tt_reorder_table();
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 1); // "b"
+            tt.begin_edit(0, "d"); // "d"
+        }
+
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[3]).center(); // "d"
+        let to = bastyde_canvas::Point::new(65.0, from.y); // before "b" — see the plain-reorder test above
+        drag(&mut tree, from, to);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.column_order_signal().get(),
+            vec![
+                "a".to_string(),
+                "d".to_string(),
+                "b".to_string(),
+                "c".to_string()
+            ],
+        );
+        assert_eq!(
+            tt.focused_cell_signal().get(),
+            Some((0, 2)),
+            "focus must follow \"b\" to its new display position"
+        );
+        assert_eq!(
+            tt.editing_cell_signal().get(),
+            Some((0, 1)),
+            "the open editor must follow \"d\" to its new display position"
+        );
+    }
+
+    #[test]
+    fn header_drag_moves_the_tree_column_and_twist_follows() {
+        // The tree column carries no special case anywhere in the reorder
+        // path: `is_tree_column` in `TreeBodyPane::build` is a plain
+        // `display_pos == tree_display_pos` comparison, and
+        // `tree_display_pos` is re-resolved from `display_indices` on
+        // every rebuild (see the comment on `TreeTableView::build`'s
+        // `key_cfg.tree_column_display_pos`). So dragging "a" (the tree
+        // column) to a later, unpinned slot must carry the indent/twist
+        // gutter with it, and ArrowLeft/Right must stay bound to it there.
+        let (mut tree, id, proxy) = build_tt_reorder_table();
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[0]).center(); // "a", the tree column
+        let to = bastyde_canvas::Point::new(220.0, from.y); // lands "a" between "c" and "d"
+        drag(&mut tree, from, to);
+
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(
+                tt.column_order_signal().get(),
+                vec![
+                    "b".to_string(),
+                    "c".to_string(),
+                    "a".to_string(),
+                    "d".to_string()
+                ],
+            );
+            assert_eq!(
+                tt.column_pinning_signal().get().get("a"),
+                None,
+                "a mid-band drop must not pin the tree column either"
+            );
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let body = tt_body_row_cells(&tree, id);
+        assert_eq!(body.len(), 4);
+        assert!(
+            !tt_subtree_has_twist_arrow(&tree, body[0]),
+            "\"b\" is no longer the tree column"
+        );
+        assert!(
+            !tt_subtree_has_twist_arrow(&tree, body[1]),
+            "\"c\" is no longer the tree column"
+        );
+        assert!(
+            tt_subtree_has_twist_arrow(&tree, body[2]),
+            "the twist must follow \"a\" to its new display position"
+        );
+        assert!(
+            !tt_subtree_has_twist_arrow(&tree, body[3]),
+            "\"d\" is not the tree column"
+        );
+
+        // ArrowLeft/Right stay bound to the tree column at its new slot.
+        use bastyde_core::event::{Key, Modifiers};
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 2); // row 0 ("docs"), tree column's new slot
+        }
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(
+            proxy.visible_count(),
+            4,
+            "ArrowRight on the relocated tree column must expand \"docs\""
+        );
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(proxy.visible_count(), 2, "and ArrowLeft collapses it again");
+    }
+
+    #[test]
+    fn header_drag_from_a_different_table_is_rejected() {
+        // Each TreeTableView mints its own `table_id`; a drop whose
+        // `ColumnReorderDragData::source_table_id` doesn't match the
+        // hovered header's own id must be a no-op — otherwise dragging a
+        // column between two independent tree-tables on screen would
+        // silently reorder the wrong one.
+        use crate::primitives::{FixedSize, HStack};
+        let proxy1 = SortFilterTreeModel::new(sample_tree());
+        let proxy2 = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+        let tt1 = TreeTableView::from_projection(proxy1)
+            .add_column(reorder_col("x", 100.0))
+            .add_column(reorder_col("y", 100.0))
+            .row_height(20.0);
+        let order1 = tt1.column_order_signal().clone();
+        let id1 = tree.add(tt1);
+        let tt2 = TreeTableView::from_projection(proxy2)
+            .add_column(reorder_col("x", 100.0))
+            .add_column(reorder_col("y", 100.0))
+            .row_height(20.0);
+        let order2 = tt2.column_order_signal().clone();
+        let id2 = tree.add(tt2);
+
+        let fixed1 = tree.add(FixedSize::new().width(200.0).height(150.0).child_id(id1));
+        let fixed2 = tree.add(FixedSize::new().width(200.0).height(150.0).child_id(id2));
+        tree.add(HStack::new().add_child(fixed1).add_child(fixed2));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(150.0),
+        });
+
+        // tt1 occupies window x[0, 200), tt2 x[200, 400) — drag tt1's
+        // leading header cell into tt2's header strip.
+        let from = tree.bounds(tt_header_row_cells(&tree, id1)[0]).center();
+        let to = bastyde_canvas::Point::new(250.0, from.y); // inside tt2's "x" cell
+        drag(&mut tree, from, to);
+
+        assert!(order1.get().is_empty(), "tt1's own order must be untouched");
+        assert!(
+            order2.get().is_empty(),
+            "tt2 must reject a drop whose payload names a different table_id"
+        );
+    }
+
+    #[test]
+    fn header_drag_released_over_the_body_does_not_trigger_foreign_row_drop() {
+        // Regression: `on_foreign_drop` fires for "any payload NOT
+        // recognized as this view's own row drag" — without the
+        // `ColumnReorderDragData` bail at the top of the row-level
+        // `on_drag_hover`/`on_drop` (added alongside wiring up header
+        // reorder — TreeTableView never carried a `ColumnReorderDragData`
+        // payload before), a header drag released past the header strip's
+        // own y-range would fall through into this hatch, or into a
+        // row-insertion-line hover affordance, for a drag the header is
+        // already handling.
+        use std::cell::Cell;
+        let foreign_fired = Rc::new(Cell::new(false));
+        let flag = foreign_fired.clone();
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .on_foreign_drop(move |_payload, _node, _pos, _ctx| {
+                    flag.set(true);
+                    true
+                })
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[0]).center();
+        let to = bastyde_canvas::Point::new(from.x, cp::HEADER_HEIGHT + 10.0); // below the header
+        drag(&mut tree, from, to);
+
+        assert!(
+            !foreign_fired.get(),
+            "a column-reorder drag must never reach on_foreign_drop"
+        );
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert!(
+            tt.column_order_signal().get().is_empty(),
+            "no header drop occurred either — the release point was outside the header strip"
+        );
+    }
+
+    #[test]
+    fn header_drag_insertion_is_scroll_aware() {
+        // The insertion-slot math (`layout::insertion_slot_at_x`) is unit
+        // tested directly for scroll-awareness; this proves the SHARED
+        // drop-target wiring actually reaches it under a nonzero
+        // `scroll_x`, for TreeTableView same as TableView.
+        let (mut tree, id) = build_tt_wide_unpinned_table(100.0, 4, 200.0);
+        let max = tt_max_scroll_x(&tree, id);
+        assert!(max > 0.0, "4×100px columns must overflow a 200px viewport");
+        tt_set_scroll_x(&tree, id, max); // scrolled fully right
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: Some(200.0),
+        });
+
+        // At full scroll the 200px viewport shows logical [200, 400): "c2"
+        // fills local [0, 100), "c3" fills local [100, 200). Dropping "c3"
+        // at local x=10 (deep in "c2"'s own zone) must resolve against the
+        // scrolled position and land before "c2" — an unscrolled read of
+        // the same raw x=10 would instead land before "c0".
+        let header = tt_header_row_cells(&tree, id);
+        let from = tree.bounds(header[3]).center(); // "c3"
+        let to = bastyde_canvas::Point::new(10.0, from.y);
+        drag(&mut tree, from, to);
+
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.column_order_signal().get(),
+            vec![
+                "c0".to_string(),
+                "c1".to_string(),
+                "c3".to_string(),
+                "c2".to_string()
+            ],
+            "\"c3\" must land before \"c2\" (scroll-aware), not before \"c0\""
         );
     }
 }

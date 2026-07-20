@@ -1978,7 +1978,7 @@ impl<T: 'static> Widget for TableView<T> {
             );
             // Wire reorder drag-target handlers on the header strip.
             let header_row_id = ctx.add(header_row);
-            attach_header_reorder_handlers(
+            header::attach_header_reorder_handlers(
                 ctx,
                 header_row_id,
                 self.table_id,
@@ -2675,129 +2675,6 @@ pub(crate) fn draw_pane_dividers(
     canvas.clear_clip();
 }
 
-// ── Reorder drag-target plumbing ───────────────────────────────────────────
-
-/// Attach `on_drag_hover` and `on_drop` to the header strip so reorder
-/// drags from any cell of *this* table can be classified into a pane
-/// (Leading / None / Trailing) and an insertion index.
-///
-/// Inter-table drops are rejected by matching `source_table_id`.
-#[allow(clippy::too_many_arguments)]
-fn attach_header_reorder_handlers(
-    ctx: &mut BuildContext,
-    header_row_id: WidgetId,
-    source_table_id: usize,
-    column_widths: Rc<RefCell<Vec<f32>>>,
-    display_indices: Rc<RefCell<Vec<usize>>>,
-    pane_boundaries: Rc<RefCell<PaneBoundaries>>,
-    column_order_signal: Signal<Vec<String>>,
-    column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
-    column_ids: Vec<String>,
-    header_strip_width: Rc<Cell<f32>>,
-    scroll_x: Signal<f32>,
-) {
-    let widths_for_drop = column_widths.clone();
-    let display_for_drop = display_indices.clone();
-    let panes_for_drop = pane_boundaries.clone();
-    let order_for_drop = column_order_signal.clone();
-    let pinning_for_drop = column_pinning_signal.clone();
-    let ids_for_drop = column_ids;
-    let strip_width_for_drop = header_strip_width;
-    let scroll_x_for_drop = scroll_x;
-
-    ctx.apply_handlers(
-        header_row_id,
-        HandlerSet::new()
-            .on_drag_hover(|payload, _position, _ctx| {
-                if payload.has_typed::<ColumnReorderDragData>() {
-                    bastyde_core::DropFeedback::HighlightRect {
-                        rect: bastyde_canvas::Rect::ZERO,
-                        color: bastyde_tokens::Color::TRANSPARENT,
-                    }
-                } else {
-                    bastyde_core::DropFeedback::NoFeedback
-                }
-            })
-            .on_drop(move |mut payload, position, ctx| {
-                let drag = match payload.take_typed::<ColumnReorderDragData>() {
-                    Some(d) => d,
-                    None => return false,
-                };
-                if drag.source_table_id != source_table_id {
-                    return false;
-                }
-                let widths = widths_for_drop.borrow().clone();
-                let display = display_for_drop.borrow().clone();
-                let panes = *panes_for_drop.borrow();
-                let total = display.len();
-                if total == 0 {
-                    return false;
-                }
-
-                // `position` is local to the header strip (origin at its
-                // physical-left edge). Under RTL the columns are placed in
-                // display order from the strip's right edge leftward, so
-                // mirror the drop x against the strip width before running
-                // the left-to-right scan. (A drop in any non-content dead
-                // space then maps past the last column → append, matching
-                // LTR's trailing-end behaviour.)
-                let drop_x = if ctx.is_rtl() {
-                    strip_width_for_drop.get() - position.x
-                } else {
-                    position.x
-                };
-
-                // Compute insertion index in display order: find the
-                // first column whose midpoint exceeds the (mirrored) x —
-                // pane- and scroll-aware, so a drop under a nonzero
-                // `scroll_x` resolves against the columns actually under
-                // the pointer, not their unscrolled positions.
-                let insertion_display_idx = layout::insertion_slot_at_x(
-                    &widths,
-                    panes,
-                    scroll_x_for_drop.get(),
-                    strip_width_for_drop.get(),
-                    drop_x,
-                );
-
-                // Classify the drop position into a pane.
-                let new_pinning = if insertion_display_idx <= panes.leading_count {
-                    PinnedSide::Leading
-                } else if insertion_display_idx >= panes.middle_end {
-                    PinnedSide::Trailing
-                } else {
-                    PinnedSide::None
-                };
-
-                // Update pinning override (record only when it deviates
-                // from None, which is the framework default).
-                let mut pin_map = pinning_for_drop.get();
-                match new_pinning {
-                    PinnedSide::None => {
-                        pin_map.remove(&drag.col_id);
-                    }
-                    other => {
-                        pin_map.insert(drag.col_id.clone(), other);
-                    }
-                }
-                pinning_for_drop.set(pin_map);
-
-                // Rebuild the column-order list to reflect the drop.
-                let mut new_order: Vec<String> =
-                    display.iter().map(|&i| ids_for_drop[i].clone()).collect();
-                let from_pos = new_order.iter().position(|id| id == &drag.col_id);
-                if let Some(from) = from_pos {
-                    let item = new_order.remove(from);
-                    let to = if from < insertion_display_idx {
-                        insertion_display_idx.saturating_sub(1)
-                    } else {
-                        insertion_display_idx
-                    };
-                    let to = to.min(new_order.len());
-                    new_order.insert(to, item);
-                    order_for_drop.set(new_order);
-                }
-                true
-            }),
-    );
-}
+// Reorder drag-target plumbing (hover + drop on the header strip) lives in
+// `header::attach_header_reorder_handlers` — shared with `TreeTableView`,
+// which builds its header out of the same `HeaderCell`/`HeaderRow` pair.
