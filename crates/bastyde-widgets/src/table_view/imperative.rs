@@ -18,6 +18,7 @@ use bastyde_core::signal::Signal;
 
 use crate::common::row_metrics::SharedRowMetrics;
 use crate::table_view::column::{Column, PinnedSide};
+use crate::table_view::selection::CellSelectionModel;
 
 /// Scroll so that `row` is aligned to the top of the viewport.
 ///
@@ -130,4 +131,42 @@ pub(crate) fn resolve_edit_target<T: 'static>(
     let decl_index = columns.iter().position(|c| c.id == col_id)?;
     let display_pos = display_indices.iter().position(|&i| i == decl_index)?;
     Some((row, display_pos))
+}
+
+/// Remap `focused_cell` / `editing_cell` / an optional `cell_selection`'s
+/// stored `(row, display_pos)` pairs through `old_to_new` — indexed by the
+/// display position they were computed against *before* a column reorder or
+/// pin-toggle rebuild, each entry giving that column's position under the
+/// *new* order, or `None` if the column dropped out of the visible set.
+///
+/// Both views recompute display order on every rebuild but only key it by
+/// stable column identity for the columns themselves — the display-position
+/// pairs a caller stashed in `focused_cell` (keyboard focus), `editing_cell`
+/// (an open F2 editor), or a cell-selection rectangle are otherwise left
+/// pointing at whatever column now sits at that position, silently
+/// relabeling onto the wrong data. `old_to_new` being the identity
+/// permutation (the common case: a rebuild triggered by something other
+/// than order/pinning) makes every remap here a no-op.
+pub(crate) fn remap_cell_state(
+    focused_cell: &Signal<Option<(usize, usize)>>,
+    editing_cell: &Signal<Option<(usize, usize)>>,
+    cell_selection: Option<&CellSelectionModel>,
+    old_to_new: &[Option<usize>],
+) {
+    let remap = |cell: Option<(usize, usize)>| {
+        cell.and_then(|(row, col)| old_to_new.get(col).copied().flatten().map(|nc| (row, nc)))
+    };
+    let old_focus = focused_cell.get();
+    let new_focus = remap(old_focus);
+    if new_focus != old_focus {
+        focused_cell.set(new_focus);
+    }
+    let old_edit = editing_cell.get();
+    let new_edit = remap(old_edit);
+    if new_edit != old_edit {
+        editing_cell.set(new_edit);
+    }
+    if let Some(cs) = cell_selection {
+        cs.remap_columns(old_to_new);
+    }
 }

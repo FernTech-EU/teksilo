@@ -11,7 +11,14 @@
 //!    `min_column_width_default`; a future pass will probe the header label
 //!    and visible cells).
 //! 3. Remaining horizontal space is distributed among `Flex` columns
-//!    proportional to their flex factor, again clamped.
+//!    proportional to their flex factor, iteratively: a column whose
+//!    proportional share would violate its own `min_width`/`max_width`
+//!    is pinned to that bound and drops out of the pool, and the
+//!    leftover + flex-factor total it would have consumed is
+//!    re-shared among the columns still in play. Repeats to a fixed
+//!    point (the same clamp-and-redistribute shape as the framework's
+//!    `LayoutResponse` shrink algorithm) so floor violations on one
+//!    column don't starve or overrun its siblings.
 //!
 //! The output is a parallel `Vec<f32>` of resolved widths matching the
 //! input column order.
@@ -90,20 +97,86 @@ impl ColumnSolver {
             }
         }
 
-        // Pass 3: distribute leftover space among un-overridden Flex columns.
+        // Pass 3: distribute leftover space among un-overridden Flex
+        // columns. See the module doc for the clamp-and-redistribute
+        // shape; a single unclamped pass would let one column's floor
+        // violation either starve its siblings (their share stays
+        // computed against the pre-floor leftover) or, if the floor
+        // exceeds the pre-floor share by only a little, silently push
+        // the resolved total past the pane.
         let leftover = (available_width - consumed).max(0.0);
         if flex_total > 0.0 {
-            for (slot, &col_idx) in display_order.iter().enumerate() {
-                let col = &columns[col_idx];
-                if overrides.contains_key(&col.id) {
-                    continue;
+            struct FlexSlot {
+                slot: usize,
+                factor: f32,
+                floor: f32,
+                max: Option<f32>,
+            }
+            let mut pool: Vec<FlexSlot> = display_order
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, &col_idx)| {
+                    let col = &columns[col_idx];
+                    if overrides.contains_key(&col.id) {
+                        return None;
+                    }
+                    match col.width {
+                        ColumnWidth::Flex(factor) => Some(FlexSlot {
+                            slot,
+                            factor: factor.max(0.0),
+                            floor: col.min_width.unwrap_or(min_width_default),
+                            max: col.max_width,
+                        }),
+                        _ => None,
+                    }
+                })
+                .collect();
+
+            let mut pool_leftover = leftover;
+            let mut pool_flex_total: f32 = pool.iter().map(|s| s.factor).sum();
+
+            while !pool.is_empty() {
+                if pool_flex_total <= 0.0 {
+                    // No factor left to key a share off (every
+                    // remaining column has a zero flex factor) —
+                    // whatever's left falls back to each floor.
+                    for slot in &pool {
+                        widths[slot.slot] = slot.floor;
+                    }
+                    break;
                 }
-                if let ColumnWidth::Flex(factor) = col.width {
-                    let share = leftover * (factor.max(0.0) / flex_total);
-                    let floor = col.min_width.unwrap_or(min_width_default);
-                    let clamped = clamp(share, floor, col.max_width);
-                    widths[slot] = clamped;
+                // One round: shares are computed against this round's
+                // leftover/total for every still-pooled column before
+                // any of them are removed, so removal order within a
+                // round never biases which columns clamp.
+                let round_leftover = pool_leftover;
+                let round_flex_total = pool_flex_total;
+                let mut next_pool = Vec::with_capacity(pool.len());
+                let mut any_clamped = false;
+                for slot in pool {
+                    let share = round_leftover * (slot.factor / round_flex_total);
+                    let violates = share < slot.floor || slot.max.is_some_and(|m| share > m);
+                    if violates {
+                        let clamped = clamp(share, slot.floor, slot.max);
+                        widths[slot.slot] = clamped;
+                        pool_leftover -= clamped;
+                        pool_flex_total -= slot.factor;
+                        any_clamped = true;
+                    } else {
+                        next_pool.push(slot);
+                    }
                 }
+                if !any_clamped {
+                    // Fixed point: every remaining column's proportional
+                    // share already fits within its bounds.
+                    for slot in &next_pool {
+                        let share = pool_leftover * (slot.factor / pool_flex_total);
+                        widths[slot.slot] = share;
+                    }
+                    break;
+                }
+                pool_leftover = pool_leftover.max(0.0);
+                pool = next_pool;
             }
         }
 
@@ -292,13 +365,49 @@ mod tests {
             col("b", ColumnWidth::Flex(1.0)),
         ];
         let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
-        // Flex(0.0) gets a 0 share of the leftover, then clamps to its
-        // min_width (40). The leftover for the other column is computed
-        // against the full 400 (since `consumed` only tracks Fixed/Auto),
-        // so it claims 400 — the table will lay out wider than the pane,
-        // but that's expected when min-width constraints over-subscribe
-        // the available space.
+        // Flex(0.0) gets a 0 share of the leftover (400), which is below
+        // its min_width (40) — it's pinned to 40 and drops out of the
+        // pool. That 40 px is subtracted from the leftover *before* `b`
+        // (the only remaining pooled column) claims the rest, so the two
+        // resolved widths sum to exactly the pane instead of overflowing
+        // it.
         assert_eq!(widths[0], 40.0);
-        assert_eq!(widths[1], 400.0);
+        assert_eq!(widths[1], 360.0);
+    }
+
+    #[test]
+    fn flex_min_width_redistributes_to_siblings() {
+        let cols = vec![
+            col("fixed", ColumnWidth::Fixed(100.0)),
+            col("a", ColumnWidth::Flex(1.0)),
+            col("b", ColumnWidth::Flex(1.0)).min_width(200.0),
+        ];
+        // Leftover after the fixed column is 300, split evenly 1:1 —
+        // 150 apiece — but `b`'s min_width (200) wins its round and
+        // pins it there. The 200 it now consumes (not its 150 share) is
+        // subtracted from the leftover before `a`'s share is
+        // recomputed in the next round, so `a` settles at 100 instead
+        // of its stale first-round share of 150 — and the three
+        // resolved widths sum to exactly the 400 px pane rather than
+        // overflowing it by `b`'s 50 px shortfall.
+        let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths[0], 100.0);
+        assert_eq!(widths[1], 100.0);
+        assert_eq!(widths[2], 200.0);
+        assert_eq!(ColumnSolver::total_width(&widths), 400.0);
+    }
+
+    #[test]
+    fn flex_min_widths_that_oversubscribe_the_pane_still_overflow() {
+        // When the floors alone exceed the available width, redistribution
+        // can't help — floors win and the resolved total overflows the
+        // pane, same as a single non-iterative clamp would produce.
+        let cols = vec![
+            col("a", ColumnWidth::Flex(1.0)).min_width(300.0),
+            col("b", ColumnWidth::Flex(1.0)).min_width(300.0),
+        ];
+        let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
+        assert_eq!(widths[0], 300.0);
+        assert_eq!(widths[1], 300.0);
     }
 }

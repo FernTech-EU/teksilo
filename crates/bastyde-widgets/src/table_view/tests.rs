@@ -1325,6 +1325,220 @@ fn cell_selection_mode_tracks_pairs() {
     assert!(cs.is_selected(2, 1));
 }
 
+// ── AT active_descendant follows cell focus ─────────────────────────────────
+
+#[test]
+fn focused_cell_sets_active_descendant_to_the_cell_node() {
+    use bastyde_core::accessibility::widget_id_to_node_id;
+
+    let (mut tree, table, _) = build_table(5);
+    focus_at(&mut tree, table, 1, 1);
+    let update = tree.sync_accessibility();
+    let table_node_id = widget_id_to_node_id(table);
+    let table_node = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == table_node_id)
+        .map(|(_, n)| n)
+        .expect("table node present in the AT tree");
+    let active = table_node
+        .active_descendant()
+        .expect("a focused cell must set active_descendant");
+
+    // It must resolve to a real node in this same update, and that node
+    // must be the cell itself (Role::Cell), not the row or the table.
+    let cell_node = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == active)
+        .map(|(_, n)| n)
+        .expect("active_descendant must reference a node present in the TreeUpdate");
+    assert_eq!(cell_node.role(), Role::Cell);
+}
+
+#[test]
+fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() {
+    use bastyde_core::accessibility::widget_id_to_node_id;
+
+    let (mut tree, table, _model) = build_table(1000);
+    focus_at(&mut tree, table, 1, 1);
+    let table_node_id = widget_id_to_node_id(table);
+    let update = tree.sync_accessibility();
+    let active_before = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == table_node_id)
+        .and_then(|(_, n)| n.active_descendant());
+    assert!(active_before.is_some(), "row 1 is realized initially");
+
+    // Scroll far enough that row 1 leaves the realized+buffer window.
+    // Nothing clears `focused_cell` on scroll — the keyboard-nav cursor
+    // is meant to persist off-screen — so this exercises exactly the
+    // "stale id" hazard: the cell's WidgetId from the pre-scroll build no
+    // longer has a live AT node once the pane rebuilds without it.
+    let signal = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.scroll_y_signal().clone()
+    };
+    signal.set(2000.0);
+    tree.request_frame();
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+
+    let update = tree.sync_accessibility();
+    let active_after = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == table_node_id)
+        .and_then(|(_, n)| n.active_descendant());
+    assert_eq!(
+        active_after, None,
+        "a focused cell that scrolled out of realization must not leave a \
+         stale active_descendant pointing at a destroyed node"
+    );
+}
+
+// ── Cell state survives a column reorder/pin ───────────────────────────────
+//
+// `focused_cell`, `editing_cell`, and `CellSelectionModel` all store
+// `(row, display_position)`. A drag-to-reorder or a pin toggle only bumps
+// the rebuild version (see the `column_order_signal` / `column_pinning_signal`
+// effects in `TableView::build`) — without a remap, the stored display
+// position would silently relabel onto whatever column now sits there.
+// These mirror the `begin_edit_resolves_before_the_view_is_mounted` tests'
+// style: pinning makes display order diverge from declaration order, so a
+// shortcut that merely keeps the same index (agreeing by accident when
+// nothing moved) would fail them.
+
+#[test]
+fn column_pinning_remaps_focused_cell_to_follow_its_column() {
+    // Unpinned, display order is declaration order: id@0, name@1.
+    let (mut tree, table, _) = build_table(3);
+    focus_at(&mut tree, table, 1, 1); // focus `name`, at display position 1
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        // Pinning `name` Leading swaps it ahead of `id` — display order
+        // becomes [name, id]. A stale (1, 1) would now land on `id`.
+        tv.set_column_pinning("name", super::PinnedSide::Leading);
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((1, 0)),
+        "focus must follow `name` to its new display position"
+    );
+}
+
+#[test]
+fn column_pinning_remaps_editing_cell_to_follow_its_column() {
+    let (mut tree, table, _) = build_table(3);
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.begin_edit(1, "name"); // name @ display position 1
+        assert_eq!(tv.editing_cell_signal().get(), Some((1, 1)));
+        tv.set_column_pinning("name", super::PinnedSide::Leading);
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    assert_eq!(
+        tv.editing_cell_signal().get(),
+        Some((1, 0)),
+        "the open editor must follow `name` to its new display position, not \
+         relabel onto whatever column now sits at position 1"
+    );
+}
+
+#[test]
+fn column_pinning_remaps_cell_selection_to_follow_its_column() {
+    let model = rows(3);
+    let cs = super::CellSelectionModel::new(TableSelectionMode::MultiCell);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    cs.select(1, 1); // select `name` at display position 1
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.set_column_pinning("name", super::PinnedSide::Leading);
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    assert!(
+        cs.is_selected(1, 0),
+        "selection must follow `name` to its new display position"
+    );
+    assert!(!cs.is_selected(1, 1));
+}
+
+#[test]
+fn set_column_order_remaps_focused_cell_across_a_full_permutation() {
+    // Three columns: id (decl 0), name (decl 1), extra (decl 2) — all
+    // unpinned, so display order starts as declaration order.
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .add_column(
+                Column::<Row>::new("extra", lit!("Extra"), |_row, _: &CellContext| {
+                    Box::new(crate::primitives::TextWidget::new(lit!("…")))
+                })
+                .width(ColumnWidth::Fixed(40.0)),
+            )
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 2); // focus `extra`, at display position 2
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        // New display order: [extra, id, name] — `extra` moves from
+        // position 2 to position 0.
+        tv.set_column_order(vec![
+            "extra".to_string(),
+            "id".to_string(),
+            "name".to_string(),
+        ]);
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((0, 0)),
+        "focus must follow `extra` to its new display position"
+    );
+}
+
 // ── Edit hooks + filter signal + row drag-drop ────────────────────────────
 
 #[test]

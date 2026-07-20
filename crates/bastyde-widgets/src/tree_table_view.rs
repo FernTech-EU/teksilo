@@ -65,7 +65,7 @@ use std::time::Duration;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
-use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::drag_payload::DragPayload;
@@ -278,6 +278,12 @@ pub struct TreeTableView<T: 'static> {
     // Layout state
     column_widths: SharedColumnWidths,
     display_indices: Rc<RefCell<Vec<usize>>>,
+    /// `(row, display_pos) -> WidgetId` for every cell realized by the
+    /// body pane's latest `build()`. Mirrors `TableView::cell_map` (the
+    /// GridView `tile_map` pattern — shared between the root and its
+    /// sibling-of-scrollbar pane); `accessibility()` reads it to point
+    /// `active_descendant` at the keyboard-focused cell's own AT node.
+    cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
     viewport_height: Rc<Cell<f32>>,
     /// The row-area's absolute (window) rect (below the header), cached by
     /// `place_children`. Threaded into the keyboard handler so it can chase the
@@ -451,6 +457,7 @@ impl<T: 'static> TreeTableView<T> {
             pane_total_refresh: Signal::new(0_u64),
             column_widths: Rc::new(RefCell::new(Vec::new())),
             display_indices: Rc::new(RefCell::new(Vec::new())),
+            cell_map: Rc::new(RefCell::new(Vec::new())),
             viewport_height: Rc::new(Cell::new(600.0)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             resize_state: Rc::new(RefCell::new(None)),
@@ -1199,6 +1206,19 @@ impl<T: 'static> TreeTableView<T> {
             self.scroll_y.set(clamped);
         }
     }
+
+    /// Buffered realized range — mirrors `TableView::visible_range`. Used
+    /// only to nudge the lazy source (`request_window`/`fetch_more`); the
+    /// pane recomputes its own copy independently for actual row
+    /// realization.
+    fn visible_range(&self) -> (usize, usize) {
+        self.row_metrics.borrow_mut().visible_range(
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            self.source.visible_count(),
+            BUFFER_ROWS,
+        )
+    }
 }
 
 impl<T: 'static> std::fmt::Debug for TreeTableView<T> {
@@ -1251,6 +1271,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        // Also at AccessibilityOnly (orthogonal — see `BindingLevel`) so a
+        // keyboard focus move re-walks the AT tree and re-resolves
+        // `active_descendant` in `accessibility()` below, even though
+        // nothing about the cell's own node changed.
+        self.focused_cell.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
 
         // Focus-aware selection + modality-gated focus ring (mirrors TableView).
         // `begin_view_focus` keys the scope signal on this root id directly —
@@ -1289,10 +1318,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // it (e.g. above an expand/collapse point) stay valid.
         let v_for_proj = version.clone();
         let proj_ver = Rc::new(Cell::new(0_u64));
+        let prev_visible_count = Rc::new(Cell::new(self.source.visible_count()));
         ctx.effect(&self.source.version_signal(), {
             let metrics = self.row_metrics.clone();
             let src = self.source.clone();
             let row_sel = self.row_selection.clone();
+            let cell_sel = self.cell_selection.clone();
+            let prev_visible_count = prev_visible_count.clone();
             move |_| {
                 metrics
                     .borrow_mut()
@@ -1302,6 +1334,26 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 if let Some(ref rs) = row_sel {
                     rs.prune();
                 }
+                // Cell selection is index-based (unlike the keyed row
+                // selection above), and a `TreeDataSource`'s flattening
+                // collapses every structural change — expand/collapse,
+                // insert/remove, a re-sort — into one version bump with no
+                // per-change delta to follow, unlike `TableView`'s
+                // `ListModel` `DataChange` granularity. A changed visible
+                // row count is a structural signal we CAN act on
+                // honestly: clear the selection rather than let it point
+                // at whatever node now occupies that flat index. Leave it
+                // alone when the count is unchanged — a content-only
+                // update (e.g. an in-place item edit) never moves a row,
+                // and clearing on every projection bump would drop the
+                // selection on a plain data refresh.
+                let new_visible_count = src.visible_count();
+                if let Some(ref cs) = cell_sel
+                    && new_visible_count != prev_visible_count.get()
+                {
+                    cs.clear();
+                }
+                prev_visible_count.set(new_visible_count);
                 let next = proj_ver.get() + 1;
                 proj_ver.set(next);
                 v_for_proj.set(next);
@@ -1346,6 +1398,34 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         // Display order.
         let display_indices = self.display_order();
+
+        // Remap any `(row, display_pos)` pairs the *previous* order left in
+        // `focused_cell` / `editing_cell` / `cell_selection` onto their
+        // column's position under the order just computed, before it
+        // overwrites `self.display_indices` below. See the identical block
+        // in `TableView::build` for why this is a no-op unless THIS
+        // rebuild's cause was a column reorder/pinning change.
+        {
+            let old_display = self.display_indices.borrow();
+            if !old_display.is_empty() {
+                let old_to_new: Vec<Option<usize>> = old_display
+                    .iter()
+                    .map(|&decl_idx| {
+                        let id = &self.columns[decl_idx].id;
+                        display_indices
+                            .iter()
+                            .position(|&new_decl_idx| self.columns[new_decl_idx].id == *id)
+                    })
+                    .collect();
+                drop(old_display);
+                imperative::remap_cell_state(
+                    &self.focused_cell,
+                    &self.editing_cell,
+                    self.cell_selection.as_ref(),
+                    &old_to_new,
+                );
+            }
+        }
         *self.display_indices.borrow_mut() = display_indices.clone();
         let tree_decl = self.tree_column_decl_index();
         let tree_display_pos = display_indices
@@ -1773,6 +1853,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     self.column_widths_signal.clone(),
                     self.column_widths.clone(),
                     display_pos,
+                    col.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                     self.column_resize_policy,
                     self.resize_state.clone(),
                     self.table_id,
@@ -1795,6 +1876,20 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // rebuilds target the pane and are never deferred by the
         // gesture-capture protection during a thumb drag.
         let row_count = self.source.visible_count();
+
+        // Lazy: nudge the source to load the realized window, and fetch
+        // the next page as the viewport nears the end (append-only
+        // sources). `TreeSource` already erases a `TreeDataSource`'s
+        // `row_state`/`request_window`/`can_fetch_more`/`fetch_more`
+        // into `self.source.dnd` (mirrors `list_source::DndLazy` — see
+        // `TableView::build`); a fully-resident source's default (inert)
+        // impls leave this a no-op.
+        let (vis_start, vis_end) = self.visible_range();
+        (self.source.dnd.request_window_fn)(vis_start..vis_end);
+        if (self.source.dnd.can_fetch_more_fn)() && vis_end + BUFFER_ROWS >= row_count {
+            (self.source.dnd.fetch_more_fn)();
+        }
+
         if row_count > 0 {
             let pane = body_pane::TreeBodyPane::<T> {
                 source: self.source.clone(),
@@ -1823,6 +1918,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 prev_built_end: self.pane_built_end.clone(),
                 total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
+                cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
         } else if let Some(ref f) = self.empty_view {
@@ -2203,6 +2299,19 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let n = builder.inner_mut();
         n.set_row_count(row_count);
         n.set_column_count(col_count);
+
+        // Roving focus: point active_descendant at the focused cell's own
+        // AT node so a screen reader follows arrow-key cell navigation
+        // and ArrowLeft/Right expand/collapse. `cell_map` is a snapshot
+        // of the body pane's last realized cells; a focused cell that
+        // scrolled (or collapsed) out of the realized buffer simply
+        // isn't in it, so no stale id is emitted.
+        if let Some(target) = self.focused_cell.get() {
+            let map = self.cell_map.borrow();
+            if let Some(&(_, cell_id)) = map.iter().find(|&&(pos, _)| pos == target) {
+                builder.set_active_descendant(widget_id_to_node_id(cell_id));
+            }
+        }
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -3298,6 +3407,397 @@ mod tests {
         assert!(tt.sort_signal().get().is_some());
         tt.clear_sort();
         assert_eq!(tt.sort_signal().get(), None);
+    }
+
+    // ── Cell state survives a column reorder/pin ───────────────────────
+    //
+    // `focused_cell`, `editing_cell`, and `CellSelectionModel` all store
+    // `(row, display_position)`. A drag-to-reorder or a pin toggle only
+    // bumps the rebuild version — without a remap, the stored display
+    // position would silently relabel onto whatever column now sits
+    // there. Pinning makes display order diverge from declaration order
+    // (columns are declared name(0), size(1)), so a shortcut that merely
+    // keeps the same index would fail these.
+
+    #[test]
+    fn column_pinning_remaps_focused_cell_to_follow_its_column() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 1); // focus `size`, at display position 1
+            // Pinning `size` Leading swaps it ahead of `name` — display
+            // order becomes [size, name]. A stale (0, 1) would now land
+            // on `name`.
+            tt.set_column_pinning("size", PinnedSide::Leading);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.focused_cell_signal().get(),
+            Some((0, 0)),
+            "focus must follow `size` to its new display position"
+        );
+    }
+
+    #[test]
+    fn column_pinning_remaps_editing_cell_to_follow_its_column() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.begin_edit(0, "size"); // size @ display position 1
+            assert_eq!(tt.editing_cell_signal().get(), Some((0, 1)));
+            tt.set_column_pinning("size", PinnedSide::Leading);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.editing_cell_signal().get(),
+            Some((0, 0)),
+            "the open editor must follow `size` to its new display \
+             position, not relabel onto whatever column now sits at \
+             position 1"
+        );
+    }
+
+    #[test]
+    fn column_pinning_remaps_cell_selection_to_follow_its_column() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let cs = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiCell)
+                .cell_selection(cs.clone()),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        cs.select(0, 1); // select `size` at display position 1
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_column_pinning("size", PinnedSide::Leading);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert!(
+            cs.is_selected(0, 0),
+            "selection must follow `size` to its new display position"
+        );
+        assert!(!cs.is_selected(0, 1));
+    }
+
+    #[test]
+    fn collapsing_a_node_above_a_selected_cell_clears_stale_cell_selection() {
+        // Cell selection is index-based; a `TreeDataSource`'s flattening
+        // gives no per-row delta to reindex it by (unlike `TableView`'s
+        // `ListModel` `DataChange`), so the honest fix on a structural
+        // change is to drop the selection rather than let a stale flat
+        // row index silently point at whatever node now occupies it.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let docs = proxy.tree().root(0);
+        let cs = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiCell)
+                .cell_selection(cs.clone()),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.expand(docs);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(proxy.visible_count(), 4); // docs, readme, guide, src
+        cs.select(3, 0); // `src`, the last flat row
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.collapse(docs);
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert_eq!(proxy.visible_count(), 2); // docs, src — `src` is now row 1
+        assert_eq!(
+            cs.count(),
+            0,
+            "a stale (row, col) surviving the collapse must be dropped, not \
+             silently point at whatever node now sits at flat row 3"
+        );
+    }
+
+    #[test]
+    fn content_only_update_leaves_cell_selection_untouched() {
+        // A version bump that doesn't change the flat row count — an
+        // in-place item edit, no expand/collapse/insert/remove — must not
+        // disturb an existing cell selection.
+        let model = sample_tree();
+        let proxy = SortFilterTreeModel::new(model);
+        let docs = proxy.tree().root(0);
+        let cs = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiCell)
+                .cell_selection(cs.clone()),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        cs.select(0, 0); // `docs`
+        // In-place content update — same node, same position, new label.
+        proxy.tree().update(docs, "docs-renamed");
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        assert!(
+            cs.is_selected(0, 0),
+            "a content-only update must leave an unrelated selection alone"
+        );
+    }
+
+    // ── AT active_descendant follows cell focus ─────────────────────────
+
+    #[test]
+    fn focused_cell_sets_active_descendant_to_the_cell_node() {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 1);
+        }
+        let update = tree.sync_accessibility();
+        let root_node_id = widget_id_to_node_id(id);
+        let root_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == root_node_id)
+            .map(|(_, n)| n)
+            .expect("root node present in the AT tree");
+        let active = root_node
+            .active_descendant()
+            .expect("a focused cell must set active_descendant");
+        let cell_node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == active)
+            .map(|(_, n)| n)
+            .expect("active_descendant must reference a node present in the TreeUpdate");
+        assert_eq!(cell_node.role(), Role::Cell);
+    }
+
+    #[test]
+    fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() {
+        let proxy = SortFilterTreeModel::new(wide_tree(1000));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(1, 0);
+        }
+        let root_node_id = widget_id_to_node_id(id);
+        let update = tree.sync_accessibility();
+        let active_before = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == root_node_id)
+            .and_then(|(_, n)| n.active_descendant());
+        assert!(active_before.is_some(), "row 1 is realized initially");
+
+        // Scroll far enough that row 1 leaves the realized+buffer window.
+        // Nothing clears `focused_cell` on scroll, so this exercises the
+        // "stale id" hazard directly: the pre-scroll build's cell WidgetId
+        // has no live AT node once the pane rebuilds without it.
+        let signal = {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.scroll_y_signal().clone()
+        };
+        signal.set(2000.0);
+        tree.request_frame();
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let update = tree.sync_accessibility();
+        let active_after = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == root_node_id)
+            .and_then(|(_, n)| n.active_descendant());
+        assert_eq!(
+            active_after, None,
+            "a focused cell that scrolled out of realization must not leave \
+             a stale active_descendant pointing at a destroyed node"
+        );
+    }
+
+    #[test]
+    fn lazy_loading_rows_render_placeholder_cells_and_request_the_window() {
+        // A windowed tree source with nothing resident: every visible row
+        // is `Loading`, so the pane must render placeholder cells (not
+        // skip the rows — `meta()` returning `None` used to mean "off the
+        // end of `start..end`" unconditionally) and the view must nudge
+        // the source to load the realized window. Mirrors TableView's
+        // `lazy_loading_rows_render_placeholder_cells_and_request_the_window`.
+        use bastyde_data::{FlatEntry, RowState};
+        use std::cell::RefCell;
+        use std::ops::Range;
+
+        struct Windowed {
+            total: usize,
+            requested: Rc<RefCell<Vec<Range<usize>>>>,
+            version: Signal<u64>,
+        }
+        impl TreeDataSource for Windowed {
+            type Item = &'static str;
+            type Key = usize;
+            fn visible_count(&self) -> usize {
+                self.total
+            }
+            fn with_entry<R>(
+                &self,
+                _i: usize,
+                _f: impl FnOnce(&&'static str, &FlatEntry<usize>) -> R,
+            ) -> Option<R> {
+                None // nothing resident yet
+            }
+            fn key_at(&self, i: usize) -> Option<usize> {
+                (i < self.total).then_some(i)
+            }
+            fn flat_index_of(&self, key: &usize) -> Option<usize> {
+                (*key < self.total).then_some(*key)
+            }
+            fn parent(&self, _key: &usize) -> Option<usize> {
+                None
+            }
+            fn child_keys(&self, _key: &usize) -> Vec<usize> {
+                vec![]
+            }
+            fn version_signal(&self) -> Signal<u64> {
+                self.version.clone()
+            }
+            fn is_expanded(&self, _key: &usize) -> bool {
+                false
+            }
+            fn set_expanded(&self, _key: &usize, _expanded: bool) {}
+            fn row_state(&self, _flat_index: usize) -> RowState {
+                RowState::Loading
+            }
+            fn request_window(&self, range: Range<usize>) {
+                self.requested.borrow_mut().push(range);
+            }
+        }
+
+        let requested = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_source(Windowed {
+                total: 1000,
+                requested: requested.clone(),
+                version: Signal::new(0),
+            })
+            .add_column(name_col())
+            .show_header(false)
+            .row_height(30.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+
+        // The body pane is the view's first child (header suppressed).
+        // 300px / 30px = 10 visible + buffer → the loading rows realize
+        // as placeholder row widgets, NOT skipped.
+        let body_pane = tree.children(id)[0];
+        let placeholder_rows = tree.children(body_pane).len();
+        assert!(
+            placeholder_rows >= 10,
+            "loading rows must render as placeholders, got {placeholder_rows}"
+        );
+        // And the source was asked to load the realized window.
+        assert!(
+            !requested.borrow().is_empty(),
+            "request_window must be called for the visible range"
+        );
     }
 
     #[test]

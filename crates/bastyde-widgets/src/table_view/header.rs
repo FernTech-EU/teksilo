@@ -86,8 +86,6 @@ struct PressState {
     pointer_y: f32,
 }
 
-const MIN_COLUMN_WIDTH: f32 = 16.0;
-
 /// One header cell — label, optional sort indicator, click-to-sort,
 /// drag-to-resize on the trailing edge.
 pub(crate) struct HeaderCell {
@@ -110,6 +108,13 @@ pub(crate) struct HeaderCell {
     column_widths: SharedColumnWidths,
     /// Index of this column in the resolved-widths vector.
     width_index: usize,
+    /// The floor a resize drag can't push this column below — the
+    /// column's own `min_width` if declared, else the table's
+    /// `min_column_width_default`. Must match the floor
+    /// `ColumnSolver::resolve_in_order` clamps to (`layout.rs`), or a
+    /// drag below it creates a dead zone (the override commits smaller
+    /// than the solver ever renders).
+    min_width_floor: f32,
     resize_policy: ColumnResizePolicy,
     resize_state: ResizeStateHandle,
     /// Stable id of the owning TableView, propagated into the reorder
@@ -169,6 +174,7 @@ impl HeaderCell {
         column_widths_signal: Signal<HashMap<String, f32>>,
         column_widths: SharedColumnWidths,
         width_index: usize,
+        min_width_floor: f32,
         resize_policy: ColumnResizePolicy,
         resize_state: ResizeStateHandle,
         table_id: usize,
@@ -189,6 +195,7 @@ impl HeaderCell {
             column_widths_signal,
             column_widths,
             width_index,
+            min_width_floor,
             resize_policy,
             resize_state,
             table_id,
@@ -324,6 +331,7 @@ impl Widget for HeaderCell {
         let resizable = self.resizable;
         let reorderable = self.reorderable;
         let resize_zone = self.resize_handle_width;
+        let min_width_floor = self.min_width_floor;
         let policy = self.resize_policy;
         let width_index = self.width_index;
         let table_id = self.table_id;
@@ -384,7 +392,7 @@ impl Widget for HeaderCell {
                             // window x from the now cell-local position.
                             let delta = position.x + cell_x0 - state.start_pointer_x;
                             let signed = if rtl { -delta } else { delta };
-                            let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
+                            let new_w = (state.start_width + signed).max(min_width_floor);
                             if policy == ColumnResizePolicy::Live {
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
@@ -506,7 +514,7 @@ impl Widget for HeaderCell {
                             if policy == ColumnResizePolicy::OnRelease {
                                 let delta = position.x + cell_x0 - state.start_pointer_x;
                                 let signed = if rtl { -delta } else { delta };
-                                let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
+                                let new_w = (state.start_width + signed).max(min_width_floor);
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
                             is_resizing.set(false);

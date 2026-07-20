@@ -65,7 +65,7 @@ use std::time::Duration;
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use bastyde_core::ObserverHandle;
-use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::{Prop, Signal};
@@ -331,6 +331,14 @@ pub struct TableView<T: 'static> {
     /// Display-order indices into `self.columns`. Recomputed each
     /// `build()`; read by `place_children` and `paint`.
     display_indices: Rc<RefCell<Vec<usize>>>,
+    /// `(row, display_pos) -> WidgetId` for every cell realized by the
+    /// body pane's latest `build()`. Shared with `BodyPane` (the GridView
+    /// `tile_map` pattern — two holders across the sibling-of-scrollbar
+    /// split): the pane overwrites it wholesale each time it rebuilds, so
+    /// a cell that scrolled out of the realized buffer simply isn't in
+    /// the map. `accessibility()` reads it to point `active_descendant`
+    /// at the keyboard-focused cell's own AT node.
+    cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
     /// Counts of (leading-pinned, middle, trailing-pinned) columns —
     /// used by paint to draw pane dividers and by the drop-zone math
     /// to classify a drop position.
@@ -553,6 +561,7 @@ impl<T: 'static> TableView<T> {
             pane_total_refresh: Signal::new(0_u64),
             column_widths: Rc::new(RefCell::new(Vec::new())),
             display_indices: Rc::new(RefCell::new(Vec::new())),
+            cell_map: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
             viewport_height: Rc::new(Cell::new(600.0)),
             laid_out: Rc::new(Cell::new(false)),
@@ -1416,6 +1425,37 @@ impl<T: 'static> Widget for TableView<T> {
         // need it. We re-write `self.display_indices` here; later
         // build steps read it.
         let display_indices_now = self.display_order();
+
+        // Remap any `(row, display_pos)` pairs the *previous* order left in
+        // `focused_cell` / `editing_cell` / `cell_selection` onto their
+        // column's position under the order just computed, before it
+        // overwrites `self.display_indices` below. A column reorder drag or
+        // a pin toggle only bumps `version` (see the `column_order_signal` /
+        // `column_pinning_signal` effects above) — display position is
+        // recomputed here on every rebuild regardless of cause, so this map
+        // is the identity (a no-op) unless THIS rebuild's cause was an
+        // order/pinning change.
+        {
+            let old_display = self.display_indices.borrow();
+            if !old_display.is_empty() {
+                let old_to_new: Vec<Option<usize>> = old_display
+                    .iter()
+                    .map(|&decl_idx| {
+                        let id = &self.columns[decl_idx].id;
+                        display_indices_now
+                            .iter()
+                            .position(|&new_decl_idx| self.columns[new_decl_idx].id == *id)
+                    })
+                    .collect();
+                drop(old_display);
+                imperative::remap_cell_state(
+                    &self.focused_cell,
+                    &self.editing_cell,
+                    self.cell_selection.as_ref(),
+                    &old_to_new,
+                );
+            }
+        }
         *self.display_indices.borrow_mut() = display_indices_now.clone();
 
         // Self handlers: scroll wheel + keyboard + clip + focusable.
@@ -1427,11 +1467,20 @@ impl<T: 'static> Widget for TableView<T> {
         let smooth_scroll_duration = self.smooth_scroll_duration;
 
         // Bind focused_cell at RepaintOnly — its update redraws the
-        // focus ring without rebuilding the row tree.
+        // focus ring without rebuilding the row tree. Also at
+        // AccessibilityOnly (orthogonal — see `BindingLevel`) so a
+        // keyboard focus move re-walks the AT tree and re-resolves
+        // `active_descendant` in `accessibility()` below, even though
+        // nothing about the cell's own node changed.
         self.focused_cell.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
+        );
+        self.focused_cell.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
         );
 
         // Focus-aware selection + modality-gated focus ring. `begin_view_focus`
@@ -1816,6 +1865,7 @@ impl<T: 'static> Widget for TableView<T> {
                     self.column_widths_signal.clone(),
                     self.column_widths.clone(),
                     display_pos,
+                    col.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
                     self.column_resize_policy,
                     self.resize_state.clone(),
                     self.table_id,
@@ -1902,6 +1952,7 @@ impl<T: 'static> Widget for TableView<T> {
                 prev_built_end: self.pane_built_end.clone(),
                 total_refresh: self.pane_total_refresh.clone(),
                 row_entries: Vec::new(),
+                cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
         }
@@ -2306,6 +2357,19 @@ impl<T: 'static> Widget for TableView<T> {
         let n = builder.inner_mut();
         n.set_row_count(row_count);
         n.set_column_count(col_count);
+
+        // Roving focus: point active_descendant at the focused cell's own
+        // AT node so a screen reader follows arrow-key cell navigation
+        // (only the table root is otherwise focusable — the ring is
+        // visual-only). `cell_map` is a snapshot of the body pane's last
+        // realized cells; a focused cell that scrolled out of the
+        // realized buffer simply isn't in it, so no stale id is emitted.
+        if let Some(target) = self.focused_cell.get() {
+            let map = self.cell_map.borrow();
+            if let Some(&(_, cell_id)) = map.iter().find(|&&(pos, _)| pos == target) {
+                builder.set_active_descendant(widget_id_to_node_id(cell_id));
+            }
+        }
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

@@ -35,10 +35,10 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_data::{DragEligibility, SelectionMode};
+use bastyde_data::{DragEligibility, RowState, SelectionMode};
 
 use crate::common::row_metrics::SharedRowMetrics;
-use crate::data_views::{RowSelection, ViewId};
+use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
 use crate::table_view::a11y::{CellA11y, TreeRowA11y};
@@ -123,6 +123,10 @@ pub(crate) struct TreeBodyPane<T: 'static> {
 
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
+    /// `(row, display_pos) -> WidgetId` for every realized cell, shared
+    /// with the `TreeTableView` root (see `table_view::body_pane::BodyPane::cell_map`).
+    /// Overwritten wholesale at the end of every `build()`.
+    pub(crate) cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
 }
 
 impl<T: 'static> TreeBodyPane<T> {
@@ -233,6 +237,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
         // Build the visible row range.
         self.row_entries.clear();
+        let mut cell_entries: Vec<((usize, usize), WidgetId)> = Vec::new();
         let (start, end) = self.visible_range();
         let display_indices = self.display_indices.borrow().clone();
         let columns = self.columns.clone();
@@ -253,10 +258,28 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             // and a cloned key) on every rebuild, and rebuilds fire on every
             // filter keystroke.
             let row_anchor = source.anchor(flat_idx);
-            let entry = match source.meta(flat_idx) {
-                Some(e) => e,
-                None => continue,
-            };
+            let entry = source.meta(flat_idx);
+            // A `TreeDataSource` returns `None` from `with_entry` (and so
+            // from `meta`) both for a genuinely out-of-range index and for
+            // an in-range-but-not-yet-loaded row — the trait gives no way
+            // to tell those apart directly, so ask `row_state` (default
+            // `Ready`, so a fully-resident source never takes this path).
+            // A loading row renders placeholder cells instead of being
+            // skipped, so the scrollbar and layout stay stable while the
+            // window loads (mirrors `BodyPane`'s flat-table handling).
+            let loading =
+                entry.is_none() && (source.dnd.row_state_fn)(flat_idx) == RowState::Loading;
+            if entry.is_none() && !loading {
+                continue;
+            }
+            // Depth/has_children/is_expanded are unknowable for a loading
+            // row (the trait can't hand back partial `FlatEntry` data
+            // without the item) — render it as a depth-0 leaf; the real
+            // values replace it once `with_entry` resolves and the pane
+            // rebuilds on the source's version bump.
+            let depth = entry.map(|e| e.depth).unwrap_or(0);
+            let has_children = entry.map(|e| e.has_children).unwrap_or(false);
+            let is_expanded = entry.map(|e| e.is_expanded).unwrap_or(false);
             let row_selected = match (selection_mode, &selection) {
                 (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
                     s.is_selected(flat_idx)
@@ -289,32 +312,41 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     is_focused,
                     is_hovered: false,
                     is_editing,
-                    depth: Some(entry.depth),
+                    depth: (!loading).then_some(depth),
                     is_tree_column,
                 };
 
-                // Build the cell delegate widget.
-                let inner_widget =
-                    source.with_row(flat_idx, &|item, _meta| (col.cell)(item, &cell_ctx));
-                let inner_widget = match inner_widget {
+                // Build the cell delegate widget — a placeholder while
+                // loading, else the real delegate (which itself resolves
+                // to `None` for a row that turned out not to be resident,
+                // e.g. a race between `meta` and `with_row`).
+                let cell_widget = if loading {
+                    Some(default_placeholder())
+                } else {
+                    source.with_row(flat_idx, &|item, _meta| (col.cell)(item, &cell_ctx))
+                };
+                let inner_widget = match cell_widget {
                     Some(w) => w,
                     None => continue,
                 };
                 let inner_id = ctx.add_boxed(inner_widget);
 
                 // Wrap the tree-column's inner widget with indent +
-                // twist arrow.
-                let leading_id = if is_tree_column {
-                    let indent_px = entry.depth as f32 * indent_per_level;
+                // twist arrow — skipped while loading, since has_children
+                // isn't knowable yet (a placeholder twist would be a
+                // guess, not information).
+                let leading_id = if is_tree_column && !loading {
+                    let indent_px = depth as f32 * indent_per_level;
                     let source_for_twist = source.clone();
                     let twist_anchor = row_anchor.clone();
                     let twist = ctx.add(
-                        TwistArrow::new(cp::TREE_TWIST_SIZE, entry.has_children, entry.is_expanded)
-                            .on_click(move |_ctx| {
+                        TwistArrow::new(cp::TREE_TWIST_SIZE, has_children, is_expanded).on_click(
+                            move |_ctx| {
                                 if let Some(i) = twist_anchor.index() {
                                     source_for_twist.toggle_at(i);
                                 }
-                            }),
+                            },
+                        ),
                     );
                     // Build inside-out so each `ctx.add` happens
                     // outside the mutable borrow chain.
@@ -332,7 +364,9 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
                 let cell_a11y =
                     CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected);
-                cell_ids.push(ctx.add(cell_a11y));
+                let cell_id = ctx.add(cell_a11y);
+                cell_entries.push(((flat_idx, display_pos), cell_id));
+                cell_ids.push(cell_id);
             }
 
             // Wrap cells in BodyRow (Role::Row by default), but add the
@@ -358,9 +392,9 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             let tree_row_id = ctx.add(TreeRowA11y::new(
                 row_inner_id,
                 flat_idx + 2,
-                entry.depth + 1,
-                if entry.has_children {
-                    Some(entry.is_expanded)
+                depth + 1,
+                if has_children {
+                    Some(is_expanded)
                 } else {
                     None
                 },
@@ -604,6 +638,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             ctx.apply_handlers(tree_row_id, row_handlers);
         }
         ctx.end_view_focus();
+
+        *self.cell_map.borrow_mut() = cell_entries;
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

@@ -130,6 +130,12 @@ pub(crate) struct BodyPane<T: 'static> {
 
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
+    /// `(row, display_pos) -> WidgetId` for every realized cell, shared
+    /// with the `TableView` root (the GridView `tile_map` pattern).
+    /// Overwritten wholesale at the end of every `build()`; the root's
+    /// `accessibility()` reads it to resolve `active_descendant` for the
+    /// keyboard-focused cell.
+    pub(crate) cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
 }
 
 impl<T: 'static> BodyPane<T> {
@@ -235,6 +241,7 @@ impl<T: 'static> Widget for BodyPane<T> {
 
         // Build the visible row range.
         self.row_entries.clear();
+        let mut cell_entries: Vec<((usize, usize), WidgetId)> = Vec::new();
         let (start, end) = self.visible_range();
         let columns = self.columns.clone();
         let with_item_fn = self.with_item_fn.clone();
@@ -369,6 +376,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                         });
                     ctx.apply_handlers(cell_id, cell_handlers);
 
+                    cell_entries.push(((row_idx, display_pos), cell_id));
                     cell_ids.push(cell_id);
                 }
             }
@@ -611,6 +619,8 @@ impl<T: 'static> Widget for BodyPane<T> {
             self.row_entries.push((row_idx, row_id));
         }
         ctx.end_view_focus();
+
+        *self.cell_map.borrow_mut() = cell_entries;
 
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }

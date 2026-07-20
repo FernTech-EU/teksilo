@@ -331,6 +331,32 @@ impl CellSelectionModel {
             }
         }
     }
+
+    /// Remap the column half of every stored `(row, col)` pair through
+    /// `old_to_new` — `old_to_new[old_col]` gives that column's new display
+    /// position, or `None` if it dropped out of the visible set. Rows are
+    /// untouched.
+    ///
+    /// A column reorder or pin toggle permutes display positions rather than
+    /// shifting a contiguous run, so it can't reuse
+    /// `adjust_for_column_insert`/`remove`'s offset arithmetic — the caller
+    /// (a rebuild that recomputed display order) hands over the full
+    /// old-position -> new-position mapping instead.
+    pub(crate) fn remap_columns(&self, old_to_new: &[Option<usize>]) {
+        let map = |c: usize| old_to_new.get(c).copied().flatten();
+        let old = self.selection.get();
+        let new: BTreeSet<(usize, usize)> = old
+            .iter()
+            .filter_map(|&(r, c)| map(c).map(|nc| (r, nc)))
+            .collect();
+        if new != old {
+            self.selection.set(new);
+        }
+        self.remap_base(|(r, c)| map(c).map(|nc| (r, nc)));
+        if let Some((r, c)) = self.anchor.get() {
+            self.anchor.set(map(c).map(|nc| (r, nc)));
+        }
+    }
 }
 
 impl Clone for CellSelectionModel {
@@ -488,6 +514,35 @@ mod tests {
         let v: Vec<_> = m.selection_signal().get().into_iter().collect();
         // col 1 dropped (in range), col 6 shifts to 4.
         assert_eq!(v, vec![(0, 4)]);
+    }
+
+    #[test]
+    fn remap_columns_follows_reorder_and_drops_removed_columns() {
+        let m = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        m.select(0, 0); // anchor + base cleared by `select`
+        m.toggle(1, 2); // Ctrl-click: commits {(0,0),(1,2)} as base, anchor (1,2)
+        // Column 0 moves to display position 2, column 2 moves to 0; column 1
+        // (unselected, but exercised via `extend_to` below) drops out.
+        let old_to_new = vec![Some(2), None, Some(0)];
+        m.remap_columns(&old_to_new);
+        let v: Vec<_> = m.selection_signal().get().into_iter().collect();
+        assert_eq!(v, vec![(0, 2), (1, 0)], "columns follow their new position");
+        // The anchor moved with column 2 -> 0; a subsequent extend must build
+        // its rectangle from the remapped anchor, not the stale one.
+        m.extend_to(1, 1);
+        assert!(
+            m.is_selected(1, 0),
+            "remapped anchor (1,0) must survive into the next extend"
+        );
+    }
+
+    #[test]
+    fn remap_columns_drops_selection_in_a_removed_column() {
+        let m = CellSelectionModel::new(TableSelectionMode::MultiCell);
+        m.select(3, 1);
+        // Column 1 (the only selected one) is gone from the new order.
+        m.remap_columns(&[Some(0), None]);
+        assert_eq!(m.count(), 0);
     }
 
     #[test]
