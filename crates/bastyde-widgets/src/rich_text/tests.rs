@@ -6078,3 +6078,43 @@ fn an_unescaped_thematic_break_is_dropped_by_the_parser() {
         "an unescaped thematic break is expected to be dropped, got:\n{plain}"
     );
 }
+
+#[test]
+fn superscript_round_trips_through_the_handle() {
+    // Until MergeTextFormatDto carried vertical_alignment, this whole API was
+    // a silent no-op: the call succeeded and the document was unchanged. This
+    // test is the guard that it stays reachable.
+    let doc = TextDocument::new();
+    doc.set_plain_text("E=mc2").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    handle.select_range(4, 5);
+
+    assert!(!handle.is_superscript());
+    handle.toggle_superscript();
+    assert!(handle.is_superscript(), "superscript must actually apply");
+
+    handle.toggle_superscript();
+    assert!(!handle.is_superscript(), "and must come back off");
+}
+
+#[test]
+fn superscript_and_subscript_are_mutually_exclusive() {
+    // One property, two toggles. A run cannot be both raised and lowered, so
+    // asking for one must clear the other rather than leaving a stale button
+    // lit in the toolbar.
+    let doc = TextDocument::new();
+    doc.set_plain_text("H2O").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+    handle.select_range(1, 2);
+
+    handle.toggle_subscript();
+    assert!(handle.is_subscript() && !handle.is_superscript());
+
+    handle.toggle_superscript();
+    assert!(
+        handle.is_superscript() && !handle.is_subscript(),
+        "raising a subscript run must clear the subscript"
+    );
+}

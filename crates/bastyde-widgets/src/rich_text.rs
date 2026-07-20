@@ -73,7 +73,8 @@ use bastyde_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, Widg
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
-    Alignment, BlockFormat, ListStyle, MoveMode, SelectionType, TextDocument, TextFormat,
+    Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, SelectionType,
+    TextDocument, TextFormat,
 };
 use bastyde_text::{
     EditorTypographyDefaults, FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode,
@@ -1022,6 +1023,66 @@ impl RichTextEditor {
     pub fn toggle_strikethrough(&self) {
         let current = self.caret_char_format().font_strikeout.unwrap_or(false);
         self.set_strikethrough(!current);
+    }
+
+    // --- Vertical alignment (super / subscript) ---------------------------
+    //
+    // One property with three meaningful states, surfaced as two independent
+    // toggles because that is how a toolbar presents it. Setting one clears
+    // the other, since a run cannot be both.
+
+    /// Raise the selection to superscript, or drop it back to the baseline.
+    pub fn set_superscript(&self, enabled: bool) {
+        self.set_vertical_alignment(if enabled {
+            CharVerticalAlignment::SuperScript
+        } else {
+            CharVerticalAlignment::Normal
+        });
+    }
+
+    /// Lower the selection to subscript, or drop it back to the baseline.
+    pub fn set_subscript(&self, enabled: bool) {
+        self.set_vertical_alignment(if enabled {
+            CharVerticalAlignment::SubScript
+        } else {
+            CharVerticalAlignment::Normal
+        });
+    }
+
+    /// Set the selection's vertical alignment directly. `Normal` is the
+    /// baseline; `Middle` exists in the model but has no toolbar affordance.
+    pub fn set_vertical_alignment(&self, alignment: CharVerticalAlignment) {
+        self.apply_char_format(TextFormat {
+            vertical_alignment: Some(alignment),
+            ..Default::default()
+        });
+    }
+
+    /// The caret's vertical alignment, `Normal` when unset.
+    pub fn get_vertical_alignment(&self) -> CharVerticalAlignment {
+        self.caret_char_format()
+            .vertical_alignment
+            .unwrap_or(CharVerticalAlignment::Normal)
+    }
+
+    /// True while the caret sits in superscript text.
+    pub fn is_superscript(&self) -> bool {
+        self.get_vertical_alignment() == CharVerticalAlignment::SuperScript
+    }
+
+    /// True while the caret sits in subscript text.
+    pub fn is_subscript(&self) -> bool {
+        self.get_vertical_alignment() == CharVerticalAlignment::SubScript
+    }
+
+    /// Flip superscript on the selection. Turning it on replaces subscript.
+    pub fn toggle_superscript(&self) {
+        self.set_superscript(!self.is_superscript());
+    }
+
+    /// Flip subscript on the selection. Turning it on replaces superscript.
+    pub fn toggle_subscript(&self) {
+        self.set_subscript(!self.is_subscript());
     }
 
     // --- Block-format commands --------------------------------------------
@@ -1981,6 +2042,64 @@ impl EditorHandle {
     /// Whether strikethrough.
     pub fn is_strikethrough(&self) -> bool {
         self.caret_char_format().font_strikeout.unwrap_or(false)
+    }
+
+    // --- Vertical alignment (super / subscript) ----------------------------
+    //
+    // See [`RichTextEditor::set_superscript`]: one tri-state property shown as
+    // two toggles, because a run cannot be both raised and lowered.
+
+    /// Raise the selection to superscript, or return it to the baseline.
+    pub fn set_superscript(&self, enabled: bool) {
+        self.set_vertical_alignment(if enabled {
+            CharVerticalAlignment::SuperScript
+        } else {
+            CharVerticalAlignment::Normal
+        });
+    }
+
+    /// Lower the selection to subscript, or return it to the baseline.
+    pub fn set_subscript(&self, enabled: bool) {
+        self.set_vertical_alignment(if enabled {
+            CharVerticalAlignment::SubScript
+        } else {
+            CharVerticalAlignment::Normal
+        });
+    }
+
+    /// Set the selection's vertical alignment directly.
+    pub fn set_vertical_alignment(&self, alignment: CharVerticalAlignment) {
+        self.apply_char_format(TextFormat {
+            vertical_alignment: Some(alignment),
+            ..Default::default()
+        });
+    }
+
+    /// The caret's vertical alignment, `Normal` when unset.
+    pub fn get_vertical_alignment(&self) -> CharVerticalAlignment {
+        self.caret_char_format()
+            .vertical_alignment
+            .unwrap_or(CharVerticalAlignment::Normal)
+    }
+
+    /// True while the caret sits in superscript text.
+    pub fn is_superscript(&self) -> bool {
+        self.get_vertical_alignment() == CharVerticalAlignment::SuperScript
+    }
+
+    /// True while the caret sits in subscript text.
+    pub fn is_subscript(&self) -> bool {
+        self.get_vertical_alignment() == CharVerticalAlignment::SubScript
+    }
+
+    /// Flip superscript on the selection. Turning it on replaces subscript.
+    pub fn toggle_superscript(&self) {
+        self.set_superscript(!self.is_superscript());
+    }
+
+    /// Flip subscript on the selection. Turning it on replaces superscript.
+    pub fn toggle_subscript(&self) {
+        self.set_subscript(!self.is_subscript());
     }
 
     // --- Block-format query / apply ----------------------------------------
