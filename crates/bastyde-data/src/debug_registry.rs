@@ -60,9 +60,15 @@ struct Entry {
 /// alive. The caller is responsible for retaining a strong `Rc` to
 /// the adapter (typically by stashing it inside the model's own
 /// `Rc<RefCell<Inner>>`, see `ListModel::debug_named`).
+///
+/// Prunes dead entries first — [`snapshot`] also prunes, but a session that
+/// churns many short-lived models (e.g. lazily realized rows) without ever
+/// calling `snapshot` would otherwise grow the registry unbounded.
 pub fn register(name: impl Into<String>, adapter: Weak<dyn ModelDebug>) {
     REGISTRY.with(|cell| {
-        cell.borrow_mut().push(Entry {
+        let mut registry = cell.borrow_mut();
+        registry.retain(|entry| entry.weak.strong_count() > 0);
+        registry.push(Entry {
             name: name.into(),
             weak: adapter,
         });
@@ -138,5 +144,28 @@ mod tests {
         // The dead entry has been pruned — count is back to initial.
         assert_eq!(snap.len(), initial);
         assert!(snap.iter().all(|(n, _)| n != "ephemeral"));
+    }
+
+    #[test]
+    fn register_prunes_dead_entries_without_a_snapshot_call() {
+        // Regression: `register` must prune dead weaks itself rather than
+        // relying on the caller to eventually call `snapshot` — a session
+        // that churns many short-lived models (lazily realized rows, say)
+        // without ever opening the inspector would otherwise grow the
+        // registry unbounded. Fresh thread-local (tests run on their own
+        // thread, see `dead_weaks_are_pruned`), so it starts empty.
+        {
+            let m: Rc<dyn ModelDebug> = Rc::new(DummyModel { len: Cell::new(0) });
+            register("ephemeral", Rc::downgrade(&m));
+            // m drops here, weak becomes dead — never snapshotted.
+        }
+
+        let m2: Rc<dyn ModelDebug> = Rc::new(DummyModel { len: Cell::new(1) });
+        register("still-alive", Rc::downgrade(&m2));
+
+        // `register` pruned the dead "ephemeral" entry before pushing the
+        // new one, so exactly one raw entry remains — not two.
+        let raw_len = REGISTRY.with(|cell| cell.borrow().len());
+        assert_eq!(raw_len, 1);
     }
 }

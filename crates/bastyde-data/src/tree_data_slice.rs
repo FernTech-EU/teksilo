@@ -96,16 +96,21 @@ impl<K, T> TreeRow<K, T> {
 /// through the backend (with undo) and reports whether it took. On `true` the
 /// slice re-sources itself via the [`set_source`](TreeDataSlice::set_source)
 /// closure.
-type ReorderFn<K> = Box<dyn Fn(K, K, DropPosition) -> bool>;
+///
+/// `Rc`, not `Box`: callers (`accept_drop`/`drag`/`resolve`) clone the handle
+/// out of its `RefCell` and drop the borrow *before* invoking the closure, so
+/// a closure that calls back into the slice (e.g. re-registering itself via
+/// `set_reorder`) doesn't hit a `BorrowMutError`.
+type ReorderFn<K> = Rc<dyn Fn(K, K, DropPosition) -> bool>;
 /// Per-row drag gate. Default (unset): every row is `NoDrag`.
-type DragPolicyFn<K> = Box<dyn Fn(&K) -> DragEligibility>;
+type DragPolicyFn<K> = Rc<dyn Fn(&K) -> DragEligibility>;
 /// Domain drop policy: `(dragged, target, target_item, position) -> effective
 /// position`, or `None` to forbid. The engine applies its own cycle guard first
 /// and looks up the target's payload, so the resolver can encode domain rules
 /// that depend on the target node (e.g. "a drop onto a non-container leaf
 /// becomes `After` it") **without capturing the slice** (which would form an
 /// `Rc` cycle).
-type DropResolverFn<K, T> = Box<dyn Fn(&K, &K, &T, DropPosition) -> Option<DropPosition>>;
+type DropResolverFn<K, T> = Rc<dyn Fn(&K, &K, &T, DropPosition) -> Option<DropPosition>>;
 /// Row source: produces the whole indent-ordered stream for the current state.
 type SourceFn<K, T> = Box<dyn Fn() -> Vec<TreeRow<K, T>>>;
 
@@ -219,12 +224,12 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
     /// Install the reorder command (`dragged, target, position -> applied`).
     /// Without one, drops are refused.
     pub fn set_reorder(&self, f: impl Fn(K, K, DropPosition) -> bool + 'static) {
-        *self.inner.reorder.borrow_mut() = Some(Box::new(f));
+        *self.inner.reorder.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Install the per-row drag gate. Without one, no row is draggable.
     pub fn set_drag_policy(&self, f: impl Fn(&K) -> DragEligibility + 'static) {
-        *self.inner.drag_policy.borrow_mut() = Some(Box::new(f));
+        *self.inner.drag_policy.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Install the domain drop resolver. The engine's cycle guard (no drop into
@@ -237,7 +242,7 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
         &self,
         f: impl Fn(&K, &K, &T, DropPosition) -> Option<DropPosition> + 'static,
     ) {
-        *self.inner.drop_resolver.borrow_mut() = Some(Box::new(f));
+        *self.inner.drop_resolver.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Whether nodes appearing for the first time start expanded (`true`) or
@@ -732,8 +737,11 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
         if dragged == target || self.is_descendant(target, dragged) {
             return None;
         }
-        let resolver = self.inner.drop_resolver.borrow();
-        match resolver.as_ref() {
+        // Clone the handle out and drop the `drop_resolver` borrow before
+        // calling `f` — a resolver that calls `set_drop_resolver` on the
+        // same slice would otherwise hit a `BorrowMutError`.
+        let resolver = self.inner.drop_resolver.borrow().clone();
+        match resolver {
             Some(f) => {
                 let row_pos = self.inner.row_pos.borrow();
                 let &idx = row_pos.get(target)?; // absent target → forbid
@@ -901,8 +909,10 @@ impl<K: ItemKey, T: PartialEq + 'static> TreeDataSource for TreeDataSlice<K, T> 
     }
 
     fn drag(&self, key: &K) -> DragEligibility {
-        let policy = self.inner.drag_policy.borrow();
-        match policy.as_ref() {
+        // Clone the handle out and drop the borrow before calling `f` — see
+        // `resolve`'s matching comment.
+        let policy = self.inner.drag_policy.borrow().clone();
+        match policy {
             Some(f) => f(key),
             None => DragEligibility::NoDrag,
         }
@@ -928,12 +938,14 @@ impl<K: ItemKey, T: PartialEq + 'static> TreeDataSource for TreeDataSlice<K, T> 
         let Some(place) = self.resolve(&dragged, &commit.target, commit.position) else {
             return false;
         };
-        let applied = {
-            let reorder = self.inner.reorder.borrow();
-            match reorder.as_ref() {
-                Some(f) => f(dragged, commit.target.clone(), place),
-                None => return false,
-            }
+        // Clone the handle out and drop the `reorder` borrow before calling
+        // `f` — a reorder command that calls back into the slice (e.g.
+        // `set_reorder`, to reconfigure itself after applying the move)
+        // would otherwise hit a `BorrowMutError`.
+        let reorder = self.inner.reorder.borrow().clone();
+        let applied = match reorder {
+            Some(f) => f(dragged, commit.target.clone(), place),
+            None => return false,
         };
         if applied {
             self.reload();
@@ -1269,6 +1281,28 @@ mod tests {
         });
         assert!(ok);
         assert!(moved.get());
+    }
+
+    #[test]
+    fn reorder_closure_can_call_back_into_the_slice() {
+        // Regression: `accept_drop` used to hold a `Ref` on the reorder
+        // closure's `RefCell` for the whole call, so a closure that called
+        // back into the slice — e.g. `set_reorder`, to swap its own policy
+        // out right after applying a move — hit a `BorrowMutError`. The
+        // handle must be cloned out and the borrow dropped before the
+        // closure runs.
+        let slice = expanded_slice();
+        let reentrant_target = slice.clone();
+        slice.set_reorder(move |_dragged, _target, _pos| {
+            reentrant_target.set_reorder(|_, _, _| true);
+            true
+        });
+        let ok = slice.accept_drop(DropCommit {
+            source: DragSource::SameView { key: 102 },
+            target: 106,
+            position: DropPosition::Before,
+        });
+        assert!(ok);
     }
 
     #[test]

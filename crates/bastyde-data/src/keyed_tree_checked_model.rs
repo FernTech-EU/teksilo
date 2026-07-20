@@ -45,7 +45,7 @@
 //! ```
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use bastyde_core::signal::{ObserverHandle, Signal};
@@ -65,8 +65,13 @@ struct Inner<K: ItemKey> {
     bool_signals: HashMap<K, Signal<bool>>,
     bridge_guards: HashMap<K, Rc<Cell<bool>>>,
     bridge_observers: HashMap<K, (ObserverHandle, ObserverHandle)>,
-    /// True while performing an internal cascade — suppresses cascade observers.
-    suppress: bool,
+    /// Keys whose signal is *currently* being written by [`write_state`] as
+    /// part of an in-progress cascade — scoped per-key, not a single global
+    /// flag, so an unrelated key's write (e.g. triggered by an app observer
+    /// reacting mid-cascade) still runs its own cascade + ancestor recompute
+    /// instead of silently no-opping. See [`crate::tree_checked_model`] for
+    /// the full rationale (identical design, keyed by `K` here).
+    suppressed: HashSet<K>,
 }
 
 /// Per-node checkbox state for a domain-keyed tree, with optional
@@ -95,7 +100,7 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
                 bool_signals: HashMap::new(),
                 bridge_guards: HashMap::new(),
                 bridge_observers: HashMap::new(),
-                suppress: false,
+                suppressed: HashSet::new(),
             })),
             mode: Rc::new(Cell::new(AggregateMode::default())),
         }
@@ -171,15 +176,17 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
             let Some(mode_rc) = mode_w.upgrade() else {
                 return;
             };
-            if inner_rc.borrow().suppress {
+            // Re-entry guard: a no-op only if THIS key's write is itself a
+            // cascade-internal echo (see `Inner::suppressed`). An unrelated
+            // key reached via `write_state`'s notification (e.g. an app
+            // observer that checks a different key) is not suppressed and
+            // runs its own cascade below.
+            if inner_rc.borrow().suppressed.contains(&node) {
                 return;
             }
             if mode_rc.get() != AggregateMode::DescendantsDriveAncestors {
                 return;
             }
-            // RAII: suppress re-entrant observers for the whole cascade and clear
-            // the flag on every exit path (even a panic in a shape closure).
-            let _guard = SuppressGuard::new(&inner_rc);
             // Cascade Checked / Unchecked down; Indeterminate is parent-only.
             if *new_state != CheckState::Indeterminate {
                 cascade_descendants(&children, &inner_rc, &node, *new_state);
@@ -344,7 +351,8 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
         let mut keys: Vec<K> = self.inner.borrow().state.keys().cloned().collect();
         // Deepest first, so a parent recomputes after its children are finalised.
         keys.sort_by_key(|k| std::cmp::Reverse(self.depth_of(k)));
-        let _guard = SuppressGuard::new(&self.inner);
+        // No outer guard needed: `recompute_from_children` -> `write_state`
+        // already scopes suppression to each individual key it writes.
         for k in keys {
             recompute_from_children(&self.children, &self.inner, &k);
         }
@@ -370,18 +378,21 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
     }
 }
 
-/// RAII guard: sets `suppress = true` on creation, clears it on drop — so a
-/// panic in a shape closure mid-cascade can't leave the model permanently
-/// unable to cascade.
+/// RAII guard: marks a single key as cascade-suppressed on creation,
+/// unmarks it on drop — so a panic in a shape closure mid-write can't leave
+/// that key permanently unable to cascade. Scoped to one `K` (see
+/// `Inner::suppressed`), not the whole model.
 struct SuppressGuard<K: ItemKey> {
     inner: Rc<RefCell<Inner<K>>>,
+    key: K,
 }
 
 impl<K: ItemKey> SuppressGuard<K> {
-    fn new(inner: &Rc<RefCell<Inner<K>>>) -> Self {
-        inner.borrow_mut().suppress = true;
+    fn new(inner: &Rc<RefCell<Inner<K>>>, key: K) -> Self {
+        inner.borrow_mut().suppressed.insert(key.clone());
         Self {
             inner: inner.clone(),
+            key,
         }
     }
 }
@@ -390,7 +401,7 @@ impl<K: ItemKey> Drop for SuppressGuard<K> {
     fn drop(&mut self) {
         // A borrow may still be held during a panic unwind; best-effort clear.
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
-            inner.suppress = false;
+            inner.suppressed.remove(&self.key);
         }
     }
 }
@@ -458,6 +469,9 @@ fn write_state<K: ItemKey>(inner: &Rc<RefCell<Inner<K>>>, node: &K, state: Check
             .clone()
     };
     if sig.get() != state {
+        // Suppress only `node`'s own cascade observer for the duration of
+        // this write — it's about to see the value it's already applying.
+        let _guard = SuppressGuard::new(inner, node.clone());
         sig.set(state);
     }
 }
@@ -712,5 +726,48 @@ mod tests {
         assert_eq!(m.check_state(&"A"), CheckState::Indeterminate);
         m.check("C");
         assert_eq!(m.check_state(&"A"), CheckState::Checked);
+    }
+
+    #[test]
+    fn reentrant_write_to_unrelated_key_still_cascades() {
+        // Regression: cascade suppression must be scoped to the keys an
+        // in-progress cascade actually touches, not the whole model. An app
+        // observer reacting to "a" becoming Checked by checking the
+        // *unrelated* key "c" (under a different root) must still get its
+        // own full cascade — "c"'s ancestor "root2" has to recompute, even
+        // though "root1"'s cascade is still on the stack.
+        let parents: HashMap<&str, &str> = [("a", "root1"), ("b", "root1"), ("c", "root2")]
+            .into_iter()
+            .collect();
+        let m = KeyedTreeCheckedModel::<&str>::new(
+            |k| match *k {
+                "root1" => vec!["a", "b"],
+                "root2" => vec!["c"],
+                _ => vec![],
+            },
+            move |k| parents.get(k).copied(),
+        );
+        let _ = (
+            m.signal_for("root1"),
+            m.signal_for("a"),
+            m.signal_for("b"),
+            m.signal_for("root2"),
+            m.signal_for("c"),
+        );
+
+        let m_for_observer = m.clone();
+        let _obs = m.signal_for("a").observe(move |state| {
+            if *state == CheckState::Checked {
+                m_for_observer.check("c");
+            }
+        });
+
+        m.check("root1"); // cascades Checked to a (and b), reentrantly checking c
+
+        assert_eq!(m.check_state(&"a"), CheckState::Checked);
+        assert_eq!(m.check_state(&"c"), CheckState::Checked);
+        // root2's only child (c) is Checked, so root2 must have recomputed —
+        // not stayed at its stale Unchecked default.
+        assert_eq!(m.check_state(&"root2"), CheckState::Checked);
     }
 }

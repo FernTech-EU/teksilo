@@ -77,6 +77,15 @@ pub enum ChartAggregateFn {
 
 impl ChartAggregateFn {
     /// Apply the reduction to a bucket's values.
+    ///
+    /// On an empty slice, every built-in variant returns `0.0`
+    /// (`Mean`/`Min`/`Max`/`First`/`Last`) or the empty sum (`Sum`, also
+    /// `0.0`) — a uniform, unsurprising convention rather than `Min`/`Max`
+    /// leaking their fold seed (`±INFINITY`) into a chart value. `Custom`
+    /// returns whatever the supplied closure computes for `&[]`. No internal
+    /// caller actually passes an empty slice — `compute_bucket_datum` bails
+    /// out before calling `apply` for an empty bucket — so this only bites a
+    /// direct caller.
     pub fn apply(&self, values: &[f32]) -> f32 {
         match self {
             ChartAggregateFn::Mean => {
@@ -87,8 +96,20 @@ impl ChartAggregateFn {
                 }
             }
             ChartAggregateFn::Sum => values.iter().sum(),
-            ChartAggregateFn::Min => values.iter().copied().fold(f32::INFINITY, f32::min),
-            ChartAggregateFn::Max => values.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+            ChartAggregateFn::Min => {
+                if values.is_empty() {
+                    0.0
+                } else {
+                    values.iter().copied().fold(f32::INFINITY, f32::min)
+                }
+            }
+            ChartAggregateFn::Max => {
+                if values.is_empty() {
+                    0.0
+                } else {
+                    values.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                }
+            }
             ChartAggregateFn::First => values.first().copied().unwrap_or(0.0),
             ChartAggregateFn::Last => values.last().copied().unwrap_or(0.0),
             ChartAggregateFn::Custom(f) => f(values),
@@ -269,6 +290,7 @@ fn translate<T: Clone + 'static>(
             if old_bc >= 1 {
                 let start = (old_bc - 1) * bs;
                 let end = (start + bs).min(new_total);
+                let mut wrote = false;
                 if let Some(d) = compute_bucket_datum(
                     &inner.with_point_fn,
                     series,
@@ -279,12 +301,24 @@ fn translate<T: Clone + 'static>(
                     && old_bc - 1 < list.len()
                 {
                     list[old_bc - 1] = d;
+                    wrote = true;
                 }
-                inner.divergence.insert(series, old_bc - 1);
-                out.push(ChartChange::PointUpdated {
-                    series,
-                    index: old_bc - 1,
-                });
+                // Only notify/diverge if the write actually happened — a
+                // failed guard (stale `buckets` entry, an empty computed
+                // range) must be a silent no-op, not a claim that a bucket
+                // changed when it didn't.
+                if wrote {
+                    inner.divergence.insert(series, old_bc - 1);
+                    out.push(ChartChange::PointUpdated {
+                        series,
+                        index: old_bc - 1,
+                    });
+                } else {
+                    debug_assert!(
+                        false,
+                        "chart_aggregate: last-bucket update guard failed for an existing bucket"
+                    );
+                }
             }
 
             if new_bc > old_bc {
@@ -321,6 +355,7 @@ fn translate<T: Clone + 'static>(
             let n = (inner.point_count_fn)(series);
             let start = bucket_index * bs;
             let end = (start + bs).min(n);
+            let mut wrote = false;
             if let Some(d) = compute_bucket_datum(
                 &inner.with_point_fn,
                 series,
@@ -331,12 +366,23 @@ fn translate<T: Clone + 'static>(
                 && bucket_index < list.len()
             {
                 list[bucket_index] = d;
+                wrote = true;
             }
-            inner.divergence.insert(series, bucket_index);
-            vec![ChartChange::PointUpdated {
-                series,
-                index: bucket_index,
-            }]
+            // Only notify/diverge if the write actually happened — see the
+            // matching guard in the `PointsInserted` arm above.
+            if wrote {
+                inner.divergence.insert(series, bucket_index);
+                vec![ChartChange::PointUpdated {
+                    series,
+                    index: bucket_index,
+                }]
+            } else {
+                debug_assert!(
+                    false,
+                    "chart_aggregate: point-update guard failed for an existing bucket"
+                );
+                vec![]
+            }
         }
         ChartChange::SeriesDataReplaced { series } => {
             let series = *series;
@@ -557,6 +603,24 @@ impl<T: 'static> std::fmt::Debug for ChartAggregate<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_on_empty_slice_is_zero_for_every_built_in_variant() {
+        // Regression: `Min`/`Max` used to leak their fold seed (`±INFINITY`)
+        // on an empty bucket, inconsistent with `Mean`/`Sum`/`First`/`Last`
+        // all returning `0.0`. No internal caller hits this path, but a
+        // direct caller shouldn't see an infinity fall out of a chart value.
+        for f in [
+            ChartAggregateFn::Mean,
+            ChartAggregateFn::Sum,
+            ChartAggregateFn::Min,
+            ChartAggregateFn::Max,
+            ChartAggregateFn::First,
+            ChartAggregateFn::Last,
+        ] {
+            assert_eq!(f.apply(&[]), 0.0, "{f:?} on empty slice");
+        }
+    }
 
     fn series_with(values: &[f32]) -> (ChartModel<i32>, SeriesId) {
         let model: ChartModel<i32> = ChartModel::new();

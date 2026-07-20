@@ -227,7 +227,7 @@ impl<T: 'static> ChartWindow<T> {
         index: usize,
         f: impl FnOnce(&ChartDatum<T>) -> R,
     ) -> Option<R> {
-        let (with_point_fn, src_idx, in_bounds) = {
+        let (with_point_fn, src_idx) = {
             let guard = self.inner.borrow();
             let total = (guard.point_count_fn)(series);
             let start = guard
@@ -236,11 +236,15 @@ impl<T: 'static> ChartWindow<T> {
                 .copied()
                 .unwrap_or_else(|| total.saturating_sub(guard.window_size));
             let visible = total.saturating_sub(start);
-            (guard.with_point_fn.clone(), start + index, index < visible)
+            // Bounds-check before computing `start + index` — `index` is
+            // caller-supplied and may be far out of range (e.g. usize::MAX),
+            // which would overflow the addition once the window has slid
+            // (start > 0).
+            if index >= visible {
+                return None;
+            }
+            (guard.with_point_fn.clone(), start + index)
         };
-        if !in_bounds {
-            return None;
-        }
         let f_cell: Cell<Option<_>> = Cell::new(Some(f));
         let slot: Cell<Option<R>> = Cell::new(None);
         (with_point_fn)(series, src_idx, &|d: &ChartDatum<T>| {
@@ -333,34 +337,42 @@ fn translate<T: 'static>(
                 return vec![ChartChange::SeriesDataReplaced { series }];
             }
 
+            // Absolute recompute (mirrors `ChartAggregate::translate`'s
+            // `PointsInserted` branch): derive what the window shows from
+            // absolute source indices rather than assuming exactly one
+            // `shift`-sized block is evicted/appended. That assumption only
+            // holds once the window is already full — a multi-point tail
+            // append can take a not-yet-full window straight past full in
+            // one step, and treating that as a same-size slide emits an
+            // insertion range that's too short for the actual growth,
+            // landing past the end of a consumer's mirrored array.
+            let old_visible = old_total.saturating_sub(old_start);
             let new_start = new_total.saturating_sub(window_size);
-            let shift = new_start.saturating_sub(old_start);
-            let out = if shift == 0 {
-                // Window not yet full — the new points land directly.
-                let local = (range.start - new_start)..(range.end - new_start);
-                inner.divergence.insert(series, local.start);
-                vec![ChartChange::PointsInserted {
+            let new_visible = new_total.saturating_sub(new_start);
+            // Old-window entries below `new_start` are no longer in range;
+            // the rest (if any) survive as the new window's prefix.
+            let dropped = new_start.saturating_sub(old_start).min(old_visible);
+            let remaining = old_visible - dropped;
+
+            let mut out = Vec::new();
+            if dropped > 0 {
+                out.push(ChartChange::PointsRemoved {
                     series,
-                    range: local,
-                }]
-            } else if shift >= window_size {
-                // Pathological bulk append larger than the window itself.
-                inner.divergence.insert(series, 0);
-                vec![ChartChange::SeriesDataReplaced { series }]
-            } else {
-                // Window was full (or became full): it slides.
-                inner.divergence.insert(series, 0);
-                vec![
-                    ChartChange::PointsRemoved {
-                        series,
-                        range: 0..shift,
-                    },
-                    ChartChange::PointsInserted {
-                        series,
-                        range: (window_size - shift)..window_size,
-                    },
-                ]
-            };
+                    range: 0..dropped,
+                });
+            }
+            if new_visible > remaining {
+                out.push(ChartChange::PointsInserted {
+                    series,
+                    range: remaining..new_visible,
+                });
+            }
+            // A front-removal renumbers every surviving index, so the first
+            // index that may differ is 0; a pure append (no removal) leaves
+            // the old prefix untouched, so it's the position after it.
+            inner
+                .divergence
+                .insert(series, if dropped > 0 { 0 } else { remaining });
             inner.starts.insert(series, new_start);
             out
         }
@@ -458,6 +470,17 @@ mod tests {
             .map(|i| window.with_point(s, i, |d| d.value).unwrap())
             .collect();
         assert_eq!(vals, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn with_point_out_of_range_returns_none_without_overflow() {
+        // Regression: `start + index` must be computed only after bounds-
+        // checking `index` — with a slid window (start > 0), an out-of-range
+        // `index` like `usize::MAX` would otherwise overflow the addition
+        // and panic (debug builds) instead of returning `None`.
+        let (model, s) = one_series(5);
+        let window = ChartWindow::new(model, 3); // window slid: start == 2
+        assert_eq!(window.with_point(s, usize::MAX, |d| d.value), None);
     }
 
     #[test]
@@ -622,5 +645,93 @@ mod tests {
             Some(&ChartChange::SeriesRemoved { series: s })
         );
         assert_eq!(window.series_count(), 0);
+    }
+
+    #[test]
+    fn translate_multi_point_insert_not_full_to_overflow() {
+        // Regression: a bulk tail append (`range.len() > 1`) that takes a
+        // not-yet-full window straight past full must be handled by
+        // recomputing from absolute source indices, not by assuming exactly
+        // one fixed-size `shift` block is evicted/appended (that shortcut
+        // only holds once the window was already full). For this exact
+        // transition the old code emitted an insertion range too short for
+        // the actual growth, landing past the end of a consumer's mirrored
+        // array. `ChartModel` only ever emits length-1 `PointsInserted`
+        // ranges, so this builds a `ChartWindowInner` by hand (skipping
+        // `ChartWindow::new`'s auto-subscription, which would otherwise
+        // apply each push through the already-correct single-point path
+        // before there's a chance to test the batch one) and calls
+        // `translate` directly with a synthesized multi-point change.
+        let model: ChartModel<i32> = ChartModel::new();
+        let s = model.add_series("s");
+        model.push_point(s, 0, 0.0);
+        model.push_point(s, 1, 1.0); // model total: 2, window_size: 3 -> not full
+
+        let series_ids_fn: SeriesIdsFn = {
+            let m = model.clone();
+            Rc::new(move || m.series_ids())
+        };
+        let point_count_fn: PointCountFn = {
+            let m = model.clone();
+            Rc::new(move |series| m.point_count(series))
+        };
+        let with_point_fn: WithPointFn<i32> = {
+            let m = model.clone();
+            Rc::new(move |series, idx, f| {
+                m.with_point(series, idx, |d| f(d));
+            })
+        };
+        let with_series_fn: WithSeriesFn = {
+            let m = model.clone();
+            Rc::new(move |series, f| {
+                m.with_series(series, |name, color, visible| f(name, color, visible));
+            })
+        };
+
+        let mut inner = ChartWindowInner {
+            series_ids_fn,
+            point_count_fn,
+            with_point_fn,
+            with_series_fn,
+            window_size: 3,
+            starts: HashMap::new(),
+            divergence: HashMap::new(),
+            observers: Vec::new(),
+            next_observer_id: 1,
+            _upstream_handle: None,
+        };
+        inner.rebuild_all(); // caches start == 0 for the not-yet-full 2-point window
+
+        // Bulk-append 2 more points directly to the model — `inner` isn't
+        // subscribed, so it still thinks the total is 2 while the model now
+        // reports 4, exactly what a batch-insert API would report as one
+        // `PointsInserted { range: 2..4 }`.
+        model.push_point(s, 2, 2.0);
+        model.push_point(s, 3, 3.0);
+
+        let changes = translate(
+            &mut inner,
+            &ChartChange::PointsInserted {
+                series: s,
+                range: 2..4,
+            },
+        );
+
+        // Old window [0,1] (len 2) -> new window [1,2,3] (len 3): drop the
+        // one element before the new start, then insert the two new ones
+        // after the one that survives — never a range past the mirror's end.
+        assert_eq!(
+            changes,
+            vec![
+                ChartChange::PointsRemoved {
+                    series: s,
+                    range: 0..1
+                },
+                ChartChange::PointsInserted {
+                    series: s,
+                    range: 1..3
+                },
+            ]
+        );
     }
 }
