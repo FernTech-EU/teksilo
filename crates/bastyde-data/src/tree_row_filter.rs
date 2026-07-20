@@ -225,7 +225,7 @@ impl<K: ItemKey, T: 'static> TreeRowFilter<K, T> {
             }
             TreeFilterMode::KeepDescendants => {
                 for &r in roots {
-                    keep_descendants(r, children, &matches, false, &mut visible);
+                    keep_descendants(r, children, &matches, &mut visible);
                 }
             }
         }
@@ -234,61 +234,65 @@ impl<K: ItemKey, T: 'static> TreeRowFilter<K, T> {
 }
 
 /// Post-order: a node is visible if it matches or any descendant is visible.
-/// Returns whether the subtree rooted here has any visible node.
-fn keep_ancestors(
-    i: usize,
-    children: &[Vec<usize>],
-    matches: &[bool],
-    visible: &mut [bool],
-) -> bool {
-    let mut any_descendant = false;
-    for &c in &children[i] {
-        if keep_ancestors(c, children, matches, visible) {
-            any_descendant = true;
+/// Explicit-stack: collect the subtree in pre-order first, then walk it
+/// **reversed** — every node is processed only after all of its
+/// descendants, so `visible[c]` already holds each child's final verdict.
+/// Depth-bounded by the subtree's node count, not the call stack.
+fn keep_ancestors(root: usize, children: &[Vec<usize>], matches: &[bool], visible: &mut [bool]) {
+    let mut pre_order = Vec::with_capacity(children.len());
+    let mut stack = vec![root];
+    while let Some(i) = stack.pop() {
+        pre_order.push(i);
+        for &c in children[i].iter().rev() {
+            stack.push(c);
         }
     }
-    if matches[i] || any_descendant {
-        visible[i] = true;
-        true
-    } else {
-        false
+    for &i in pre_order.iter().rev() {
+        let any_descendant = children[i].iter().any(|&c| visible[c]);
+        if matches[i] || any_descendant {
+            visible[i] = true;
+        }
     }
 }
 
 /// Pre-order: once a node matches, its whole subtree stays visible.
-fn keep_descendants(
-    i: usize,
-    children: &[Vec<usize>],
-    matches: &[bool],
-    ancestor_matched: bool,
-    visible: &mut [bool],
-) {
-    let here = matches[i] || ancestor_matched;
-    if here {
-        visible[i] = true;
-    }
-    for &c in &children[i] {
-        keep_descendants(c, children, matches, here, visible);
+/// Explicit-stack, threading `ancestor_matched` through the stack instead of
+/// a recursive call argument.
+fn keep_descendants(root: usize, children: &[Vec<usize>], matches: &[bool], visible: &mut [bool]) {
+    let mut stack = vec![(root, false)];
+    while let Some((i, ancestor_matched)) = stack.pop() {
+        let here = matches[i] || ancestor_matched;
+        if here {
+            visible[i] = true;
+        }
+        for &c in children[i].iter().rev() {
+            stack.push((c, here));
+        }
     }
 }
 
 /// Emit visible nodes in pre-order; hidden nodes add no depth (their visible
-/// descendants compact onto the nearest surviving ancestor).
+/// descendants compact onto the nearest surviving ancestor). Explicit-stack
+/// pre-order walk, children pushed in reverse so `pop()` yields them in
+/// source order — output order is bit-for-bit identical to the recursive form.
 fn emit_dfs(
-    i: usize,
+    root: usize,
     out_depth: usize,
     children: &[Vec<usize>],
     visible: &[bool],
     emit: &mut Vec<(usize, usize)>,
 ) {
-    let child_depth = if visible[i] {
-        emit.push((i, out_depth));
-        out_depth + 1
-    } else {
-        out_depth
-    };
-    for &c in &children[i] {
-        emit_dfs(c, child_depth, children, visible, emit);
+    let mut stack = vec![(root, out_depth)];
+    while let Some((i, out_depth)) = stack.pop() {
+        let child_depth = if visible[i] {
+            emit.push((i, out_depth));
+            out_depth + 1
+        } else {
+            out_depth
+        };
+        for &c in children[i].iter().rev() {
+            stack.push((c, child_depth));
+        }
     }
 }
 
@@ -452,5 +456,41 @@ mod tests {
             out.iter().map(|r| r.depth).collect::<Vec<_>>(),
             vec![0, 1, 2, 2, 1, 2, 0, 1]
         );
+    }
+
+    /// `keep_ancestors`, `keep_descendants`, and `emit_dfs` are
+    /// explicit-stack walks; a 50,000-deep single-child chain must apply
+    /// every filter mode without overflowing the call stack.
+    #[test]
+    fn deep_chain_applies_each_mode_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let rows = |depth: usize| -> Vec<TreeRow<u64, usize>> {
+            (0..depth).map(|i| TreeRow::new(i as u64, i, i)).collect()
+        };
+
+        // KeepAncestors: matching the deepest node keeps its entire
+        // ancestor chain — every row in this linear tree.
+        let out = TreeRowFilter::new()
+            .filter_mode(TreeFilterMode::KeepAncestors)
+            .filter(move |item: &usize| *item == DEPTH - 1)
+            .apply(rows(DEPTH));
+        assert_eq!(out.len(), DEPTH);
+        assert_eq!(out.last().unwrap().depth, DEPTH - 1);
+
+        // KeepDescendants: matching the root keeps its entire subtree —
+        // every row, compacted onto the root.
+        let out = TreeRowFilter::new()
+            .filter_mode(TreeFilterMode::KeepDescendants)
+            .filter(|item: &usize| *item == 0)
+            .apply(rows(DEPTH));
+        assert_eq!(out.len(), DEPTH);
+
+        // HideNonMatching: only the root matches, and its child
+        // immediately breaks the whole-path rule — one surviving row.
+        let out = TreeRowFilter::new()
+            .filter_mode(TreeFilterMode::HideNonMatching)
+            .filter(|item: &usize| *item == 0)
+            .apply(rows(DEPTH));
+        assert_eq!(out.len(), 1);
     }
 }

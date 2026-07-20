@@ -170,6 +170,27 @@ struct ObserverEntry {
     callback: Rc<dyn Fn(&ChartChange)>,
 }
 
+/// Structural equality for `ColorProp`, which has no general `PartialEq`
+/// (a `Signal` carries no value-equality of its own). `Static`/role variants
+/// compare by value; `Bound`/`Dynamic*` variants compare by `Signal`
+/// identity ([`Signal::same`]). Anything else (different variants, or
+/// either side `Undimmed`) is conservatively "different" so a genuine value
+/// swap is never mistaken for a no-op — used only to gate the idempotency
+/// short-circuit in [`ChartModel::set_series_color`].
+fn color_prop_eq(a: &ColorProp, b: &ColorProp) -> bool {
+    match (a, b) {
+        (ColorProp::Static(x), ColorProp::Static(y)) => x == y,
+        (ColorProp::Bound(x), ColorProp::Bound(y)) => Signal::same(x, y),
+        (ColorProp::TextRole(x), ColorProp::TextRole(y)) => x == y,
+        (ColorProp::SurfaceRole(x), ColorProp::SurfaceRole(y)) => x == y,
+        (ColorProp::BorderRole(x), ColorProp::BorderRole(y)) => x == y,
+        (ColorProp::DynamicTextRole(x), ColorProp::DynamicTextRole(y)) => Signal::same(x, y),
+        (ColorProp::DynamicSurfaceRole(x), ColorProp::DynamicSurfaceRole(y)) => Signal::same(x, y),
+        (ColorProp::DynamicBorderRole(x), ColorProp::DynamicBorderRole(y)) => Signal::same(x, y),
+        _ => false,
+    }
+}
+
 struct ChartModelInner<T> {
     arena: SlotMap<slotmap::DefaultKey, SeriesEntry<T>>,
     order: Vec<SeriesId>,
@@ -310,42 +331,79 @@ impl<T: 'static> ChartModel<T> {
         self.bump_structure();
     }
 
-    /// Rename a series.
+    /// Rename a series. A no-op (no notify, no version bump) if `name`
+    /// already matches the current value.
     ///
     /// # Panics
     /// Panics if `series` is unknown.
     pub fn rename_series(&self, series: SeriesId, name: impl Into<String>) {
-        {
+        let name = name.into();
+        let changed = {
             let mut guard = self.inner.borrow_mut();
-            guard.arena[series.key()].name = name.into();
+            let entry = &mut guard.arena[series.key()];
+            if entry.name == name {
+                false
+            } else {
+                entry.name = name;
+                true
+            }
+        };
+        if !changed {
+            return;
         }
         self.notify(ChartChange::SeriesRenamed { series });
         self.bump_structure();
     }
 
     /// Set a series' explicit color. Bumps [`Self::style_version`] (not
-    /// [`Self::structure_version`]) — this is a paint-only change.
+    /// [`Self::structure_version`]) — this is a paint-only change. A no-op
+    /// (no notify, no version bump) if `color` already matches the current
+    /// value.
     ///
     /// # Panics
     /// Panics if `series` is unknown.
     pub fn set_series_color(&self, series: SeriesId, color: impl Into<ColorProp>) {
-        {
+        let color = color.into();
+        let changed = {
             let mut guard = self.inner.borrow_mut();
-            guard.arena[series.key()].color = Some(color.into());
+            let entry = &mut guard.arena[series.key()];
+            if entry
+                .color
+                .as_ref()
+                .is_some_and(|c| color_prop_eq(c, &color))
+            {
+                false
+            } else {
+                entry.color = Some(color);
+                true
+            }
+        };
+        if !changed {
+            return;
         }
         self.notify(ChartChange::SeriesColorChanged { series });
         self.bump_style();
     }
 
     /// Clear a series' explicit color (falls back to the chart's palette).
-    /// Bumps [`Self::style_version`].
+    /// Bumps [`Self::style_version`]. A no-op (no notify, no version bump)
+    /// if the series already has no explicit color.
     ///
     /// # Panics
     /// Panics if `series` is unknown.
     pub fn clear_series_color(&self, series: SeriesId) {
-        {
+        let changed = {
             let mut guard = self.inner.borrow_mut();
-            guard.arena[series.key()].color = None;
+            let entry = &mut guard.arena[series.key()];
+            if entry.color.is_none() {
+                false
+            } else {
+                entry.color = None;
+                true
+            }
+        };
+        if !changed {
+            return;
         }
         self.notify(ChartChange::SeriesColorChanged { series });
         self.bump_style();
@@ -602,18 +660,41 @@ impl<T: 'static> ChartModel<T> {
     /// Structural version signal — bumped by every mutation except a color
     /// change (series add/remove/move/rename/show-hide, all point ops).
     /// Bind at `BindingLevel::Relayout` or `Rebuild`.
+    ///
+    /// Ordering: every mutator notifies the `ChartChange` observers
+    /// registered via [`Self::observe_changes`] *before* bumping this
+    /// signal — see the note on `observe_changes` for what that means for a
+    /// callback that reads the signal back synchronously.
     pub fn structure_version(&self) -> Signal<u64> {
         self.inner.borrow().structure_version.clone()
     }
 
     /// Style version signal — bumped only by a series color change. Bind at
-    /// `BindingLevel::RepaintOnly`.
+    /// `BindingLevel::RepaintOnly`. Same notify-before-bump ordering as
+    /// [`Self::structure_version`] — see [`Self::observe_changes`].
     pub fn style_version(&self) -> Signal<u64> {
         self.inner.borrow().style_version.clone()
     }
 
     /// Register an observer that is called on every mutation.
     /// Returns an `ObserverHandle` — dropping it removes the callback.
+    ///
+    /// **Ordering contract:** every mutator calls this observer *before*
+    /// bumping [`Self::structure_version`] / [`Self::style_version`] (see
+    /// e.g. `rename_series`, `push_point`) — notify, then bump. This is
+    /// intentional, not an implementation accident: it lets a `ChartChange`
+    /// callback distinguish "did I get here via the change I'm reacting to"
+    /// from "did something else bump the version already", by comparing the
+    /// version signal's value inside the callback against a value captured
+    /// before the mutation. The flip side: a callback that reads
+    /// `structure_version()`/`style_version()` synchronously **inside**
+    /// itself always observes the **pre-bump** value for the mutation
+    /// currently being notified — the bump hasn't happened yet. Don't use
+    /// the version signal from inside a `ChartChange` observer as a proxy
+    /// for "has this specific mutation been applied" — the `ChartChange`
+    /// argument already tells you that; use the signal for *external*
+    /// bind-and-rerun consumers (widgets), not from within the notify path
+    /// itself.
     pub fn observe_changes(&self, f: impl Fn(&ChartChange) + 'static) -> ObserverHandle {
         let mut guard = self.inner.borrow_mut();
         let id = guard.next_observer_id;
@@ -857,6 +938,45 @@ mod tests {
     }
 
     #[test]
+    fn observer_sees_pre_bump_structure_version_during_notify() {
+        let model: ChartModel<String> = ChartModel::new();
+        let structure = model.structure_version();
+        let seen_during_callback: Rc<Cell<Option<u64>>> = Rc::new(Cell::new(None));
+        let seen = seen_during_callback.clone();
+        let sig = structure.clone();
+        let _handle = model.observe_changes(move |_| seen.set(Some(sig.get())));
+
+        let before = structure.get();
+        model.add_series("A");
+        let after = structure.get();
+
+        assert_eq!(after, before + 1, "the mutation did bump the signal");
+        assert_eq!(
+            seen_during_callback.get(),
+            Some(before),
+            "notify runs before the version bump, so a ChartChange observer \
+             reading structure_version() synchronously sees the pre-bump value"
+        );
+    }
+
+    #[test]
+    fn observer_sees_pre_bump_style_version_during_notify() {
+        let (model, a, _b) = sample();
+        let style = model.style_version();
+        let seen_during_callback: Rc<Cell<Option<u64>>> = Rc::new(Cell::new(None));
+        let seen = seen_during_callback.clone();
+        let sig = style.clone();
+        let _handle = model.observe_changes(move |_| seen.set(Some(sig.get())));
+
+        let before = style.get();
+        model.set_series_color(a, test_color());
+        let after = style.get();
+
+        assert_eq!(after, before + 1);
+        assert_eq!(seen_during_callback.get(), Some(before));
+    }
+
+    #[test]
     fn insert_series_at_index() {
         let (model, a, b) = sample();
         let c = model.insert_series(1, "Middle");
@@ -897,6 +1017,17 @@ mod tests {
     }
 
     #[test]
+    fn rename_series_noop_does_not_notify() {
+        let (model, a, _b) = sample();
+        let structure_before = model.structure_version().get();
+        let (log, _handle) = track_changes(&model);
+
+        model.rename_series(a, "Revenue"); // already the name
+        assert_eq!(log.borrow().len(), 0);
+        assert_eq!(model.structure_version().get(), structure_before);
+    }
+
+    #[test]
     fn set_series_color_bumps_style_not_structure() {
         let (model, a, _b) = sample();
         let structure_before = model.structure_version().get();
@@ -919,6 +1050,20 @@ mod tests {
     }
 
     #[test]
+    fn set_series_color_noop_does_not_notify() {
+        let (model, a, _b) = sample();
+        model.set_series_color(a, test_color());
+        let structure_before = model.structure_version().get();
+        let style_before = model.style_version().get();
+        let (log, _handle) = track_changes(&model);
+
+        model.set_series_color(a, test_color()); // same static color again
+        assert_eq!(log.borrow().len(), 0);
+        assert_eq!(model.structure_version().get(), structure_before);
+        assert_eq!(model.style_version().get(), style_before);
+    }
+
+    #[test]
     fn clear_series_color_bumps_style_and_clears() {
         let (model, a, _b) = sample();
         model.set_series_color(a, test_color());
@@ -933,6 +1078,20 @@ mod tests {
         );
         assert!(model.style_version().get() > style_before);
         assert!(!model.with_series(a, |_, color, _| color.is_some()).unwrap());
+    }
+
+    #[test]
+    fn clear_series_color_noop_does_not_notify_when_already_none() {
+        let (model, a, _b) = sample();
+        // Freshly-built series has no explicit color.
+        let structure_before = model.structure_version().get();
+        let style_before = model.style_version().get();
+        let (log, _handle) = track_changes(&model);
+
+        model.clear_series_color(a);
+        assert_eq!(log.borrow().len(), 0);
+        assert_eq!(model.structure_version().get(), structure_before);
+        assert_eq!(model.style_version().get(), style_before);
     }
 
     #[test]

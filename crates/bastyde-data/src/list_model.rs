@@ -346,9 +346,23 @@ impl<T: PartialEq + 'static> ListModel<T> {
     /// # Preconditions
     /// `key_fn` must be a pure, stable function of an item's identity (not
     /// its content) and keys must be **unique** within both the current list
-    /// and `new_items`. A duplicate key is a caller bug — behavior in that
-    /// case is unspecified (some duplicate will win the position/content of
-    /// its key).
+    /// and `new_items`. See `# Panics` below — violating either is a caller
+    /// bug, not a silently-tolerated edge case.
+    ///
+    /// # Panics
+    /// Panics (via an internal `.expect`) if `key_fn` is not stable — it
+    /// returns a different key for the same item across the two calls this
+    /// method makes to it (once while snapshotting the current list's keys,
+    /// once while re-deriving a key during the write pass) — or if a key is
+    /// **duplicated** within the current list or within `new_items`. Both
+    /// break the same invariant the write pass relies on: "the item that
+    /// was accounted for under this key is still findable at or after the
+    /// write cursor." A duplicate key means two different items raced to
+    /// claim one key slot, so by the time the second one is processed the
+    /// slot the accounting expected is already gone. This is this crate's
+    /// usual documented-panic-on-contract-violation style (see e.g.
+    /// [`TreeModel::remove`](crate::TreeModel::remove)) — a caller-side bug
+    /// surfaced immediately as a panic, not silently wrong data.
     ///
     /// # Complexity
     /// Re-ordering is a straightforward left-to-right pass that moves each
@@ -1316,5 +1330,15 @@ mod tests {
                 log.borrow()
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "reconcile_by_key")]
+    fn reconcile_duplicate_key_in_new_items_panics() {
+        let model = ListModel::from_vec(vec![row(1, "a"), row(2, "b")]);
+        // Two incoming rows both claim key 1 — the second can't be found at
+        // or after the write cursor once the first has already consumed
+        // that key's slot (see `# Panics` on `reconcile_by_key`).
+        model.reconcile_by_key(vec![row(1, "a"), row(1, "a-dup"), row(2, "b")], key);
     }
 }

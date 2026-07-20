@@ -21,6 +21,16 @@
 //! every projection rebuild — `TreeTableView` binds to that to know when to
 //! rebuild its row tree.
 //!
+//! A single-node `TreeChange::NodeUpdated` with **no filter active** skips
+//! the full filter/sort/flatten recompute: the node's rank among its
+//! siblings is checked against its immediate neighbours (tree sort never
+//! crosses levels) and, if stable, only `first_changed_index()` and
+//! `version_signal()` advance. Any active filter falls back to the full
+//! rebuild (a node's own match verdict can cascade to ancestors and/or
+//! descendants depending on `TreeFilterMode`, so cheaply proving no
+//! cascade isn't possible without re-deriving visibility). See
+//! `try_incremental_node_update` for the full reasoning.
+//!
 //! ## Selection semantics
 //!
 //! Selection on a sorted/filtered tree view is tracked by **flat (visible)
@@ -95,6 +105,10 @@ struct Inner<T: 'static> {
     tree: TreeModel<T>,
     expanded: HashSet<NodeId>,
     flattened: Vec<FlatEntry>,
+    /// `NodeId` → flat index, rebuilt alongside `flattened` on every
+    /// projection rebuild. Keeps `flat_index_of` O(1) (mirrors
+    /// `TreeDataSlice`'s `vis_pos`) instead of a linear scan.
+    positions: HashMap<NodeId, usize>,
     comparators: HashMap<String, Comparator<T>>,
     predicate_factories: HashMap<String, PredicateFactory<T>>,
     sort: Option<(String, SortDirection)>,
@@ -126,6 +140,7 @@ impl<T: 'static> SortFilterTreeModel<T> {
             tree: tree.clone(),
             expanded: HashSet::new(),
             flattened: Vec::new(),
+            positions: HashMap::new(),
             comparators: HashMap::new(),
             predicate_factories: HashMap::new(),
             sort: None,
@@ -315,13 +330,11 @@ impl<T: 'static> SortFilterTreeModel<T> {
         self.inner.borrow().flattened.get(flat_index).cloned()
     }
 
-    /// Return the flat index of `node` in the current visible list, or `None` if it is not visible.
+    /// Return the flat index of `node` in the current visible list, or `None`
+    /// if it is not visible. O(1) — backed by a position map rebuilt on
+    /// every projection rebuild.
     pub fn flat_index_of(&self, node: NodeId) -> Option<usize> {
-        self.inner
-            .borrow()
-            .flattened
-            .iter()
-            .position(|e| e.node_id == node)
+        self.inner.borrow().positions.get(&node).copied()
     }
 
     /// Whether `node` is currently expanded in this projection.
@@ -534,22 +547,21 @@ impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
 
 // ── Internals ───────────────────────────────────────────────────────────────
 
+/// Explicit-stack pre-order walk — depth-bounded only by tree size, not call
+/// stack, so a pathologically deep tree can't overflow it.
 fn collect_nodes_with_children<T: 'static>(tree: &TreeModel<T>) -> Vec<NodeId> {
     let mut out = Vec::new();
     let root_count = tree.root_count();
-    for i in 0..root_count {
-        collect_recurse(tree, tree.root(i), &mut out);
-    }
-    out
-}
-
-fn collect_recurse<T: 'static>(tree: &TreeModel<T>, node: NodeId, out: &mut Vec<NodeId>) {
-    if tree.has_children(node) {
-        out.push(node);
-        for child in tree.children(node) {
-            collect_recurse(tree, child, out);
+    let mut stack: Vec<NodeId> = (0..root_count).rev().map(|i| tree.root(i)).collect();
+    while let Some(node) = stack.pop() {
+        if tree.has_children(node) {
+            out.push(node);
+            for child in tree.children(node).into_iter().rev() {
+                stack.push(child);
+            }
         }
     }
+    out
 }
 
 fn rebuild_and_bump<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>) {
@@ -560,6 +572,15 @@ fn rebuild_and_bump_with<T: 'static>(
     inner_rc: &Rc<RefCell<Inner<T>>>,
     upstream: Option<&TreeChange>,
 ) {
+    // Fast path: a single-node content edit that can't have moved anything
+    // (see `try_incremental_node_update`) skips the O(n) filter/sort/
+    // flatten recompute entirely.
+    if let Some(TreeChange::NodeUpdated { node }) = upstream
+        && try_incremental_node_update(inner_rc, *node)
+    {
+        return;
+    }
+
     // Read inputs out of the borrow before doing the work — observers
     // attached to the version signal may call back into the proxy.
     let (tree, predicates, sort, filter_mode, expanded) = {
@@ -615,12 +636,131 @@ fn rebuild_and_bump_with<T: 'static>(
         }
         g.last_divergence = Some(d);
         g.flattened = flat;
+        g.positions = g
+            .flattened
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.node_id, i))
+            .collect();
         let v = g.version_counter.get() + 1;
         g.version_counter.set(v);
         v
     };
     let signal = inner_rc.borrow().version.clone();
     signal.set(next_version);
+}
+
+/// Fast path for a single-node `TreeChange::NodeUpdated`: skip the O(n)
+/// filter/sort/flatten recompute when nothing about visibility or sibling
+/// order could have changed. This type has no per-row change event — unlike
+/// `SortFilterListModel`'s `DataChange::ItemUpdated`, consumers here only
+/// ever see `version_signal()` + the `first_changed_index()` divergence
+/// side-channel — so "targeted update" for this type means: skip the
+/// recompute, but still correctly advance the divergence floor and bump the
+/// version signal (a content change is still observable and must still be
+/// signalled). Returns `false` when it can't prove safety; the caller falls
+/// back to the existing full rebuild.
+///
+/// Only attempted when **no filter is active**. With a filter engaged, a
+/// node's own match verdict can cascade to ancestors (`KeepAncestors`),
+/// descendants (`KeepDescendants` / `HideNonMatching`), or both — and the
+/// raw per-node filter-visibility set (independent of expand/collapse
+/// state) isn't persisted across rebuilds, so cheaply proving "nothing else
+/// moved" isn't possible without re-deriving it, which is exactly what the
+/// full rebuild already does safely. With no filter, every node is
+/// unconditionally visible, so the only thing a content edit can change is
+/// the node's rank among its **siblings** under an active sort (tree sort
+/// never crosses levels — see the module docs) — checked against its
+/// immediate same-depth flat neighbours, which, with no filter hiding
+/// anyone, are exactly its adjacent sorted siblings.
+fn try_incremental_node_update<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>, node: NodeId) -> bool {
+    let mut g = inner_rc.borrow_mut();
+
+    if g.filters.values().any(|t| !t.is_empty()) {
+        return false;
+    }
+
+    let divergence = match g.positions.get(&node).copied() {
+        // Hidden under a collapsed ancestor — nothing visible changed.
+        None => g.flattened.len(),
+        Some(old_pos) => {
+            let depth = g.flattened[old_pos].depth;
+            if let Some((col_id, dir)) = g.sort.clone()
+                && let Some(cmp) = g.comparators.get(&col_id).cloned()
+            {
+                let tree = g.tree.clone();
+                let descending = dir == SortDirection::Descending;
+                let cmp_nodes = |a: NodeId, b: NodeId| -> Ordering {
+                    let ord = Cell::new(Ordering::Equal);
+                    tree.with_item(a, |va| {
+                        tree.with_item(b, |vb| {
+                            ord.set(cmp(va, vb));
+                        });
+                    });
+                    if descending {
+                        ord.get().reverse()
+                    } else {
+                        ord.get()
+                    }
+                };
+                let before = same_depth_neighbor_before(&g.flattened, old_pos, depth);
+                if before.is_some_and(|prev| cmp_nodes(prev, node) == Ordering::Greater) {
+                    return false; // moved before its predecessor
+                }
+                let after = same_depth_neighbor_after(&g.flattened, old_pos, depth);
+                if after.is_some_and(|next| cmp_nodes(node, next) == Ordering::Greater) {
+                    return false; // moved past its successor
+                }
+            }
+            old_pos
+        }
+    };
+
+    g.last_divergence = Some(divergence);
+    let v = g.version_counter.get() + 1;
+    g.version_counter.set(v);
+    let signal = g.version.clone();
+    drop(g);
+    signal.set(v);
+    true
+}
+
+/// Walk backward from `from`, skipping deeper entries (descendants of an
+/// earlier sibling), stopping at the first entry at `depth` (the previous
+/// sibling) or shallower (no previous sibling — the group was exited).
+fn same_depth_neighbor_before(
+    flattened: &[FlatEntry],
+    from: usize,
+    depth: usize,
+) -> Option<NodeId> {
+    let mut i = from;
+    while i > 0 {
+        i -= 1;
+        let e = &flattened[i];
+        if e.depth == depth {
+            return Some(e.node_id);
+        }
+        if e.depth < depth {
+            return None;
+        }
+    }
+    None
+}
+
+/// Forward counterpart of [`same_depth_neighbor_before`].
+fn same_depth_neighbor_after(flattened: &[FlatEntry], from: usize, depth: usize) -> Option<NodeId> {
+    let mut i = from + 1;
+    while i < flattened.len() {
+        let e = &flattened[i];
+        if e.depth == depth {
+            return Some(e.node_id);
+        }
+        if e.depth < depth {
+            return None;
+        }
+        i += 1;
+    }
+    None
 }
 
 fn sort_siblings<T: 'static>(
@@ -671,7 +811,7 @@ fn compute_visibility<T: 'static>(
         }
         TreeFilterMode::KeepDescendants => {
             for i in 0..tree.root_count() {
-                visit_keep_descendants(tree, tree.root(i), predicates, false, &mut visible);
+                visit_keep_descendants(tree, tree.root(i), predicates, &mut visible);
             }
         }
     }
@@ -695,99 +835,125 @@ fn matches_all<T: 'static>(
     result.get()
 }
 
+/// Explicit-stack pre-order walk (equivalent order to the recursive form —
+/// membership in `visible` doesn't depend on traversal order).
 fn visit_hide_non_matching<T: 'static>(
     tree: &TreeModel<T>,
-    node: NodeId,
+    root: NodeId,
     predicates: &[Box<dyn Fn(&T) -> bool>],
     visible: &mut HashSet<NodeId>,
 ) {
-    if matches_all(tree, node, predicates) {
-        visible.insert(node);
-    }
-    for child in tree.children(node) {
-        visit_hide_non_matching(tree, child, predicates, visible);
-    }
-}
-
-fn visit_keep_ancestors<T: 'static>(
-    tree: &TreeModel<T>,
-    node: NodeId,
-    predicates: &[Box<dyn Fn(&T) -> bool>],
-    visible: &mut HashSet<NodeId>,
-) -> bool {
-    let mut any_descendant_visible = false;
-    for child in tree.children(node) {
-        if visit_keep_ancestors(tree, child, predicates, visible) {
-            any_descendant_visible = true;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if matches_all(tree, node, predicates) {
+            visible.insert(node);
+        }
+        for child in tree.children(node).into_iter().rev() {
+            stack.push(child);
         }
     }
-    let self_matches = matches_all(tree, node, predicates);
-    if self_matches || any_descendant_visible {
-        visible.insert(node);
-        true
-    } else {
-        false
+}
+
+/// Bottom-up (descendants before ancestors) aggregation without recursion:
+/// collect the subtree in pre-order first, then walk it **reversed** — for
+/// any tree, reversed pre-order visits every node only after all of its
+/// descendants, so by the time a node is processed, `visible` already holds
+/// the final verdict for every child and can be queried directly.
+fn visit_keep_ancestors<T: 'static>(
+    tree: &TreeModel<T>,
+    root: NodeId,
+    predicates: &[Box<dyn Fn(&T) -> bool>],
+    visible: &mut HashSet<NodeId>,
+) {
+    let mut pre_order = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        pre_order.push(node);
+        for child in tree.children(node).into_iter().rev() {
+            stack.push(child);
+        }
+    }
+
+    for &node in pre_order.iter().rev() {
+        let self_matches = matches_all(tree, node, predicates);
+        let any_descendant_visible = tree.children(node).iter().any(|c| visible.contains(c));
+        if self_matches || any_descendant_visible {
+            visible.insert(node);
+        }
     }
 }
 
+/// Explicit-stack pre-order walk threading `ancestor_matched` down through
+/// the stack instead of a recursive call argument.
 fn visit_keep_descendants<T: 'static>(
     tree: &TreeModel<T>,
-    node: NodeId,
+    root: NodeId,
     predicates: &[Box<dyn Fn(&T) -> bool>],
-    ancestor_matched: bool,
     visible: &mut HashSet<NodeId>,
 ) {
-    let self_matches = matches_all(tree, node, predicates);
-    let here = self_matches || ancestor_matched;
-    if here {
-        visible.insert(node);
-    }
-    for child in tree.children(node) {
-        visit_keep_descendants(tree, child, predicates, here, visible);
+    let mut stack = vec![(root, false)];
+    while let Some((node, ancestor_matched)) = stack.pop() {
+        let self_matches = matches_all(tree, node, predicates);
+        let here = self_matches || ancestor_matched;
+        if here {
+            visible.insert(node);
+        }
+        for child in tree.children(node).into_iter().rev() {
+            stack.push((child, here));
+        }
     }
 }
 
 fn mark_subtree_visible<T: 'static>(
     tree: &TreeModel<T>,
-    node: NodeId,
+    root: NodeId,
     visible: &mut HashSet<NodeId>,
 ) {
-    visible.insert(node);
-    for child in tree.children(node) {
-        mark_subtree_visible(tree, child, visible);
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        visible.insert(node);
+        for child in tree.children(node).into_iter().rev() {
+            stack.push(child);
+        }
     }
 }
 
+/// Explicit-stack pre-order walk, pushing children in reverse so `pop()`
+/// yields them in the same (possibly just-sorted) order the recursive form
+/// visited them in — output order is bit-for-bit identical.
 fn flatten_visible<T: 'static>(
     tree: &TreeModel<T>,
-    node: NodeId,
+    root: NodeId,
     depth: usize,
     visible: &HashSet<NodeId>,
     expanded: &HashSet<NodeId>,
     sort: &Option<(Comparator<T>, SortDirection)>,
     out: &mut Vec<FlatEntry>,
 ) {
-    if !visible.contains(&node) {
+    if !visible.contains(&root) {
         return;
     }
-    let mut children = tree.children(node);
-    children.retain(|c| visible.contains(c));
-    let has_children = !children.is_empty();
-    let is_expanded = expanded.contains(&node);
+    let mut stack = vec![(root, depth)];
+    while let Some((node, depth)) = stack.pop() {
+        let mut children = tree.children(node);
+        children.retain(|c| visible.contains(c));
+        let has_children = !children.is_empty();
+        let is_expanded = expanded.contains(&node);
 
-    out.push(FlatEntry {
-        node_id: node,
-        depth,
-        has_children,
-        is_expanded,
-    });
+        out.push(FlatEntry {
+            node_id: node,
+            depth,
+            has_children,
+            is_expanded,
+        });
 
-    if is_expanded && has_children {
-        if let Some((cmp, dir)) = sort {
-            sort_siblings(tree, &mut children, cmp, *dir);
-        }
-        for child in children {
-            flatten_visible(tree, child, depth + 1, visible, expanded, sort, out);
+        if is_expanded && has_children {
+            if let Some((cmp, dir)) = sort {
+                sort_siblings(tree, &mut children, cmp, *dir);
+            }
+            for child in children.into_iter().rev() {
+                stack.push((child, depth + 1));
+            }
         }
     }
 }
@@ -1150,5 +1316,202 @@ mod tests {
         // readme.md is hidden (docs collapsed) — nothing visible changed.
         tree.update(readme, "readme.txt");
         assert_eq!(proxy.first_changed_index(), Some(proxy.visible_count()));
+    }
+
+    // ── flat_index_of position map ──────────────────────────────────────
+
+    /// The position map underlying `flat_index_of` must agree with
+    /// iteration order (`visible_node_id`) after every kind of
+    /// rebuild-triggering mutation.
+    fn assert_positions_match_iteration_order<T: 'static>(proxy: &SortFilterTreeModel<T>) {
+        for i in 0..proxy.visible_count() {
+            let node = proxy.visible_node_id(i).unwrap();
+            assert_eq!(
+                proxy.flat_index_of(node),
+                Some(i),
+                "flat_index_of({node:?}) should be the iteration position {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn flat_index_of_matches_iteration_order_across_mutations() {
+        let (tree, docs, _, _, _, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone())
+            .filter_mode(TreeFilterMode::KeepAncestors)
+            .with_comparator("name", |a: &&str, b: &&str| a.cmp(b))
+            .with_predicate("name", |t| {
+                let needle = t.to_string();
+                Box::new(move |row: &&str| row.contains(&needle))
+            });
+        assert_positions_match_iteration_order(&proxy);
+
+        proxy.expand_all();
+        assert_positions_match_iteration_order(&proxy);
+
+        proxy.set_filter("name", "rs");
+        assert_positions_match_iteration_order(&proxy);
+
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        assert_positions_match_iteration_order(&proxy);
+
+        proxy.collapse(docs);
+        assert_positions_match_iteration_order(&proxy);
+
+        proxy.clear_filters();
+        assert_positions_match_iteration_order(&proxy);
+
+        tree.insert_root(3, "extra");
+        assert_positions_match_iteration_order(&proxy);
+    }
+
+    // ── Depth-safe walks (flatten_visible / mark_subtree_visible / visit_*) ─
+
+    /// `expand_all`, `flatten_visible`, and all three `visit_*` filter
+    /// strategies are explicit-stack walks; a 50,000-deep single-child
+    /// chain must not overflow the call stack in any of them.
+    #[test]
+    fn deep_chain_filters_each_mode_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let tree: TreeModel<usize> = TreeModel::new();
+        let root = tree.insert_root(0, 0usize);
+        let mut leaf = root;
+        for i in 1..DEPTH {
+            leaf = tree.insert_child(leaf, 0, i);
+        }
+        let _ = leaf;
+        let needle = DEPTH - 1;
+        let matches_leaf = move |item: &usize| *item == needle;
+
+        // KeepAncestors: the single match's whole ancestor chain (every
+        // node in this linear tree) stays visible — exercises
+        // visit_keep_ancestors' bottom-up aggregation at full depth.
+        let proxy = SortFilterTreeModel::new(tree.clone())
+            .filter_mode(TreeFilterMode::KeepAncestors)
+            .with_predicate("v", move |_| Box::new(matches_leaf));
+        proxy.expand_all();
+        proxy.set_filter("v", "match");
+        assert_eq!(proxy.visible_count(), DEPTH);
+
+        // HideNonMatching: only the leaf matches, but the whole-path rule
+        // requires every ancestor to match too — nothing survives.
+        let proxy = SortFilterTreeModel::new(tree.clone())
+            .filter_mode(TreeFilterMode::HideNonMatching)
+            .with_predicate("v", move |_| Box::new(matches_leaf));
+        proxy.expand_all();
+        proxy.set_filter("v", "match");
+        assert_eq!(proxy.visible_count(), 0);
+
+        // KeepDescendants: the match's subtree (itself, a leaf) is
+        // visible, but flatten_visible starts at the real tree root, which
+        // isn't on the visible set — so nothing is emitted. Documented
+        // divergence from KeepAncestors (see TreeRowFilter's module docs
+        // for the equivalent rule on the TreeDataSlice pipeline).
+        let proxy = SortFilterTreeModel::new(tree)
+            .filter_mode(TreeFilterMode::KeepDescendants)
+            .with_predicate("v", move |_| Box::new(matches_leaf));
+        proxy.expand_all();
+        proxy.set_filter("v", "match");
+        assert_eq!(proxy.visible_count(), 0);
+    }
+
+    // ── Incremental NodeUpdated fast path ───────────────────────────────
+
+    #[test]
+    fn node_update_fast_path_skips_full_resort_when_order_stable() {
+        let (tree, _, _, util, _, _) = sample();
+        let calls = Rc::new(Cell::new(0usize));
+        let c = calls.clone();
+        let proxy = SortFilterTreeModel::new(tree.clone()).with_comparator(
+            "name",
+            move |a: &&str, b: &&str| {
+                c.set(c.get() + 1);
+                a.cmp(b)
+            },
+        );
+        proxy.expand_all();
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        // src children ascending: lib.rs, main.rs, util (last).
+        let v0 = proxy.version_signal().get();
+        calls.set(0); // isolate calls made by the update below
+
+        // "utility" still sorts after "main.rs" and has no next sibling —
+        // rank among siblings is unchanged.
+        tree.update(util, "utility");
+
+        assert_eq!(
+            calls.get(),
+            1,
+            "only the one stable-neighbour comparison should run, not a full resort"
+        );
+        assert_eq!(proxy.first_changed_index(), Some(7)); // util's flat index
+        assert!(
+            proxy.version_signal().get() > v0,
+            "content changed — must still bump"
+        );
+        assert_eq!(
+            collect_visible(&proxy),
+            vec![
+                "build.txt",
+                "docs",
+                "guide.md",
+                "readme.md",
+                "src",
+                "lib.rs",
+                "main.rs",
+                "utility",
+                "hash.rs"
+            ]
+        );
+    }
+
+    #[test]
+    fn node_update_that_reorders_falls_back_to_full_rebuild_with_correct_order() {
+        let (tree, _, _, util, _, _) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone())
+            .with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
+        proxy.expand_all();
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        // src children ascending: lib.rs, main.rs, util.
+
+        // Renaming to "abc" sorts before every other src child.
+        tree.update(util, "abc");
+
+        assert_eq!(
+            collect_visible(&proxy),
+            vec![
+                "build.txt",
+                "docs",
+                "guide.md",
+                "readme.md",
+                "src",
+                "abc",
+                "hash.rs",
+                "lib.rs",
+                "main.rs"
+            ]
+        );
+    }
+
+    #[test]
+    fn node_update_under_active_filter_still_produces_correct_visibility() {
+        let (tree, _, _, _, _, main) = sample();
+        let proxy = SortFilterTreeModel::new(tree.clone())
+            .filter_mode(TreeFilterMode::KeepAncestors)
+            .with_predicate("name", |t| {
+                let needle = t.to_string();
+                Box::new(move |row: &&str| row.contains(&needle))
+            });
+        proxy.expand_all();
+        proxy.set_filter("name", "main");
+        assert_eq!(collect_visible(&proxy), vec!["src", "main.rs"]);
+
+        // Filtered in → out: rename away from the match.
+        tree.update(main, "entry.rs");
+        assert_eq!(collect_visible(&proxy), Vec::<&str>::new());
+
+        // Filtered out → in: rename back to match again.
+        tree.update(main, "main.rs");
+        assert_eq!(collect_visible(&proxy), vec!["src", "main.rs"]);
     }
 }

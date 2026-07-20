@@ -302,13 +302,19 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
     }
 
     /// Reset all known nodes to [`CheckState::Unchecked`].
+    ///
+    /// Writes every tracked key directly via the internal `write_state`
+    /// helper (per-key cascade-suppressed) instead of `signal_for(..).set(..)`'s normal
+    /// path, which would, for every currently-checked key, cascade the
+    /// write down its whole descendant subtree and recompute every
+    /// ancestor up to the root — redundant here, since every tracked key
+    /// ends up `Unchecked` and "all children unchecked" is already the
+    /// correct parent aggregate. See [`TreeCheckedModel::clear`](crate::TreeCheckedModel::clear)
+    /// for the non-keyed twin of this same optimization.
     pub fn clear(&self) {
         let keys: Vec<K> = self.inner.borrow().state.keys().cloned().collect();
         for k in keys {
-            let sig = self.signal_for(k);
-            if sig.get() != CheckState::Unchecked {
-                sig.set(CheckState::Unchecked);
-            }
+            write_state(&self.inner, &k, CheckState::Unchecked);
         }
     }
 
@@ -638,6 +644,52 @@ mod tests {
         m.check(1);
         m.clear();
         assert_eq!(m.checked_keys(), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn clear_resets_every_key_and_still_notifies() {
+        // Covers the fast path (`clear` writes every tracked key directly
+        // instead of cascading each one): check(2) cascades Checked down to
+        // its children {3, 5} and leaves Binder(1) Indeterminate (Scene
+        // B(4) still unchecked); check(4) then aggregates Binder(1) up to
+        // fully Checked. Observers + a bool-signal bridge on every key must
+        // still all see Unchecked after clear() even though it no longer
+        // walks the tree.
+        let m = model();
+        m.check(2);
+        m.check(4);
+        assert_eq!(m.check_state(&1), CheckState::Checked);
+        assert_eq!(m.check_state(&2), CheckState::Checked);
+        assert_eq!(m.check_state(&3), CheckState::Checked);
+        assert_eq!(m.check_state(&5), CheckState::Checked);
+        let bool_3 = m.bool_signal_for(3);
+        assert!(bool_3.get());
+
+        let notified: Rc<RefCell<HashSet<u64>>> = Rc::new(RefCell::new(HashSet::new()));
+        let mut handles = Vec::new();
+        for key in [1u64, 2, 3, 4, 5] {
+            let log = notified.clone();
+            handles.push(m.signal_for(key).observe(move |state| {
+                if *state == CheckState::Unchecked {
+                    log.borrow_mut().insert(key);
+                }
+            }));
+        }
+
+        m.clear();
+
+        assert_eq!(m.checked_keys(), Vec::<u64>::new());
+        for key in [1u64, 2, 3, 4, 5] {
+            assert_eq!(m.check_state(&key), CheckState::Unchecked);
+        }
+        assert!(!bool_3.get());
+        assert_eq!(
+            notified.borrow().len(),
+            5,
+            "every tracked key must still notify its own observers on clear: {:?}",
+            notified.borrow()
+        );
+        drop(handles);
     }
 
     #[test]

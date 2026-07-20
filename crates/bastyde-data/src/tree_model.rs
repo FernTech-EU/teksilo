@@ -372,15 +372,23 @@ impl<T: 'static> TreeModel<T> {
         }
     }
 
+    /// Explicit-stack walk: collect every id in the subtree first (reading
+    /// `.children` before anything is removed), then free them all. Removal
+    /// order doesn't matter — freeing a slot doesn't touch any other
+    /// entry's `children` list — so this stays depth-bounded by the
+    /// subtree's node count rather than the call stack.
     fn remove_subtree(arena: &mut SlotMap<slotmap::DefaultKey, TreeNode<T>>, node: NodeId) {
-        let children: Vec<NodeId> = arena
-            .get(node.key())
-            .map(|n| n.children.clone())
-            .unwrap_or_default();
-        for child in children {
-            Self::remove_subtree(arena, child);
+        let mut stack = vec![node];
+        let mut to_remove = Vec::new();
+        while let Some(current) = stack.pop() {
+            if let Some(n) = arena.get(current.key()) {
+                stack.extend(n.children.iter().copied());
+            }
+            to_remove.push(current);
         }
-        arena.remove(node.key());
+        for id in to_remove {
+            arena.remove(id.key());
+        }
     }
 
     fn is_descendant_of(
@@ -762,5 +770,22 @@ mod tests {
         let (tree, a, _, a1, a2) = sample_tree();
         let children = tree.children(a);
         assert_eq!(children, vec![a1, a2]);
+    }
+
+    /// `remove` walks the whole subtree via `remove_subtree`; a 50,000-deep
+    /// single-child chain must not overflow the call stack (it's an
+    /// explicit-stack walk, not recursion).
+    #[test]
+    fn remove_deep_chain_does_not_overflow() {
+        const DEPTH: usize = 50_000;
+        let tree = TreeModel::new();
+        let root = tree.insert_root(0, 0usize);
+        let mut leaf = root;
+        for i in 1..DEPTH {
+            leaf = tree.insert_child(leaf, 0, i);
+        }
+        tree.remove(root);
+        assert_eq!(tree.root_count(), 0);
+        assert_eq!(tree.with_item(leaf, |_| ()), None);
     }
 }

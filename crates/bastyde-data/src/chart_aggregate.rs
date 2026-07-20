@@ -25,10 +25,14 @@
 //! A tail append that doesn't change the bucket count updates the
 //! now-not-yet-full last bucket in place (`PointUpdated`); a tail append
 //! that starts a new bucket finalizes the previous last bucket
-//! (`PointUpdated`) and appends the new one(s) (`PointsInserted`). A
-//! mid-series insert or any removal falls back to a full per-series rebuild
-//! reported as `SeriesDataReplaced`. A `PointUpdated` recomputes just its
-//! own bucket.
+//! (`PointUpdated`) and appends the new one(s) (`PointsInserted`).
+//! Symmetrically, a **tail removal** that doesn't eliminate the last bucket
+//! recomputes it in place (`PointUpdated`, since it lost some of its
+//! points); one that eliminates one or more trailing buckets recomputes the
+//! new last bucket the same way and then drops the buckets beyond it
+//! (`PointsRemoved`). A mid-series insert or removal (front or interior)
+//! falls back to a full per-series rebuild reported as
+//! `SeriesDataReplaced`. A `PointUpdated` recomputes just its own bucket.
 //!
 //! ```ignore
 //! use bastyde_data::{ChartModel, ChartAggregate, ChartAggregateFn};
@@ -343,10 +347,79 @@ fn translate<T: Clone + 'static>(
             }
             out
         }
-        ChartChange::PointsRemoved { series, .. } => {
+        ChartChange::PointsRemoved { series, range } => {
             let series = *series;
-            rebuild_series(inner, series);
-            vec![ChartChange::SeriesDataReplaced { series }]
+            let range = range.clone();
+            let bs = inner.bucket_size;
+            let new_total = (inner.point_count_fn)(series);
+            let removed = range.end - range.start;
+            let old_total = new_total + removed;
+
+            if range.end != old_total {
+                // Not a tail removal — a front/mid-series removal shifts
+                // every point after it into a different bucket. Rebuild.
+                rebuild_series(inner, series);
+                return vec![ChartChange::SeriesDataReplaced { series }];
+            }
+
+            // Tail-removal mirror of the `PointsInserted` tail-append
+            // branch above: buckets entirely below the new total are
+            // untouched (their point range didn't change), the new last
+            // bucket (if any) may have lost some of its points and needs
+            // recomputing, and any buckets entirely beyond the new total
+            // no longer exist.
+            let old_bc = old_total.div_ceil(bs);
+            let new_bc = new_total.div_ceil(bs);
+            let mut out = Vec::new();
+            let mut floor = usize::MAX;
+
+            if new_bc >= 1 {
+                let start = (new_bc - 1) * bs;
+                let end = (start + bs).min(new_total);
+                let mut wrote = false;
+                if let Some(d) = compute_bucket_datum(
+                    &inner.with_point_fn,
+                    series,
+                    &inner.aggregate_fn,
+                    start,
+                    end,
+                ) && let Some(list) = inner.buckets.get_mut(&series)
+                    && new_bc - 1 < list.len()
+                {
+                    list[new_bc - 1] = d;
+                    wrote = true;
+                }
+                // Only notify/diverge if the write actually happened — see
+                // the matching guard in the `PointsInserted` arm above.
+                if wrote {
+                    floor = floor.min(new_bc - 1);
+                    out.push(ChartChange::PointUpdated {
+                        series,
+                        index: new_bc - 1,
+                    });
+                } else {
+                    debug_assert!(
+                        false,
+                        "chart_aggregate: last-bucket update guard failed for an existing bucket after removal"
+                    );
+                }
+            }
+
+            if new_bc < old_bc {
+                if let Some(list) = inner.buckets.get_mut(&series) {
+                    list.truncate(new_bc);
+                }
+                floor = floor.min(new_bc);
+                out.push(ChartChange::PointsRemoved {
+                    series,
+                    range: new_bc..old_bc,
+                });
+            }
+
+            if floor != usize::MAX {
+                inner.divergence.insert(series, floor);
+            }
+            out
         }
         ChartChange::PointUpdated { series, index } => {
             let (series, index) = (*series, *index);
@@ -765,7 +838,9 @@ mod tests {
     }
 
     #[test]
-    fn any_removal_falls_back_to_replace() {
+    fn front_removal_falls_back_to_replace() {
+        // Removing anything but the tail shifts every later point into a
+        // different bucket — must still rebuild.
         let (model, s) = series_with(&[0.0, 1.0, 2.0, 3.0]);
         let agg = ChartAggregate::new(model.clone(), 2, ChartAggregateFn::Sum);
         let (log, _h) = track(&agg);
@@ -776,6 +851,84 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0], ChartChange::SeriesDataReplaced { series: s });
         assert_eq!(agg.point_count(s), 2); // 3 remaining points / 2
+    }
+
+    #[test]
+    fn tail_removal_worked_trace_bucket_size_3() {
+        // Mirror of `tail_append_worked_trace_bucket_size_3` for removal.
+        // 10 points -> 4 buckets: [0,1,2], [3,4,5], [6,7,8], [9]
+        let (model, s) = series_with(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        let agg = ChartAggregate::new(model.clone(), 3, ChartAggregateFn::Sum);
+        assert_eq!(agg.point_count(s), 4);
+        let (log, _h) = track(&agg);
+
+        // 10 -> 9: drops the trailing partial bucket [9] entirely; the new
+        // last bucket [6,7,8] is recomputed (unchanged value, but still
+        // written — same "always recompute the boundary bucket" contract
+        // the insert-side tail-append path uses).
+        model.remove_point(s, 9);
+        {
+            let entries = log.borrow();
+            assert_eq!(entries.len(), 2);
+            assert_eq!(
+                entries[0],
+                ChartChange::PointUpdated {
+                    series: s,
+                    index: 2
+                }
+            );
+            assert_eq!(
+                entries[1],
+                ChartChange::PointsRemoved {
+                    series: s,
+                    range: 3..4
+                }
+            );
+        }
+        assert_eq!(agg.point_count(s), 3);
+        assert_eq!(agg.with_point(s, 2, |d| d.value), Some(21.0)); // 6+7+8
+        log.borrow_mut().clear();
+
+        // 9 -> 8: same bucket count (last bucket shrinks to [6,7]).
+        model.remove_point(s, 8);
+        {
+            let entries = log.borrow();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(
+                entries[0],
+                ChartChange::PointUpdated {
+                    series: s,
+                    index: 2
+                }
+            );
+        }
+        assert_eq!(agg.point_count(s), 3);
+        assert_eq!(agg.with_point(s, 2, |d| d.value), Some(13.0)); // 6+7
+    }
+
+    #[test]
+    fn tail_removal_down_to_empty_series_drops_the_last_bucket() {
+        // new_bc == 0: the "recompute the new last bucket" step must be
+        // skipped entirely (there is no last bucket any more), leaving only
+        // the bucket-removal event.
+        let (model, s) = series_with(&[1.0, 2.0]);
+        let agg = ChartAggregate::new(model.clone(), 3, ChartAggregateFn::Sum);
+        assert_eq!(agg.point_count(s), 1); // one trailing partial bucket
+        let (log, _h) = track(&agg);
+
+        model.remove_point(s, 1);
+        model.remove_point(s, 0);
+
+        let entries = log.borrow();
+        assert_eq!(
+            entries.last(),
+            Some(&ChartChange::PointsRemoved {
+                series: s,
+                range: 0..1
+            })
+        );
+        drop(entries);
+        assert_eq!(agg.point_count(s), 0);
     }
 
     #[test]

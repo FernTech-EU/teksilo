@@ -21,11 +21,19 @@
 //! Three independent change vectors trigger a rebuild of the visible-index
 //! map:
 //!
-//! - The upstream source emits any [`DataChange`]. The proxy collapses every
-//!   upstream change into a single [`DataChange::Reset`] for its own
-//!   observers — translating fine-grained inserts / updates through a sort
-//!   projection is correctness-fragile (an updated item's sort key can move
-//!   it to a different visible row), so a Reset is the safe contract.
+//! - The upstream source emits any [`DataChange`]. Most changes collapse to
+//!   a single [`DataChange::Reset`] for the proxy's own observers —
+//!   translating fine-grained inserts / removes / moves through a sort
+//!   projection is correctness-fragile (an item's sort key can move it to a
+//!   different visible row), so `Reset` is the safe default contract. The
+//!   one exception is [`DataChange::ItemUpdated`]: the proxy re-evaluates
+//!   just that row's filter verdict and its position against its current
+//!   visible neighbours (not the whole list), and if neither changed,
+//!   forwards a scoped `ItemUpdated` at the mapped visible index instead of
+//!   paying for a full re-filter + re-sort + `Reset` on every edit to a
+//!   live-updating source. Any verdict change (entering/leaving the visible
+//!   set, or needing to move past a neighbour) still falls back to the full
+//!   rebuild.
 //! - A bound sort signal updates: rebuild and emit `Reset`.
 //! - A bound filters signal updates: rebuild and emit `Reset`.
 //!
@@ -464,6 +472,25 @@ fn rebuild_and_notify_with<T: 'static>(
     inner: &Rc<RefCell<Inner<T>>>,
     upstream: Option<&DataChange>,
 ) {
+    // Fast path: a single-row content edit that neither enters/leaves the
+    // visible set nor needs to move relative to its sorted neighbours can
+    // skip the full O(n) filter pass + O(n log n) sort — patch the one row
+    // instead of collapsing to `Reset`.
+    if let Some(DataChange::ItemUpdated { index }) = upstream
+        && let Some(outcome) = try_incremental_item_update(inner, *index)
+    {
+        if let IncrementalOutcome::Updated { visible_index } = outcome {
+            let callbacks = inner.borrow().snapshot_callbacks();
+            let change = DataChange::ItemUpdated {
+                index: visible_index,
+            };
+            for cb in &callbacks {
+                cb(&change);
+            }
+        }
+        return;
+    }
+
     // Drop the borrow before invoking observer callbacks so they may freely
     // call back into the proxy (`with_item`, `len`, etc.).
     let callbacks = {
@@ -475,6 +502,97 @@ fn rebuild_and_notify_with<T: 'static>(
     for cb in &callbacks {
         cb(&change);
     }
+}
+
+/// Outcome of [`try_incremental_item_update`]. Both variants mean the fast
+/// path succeeded (no rebuild ran); the caller only needs to notify for
+/// `Updated`.
+enum IncrementalOutcome {
+    /// The item was and remains visible at `visible_index` — its content
+    /// changed, so observers get a scoped `ItemUpdated` there.
+    Updated { visible_index: usize },
+    /// The item was and remains filtered out — nothing observable changed.
+    StillHidden,
+}
+
+/// Fast path for a single-row `DataChange::ItemUpdated`: re-evaluate just
+/// this row's filter verdict and sort position against its current visible
+/// neighbours, instead of re-filtering and re-sorting every row. Returns
+/// `None` when either verdict changed (entering/leaving the visible set, or
+/// needing to move past an adjacent neighbour) — the caller falls back to
+/// the full rebuild, which is the only way to get a correct renumbering in
+/// that case. On success `source_to_visible`'s lazy reverse map is left
+/// untouched: nothing's position moved, so it's still valid.
+fn try_incremental_item_update<T: 'static>(
+    inner: &Rc<RefCell<Inner<T>>>,
+    index: usize,
+) -> Option<IncrementalOutcome> {
+    let mut guard = inner.borrow_mut();
+
+    let predicates: Vec<Box<dyn Fn(&T) -> bool>> = guard
+        .filters
+        .iter()
+        .filter(|(_, text)| !text.is_empty())
+        .filter_map(|(col_id, text)| guard.predicate_factories.get(col_id).map(|f| f(text)))
+        .collect();
+    let with_item_fn = guard.with_item_fn.clone();
+
+    let passes_now = {
+        let keep = Cell::new(true);
+        (with_item_fn)(index, &|item: &T| {
+            for pred in &predicates {
+                if !pred(item) {
+                    keep.set(false);
+                    return;
+                }
+            }
+        });
+        keep.get()
+    };
+
+    let old_visible_pos = guard.visible_to_source.iter().position(|&s| s == index);
+    if passes_now != old_visible_pos.is_some() {
+        return None; // entering or leaving the visible set — needs a full renumber
+    }
+
+    let Some(visible_pos) = old_visible_pos else {
+        // Was, and remains, filtered out.
+        guard.last_divergence = Some(guard.visible_to_source.len());
+        return Some(IncrementalOutcome::StillHidden);
+    };
+
+    if let Some((col_id, dir)) = guard.sort.clone()
+        && let Some(cmp) = guard.comparators.get(&col_id).cloned()
+    {
+        let descending = dir == SortDirection::Descending;
+        let ordered = |a: usize, b: usize| -> Ordering {
+            let ord = Cell::new(Ordering::Equal);
+            (with_item_fn)(a, &|va| {
+                (with_item_fn)(b, &|vb| {
+                    ord.set(cmp(va, vb));
+                });
+            });
+            if descending {
+                ord.get().reverse()
+            } else {
+                ord.get()
+            }
+        };
+        let visible = &guard.visible_to_source;
+        if visible_pos > 0 && ordered(visible[visible_pos - 1], index) == Ordering::Greater {
+            return None; // moved before its predecessor
+        }
+        if visible_pos + 1 < visible.len()
+            && ordered(index, visible[visible_pos + 1]) == Ordering::Greater
+        {
+            return None; // moved past its successor
+        }
+    }
+
+    guard.last_divergence = Some(visible_pos);
+    Some(IncrementalOutcome::Updated {
+        visible_index: visible_pos,
+    })
 }
 
 impl<T: 'static> Clone for SortFilterListModel<T> {
@@ -960,5 +1078,139 @@ mod tests {
         );
         let proxy = SortFilterListModel::from_source(src);
         assert_eq!(proxy.len(), 2);
+    }
+
+    // ── Incremental ItemUpdated fast path ───────────────────────────────
+
+    #[test]
+    fn content_only_update_emits_item_updated_not_reset_and_preserves_order() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone())
+            .with_comparator("name", |a: &Row, b| a.name.cmp(&b.name));
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        // Sorted: alice(1), bob(2), carol(0), dan(3).
+        let before = collect_names(&proxy);
+
+        let changes: Rc<RefCell<Vec<DataChange>>> = Rc::new(RefCell::new(Vec::new()));
+        let c = changes.clone();
+        let _h = proxy.observe_changes(move |change| c.borrow_mut().push(change.clone()));
+
+        // Same sort key initial letter ('b'), so "bob" stays between
+        // "alice" and "carol" — content changed, order didn't.
+        model.set(
+            2,
+            Row {
+                id: 2,
+                name: "bobby".into(),
+            },
+        );
+
+        assert_eq!(
+            changes.borrow().as_slice(),
+            &[DataChange::ItemUpdated { index: 1 }],
+            "a stable-position content edit must emit a scoped ItemUpdated, not Reset"
+        );
+        assert_eq!(proxy.first_changed_index(), Some(1));
+        let after = collect_names(&proxy);
+        assert_eq!(after, vec!["alice", "bobby", "carol", "dan"]);
+        assert_eq!(before.len(), after.len());
+    }
+
+    #[test]
+    fn update_that_changes_sort_position_falls_back_to_reset_with_correct_ordering() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone())
+            .with_comparator("name", |a: &Row, b| a.name.cmp(&b.name));
+        proxy.set_sort(Some("name"), SortDirection::Ascending);
+        // Sorted: alice(1), bob(2), carol(0), dan(3).
+
+        let changes: Rc<RefCell<Vec<DataChange>>> = Rc::new(RefCell::new(Vec::new()));
+        let c = changes.clone();
+        let _h = proxy.observe_changes(move |change| c.borrow_mut().push(change.clone()));
+
+        // Rename dan → "aaa": jumps ahead of alice, forcing a renumber.
+        model.set(
+            3,
+            Row {
+                id: 4,
+                name: "aaa".into(),
+            },
+        );
+
+        assert_eq!(
+            changes.borrow().as_slice(),
+            &[DataChange::Reset],
+            "a position-changing edit must fall back to the full rebuild"
+        );
+        assert_eq!(collect_names(&proxy), vec!["aaa", "alice", "bob", "carol"]);
+    }
+
+    #[test]
+    fn update_transitions_filtered_out_to_in_and_back_rebuild() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone()).with_predicate("name", |t| {
+            let needle = t.to_string();
+            Box::new(move |r: &Row| r.name.contains(&needle))
+        });
+        proxy.set_filter("name", "z");
+        assert_eq!(proxy.len(), 0);
+
+        let changes: Rc<RefCell<Vec<DataChange>>> = Rc::new(RefCell::new(Vec::new()));
+        let c = changes.clone();
+        let _h = proxy.observe_changes(move |change| c.borrow_mut().push(change.clone()));
+
+        // Filtered out → in: "bob" doesn't match "z", "bobz" does.
+        model.set(
+            2,
+            Row {
+                id: 2,
+                name: "bobz".into(),
+            },
+        );
+        assert_eq!(changes.borrow().as_slice(), &[DataChange::Reset]);
+        assert_eq!(proxy.len(), 1);
+        assert_eq!(collect_names(&proxy), vec!["bobz"]);
+        changes.borrow_mut().clear();
+
+        // Filtered in → out: rename it away from "z" again.
+        model.set(
+            2,
+            Row {
+                id: 2,
+                name: "bob".into(),
+            },
+        );
+        assert_eq!(changes.borrow().as_slice(), &[DataChange::Reset]);
+        assert_eq!(proxy.len(), 0);
+    }
+
+    #[test]
+    fn hidden_item_update_stays_hidden_is_a_silent_fast_path() {
+        let model = sample();
+        let proxy = SortFilterListModel::new(model.clone()).with_predicate("name", |t| {
+            let needle = t.to_string();
+            Box::new(move |r: &Row| r.name.contains(&needle))
+        });
+        proxy.set_filter("name", "a"); // alice, carol, dan visible; bob hidden
+        assert_eq!(proxy.len(), 3);
+
+        let changes: Rc<RefCell<Vec<DataChange>>> = Rc::new(RefCell::new(Vec::new()));
+        let c = changes.clone();
+        let _h = proxy.observe_changes(move |change| c.borrow_mut().push(change.clone()));
+
+        // bob stays filtered out both before and after.
+        model.set(
+            2,
+            Row {
+                id: 2,
+                name: "bobby".into(),
+            },
+        );
+        assert!(
+            changes.borrow().is_empty(),
+            "no visible row changed, so no notification should fire"
+        );
+        assert_eq!(proxy.first_changed_index(), Some(proxy.len()));
+        assert_eq!(proxy.len(), 3);
     }
 }

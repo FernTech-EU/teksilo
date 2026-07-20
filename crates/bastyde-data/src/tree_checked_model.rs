@@ -342,14 +342,24 @@ impl<T: 'static> TreeCheckedModel<T> {
     }
 
     /// Reset all known nodes to [`CheckState::Unchecked`] and notify observers.
+    ///
+    /// Writes every tracked node directly via the internal `write_state`
+    /// helper (per-node cascade-suppressed, like the recompute pass) instead of going
+    /// through `check`/`uncheck`'s normal `signal_for(..).set(..)` path —
+    /// the latter would, for every currently-checked node, cascade the
+    /// write down its entire descendant subtree and recompute every
+    /// ancestor up to the root, all *before* the outer loop even reaches
+    /// those same nodes. Since every tracked node ends up `Unchecked` here,
+    /// there is nothing left to aggregate: "all children unchecked" is
+    /// already the correct parent state, so skipping the cascade and
+    /// ancestor recompute entirely still leaves every node's state
+    /// consistent — one direct write per tracked node instead of a
+    /// cascade+recompute pass per *checked* one.
     pub fn clear(&self) {
         // Snapshot keys to avoid borrow-during-iteration.
         let keys: Vec<NodeId> = self.inner.borrow().state.keys().copied().collect();
         for k in keys {
-            let sig = self.signal_for(k);
-            if sig.get() != CheckState::Unchecked {
-                sig.set(CheckState::Unchecked);
-            }
+            write_state(&self.inner, k, CheckState::Unchecked);
         }
     }
 
@@ -681,6 +691,53 @@ mod tests {
         m.check(root1);
         m.clear();
         assert_eq!(m.checked_nodes(), Vec::<NodeId>::new());
+    }
+
+    #[test]
+    fn clear_resets_every_node_and_still_notifies() {
+        // Covers the fast path (`clear` writes every tracked node directly
+        // instead of cascading each one): mix a directly-checked ancestor
+        // (root1, cascades to a/b), a directly-checked leaf (c, whose
+        // ancestor root2 must have recomputed to Checked), and observers +
+        // a bool-signal bridge on several nodes to prove every one still
+        // gets notified exactly once even though clear() no longer walks
+        // the tree.
+        let (t, root1, a, b, root2, c) = sample_tree();
+        let m = TreeCheckedModel::new(t);
+        let _ = (m.signal_for(root1), m.signal_for(a), m.signal_for(b));
+        let bool_a = m.bool_signal_for(a);
+
+        m.check(root1); // cascades Checked to a, b
+        m.check(c); // root2 recomputes to Checked
+        assert_eq!(m.check_state(root1), CheckState::Checked);
+        assert_eq!(m.check_state(root2), CheckState::Checked);
+        assert!(bool_a.get());
+
+        let notified: Rc<RefCell<HashSet<NodeId>>> = Rc::new(RefCell::new(HashSet::new()));
+        let mut handles = Vec::new();
+        for node in [root1, a, b, root2, c] {
+            let log = notified.clone();
+            handles.push(m.signal_for(node).observe(move |state| {
+                if *state == CheckState::Unchecked {
+                    log.borrow_mut().insert(node);
+                }
+            }));
+        }
+
+        m.clear();
+
+        assert_eq!(m.checked_nodes(), Vec::<NodeId>::new());
+        for node in [root1, a, b, root2, c] {
+            assert_eq!(m.check_state(node), CheckState::Unchecked);
+        }
+        assert!(!bool_a.get());
+        assert_eq!(
+            notified.borrow().len(),
+            5,
+            "every tracked node must still notify its own observers on clear: {:?}",
+            notified.borrow()
+        );
+        drop(handles);
     }
 
     #[test]

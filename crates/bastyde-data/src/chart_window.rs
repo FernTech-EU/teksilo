@@ -20,9 +20,14 @@
 //! fixed-size tail window has no such hazard): a tail append into a full
 //! window becomes a `PointsRemoved` + `PointsInserted` pair (the window
 //! slides), a tail append into a still-growing window becomes a plain
-//! `PointsInserted`, and anything that isn't a clean tail append (a
-//! mid-series insert, any removal) falls back to a per-series rebuild
-//! reported as `SeriesDataReplaced`.
+//! `PointsInserted`, and symmetrically a **tail removal** (trimming the
+//! series' own end — e.g. discarding a bad trailing reading) becomes the
+//! mirror-image `PointsRemoved` + `PointsInserted` pair: points beyond the
+//! new total drop out of the window, and if the window slid backward to
+//! stay full, the newly-uncovered prefix is revealed as an insertion.
+//! Anything that isn't a clean tail append/removal (a mid-series insert or
+//! removal) falls back to a per-series rebuild reported as
+//! `SeriesDataReplaced`.
 //!
 //! ```ignore
 //! use bastyde_data::{ChartModel, ChartWindow};
@@ -376,10 +381,70 @@ fn translate<T: 'static>(
             inner.starts.insert(series, new_start);
             out
         }
-        ChartChange::PointsRemoved { series, .. } => {
+        ChartChange::PointsRemoved { series, range } => {
             let series = *series;
-            inner.rebuild_series(series);
-            vec![ChartChange::SeriesDataReplaced { series }]
+            let range = range.clone();
+            let window_size = inner.window_size;
+            let new_total = (inner.point_count_fn)(series);
+            let removed = range.end - range.start;
+            let old_total = new_total + removed;
+            let old_start = inner
+                .starts
+                .get(&series)
+                .copied()
+                .unwrap_or_else(|| old_total.saturating_sub(window_size));
+
+            if range.end != old_total {
+                // Not a tail removal — a front/mid-series removal
+                // renumbers every point after it, including ones the
+                // window doesn't show. Rebuild.
+                inner.rebuild_series(series);
+                return vec![ChartChange::SeriesDataReplaced { series }];
+            }
+
+            // Tail-removal mirror of the `PointsInserted` tail-append
+            // branch above: absolute recompute from source indices rather
+            // than assuming a fixed-size slide. `new_start <= old_start`
+            // always holds here (removing points can only grow the window
+            // backward to keep it full, never shrink it forward) — the
+            // old window's front survives at a shifted local position, its
+            // tail (the removed points) is gone, and any newly-uncovered
+            // prefix below the old start is freshly revealed.
+            let old_visible = old_total.saturating_sub(old_start);
+            let new_start = new_total.saturating_sub(window_size);
+            let new_visible = new_total.saturating_sub(new_start);
+            // Old-window entries at or past `new_total` were removed; the
+            // rest (if any) survive as the front of the old window.
+            let survivors = new_total.saturating_sub(old_start).min(old_visible);
+            let removed_from_window = old_visible - survivors;
+            let revealed = old_start.saturating_sub(new_start);
+
+            let mut out = Vec::new();
+            if removed_from_window > 0 {
+                out.push(ChartChange::PointsRemoved {
+                    series,
+                    range: survivors..old_visible,
+                });
+            }
+            if revealed > 0 {
+                out.push(ChartChange::PointsInserted {
+                    series,
+                    range: 0..revealed,
+                });
+            }
+            // A revealed prefix renumbers every surviving index, so the
+            // first index that may differ is 0; otherwise the survivors
+            // (if any) are untouched and only the point past them changed.
+            inner.divergence.insert(
+                series,
+                if revealed > 0 {
+                    0
+                } else {
+                    survivors.min(new_visible)
+                },
+            );
+            inner.starts.insert(series, new_start);
+            out
         }
         ChartChange::PointUpdated { series, index } => {
             let (series, index) = (*series, *index);
@@ -554,7 +619,9 @@ mod tests {
     }
 
     #[test]
-    fn any_removal_falls_back_to_replace() {
+    fn front_removal_falls_back_to_replace() {
+        // Removing anything but the tail renumbers every later point,
+        // including ones the window doesn't show — must still rebuild.
         let (model, s) = one_series(3);
         let window = ChartWindow::new(model.clone(), 5);
         let (log, _h) = track(&window);
@@ -566,6 +633,69 @@ mod tests {
         assert_eq!(entries[0], ChartChange::SeriesDataReplaced { series: s });
         drop(entries);
         assert_eq!(window.point_count(s), 2);
+    }
+
+    #[test]
+    fn partial_window_tail_removal_emits_plain_removed() {
+        // Window not full (5 points shown out of a 10-point capacity) —
+        // trimming the tail just shrinks it, nothing to reveal.
+        let (model, s) = one_series(5);
+        let window = ChartWindow::new(model.clone(), 10);
+        let (log, _h) = track(&window);
+
+        model.remove_point(s, 4); // the tail point
+
+        let entries = log.borrow();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0],
+            ChartChange::PointsRemoved {
+                series: s,
+                range: 4..5
+            }
+        );
+        drop(entries);
+        assert_eq!(window.point_count(s), 4);
+        let vals: Vec<f32> = (0..4)
+            .map(|i| window.with_point(s, i, |d| d.value).unwrap())
+            .collect();
+        assert_eq!(vals, vec![0.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn full_window_tail_removal_emits_removed_then_inserted() {
+        // Window full (shows the last 3 of 5) — trimming the tail slides it
+        // backward to reveal the point that just fell off the front.
+        let (model, s) = one_series(5); // window shows [2,3,4] -> [2.0,3.0,4.0]
+        let window = ChartWindow::new(model.clone(), 3);
+        assert_eq!(window.point_count(s), 3);
+        let (log, _h) = track(&window);
+
+        model.remove_point(s, 4); // remove the tail point (value 4.0)
+
+        let entries = log.borrow();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0],
+            ChartChange::PointsRemoved {
+                series: s,
+                range: 2..3
+            }
+        );
+        assert_eq!(
+            entries[1],
+            ChartChange::PointsInserted {
+                series: s,
+                range: 0..1
+            }
+        );
+        drop(entries);
+
+        assert_eq!(window.point_count(s), 3);
+        let vals: Vec<f32> = (0..3)
+            .map(|i| window.with_point(s, i, |d| d.value).unwrap())
+            .collect();
+        assert_eq!(vals, vec![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -730,6 +860,92 @@ mod tests {
                 ChartChange::PointsInserted {
                     series: s,
                     range: 1..3
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn translate_multi_point_tail_removal_from_full_to_not_full() {
+        // Mirror of `translate_multi_point_insert_not_full_to_overflow` for
+        // removal: a bulk tail trim (`range.len() > 1`) that takes a full
+        // window back below capacity must be handled by the same absolute
+        // recompute, not a fixed-size `shift` assumption (which only holds
+        // for a single-point removal). `ChartModel::remove_point` only ever
+        // emits length-1 `PointsRemoved` ranges, so this builds a
+        // `ChartWindowInner` by hand and calls `translate` directly with a
+        // synthesized multi-point change, exactly like the insert-side
+        // regression test above.
+        let model: ChartModel<i32> = ChartModel::new();
+        let s = model.add_series("s");
+        for i in 0..5 {
+            model.push_point(s, i, i as f32);
+        }
+
+        let series_ids_fn: SeriesIdsFn = {
+            let m = model.clone();
+            Rc::new(move || m.series_ids())
+        };
+        let point_count_fn: PointCountFn = {
+            let m = model.clone();
+            Rc::new(move |series| m.point_count(series))
+        };
+        let with_point_fn: WithPointFn<i32> = {
+            let m = model.clone();
+            Rc::new(move |series, idx, f| {
+                m.with_point(series, idx, |d| f(d));
+            })
+        };
+        let with_series_fn: WithSeriesFn = {
+            let m = model.clone();
+            Rc::new(move |series, f| {
+                m.with_series(series, |name, color, visible| f(name, color, visible));
+            })
+        };
+
+        let mut inner = ChartWindowInner {
+            series_ids_fn,
+            point_count_fn,
+            with_point_fn,
+            with_series_fn,
+            window_size: 3,
+            starts: HashMap::new(),
+            divergence: HashMap::new(),
+            observers: Vec::new(),
+            next_observer_id: 1,
+            _upstream_handle: None,
+        };
+        inner.rebuild_all(); // caches start == 2 for the full 5-point window: [2,3,4]
+
+        // Bulk-remove the last 3 points directly from the model — `inner`
+        // isn't subscribed, so it still thinks the total is 5 while the
+        // model now reports 2, exactly what a batch-remove API would
+        // report as one `PointsRemoved { range: 2..5 }`.
+        model.remove_point(s, 4);
+        model.remove_point(s, 3);
+        model.remove_point(s, 2);
+
+        let changes = translate(
+            &mut inner,
+            &ChartChange::PointsRemoved {
+                series: s,
+                range: 2..5,
+            },
+        );
+
+        // Old window [2,3,4] (len 3) -> new window [0,1] (len 2): every old
+        // entry is gone (none survive below the new total of 2), and both
+        // remaining source points are freshly revealed at the front.
+        assert_eq!(
+            changes,
+            vec![
+                ChartChange::PointsRemoved {
+                    series: s,
+                    range: 0..3
+                },
+                ChartChange::PointsInserted {
+                    series: s,
+                    range: 0..2
                 },
             ]
         );

@@ -39,7 +39,7 @@
 //! ```
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use bastyde_core::ObserverHandle;
@@ -62,6 +62,10 @@ pub struct TreeSlice<T: 'static> {
     tree: TreeModel<T>,
     expanded: Rc<RefCell<HashSet<NodeId>>>,
     flattened: Rc<RefCell<Vec<FlatEntry>>>,
+    /// `NodeId` → flat index, rebuilt alongside `flattened` on every
+    /// reflatten. Keeps `flat_index_of` O(1) (mirrors `TreeDataSlice`'s
+    /// `vis_pos`) instead of a linear scan over `flattened`.
+    positions: Rc<RefCell<HashMap<NodeId, usize>>>,
     version: Signal<u64>,
     version_counter: Rc<std::cell::Cell<u64>>,
     /// First flat index whose content may differ after the latest
@@ -76,29 +80,40 @@ impl<T: 'static> TreeSlice<T> {
     pub fn new(tree: TreeModel<T>) -> Self {
         let expanded: Rc<RefCell<HashSet<NodeId>>> = Rc::new(RefCell::new(HashSet::new()));
         let flattened: Rc<RefCell<Vec<FlatEntry>>> = Rc::new(RefCell::new(Vec::new()));
+        let positions: Rc<RefCell<HashMap<NodeId, usize>>> = Rc::new(RefCell::new(HashMap::new()));
         let version = Signal::new(0_u64);
         let version_counter = Rc::new(std::cell::Cell::new(0_u64));
         let divergence = Rc::new(std::cell::Cell::new(None));
 
         // Initial flatten
-        Self::rebuild_flat_list(&tree, &expanded.borrow(), &mut flattened.borrow_mut());
+        Self::rebuild_flat_list(
+            &tree,
+            &expanded.borrow(),
+            &mut flattened.borrow_mut(),
+            &mut positions.borrow_mut(),
+        );
 
         // Observe tree changes
         let exp = expanded.clone();
         let flat = flattened.clone();
+        let pos = positions.clone();
         let tree_for_obs = tree.clone();
         let ver = version.clone();
         let vc = version_counter.clone();
         let div = divergence.clone();
         let observer = tree.observe_changes(move |change| {
-            let mut d =
-                Self::rebuild_flat_list(&tree_for_obs, &exp.borrow(), &mut flat.borrow_mut());
+            let mut d = Self::rebuild_flat_list(
+                &tree_for_obs,
+                &exp.borrow(),
+                &mut flat.borrow_mut(),
+                &mut pos.borrow_mut(),
+            );
             // A NodeUpdated leaves the flat structure identical, but the
             // updated node's content (and thus any per-row derived state
             // such as a measured height) changed — fold its flat position
             // into the divergence.
             if let TreeChange::NodeUpdated { node } = change
-                && let Some(p) = flat.borrow().iter().position(|e| e.node_id == *node)
+                && let Some(&p) = pos.borrow().get(node)
             {
                 d = d.min(p);
             }
@@ -112,6 +127,7 @@ impl<T: 'static> TreeSlice<T> {
             tree,
             expanded,
             flattened,
+            positions,
             version,
             version_counter,
             divergence,
@@ -159,11 +175,9 @@ impl<T: 'static> TreeSlice<T> {
     }
 
     /// Find the flat index for a given `NodeId`, or `None` if not visible.
+    /// O(1) — backed by a position map rebuilt on every reflatten.
     pub fn flat_index_of(&self, node: NodeId) -> Option<usize> {
-        self.flattened
-            .borrow()
-            .iter()
-            .position(|e| e.node_id == node)
+        self.positions.borrow().get(&node).copied()
     }
 
     // --- Expand / Collapse ---
@@ -274,6 +288,7 @@ impl<T: 'static> TreeSlice<T> {
             tree: self.tree.clone(),
             expanded: self.expanded.clone(),
             flattened: self.flattened.clone(),
+            positions: self.positions.clone(),
             version: self.version.clone(),
             version_counter: self.version_counter.clone(),
             divergence: self.divergence.clone(),
@@ -287,6 +302,7 @@ impl<T: 'static> TreeSlice<T> {
             &self.tree,
             &self.expanded.borrow(),
             &mut self.flattened.borrow_mut(),
+            &mut self.positions.borrow_mut(),
         );
         self.divergence.set(Some(d));
         let next = self.version_counter.get() + 1;
@@ -303,25 +319,31 @@ impl<T: 'static> TreeSlice<T> {
         }
     }
 
-    fn expand_subtree_recursive(tree: &TreeModel<T>, node: NodeId, expanded: &mut HashSet<NodeId>) {
-        if tree.has_children(node) {
-            expanded.insert(node);
-            let children = tree.children(node);
-            for child in children {
-                Self::expand_subtree_recursive(tree, child, expanded);
+    /// Explicit-stack walk — `expand_all` is the natural companion of a deep
+    /// `flatten_node` walk, so it needs the same depth-bounded traversal.
+    fn expand_subtree_recursive(tree: &TreeModel<T>, root: NodeId, expanded: &mut HashSet<NodeId>) {
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if tree.has_children(node) {
+                expanded.insert(node);
+                for child in tree.children(node) {
+                    stack.push(child);
+                }
             }
         }
     }
 
-    /// Rebuild `out` from scratch and return the length of the common
-    /// prefix with the previous flat list — the first flat index at which
-    /// the projection diverges (`out.len()` when nothing visible changed).
-    /// `NodeId`s are stable slotmap keys, so equal entries denote the same
-    /// node at the same depth/expand state.
+    /// Rebuild `out` (and the `pos` position map alongside it) from scratch
+    /// and return the length of the common prefix with the previous flat
+    /// list — the first flat index at which the projection diverges
+    /// (`out.len()` when nothing visible changed). `NodeId`s are stable
+    /// slotmap keys, so equal entries denote the same node at the same
+    /// depth/expand state.
     fn rebuild_flat_list(
         tree: &TreeModel<T>,
         expanded: &HashSet<NodeId>,
         out: &mut Vec<FlatEntry>,
+        pos: &mut HashMap<NodeId, usize>,
     ) -> usize {
         let old = std::mem::take(out);
         out.reserve(old.len());
@@ -330,33 +352,40 @@ impl<T: 'static> TreeSlice<T> {
             let root = tree.root(i);
             Self::flatten_node(tree, root, 0, expanded, out);
         }
+        pos.clear();
+        pos.extend(out.iter().enumerate().map(|(i, e)| (e.node_id, i)));
         old.iter()
             .zip(out.iter())
             .take_while(|(a, b)| a == b)
             .count()
     }
 
+    /// Explicit-stack pre-order walk (children pushed in reverse so `pop()`
+    /// yields them in source order) — depth-bounded by tree size, not the
+    /// call stack.
     fn flatten_node(
         tree: &TreeModel<T>,
-        node: NodeId,
+        root: NodeId,
         depth: usize,
         expanded: &HashSet<NodeId>,
         out: &mut Vec<FlatEntry>,
     ) {
-        let has_children = tree.has_children(node);
-        let is_expanded = expanded.contains(&node);
+        let mut stack = vec![(root, depth)];
+        while let Some((node, depth)) = stack.pop() {
+            let has_children = tree.has_children(node);
+            let is_expanded = expanded.contains(&node);
 
-        out.push(FlatEntry {
-            node_id: node,
-            depth,
-            has_children,
-            is_expanded,
-        });
+            out.push(FlatEntry {
+                node_id: node,
+                depth,
+                has_children,
+                is_expanded,
+            });
 
-        if is_expanded && has_children {
-            let children = tree.children(node);
-            for child in children {
-                Self::flatten_node(tree, child, depth + 1, expanded, out);
+            if is_expanded && has_children {
+                for child in tree.children(node).into_iter().rev() {
+                    stack.push((child, depth + 1));
+                }
             }
         }
     }
@@ -381,6 +410,7 @@ pub struct TreeSliceHandle<T: 'static> {
     tree: TreeModel<T>,
     expanded: Rc<RefCell<HashSet<NodeId>>>,
     flattened: Rc<RefCell<Vec<FlatEntry>>>,
+    positions: Rc<RefCell<HashMap<NodeId, usize>>>,
     version: Signal<u64>,
     version_counter: Rc<std::cell::Cell<u64>>,
     divergence: Rc<std::cell::Cell<Option<usize>>>,
@@ -468,6 +498,7 @@ impl<T: 'static> TreeSliceHandle<T> {
             &self.tree,
             &self.expanded.borrow(),
             &mut self.flattened.borrow_mut(),
+            &mut self.positions.borrow_mut(),
         );
         self.divergence.set(Some(d));
         let next = self.version_counter.get() + 1;
@@ -482,6 +513,7 @@ impl<T: 'static> Clone for TreeSliceHandle<T> {
             tree: self.tree.clone(),
             expanded: self.expanded.clone(),
             flattened: self.flattened.clone(),
+            positions: self.positions.clone(),
             version: self.version.clone(),
             version_counter: self.version_counter.clone(),
             divergence: self.divergence.clone(),
@@ -820,6 +852,46 @@ mod tests {
         assert_eq!(slice.flat_index_of(b), Some(1));
     }
 
+    /// The position map underlying `flat_index_of` must agree with iteration
+    /// order (`visible_node_id`) after every kind of reflatten-triggering
+    /// mutation — expand, collapse, and an upstream model change (a filter
+    /// pass on `TreeSlice` would be the model-level equivalent).
+    fn assert_positions_match_iteration_order<T>(slice: &TreeSlice<T>) {
+        for i in 0..slice.visible_count() {
+            let node = slice.visible_node_id(i).unwrap();
+            assert_eq!(
+                slice.flat_index_of(node),
+                Some(i),
+                "flat_index_of({node:?}) should be the iteration position {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn flat_index_of_matches_iteration_order_across_mutations() {
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let b = tree.root(1);
+        let slice = TreeSlice::new(tree.clone());
+
+        assert_positions_match_iteration_order(&slice);
+
+        slice.expand(a);
+        assert_positions_match_iteration_order(&slice);
+
+        slice.expand(b);
+        assert_positions_match_iteration_order(&slice);
+
+        slice.collapse(a);
+        assert_positions_match_iteration_order(&slice);
+
+        tree.insert_root(3, "D");
+        assert_positions_match_iteration_order(&slice);
+
+        tree.remove(b);
+        assert_positions_match_iteration_order(&slice);
+    }
+
     #[test]
     fn persistence_save_restore() {
         let tree = sample_tree();
@@ -1009,5 +1081,30 @@ mod tests {
         assert_eq!(slice.visible_count(), 2);
         assert_eq!(slice.with_entry(0, |v, _| *v), Some("A"));
         assert_eq!(slice.with_entry(1, |v, _| *v), Some("C"));
+    }
+
+    /// `flatten_node` and `expand_subtree_recursive` are both explicit-stack
+    /// walks; a 50,000-deep single-child chain must flatten (and fully
+    /// expand) without overflowing the call stack.
+    #[test]
+    fn deep_chain_flattens_and_expands_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let tree = TreeModel::new();
+        let root = tree.insert_root(0, 0usize);
+        let mut leaf = root;
+        for i in 1..DEPTH {
+            leaf = tree.insert_child(leaf, 0, i);
+        }
+        let slice = TreeSlice::new(tree);
+
+        // expand_all walks the whole tree (expand_subtree_recursive) then
+        // reflattens once (flatten_node walks the full DEPTH) — both
+        // explicit-stack, so this exercises both in one shot instead of
+        // one `expand()` reflatten per node (which would be O(n^2)).
+        slice.expand_all();
+
+        assert_eq!(slice.visible_count(), DEPTH);
+        assert_eq!(slice.flat_index_of(leaf), Some(DEPTH - 1));
+        assert_eq!(slice.depth_at(DEPTH - 1), DEPTH - 1);
     }
 }

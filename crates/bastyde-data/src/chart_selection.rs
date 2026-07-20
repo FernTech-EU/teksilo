@@ -25,7 +25,13 @@
 //! only extends within the anchor's own series — a cross-series "range" has
 //! no natural order, so it falls back to a single-point select.
 //! [`ChartSelection::adjust`] keeps selected points consistent as the
-//! source model mutates (series removed, points inserted/removed).
+//! source model mutates (series removed, points inserted/removed) — call it
+//! from your own model observer, or skip the wiring entirely with
+//! [`ChartSelection::attached`] (equivalently, [`ChartSelection::attach`] on
+//! an existing selection), which subscribes internally and calls `adjust`
+//! for you, the same way [`crate::ChartWindow`]/[`crate::ChartAggregate`]
+//! self-wire in their own constructors. Forgetting to wire `adjust` up
+//! manually otherwise leaves the selection silently stale after a mutation.
 //!
 //! ```rust
 //! # use bastyde_data::{ChartModel, ChartSelection, SelectionMode};
@@ -35,10 +41,14 @@
 //!     model.push_point(s, i, i as f32);
 //! }
 //!
-//! let sel = ChartSelection::new(SelectionMode::Multi);
+//! let sel = ChartSelection::attached(SelectionMode::Multi, &model);
 //! sel.select_point(s, 1);
 //! sel.extend_to(s, 3);
 //! assert_eq!(sel.count(), 3); // (s,1), (s,2), (s,3)
+//!
+//! model.remove_point(s, 0); // upstream mutation — no manual adjust() call
+//! assert_eq!(sel.count(), 3); // (s,0), (s,1), (s,2) — shifted down
+//!
 //! sel.clear();
 //! assert_eq!(sel.count(), 0);
 //! ```
@@ -47,9 +57,11 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use bastyde_core::ObserverHandle;
 use bastyde_core::signal::Signal;
 
 use crate::chart_change::{ChartChange, SeriesId};
+use crate::chart_model::ChartModel;
 use crate::selection_model::SelectionMode;
 
 /// Point-level selection state for a chart, keyed by `(series, point
@@ -60,6 +72,11 @@ pub struct ChartSelection {
     /// Anchor point for range extension. Shared via `Rc` so clones see the
     /// same anchor state.
     anchor: Rc<RefCell<Option<(SeriesId, usize)>>>,
+    /// Holder for an [`attach`](Self::attach)ed model subscription. Shared
+    /// across clones (like `anchor`) so the subscription stays alive as
+    /// long as any handle to this selection does, and re-attaching (or
+    /// every clone dropping) tears down the previous one.
+    attach_handle: Rc<RefCell<Option<ObserverHandle>>>,
     /// Strong holder for the debug-registry adapter. Shared across clones;
     /// once all `ChartSelection` handles drop, the holder `Rc` reaches
     /// zero and the adapter is freed, marking the registry entry dead.
@@ -75,9 +92,46 @@ impl ChartSelection {
             mode,
             selection: Signal::new(HashSet::new()),
             anchor: Rc::new(RefCell::new(None)),
+            attach_handle: Rc::new(RefCell::new(None)),
             #[cfg(debug_assertions)]
             debug_adapter_holder: Rc::new(RefCell::new(None)),
         }
+    }
+
+    /// Create a selection that self-wires to `model`: every [`ChartChange`]
+    /// the model emits is automatically routed through [`Self::adjust`], so
+    /// a point removed or shifted upstream never leaves a stale selected
+    /// index behind. Equivalent to `ChartSelection::new(mode)` plus
+    /// `model.observe_changes(|c| sel.adjust(c))`, minus the easy-to-forget
+    /// wiring — mirrors how [`crate::ChartWindow`] and
+    /// [`crate::ChartAggregate`] self-wire in their own constructors. The
+    /// manual [`Self::adjust`] path still works — call it yourself instead
+    /// if you'd rather relay through a custom change pipeline.
+    pub fn attached<T: 'static>(mode: SelectionMode, model: &ChartModel<T>) -> Self {
+        let sel = Self::new(mode);
+        sel.attach(model);
+        sel
+    }
+
+    /// Subscribe this selection to `model`'s changes, applying
+    /// [`Self::adjust`] on every [`ChartChange`]. The subscription is held
+    /// internally (shared across clones — see [`Clone`]), so it stays alive
+    /// as long as any handle to this selection does; calling `attach`
+    /// again (on this handle or any clone) drops the previous subscription
+    /// and installs the new one.
+    ///
+    /// The subscription closure captures only `selection` + `anchor`, not a
+    /// full `Self` — capturing `Self` would pull in `attach_handle` too,
+    /// which holds this very `ObserverHandle`, forming an `Rc` cycle that
+    /// would leak the subscription instead of tearing down when every
+    /// `ChartSelection` handle drops.
+    pub fn attach<T: 'static>(&self, model: &ChartModel<T>) {
+        let selection = self.selection.clone();
+        let anchor = self.anchor.clone();
+        let handle = model.observe_changes(move |change| {
+            Self::adjust_state(&selection, &anchor, change);
+        });
+        *self.attach_handle.borrow_mut() = Some(handle);
     }
 
     /// The selection mode.
@@ -205,29 +259,40 @@ impl ChartSelection {
     /// Series metadata changes (rename/recolor/visibility/move/insert) and
     /// in-place point updates never affect which points are selected.
     pub fn adjust(&self, change: &ChartChange) {
+        Self::adjust_state(&self.selection, &self.anchor, change);
+    }
+
+    /// The body of [`Self::adjust`], taking `selection`/`anchor` directly
+    /// rather than `&self` — used by [`Self::attach`]'s subscription
+    /// closure, which must **not** capture a full `Self` (that would
+    /// capture `attach_handle` too, which holds the very `ObserverHandle`
+    /// the closure lives inside: an `Rc` cycle that would leak the
+    /// subscription forever instead of tearing down when every
+    /// `ChartSelection` handle drops).
+    fn adjust_state(
+        selection: &Signal<HashSet<(SeriesId, usize)>>,
+        anchor: &Rc<RefCell<Option<(SeriesId, usize)>>>,
+        change: &ChartChange,
+    ) {
         match change {
             ChartChange::SeriesRemoved { series } | ChartChange::SeriesDataReplaced { series } => {
                 let series = *series;
-                let old = self.selection.get();
+                let old = selection.get();
                 let new: HashSet<(SeriesId, usize)> =
                     old.iter().filter(|(s, _)| *s != series).copied().collect();
                 if new.len() != old.len() {
-                    self.selection.set(new);
+                    selection.set(new);
                 }
-                let drop_anchor = self
-                    .anchor
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|(s, _)| *s == series);
+                let drop_anchor = anchor.borrow().as_ref().is_some_and(|(s, _)| *s == series);
                 if drop_anchor {
-                    *self.anchor.borrow_mut() = None;
+                    *anchor.borrow_mut() = None;
                 }
             }
             ChartChange::PointsInserted { series, range } => {
                 let series = *series;
                 let start = range.start;
                 let count = range.end - range.start;
-                let old = self.selection.get();
+                let old = selection.get();
                 let new: HashSet<(SeriesId, usize)> = old
                     .iter()
                     .map(|&(s, i)| {
@@ -239,9 +304,9 @@ impl ChartSelection {
                     })
                     .collect();
                 if new != old {
-                    self.selection.set(new);
+                    selection.set(new);
                 }
-                let mut anchor = self.anchor.borrow_mut();
+                let mut anchor = anchor.borrow_mut();
                 if let Some((s, i)) = *anchor
                     && s == series
                     && i >= start
@@ -254,7 +319,7 @@ impl ChartSelection {
                 let start = range.start;
                 let end = range.end;
                 let count = range.end - range.start;
-                let old = self.selection.get();
+                let old = selection.get();
                 let new: HashSet<(SeriesId, usize)> = old
                     .iter()
                     .filter_map(|&(s, i)| {
@@ -271,9 +336,9 @@ impl ChartSelection {
                     })
                     .collect();
                 if new != old {
-                    self.selection.set(new);
+                    selection.set(new);
                 }
-                let mut anchor = self.anchor.borrow_mut();
+                let mut anchor = anchor.borrow_mut();
                 if let Some((s, i)) = *anchor
                     && s == series
                 {
@@ -284,7 +349,10 @@ impl ChartSelection {
                     }
                 }
             }
-            ChartChange::Reset => self.clear(),
+            ChartChange::Reset => {
+                selection.set(HashSet::new());
+                *anchor.borrow_mut() = None;
+            }
             // Series metadata and in-place point updates don't change
             // which points are selected.
             ChartChange::SeriesInserted { .. }
@@ -324,6 +392,7 @@ impl Clone for ChartSelection {
             mode: self.mode,
             selection: self.selection.clone(),
             anchor: self.anchor.clone(),
+            attach_handle: self.attach_handle.clone(),
             #[cfg(debug_assertions)]
             debug_adapter_holder: self.debug_adapter_holder.clone(),
         }
@@ -392,7 +461,6 @@ impl std::fmt::Debug for ChartSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chart_model::ChartModel;
 
     fn two_series() -> (SeriesId, SeriesId) {
         let model: ChartModel<i32> = ChartModel::new();
@@ -609,5 +677,75 @@ mod tests {
         clone.extend_to(a, 3); // uses the shared anchor from `sel`
         assert_eq!(sel.selection_signal().get(), set([(a, 1), (a, 2), (a, 3)]));
         let _ = b;
+    }
+
+    // ── attach / attached ───────────────────────────────────────────────
+
+    #[test]
+    fn attached_shifts_selection_on_point_removed_before_it() {
+        let model: ChartModel<i32> = ChartModel::new();
+        let s = model.add_series("s");
+        for i in 0..5 {
+            model.push_point(s, i, i as f32);
+        }
+        let sel = ChartSelection::attached(SelectionMode::Multi, &model);
+        sel.select_point(s, 3);
+        assert!(sel.is_selected(s, 3));
+
+        // Remove the two points before index 3 — it must auto-shift to 1,
+        // with no manual `sel.adjust(...)` call from the test.
+        model.remove_point(s, 0);
+        model.remove_point(s, 0);
+
+        assert!(!sel.is_selected(s, 3));
+        assert!(sel.is_selected(s, 1));
+    }
+
+    #[test]
+    fn attach_on_a_manually_constructed_selection_wires_it_up() {
+        let model: ChartModel<i32> = ChartModel::new();
+        let s = model.add_series("s");
+        model.push_point(s, 0, 0.0);
+        model.push_point(s, 1, 1.0);
+
+        let sel = ChartSelection::new(SelectionMode::Single);
+        sel.select_point(s, 1);
+        sel.attach(&model); // not attached at construction time
+
+        model.remove_point(s, 0);
+        assert!(sel.is_selected(s, 0), "index 1 shifted down to 0");
+    }
+
+    #[test]
+    fn manual_adjust_still_works_without_attach() {
+        // The pre-existing manual wiring path keeps working — attach is
+        // additive sugar, not a replacement.
+        let (a, _b) = two_series();
+        let sel = ChartSelection::new(SelectionMode::Multi);
+        sel.select_point(a, 3);
+        sel.adjust(&ChartChange::PointsRemoved {
+            series: a,
+            range: 0..2,
+        });
+        assert!(sel.is_selected(a, 1));
+    }
+
+    #[test]
+    fn attach_does_not_leak_the_subscription_via_a_reference_cycle() {
+        let model: ChartModel<i32> = ChartModel::new();
+        let sel = ChartSelection::attached(SelectionMode::Multi, &model);
+        let weak_anchor = Rc::downgrade(&sel.anchor);
+        let weak_attach_handle = Rc::downgrade(&sel.attach_handle);
+
+        drop(sel);
+
+        assert!(
+            weak_anchor.upgrade().is_none(),
+            "anchor must not be kept alive by the subscription closure"
+        );
+        assert!(
+            weak_attach_handle.upgrade().is_none(),
+            "attach_handle must not be kept alive by its own subscription"
+        );
     }
 }
