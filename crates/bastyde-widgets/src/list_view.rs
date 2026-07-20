@@ -1083,6 +1083,22 @@ impl<T: 'static> Widget for ListView<T> {
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
+                        Key::Space if modifiers.ctrl() => {
+                            // Ctrl+Space toggles the focused row's selection —
+                            // the keyboard equivalent of Ctrl+click. Distinct
+                            // from plain Space below: it always toggles (even
+                            // in Single mode, via `SelectionModel::toggle`'s
+                            // own Single-mode fallback to `select`), pairing
+                            // with Ctrl+Arrow's cursor-only move so a user can
+                            // walk the cursor without disturbing the existing
+                            // selection, then Ctrl+Space to add rows one at a
+                            // time.
+                            if let Some(ref sel) = sel_for_key {
+                                sel.toggle(current);
+                            }
+                            fi.set(Some(current));
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
                         Key::Space => {
                             // Space moves/toggles the selection but does NOT
                             // activate — the platform convention (Enter is the
@@ -1103,8 +1119,17 @@ impl<T: 'static> Widget for ListView<T> {
 
                     if let Some(idx) = new_idx {
                         fi.set(Some(idx));
-                        // Select the focused item (standard list keyboard behavior)
-                        if let Some(ref sel) = sel_for_key {
+                        // Ctrl+Arrow (no Shift) moves the keyboard cursor only,
+                        // leaving the selection untouched — pairs with
+                        // Ctrl+Space to build a selection without every step
+                        // replacing it. Every other nav key keeps the
+                        // existing select-follow behavior (Home/End/PageUp/
+                        // PageDown are unaffected by Ctrl; only the arrows
+                        // opt into cursor-only movement).
+                        let cursor_only = modifiers.ctrl()
+                            && !modifiers.shift()
+                            && matches!(key, Key::ArrowUp | Key::ArrowDown);
+                        if !cursor_only && let Some(ref sel) = sel_for_key {
                             if modifiers.shift() {
                                 sel.extend_to(idx);
                             } else {
@@ -2589,6 +2614,90 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_arrow_moves_cursor_without_selecting_in_multi_mode() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..6usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+
+        // Plain Arrow still selects (the first Down lands ON row 0).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![0]);
+
+        // Ctrl+ArrowDown moves the cursor without touching the selection.
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "Ctrl+ArrowDown must leave the selection unchanged"
+        );
+        let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
+        assert_eq!(focused, Some(1), "Ctrl+ArrowDown moves the cursor to row 1");
+
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert_eq!(selection.selected_indices(), vec![0], "still unchanged");
+        let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
+        assert_eq!(focused, Some(2));
+
+        // Ctrl+Space toggles the now-focused row (row 2) on, adding to —
+        // not replacing — the existing selection.
+        tree.press_key(Key::Space, Modifiers::CTRL);
+        assert_eq!(selection.selected_indices(), vec![0, 2]);
+
+        // Ctrl+Space again toggles it back off.
+        tree.press_key(Key::Space, Modifiers::CTRL);
+        assert_eq!(selection.selected_indices(), vec![0]);
+
+        // Plain Arrow after a Ctrl-cursor move still replaces the
+        // selection with the new cursor position (select-follow).
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![3]);
+    }
+
+    #[test]
+    fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
+        use bastyde_core::event::{Key, Modifiers};
+        use bastyde_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec((0..6usize).collect());
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv = tree.add(
+            ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+                .item_height(20.0)
+                .selection(sel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(lv);
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![0]);
+
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "Ctrl+ArrowDown must not select in Single mode either"
+        );
+        let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
+        assert_eq!(focused, Some(1));
+
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![2]);
+    }
+
+    #[test]
     fn type_ahead_jumps_to_matching_row() {
         use bastyde_core::event::{Key, Modifiers};
         use bastyde_data::{SelectionMode, SelectionModel};
@@ -3569,6 +3678,68 @@ mod tests {
             (spans[1].0 - 30.0).abs() < 0.01,
             "measured prefix must survive an append, got y {}",
             spans[1].0
+        );
+    }
+
+    #[test]
+    fn scrollbar_reservation_self_corrects_after_auto_measure_flips_the_decision() {
+        // The scrollbar decision (and the content width it drives) is made
+        // from the PRE-measure estimate, since rows can't be measured at a
+        // width that itself depends on the decision. When the actual
+        // measured total flips "fits without a scrollbar" into "needs
+        // one", the pass that measures it places rows at the stale
+        // (unreserved) width and leaves the scrollbar collapsed; the NEXT
+        // pass recomputes `provisional_total` from the now-measured total
+        // and corrects both. Pins that the mismatch resolves by the very
+        // next layout pass — see the comment on `provisional_total` in
+        // `ListView::place_children` — so a refactor can't make the
+        // one-frame lag persist.
+        //
+        // 10 rows at the 20px estimate fit a 300px viewport (no
+        // scrollbar); the same 10 rows measured at their real 40px
+        // height (400px total) do not. With every row already realized
+        // and no scroll-anchor shift, nothing else in this scenario
+        // dirties the list for another pass — `tree.layout()` short-
+        // circuits a clean tree (see `WidgetTree::layout_with_ops`'s
+        // `!proposal_changed && !any_needs_layout()` guard) — so the
+        // second pass is driven by a `scroll_y` touch, the same
+        // `Relayout`-bound signal a real scroll/resize event would flip
+        // in a live app.
+        let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+        let mut tree = WidgetTree::new();
+        let lv = ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 40.0)))
+            .auto_item_height(20.0);
+        let scroll_y = lv.scroll_y_signal().clone();
+        let lv_id = tree.add(lv);
+
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let children = tree.children(lv_id);
+        let item0_frame1 = tree.bounds(children[0]).width;
+        let sb_frame1 = tree.bounds(*children.last().unwrap()).width;
+        assert!(
+            (item0_frame1 - 400.0).abs() < 0.01,
+            "frame 1 uses the pre-measure (no-scrollbar) decision, got width {item0_frame1}"
+        );
+        assert!(
+            sb_frame1 < 0.01,
+            "frame 1's scrollbar is still collapsed from the same stale decision, got {sb_frame1}"
+        );
+
+        // `Signal::set` always notifies (no equality skip), so setting the
+        // same value still marks this list dirty for `Relayout` and forces
+        // the next `layout()` to re-run `place_children`.
+        scroll_y.set(0.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let children = tree.children(lv_id);
+        let item0_frame2 = tree.bounds(children[0]).width;
+        let sb_frame2 = tree.bounds(*children.last().unwrap()).width;
+        assert!(
+            (item0_frame2 - (400.0 - SCROLLBAR_THICKNESS)).abs() < 0.01,
+            "frame 2 must self-correct to the measured (needs-scrollbar) width, got {item0_frame2}"
+        );
+        assert!(
+            (sb_frame2 - SCROLLBAR_THICKNESS).abs() < 0.01,
+            "frame 2's scrollbar must appear once the measured total is known, got {sb_frame2}"
         );
     }
 

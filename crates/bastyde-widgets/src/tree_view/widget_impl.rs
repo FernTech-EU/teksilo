@@ -451,6 +451,19 @@ impl<T: 'static> Widget for TreeView<T> {
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
+                        Key::Space if modifiers.ctrl() => {
+                            // Ctrl+Space toggles the focused row's selection —
+                            // the keyboard equivalent of Ctrl+click. Pairs
+                            // with Ctrl+Arrow's cursor-only move so a user can
+                            // walk the cursor without disturbing the existing
+                            // selection, then Ctrl+Space to add rows one at a
+                            // time.
+                            if let Some(ref sel) = sel_for_key {
+                                sel.toggle(current);
+                            }
+                            set_focus(current);
+                            return bastyde_core::event::EventResponse::Handled;
+                        }
                         Key::Space => {
                             // Space moves/toggles the selection but does NOT
                             // activate (Enter is the activator). Multi: toggle;
@@ -470,7 +483,15 @@ impl<T: 'static> Widget for TreeView<T> {
 
                     if let Some(idx) = new_idx {
                         set_focus(idx);
-                        if let Some(ref sel) = sel_for_key {
+                        // Ctrl+Arrow (no Shift) moves the keyboard cursor
+                        // only, leaving the selection untouched — see the
+                        // `ListView` sibling implementation for the full
+                        // rationale. Only the arrows opt in; Home/End/
+                        // PageUp/PageDown keep selecting under Ctrl.
+                        let cursor_only = modifiers.ctrl()
+                            && !modifiers.shift()
+                            && matches!(key, Key::ArrowUp | Key::ArrowDown);
+                        if !cursor_only && let Some(ref sel) = sel_for_key {
                             if modifiers.shift() {
                                 sel.extend_to(idx);
                             } else {

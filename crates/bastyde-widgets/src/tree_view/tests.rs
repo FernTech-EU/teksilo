@@ -381,6 +381,82 @@ fn ctrl_a_selects_all_visible_in_multi_mode() {
 }
 
 #[test]
+fn ctrl_arrow_moves_cursor_without_selecting_in_multi_mode() {
+    use bastyde_core::event::{Key, Modifiers};
+    let (mut wtree, tv, selection) = flat_tree_view(6, bastyde_data::SelectionMode::Multi);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    let focused_index = |wtree: &WidgetTree| -> Option<usize> {
+        wtree
+            .widget_as_any(tv)
+            .and_then(|any| any.downcast_ref::<TreeView<String>>())
+            .and_then(|v| v.focused_index.get())
+    };
+
+    // Plain Arrow still selects (the first Down lands ON row 0).
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    // Ctrl+ArrowDown moves the cursor without touching the selection.
+    wtree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "Ctrl+ArrowDown must leave the selection unchanged"
+    );
+    assert_eq!(
+        focused_index(&wtree),
+        Some(1),
+        "Ctrl+ArrowDown moves the cursor to row 1"
+    );
+
+    wtree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0], "still unchanged");
+    assert_eq!(focused_index(&wtree), Some(2));
+
+    // Ctrl+Space toggles the now-focused row (row 2) on, adding to — not
+    // replacing — the existing selection.
+    wtree.press_key(Key::Space, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0, 2]);
+
+    // Ctrl+Space again toggles it back off.
+    wtree.press_key(Key::Space, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    // Plain Arrow after a Ctrl-cursor move still replaces the selection
+    // with the new cursor position (select-follow).
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![3]);
+}
+
+#[test]
+fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
+    use bastyde_core::event::{Key, Modifiers};
+    let (mut wtree, tv, selection) = flat_tree_view(6, bastyde_data::SelectionMode::Single);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    wtree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "Ctrl+ArrowDown must not select in Single mode either"
+    );
+    let focused = wtree
+        .widget_as_any(tv)
+        .and_then(|any| any.downcast_ref::<TreeView<String>>())
+        .and_then(|v| v.focused_index.get());
+    assert_eq!(focused, Some(1));
+
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![2]);
+}
+
+#[test]
 fn space_toggles_enter_activates() {
     use bastyde_core::event::{Key, Modifiers};
     use std::cell::Cell;
@@ -1013,6 +1089,81 @@ fn spring_loaded_folder_expands_after_dwell() {
         button: PointerButton::Primary,
         modifiers: Modifiers::NONE,
     });
+}
+
+#[test]
+fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
+    // End-to-end pin of the drag-key-stash fix, through the real widget
+    // event path (`spring_loaded_folder_expands_after_dwell` above stops
+    // at the expand — this completes the gesture with a drop). Mirrors
+    // `tree_source.rs`'s `a_reorder_moves_the_node_dragged_not_the_slot_it_left`,
+    // which pins the same scenario at the erasure level.
+    //
+    // Grab leaf C (flat index 2), hover collapsed folder B (index 1) long
+    // enough to spring it open — inserting B1 between B and C, which
+    // shifts C from flat index 2 to 3 mid-drag — then drop. The
+    // ORIGINALLY dragged node (C) must move; a stale-index bug would
+    // instead move whichever node the reflow slid into index 2 (B1).
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    let tree = sample_tree(); // A (A1 A2), B (B1), C (leaf)
+    let mut wtree = WidgetTree::new();
+    let tv_id = wtree.add(
+        TreeView::new(tree.clone(), |_item, entry, _sel| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .reorderable(true),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
+    wtree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(50.0, 70.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    wtree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(60.0, 70.0),
+    });
+    wtree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(60.0, 42.0),
+    });
+    assert_eq!(
+        wtree.children(tv_id).len() - 1,
+        3,
+        "Precondition: 3 visible roots, nothing expanded"
+    );
+
+    // Wait past the spring delay and tick — B auto-expands, reflowing the
+    // flat index space out from under the drag.
+    sleep(Duration::from_millis(750));
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        wtree.children(tv_id).len() - 1,
+        4,
+        "B should have spring-opened after the dwell"
+    );
+
+    // Move to the top third of row 0 (A) — DropPosition::Before — and
+    // release: drop the dragged node before A.
+    let drop_at = Point::new(60.0, 2.0);
+    wtree.dispatch_event(WidgetEvent::PointerMove { position: drop_at });
+    wtree.dispatch_event(WidgetEvent::PointerUp {
+        position: drop_at,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert_eq!(
+        tree.with_item(tree.root(0), |&v| v),
+        Some("C"),
+        "the ORIGINALLY dragged node (C) must land at the drop target, \
+         not whichever node the mid-drag spring-load reflow shifted into \
+         its old flat index"
+    );
 }
 
 // --- Alt+Arrow keyboard reorder test ---

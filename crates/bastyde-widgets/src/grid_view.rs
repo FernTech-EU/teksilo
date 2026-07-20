@@ -1160,6 +1160,39 @@ impl<T: 'static> Widget for GridView<T> {
                 len_fn: self.source.len_fn.clone(),
                 additive_mods,
             }));
+
+            // Viewport-edge auto-scroll while the marquee is active, so a
+            // rubber-band selection can extend past the visible window —
+            // matching `TabBar`/`TreeView`'s drag-tick edge-scroll. Those
+            // ride `on_drag_tick`, which only fires for an `active_drag`
+            // (a `DragPayload` session started via `start_drag`); the
+            // marquee is a plain gesture-recognizer drag (`on_drag`) with
+            // no such session, so it drives itself from the raw per-frame
+            // handle instead — the same "owner-driven, non-visibility-
+            // bound" path the rich-text editor's drag-select auto-scroll
+            // uses. Not gated on reduced-motion: this is an interaction
+            // (extending the selection), not decorative motion.
+            let frame_request = ctx.frame_request_handle();
+            let marquee_for_tick = self.marquee.clone();
+            let scroll_for_tick = self.scroll_y.clone();
+            let max_scroll_for_tick = self.max_scroll_y.clone();
+            let viewport_h_for_tick = self.viewport_height.clone();
+            ctx.effect(&ctx.frame_tick(), move |_delta| {
+                let Some(st) = marquee_for_tick.get() else {
+                    return;
+                };
+                let step =
+                    selection::marquee_auto_scroll_step(st.current.y, viewport_h_for_tick.get());
+                if step != 0.0 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + step).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
+                    // Still inside the edge band (or the marquee moved
+                    // again next frame) — keep the chain alive so the
+                    // pointer doesn't need to wiggle to keep scrolling.
+                    frame_request.set(true);
+                }
+            });
         }
 
         // Drop target: intra-grid reorder + foreign-rows receive + external
@@ -1334,6 +1367,7 @@ impl<T: 'static> Widget for GridView<T> {
                 total_refresh: pane_total_refresh,
                 tile_entries: Vec::new(),
                 header_entries: Vec::new(),
+                in_place_children: Cell::new(false),
             };
             self.body_pane_id = Some(ctx.add(pane));
 
@@ -1761,7 +1795,7 @@ impl Widget for GridOverlay {
     fn paint(&self, bounds: Rect, canvas: &mut bastyde_canvas::Canvas, ctx: &PaintContext) {
         // Marquee rectangle (in widget-local coords → offset by bounds origin).
         if let Some(m) = self.marquee.get() {
-            let lr = m.rect();
+            let lr = m.local_rect(self.scroll_y.get());
             let rect = Rect::new(bounds.x + lr.x, bounds.y + lr.y, lr.width, lr.height);
             let recipe = self.marquee_recipe(ctx);
             let c = recipe.role.resolve(&ctx.theme.colors);

@@ -97,8 +97,14 @@ impl ColumnGeometry {
                 }
                 // `floor((avail + gap) / (w + gap))` — the CSS auto-fill count.
                 // Adding one gap to the numerator accounts for there being one
-                // fewer gap than columns.
-                let n = ((avail + self.col_gap) / (w + self.col_gap)).floor() as i64;
+                // fewer gap than columns. A tiny epsilon on the ratio before
+                // flooring absorbs float noise from upstream layout math
+                // (e.g. a `viewport_width` that should exactly fit N columns
+                // landing a hair under N*(w+gap)) so an exact fit doesn't
+                // intermittently lose a column; it's far smaller than one
+                // real pixel, so a genuine under-fit still floors down.
+                const EPSILON: f32 = 1e-4;
+                let n = ((avail + self.col_gap) / (w + self.col_gap) + EPSILON).floor() as i64;
                 n.max(1) as usize
             }
         };
@@ -174,6 +180,31 @@ mod tests {
     #[test]
     fn zero_min_width_does_not_divide_by_zero() {
         assert_eq!(adaptive(0.0, None, 0.0).column_count(1000.0), 1);
+    }
+
+    #[test]
+    fn exact_fit_is_stable_under_float_rounding() {
+        // `avail` is supposed to fit exactly 4 columns of 240 (no gap), but
+        // land a hair under the exact boundary — the kind of sub-pixel
+        // float noise `(avail + gap) / (w + gap)` can pick up from upstream
+        // layout math (e.g. 3.999999... instead of 4.0). Without the
+        // stabilizing epsilon this floors to 3, silently dropping a column
+        // that should fit.
+        let g = adaptive(240.0, None, 0.0);
+        let avail = 4.0 * 240.0 - 0.0001;
+        assert_eq!(
+            g.column_count(avail),
+            4,
+            "an exact (up to float noise) fit must not drop a column"
+        );
+    }
+
+    #[test]
+    fn one_pixel_under_still_drops_a_column() {
+        // A genuine, non-noise shortfall — the epsilon must not swallow it.
+        let g = adaptive(240.0, None, 0.0);
+        let avail = 4.0 * 240.0 - 1.0;
+        assert_eq!(g.column_count(avail), 3);
     }
 
     #[test]

@@ -332,6 +332,28 @@ impl RowSelection {
                 })
             },
             extend_fn: {
+                // O(visible count) per Shift-click / Shift-arrow gesture:
+                // builds the full visible key order every call rather than
+                // just the `[anchor_index..=target_index]` span
+                // `KeyedSelectionModel::extend_to` actually inserts.
+                //
+                // Narrowing this to the sub-range was considered and
+                // rejected as not cleanly possible without touching
+                // `bastyde-data`: `extend_to`'s "anchor scrolled out of
+                // view / evicted" fallback (single-select `target`) is
+                // detected by NOT finding `anchor` in the `ordered_keys`
+                // slice it's given, and the anchor is a private field with
+                // no public accessor (`KeyedSelectionModel::anchor` isn't
+                // exposed, and there's no `index_of_key` on the view's
+                // key↔index mapping this facade carries either). Without
+                // that, this closure has no way to know the anchor's
+                // current index — or whether it still HAS one — to bound a
+                // sub-range with, and a shadow copy of the anchor tracked
+                // here would drift from `KeyedSelectionModel`'s own
+                // whenever something else drives `select`/`toggle`
+                // (clearing or moving the anchor) — a duplicated-state
+                // correctness risk for a micro-optimization on a
+                // human-triggered, once-per-gesture path (not a hot loop).
                 let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
                 Rc::new(move |i| {
                     if let Some(target) = ka(i) {

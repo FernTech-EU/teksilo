@@ -522,6 +522,118 @@ fn ctrl_a_selects_all() {
 }
 
 #[test]
+fn ctrl_arrow_moves_cursor_without_selecting() {
+    // 3 columns fit 400px (3*100 + 2*8 = 316 <= 400).
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+
+    let focused_index = |tree: &WidgetTree| -> Option<usize> {
+        tree.widget_as_any(id)
+            .and_then(|any| any.downcast_ref::<GridView<usize>>())
+            .and_then(|g| g.focused_index.get())
+    };
+    let press = |tree: &mut WidgetTree, key: Key, modifiers: Modifiers| {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers,
+            text: None,
+        });
+    };
+
+    // Plain ArrowRight still selects (the first press lands ON tile 0).
+    press(&mut tree, Key::ArrowRight, Modifiers::default());
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    // Ctrl+ArrowRight moves the cursor without touching the selection.
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "Ctrl+ArrowRight must leave the selection unchanged"
+    );
+    assert_eq!(focused_index(&tree), Some(1));
+
+    // Ctrl+ArrowDown moves by one row (±cols) — still cursor-only.
+    press(&mut tree, Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0], "still unchanged");
+    assert_eq!(
+        focused_index(&tree),
+        Some(4),
+        "Ctrl+ArrowDown moves the cursor by one row (col count 3)"
+    );
+
+    // Ctrl+Space toggles the now-focused tile (4) on, adding to — not
+    // replacing — the existing selection.
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0, 4]);
+
+    // Ctrl+Space again toggles it back off.
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    // Plain Arrow after a Ctrl-cursor move still replaces the selection
+    // with the new cursor position (select-follow).
+    press(&mut tree, Key::ArrowRight, Modifiers::default());
+    assert_eq!(selection.selected_indices(), vec![5]);
+}
+
+#[test]
+fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
+    assert_eq!(selection.selected_indices(), vec![0]);
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::CTRL,
+        text: None,
+    });
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "Ctrl+ArrowRight must not select in Single mode either"
+    );
+    let focused = tree
+        .widget_as_any(id)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .and_then(|g| g.focused_index.get());
+    assert_eq!(focused, Some(1));
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
+    assert_eq!(selection.selected_indices(), vec![2]);
+}
+
+#[test]
 fn container_has_grid_role_and_counts() {
     let (mut tree, id, _model) = make_grid(30);
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -924,6 +1036,76 @@ fn pointer_drag_drop_in_a_row_gap_does_not_append_at_the_end() {
         model.with_item(7, |v| *v),
         Some(10),
         "a row-gap drop must not silently append the dragged tile at the end"
+    );
+}
+
+#[test]
+fn marquee_edge_auto_scroll_selects_tiles_revealed_by_scrolling() {
+    // Regression for the marquee's viewport-edge auto-scroll: a rubber-band
+    // drag held near the bottom edge must keep scrolling content into view
+    // and grow the selection to cover it, not just the tiles that were
+    // visible at press time.
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    // Single column (100px tile + 8px gap needs 108px; a 150px viewport
+    // fits exactly one), so tile x spans 0..100 and row `i` sits at
+    // y = i * 58 (50 + 8 gap). 40 rows gives plenty of off-screen content
+    // below the 150px-tall viewport (only rows 0..2 are visible at rest).
+    let model = ListModel::from_vec((0..40).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(150.0, 150.0));
+
+    // Press on the background at x=120 (past the tile's 0..100 span, so
+    // `index_at_point` misses and this starts a marquee, not an item
+    // drag) near the top of the viewport.
+    let press = Point::new(120.0, 10.0);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: press,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    // Cross the 5px drag threshold.
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(120.0, 16.0),
+    });
+    // Sweep into the tile column (x=50) and past the bottom edge — deep
+    // enough into the edge band that the pointer never needs to move
+    // again for auto-scroll to keep going.
+    let hold = Point::new(50.0, 200.0);
+    tree.dispatch_event(WidgetEvent::PointerMove { position: hold });
+
+    // Pump enough frame ticks for the auto-scroll effect to run well past
+    // one screenful. Each `layout()` call advances at most one tick (see
+    // `WidgetTree::advance_frame_tick`), and the tick handler re-arms
+    // itself every time it's still in the edge band, so a fixed loop of
+    // `tree.layout()` calls is deterministic here — no real elapsed time
+    // or sleeping needed.
+    for _ in 0..80 {
+        tree.layout(SizeProposal::exact(150.0, 150.0));
+    }
+
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: hold,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert!(
+        selection.is_selected(0),
+        "row 0, under the original press point, should stay selected"
+    );
+    assert!(
+        selection.is_selected(15),
+        "row 15 was off-screen at press time; auto-scroll must have \
+         revealed it and grown the marquee to cover it"
     );
 }
 

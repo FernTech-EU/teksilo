@@ -152,6 +152,12 @@ pub(crate) struct GridBodyPane<T: 'static> {
     // Build state
     pub(crate) tile_entries: Vec<(usize, WidgetId)>,
     pub(crate) header_entries: Vec<(usize, WidgetId)>,
+
+    /// Re-entrancy guard for `place_children`'s Relayout-bound signal
+    /// writes (`scroll_y`, `version`, `total_refresh`) — see the comment
+    /// at their call site. Not `Rc`-shared: purely internal bookkeeping
+    /// for this one pane instance.
+    pub(crate) in_place_children: Cell<bool>,
 }
 
 impl<T: 'static> GridBodyPane<T> {
@@ -522,6 +528,35 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // Debug-only re-entrancy guard for the Relayout-bound signal writes
+        // below (`scroll_y`'s anchor correction, `version`, `total_refresh`
+        // — see the comments at each call site). Their safety rests on an
+        // invariant this function cannot observe directly: `WidgetTree`
+        // flushes every pending relayout-dirty mark exactly ONCE per
+        // `layout()` / `layout_with_ops()` call, *before* the recursive
+        // `place_children` walk begins — so a `Signal::set` here only
+        // marks a consumer dirty for the NEXT pass, never triggers a
+        // synchronous nested layout within this one. If that ever stopped
+        // holding, this pane would be re-entered before this call
+        // returns, and the flag below turns that into a diagnostic panic
+        // instead of a silent infinite bounce or a stack overflow.
+        //
+        // This only catches a *synchronous* re-entry on this exact pane
+        // instance — there's no pass/frame id on `LayoutContext` for
+        // `place_children` to compare against, so a same-frame-but-not-
+        // nested double call (were the walk order ever restructured to
+        // revisit a dirtied subtree before returning to the caller) would
+        // slip past it. `Signal::try_set`'s own debug-only
+        // `NotifyDepthGuard` remains the general backstop for a runaway
+        // observer feedback loop through these signals.
+        debug_assert!(
+            !self.in_place_children.get(),
+            "GridBodyPane::place_children was re-entered — the single- \
+             flush-per-pass invariant its scroll-anchor/total-refresh \
+             signal writes rely on no longer holds"
+        );
+        self.in_place_children.set(true);
+
         // Publish our absolute origin so GridView's keyboard handler can build
         // the focused tile's window rect for the outer-scroll chase.
         self.viewport_origin
@@ -594,10 +629,8 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             }
         }
 
-        // Apply scroll-anchor correction. Safe from place_children: the
-        // dirty flag is set but no second layout sweep runs this frame
-        // (flush_all_dirty already ran at the start of the pass), so this
-        // lands next frame with no loop.
+        // Apply scroll-anchor correction — see the invariant documented
+        // on the re-entrancy guard at the top of this function.
         if anchor_delta.abs() > 0.01 {
             let new_scroll = (self.scroll_y.get() + anchor_delta).max(0.0);
             self.scroll_y.set(new_scroll);
@@ -632,6 +665,8 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
+
+        self.in_place_children.set(false);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

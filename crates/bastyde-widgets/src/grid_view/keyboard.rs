@@ -266,6 +266,18 @@ pub(crate) fn build_grid_key_handler(
                     }
                     return EventResponse::Handled;
                 }
+                Key::Space if modifiers.ctrl() => {
+                    // Ctrl+Space toggles the focused tile's selection — the
+                    // keyboard equivalent of Ctrl+click. Pairs with
+                    // Ctrl+Arrow's cursor-only move so a user can walk the
+                    // cursor without disturbing the existing selection,
+                    // then Ctrl+Space to add tiles one at a time.
+                    if let Some(ref sel) = cfg.selection {
+                        sel.toggle(current);
+                    }
+                    cfg.focused_index.set(Some(current));
+                    return EventResponse::Handled;
+                }
                 Key::Space => {
                     if let Some(ref sel) = cfg.selection {
                         sel.select(current);
@@ -285,7 +297,19 @@ pub(crate) fn build_grid_key_handler(
             return EventResponse::Ignored;
         };
         cfg.focused_index.set(Some(idx));
-        if let Some(ref sel) = cfg.selection {
+        // Ctrl+Arrow (no Shift, no Alt — Alt+Arrow reorder and Ctrl+Home/End
+        // keep their existing behavior) moves the keyboard cursor only,
+        // leaving the selection untouched. Checked against
+        // `logical_next`/`logical_prev` (already RTL-swapped above) plus
+        // the raw vertical keys, so the chord follows the visual arrow.
+        let cursor_only = modifiers.ctrl()
+            && !modifiers.shift()
+            && !modifiers.alt()
+            && (*key == logical_next
+                || *key == logical_prev
+                || *key == Key::ArrowDown
+                || *key == Key::ArrowUp);
+        if !cursor_only && let Some(ref sel) = cfg.selection {
             if modifiers.shift() {
                 sel.extend_to(idx);
             } else {
