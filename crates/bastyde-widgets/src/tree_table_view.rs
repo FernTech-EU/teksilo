@@ -298,17 +298,21 @@ pub struct TreeTableView<T: 'static> {
     /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
     /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start
     /// payload build, and the move-out completion, shared by all five data
-    /// views. `TreeTableView` is the one non-pluggable-source view: it
-    /// builds its reader + stable-`NodeId` removal thunk inline at
-    /// drag-start (see `TreeBodyPane::build`'s `on_drag`), since it is
-    /// backed by a concrete `SortFilterTreeModel<T>` rather than a source
-    /// with capability closures.
+    /// views. `TreeTableView` builds its reader + stable-key removal thunk
+    /// inline at drag-start (see `TreeBodyPane::build`'s `on_drag`) rather
+    /// than from source capability closures, so the key it removes by is
+    /// resolved once at drag-start and stays correct even if a mid-drag
+    /// spring-load reflattens the rows under the pointer.
     export: crate::data_views::RowExport<T>,
-    /// Raw escape hatch: `TreeTableView` is backed by a concrete
-    /// `SortFilterTreeModel<T>` rather than a pluggable source, so unlike
-    /// `ListView` / `TableView` it cannot express foreign-accept purely
-    /// through source capability closures. Fires for any payload NOT
-    /// recognized as this view's own row drag, dropped on a node —
+    /// Raw escape hatch for a payload this view cannot interpret itself.
+    ///
+    /// A source-backed view ([`from_source`](Self::from_source)) expresses
+    /// foreign-accept through its source's capability closures, like
+    /// `ListView` / `TableView`. This hook is what a **projection**-backed
+    /// view ([`from_projection`](Self::from_projection) / [`new`](Self::new))
+    /// has instead, since a `SortFilterTreeModel` carries no such closures.
+    /// Fires for any payload NOT recognized as this view's own row drag,
+    /// dropped on a node —
     /// `(payload, target node, drop position, ctx) -> accepted`. Tried after
     /// [`on_rows_received`](Self::on_rows_received).
     #[allow(clippy::type_complexity)]
@@ -343,7 +347,12 @@ impl<T: 'static> TreeTableView<T> {
     /// The `NodeId`-typed methods ([`expand`](Self::expand),
     /// [`projection`](Self::projection), [`keyed_selection`](Self::keyed_selection))
     /// do not apply here and no-op; drive expansion through the source itself.
-    /// Row drag-reorder is not yet wired on this path.
+    ///
+    /// Row drag-reorder **is** wired on this path: a drop routes through the source's
+    /// own `drag` / `can_accept` / `accept_drop`, exactly as [`TreeView`] does — so the
+    /// source owns both the cycle guard and the commit. Note that
+    /// [`TreeDataSlice::drag`](bastyde_data::TreeDataSlice) defaults to `NoDrag`: an
+    /// external source must opt its rows in before anything can be dragged.
     pub fn from_source<S: TreeDataSource<Item = T> + 'static>(source: S) -> Self {
         Self::assemble(Rc::new(TreeSource::from_data_source(Rc::new(source))), None)
     }
