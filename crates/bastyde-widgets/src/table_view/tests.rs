@@ -1451,6 +1451,44 @@ fn escape_ends_edit_before_clearing_focus() {
 }
 
 #[test]
+fn begin_edit_resolves_before_the_view_is_mounted() {
+    // Seeding a freshly constructed view with an edit target the caller
+    // already holds is only possible on the builder. `display_indices` is
+    // filled by `build()`, so before the fix a pre-mount call resolved
+    // against an empty cache and silently did nothing.
+    //
+    // `name` is pinned Leading, so display order is [name, id] and the
+    // correct answer for "id" is 1, not its declaration index 0 — which is
+    // what makes this a test of `display_order()` rather than of a shortcut
+    // that happens to agree when nothing is pinned.
+    let view = TableView::new(rows(5))
+        .add_column(id_col())
+        .add_column(name_col().pinned(super::PinnedSide::Leading))
+        .row_height(20.0);
+
+    view.begin_edit(1, "id");
+    assert_eq!(view.editing_cell_signal().get(), Some((1, 1)));
+
+    view.end_edit();
+    view.begin_edit(0, "no-such-column");
+    assert_eq!(view.editing_cell_signal().get(), None);
+    view.begin_edit(9999, "id");
+    assert_eq!(view.editing_cell_signal().get(), None);
+
+    // The seed survives mounting.
+    view.begin_edit(1, "id");
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(view);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    assert_eq!(tv.editing_cell_signal().get(), Some((1, 1)));
+}
+
+#[test]
 fn filters_signal_is_writable() {
     let (tree, table, _) = build_table(5);
     let any = tree.widget_as_any(table).unwrap();

@@ -1087,16 +1087,30 @@ impl<T: 'static> TreeTableView<T> {
     /// isn't a currently-displayed column, or if `row` is outside the visible
     /// range — an out-of-range target would otherwise strand `editing_cell` on
     /// a row nothing can match.
+    ///
+    /// Callable **before the view is mounted**, which is the only point at
+    /// which a consumer can seed a freshly constructed view with an edit
+    /// target it already holds. `display_indices` is a cache `build()` fills,
+    /// so a pre-mount call finds it empty; the order is recomputed on demand
+    /// in that case rather than resolving against nothing and no-opping for a
+    /// third, undocumented reason.
     pub fn begin_edit(&self, row: usize, col_id: &str) {
-        let display = self.display_indices.borrow();
+        let cached = self.display_indices.borrow();
+        let recomputed;
+        let display: &[usize] = if cached.is_empty() {
+            recomputed = self.display_order();
+            &recomputed
+        } else {
+            &cached
+        };
         if let Some(target) = imperative::resolve_edit_target(
             row,
             col_id,
             &self.columns,
-            &display,
+            display,
             self.source.visible_count(),
         ) {
-            drop(display);
+            drop(cached);
             self.editing_cell.set(Some(target));
         }
     }
@@ -3172,6 +3186,52 @@ mod tests {
         // ...and a refused call must not clobber a live editor.
         tt.begin_edit(1, "size");
         tt.begin_edit(9999, "size");
+        assert_eq!(tt.editing_cell_signal().get(), Some((1, 1)));
+    }
+
+    #[test]
+    fn begin_edit_resolves_before_the_view_is_mounted() {
+        // Seeding a freshly constructed view with an edit target it already
+        // holds is only possible on the builder — a rebuild makes a brand-new
+        // view whose `editing_cell` starts `None`, and there is no post-mount
+        // handle (`as_any_mut` is not overridden). `display_indices` is filled
+        // by `build()`, so before the fix this resolved against an empty cache
+        // and silently did nothing: the caller's edit request vanished.
+        //
+        // `size` is pinned Leading, so display order is [size, name] and the
+        // correct answer for "name" is 1, not its declaration index 0 — which
+        // is what makes this a test of `display_order()` and not of a shortcut
+        // that happens to agree when nothing is pinned.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let view = TreeTableView::from_projection(proxy)
+            .add_column(name_col())
+            .add_column(size_col().pinned(PinnedSide::Leading))
+            .row_height(20.0);
+
+        view.begin_edit(1, "name");
+        assert_eq!(view.editing_cell_signal().get(), Some((1, 1)));
+
+        // The documented no-ops still hold with no cache to consult.
+        view.end_edit();
+        view.begin_edit(0, "no-such-column");
+        assert_eq!(view.editing_cell_signal().get(), None);
+        view.begin_edit(9999, "name");
+        assert_eq!(view.editing_cell_signal().get(), None);
+
+        // And the seed survives mounting: the target it resolved is the one
+        // the body pane reads back.
+        view.begin_edit(1, "name");
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(view);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let tt = tree
+            .widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap();
         assert_eq!(tt.editing_cell_signal().get(), Some((1, 1)));
     }
 

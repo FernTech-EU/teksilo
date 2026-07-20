@@ -986,12 +986,26 @@ impl<T: 'static> TableView<T> {
     /// isn't a currently-displayed column, or if `row` is outside the visible
     /// range — an out-of-range target would otherwise strand `editing_cell` on
     /// a row nothing can match.
+    ///
+    /// Callable **before the view is mounted**, which is the only point at
+    /// which a consumer can seed a freshly constructed view with an edit
+    /// target it already holds. `display_indices` is a cache `build()` fills,
+    /// so a pre-mount call finds it empty; the order is recomputed on demand
+    /// in that case rather than resolving against nothing and no-opping for a
+    /// third, undocumented reason.
     pub fn begin_edit(&self, row: usize, col_id: &str) {
-        let display = self.display_indices.borrow();
+        let cached = self.display_indices.borrow();
+        let recomputed;
+        let display: &[usize] = if cached.is_empty() {
+            recomputed = self.display_order();
+            &recomputed
+        } else {
+            &cached
+        };
         if let Some(target) =
-            imperative::resolve_edit_target(row, col_id, &self.columns, &display, (self.len_fn)())
+            imperative::resolve_edit_target(row, col_id, &self.columns, display, (self.len_fn)())
         {
-            drop(display);
+            drop(cached);
             self.editing_cell.set(Some(target));
         }
     }
