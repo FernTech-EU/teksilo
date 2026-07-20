@@ -710,13 +710,17 @@ impl<T: 'static> RowExport<T> {
     /// and `items` stay index-aligned and a Move never deletes a row whose data
     /// wasn't transferred. Attaches MIME, and stashes the rows + a stable-key
     /// removal thunk for the completion.
+    ///
+    /// `None` when no row survives the residency filter (an all-`Loading`
+    /// selection): the caller must refuse the drag rather than float an empty
+    /// payload nothing can accept.
     pub(crate) fn build_payload(
         &self,
         source: ViewId,
         mut rows: Vec<usize>,
         read: &dyn Fn(usize, &mut dyn FnMut(&T)) -> bool,
         snapshot_out: &SnapshotOutFn,
-    ) -> DragPayload {
+    ) -> Option<DragPayload> {
         let items: Option<Vec<T>> = if let Some(cf) = self.clone_item_fn.as_ref() {
             let mut out = Vec::with_capacity(rows.len());
             rows.retain(|&r| {
@@ -734,6 +738,9 @@ impl<T: 'static> RowExport<T> {
         } else {
             None
         };
+        if rows.is_empty() {
+            return None;
+        }
         let mime_pairs: Vec<(String, Vec<u8>)> =
             match (self.export_mime_fn.as_ref(), items.as_ref()) {
                 (Some(mf), Some(its)) => mf(its),
@@ -753,7 +760,7 @@ impl<T: 'static> RowExport<T> {
         }
         *self.removal.borrow_mut() = Some((snapshot_out)(&rows));
         *self.dragged_rows.borrow_mut() = rows;
-        payload
+        Some(payload)
     }
 
     /// Whether a **foreign** exported payload would be accepted here — for the
@@ -889,5 +896,57 @@ pub(crate) mod deferred_select {
         if pending.replace(false) {
             sel.select(index);
         }
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+
+    fn noop_snapshot() -> SnapshotOutFn {
+        Rc::new(|_: &[usize]| Box::new(|| {}) as Box<dyn Fn()>)
+    }
+
+    #[test]
+    fn an_all_unresident_selection_refuses_the_drag() {
+        // Every dragged row is still `Loading`: the residency filter empties
+        // the set, and the drag must be refused outright — a floating payload
+        // with no rows and no items would remove nothing on a Move and offer
+        // nothing to a receiver.
+        let mut export = RowExport::<u64>::default();
+        export.set_exportable(DragTransferMode::Move);
+        let read = |_: usize, _: &mut dyn FnMut(&u64)| false;
+        let payload = export.build_payload(
+            ViewId::next(ViewKind::List),
+            vec![0, 1, 2],
+            &read,
+            &noop_snapshot(),
+        );
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn a_partially_resident_selection_carries_only_the_resident_rows() {
+        let mut export = RowExport::<u64>::default();
+        export.set_exportable(DragTransferMode::Copy);
+        // Row 1 is unresident; rows 0 and 2 resolve.
+        let read = |i: usize, f: &mut dyn FnMut(&u64)| {
+            if i == 1 {
+                return false;
+            }
+            f(&(i as u64 * 10));
+            true
+        };
+        let payload = export
+            .build_payload(
+                ViewId::next(ViewKind::List),
+                vec![0, 1, 2],
+                &read,
+                &noop_snapshot(),
+            )
+            .expect("two rows are resident");
+        let rd = payload.get_typed::<RowDragData<u64>>().unwrap();
+        assert_eq!(rd.rows, vec![0, 2]);
+        assert_eq!(rd.items.as_deref(), Some(&[0, 20][..]));
     }
 }

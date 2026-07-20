@@ -540,8 +540,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                         let read = |i: usize, f: &mut dyn FnMut(&T)| -> bool {
                             read_item_local(&with_item_for_drag, i, |t| f(t)).is_some()
                         };
-                        let payload =
-                            export_for_drag.build_payload(view_id, rows, &read, &snapshot_for_drag);
+                        let Some(payload) =
+                            export_for_drag.build_payload(view_id, rows, &read, &snapshot_for_drag)
+                        else {
+                            return;
+                        };
                         // Build a full-width preview from the PRESSED row's
                         // cells so the floating widget reads as the picked-up
                         // row. Cells are built eagerly here (no arena), then a

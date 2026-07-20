@@ -1431,12 +1431,14 @@ impl<T: 'static> Widget for ListView<T> {
                                     }
                                     _ => vec![drag_index],
                                 };
-                                let payload = export_for_drag.build_payload(
+                                let Some(payload) = export_for_drag.build_payload(
                                     drag_model_id,
                                     rows,
                                     &*read_for_drag,
                                     &snapshot_for_drag,
-                                );
+                                ) else {
+                                    return;
+                                };
                                 let delegate = delegate_for_preview.clone();
                                 let w = width_for_preview.get().max(120.0);
                                 let h = metrics_for_preview.borrow_mut().row_height(drag_index);

@@ -407,12 +407,14 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             }
                             _ => vec![idx],
                         };
-                        let payload = export_for_drag.build_payload(
+                        let Some(payload) = export_for_drag.build_payload(
                             model_id,
                             rows,
                             &*read_for_drag,
                             &snapshot_for_drag,
-                        );
+                        ) else {
+                            return;
+                        };
                         let r = strategy.tile_rect(idx, vp_w.get());
                         let (w, h) = (r.width.max(40.0), r.height.max(40.0));
                         let delegate = delegate.clone();

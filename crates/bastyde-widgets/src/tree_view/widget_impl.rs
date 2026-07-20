@@ -967,12 +967,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                     }
                                     _ => vec![flat_idx],
                                 };
-                                let payload = export_for_drag.build_payload(
+                                let Some(payload) = export_for_drag.build_payload(
                                     drag_view_id,
                                     rows,
                                     &*read_for_drag,
                                     &snapshot_for_drag,
-                                );
+                                ) else {
+                                    return;
+                                };
                                 const PREVIEW_WIDTH: f32 = 240.0;
                                 let h = metrics_for_preview.borrow_mut().row_height(flat_idx);
                                 let rd = row_delegate.clone();

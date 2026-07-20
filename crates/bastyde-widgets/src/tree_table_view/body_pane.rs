@@ -548,12 +548,14 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // stale-key panic `TreeModel::remove` would raise.
                         let snapshot_out = source_for_drag.dnd.snapshot_out_fn.clone();
 
-                        let payload = export_for_drag.build_payload(
+                        let Some(payload) = export_for_drag.build_payload(
                             drag_model_id,
                             rows,
                             &read,
                             &snapshot_out,
-                        );
+                        ) else {
+                            return;
+                        };
 
                         // Flat multi-cell preview of the PRESSED row (indent
                         // is dropped in the floating preview — it reads as
