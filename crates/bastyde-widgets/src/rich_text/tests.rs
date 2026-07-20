@@ -3284,6 +3284,123 @@ fn widget_insert_list_creates_list_block() {
 }
 
 #[test]
+fn widget_remove_from_list_leaves_a_plain_paragraph() {
+    // `outdent` deliberately bottoms out at depth 0 rather than destroying the
+    // list, so "remove list formatting" needs its own command.
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.set_caret_position(0);
+    editor.insert_list(false);
+    assert!(doc.block_at_position(0).unwrap().list().is_some());
+
+    editor.outdent();
+    assert!(
+        doc.block_at_position(0).unwrap().list().is_some(),
+        "outdent at depth 0 must leave the list intact"
+    );
+
+    editor.remove_from_list();
+    assert!(
+        doc.block_at_position(0).unwrap().list().is_none(),
+        "remove_from_list must take the block out of the list entirely"
+    );
+}
+
+#[test]
+fn handle_remove_from_list_mirrors_the_widget() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.set_caret_position(0);
+    let handle = editor.handle();
+    handle.insert_list(true);
+    assert!(doc.block_at_position(0).unwrap().list().is_some());
+
+    handle.remove_from_list();
+    assert!(doc.block_at_position(0).unwrap().list().is_none());
+
+    // Outside a list it is a no-op, not an error — a toolbar button may be
+    // clicked anywhere.
+    handle.remove_from_list();
+    assert!(doc.block_at_position(0).unwrap().list().is_none());
+}
+
+#[test]
+fn edit_block_collapses_several_commands_into_one_undo_entry() {
+    // The reason this exists: a "clear formatting" action that turns off four
+    // marks would otherwise cost four Ctrl+Z presses, and a single undo would
+    // leave the document half-cleared.
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.select_all();
+    let handle = editor.handle();
+
+    handle.edit_block(|| {
+        handle.set_bold(true);
+        handle.set_italic(true);
+        handle.set_underline(true);
+    });
+    assert!(handle.is_bold() && handle.is_italic() && handle.is_underline());
+
+    handle.undo();
+    assert!(
+        !handle.is_bold() && !handle.is_italic() && !handle.is_underline(),
+        "one undo must revert the whole block, not just its last command"
+    );
+}
+
+#[test]
+fn ungrouped_commands_still_undo_one_at_a_time() {
+    // The contrast case, so the test above is proving grouping rather than
+    // some blanket coalescing the backend would do anyway.
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.select_all();
+    let handle = editor.handle();
+
+    handle.set_bold(true);
+    handle.set_italic(true);
+    handle.undo();
+    assert!(
+        handle.is_bold(),
+        "without an edit block each command is its own undo entry"
+    );
+}
+
+#[test]
+fn edit_block_closes_even_when_the_body_returns_early() {
+    // The scoped form exists precisely so a `?` or an early `return` cannot
+    // leave a composite open and swallow every later edit into it.
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.select_all();
+    let handle = editor.handle();
+
+    let applied = handle.edit_block(|| {
+        handle.set_bold(true);
+        if handle.is_bold() {
+            return true;
+        }
+        handle.set_italic(true);
+        false
+    });
+    assert!(applied);
+
+    // A later edit must be its own entry, which it cannot be if the block
+    // above is still open.
+    handle.set_italic(true);
+    handle.undo();
+    assert!(
+        handle.is_bold(),
+        "the early return must not have left the edit block open"
+    );
+}
+
+#[test]
 fn widget_runtime_zoom_setter_roundtrips() {
     let doc = TextDocument::new();
     doc.set_plain_text("zoom me").unwrap();
@@ -5961,5 +6078,3 @@ fn an_unescaped_thematic_break_is_dropped_by_the_parser() {
         "an unescaped thematic break is expected to be dropped, got:\n{plain}"
     );
 }
-
-

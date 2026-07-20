@@ -1111,6 +1111,18 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Take the caret's block out of its list entirely, leaving a plain
+    /// paragraph. No-op when the caret is not inside a list.
+    ///
+    /// [`outdent`](Self::outdent) deliberately stops at depth 0 — Shift+Tab
+    /// should not silently destroy the list — so a toolbar that offers
+    /// "remove list formatting" needs this instead. Backspace at block-start
+    /// reaches the same codepath from the keyboard.
+    pub fn remove_from_list(&self) {
+        let _ = self.state.borrow().cursor.remove_current_block_from_list();
+        sync_cursor_signals(&self.state);
+    }
+
     // --- Blockquote commands ----------------------------------------------
 
     /// True iff the caret currently sits inside a blockquote frame at
@@ -1324,6 +1336,44 @@ impl RichTextEditor {
     pub fn redo(&self) {
         let _ = self.state.borrow().document.redo();
         sync_cursor_signals(&self.state);
+    }
+
+    // --- Edit blocks (composite undo) ------------------------------------
+    //
+    // Every command on this type is its own transaction, so a caller that
+    // composes several of them into one user-visible action — "clear
+    // formatting" turning off four marks and flattening a heading — leaves
+    // the user pressing Ctrl+Z once per property. Wrapping the sequence in
+    // an edit block makes it one entry.
+    //
+    // The editor already groups this way internally for IME composition
+    // (`keyboard.rs`) and for list nesting; these expose the same primitive
+    // to external toolbars. Composites nest, so it is safe to wrap calls
+    // that open one of their own.
+
+    /// Begin grouping subsequent edits into a single undo entry.
+    ///
+    /// Must be paired with [`end_edit_block`](Self::end_edit_block). Prefer
+    /// [`edit_block`](Self::edit_block), which pairs them for you.
+    pub fn begin_edit_block(&self) {
+        self.state.borrow().cursor.begin_edit_block();
+    }
+
+    /// Close the group opened by [`begin_edit_block`](Self::begin_edit_block).
+    pub fn end_edit_block(&self) {
+        self.state.borrow().cursor.end_edit_block();
+    }
+
+    /// Run `edits` as one undo entry.
+    ///
+    /// The scoped form of [`begin_edit_block`](Self::begin_edit_block) — the
+    /// block is closed even if `edits` returns early, which hand-pairing gets
+    /// wrong eventually.
+    pub fn edit_block<R>(&self, edits: impl FnOnce() -> R) -> R {
+        self.begin_edit_block();
+        let result = edits();
+        self.end_edit_block();
+        result
     }
 
     /// Set the document-wide default language (ISO 639-1 code, e.g. "en",
@@ -2017,6 +2067,19 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    /// Take the caret's block out of its list entirely, leaving a plain
+    /// paragraph. No-op when the caret is not inside a list.
+    ///
+    /// See [`RichTextEditor::remove_from_list`] for why this is separate from
+    /// [`outdent`](Self::outdent), which stops at depth 0 by design.
+    pub fn remove_from_list(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_block_from_list();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
     // --- Blockquotes -------------------------------------------------------
 
     /// True iff the caret currently sits inside a blockquote frame at
@@ -2156,6 +2219,32 @@ impl EditorHandle {
     pub fn redo(&self) {
         let _ = self.state.borrow().document.redo();
         sync_cursor_signals(&self.state);
+    }
+
+    // --- Edit blocks (composite undo) --------------------------------------
+    //
+    // See [`RichTextEditor::begin_edit_block`] for the rationale: a toolbar
+    // action composed of several commands should cost one Ctrl+Z, not one per
+    // property it touched.
+
+    /// Begin grouping subsequent edits into a single undo entry. Pair with
+    /// [`end_edit_block`](Self::end_edit_block), or prefer the scoped
+    /// [`edit_block`](Self::edit_block).
+    pub fn begin_edit_block(&self) {
+        self.state.borrow().cursor.begin_edit_block();
+    }
+
+    /// Close the group opened by [`begin_edit_block`](Self::begin_edit_block).
+    pub fn end_edit_block(&self) {
+        self.state.borrow().cursor.end_edit_block();
+    }
+
+    /// Run `edits` as one undo entry — the pairing-safe form.
+    pub fn edit_block<R>(&self, edits: impl FnOnce() -> R) -> R {
+        self.begin_edit_block();
+        let result = edits();
+        self.end_edit_block();
+        result
     }
 
     // --- Clipboard ---------------------------------------------------------
