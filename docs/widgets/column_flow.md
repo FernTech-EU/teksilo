@@ -68,7 +68,7 @@ this as a CSS multicol port.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/primitives/column_flow/index.html)
 
 ## `pub struct ColumnFlow`
 

@@ -90,8 +90,10 @@ Every public widget in `bastyde-widgets`, grouped by category. Each page links t
 
 ## Text input family
 
+- [CodeEditor](widget.md) — The public editing surfaces: `CodeEditor` and `PlainTextEditor`
 - [FilePickerField](file_picker_field.md) — `FilePickerField` — a text-input preset for path entry with a Browse button
 - [InputDialog](input_dialog.md) — InputDialog — a `QInputDialog`-style modal that prompts the user for
+- [LogView](log_view.md) — `LogView` — a read-only, append-only, tail-following streaming view
 - [PasswordField](password_field.md) — `PasswordField` — secure single-line text entry with a reveal
 - [RichTextEditor](rich_text.md) — Rich text editor and viewer widget
 - [SearchField](search_field.md) — SearchField — a `TextInput` preset
@@ -171,6 +173,7 @@ Every public widget in `bastyde-widgets`, grouped by category. Each page links t
 ## Other
 
 - [ActivateOn](data_views.md) — Shared substrate for the data views' source-owned drag-and-drop + lazy
+- [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer
 - [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`

@@ -29,7 +29,7 @@ GridView::new(model, |tc| {
 
 ## Builder methods at a glance
 
-`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `type_ahead_timeout`
+`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`
 
 ## API reference
 
@@ -73,9 +73,17 @@ Create a grid backed by any `ListDataSource` (large / external data).
 Enable or disable the whole view. A disabled view greys out and stops
 accepting focus / selection / keyboard input (arena-gated).
 
-#### `pub fn sizing(mut self, sizing: GridSizing) -> Self`
+#### `pub fn sizing(mut self, sizing: impl Into<Prop<GridSizing>>) -> Self`
 
 Set the tile sizing / column-count policy.
+
+Accepts a plain `GridSizing` (static) **or** a `Signal<GridSizing>`
+(reactive). A bound signal is observed at [`BindingLevel::Rebuild`]: when
+it changes, `build()` rebuilds the cached layout strategy and reflows —
+the internal `scroll_y` / `focused_index` / selection are field signals on
+the same widget instance, so they survive the rebuild (no scroll jump).
+This is the card-size-slider path; mirrors
+`TabWidget::sizing`.
 
 #### `pub fn tile_size(mut self, width: f32, height: f32) -> Self`
 
@@ -315,6 +323,13 @@ optional menu widget.
 
 Supply a per-item label for type-ahead navigation (typing letters
 jumps to the first matching item). Required to enable type-ahead.
+
+#### `pub fn tile_a11y_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self`
+
+Supply a per-item accessible name applied to each tile's `GridCell`
+(`Node::label`), so a screen reader announces a concise item name in
+addition to the row/column position. Without it, the cell's name is left
+to its contents.
 
 #### `pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self`
 

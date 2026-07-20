@@ -32,7 +32,7 @@ let _w = Toggle::new(dark_mode)
 
 ## Builder methods at a glance
 
-`label`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`label`, `labelled_externally`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -56,6 +56,18 @@ current state) and written (flipped on each activation).
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Accessible label announced by AT and optionally displayed beside the switch.
+
+#### `pub fn labelled_externally(mut self) -> Self`
+
+Declare that this toggle's accessible name comes from a **sibling label
+widget**, wired by a container after mount (`FormLayout::line` does this
+via `access_labelled_by`).
+
+Without it the debug assertion below fires even though the toggle *is*
+properly labelled: the `labelled_by` relation is pushed post-mount, so
+`accessibility()` cannot see it and every form-hosted toggle looks
+nameless. Setting `.label(..)` instead would satisfy the assert but
+render the text a second time, beside a label column that already has it.
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 

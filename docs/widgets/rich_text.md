@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -143,8 +143,10 @@ the shared document's search/spell highlights change.
 
 Set which highlight sessions **this view** renders, at runtime.
 
-`HighlightMask::all` shows every session on the document (the default);
-`HighlightMask::only` shows a chosen set — which is how a per-editor find banner
+`HighlightMask::all` shows every
+session on the document (the default);
+`HighlightMask::only` shows a
+chosen set — which is how a per-editor find banner
 keeps one pane's find highlighting out of another pane over the same document.
 `show_highlights(false)` still overrides this to nothing.
 
@@ -200,6 +202,26 @@ Set the vertical scroll-bar visibility policy.
 #### `pub fn h_scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
 Set the horizontal scroll-bar visibility policy.
+
+#### `pub fn window_to_clip(self, on: bool) -> Self`
+
+Window paint-time culling to the accumulated ancestor clip rather than
+this editor's own bounds.
+
+Enable this **only** for an editor deliberately laid out at its full
+document height inside an outer `ScrollArea`
+(`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "bastard
+mode". Such an editor's own viewport spans the whole document, so the
+viewport-derived render cull keeps nothing; this makes it cull to the
+visible clip band instead, so a huge document only rasterizes the rows on
+screen. Correct under nested ScrollAreas (the clip is the intersection of
+all clipping ancestors), and positioning / hit-testing are unaffected.
+
+A normal self-scrolling editor already culls correctly from its own scroll
+offset and doesn't need this — leave it **off** (the default). (The window
+is computed relative to the editor's own scroll offset as well, so enabling
+it on a self-scroller degrades to a correct-but-redundant cull rather than
+rendering the wrong rows.)
 
 #### `pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
@@ -435,6 +457,19 @@ Replaces any selection. Uses text-document's
 `TextCursor::insert_html`,
 which parses the HTML into a `DocumentFragment` and inserts it.
 
+#### `pub fn insert_djot(&self, djot: &str)`
+
+Insert a fragment parsed from djot at the widget's caret.
+Replaces any selection. Uses text-document's
+`TextCursor::insert_djot`,
+which parses the djot into a `DocumentFragment` and inserts it — so
+unlike `insert_text`, block-level source really
+does produce new blocks rather than literal newlines in one paragraph.
+
+#### `pub fn insert_block(&self)`
+
+Split the current block at the widget's caret, as pressing Enter does.
+
 #### `pub fn insert_image(&self, name: &str, width: u32, height: u32)`
 
 Insert an inline image by logical resource name. `width` and
@@ -532,6 +567,39 @@ Toggle underline; see `toggle_bold`.
 
 Toggle strikethrough; see `toggle_bold`.
 
+#### `pub fn set_superscript(&self, enabled: bool)`
+
+Raise the selection to superscript, or drop it back to the baseline.
+
+#### `pub fn set_subscript(&self, enabled: bool)`
+
+Lower the selection to subscript, or drop it back to the baseline.
+
+#### `pub fn set_vertical_alignment(&self, alignment: CharVerticalAlignment)`
+
+Set the selection's vertical alignment directly. `Normal` is the
+baseline; `Middle` exists in the model but has no toolbar affordance.
+
+#### `pub fn get_vertical_alignment(&self) -> CharVerticalAlignment`
+
+The caret's vertical alignment, `Normal` when unset.
+
+#### `pub fn is_superscript(&self) -> bool`
+
+True while the caret sits in superscript text.
+
+#### `pub fn is_subscript(&self) -> bool`
+
+True while the caret sits in subscript text.
+
+#### `pub fn toggle_superscript(&self)`
+
+Flip superscript on the selection. Turning it on replaces subscript.
+
+#### `pub fn toggle_subscript(&self)`
+
+Flip subscript on the selection. Turning it on replaces superscript.
+
 #### `pub fn apply_block_format(&self, fmt: BlockFormat)`
 
 Set an arbitrary `BlockFormat` on the caret's current block.
@@ -585,6 +653,16 @@ buttons that do not want to synthesise key events.
 Decrease the nesting depth of the caret's current list item by
 one. No-op at depth 0 (use `Backspace` at block-start to exit
 the list entirely). Toolbar counterpart of Shift+Tab.
+
+#### `pub fn remove_from_list(&self)`
+
+Take the caret's block out of its list entirely, leaving a plain
+paragraph. No-op when the caret is not inside a list.
+
+`outdent` deliberately stops at depth 0 — Shift+Tab
+should not silently destroy the list — so a toolbar that offers
+"remove list formatting" needs this instead. Backspace at block-start
+reaches the same codepath from the keyboard.
 
 #### `pub fn is_in_blockquote(&self) -> bool`
 
@@ -691,6 +769,25 @@ stack is empty.
 
 Redo the most recently undone edit. Mirrors Ctrl+Y /
 Ctrl+Shift+Z. No-op when the redo stack is empty.
+
+#### `pub fn begin_edit_block(&self)`
+
+Begin grouping subsequent edits into a single undo entry.
+
+Must be paired with `end_edit_block`. Prefer
+`edit_block`, which pairs them for you.
+
+#### `pub fn end_edit_block(&self)`
+
+Close the group opened by `begin_edit_block`.
+
+#### `pub fn edit_block<R>(&self, edits: impl FnOnce() -> R) -> R`
+
+Run `edits` as one undo entry.
+
+The scoped form of `begin_edit_block` — the
+block is closed even if `edits` returns early, which hand-pairing gets
+wrong eventually.
 
 #### `pub fn set_default_language(&self, language: &str)`
 
@@ -877,6 +974,101 @@ See `RichTextEditor::focused_signal`.
 Select the character range `[start, end)` without collapsing (anchor at
 `start`, caret at `end`). See `RichTextEditor::select_range`.
 
+#### `pub fn replace_range(&self, start: usize, end: usize, text: &str)`
+
+Replace the character range ``start, end)` with `text`, leaving the caret
+after the inserted text.
+
+The counterpart to [`select_range`` for callers that
+must *rewrite* a span rather than merely reveal it — a spell-check
+correction picked from a context menu, an autocorrect, a
+replace-this-occurrence action. It goes through the widget's **internal**
+cursor, so the edit behaves exactly like typed text: it lands on the
+editor's undo stack as one entry (the replacement is a single
+insert-over-selection), fires the document's change notifications, and
+leaves the caret where the user would expect it.
+
+Offsets are **character** positions, the same space
+`cursor_position` and `select_range` use. The
+inserted text inherits the character format at `start`, so correcting a
+word inside italic prose stays italic.
+
+Reaching through `TextDocument::cursor`
+instead would mutate the document behind the widget's back, leaving the
+caret decoupled from the edit — use this.
+
+#### `pub fn insert_text(&self, text: &str)`
+
+Insert plain text at the caret, replacing any selection. The
+`EditorHandle` counterpart of
+`RichTextEditor::insert_text`, for callers
+that hold only a handle — a toolbar button or a global menu command.
+
+#### `pub fn insert_djot(&self, djot: &str)`
+
+Insert a fragment parsed from djot at the caret, replacing any selection.
+
+Unlike `insert_text`, which drops its bytes into the
+current block verbatim (a `\n` becomes literal content, not a new
+paragraph), this parses block-level djot into a `DocumentFragment`, so
+inserting a standalone paragraph really does create one.
+
+#### `pub fn insert_block(&self)`
+
+Split the current block at the caret, as pressing Enter does.
+
+#### `pub fn insert_paragraph(&self, text: &str) -> bool`
+
+Insert `text` as a **paragraph of its own** at the caret: split here, fill
+the new block, split again, so whatever followed the caret continues in a
+third block.
+
+Deliberately one call rather than three. Composing
+`insert_block` + `insert_text` + `insert_block` from outside re-enters the
+widget three times, and an application that rebuilds its editor in
+response to the first change notification is left driving a handle that
+no longer points at the mounted widget — the split lands and the text
+silently does not. Doing the whole edit under a single borrow, with one
+signal sync at the end, makes it atomic from the caller's side.
+Returns `false` if any step failed, leaving the document as far as it
+got. Steps are **not** attempted after a failure: filling and re-splitting
+on top of a split that did not happen produces a mangled paragraph rather
+than a partial one, and the caller has no way to tell.
+
+#### `pub fn selection(&self) -> (usize, usize)`
+
+The live selection as `(anchor, position)`, unordered — `anchor` is where the
+selection started, `position` is where the caret is, so a backwards drag
+reports `anchor > position`. Equal values mean no selection.
+
+Both ends are read under a **single** borrow, so the pair cannot tear. That is
+the reason to prefer this over pairing `cursor_position`
+with `cursor_anchor_signal`: the former is a live
+read of the cursor while the latter is a mirror refreshed on sync, so combining
+them mixes two different moments in time and can invent — or miss — a selection
+if the mirror lags. A caller deciding *"is there a selection, and over what"*
+wants one consistent answer.
+
+#### `pub fn offset_at_point(&self, window_point: Point) -> Option<usize>`
+
+Hit-test a point — **in window coordinates**, as a
+`context_menu` factory receives it — to a
+document character offset. `None` when the point resolves to no text
+(past the last glyph on an empty line, outside the body, etc.).
+
+Lets a custom context-menu factory resolve "the word under the pointer"
+from the right-click position, since a bare right-click does not move the
+caret on its own.
+
+#### `pub fn reposition_caret_for_context_menu(&self, window_point: Point)`
+
+Reposition the caret to a right-click point (**window coordinates**)
+unless the click lands inside the current selection (then the selection
+is preserved). Call this at the top of a custom
+`context_menu` factory so the menu's Paste
+— and any caret-relative action — operates where the user clicked, exactly
+as the built-in menu and the single-line field do.
+
 #### `pub fn reveal_range( &self, ctx: &mut bastyde_core::widget::EventContext, start: usize, end: usize, )`
 
 Scroll the character range `[start, end)` into view. A no-op until the
@@ -989,6 +1181,38 @@ Whether underline.
 
 Whether strikethrough.
 
+#### `pub fn set_superscript(&self, enabled: bool)`
+
+Raise the selection to superscript, or return it to the baseline.
+
+#### `pub fn set_subscript(&self, enabled: bool)`
+
+Lower the selection to subscript, or return it to the baseline.
+
+#### `pub fn set_vertical_alignment(&self, alignment: CharVerticalAlignment)`
+
+Set the selection's vertical alignment directly.
+
+#### `pub fn get_vertical_alignment(&self) -> CharVerticalAlignment`
+
+The caret's vertical alignment, `Normal` when unset.
+
+#### `pub fn is_superscript(&self) -> bool`
+
+True while the caret sits in superscript text.
+
+#### `pub fn is_subscript(&self) -> bool`
+
+True while the caret sits in subscript text.
+
+#### `pub fn toggle_superscript(&self)`
+
+Flip superscript on the selection. Turning it on replaces subscript.
+
+#### `pub fn toggle_subscript(&self)`
+
+Flip subscript on the selection. Turning it on replaces superscript.
+
 #### `pub fn apply_block_format(&self, fmt: BlockFormat)`
 
 Apply an arbitrary `BlockFormat` to the caret's block.
@@ -1029,6 +1253,14 @@ No-op when the caret is not inside a list. Equivalent to Tab.
 
 Outdent the caret's current list item by one nesting level.
 No-op at depth 0. Equivalent to Shift+Tab.
+
+#### `pub fn remove_from_list(&self)`
+
+Take the caret's block out of its list entirely, leaving a plain
+paragraph. No-op when the caret is not inside a list.
+
+See `RichTextEditor::remove_from_list` for why this is separate from
+`outdent`, which stops at depth 0 by design.
 
 #### `pub fn is_in_blockquote(&self) -> bool`
 
@@ -1100,6 +1332,20 @@ Undo the most recent edit. No-op when the undo stack is empty.
 
 Redo the most recently undone edit. No-op when the redo stack
 is empty.
+
+#### `pub fn begin_edit_block(&self)`
+
+Begin grouping subsequent edits into a single undo entry. Pair with
+`end_edit_block`, or prefer the scoped
+`edit_block`.
+
+#### `pub fn end_edit_block(&self)`
+
+Close the group opened by `begin_edit_block`.
+
+#### `pub fn edit_block<R>(&self, edits: impl FnOnce() -> R) -> R`
+
+Run `edits` as one undo entry — the pairing-safe form.
 
 #### `pub fn copy(&self, ctx: &bastyde_core::widget::EventContext)`
 

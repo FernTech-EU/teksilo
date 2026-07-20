@@ -39,7 +39,7 @@ let _w = MenuItem::new(lit!("&Save"))
 
 ## Builder methods at a glance
 
-`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `shortcut_label`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
+`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `shortcut_label`, `trailing_hint`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
 
 ## API reference
 
@@ -97,6 +97,25 @@ Set a leading icon.
 Set a trailing shortcut label (e.g., "Ctrl+X"). Shortcut labels are
 typically not translated (they're the key combination literal), so
 this accepts a plain string.
+
+#### `pub fn trailing_hint(mut self, text: impl Into<LocalizedString>) -> Self`
+
+Set a trailing *descriptive* hint (e.g. "inside", "after parent") —
+a secondary phrase explaining what the item will do, rendered in the
+same trailing slot as an accelerator but semantically unrelated to one.
+
+Prefer this over `shortcut_label` for any
+trailing text that is not a key combination. It differs in two ways
+that matter:
+
+* it takes a `LocalizedString`, so a `tr!(...)` hint re-resolves on
+  a live locale change instead of being frozen at build time;
+* it is announced as the item's accessible **description**, not as
+  `keyboard_shortcut` — a screen reader would otherwise read the
+  phrase out as if it were a chord to press.
+
+Independent of the accelerator: an item may carry both, in which case
+the chord renders first and the hint follows it.
 
 #### `pub fn for_shortcut(mut self, id: &'static str) -> Self`
 

@@ -47,7 +47,7 @@ let _table = TableView::new(model)
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_trigger`, `on_cell_edit_request`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -333,6 +333,22 @@ Maximum vertical scroll offset — `total_content_height − viewport_height`.
 
 Viewport-to-content height ratio, used by external scroll bar thumbs.
 
+#### `pub fn scroll_x_signal(&self) -> &Signal<f32>`
+
+Current horizontal scroll offset of the Middle (unpinned) pane, in
+logical pixels. Leading/Trailing-pinned columns are unaffected —
+see `Column::pinned`.
+
+#### `pub fn max_scroll_x_signal(&self) -> &Signal<f32>`
+
+Maximum horizontal scroll offset — `middle_content_width −
+middle_viewport_width`.
+
+#### `pub fn viewport_ratio_x_signal(&self) -> &Signal<f32>`
+
+Middle-pane viewport-to-content width ratio, used by external
+horizontal scroll bar thumbs.
+
 #### `pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>>`
 
 Active sort: `Some((col_id, dir))` or `None` when unsorted.
@@ -398,6 +414,13 @@ Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`
 isn't a currently-displayed column, or if `row` is outside the visible
 range — an out-of-range target would otherwise strand `editing_cell` on
 a row nothing can match.
+
+Callable **before the view is mounted**, which is the only point at
+which a consumer can seed a freshly constructed view with an edit
+target it already holds. `display_indices` is a cache `build()` fills,
+so a pre-mount call finds it empty; the order is recomputed on demand
+in that case rather than resolving against nothing and no-opping for a
+third, undocumented reason.
 
 #### `pub fn end_edit(&self)`
 

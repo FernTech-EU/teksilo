@@ -29,7 +29,7 @@ let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")
 
 ## Builder methods at a glance
 
-`with_child`, `with_child_id`
+`with_child`, `with_child_id`, `close_action`
 
 ## API reference
 
@@ -60,3 +60,9 @@ title). Pointer events not consumed by the child bubble up to the drag handler.
 Create a drag region with an already-registered child identified by `id`.
 Use this when the child widget was added to the tree before constructing the
 region (e.g. when you need the child's `WidgetId` for another reference).
+
+#### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>, ) -> Self`
+
+Forward the title bar's close-action override, so the fallback window
+menu's Close entry matches the close button. No effect on platforms
+that provide their own window menu.
