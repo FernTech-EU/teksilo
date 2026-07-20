@@ -136,6 +136,11 @@ pub struct MenuItem {
     label: LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
+    /// A trailing *descriptive* phrase — not an accelerator. Unlike
+    /// `shortcut_label` this stays a [`LocalizedString`], so it re-resolves
+    /// on a live locale change, and it is announced as the item's
+    /// accessible *description* rather than its keyboard shortcut.
+    trailing_hint: Option<LocalizedString>,
     /// Optional shortcut id. When set and `shortcut_label` is not, the
     /// rendered trailing label is pulled from the tree's
     /// [`ShortcutRegistry`](bastyde_core::shortcut::ShortcutRegistry) and
@@ -218,6 +223,7 @@ impl MenuItem {
             label: ls,
             icon: None,
             shortcut_label: None,
+            trailing_hint: None,
             shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -283,6 +289,27 @@ impl MenuItem {
     /// this accepts a plain string.
     pub fn shortcut_label(mut self, label: impl Into<String>) -> Self {
         self.shortcut_label = Some(label.into());
+        self
+    }
+
+    /// Set a trailing *descriptive* hint (e.g. "inside", "after parent") —
+    /// a secondary phrase explaining what the item will do, rendered in the
+    /// same trailing slot as an accelerator but semantically unrelated to one.
+    ///
+    /// Prefer this over [`shortcut_label`](Self::shortcut_label) for any
+    /// trailing text that is not a key combination. It differs in two ways
+    /// that matter:
+    ///
+    /// * it takes a [`LocalizedString`], so a `tr!(...)` hint re-resolves on
+    ///   a live locale change instead of being frozen at build time;
+    /// * it is announced as the item's accessible **description**, not as
+    ///   `keyboard_shortcut` — a screen reader would otherwise read the
+    ///   phrase out as if it were a chord to press.
+    ///
+    /// Independent of the accelerator: an item may carry both, in which case
+    /// the chord renders first and the hint follows it.
+    pub fn trailing_hint(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.trailing_hint = Some(text.into());
         self
     }
 
@@ -384,6 +411,7 @@ impl MenuItem {
             label: ls,
             icon: None,
             shortcut_label: None,
+            trailing_hint: None,
             shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -779,12 +807,36 @@ impl Widget for MenuItem {
                         .text(sig.map(|ks| (*ks).map(format_keystroke).unwrap_or_default()))
                 })
             };
+            let has_shortcut = shortcut.is_some();
             if let Some(shortcut) = shortcut {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
                 trailing_row = trailing_row.child(
                     shortcut
                         .style(TextStyleRole::Body)
                         .color(shortcut_role)
+                        .single_line()
+                        .a11y_hidden(),
+                );
+            }
+            // Trailing descriptive hint. Unlike the accelerator above this is
+            // built straight from the `LocalizedString`, so `TextWidget`'s own
+            // `Prop<String>` conversion binds it to the locale signal and it
+            // re-resolves in place on a language switch. It is `a11y_hidden`
+            // because it is announced as the item's *description* instead (see
+            // `accessibility`), never as a keyboard shortcut.
+            if let Some(hint) = self.trailing_hint.clone() {
+                if has_shortcut {
+                    // Both set (rare) — keep the chord and the phrase apart.
+                    trailing_row = trailing_row.child(
+                        crate::primitives::FixedSize::new()
+                            .width(menu::MENU_ITEM_PADDING_HORIZONTAL),
+                    );
+                }
+                let hint_role = interaction.map(|s| resolve_shortcut_role(*s));
+                trailing_row = trailing_row.child(
+                    TextWidget::new(hint)
+                        .style(TextStyleRole::Body)
+                        .color(hint_role)
                         .single_line()
                         .a11y_hidden(),
                 );
@@ -1450,6 +1502,13 @@ impl Widget for MenuItem {
         if let Some(accel) = accel {
             builder.set_keyboard_shortcut(accel);
         }
+        // A trailing hint is prose, not a chord — it belongs in the
+        // description so AT reads "Scene, inside" rather than announcing
+        // "inside" as a key to press. Resolved here rather than at build
+        // time so the a11y tree follows a live locale change too.
+        if let Some(hint) = self.trailing_hint.as_ref() {
+            builder.set_description(hint.resolve_now());
+        }
 
         // Mnemonic — populates AccessKit's `access_key` field, which
         // Windows Narrator announces as "Access key: F" on items
@@ -1502,6 +1561,77 @@ mod tests {
     }
 
     // --- Role coverage ---
+
+    fn a11y_node(
+        update: &bastyde_core::accesskit::TreeUpdate,
+        id: bastyde_core::widget_id::WidgetId,
+    ) -> &bastyde_core::accesskit::Node {
+        let nid = bastyde_core::accessibility::widget_id_to_node_id(id);
+        update
+            .nodes
+            .iter()
+            .find(|(node_id, _)| *node_id == nid)
+            .map(|(_, n)| n)
+            .expect("widget present in the accessibility tree")
+    }
+
+    // --- Trailing hint (descriptive phrase, not an accelerator) ---
+
+    /// The whole point of `trailing_hint` over `shortcut_label`: a phrase like
+    /// "inside" must reach AT as a *description*. Routed through
+    /// `keyboard_shortcut` (as `shortcut_label` does) a screen reader would
+    /// announce it as a chord the user should press.
+    #[test]
+    fn trailing_hint_is_announced_as_a_description_not_a_chord() {
+        let mut t = tree();
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Scene")).trailing_hint(lit!("inside"))));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let update = t.sync_accessibility();
+        let node = a11y_node(&update, item_id);
+        assert_eq!(node.description(), Some("inside"));
+        assert_eq!(
+            node.keyboard_shortcut(),
+            None,
+            "a descriptive hint must never be announced as a keyboard shortcut"
+        );
+    }
+
+    /// The sibling guarantee — `shortcut_label` keeps its accelerator
+    /// semantics, and does not leak into the description slot.
+    #[test]
+    fn shortcut_label_stays_a_chord_and_sets_no_description() {
+        let mut t = tree();
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Save")).shortcut_label("Ctrl+S")));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let update = t.sync_accessibility();
+        let node = a11y_node(&update, item_id);
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
+        assert_eq!(node.description(), None);
+    }
+
+    /// Both may coexist: the chord and the phrase occupy the same trailing
+    /// row but neither displaces the other, in the render or in AT.
+    #[test]
+    fn a_chord_and_a_hint_coexist_without_displacing_each_other() {
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(
+                MenuItem::new(lit!("Duplicate"))
+                    .shortcut_label("Ctrl+D")
+                    .trailing_hint(lit!("after")),
+            ),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let update = t.sync_accessibility();
+        let node = a11y_node(&update, item_id);
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+D"));
+        assert_eq!(node.description(), Some("after"));
+    }
 
     #[test]
     fn plain_item_emits_role_menuitem() {
