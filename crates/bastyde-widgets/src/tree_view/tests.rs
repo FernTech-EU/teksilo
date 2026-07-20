@@ -2311,3 +2311,229 @@ fn treeview_exportable_move_removes_source_node_via_stable_key() {
         "node A was removed on Move"
     );
 }
+
+// --- `focused_index` reconciliation regression tests (RowAnchor) ---
+//
+// A tree's structural changes — including expand/collapse, which a flat
+// `ListView` never has — surface only as a bare source-version bump, with
+// no `DataChange` delta the keyboard cursor could shift by. These pin the
+// `RowAnchor`-based fix: `focused_index` follows the row it was on, not
+// the flat slot it used to occupy. Mirrors `list_view`'s
+// `focused_index_follows_insert_before_it` /
+// `focused_index_dropped_when_its_row_is_removed`.
+
+#[test]
+fn focused_index_follows_insert_above_it() {
+    use bastyde_core::event::{Key, Modifiers};
+    use bastyde_data::{SelectionMode, SelectionModel};
+
+    let tree = TreeModel::new();
+    for i in 0..10usize {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(tree.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .selection(sel),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    // Click row 3 — selects it AND sets the nav cursor (`focused_index`) to 3.
+    press_at(&mut wtree, 100.0, 70.0);
+    assert_eq!(selection.selected_indices(), vec![3], "precondition");
+
+    // Two roots inserted above — the same node (row 3) is now row 5.
+    tree.insert_root(0, "New A".to_string());
+    tree.insert_root(0, "New B".to_string());
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Index-based selection has no identity to shift by on a bare version
+    // bump, so it stays put — the documented limitation on
+    // `TreeView::selection` (unlike the keyboard cursor below, which tracks
+    // the row by identity via `RowAnchor`).
+    assert_eq!(
+        selection.selected_indices(),
+        vec![3],
+        "precondition: index selection does not follow the insert"
+    );
+
+    // ArrowDown must resume from the shifted row (5 → 6) — the cursor
+    // followed the insert, not the stale pre-insert index (3 → 4).
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![6],
+        "ArrowDown after a leading insert resumes from the shifted row \
+         (5 → 6), not the stale pre-insert one (3 → 4)"
+    );
+}
+
+#[test]
+fn focused_index_clears_when_its_row_is_removed() {
+    // No selection model: Enter's activation index is then a direct read of
+    // `focused_index` (a selection would otherwise mask the fix via its own
+    // stale-but-in-range fallback — see `alt_arrow_after_a_structural_change_...`
+    // below for why that fallback matters).
+    use bastyde_core::event::{Key, Modifiers};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let tree = TreeModel::new();
+    for i in 0..10usize {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let activated: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    let act = activated.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(tree.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .on_activate(move |i| act.set(Some(i))),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    // Click row 3, then Enter activates the cursor's row.
+    press_at(&mut wtree, 100.0, 70.0);
+    wtree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(activated.get(), Some(3), "precondition: cursor is on row 3");
+
+    // Row 3 itself — the row under the cursor — is removed.
+    let node3 = tree.root(3);
+    tree.remove(node3);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // With the cursor cleared (its anchor resolves to `None`), Enter with
+    // no cursor falls back to row 0 — NOT row 4 (the stale index's `+1`
+    // reading), and NOT whoever slid into the vacated slot 3.
+    wtree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        activated.get(),
+        Some(0),
+        "focused_index was cleared when its row was removed, so activation \
+         falls back to row 0 rather than the stale index or its replacement"
+    );
+}
+
+#[test]
+fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
+    // Unlike a flat list, a tree's structural changes include expand /
+    // collapse — this is the shape the source-version-only signal (no
+    // `DataChange`) is specifically for. A's chevron toggles it WITHOUT
+    // moving the nav cursor (`chevron_press_toggles_without_selecting_the_row`
+    // pins that separately), so C's focus is undisturbed by the very
+    // expand/collapse this test is exercising above it.
+    use bastyde_core::event::{Key, Modifiers};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let tree = sample_tree(); // A (A1, A2), B (B1), C — all collapsed
+    let activated: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    let act = activated.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new_with_context(tree, |item: &&'static str, entry, selected, ctx| {
+            Box::new(
+                crate::StandardTreeItem::new(lit!((*item).to_string()))
+                    .from_entry(entry)
+                    .selected(selected)
+                    .on_toggle_rc(ctx.toggle_callback()),
+            ) as Box<dyn Widget>
+        })
+        .item_height(28.0)
+        .row_click_expands(false)
+        .on_activate(move |i| act.set(Some(i))),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    // Expand A via its chevron (x in [0, 16], row 0 depth 0) — reveals A1,
+    // A2: rows are now A(0), A1(1), A2(2), B(3), C(4).
+    press_at(&mut wtree, 8.0, 14.0);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(wtree.children(tv).len() - 1, 5, "precondition: A expanded");
+
+    // Click C's BODY (past the chevron column) to focus it.
+    press_at(&mut wtree, 100.0, 126.0);
+    wtree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        activated.get(),
+        Some(4),
+        "precondition: cursor is on row C (index 4)"
+    );
+
+    // Collapse A again via its chevron — the branch ABOVE the focused row,
+    // toggled without touching the cursor. C moves from flat index 4 to 2.
+    press_at(&mut wtree, 8.0, 14.0);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        wtree.children(tv).len() - 1,
+        3,
+        "precondition: A collapsed again"
+    );
+
+    wtree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        activated.get(),
+        Some(2),
+        "the cursor follows row C to its new flat index (4 → 2) once the \
+         branch above it collapses, instead of staying on the stale index \
+         (now B)"
+    );
+}
+
+#[test]
+fn alt_arrow_after_a_structural_change_reorders_the_row_the_cursor_is_on() {
+    // No selection model, deliberately: Alt+Arrow's dragged-row fallback is
+    // `selected_indices().first().or(fi.get())`, and index-based selection
+    // does NOT itself follow a structural change (see
+    // `focused_index_follows_insert_above_it`) — with one attached, this
+    // scenario would still reorder the wrong row via the selection half of
+    // that fallback, masking the `focused_index` fix under test here.
+    use bastyde_core::event::{Key, Modifiers};
+
+    let tree = TreeModel::new();
+    for (i, label) in ["N0", "N1", "N2", "N3", "N4"].into_iter().enumerate() {
+        tree.insert_root(i, label);
+    }
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(tree.clone(), |_item, entry, _sel| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .reorderable(true),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    // Click N2's body (row 2, y≈70) — sets the nav cursor to 2.
+    press_at(&mut wtree, 50.0, 70.0);
+
+    // A root inserted above shifts N2 from flat index 2 to 3.
+    tree.insert_root(0, "New");
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Alt+ArrowDown must reorder the row the cursor is VISIBLY on (N2, now
+    // at index 3) past its new next sibling (N3) — not the stale index 2
+    // (now occupied by N0).
+    wtree.press_key(Key::ArrowDown, Modifiers::ALT);
+
+    let order: Vec<&str> = (0..tree.root_count())
+        .map(|i| tree.with_item(tree.root(i), |&v| v).unwrap())
+        .collect();
+    assert_eq!(
+        order,
+        vec!["New", "N0", "N1", "N3", "N2", "N4"],
+        "Alt+ArrowDown moved N2 (the row the cursor is visibly on) past N3, \
+         not the stale pre-insert index 2 (now N0)"
+    );
+}

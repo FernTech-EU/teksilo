@@ -70,6 +70,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let metrics = self.metrics.clone();
             let source = self.source.clone();
             let row_sel = self.row_selection.clone();
+            let focused = self.focused_index.clone();
+            let focused_anchor = self.focused_anchor.clone();
             move |_| {
                 // Source version observers fire synchronously per reflatten, so
                 // `first_changed_index()` describes exactly this change:
@@ -83,6 +85,37 @@ impl<T: 'static> Widget for TreeView<T> {
                 // node's selection survives.
                 if let Some(ref rs) = row_sel {
                     rs.prune();
+                    // Index-based selection has no identity to track by, so
+                    // it cannot follow a moved row — but it must not keep
+                    // pointing past the shrunk end either.
+                    rs.prune_out_of_range(source.visible_count());
+                }
+                // The keyboard cursor: a version bump carries no `DataChange`
+                // delta to shift it by (it covers expand/collapse too, which
+                // has none), so it is tracked by identity instead. The anchor
+                // captured the last time `focused_index` moved is resolved
+                // against the now-current source and the cursor rewritten to
+                // wherever that row landed, or dropped if the row is gone —
+                // the same dance `reconcile_editing_row` runs for
+                // `TableView`'s `editing_cell`.
+                // Snapshot-then-drop the borrow before the `None` arm below
+                // takes it mutably — an `if let focused_anchor.borrow()...`
+                // scrutinee keeps the immutable `Ref` alive for the whole
+                // block (temporary lifetime extension), which would panic
+                // on that `borrow_mut()`.
+                let anchor_snapshot = focused_anchor.borrow().clone();
+                if let Some(anchor) = anchor_snapshot {
+                    match anchor.index() {
+                        Some(idx) => {
+                            if focused.get() != Some(idx) {
+                                focused.set(Some(idx));
+                            }
+                        }
+                        None => {
+                            focused.set(None);
+                            *focused_anchor.borrow_mut() = None;
+                        }
+                    }
                 }
                 let next = dv.get() + 1;
                 dv.set(next);
@@ -190,6 +223,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let sel_for_key = self.row_selection.clone();
             let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
+            let fi_anchor = self.focused_anchor.clone();
             let reorderable = self.reorderable;
             let scroll_for_nav = self.scroll_y.clone();
             let metrics_for_nav = self.metrics.clone();
@@ -225,6 +259,16 @@ impl<T: 'static> Widget for TreeView<T> {
                     // collapse / paging / activation) rather than step in a
                     // direction.
                     let current = cursor.unwrap_or(0);
+
+                    // Move the keyboard cursor AND refresh the `RowAnchor` it
+                    // resolves through on the next structural change — every
+                    // site below that moves `fi` must go through this, or the
+                    // cursor silently stops following its row (see the
+                    // `source_version` effect in `build`).
+                    let set_focus = |idx: usize| {
+                        fi.set(Some(idx));
+                        *fi_anchor.borrow_mut() = Some(source.anchor(idx));
+                    };
 
                     // Helper: scroll so flat row `idx` is visible in the tree's
                     // OWN viewport; returns the resulting scroll offset so the
@@ -270,7 +314,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 source_ref.with_row_str(i, &|item| label(item))
                             })
                         {
-                            fi.set(Some(idx));
+                            set_focus(idx);
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(idx);
                             }
@@ -302,7 +346,7 @@ impl<T: 'static> Widget for TreeView<T> {
                             _ => return bastyde_core::event::EventResponse::Ignored,
                         };
                         if let Some(new_flat) = source.keyboard_reorder(flat_idx, down) {
-                            fi.set(Some(new_flat));
+                            set_focus(new_flat);
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(new_flat);
                             }
@@ -330,7 +374,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 }
                                 // If leaf or collapsed, move to parent.
                                 if let Some(parent_idx) = source.parent_index(current) {
-                                    fi.set(Some(parent_idx));
+                                    set_focus(parent_idx);
                                     if let Some(ref sel) = sel_for_key {
                                         sel.select(parent_idx);
                                     }
@@ -418,14 +462,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                     sel.select(current);
                                 }
                             }
-                            fi.set(Some(current));
+                            set_focus(current);
                             return bastyde_core::event::EventResponse::Handled;
                         }
                         _ => None,
                     };
 
                     if let Some(idx) = new_idx {
-                        fi.set(Some(idx));
+                        set_focus(idx);
                         if let Some(ref sel) = sel_for_key {
                             if modifiers.shift() {
                                 sel.extend_to(idx);
@@ -469,9 +513,11 @@ impl<T: 'static> Widget for TreeView<T> {
             let scroll_for_hover = self.scroll_y.clone();
             let source_for_hover = self.source.clone();
             let feedback_for_hover = self.drop_feedback.clone();
+            let width_for_hover = self.placed_content_width.clone();
             let hr_for_hover = hovered_row.clone();
             let export_for_hover = self.export.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                let line_width = width_for_hover.get();
                 let vc = source_for_hover.visible_count();
                 if vc == 0 {
                     feedback_for_hover.set(None);
@@ -534,21 +580,21 @@ impl<T: 'static> Widget for TreeView<T> {
                     feedback_for_hover.set(Some(DropViz::Rect {
                         top,
                         height: row_h,
-                        width: 400.0,
+                        width: line_width,
                     }));
                     DropFeedback::HighlightRect {
-                        rect: Rect::new(0.0, top, 400.0, row_h),
+                        rect: Rect::new(0.0, top, line_width, row_h),
                         color: bastyde_tokens::Color::from_rgba(0.25, 0.47, 0.85, 0.25),
                     }
                 } else {
                     let insertion_y = insertion_top - scroll;
                     feedback_for_hover.set(Some(DropViz::Line {
                         y: insertion_y,
-                        width: 400.0,
+                        width: line_width,
                     }));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
-                        width: 400.0,
+                        width: line_width,
                     }
                 }
             });
@@ -747,6 +793,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     let source_click = self.source.clone();
                     let click_anchor = self.source.anchor(i);
                     let fi_click = self.focused_index.clone();
+                    let fi_anchor_click = self.focused_anchor.clone();
                     let has_children = item_has_children && self.row_click_expands;
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
@@ -800,7 +847,11 @@ impl<T: 'static> Widget for TreeView<T> {
                                     // keyboard handler, so without this a click
                                     // would select a row yet leave arrows
                                     // stepping from the stale keyboard cursor.
+                                    // Refresh the anchor alongside it — see
+                                    // `set_focus` in the keyboard handler.
                                     fi_click.set(Some(click_index));
+                                    *fi_anchor_click.borrow_mut() =
+                                        Some(source_click.anchor(click_index));
                                 }
                                 // Ignored lets the gesture arena also see the
                                 // PointerDown so DragRecognizer can capture the
@@ -1006,6 +1057,7 @@ impl<T: 'static> Widget for TreeView<T> {
         } else {
             bounds.width
         };
+        self.placed_content_width.set(content_width);
 
         // Auto-measure pass: measure every realized row at the content
         // width (height-for-width), feed the heights back, and apply the
@@ -1138,7 +1190,7 @@ impl<T: 'static> Widget for TreeView<T> {
         let has_selection = self
             .row_selection
             .as_ref()
-            .is_some_and(|s| !s.selected_indices().is_empty());
+            .is_some_and(|s| s.has_selection());
         if self.view_focused.get() && self.focus_visible.get() && !has_selection {
             let color = BorderRole::Focused.resolve(&ctx.theme.colors);
             let inset = 1.0_f32;

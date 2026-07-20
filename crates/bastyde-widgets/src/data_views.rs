@@ -218,12 +218,23 @@ pub(crate) struct RowSelection {
     extend_fn: Rc<dyn Fn(usize)>,
     select_all_fn: Rc<dyn Fn(usize)>,
     selected_indices_fn: Rc<dyn Fn() -> Vec<usize>>,
+    /// Cheap (O(selected count), never O(visible)) emptiness check for the
+    /// container-focus-ring gate — paint runs every frame and only needs to
+    /// know "is anything selected", not the set itself.
+    has_selection_fn: Rc<dyn Fn() -> bool>,
     clear_fn: Rc<dyn Fn()>,
     observe_fn: Rc<dyn Fn(Box<dyn Fn()>) -> ObserverHandle>,
     on_change_fn: Rc<dyn Fn(&DataChange)>,
     /// Unconditional prune for the version-signal-driven tree views (which
     /// don't emit a `DataChange`): drop orphaned keys (keyed) or no-op (index).
     prune_fn: Rc<dyn Fn()>,
+    /// Drop selected indices that no longer fit `0..count`, for the
+    /// version-signal-driven tree views' index-selection path: an index has
+    /// no identity to follow a moved row by (that's `focused_index`'s job,
+    /// via `RowAnchor`), so a structural change can only clamp it — never
+    /// re-land it on the row it used to point at. A no-op for the keyed
+    /// model, which is already fully reconciled by `prune_fn`.
+    prune_range_fn: Rc<dyn Fn(usize)>,
 }
 
 impl RowSelection {
@@ -231,7 +242,9 @@ impl RowSelection {
     /// straight through; `on_data_change` index-shifts (insert / remove) or
     /// clears (reset) the selection, matching the legacy inline behaviour.
     pub(crate) fn from_index(sel: SelectionModel) -> Self {
-        let (s_is, s_sel, s_tog, s_ext, s_all, s_idx, s_clr, s_obs, s_chg) = (
+        let (s_is, s_sel, s_tog, s_ext, s_all, s_idx, s_has, s_clr, s_obs, s_chg, s_range) = (
+            sel.clone(),
+            sel.clone(),
             sel.clone(),
             sel.clone(),
             sel.clone(),
@@ -250,6 +263,7 @@ impl RowSelection {
             extend_fn: Rc::new(move |i| s_ext.extend_to(i)),
             select_all_fn: Rc::new(move |count| s_all.select_all(count)),
             selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
+            has_selection_fn: Rc::new(move || s_has.count() > 0),
             clear_fn: Rc::new(move || s_clr.clear()),
             observe_fn: Rc::new(move |cb| s_obs.selection_signal().observe(move |_| cb())),
             on_change_fn: Rc::new(move |change| match change {
@@ -269,6 +283,16 @@ impl RowSelection {
             // bare version bump — tree structural adjustments stay no-ops here
             // (the legacy behaviour).
             prune_fn: Rc::new(|| {}),
+            prune_range_fn: Rc::new(move |count| {
+                let kept: Vec<usize> = s_range
+                    .selected_indices()
+                    .into_iter()
+                    .filter(|&i| i < count)
+                    .collect();
+                if kept.len() != s_range.count() {
+                    s_range.select_indices(kept, false);
+                }
+            }),
         }
     }
 
@@ -331,6 +355,10 @@ impl RowSelection {
                         .collect()
                 })
             },
+            has_selection_fn: {
+                let k = keyed.clone();
+                Rc::new(move || k.count() > 0)
+            },
             clear_fn: {
                 let k = keyed.clone();
                 Rc::new(move || k.clear())
@@ -354,6 +382,9 @@ impl RowSelection {
                 let (k, c) = (keyed, contains_key);
                 Rc::new(move || k.prune_missing(|key| c(key)))
             },
+            // Keys already survive a version bump via `prune_fn` above —
+            // there is no separate index range to clamp.
+            prune_range_fn: Rc::new(|_count: usize| {}),
         }
     }
 
@@ -378,6 +409,13 @@ impl RowSelection {
     pub(crate) fn selected_indices(&self) -> Vec<usize> {
         (self.selected_indices_fn)()
     }
+    /// Whether anything is selected. Prefer this over
+    /// `!selected_indices().is_empty()` when only the emptiness matters (e.g.
+    /// a per-frame paint gate) — it costs O(selected count), never
+    /// O(visible), for both the index and keyed backings.
+    pub(crate) fn has_selection(&self) -> bool {
+        (self.has_selection_fn)()
+    }
     pub(crate) fn clear(&self) {
         (self.clear_fn)()
     }
@@ -396,6 +434,15 @@ impl RowSelection {
     /// model.
     pub(crate) fn prune(&self) {
         (self.prune_fn)()
+    }
+    /// Drop selected indices `>= count` (index model) after a structural
+    /// change with no delta to shift them by — a version-signal-driven tree
+    /// view's only defence against a selection left pointing past the
+    /// shrunk end (it cannot re-land on the row it used to point at; only
+    /// `focused_index`'s `RowAnchor` tracks identity). No-op for the keyed
+    /// model, already fully reconciled by `prune`.
+    pub(crate) fn prune_out_of_range(&self, count: usize) {
+        (self.prune_range_fn)(count)
     }
 }
 

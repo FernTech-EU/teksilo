@@ -157,6 +157,16 @@ pub struct TreeView<T: 'static> {
 
     /// Keyboard-focused flat index.
     focused_index: Rc<Cell<Option<usize>>>,
+    /// The row identity `focused_index` currently points at, refreshed
+    /// alongside every write to `focused_index`. A tree's structural changes
+    /// (insert/remove/reorder, and — unlike a flat list — expand/collapse)
+    /// surface as a bare version bump with no `DataChange` delta to shift the
+    /// cursor by, so it is reconciled by identity instead: resolved against
+    /// the source on every version bump and used to rewrite `focused_index`
+    /// to wherever the row landed (or drop it if the row is gone). See
+    /// `crate::data_views::RowAnchor` and `reconcile_editing_row`, which
+    /// plays the same role for `TableView`'s `editing_cell`.
+    focused_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     /// Type-ahead ("type to jump") label extractor — opt-in via
     /// [`type_ahead_label`](Self::type_ahead_label).
@@ -246,6 +256,10 @@ pub struct TreeView<T: 'static> {
     /// Rows are not distinct focusable nodes, so the focus-driven follow never
     /// reveals the selected row in an outer scroller — this closes that gap.
     viewport_bounds: Rc<Cell<Rect>>,
+    /// Content width (updated during `place_children`, used by drag
+    /// feedback so the insertion line / into-folder highlight spans the
+    /// row's actual width instead of a guess). Mirrors `ListView`.
+    placed_content_width: Rc<Cell<f32>>,
     tree_id: ViewId,
 
     /// Whole-view enabled state, statically or reactively. Forwarded to the

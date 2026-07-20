@@ -157,6 +157,7 @@ impl<T: 'static> TreeView<T> {
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
             focused_index: Rc::new(Cell::new(None)),
+            focused_anchor: Rc::new(RefCell::new(None)),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
@@ -183,6 +184,7 @@ impl<T: 'static> TreeView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            placed_content_width: Rc::new(Cell::new(0.0)),
             tree_id: view_id,
             enabled: Prop::Static(true),
         }
@@ -274,9 +276,16 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
-    /// Set the index-based selection model (visible positions). For
-    /// identity-based selection that survives expand / collapse / filter and
-    /// node moves, use [`keyed_selection`](Self::keyed_selection) instead.
+    /// Set the index-based selection model (visible positions). Unlike
+    /// `ListView` (where every structural change carries an insert/remove
+    /// `DataChange` the selection index-shifts against), a `TreeView`'s
+    /// structural changes — including expand/collapse — surface only as a
+    /// version bump, with no delta to shift a *selected index* by; a moved
+    /// row's old index is only clamped into range, not followed to its new
+    /// position (`focused_index`, the keyboard cursor, tracks by identity
+    /// via a `RowAnchor` and IS followed). For selection that survives
+    /// expand / collapse / filter and node moves, use
+    /// [`keyed_selection`](Self::keyed_selection) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
         self.row_selection = Some(RowSelection::from_index(sel));
         self

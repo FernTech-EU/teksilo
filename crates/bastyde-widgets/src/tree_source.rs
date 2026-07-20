@@ -64,6 +64,39 @@ impl TreeRow {
     }
 }
 
+/// Cache of the ascending flat indices of every visible depth-0 (root) row,
+/// valid for one source version. Roots have no `parent` to enumerate
+/// siblings through, so both `sibling_pos`'s root branch and Alt+Arrow's
+/// root-sibling reorder fall back to scanning the WHOLE visible range for
+/// `depth == 0` rows — O(realized root rows × visible count) per rebuild for
+/// a flat-ish tree with many roots, since every realized root row repeats
+/// the full scan. Rebuilt once per version bump (shared by both call sites)
+/// instead, then answered by a binary search (`sibling_pos`) or a direct
+/// re-map (`keyboard_reorder`).
+type RootIndexCache = RefCell<Option<(u64, Rc<Vec<usize>>)>>;
+
+/// The cached root indices for `source`'s current version, rescanning only
+/// when the version has moved on since the last call.
+fn root_indices<S: TreeDataSource>(source: &S, cache: &RootIndexCache) -> Rc<Vec<usize>> {
+    let version = source.version_signal().get();
+    {
+        let cached = cache.borrow();
+        if let Some((v, flat)) = cached.as_ref()
+            && *v == version
+        {
+            return flat.clone();
+        }
+    }
+    let n = source.visible_count();
+    let flat = Rc::new(
+        (0..n)
+            .filter(|&j| source.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false))
+            .collect::<Vec<usize>>(),
+    );
+    *cache.borrow_mut() = Some((version, flat.clone()));
+    flat
+}
+
 /// Erased DnD + lazy capability closures for a tree source. View-facing
 /// arguments are visible flat indices + the view's id; the closures resolve keys
 /// internally. Mirrors [`DndLazy`](crate::list_source::DndLazy) for trees, so the
@@ -262,6 +295,11 @@ impl<T: 'static> TreeSource<T> {
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let dnd = TreeDndLazy::from_source(s.clone());
+        // Shared by `sibling_pos_fn` and `keyboard_reorder_fn` below — both
+        // need "all visible roots, in order" and a version bump invalidates
+        // both alike, so one scan per version serves either caller.
+        let root_cache: Rc<RootIndexCache> = Rc::new(RefCell::new(None));
+        let (root_cache_sib, root_cache_kbd) = (root_cache.clone(), root_cache);
         let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13) = (
             s.clone(),
             s.clone(),
@@ -339,21 +377,12 @@ impl<T: 'static> TreeSource<T> {
                         (pos, sibs.len().max(1))
                     }
                     None => {
-                        // Roots are always visible (depth 0): count visible
-                        // depth-0 rows and find this one's position among them.
-                        let n = s7.visible_count();
-                        let mut roots = 0usize;
-                        let mut pos = 1usize;
-                        for j in 0..n {
-                            let is_root = s7.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
-                            if is_root {
-                                roots += 1;
-                                if j == index {
-                                    pos = roots;
-                                }
-                            }
-                        }
-                        (pos, roots.max(1))
+                        // Roots are always visible (depth 0). The cached scan
+                        // (one per source version) avoids re-deriving "all
+                        // visible roots" for every realized root row.
+                        let roots = root_indices(&*s7, &root_cache_sib);
+                        let pos = roots.binary_search(&index).map(|p| p + 1).unwrap_or(1);
+                        (pos, roots.len().max(1))
                     }
                 }
             }),
@@ -364,11 +393,9 @@ impl<T: 'static> TreeSource<T> {
                 // depth-0 scan — no root-enumeration method needed on the trait.
                 let siblings: Vec<S::Key> = match s10.parent(&k) {
                     Some(p) => s10.child_keys(&p),
-                    None => (0..s10.visible_count())
-                        .filter_map(|j| {
-                            let is_root = s10.with_entry(j, |_it, e| e.depth == 0).unwrap_or(false);
-                            if is_root { s10.key_at(j) } else { None }
-                        })
+                    None => root_indices(&*s10, &root_cache_kbd)
+                        .iter()
+                        .filter_map(|&j| s10.key_at(j))
                         .collect(),
                 };
                 let pos = siblings.iter().position(|x| *x == k)?;

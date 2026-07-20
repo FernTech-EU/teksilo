@@ -1668,7 +1668,7 @@ impl<T: 'static> Widget for ListView<T> {
         let has_selection = self
             .row_selection
             .as_ref()
-            .is_some_and(|s| !s.selected_indices().is_empty());
+            .is_some_and(|s| s.has_selection());
         if self.view_focused.get() && self.focus_visible.get() && !has_selection {
             let color = BorderRole::Focused.resolve(&ctx.theme.colors);
             let inset = 1.0_f32;
