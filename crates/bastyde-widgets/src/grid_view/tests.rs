@@ -115,6 +115,114 @@ fn data_change_triggers_rebuild() {
 }
 
 #[test]
+fn focused_index_follows_insert_before_it() {
+    // Bug repro: `focused_index` (the keyboard-nav anchor) was never
+    // adjusted on any DataChange, so after a peer/insert shifts the tiles
+    // it silently pointed at the wrong one — the next ArrowRight would
+    // resume from a stale position instead of the tile the user was
+    // actually on. Mirrors `ListView`'s regression test of the same name.
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+    // tile_size(100, 50) with the default 8px gaps fits 3 columns in 400px
+    // (3*100 + 2*8 = 316 <= 400; a 4th would need 424).
+    let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+
+    // Click tile 1 (column 1 — clear of the row's trailing edge, where
+    // ArrowRight is blocked without wrap-navigation) — sets both selection
+    // and the keyboard-nav anchor to 1.
+    let t = tiles(&tree, id);
+    tree.click(t[1]);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![1],
+        "precondition: click selects tile 1"
+    );
+
+    // A peer-driven reload prepends two tiles — tile 1 is now tile 3
+    // (still column 0, clear of the trailing edge).
+    model.insert(0, 100);
+    model.insert(0, 200);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    // The selection model itself already index-shifts (existing
+    // behaviour) — this just re-confirms the setup, not the fix.
+    assert_eq!(
+        selection.selected_indices(),
+        vec![3],
+        "precondition: selection shifts with the inserted tiles"
+    );
+
+    // If `focused_index` had NOT shifted (the bug), it would still read 1,
+    // and ArrowRight would resume from there (→ select 2). With the fix it
+    // follows the insert to 3, so ArrowRight resumes from 3 (→ 4).
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
+    assert_eq!(
+        selection.selected_indices(),
+        vec![4],
+        "ArrowRight after a leading insert resumes from the shifted tile (3 → 4), \
+         not the stale pre-insert one (1 → 2)"
+    );
+}
+
+#[test]
+fn focused_index_dropped_when_its_tile_is_removed() {
+    // The focused tile itself was removed: the anchor must be cleared, not
+    // left pointing at whatever now occupies its old slot.
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
+    let model = ListModel::from_vec((0..10).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+
+    let t = tiles(&tree, id);
+    tree.click(t[3]);
+    assert_eq!(selection.selected_indices(), vec![3], "precondition");
+
+    model.remove(3);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        selection.selected_indices().is_empty(),
+        "precondition: selection drops the removed tile"
+    );
+
+    // With the bug, `focused_index` still reads 3 (now a DIFFERENT tile —
+    // the one that slid into that slot), so ArrowRight would select 4.
+    // With the fix it's cleared, so "no cursor yet" semantics apply and
+    // ArrowRight lands ON tile 0 instead of stepping past it.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::default(),
+        text: None,
+    });
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "focused_index must be dropped when its tile is removed, not silently repointed"
+    );
+}
+
+#[test]
 fn click_selects_tile() {
     let model = ListModel::from_vec((0..12).collect());
     let selection = SelectionModel::new(SelectionMode::Multi);
@@ -597,6 +705,81 @@ fn sections_offset_tiles_below_headers() {
     );
 }
 
+#[test]
+fn sections_report_section_local_aria_row_col() {
+    // Item 3 is the FIRST item of section 1 (items 0, 1, 2 belong to
+    // section 0 — see `sections_offset_tiles_below_headers` above), so it
+    // must announce ARIA row 1 / col 1 (1-based) — its position within ITS
+    // OWN section band — not row 2 / col 2, the answer global
+    // `index / cols, index % cols` math would give.
+    let model = ListModel::from_vec((0..6).collect());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(50.0, 50.0)))
+            .column_count(2, 50.0)
+            .section_header_height(28.0)
+            .sections(TwoSections),
+    );
+    tree.layout(SizeProposal::exact(300.0, 600.0));
+    let kids = tree.children(id);
+    let body = kids[0];
+    let body_kids = tree.children(body);
+    let item3_id = body_kids[3];
+
+    let update = tree.sync_accessibility();
+    let node_id = widget_id_to_node_id(item3_id);
+    let node = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == node_id)
+        .map(|(_, n)| n)
+        .expect("item 3's a11y node must be present in the sync");
+    assert_eq!(
+        node.row_index(),
+        Some(1),
+        "item 3 is the first row of its OWN section"
+    );
+    assert_eq!(
+        node.column_index(),
+        Some(1),
+        "item 3 is the first column of its row"
+    );
+}
+
+#[test]
+fn pinned_header_is_not_built_for_a_zero_section_provider() {
+    // A hand-rolled `SectionProvider` that reports zero sections despite a
+    // non-empty model (a misconfiguration, but one the widget must survive
+    // gracefully): with `pinned_section_headers(true)`, `PinnedHeader::build`
+    // used to unconditionally call the header factory at `current_section`'s
+    // default (0) — a provider indexing directly into its own section list
+    // would panic. The fix skips building the pinned header entirely when
+    // there are no sections.
+    struct ZeroSections;
+    impl super::sections::SectionProvider for ZeroSections {
+        fn section_count(&self) -> usize {
+            0
+        }
+        fn items_in_section(&self, _s: usize) -> usize {
+            panic!("must not be called for a zero-section provider")
+        }
+        fn section_title(&self, _s: usize) -> String {
+            panic!("must not be called for a zero-section provider")
+        }
+    }
+
+    let model = ListModel::from_vec((0..3).collect());
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(50.0, 50.0)))
+            .column_count(2, 50.0)
+            .sections(ZeroSections)
+            .pinned_section_headers(true),
+    );
+    // Must not panic.
+    tree.layout(SizeProposal::exact(300.0, 300.0));
+}
+
 // ── Phase 4: waterfall ──────────────────────────────────────────────────
 
 #[test]
@@ -697,6 +880,114 @@ fn pointer_drag_reorders_tile_through_source_accept_drop() {
 }
 
 #[test]
+fn pointer_drag_drop_in_a_row_gap_does_not_append_at_the_end() {
+    // Regression: a drop anywhere in an inter-tile gap (here, the row-gap
+    // band between two rows) used to silently resolve to "append at the
+    // end", because `index_at_point` returns None for any non-tile point
+    // and the old `insertion_index` fell straight through to `len`.
+    // Dragging tile 0 and dropping in the gap between row 0 and row 1 must
+    // insert it near its origin, not send it to the very end.
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let model = ListModel::from_vec(vec![10usize, 20, 30, 40, 50, 60, 70, 80]);
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .reorderable(true),
+    );
+    // 2×100 + 8 gap = 208 → 2 columns fit in 220px; row_step = 50 + 8 =
+    // 58, so the row-gap band spans y 50..58.
+    tree.layout(SizeProposal::exact(220.0, 300.0));
+
+    let from = Point::new(50.0, 25.0); // tile 0 center
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: from,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    // Cross the drag threshold, then move into the row-gap: y=53 sits
+    // between row 0 (0..50) and row 1 (58..108); x=70 is inside column 0,
+    // past its horizontal center.
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(72.0, 25.0),
+    });
+    let to = Point::new(70.0, 53.0);
+    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: to,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    assert_ne!(
+        model.with_item(7, |v| *v),
+        Some(10),
+        "a row-gap drop must not silently append the dragged tile at the end"
+    );
+}
+
+#[test]
+fn insertion_bar_geometry_uses_target_row_at_row_boundary() {
+    // Regression: the bar used to be derived from `tile_rect(ins - 1)` (the
+    // PREVIOUS item), so at a row boundary — where `ins` is the first index
+    // of a NEW row — it drew on the wrong (previous) row's y/height.
+    // 100×50 tiles, 10px gaps, no insets → 4 columns in 430px;
+    // row_step = 50 + 10 = 60.
+    let g = UniformGrid::new(
+        GridSizing::Fixed {
+            width: 100.0,
+            height: 50.0,
+        },
+        10.0,
+        10.0,
+        EdgeInsets::ZERO,
+    );
+    // Insertion at index 4 = the first tile of row 1 (4 cols/row).
+    let (bar_x, r) = insertion_bar_geometry(&g, 4, 12, 430.0).unwrap();
+    assert!(
+        (r.y - 60.0).abs() < 0.01,
+        "row-boundary bar must sit on the TARGET row (y=60), got y={}",
+        r.y
+    );
+    assert!(
+        (bar_x - 0.0).abs() < 0.01,
+        "bar should sit at row 1's leading edge x=0, got {bar_x}"
+    );
+}
+
+#[test]
+fn insertion_bar_geometry_appends_at_trailing_edge_of_last_tile() {
+    let g = UniformGrid::new(
+        GridSizing::Fixed {
+            width: 100.0,
+            height: 50.0,
+        },
+        10.0,
+        10.0,
+        EdgeInsets::ZERO,
+    );
+    // Last tile (index 11, of 12) is row 2 / col 3: x = 3*(100+10) = 330,
+    // width 100 → trailing edge at 430.
+    let (bar_x, _) = insertion_bar_geometry(&g, 12, 12, 430.0).unwrap();
+    assert!((bar_x - 430.0).abs() < 0.01, "append bar_x = {bar_x}");
+}
+
+#[test]
+fn insertion_bar_geometry_is_none_for_an_empty_grid() {
+    let g = UniformGrid::new(
+        GridSizing::Fixed {
+            width: 100.0,
+            height: 50.0,
+        },
+        10.0,
+        10.0,
+        EdgeInsets::ZERO,
+    );
+    assert!(insertion_bar_geometry(&g, 0, 0, 430.0).is_none());
+}
+
+#[test]
 fn enter_activates_focused_tile() {
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     use std::cell::Cell;
@@ -790,6 +1081,66 @@ fn type_ahead_fires_on_letter_key_variant() {
     assert!(
         selection.is_selected(1),
         "letter key 'B' must trigger type-ahead → banana"
+    );
+}
+
+#[test]
+fn type_ahead_skips_unloaded_rows() {
+    // Regression: type-ahead searched every index's label regardless of
+    // whether the row was actually resident. The public
+    // `type_ahead_label(usize) -> String` closure is index-only and can't
+    // itself tell whether its row is loaded, so an unloaded (lazy /
+    // windowed) row could still "match" and get jumped to. The search is
+    // now gated through the source's string accessor, which returns
+    // `None` for an unloaded row, so it's skipped — mirrors `ListView`'s
+    // `with_item_str_fn` routing.
+    use bastyde_core::ObserverHandle;
+    use bastyde_core::event::{Key, Modifiers};
+    use bastyde_data::ListDataSource;
+
+    struct PartiallyLoaded;
+    impl ListDataSource for PartiallyLoaded {
+        type Item = String;
+        type Key = usize;
+        fn len(&self) -> usize {
+            4
+        }
+        fn with_item<R>(&self, index: usize, f: impl FnOnce(&String) -> R) -> Option<R> {
+            // Row 1 ("banana") is never resident — a windowed placeholder.
+            if index == 1 || index >= 4 {
+                return None;
+            }
+            let names = ["apple", "banana", "cherry", "date"];
+            Some(f(&names[index].to_string()))
+        }
+        fn key_at(&self, index: usize) -> Option<usize> {
+            (index < 4).then_some(index)
+        }
+        fn observe_changes(
+            &self,
+            _f: impl Fn(&bastyde_data::DataChange) + 'static,
+        ) -> ObserverHandle {
+            let inner: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(());
+            ObserverHandle::new(inner, 0, std::rc::Rc::new(|_| {}))
+        }
+    }
+
+    let names = ["apple", "banana", "cherry", "date"];
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::from_source(PartiallyLoaded, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel)
+            .type_ahead_label(move |i| names[i].to_string()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    tree.press_key(Key::B, Modifiers::NONE);
+    assert!(
+        selection.selected_indices().is_empty(),
+        "type-ahead must skip an unloaded row ('banana') rather than jump to it"
     );
 }
 

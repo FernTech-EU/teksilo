@@ -68,7 +68,7 @@ use body_pane::{GridBodyPane, TileDelegate};
 use keyboard::{GridKeyConfig, build_grid_key_handler};
 use layout::masonry::VirtualizedMasonry;
 use layout::sectioned::SectionedGrid;
-use layout::strategy::GridLayoutStrategy;
+use layout::strategy::{GridLayoutStrategy, TileRect};
 use layout::uniform::UniformGrid;
 use layout::variable_row::VariableRowGrid;
 use sections::{SectionData, SectionProvider};
@@ -975,6 +975,7 @@ impl<T: 'static> Widget for GridView<T> {
             let selection_obs = self.selection.clone();
             let len_fn = self.source.len_fn.clone();
             let scroll_reset = self.scroll_y.clone();
+            let focused_obs = self.focused_index.clone();
             let handle = (self.source.observe_fn)(Box::new(move |change| {
                 match change {
                     DataChange::ItemsInserted { range } => {
@@ -1011,6 +1012,17 @@ impl<T: 'static> Widget for GridView<T> {
                         }
                         scroll_reset.set(0.0);
                     }
+                }
+                // Keep the keyboard-focus anchor in step too — otherwise it
+                // silently points at the wrong tile after an insert / remove
+                // / move (reachable not just from local edits but from a
+                // live watcher pushing in a peer process's write), and the
+                // next Enter/Space acts on the wrong item. Mirrors
+                // `ListView`'s `focused_index` adjustment.
+                if let Some(current) = focused_obs.get() {
+                    focused_obs.set(bastyde_data::data_change::adjust_single_index_for_change(
+                        current, change,
+                    ));
                 }
                 let next = counter.get() + 1;
                 counter.set(next);
@@ -1105,7 +1117,18 @@ impl<T: 'static> Widget for GridView<T> {
                 })
             },
             type_ahead_timeout: self.type_ahead_timeout,
-            type_ahead_label: self.type_ahead_label.clone(),
+            // Route through the source's string accessor so an unloaded
+            // (lazy/windowed) row is skipped rather than searched with
+            // whatever the app's index-only closure happens to compute for
+            // it — mirrors `ListView::with_item_str_fn`. The public
+            // `type_ahead_label(usize) -> String` API is unchanged; this
+            // just gates it on row residency.
+            type_ahead_label: self.type_ahead_label.as_ref().map(|label| {
+                let label = label.clone();
+                let with_item_str = self.source.with_item_str_fn.clone();
+                Rc::new(move |i: usize| (with_item_str)(i, &|_item: &T| label(i)))
+                    as Rc<dyn Fn(usize) -> Option<String>>
+            }),
         }));
 
         // Rubber-band marquee (Multi mode only). A container pointer handler
@@ -1328,13 +1351,23 @@ impl<T: 'static> Widget for GridView<T> {
                 marquee: self.marquee.clone(),
                 insertion: self.insertion.clone(),
                 style: self.style.clone(),
+                len_fn: self.source.len_fn.clone(),
             };
             self.overlay_id = Some(ctx.add(overlay));
 
             // Sticky pinned header slot (reused widget showing the current
-            // section's header at the viewport top).
+            // section's header at the viewport top). Skipped when the
+            // provider declares zero sections — `PinnedHeader::build` would
+            // otherwise unconditionally invoke the factory at
+            // `current_section`'s default (0), and a hand-rolled provider
+            // indexing directly into its own section list would panic.
             self.pinned_header_id = None;
-            if self.pinned_section_headers {
+            let section_count = self
+                .section_data
+                .as_ref()
+                .map(|d| (d.counts_fn)().len())
+                .unwrap_or(0);
+            if self.pinned_section_headers && section_count > 0 {
                 if let Some(factory) = self.header_factory() {
                     let ph = PinnedHeader {
                         current_section: self.current_section.clone(),
@@ -1605,6 +1638,12 @@ struct GridOverlay {
     marquee: Signal<Option<MarqueeState>>,
     insertion: Signal<Option<usize>>,
     style: Option<Rc<dyn GridViewStyle>>,
+    /// Live item count — `focused_index` is adjusted on every model change,
+    /// but paint reads a snapshot signal on a different binding level
+    /// (`AccessibilityOnly` on the grid root vs `RepaintOnly` here), so a
+    /// stale index can transiently outlive the adjustment. Bounds-check
+    /// before drawing a ring at a tile that no longer exists.
+    len_fn: Rc<dyn Fn() -> usize>,
 }
 
 impl std::fmt::Debug for GridOverlay {
@@ -1622,6 +1661,31 @@ impl GridOverlay {
     }
     fn insertion_recipe(&self, ctx: &PaintContext) -> bastyde_core::styles::GridInsertionRecipe {
         resolve_grid_style(&self.style, ctx, |s| s.insertion())
+    }
+}
+
+/// Geometry of the drag-reorder insertion bar: `(bar_x, row_rect)`, where
+/// `bar_x` is the bar's CENTER x and `row_rect` supplies its `y`/`height`.
+/// When `ins < len` this is the LEADING edge of the target tile
+/// `tile_rect(ins)` — using the target row (not the previous tile's row)
+/// is what keeps the bar on the correct row at a row boundary, where
+/// `ins` is the first index of a new row. When `ins >= len` (append) it's
+/// the trailing edge of the last tile. `None` for an empty grid.
+fn insertion_bar_geometry(
+    strategy: &dyn GridLayoutStrategy,
+    ins: usize,
+    len: usize,
+    viewport_width: f32,
+) -> Option<(f32, TileRect)> {
+    if len == 0 {
+        return None;
+    }
+    if ins < len {
+        let r = strategy.tile_rect(ins, viewport_width);
+        Some((r.x, r))
+    } else {
+        let r = strategy.tile_rect(len - 1, viewport_width);
+        Some((r.x + r.width, r))
     }
 }
 
@@ -1709,17 +1773,11 @@ impl Widget for GridOverlay {
         // Drag-reorder insertion bar: a vertical accent bar at the leading
         // edge of the target tile (or trailing edge of the last tile when
         // appending).
-        if let Some(ins) = self.insertion.get() {
-            let vp_w = bounds.width;
+        if let Some(ins) = self.insertion.get()
+            && let Some((bar_x, r)) =
+                insertion_bar_geometry(self.strategy.as_ref(), ins, (self.len_fn)(), bounds.width)
+        {
             let scroll_y = self.scroll_y.get();
-            let (bar_x, r) = if ins == 0 {
-                (0.0, self.strategy.tile_rect(0, vp_w))
-            } else {
-                let prev = self.strategy.tile_rect(ins - 1, vp_w);
-                // After the previous tile (handles both mid-row and append).
-                (prev.x + prev.width + 1.0, prev)
-            };
-            let bar_x = if ins == 0 { r.x } else { bar_x };
             let y = bounds.y + r.y - scroll_y;
             let h = r.height;
             if y + h >= bounds.y && y <= bounds.bottom() {
@@ -1735,7 +1793,11 @@ impl Widget for GridOverlay {
         if !self.view_focused.get() || !self.focus_visible.get() {
             return;
         }
-        let Some(idx) = self.focused_index.get() else {
+        // A stale index (outlived by a not-yet-applied model-change
+        // adjustment) can't draw a ring at a tile that no longer exists —
+        // treat it the same as "no current tile".
+        let idx = self.focused_index.get().filter(|&i| i < (self.len_fn)());
+        let Some(idx) = idx else {
             // No current tile. If nothing is selected either, no tile chrome
             // marks the focus — outline the whole grid so a Tab-focused empty
             // grid still shows where focus landed (mirrors TreeView / ListView).

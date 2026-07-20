@@ -200,6 +200,13 @@ impl VirtualizedMasonry {
 }
 
 impl GridLayoutStrategy for VirtualizedMasonry {
+    // `index_at_point` intentionally keeps the trait's O(n) `tile_rect` scan
+    // default: unlike the row-major strategies, item order here isn't
+    // visually monotonic in `y` (each item drops into the currently-
+    // shortest column), so there's no closed-form inverse of `tile_rect` to
+    // exploit. Acceptable for the hundreds-to-low-thousands of items a
+    // waterfall gallery holds (see the module doc comment).
+
     fn column_count(&self, viewport_width: f32) -> usize {
         self.columns.column_count(viewport_width)
     }

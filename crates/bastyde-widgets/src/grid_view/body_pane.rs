@@ -32,7 +32,7 @@ use bastyde_data::{DragEligibility, RowState, SelectionModel};
 use super::TileContext;
 use super::a11y::TileA11y;
 use super::layout::GridLayoutStrategy;
-use crate::data_views::{ViewId, default_placeholder};
+use crate::data_views::{RowSelection, ViewId, default_placeholder};
 
 pub(crate) type LenFn = Rc<dyn Fn() -> usize>;
 pub(crate) type WithItemFn<T> =
@@ -244,7 +244,6 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         // Realize the visible tiles.
         self.tile_entries.clear();
         let total = (self.len_fn)();
-        let cols = self.strategy.column_count(self.viewport_width.get()).max(1);
         let (start, end) = self.visible();
         // Lazy: nudge the source to load the realized window, and fetch more
         // as the viewport nears the end (append-only sources). Fires on every
@@ -254,11 +253,20 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             (self.fetch_more_fn)();
         }
         let focused = self.focused_index.get();
+        // Built ONCE per pane build (not per tile) and cheaply `Clone`d
+        // per-tile below — the facade's `Rc<dyn Fn>` closures would be
+        // real allocations if constructed inside the realize loop.
+        let sel_facade = self
+            .selection
+            .as_ref()
+            .map(|s| RowSelection::from_index(s.clone()));
 
         ctx.begin_view_focus_for(self.scope_owner);
         for i in start..end {
-            let row = i / cols;
-            let col = i % cols;
+            // Per-strategy: global row-major math for uniform/variable-row/
+            // waterfall, section-local for a sectioned grid (each section
+            // starts its own row band — see `SectionedGrid::tile_row_col`).
+            let (row, col) = self.strategy.tile_row_col(i, self.viewport_width.get());
             let selected = self
                 .selection
                 .as_ref()
@@ -299,9 +307,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // sees the PointerDown (drag-to-reorder / marquee). Deferred
             // collapse: pressing an already-selected tile (no modifiers)
             // keeps the whole (multi-)selection so it can be dragged; the
-            // collapse-to-single happens on release WITHOUT a drag (mirrors
-            // `ListView`).
-            if let Some(ref sel) = self.selection {
+            // collapse-to-single happens on release WITHOUT a drag. The
+            // press-claimed guard, Ctrl/Shift handling, and the defer rule
+            // itself live in the shared `deferred_select` helper (mirrors
+            // `ListView` / `TreeView`); only the focus-follows-selection
+            // step is grid-specific, gated on `on_down`'s return.
+            if let Some(ref sel) = sel_facade {
                 let sel_click = sel.clone();
                 let focused_set = self.focused_index.clone();
                 let idx = i;
@@ -314,31 +325,14 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             modifiers,
                             ..
                         } => {
-                            // The press belongs to an interactive child (an
-                            // embedded checkbox, button, …) — let it handle
-                            // the tap; don't also select the tile. Clear any
-                            // stale deferred-collapse (left by a prior drag
-                            // whose PointerUp the drag machinery consumed) so
-                            // it can't fire on this unrelated interaction.
-                            if ctx.press_claimed_by_interactive_child() {
-                                pending_collapse.set(false);
-                                return EventResponse::Ignored;
-                            }
-                            focused_set.set(Some(idx));
-                            if modifiers.ctrl() {
-                                sel_click.toggle(idx);
-                                pending_collapse.set(false);
-                            } else if modifiers.shift() {
-                                sel_click.extend_to(idx);
-                                pending_collapse.set(false);
-                            } else if sel_click.is_selected(idx) {
-                                // Defer: a following drag preserves the whole
-                                // selection; a plain click collapses on
-                                // release.
-                                pending_collapse.set(true);
-                            } else {
-                                sel_click.select(idx);
-                                pending_collapse.set(false);
+                            if crate::data_views::deferred_select::on_down(
+                                &sel_click,
+                                idx,
+                                *modifiers,
+                                &pending_collapse,
+                                ctx,
+                            ) {
+                                focused_set.set(Some(idx));
                             }
                             EventResponse::Ignored
                         }
@@ -346,19 +340,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             button: PointerButton::Primary,
                             ..
                         } => {
-                            // A release on an interactive child is that
-                            // child's tap — never collapse the tile from it
-                            // (guards against a `pending_collapse` a prior
-                            // drag left stuck true).
-                            if ctx.press_claimed_by_interactive_child() {
-                                return EventResponse::Ignored;
-                            }
-                            // Reached only on a click WITHOUT a drag (an
-                            // active drag consumes PointerUp). Collapse the
-                            // deferred multi-selection to the clicked tile.
-                            if pending_collapse.replace(false) {
-                                sel_click.select(idx);
-                            }
+                            crate::data_views::deferred_select::on_up(
+                                &sel_click,
+                                idx,
+                                &pending_collapse,
+                                ctx,
+                            );
                             EventResponse::Ignored
                         }
                         _ => EventResponse::Ignored,
@@ -429,12 +416,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                         let r = strategy.tile_rect(idx, vp_w.get());
                         let (w, h) = (r.width.max(40.0), r.height.max(40.0));
                         let delegate = delegate.clone();
-                        let cols = strategy.column_count(vp_w.get()).max(1);
+                        let (row, col) = strategy.tile_row_col(idx, vp_w.get());
                         let preview = (with_item)(idx, &|item| {
                             let tc = TileContext {
                                 index: idx,
-                                row: idx / cols,
-                                col: idx % cols,
+                                row,
+                                col,
                                 item,
                                 is_selected: false,
                                 is_focused: false,

@@ -228,8 +228,13 @@ pub(crate) trait GridLayoutStrategy: std::fmt::Debug + 'static {
     /// The flat index of the tile whose rect contains `content_point` (a
     /// point in content space), or `None` for an inter-tile gap / empty
     /// background. Used to decide whether a press should start an item drag
-    /// (on a tile) or a marquee (on the background), and to compute a 2D
-    /// drag-reorder insertion index. Default scans via `tile_rect`.
+    /// (on a tile) or a marquee (on the background). Default scans via
+    /// `tile_rect` — O(n); `UniformGrid`/`VariableRowGrid`/`SectionedGrid`
+    /// override with a closed-form lookup since this runs on every
+    /// `on_drag_hover` move. `VirtualizedMasonry` keeps this default: its
+    /// placement isn't row-major (items drop into the currently-shortest
+    /// column), so there's no O(1) inverse — acceptable for the
+    /// hundreds-to-low-thousands of items a waterfall gallery holds.
     fn index_at_point(
         &self,
         content_point: bastyde_canvas::Point,
@@ -243,6 +248,80 @@ pub(crate) trait GridLayoutStrategy: std::fmt::Debug + 'static {
             }
         }
         None
+    }
+
+    /// The flat index a drag-reorder drop at `content_point` should insert
+    /// *before* — the counterpart to [`index_at_point`](Self::index_at_point)
+    /// for drop resolution. Unlike `index_at_point` (which must return `None`
+    /// for a background point so marquee-vs-drag disambiguation works),
+    /// this ALWAYS resolves to a real insertion point: a point over a tile
+    /// lands on its leading or trailing edge (by which half of the tile's
+    /// width it falls in); a point in a gap (row-gap, column-gap, or before
+    /// the first row) resolves to the nearest tile by row proximity first,
+    /// then column proximity, and applies the same edge rule to it — so a
+    /// row-gap point never silently falls through to "append at end" the
+    /// way naively delegating to `index_at_point` would. Only a point at or
+    /// past the bottom of the very last tile yields `item_count` (append).
+    fn insertion_index_at(
+        &self,
+        content_point: bastyde_canvas::Point,
+        item_count: usize,
+        viewport_width: f32,
+    ) -> usize {
+        if item_count == 0 {
+            return 0;
+        }
+        let last = self.tile_rect(item_count - 1, viewport_width);
+        if content_point.y >= last.y + last.height {
+            return item_count;
+        }
+        if let Some(i) = self.index_at_point(content_point, item_count, viewport_width) {
+            let r = self.tile_rect(i, viewport_width);
+            return if content_point.x > r.x + r.width * 0.5 {
+                (i + 1).min(item_count)
+            } else {
+                i
+            };
+        }
+        // Gap: the nearest tile by (vertical, then horizontal) edge
+        // distance — 0 when the point is already within the tile's span on
+        // that axis. Locking onto the nearest ROW first (not just the
+        // nearest tile overall) is what makes a row-gap point resolve to
+        // the adjacent row instead of an arbitrary far-away tile.
+        let mut best = 0usize;
+        let mut best_dy = f32::MAX;
+        let mut best_dx = f32::MAX;
+        for i in 0..item_count {
+            let r = self.tile_rect(i, viewport_width);
+            let dy = edge_gap(content_point.y, r.y, r.height);
+            let dx = edge_gap(content_point.x, r.x, r.width);
+            if dy < best_dy - 0.01 || ((dy - best_dy).abs() <= 0.01 && dx < best_dx) {
+                best = i;
+                best_dy = dy;
+                best_dx = dx;
+            }
+        }
+        let r = self.tile_rect(best, viewport_width);
+        if content_point.x > r.x + r.width * 0.5 {
+            (best + 1).min(item_count)
+        } else {
+            best
+        }
+    }
+
+    /// `(row, col)` of item `index`, 0-based — the tile's ARIA grid
+    /// coordinates and the values handed to the delegate via
+    /// [`TileContext`](super::super::TileContext). Default is global
+    /// row-major math (`index / cols`, `index % cols`), correct for every
+    /// strategy whose flat index order matches its visual row order
+    /// (uniform, variable-row, waterfall-as-appropriate). `SectionedGrid`
+    /// overrides with SECTION-LOCAL numbering, since each section starts a
+    /// fresh row band (see `SectionedGrid::tile_rect`) — the global index
+    /// misreports row/col whenever an earlier section's count isn't a
+    /// column multiple.
+    fn tile_row_col(&self, index: usize, viewport_width: f32) -> (usize, usize) {
+        let cols = self.column_count(viewport_width).max(1);
+        (index / cols, index % cols)
     }
 
     // ── Section headers (only the sectioned strategy implements these) ──
@@ -276,6 +355,19 @@ pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
+/// Distance from `p` to the nearest edge of the span `[origin, origin +
+/// extent]`; `0.0` when `p` falls inside it. The building block for
+/// [`GridLayoutStrategy::insertion_index_at`]'s gap-resolution scan.
+fn edge_gap(p: f32, origin: f32, extent: f32) -> f32 {
+    if p < origin {
+        origin - p
+    } else if p > origin + extent {
+        p - (origin + extent)
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +383,20 @@ mod tests {
             },
             0.0,
             0.0,
+            EdgeInsets::ZERO,
+        )
+    }
+
+    fn gapped_grid() -> UniformGrid {
+        // 100×50 tiles, 10px gaps, no insets → 4 columns in 430px
+        // (4*100 + 3*10 = 430), row_step = 50 + 10 = 60.
+        UniformGrid::new(
+            GridSizing::Fixed {
+                width: 100.0,
+                height: 50.0,
+            },
+            10.0,
+            10.0,
             EdgeInsets::ZERO,
         )
     }
@@ -318,5 +424,42 @@ mod tests {
         assert_eq!(g.index_at_point(Point::new(10.0, 60.0), 40, 400.0), Some(4));
         // Point beyond the last item.
         assert_eq!(g.index_at_point(Point::new(10.0, 9000.0), 40, 400.0), None);
+    }
+
+    #[test]
+    fn insertion_index_at_row_gap_does_not_fall_through_to_len() {
+        // 12 items, 4 cols → 3 rows. y=53 sits in the row-gap between row 0
+        // (0..50) and row 1 (60..110), closer to row 0; x=50 is inside
+        // column 0. Before the fix this always fell through to `len` (12)
+        // because `index_at_point` returns None for any non-tile point.
+        let g = gapped_grid();
+        let idx = g.insertion_index_at(Point::new(50.0, 53.0), 12, 430.0);
+        assert!(
+            idx < 12,
+            "a mid-grid row-gap point must not fall through to len, got {idx}"
+        );
+    }
+
+    #[test]
+    fn insertion_index_at_col_gap_yields_next_tile() {
+        // Row 0: tile 0 spans x 0..100, the gap spans 100..110, tile 1
+        // spans 110..210. A point in the gap (x=105) must insert BEFORE
+        // tile 1 — i.e. resolve to index 1 — not fall through to `len`.
+        let g = gapped_grid();
+        let idx = g.insertion_index_at(Point::new(105.0, 25.0), 12, 430.0);
+        assert_eq!(
+            idx, 1,
+            "a point in the col-gap between tiles 0 and 1 should insert before tile 1"
+        );
+    }
+
+    #[test]
+    fn insertion_index_at_past_last_tile_yields_len() {
+        let g = gapped_grid();
+        let idx = g.insertion_index_at(Point::new(50.0, 9000.0), 12, 430.0);
+        assert_eq!(
+            idx, 12,
+            "a point past the last tile should append at the end"
+        );
     }
 }

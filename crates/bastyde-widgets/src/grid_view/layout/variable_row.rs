@@ -22,9 +22,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use bastyde_canvas::EdgeInsets;
+use bastyde_canvas::{EdgeInsets, Point};
 
-use super::columns::{ColumnGeometry, geometry_for};
+use super::columns::{ColumnGeometry, column_at, geometry_for};
 use super::offsets::PrefixSumOffsets;
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
@@ -251,5 +251,74 @@ impl GridLayoutStrategy for VariableRowGrid {
         let rows = item_count.div_ceil(cols);
         self.offsets.borrow_mut().resize(rows);
         self.reseed_exact(cols);
+    }
+
+    fn index_at_point(
+        &self,
+        content_point: Point,
+        item_count: usize,
+        viewport_width: f32,
+    ) -> Option<usize> {
+        if item_count == 0 {
+            return None;
+        }
+        self.item_count.set(item_count);
+        self.sync(viewport_width);
+        let cols = self.stored_cols.get().max(1);
+        let (row, row_top, row_h) = {
+            let mut off = self.offsets.borrow_mut();
+            let row = off.row_at(content_point.y);
+            (row, off.row_top(row), off.row_height(row))
+        };
+        // `row_at` clamps to a valid row even when the point is above the
+        // first row or below the last — the explicit span check below is
+        // what actually rejects those (and any row-gap in between).
+        if content_point.y < row_top || content_point.y > row_top + row_h {
+            return None;
+        }
+        let col = column_at(&self.columns, content_point.x, viewport_width)?;
+        let idx = row * cols + col;
+        (idx < item_count).then_some(idx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grid() -> VariableRowGrid {
+        // 100-wide tiles, 10px gaps → 2 columns in 210px. Exact 40px item
+        // height (no measurement pass needed): row_step = 40 + 10 = 50.
+        VariableRowGrid::new(
+            GridSizing::Fixed {
+                width: 100.0,
+                height: 40.0,
+            },
+            10.0,
+            10.0,
+            EdgeInsets::ZERO,
+            40.0,
+            Some(Rc::new(|_i| 40.0)),
+        )
+    }
+
+    #[test]
+    fn index_at_point_closed_form_matches_measured_rows() {
+        let g = grid();
+        // 6 items, 2 cols → 3 rows. Row 0 spans y 0..40; row 1 spans
+        // 50..90 (the row-gap band is 40..50).
+        assert_eq!(g.index_at_point(Point::new(0.0, 0.0), 6, 210.0), Some(0));
+        assert_eq!(g.index_at_point(Point::new(0.0, 50.0), 6, 210.0), Some(2));
+    }
+
+    #[test]
+    fn index_at_point_closed_form_returns_none_in_gaps() {
+        let g = grid();
+        // Row-gap band.
+        assert_eq!(g.index_at_point(Point::new(0.0, 45.0), 6, 210.0), None);
+        // Column-gap band (x 100..110).
+        assert_eq!(g.index_at_point(Point::new(105.0, 10.0), 6, 210.0), None);
+        // Past the last row.
+        assert_eq!(g.index_at_point(Point::new(0.0, 9000.0), 6, 210.0), None);
     }
 }

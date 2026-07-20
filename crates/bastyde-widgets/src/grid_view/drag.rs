@@ -17,8 +17,10 @@ use bastyde_canvas::Point;
 use super::layout::GridLayoutStrategy;
 
 /// The flat index a drop at `local` (widget-local point) would insert
-/// *before*. Lands on the nearest tile edge; falls through to `len` (append)
-/// when the point is past the last tile / in trailing empty space.
+/// *before*. Delegates to [`GridLayoutStrategy::insertion_index_at`], which
+/// (unlike `index_at_point`) always resolves to a real insertion point — a
+/// point in an inter-tile gap (row-gap, column-gap) lands on the nearest
+/// tile rather than falling through to "append at the end".
 pub(crate) fn insertion_index(
     strategy: &dyn GridLayoutStrategy,
     local: Point,
@@ -27,15 +29,5 @@ pub(crate) fn insertion_index(
     len: usize,
 ) -> usize {
     let cp = Point::new(local.x, local.y + scroll_y);
-    match strategy.index_at_point(cp, len, viewport_width) {
-        Some(i) => {
-            let r = strategy.tile_rect(i, viewport_width);
-            if cp.x > r.x + r.width * 0.5 {
-                (i + 1).min(len)
-            } else {
-                i
-            }
-        }
-        None => len,
-    }
+    strategy.insertion_index_at(cp, len, viewport_width)
 }

@@ -12,9 +12,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use bastyde_canvas::EdgeInsets;
+use bastyde_canvas::{EdgeInsets, Point};
 
-use super::columns::{ColumnGeometry, geometry_for};
+use super::columns::{ColumnGeometry, column_at, geometry_for};
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
 /// Computed geometry for one section.
@@ -238,6 +238,64 @@ impl GridLayoutStrategy for SectionedGrid {
         self.tile_height
     }
 
+    fn index_at_point(
+        &self,
+        content_point: Point,
+        item_count: usize,
+        viewport_width: f32,
+    ) -> Option<usize> {
+        if item_count == 0 {
+            return None;
+        }
+        self.sync(viewport_width);
+        let cache = self.cache.borrow();
+        if cache.sections.is_empty() {
+            return None;
+        }
+        let cols = cache.cols.max(1);
+        // First section whose band is at/after the point; the containing
+        // (or nearest-preceding) section is one back. `band_top` is
+        // non-decreasing across sections, so this is a valid binary search.
+        let after = cache
+            .sections
+            .partition_point(|g| g.band_top <= content_point.y);
+        let g = cache.sections[after.saturating_sub(1)];
+        if g.count == 0 {
+            return None;
+        }
+        let rel_y = content_point.y - g.band_top;
+        if rel_y < 0.0 {
+            return None; // above this section's band (its header, or the gap before it)
+        }
+        let row = (rel_y / self.row_step()) as usize;
+        if row >= g.rows || rel_y - row as f32 * self.row_step() > self.tile_height {
+            return None; // past the section's last row, or a row-gap within it
+        }
+        let col = column_at(&self.columns, content_point.x, viewport_width)?;
+        let local = row * cols + col;
+        if local >= g.count {
+            return None;
+        }
+        let idx = g.first_flat + local;
+        (idx < item_count).then_some(idx)
+    }
+
+    fn tile_row_col(&self, index: usize, viewport_width: f32) -> (usize, usize) {
+        self.sync(viewport_width);
+        let cache = self.cache.borrow();
+        let cols = cache.cols.max(1);
+        let s = self.section_of(index, &cache);
+        let g = cache.sections.get(s).copied().unwrap_or(SectionGeom {
+            header_top: self.inset.top,
+            band_top: self.inset.top,
+            first_flat: 0,
+            count: 0,
+            rows: 0,
+        });
+        let local = index.saturating_sub(g.first_flat);
+        (local / cols, local % cols)
+    }
+
     fn headers_in_range(
         &self,
         scroll_y: f32,
@@ -327,5 +385,35 @@ mod tests {
         let g = grid(vec![0, 2]);
         let r = g.tile_rect(0, 200.0);
         assert!((r.y - 48.0).abs() < 0.5, "item 0 y = {} (expected 48)", r.y);
+    }
+
+    #[test]
+    fn index_at_point_finds_tile_in_second_section() {
+        // counts [3, 3], 2 cols: section 1's band starts at y = 20(header) +
+        // 108(section 0's 2-row band) + 8(gap) + 20(section 1's own header)
+        // = 156.
+        let g = grid(vec![3, 3]);
+        assert_eq!(g.index_at_point(Point::new(0.0, 156.0), 6, 300.0), Some(3));
+    }
+
+    #[test]
+    fn index_at_point_returns_none_between_sections() {
+        let g = grid(vec![3, 3]);
+        // y=140 sits between section 0's last row (ending at 128) and
+        // section 1's tiles (starting at 156) — the row-gap plus section
+        // 1's header — not a tile.
+        assert_eq!(g.index_at_point(Point::new(0.0, 140.0), 6, 300.0), None);
+    }
+
+    #[test]
+    fn tile_row_col_is_section_local() {
+        // Item 3 is the FIRST item of section 1 (items 0, 1, 2 belong to
+        // section 0), so it must report row 0 / col 0 within ITS OWN
+        // section — not row 1 / col 1, the answer global `index / cols,
+        // index % cols` math would give.
+        let g = grid(vec![3, 3]);
+        assert_eq!(g.tile_row_col(3, 300.0), (0, 0));
+        assert_eq!(g.tile_row_col(4, 300.0), (0, 1));
+        assert_eq!(g.tile_row_col(5, 300.0), (1, 0));
     }
 }

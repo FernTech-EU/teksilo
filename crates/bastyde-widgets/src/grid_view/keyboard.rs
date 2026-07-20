@@ -11,9 +11,9 @@
 //! navigation extends the selection range (reading-order, Finder/Explorer
 //! style). Every navigation scrolls the new focus into view.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
@@ -22,6 +22,7 @@ use bastyde_core::widget::EventContext;
 use bastyde_data::{DropPosition, SelectionModel};
 
 use super::layout::{GridLayoutStrategy, ScrollAnchor};
+use crate::common::type_ahead::TypeAheadState;
 use crate::data_views::ViewId;
 
 /// How Tab moves out of (or within) the grid.
@@ -81,16 +82,19 @@ pub(crate) struct GridKeyConfig {
     /// doesn't need a type parameter — mirrors the `DndLazy` erasure pattern.
     pub(crate) make_reorder_payload: Rc<dyn Fn(usize) -> DragPayload>,
     pub(crate) type_ahead_timeout: Duration,
+    /// `None` when a row isn't resident yet (lazy/windowed source) — skipped
+    /// during the search rather than matched against whatever the label
+    /// closure happens to compute for an absent row.
     #[allow(clippy::type_complexity)]
-    pub(crate) type_ahead_label: Option<Rc<dyn Fn(usize) -> String>>,
+    pub(crate) type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>>,
 }
 
 /// Build the `on_key` closure for a `GridView`.
 pub(crate) fn build_grid_key_handler(
     cfg: GridKeyConfig,
 ) -> impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static {
-    // Type-ahead accumulator: (last keystroke time, buffer).
-    let ta_state = Rc::new(RefCell::new((Instant::now(), String::new())));
+    // Shared accumulate-and-search type-ahead state (mirrors `ListView`).
+    let ta_state = TypeAheadState::new();
     move |event, ctx| {
         let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
             return EventResponse::Ignored;
@@ -171,19 +175,20 @@ pub(crate) fn build_grid_key_handler(
         // Use `to_char()` so letters (which arrive as the dedicated
         // `Key::A`..`Key::Z` variants, NOT `Key::Character`) trigger it too —
         // matching only `Key::Character` silently broke letter type-ahead.
-        if !modifiers.ctrl()
+        if let Some(ref label_fn) = cfg.type_ahead_label
+            && !modifiers.ctrl()
             && !modifiers.alt()
             && !modifiers.super_key()
             && let Some(c) = key.to_char()
+            && let Some(idx) =
+                ta_state.search(c, current, n, cfg.type_ahead_timeout, |i| label_fn(i))
         {
-            if let Some(idx) = type_ahead(&cfg, &ta_state, c, current, n) {
-                cfg.focused_index.set(Some(idx));
-                if let Some(ref sel) = cfg.selection {
-                    sel.select(idx);
-                }
-                ensure_visible(&cfg, idx, ctx);
-                return EventResponse::Handled;
+            cfg.focused_index.set(Some(idx));
+            if let Some(ref sel) = cfg.selection {
+                sel.select(idx);
             }
+            ensure_visible(&cfg, idx, ctx);
+            return EventResponse::Handled;
         }
 
         // With no cursor yet, a directional key lands ON the near end tile
@@ -290,42 +295,6 @@ pub(crate) fn build_grid_key_handler(
         ensure_visible(&cfg, idx, ctx);
         EventResponse::Handled
     }
-}
-
-/// Append `c` to the type-ahead buffer (resetting it after the timeout) and
-/// return the next item whose label starts with the buffer, searching from
-/// just after the current focus and wrapping. Returns `None` when no label
-/// function is configured or nothing matches.
-fn type_ahead(
-    cfg: &GridKeyConfig,
-    state: &Rc<RefCell<(Instant, String)>>,
-    c: char,
-    current: usize,
-    n: usize,
-) -> Option<usize> {
-    let label_fn = cfg.type_ahead_label.as_ref()?;
-    if cfg.type_ahead_timeout.is_zero() || c.is_control() {
-        return None;
-    }
-    let now = Instant::now();
-    let mut st = state.borrow_mut();
-    if now.duration_since(st.0) > cfg.type_ahead_timeout {
-        st.1.clear();
-    }
-    st.0 = now;
-    st.1.push(c.to_ascii_lowercase());
-    let buffer = st.1.clone();
-    drop(st);
-
-    // Search from current+1, wrapping around to current.
-    for offset in 1..=n {
-        let i = (current + offset) % n;
-        let label = label_fn(i).to_ascii_lowercase();
-        if label.starts_with(&buffer) {
-            return Some(i);
-        }
-    }
-    None
 }
 
 fn rows_per_page(cfg: &GridKeyConfig) -> usize {
