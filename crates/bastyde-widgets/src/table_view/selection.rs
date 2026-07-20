@@ -277,6 +277,16 @@ impl CellSelectionModel {
     }
 
     /// Adjust selection after `count` columns are inserted at `at_col`.
+    ///
+    /// Reserved for future dynamic-column support. `TableView`/`TreeTableView`
+    /// columns are declared once via `.add_column()`/`.columns()` and are
+    /// static for the widget's lifetime — there is no runtime insert/remove
+    /// API today, so nothing calls this. A column *reorder* or pin-toggle
+    /// permutes positions instead (see `remap_columns`),
+    /// which is what the current views actually use. Kept (not removed) as
+    /// public API in case a future dynamic-column feature needs the
+    /// offset-shift semantics this and [`adjust_for_column_remove`](Self::adjust_for_column_remove)
+    /// already implement and test.
     pub fn adjust_for_column_insert(&self, at_col: usize, count: usize) {
         let old = self.selection.get();
         let mut new = BTreeSet::new();
@@ -300,6 +310,10 @@ impl CellSelectionModel {
 
     /// Adjust selection after `count` columns starting at `at_col` are
     /// removed.
+    ///
+    /// Reserved for future dynamic-column support — see the doc comment on
+    /// [`adjust_for_column_insert`](Self::adjust_for_column_insert); nothing
+    /// calls this today for the same reason.
     pub fn adjust_for_column_remove(&self, at_col: usize, count: usize) {
         let old = self.selection.get();
         let end = at_col + count;

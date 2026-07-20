@@ -50,10 +50,12 @@ fn style_sort(d: SortDirection) -> StyleSortDirection {
 use crate::primitives::{HStack, Padding, Spacer, TextWidget};
 
 use super::ColumnReorderDragData;
-use super::body::SharedColumnWidths;
+use super::PaneBoundaries;
+use super::body::{RowBand, SharedColumnWidths};
 use super::column::ColumnResizePolicy;
 use super::filter::FilterIndicator;
 use super::filter::FilterPopoverContent;
+use super::layout::band_rects;
 use crate::popover::Popover;
 use bastyde_core::overlay::OverlayPlacement;
 
@@ -673,11 +675,20 @@ impl Widget for SortIndicator {
 
 /// Header strip — `Role::Row` (row index 1), N HeaderCell widgets laid
 /// out horizontally using the same shared widths handle as body rows.
+///
+/// Splits into pane bands under column pinning, exactly like `BodyRow` — see
+/// that type's module docs for the full rationale (this is the header-side
+/// half of the same mechanism, sharing `RowBand`).
 #[derive(Debug)]
 pub(crate) struct HeaderRow {
     cells: Vec<WidgetId>,
     widths: SharedColumnWidths,
     divider_width: f32,
+    pane_boundaries: PaneBoundaries,
+    scroll_x: Signal<f32>,
+
+    // Build state.
+    bands: Option<[Option<WidgetId>; 3]>,
 }
 
 impl HeaderRow {
@@ -685,16 +696,56 @@ impl HeaderRow {
         cells: Vec<WidgetId>,
         widths: SharedColumnWidths,
         divider_width: f32,
+        pane_boundaries: PaneBoundaries,
+        scroll_x: Signal<f32>,
     ) -> Self {
         Self {
             cells,
             widths,
             divider_width,
+            pane_boundaries,
+            scroll_x,
+            bands: None,
         }
+    }
+
+    fn has_pinning(&self) -> bool {
+        self.pane_boundaries.leading_count > 0 || self.pane_boundaries.middle_end < self.cells.len()
     }
 }
 
 impl Widget for HeaderRow {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if !self.has_pinning() {
+            return Vec::new();
+        }
+        let b = self.pane_boundaries;
+        let leading_end = b.leading_count.min(self.cells.len());
+        let middle_end = b.middle_end.min(self.cells.len()).max(leading_end);
+        let leading: Vec<WidgetId> = self.cells[..leading_end].to_vec();
+        let middle: Vec<WidgetId> = self.cells[leading_end..middle_end].to_vec();
+        let trailing: Vec<WidgetId> = self.cells[middle_end..].to_vec();
+
+        let mut bands: [Option<WidgetId>; 3] = [None, None, None];
+        if !leading.is_empty() {
+            bands[0] = Some(ctx.add(RowBand::new(leading, self.widths.clone(), 0)));
+        }
+        if !middle.is_empty() {
+            bands[1] = Some(
+                ctx.add(
+                    RowBand::new(middle, self.widths.clone(), leading_end)
+                        .scrollable(self.scroll_x.clone()),
+                ),
+            );
+        }
+        if !trailing.is_empty() {
+            bands[2] = Some(ctx.add(RowBand::new(trailing, self.widths.clone(), middle_end)));
+        }
+        let out: Vec<WidgetId> = bands.iter().copied().flatten().collect();
+        self.bands = Some(bands);
+        out
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
@@ -714,6 +765,25 @@ impl Widget for HeaderRow {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        if let Some(bands) = self.bands {
+            let widths = self.widths.borrow();
+            let rtl = ctx.is_rtl();
+            let (leading_rect, middle_rect, trailing_rect) =
+                band_rects(bounds, &widths, self.pane_boundaries, rtl);
+            let rects = [leading_rect, middle_rect, trailing_rect];
+            let mut next = 0;
+            for (band, rect) in bands.iter().zip(rects.iter()) {
+                if band.is_some() {
+                    if let Some(child) = children.get_mut(next) {
+                        child.origin = rect.origin();
+                        child.size = rect.size();
+                    }
+                    next += 1;
+                }
+            }
+            return;
+        }
+
         let widths = self.widths.borrow();
         let total_children = children.len();
         let fallback_w = if total_children == 0 {
@@ -721,9 +791,10 @@ impl Widget for HeaderRow {
         } else {
             bounds.width / total_children as f32
         };
+        let scroll = self.scroll_x.get();
         // Mirror the body: preserve display order, reverse physical x in RTL.
         if ctx.is_rtl() {
-            let mut x = bounds.right();
+            let mut x = bounds.right() + scroll;
             for (i, child) in children.iter_mut().enumerate() {
                 let w = widths.get(i).copied().unwrap_or(fallback_w);
                 x -= w;
@@ -731,7 +802,7 @@ impl Widget for HeaderRow {
                 child.size = Size::new(w, bounds.height);
             }
         } else {
-            let mut x = bounds.x;
+            let mut x = bounds.x - scroll;
             for (i, child) in children.iter_mut().enumerate() {
                 let w = widths.get(i).copied().unwrap_or(fallback_w);
                 child.origin = Point::new(x, bounds.y);
@@ -759,6 +830,9 @@ impl Widget for HeaderRow {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.cells.clone()
+        match self.bands {
+            Some(bands) => bands.iter().copied().flatten().collect(),
+            None => self.cells.clone(),
+        }
     }
 }

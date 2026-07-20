@@ -248,6 +248,15 @@ pub struct TableView<T: 'static> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
+    /// Horizontal scroll offset of the Middle (unpinned) pane — see
+    /// `PaneBoundaries`. Leading/Trailing-pinned columns never move; the
+    /// Middle pane's content shifts by `-scroll_x`.
+    scroll_x: Signal<f32>,
+    /// Maximum `scroll_x` — `middle_content_width − middle_viewport_width`.
+    max_scroll_x: Signal<f32>,
+    /// Middle-pane viewport-to-content width ratio, for the horizontal
+    /// scroll bar's thumb.
+    viewport_ratio_x: Signal<f32>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
     /// Column ids in display order. Empty means "use declaration order".
@@ -312,6 +321,10 @@ pub struct TableView<T: 'static> {
     header_row_id: Option<WidgetId>,
     body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
+    /// Horizontal scroll bar along the bottom of the Middle pane only —
+    /// built whenever `show_internal_scrollbars` is set, placed/sized (and
+    /// hidden at zero size, mirroring the vertical bar) in `place_children`.
+    h_scrollbar_id: Option<WidgetId>,
     empty_id: Option<WidgetId>,
     /// Pane-local rebuild trigger + buffered range, owned here so they
     /// survive `TableView` rebuilds (each rebuild constructs a fresh
@@ -344,6 +357,10 @@ pub struct TableView<T: 'static> {
     /// to classify a drop position.
     pane_boundaries: Rc<RefCell<PaneBoundaries>>,
     viewport_height: Rc<Cell<f32>>,
+    /// Middle-pane viewport width, snapshotted by `place_children` — the
+    /// horizontal analogue of `viewport_height`. Read by the keyboard
+    /// handler's ensure-column-visible follow.
+    middle_viewport_width: Rc<Cell<f32>>,
     /// Set on the first `place_children`. Until then `viewport_height` still
     /// holds its construction placeholder, so viewport-relative imperatives
     /// (`ensure_row_visible`) would scroll against a size that was never real.
@@ -530,6 +547,9 @@ impl<T: 'static> TableView<T> {
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
+            scroll_x: Signal::new_animated(0.0),
+            max_scroll_x: Signal::new(0.0),
+            viewport_ratio_x: Signal::new(1.0),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
             column_order_signal: Signal::new(Vec::new()),
@@ -554,6 +574,7 @@ impl<T: 'static> TableView<T> {
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
+            h_scrollbar_id: None,
             empty_id: None,
             pane_version: Signal::new(0_u64),
             pane_built_start: Rc::new(Cell::new(0)),
@@ -564,6 +585,7 @@ impl<T: 'static> TableView<T> {
             cell_map: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
             viewport_height: Rc::new(Cell::new(600.0)),
+            middle_viewport_width: Rc::new(Cell::new(600.0)),
             laid_out: Rc::new(Cell::new(false)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             header_strip_width: Rc::new(Cell::new(0.0)),
@@ -924,6 +946,25 @@ impl<T: 'static> TableView<T> {
         &self.viewport_ratio_y
     }
 
+    /// Current horizontal scroll offset of the Middle (unpinned) pane, in
+    /// logical pixels. Leading/Trailing-pinned columns are unaffected —
+    /// see [`Column::pinned`].
+    pub fn scroll_x_signal(&self) -> &Signal<f32> {
+        &self.scroll_x
+    }
+
+    /// Maximum horizontal scroll offset — `middle_content_width −
+    /// middle_viewport_width`.
+    pub fn max_scroll_x_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_x
+    }
+
+    /// Middle-pane viewport-to-content width ratio, used by external
+    /// horizontal scroll bar thumbs.
+    pub fn viewport_ratio_x_signal(&self) -> &Signal<f32> {
+        &self.viewport_ratio_x
+    }
+
     /// Active sort: `Some((col_id, dir))` or `None` when unsorted.
     /// Mutated by header clicks (cycle: None → Asc → Desc → None) and by
     /// [`set_sort`](Self::set_sort) / [`clear_sort`](Self::clear_sort).
@@ -1239,6 +1280,15 @@ impl<T: 'static> Widget for TableView<T> {
         );
         ctx.register_animated_signal(&self.scroll_y);
 
+        // Scroll-x mirrors scroll-y: Relayout re-places the header + body
+        // bands (and any pane-aware root decorations) without a rebuild.
+        self.scroll_x.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        ctx.register_animated_signal(&self.scroll_x);
+
         // Row-drop insertion indicator at RepaintOnly so on_drag_hover /
         // on_drag_leave `set(...)` calls dirty paint without a rebuild.
         self.drop_feedback.bind_to(
@@ -1461,6 +1511,8 @@ impl<T: 'static> Widget for TableView<T> {
         // Self handlers: scroll wheel + keyboard + clip + focusable.
         let scroll_y_for_wheel = self.scroll_y.clone();
         let max_scroll_for_wheel = self.max_scroll_y.clone();
+        let scroll_x_for_wheel = self.scroll_x.clone();
+        let max_scroll_x_for_wheel = self.max_scroll_x.clone();
         let line_height = row_h;
         let overscroll_behavior = self.overscroll_behavior;
         let smooth_scrolling = self.smooth_scrolling;
@@ -1575,6 +1627,11 @@ impl<T: 'static> Widget for TableView<T> {
             type_ahead: self.type_ahead.clone(),
             type_ahead_label,
             type_ahead_timeout: self.type_ahead_timeout,
+            column_widths: self.column_widths.clone(),
+            pane_boundaries: *self.pane_boundaries.borrow(),
+            scroll_x: self.scroll_x.clone(),
+            max_scroll_x: self.max_scroll_x.clone(),
+            middle_viewport_width: self.middle_viewport_width.clone(),
         };
 
         // Row DnD is owned by the backing source. The view computes the
@@ -1675,34 +1732,70 @@ impl<T: 'static> Widget for TableView<T> {
 
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
-                bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        bastyde_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
-                        bastyde_core::event::ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    let current = scroll_y_for_wheel.get();
-                    let max = max_scroll_for_wheel.get();
-                    // Base off the animation target (not the rendered offset)
-                    // so a mid-fling boundary correctly chains and successive
-                    // notches accumulate instead of restarting from the
-                    // partway-animated position.
-                    let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
-                    if moved {
-                        if smooth_scrolling {
-                            scroll_y_for_wheel.animate_to(
-                                new_y,
-                                smooth_scroll_duration,
-                                Easing::EaseOut,
-                            );
-                        } else {
-                            scroll_y_for_wheel.set(new_y);
+                bastyde_core::event::WidgetEvent::Scroll { delta, modifiers } => {
+                    let (raw_dx, raw_dy) = match delta {
+                        bastyde_core::event::ScrollDelta::Lines { x, y } => {
+                            (x * line_height, y * line_height)
                         }
+                        bastyde_core::event::ScrollDelta::Pixels { x, y } => (*x, *y),
+                    };
+                    // Shift+wheel remaps a vertical-only wheel to horizontal
+                    // scroll (the `TabBar` precedent) — a genuine two-axis
+                    // trackpad delta (both native `dx` and `dy` nonzero)
+                    // passes through unremapped either way.
+                    let (dx, dy) = if modifiers.shift() && raw_dx.abs() < f32::EPSILON {
+                        (raw_dy, 0.0)
+                    } else {
+                        (raw_dx, raw_dy)
+                    };
+
+                    let mut moved_any = false;
+                    if dy.abs() > 0.0 {
+                        let current = scroll_y_for_wheel.get();
+                        let max = max_scroll_for_wheel.get();
+                        // Base off the animation target (not the rendered
+                        // offset) so a mid-fling boundary correctly chains
+                        // and successive notches accumulate instead of
+                        // restarting from the partway-animated position.
+                        let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
+                        let (new_y, moved) =
+                            crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                        if moved {
+                            if smooth_scrolling {
+                                scroll_y_for_wheel.animate_to(
+                                    new_y,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                            } else {
+                                scroll_y_for_wheel.set(new_y);
+                            }
+                        }
+                        moved_any |= moved;
                     }
-                    // Chain to an ancestor scrollable when fully clamped
-                    // (unless Contain), otherwise consume.
+                    if dx.abs() > 0.0 {
+                        let current = scroll_x_for_wheel.get();
+                        let max = max_scroll_x_for_wheel.get();
+                        let base = scroll_x_for_wheel.animation_target().unwrap_or(current);
+                        let (new_x, moved) =
+                            crate::common::scroll::scroll_clamp_axis(base, dx, max);
+                        if moved {
+                            if smooth_scrolling {
+                                scroll_x_for_wheel.animate_to(
+                                    new_x,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                            } else {
+                                scroll_x_for_wheel.set(new_x);
+                            }
+                        }
+                        moved_any |= moved;
+                    }
+                    // Chain to an ancestor scrollable when fully clamped on
+                    // every axis touched (unless Contain), otherwise consume.
                     crate::common::scroll::scroll_response(
-                        moved,
+                        moved_any,
                         overscroll_behavior == OverscrollBehavior::Contain,
                     )
                 }
@@ -1831,6 +1924,7 @@ impl<T: 'static> Widget for TableView<T> {
         self.header_row_id = None;
         self.body_pane_id = None;
         self.scrollbar_id = None;
+        self.h_scrollbar_id = None;
         self.empty_id = None;
 
         // Display order was already computed above (before the
@@ -1879,6 +1973,8 @@ impl<T: 'static> Widget for TableView<T> {
                 cell_ids,
                 self.column_widths.clone(),
                 cp::GRID_LINE_THICKNESS,
+                *self.pane_boundaries.borrow(),
+                self.scroll_x.clone(),
             );
             // Wire reorder drag-target handlers on the header strip.
             let header_row_id = ctx.add(header_row);
@@ -1893,6 +1989,7 @@ impl<T: 'static> Widget for TableView<T> {
                 self.column_pinning_signal.clone(),
                 self.columns.iter().map(|c| c.id.clone()).collect(),
                 self.header_strip_width.clone(),
+                self.scroll_x.clone(),
             );
             self.header_row_id = Some(header_row_id);
         }
@@ -1930,6 +2027,8 @@ impl<T: 'static> Widget for TableView<T> {
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
+                pane_boundaries: *self.pane_boundaries.borrow(),
+                scroll_x: self.scroll_x.clone(),
                 row_metrics: self.row_metrics.clone(),
                 selection_mode: self.selection_mode,
                 selection: self.row_selection.clone(),
@@ -1971,6 +2070,24 @@ impl<T: 'static> Widget for TableView<T> {
                 ScrollBarMode::Thin => ScrollBarVisual::Thin,
             });
             self.scrollbar_id = Some(ctx.add(sb));
+
+            // Horizontal bar — the Middle pane only. Visibility (max_scroll_x
+            // > 0) and geometry (band_left + pinned-pane offsets) are decided
+            // in `place_children`, same as the vertical bar's `needs_scrollbar`
+            // gate; here we just build it unconditionally so it exists to be
+            // placed (zero-sized and skipped when not needed).
+            let hsb = ScrollBar::new(
+                ScrollBarOrientation::Horizontal,
+                self.scroll_x.clone(),
+                self.max_scroll_x.clone(),
+                self.viewport_ratio_x.clone(),
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
+            self.h_scrollbar_id = Some(ctx.add(hsb));
         }
 
         // Z-order: body rows first, then empty/scrollbar, then header
@@ -1989,6 +2106,9 @@ impl<T: 'static> Widget for TableView<T> {
             children.push(id);
         }
         if let Some(id) = self.scrollbar_id {
+            children.push(id);
+        }
+        if let Some(id) = self.h_scrollbar_id {
             children.push(id);
         }
         if let Some(id) = self.header_row_id {
@@ -2025,27 +2145,22 @@ impl<T: 'static> Widget for TableView<T> {
         }
         let rtl = ctx.is_rtl();
         let header_h = self.effective_header_height();
-        let body_height = (bounds.height - header_h).max(0.0);
+        // Provisional — the vertical scrollbar's own need is decided
+        // against this (a possible tiny inaccuracy if reserving room for
+        // the horizontal bar below would itself flip that decision; not
+        // worth a fixed-point iteration for a dual-scrollbar corner case).
+        let body_height_provisional = (bounds.height - header_h).max(0.0);
 
         // Parent-before-child layout order means this runs before the
         // body pane's measure pass — in auto-measure mode the scrollbar
         // totals settle one frame after a measurement change.
         let total_height = self.total_content_height();
-        let max_y = (total_height - body_height).max(0.0);
-        self.max_scroll_y.set(max_y);
-        let ratio = if total_height > 0.0 {
-            (body_height / total_height).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        self.viewport_ratio_y.set(ratio);
-        self.clamp_scroll();
-
-        let needs_scrollbar = self.show_internal_scrollbars && total_height > body_height + 0.5;
+        let needs_v_scrollbar =
+            self.show_internal_scrollbars && total_height > body_height_provisional + 0.5;
         // Permanent reserves a column for the bar; Overlay / Thin float
         // over the content, so rows span the full width.
-        let reserves_bar = needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
-        let body_width = if reserves_bar {
+        let reserves_v_bar = needs_v_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_width = if reserves_v_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -2056,7 +2171,7 @@ impl<T: 'static> Widget for TableView<T> {
         // body pane, empty state, and header; `scrollbar_x` is the
         // scrollbar's own physical x. The paint pass derives the same
         // content region from these conventions so the two never drift.
-        let band_left = if rtl && reserves_bar {
+        let band_left = if rtl && reserves_v_bar {
             bounds.x + SCROLLBAR_THICKNESS
         } else {
             bounds.x
@@ -2081,7 +2196,55 @@ impl<T: 'static> Widget for TableView<T> {
             cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
         );
+
+        // Pane geometry: the Middle pane's viewport (`body_width` minus the
+        // pinned panes) and the horizontal scroll headroom it implies.
+        let boundaries = *self.pane_boundaries.borrow();
+        let (leading_w, middle_content_w, trailing_w) = layout::pane_widths(&widths, boundaries);
+        let middle_viewport_w = (body_width - leading_w - trailing_w).max(0.0);
+        let max_x = (middle_content_w - middle_viewport_w).max(0.0);
+        self.max_scroll_x.set(max_x);
+        self.middle_viewport_width.set(middle_viewport_w);
+        let x_ratio = if middle_content_w > 0.0 {
+            (middle_viewport_w / middle_content_w).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.viewport_ratio_x.set(x_ratio);
+        // Clamp scroll_x — a pane shrink (window narrowed, a column grew)
+        // must not leave scroll_x stranded past the new max (mirrors
+        // `clamp_scroll` for scroll_y).
+        {
+            let current = self.scroll_x.get();
+            let clamped = current.clamp(0.0, max_x);
+            if (clamped - current).abs() > 0.001 {
+                self.scroll_x.set(clamped);
+            }
+        }
+
         *self.column_widths.borrow_mut() = widths;
+
+        let needs_h_scrollbar = self.show_internal_scrollbars && max_x > 0.5;
+        let reserves_h_bar = needs_h_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_height = if reserves_h_bar {
+            (body_height_provisional - SCROLLBAR_THICKNESS).max(0.0)
+        } else {
+            body_height_provisional
+        };
+
+        // Vertical scrollbar totals, against the FINAL body_height (after
+        // any horizontal-bar reservation) so the range stays accurate when
+        // both bars show at once.
+        let max_y = (total_height - body_height).max(0.0);
+        self.max_scroll_y.set(max_y);
+        let y_ratio = if total_height > 0.0 {
+            (body_height / total_height).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.viewport_ratio_y.set(y_ratio);
+        self.clamp_scroll();
+
         let body_origin_y = bounds.y + header_h;
         // Cache the row-area rect for the keyboard handler's outer-scroll chase.
         self.body_bounds
@@ -2113,9 +2276,29 @@ impl<T: 'static> Widget for TableView<T> {
         // left under RTL, physical right under LTR.
         if self.scrollbar_id.is_some() {
             if let Some(child) = children.get_mut(next) {
-                if needs_scrollbar {
+                if needs_v_scrollbar {
                     child.origin = Point::new(scrollbar_x, body_origin_y);
                     child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
+                } else {
+                    child.origin = bounds.origin();
+                    child.size = Size::ZERO;
+                }
+            }
+            next += 1;
+        }
+
+        // Horizontal scrollbar — the Middle pane's own band, below the
+        // body, never overlapping a pinned pane.
+        if self.h_scrollbar_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                if needs_h_scrollbar {
+                    let h_x = if rtl {
+                        band_left + trailing_w
+                    } else {
+                        band_left + leading_w
+                    };
+                    child.origin = Point::new(h_x, body_origin_y + body_height);
+                    child.size = Size::new(middle_viewport_w, SCROLLBAR_THICKNESS);
                 } else {
                     child.origin = bounds.origin();
                     child.size = Size::ZERO;
@@ -2238,30 +2421,53 @@ impl<T: 'static> Widget for TableView<T> {
             }
         }
 
+        // Pane geometry for the two column-position-dependent decorations
+        // below (vertical grid lines, the cell focus ring): both must clip
+        // to the target column's OWN pane, or a scrolled Middle-pane
+        // decoration could paint over a pinned Leading/Trailing column
+        // within the same row band (the outer body clip above only bounds
+        // the row's outer edges, not the seam between panes).
+        let boundaries = *self.pane_boundaries.borrow();
+        let scroll_x = self.scroll_x.get();
+        let content_bounds = Rect::new(
+            content_left,
+            body_origin_y,
+            body_width_for_paint,
+            body_height,
+        );
+        let (leading_rect, middle_rect, trailing_rect) =
+            layout::band_rects(content_bounds, &widths, boundaries, rtl);
+
         if matches!(self.grid_lines, GridLines::Vertical | GridLines::Both) {
-            let content_right = content_left + body_width_for_paint;
-            if rtl {
-                // Columns run right-to-left: accumulate from the right
-                // edge and draw the divider at each column's (physical)
-                // left boundary, skipping the outermost edge.
-                let mut x = content_right;
-                for &w in widths.iter() {
-                    x -= w;
-                    if x > content_left + 0.5 {
-                        let rect = Rect::new(x, body_origin_y, line_w, body_height);
-                        canvas.fill_rect(rect, line_color);
-                    }
-                }
-            } else {
-                let mut x = content_left;
-                for &w in widths.iter() {
-                    x += w;
-                    if x < content_right - 0.5 {
-                        let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
-                        canvas.fill_rect(rect, line_color);
-                    }
-                }
-            }
+            let leading_end = boundaries.leading_count.min(widths.len());
+            let middle_end = boundaries.middle_end.min(widths.len()).max(leading_end);
+            draw_pane_dividers(
+                canvas,
+                leading_rect,
+                &widths[..leading_end],
+                0.0,
+                rtl,
+                line_color,
+                line_w,
+            );
+            draw_pane_dividers(
+                canvas,
+                middle_rect,
+                &widths[leading_end..middle_end],
+                scroll_x,
+                rtl,
+                line_color,
+                line_w,
+            );
+            draw_pane_dividers(
+                canvas,
+                trailing_rect,
+                &widths[middle_end..],
+                0.0,
+                rtl,
+                line_color,
+                line_w,
+            );
         }
 
         // Focus ring on the currently-focused cell — keyboard-only
@@ -2271,11 +2477,14 @@ impl<T: 'static> Widget for TableView<T> {
             && self.focus_visible.get()
             && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
+            && let Some(x_off) = layout::column_logical_x(
+                &widths,
+                boundaries,
+                scroll_x,
+                body_width_for_paint,
+                focus_col,
+            )
         {
-            let mut x_off = 0.0_f32;
-            for &w in widths.iter().take(focus_col) {
-                x_off += w;
-            }
             let cell_w = widths[focus_col];
             let (focus_top, focus_h) = {
                 let mut m = self.row_metrics.borrow_mut();
@@ -2283,6 +2492,14 @@ impl<T: 'static> Widget for TableView<T> {
             };
             let y = body_origin_y + focus_top - scroll_y;
             if y + focus_h >= body_origin_y && y <= body_origin_y + body_height {
+                let pane_rect = if focus_col < boundaries.leading_count {
+                    leading_rect
+                } else if focus_col >= boundaries.middle_end {
+                    trailing_rect
+                } else {
+                    middle_rect
+                };
+                canvas.set_clip(pane_rect);
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
@@ -2305,6 +2522,7 @@ impl<T: 'static> Widget for TableView<T> {
                 canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
                 // Right
                 canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
+                canvas.clear_clip();
             }
         }
 
@@ -2389,6 +2607,9 @@ impl<T: 'static> Widget for TableView<T> {
         if let Some(id) = self.scrollbar_id {
             out.push(id);
         }
+        if let Some(id) = self.h_scrollbar_id {
+            out.push(id);
+        }
         if let Some(id) = self.header_row_id {
             out.push(id);
         }
@@ -2404,6 +2625,7 @@ impl<T: 'static> Widget for TableView<T> {
             self.body_pane_id,
             self.empty_id,
             self.scrollbar_id,
+            self.h_scrollbar_id,
         ]
         .into_iter()
         .flatten()
@@ -2414,6 +2636,43 @@ impl<T: 'static> Widget for TableView<T> {
     fn clips_children(&self) -> bool {
         true
     }
+}
+
+/// Draw the internal vertical grid-line dividers for one pane band —
+/// `slice.len() - 1` lines between adjacent columns, clipped to `rect` so a
+/// scrolled Middle-pane line can't bleed past its own viewport into a
+/// pinned neighbour. `scroll` is nonzero only for the Middle pane.
+///
+/// Shared by `TableView`/`TreeTableView`'s `paint()`, which are otherwise
+/// near-identical for this decoration.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_pane_dividers(
+    canvas: &mut Canvas,
+    rect: Rect,
+    slice: &[f32],
+    scroll: f32,
+    rtl: bool,
+    color: bastyde_tokens::Color,
+    line_w: f32,
+) {
+    if slice.len() < 2 || rect.width <= 0.0 {
+        return;
+    }
+    canvas.set_clip(rect);
+    if rtl {
+        let mut x = rect.right() + scroll;
+        for &w in &slice[..slice.len() - 1] {
+            x -= w;
+            canvas.fill_rect(Rect::new(x, rect.y, line_w, rect.height), color);
+        }
+    } else {
+        let mut x = rect.x - scroll;
+        for &w in &slice[..slice.len() - 1] {
+            x += w;
+            canvas.fill_rect(Rect::new(x - line_w, rect.y, line_w, rect.height), color);
+        }
+    }
+    canvas.clear_clip();
 }
 
 // ── Reorder drag-target plumbing ───────────────────────────────────────────
@@ -2435,6 +2694,7 @@ fn attach_header_reorder_handlers(
     column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
     column_ids: Vec<String>,
     header_strip_width: Rc<Cell<f32>>,
+    scroll_x: Signal<f32>,
 ) {
     let widths_for_drop = column_widths.clone();
     let display_for_drop = display_indices.clone();
@@ -2443,6 +2703,7 @@ fn attach_header_reorder_handlers(
     let pinning_for_drop = column_pinning_signal.clone();
     let ids_for_drop = column_ids;
     let strip_width_for_drop = header_strip_width;
+    let scroll_x_for_drop = scroll_x;
 
     ctx.apply_handlers(
         header_row_id,
@@ -2487,17 +2748,17 @@ fn attach_header_reorder_handlers(
                 };
 
                 // Compute insertion index in display order: find the
-                // first column whose midpoint exceeds the (mirrored) x.
-                let mut x = 0.0;
-                let mut insertion_display_idx = total;
-                for (i, w) in widths.iter().enumerate() {
-                    let mid = x + w * 0.5;
-                    if drop_x < mid {
-                        insertion_display_idx = i;
-                        break;
-                    }
-                    x += w;
-                }
+                // first column whose midpoint exceeds the (mirrored) x —
+                // pane- and scroll-aware, so a drop under a nonzero
+                // `scroll_x` resolves against the columns actually under
+                // the pointer, not their unscrolled positions.
+                let insertion_display_idx = layout::insertion_slot_at_x(
+                    &widths,
+                    panes,
+                    scroll_x_for_drop.get(),
+                    strip_width_for_drop.get(),
+                    drop_x,
+                );
 
                 // Classify the drop position into a pane.
                 let new_pinning = if insertion_display_idx <= panes.leading_count {

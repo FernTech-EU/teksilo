@@ -116,7 +116,10 @@ impl Widget for CellA11y {
 
 /// `TreeTableView`-flavoured row wrapper. Announces `Role::Row` and, in
 /// addition to the row index, declares `set_level` (1-based depth) and
-/// `set_expanded` when the row has children.
+/// `set_expanded` when the row has children, plus `set_position_in_set` /
+/// `set_size_of_set` among the row's siblings — mirroring what
+/// `TreeView`'s `TreeItemWrapper` (`list_item_a11y.rs`) already announces,
+/// so a screen reader reads "item 2 of 5" the same way in both widgets.
 #[derive(Debug)]
 pub(crate) struct TreeRowA11y {
     child: WidgetId,
@@ -126,15 +129,22 @@ pub(crate) struct TreeRowA11y {
     /// `Some(true|false)` for non-leaf rows; `None` for leaves.
     expanded: Option<bool>,
     selected: bool,
+    /// 1-based position among this row's siblings (`TreeSource::sibling_pos`).
+    position_in_set: usize,
+    /// Total sibling count at this row's level.
+    size_of_set: usize,
 }
 
 impl TreeRowA11y {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         child: WidgetId,
         row_index_1based: usize,
         level_1based: usize,
         expanded: Option<bool>,
         selected: bool,
+        position_in_set: usize,
+        size_of_set: usize,
     ) -> Self {
         Self {
             child,
@@ -142,6 +152,8 @@ impl TreeRowA11y {
             level_1based,
             expanded,
             selected,
+            position_in_set,
+            size_of_set,
         }
     }
 }
@@ -180,6 +192,10 @@ impl Widget for TreeRowA11y {
         // Clamp to 1.. — AccessKit's `set_level` is `usize` but ARIA
         // levels start at 1.
         builder.inner_mut().set_level(self.level_1based.max(1));
+        builder
+            .inner_mut()
+            .set_position_in_set(self.position_in_set);
+        builder.inner_mut().set_size_of_set(self.size_of_set);
     }
 
     fn children(&self) -> Vec<WidgetId> {

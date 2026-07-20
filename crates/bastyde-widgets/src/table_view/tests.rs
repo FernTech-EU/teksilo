@@ -854,6 +854,102 @@ fn arrow_keys_clamp_at_edges() {
 }
 
 #[test]
+fn ctrl_arrow_moves_cursor_without_touching_selection() {
+    // Explorer/Finder convention: Ctrl+Arrow repositions the keyboard
+    // cursor without touching selection; plain Arrow keeps its existing
+    // select-follow behavior.
+    let model = rows(5);
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    sel.select(0);
+    assert_eq!(sel.selected_indices(), vec![0]);
+
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((1, 0)),
+        "cursor advances"
+    );
+    assert_eq!(
+        sel.selected_indices(),
+        vec![0],
+        "Ctrl+Arrow must not touch selection"
+    );
+
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(read_focused_cell(&tree, table), Some((2, 0)));
+    assert_eq!(
+        sel.selected_indices(),
+        vec![0],
+        "still untouched after a second Ctrl+Arrow"
+    );
+
+    // Plain Arrow (no Ctrl) resumes select-follow from wherever the
+    // Ctrl+Arrow walk left the cursor.
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
+    assert_eq!(
+        sel.selected_indices(),
+        vec![3],
+        "plain Arrow selects the row it lands on"
+    );
+}
+
+#[test]
+fn ctrl_space_toggles_the_cursor_row_after_a_ctrl_arrow_move() {
+    let model = rows(5);
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((2, 0)),
+        "cursor at row 2, nothing selected yet"
+    );
+    assert!(sel.selected_indices().is_empty());
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    assert_eq!(
+        sel.selected_indices(),
+        vec![2],
+        "Ctrl+Space toggles the focused row on"
+    );
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    assert!(
+        sel.selected_indices().is_empty(),
+        "Ctrl+Space toggles it back off"
+    );
+}
+
+#[test]
 fn row_click_moves_focus_so_arrow_nav_resumes_there() {
     // Guards that a click moves the keyboard-navigation cursor (`focused_cell`,
     // the arrow-nav origin) to the clicked row, so the next Arrow resumes from
@@ -2315,7 +2411,368 @@ fn body_row_does_not_paint_over_header_after_scroll() {
     );
 }
 
+// ── Horizontal scroll ────────────────────────────────────────────────────
+
+/// A 3-column fixture: `id` (Leading pinned, 60px), `name` (unpinned,
+/// `middle_w` px), `extra` (Trailing pinned, 60px) — the shared
+/// pinned-columns horizontal-scroll rig.
+fn build_pinned_scroll_table(middle_w: f32, table_w: f32) -> (WidgetTree, WidgetId) {
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(
+                Column::<Row>::new("id", lit!("ID"), |row, _: &CellContext| {
+                    Box::new(TextWidget::new(lit!(row.id.to_string())))
+                })
+                .width(ColumnWidth::Fixed(60.0))
+                .pinned(super::PinnedSide::Leading),
+            )
+            .add_column(
+                Column::<Row>::new("name", lit!("Name"), |row, _: &CellContext| {
+                    Box::new(TextWidget::new(lit!(row.name.clone())))
+                })
+                .width(ColumnWidth::Fixed(middle_w)),
+            )
+            .add_column(
+                Column::<Row>::new("extra", lit!("Extra"), |_row, _: &CellContext| {
+                    Box::new(TextWidget::new(lit!("x")))
+                })
+                .width(ColumnWidth::Fixed(60.0))
+                .pinned(super::PinnedSide::Trailing),
+            )
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(table_w),
+        height: Some(200.0),
+    });
+    (tree, table)
+}
+
+/// `n` unpinned Fixed columns of `col_w` px each, in a `table_w`-wide table
+/// — the shared "content overflows the viewport, nothing pinned" rig.
+fn build_wide_unpinned_table(col_w: f32, n: usize, table_w: f32) -> (WidgetTree, WidgetId) {
+    let model = rows(3);
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let mut tv = TableView::new(model);
+    for i in 0..n {
+        let id = format!("c{i}");
+        tv = tv.add_column(
+            Column::<Row>::new(id.clone(), lit!(id.clone()), |row, _: &CellContext| {
+                Box::new(TextWidget::new(lit!(row.name.clone())))
+            })
+            .width(ColumnWidth::Fixed(col_w)),
+        );
+    }
+    let table = tree.add(tv.row_height(20.0));
+    tree.layout(SizeProposal {
+        width: Some(table_w),
+        height: Some(200.0),
+    });
+    (tree, table)
+}
+
+fn scroll_x_of(tree: &WidgetTree, table: WidgetId) -> f32 {
+    let any = tree.widget_as_any(table).unwrap();
+    any.downcast_ref::<TableView<Row>>()
+        .unwrap()
+        .scroll_x_signal()
+        .get()
+}
+
+fn max_scroll_x_of(tree: &WidgetTree, table: WidgetId) -> f32 {
+    let any = tree.widget_as_any(table).unwrap();
+    any.downcast_ref::<TableView<Row>>()
+        .unwrap()
+        .max_scroll_x_signal()
+        .get()
+}
+
+fn set_scroll_x(tree: &WidgetTree, table: WidgetId, x: f32) {
+    let any = tree.widget_as_any(table).unwrap();
+    any.downcast_ref::<TableView<Row>>()
+        .unwrap()
+        .scroll_x_signal()
+        .set(x);
+}
+
+#[test]
+fn scroll_x_clamps_after_the_pane_widens() {
+    // Three unpinned Fixed columns totalling 600px in a narrow 300px table
+    // force horizontal scroll. Widening the table live shrinks
+    // `max_scroll_x` below the current position — `scroll_x` must clamp
+    // down with it rather than stranding the view past the content edge.
+    let (mut tree, table) = build_wide_unpinned_table(200.0, 3, 300.0);
+    let max = max_scroll_x_of(&tree, table);
+    assert!(max > 0.0, "columns must overflow the narrow table");
+    set_scroll_x(&tree, table, max);
+    assert_eq!(scroll_x_of(&tree, table), max);
+
+    tree.layout(SizeProposal {
+        width: Some(700.0),
+        height: Some(200.0),
+    });
+    assert_eq!(max_scroll_x_of(&tree, table), 0.0, "content now fits");
+    assert_eq!(
+        scroll_x_of(&tree, table),
+        0.0,
+        "scroll_x must clamp down with the new (smaller) max_scroll_x"
+    );
+}
+
+#[test]
+fn pinned_columns_keep_their_bands_under_scroll() {
+    let (mut tree, table) = build_pinned_scroll_table(400.0, 200.0);
+
+    let cells0 = body_row_cells(&tree, table);
+    assert_eq!(cells0.len(), 3, "id, name, extra");
+    let id_x0 = tree.bounds(cells0[0]).x;
+    let name_x0 = tree.bounds(cells0[1]).x;
+    let extra_x0 = tree.bounds(cells0[2]).x;
+
+    // The Middle band (and only it) must clip — otherwise a scrolled `name`
+    // cell could paint over the pinned `id`/`extra` bands.
+    let raw_bands = tree.children(first_body_row_id(&tree, table));
+    assert_eq!(raw_bands.len(), 3, "leading + middle + trailing bands");
+    assert!(
+        !tree.widget_clips_children(raw_bands[0]),
+        "the Leading band never needs to clip"
+    );
+    assert!(
+        tree.widget_clips_children(raw_bands[1]),
+        "the Middle band must clip"
+    );
+    assert!(
+        !tree.widget_clips_children(raw_bands[2]),
+        "the Trailing band never needs to clip"
+    );
+
+    let max = max_scroll_x_of(&tree, table);
+    assert!(max > 0.0);
+    set_scroll_x(&tree, table, 50.0_f32.min(max));
+    tree.layout(SizeProposal {
+        width: Some(200.0),
+        height: Some(200.0),
+    });
+
+    let cells1 = body_row_cells(&tree, table);
+    assert_eq!(
+        tree.bounds(cells1[0]).x,
+        id_x0,
+        "Leading column never moves"
+    );
+    assert_eq!(
+        tree.bounds(cells1[2]).x,
+        extra_x0,
+        "Trailing column never moves"
+    );
+    let name_x1 = tree.bounds(cells1[1]).x;
+    assert!(
+        (name_x1 - (name_x0 - 50.0)).abs() < 0.5,
+        "the Middle column shifts left by exactly scroll_x: got {name_x1}, want ~{}",
+        name_x0 - 50.0
+    );
+}
+
+#[test]
+fn header_and_body_x_offsets_agree_under_scroll() {
+    let (mut tree, table) = build_pinned_scroll_table(400.0, 200.0);
+    set_scroll_x(&tree, table, 37.0);
+    tree.layout(SizeProposal {
+        width: Some(200.0),
+        height: Some(200.0),
+    });
+
+    let header_cells = header_row_cells(&tree, table);
+    let body_cells = body_row_cells(&tree, table);
+    assert_eq!(header_cells.len(), body_cells.len());
+    for (i, (&h, &b)) in header_cells.iter().zip(body_cells.iter()).enumerate() {
+        let hx = tree.bounds(h).x;
+        let bx = tree.bounds(b).x;
+        assert!(
+            (hx - bx).abs() < 0.01,
+            "column {i}: header x {hx} must equal body x {bx}"
+        );
+    }
+}
+
+#[test]
+fn shift_wheel_scrolls_horizontally() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{ScrollDelta, WidgetEvent};
+    let (mut tree, table) = build_wide_unpinned_table(200.0, 4, 300.0);
+    // Pointer in the table body (below the header).
+    tree.pointer_move(Point::new(50.0, 60.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Lines { x: 0.0, y: 3.0 },
+        modifiers: Modifiers::SHIFT,
+    });
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: Some(200.0),
+    });
+    assert!(
+        scroll_x_of(&tree, table) > 0.0,
+        "Shift+wheel must remap a vertical-only wheel to horizontal scroll"
+    );
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    assert_eq!(
+        tv.scroll_y_signal().get(),
+        0.0,
+        "Shift+wheel must not also scroll vertically"
+    );
+}
+
+#[test]
+fn ensure_col_visible_follows_focus_in_both_directions() {
+    // 5 unpinned 150px columns (750px total) in a 300px table.
+    let (mut tree, table) = build_wide_unpinned_table(150.0, 5, 300.0);
+    focus_at(&mut tree, table, 0, 0);
+    assert_eq!(scroll_x_of(&tree, table), 0.0);
+
+    // End jumps to the last column (display index 4), off the right edge —
+    // scroll_x must advance to bring it into view.
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 4)));
+    let scrolled_right = scroll_x_of(&tree, table);
+    assert!(
+        scrolled_right > 0.0,
+        "ensure-column-visible must scroll right to reveal column 4"
+    );
+
+    // Home jumps back to column 0, off the left edge of the now-scrolled
+    // viewport — scroll_x must retreat back to 0.
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+    assert_eq!(
+        scroll_x_of(&tree, table),
+        0.0,
+        "ensure-column-visible must scroll left back to 0 for column 0"
+    );
+}
+
+#[test]
+fn ensure_col_visible_never_scrolls_for_a_pinned_column() {
+    // `id` is Leading-pinned; jumping the cursor there must never move
+    // scroll_x even while the Middle pane is scrolled.
+    let (mut tree, table) = build_pinned_scroll_table(400.0, 200.0);
+    let max = max_scroll_x_of(&tree, table);
+    set_scroll_x(&tree, table, max);
+    focus_at(&mut tree, table, 0, 1); // `name`, the Middle column
+    tree.press_key(Key::Home, Modifiers::NONE); // -> column 0, `id` (Leading)
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+    assert_eq!(
+        scroll_x_of(&tree, table),
+        max,
+        "a Leading-pinned column is always visible; scroll_x must not move"
+    );
+}
+
+#[test]
+fn resize_handle_hit_tests_correctly_under_scroll() {
+    // Two unpinned 300px columns in a 200px table: at scroll_x = 150 the
+    // first column's trailing (resize) edge sits at local x = 300 - 150 =
+    // 150, inside the viewport — the drag must resize THAT column using
+    // window-space pointer deltas unaffected by the scroll offset.
+    use crate::styles::recipe_table_style as cp;
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let (mut tree, table) = build_wide_unpinned_table(300.0, 2, 200.0);
+    let max = max_scroll_x_of(&tree, table);
+    set_scroll_x(&tree, table, 150.0_f32.min(max));
+    tree.layout(SizeProposal {
+        width: Some(200.0),
+        height: Some(200.0),
+    });
+
+    let table_bounds = tree.bounds(table);
+    let resize_x = table_bounds.x + 150.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+    let resize_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
+    let drop_x = resize_x + 20.0;
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(resize_x, resize_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(drop_x, resize_y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(drop_x, resize_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    let widths = tv.column_widths_signal().get();
+    assert!(
+        widths.contains_key("c0"),
+        "dragging the first column's resize handle under scroll must commit its width override, got {widths:?}"
+    );
+    let got = widths["c0"];
+    assert!(
+        (got - 320.0).abs() < 1.0,
+        "expected c0 to grow to ~320px, got {got}"
+    );
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/// The first (lowest row_index) BODY `Role::Row` — distinguished from the
+/// header (same `Role::Row`, but `Role::ColumnHeader` children once
+/// band-flattened) by having at least one `Role::Cell` child.
+fn first_body_row_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
+    let mut walker = vec![root];
+    while let Some(id) = walker.pop() {
+        if tree.accessibility_node(id).role() == Role::Row {
+            let flat = flatten_through_bands(tree, tree.children(id));
+            if flat
+                .iter()
+                .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
+            {
+                return id;
+            }
+        }
+        for c in tree.children(id) {
+            walker.push(c);
+        }
+    }
+    panic!("no body Role::Row found");
+}
+
+/// The header strip's `Role::Row` — the one whose (band-flattened) children
+/// are all `Role::ColumnHeader`.
+fn header_row_widget_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
+    let mut walker = vec![root];
+    while let Some(id) = walker.pop() {
+        if tree.accessibility_node(id).role() == Role::Row {
+            let flat = flatten_through_bands(tree, tree.children(id));
+            if !flat.is_empty()
+                && flat
+                    .iter()
+                    .all(|&c| tree.accessibility_node(c).role() == Role::ColumnHeader)
+            {
+                return id;
+            }
+        }
+        for c in tree.children(id) {
+            walker.push(c);
+        }
+    }
+    panic!("no header Role::Row found");
+}
+
+fn body_row_cells(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+    flatten_through_bands(tree, tree.children(first_body_row_id(tree, root)))
+}
+
+fn header_row_cells(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+    flatten_through_bands(tree, tree.children(header_row_widget_id(tree, root)))
+}
 
 /// Walk the tree and return the cell IDs of the first (lowest row_index)
 /// `Role::Row` found.
@@ -2334,7 +2791,28 @@ fn first_visible_row_cells(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
         }
     }
     let row = best.expect("no Role::Row found");
-    tree.children(row)
+    flatten_through_bands(tree, tree.children(row))
+}
+
+/// Expand any AT-transparent id (no `accessibility()` override, so the
+/// walker's `AccessNodeBuilder` default of `Role::Unknown`) in `ids` into
+/// its own children, recursively — the pane-band wrapper `RowBand` inserts
+/// under column pinning (see `table_view::body`'s module docs) never calls
+/// `set_role`, so this recovers the flat cell/header-cell list regardless
+/// of whether the row split into Leading/Middle/Trailing bands.
+fn flatten_through_bands(tree: &WidgetTree, ids: Vec<WidgetId>) -> Vec<WidgetId> {
+    let mut out = Vec::new();
+    for id in ids {
+        if matches!(
+            tree.accessibility_node(id).role(),
+            Role::GenericContainer | Role::Unknown
+        ) {
+            out.extend(flatten_through_bands(tree, tree.children(id)));
+        } else {
+            out.push(id);
+        }
+    }
+    out
 }
 
 fn count_role(tree: &WidgetTree, root: WidgetId, role: Role) -> usize {

@@ -211,6 +211,11 @@ pub struct TreeTableView<T: 'static> {
     /// Scroll-chaining behavior at the boundary (default `Chain`).
     overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
+    /// Horizontal scroll offset of the Middle (unpinned) pane — mirrors
+    /// `TableView::scroll_x`. See `table_view::PaneBoundaries`.
+    scroll_x: Signal<f32>,
+    max_scroll_x: Signal<f32>,
+    viewport_ratio_x: Signal<f32>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
     column_order_signal: Signal<Vec<String>>,
@@ -242,6 +247,9 @@ pub struct TreeTableView<T: 'static> {
     header_row_id: Option<WidgetId>,
     body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
+    /// Horizontal scroll bar along the bottom of the Middle pane only —
+    /// mirrors `TableView::h_scrollbar_id`.
+    h_scrollbar_id: Option<WidgetId>,
     empty_id: Option<WidgetId>,
     /// Pane-local rebuild trigger + buffered range, owned here so they
     /// survive `TreeTableView` rebuilds (each rebuild constructs a fresh
@@ -278,6 +286,9 @@ pub struct TreeTableView<T: 'static> {
     // Layout state
     column_widths: SharedColumnWidths,
     display_indices: Rc<RefCell<Vec<usize>>>,
+    /// Counts of (leading-pinned, middle, trailing-pinned) columns —
+    /// mirrors `TableView::pane_boundaries`. Populated by `display_order()`.
+    pane_boundaries: Rc<RefCell<crate::table_view::PaneBoundaries>>,
     /// `(row, display_pos) -> WidgetId` for every cell realized by the
     /// body pane's latest `build()`. Mirrors `TableView::cell_map` (the
     /// GridView `tile_map` pattern — shared between the root and its
@@ -285,6 +296,9 @@ pub struct TreeTableView<T: 'static> {
     /// `active_descendant` at the keyboard-focused cell's own AT node.
     cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
     viewport_height: Rc<Cell<f32>>,
+    /// Middle-pane viewport width, snapshotted by `place_children` —
+    /// mirrors `TableView::middle_viewport_width`.
+    middle_viewport_width: Rc<Cell<f32>>,
     /// The row-area's absolute (window) rect (below the header), cached by
     /// `place_children`. Threaded into the keyboard handler so it can chase the
     /// focused row into any *enclosing* scroll area via
@@ -432,6 +446,9 @@ impl<T: 'static> TreeTableView<T> {
             max_scroll_y: Signal::new(0.0),
             overscroll_behavior: OverscrollBehavior::default(),
             viewport_ratio_y: Signal::new(1.0),
+            scroll_x: Signal::new_animated(0.0),
+            max_scroll_x: Signal::new(0.0),
+            viewport_ratio_x: Signal::new(1.0),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
             column_order_signal: Signal::new(Vec::new()),
@@ -451,6 +468,7 @@ impl<T: 'static> TreeTableView<T> {
             header_row_id: None,
             body_pane_id: None,
             scrollbar_id: None,
+            h_scrollbar_id: None,
             empty_id: None,
             pane_version: Signal::new(0_u64),
             pane_built_start: Rc::new(Cell::new(0)),
@@ -458,8 +476,10 @@ impl<T: 'static> TreeTableView<T> {
             pane_total_refresh: Signal::new(0_u64),
             column_widths: Rc::new(RefCell::new(Vec::new())),
             display_indices: Rc::new(RefCell::new(Vec::new())),
+            pane_boundaries: Rc::new(RefCell::new(crate::table_view::PaneBoundaries::default())),
             cell_map: Rc::new(RefCell::new(Vec::new())),
             viewport_height: Rc::new(Cell::new(600.0)),
+            middle_viewport_width: Rc::new(Cell::new(600.0)),
             body_bounds: Rc::new(Cell::new(Rect::ZERO)),
             resize_state: Rc::new(RefCell::new(None)),
             table_id,
@@ -893,6 +913,23 @@ impl<T: 'static> TreeTableView<T> {
         &self.viewport_ratio_y
     }
 
+    /// Current horizontal scroll offset of the Middle (unpinned) pane, in
+    /// logical pixels. Leading/Trailing-pinned columns are unaffected.
+    pub fn scroll_x_signal(&self) -> &Signal<f32> {
+        &self.scroll_x
+    }
+
+    /// Maximum horizontal scroll offset — `middle_content_width −
+    /// middle_viewport_width`.
+    pub fn max_scroll_x_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_x
+    }
+
+    /// Middle-pane viewport-to-content width ratio.
+    pub fn viewport_ratio_x_signal(&self) -> &Signal<f32> {
+        &self.viewport_ratio_x
+    }
+
     /// Active sort state: `Some((col_id, direction))` or `None` for unsorted.
     ///
     /// **This is the header's state, not the data's.** Clicking a sort header
@@ -1194,8 +1231,15 @@ impl<T: 'static> TreeTableView<T> {
         trailing.sort_by_key(|&i| key_for(i));
         let mut out = Vec::with_capacity(leading.len() + middle.len() + trailing.len());
         out.extend(leading);
+        let leading_count = out.len();
         out.extend(middle);
+        let middle_end = out.len();
         out.extend(trailing);
+        // Stash the boundaries so paint / place_children / the keyboard
+        // handler's ensure-column-visible can read them — mirrors
+        // `TableView::display_order`.
+        *self.pane_boundaries.borrow_mut() =
+            crate::table_view::PaneBoundaries::new(leading_count, middle_end);
         out
     }
 
@@ -1251,6 +1295,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
             BindingLevel::Relayout,
         );
         ctx.register_animated_signal(&self.scroll_y);
+
+        self.scroll_x.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        ctx.register_animated_signal(&self.scroll_x);
 
         // Pane → root total refresh (auto-measure mode): re-place this
         // root when the body pane's measurements changed the content
@@ -1437,6 +1488,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // Self handlers: scroll wheel + keyboard.
         let scroll_y_for_wheel = self.scroll_y.clone();
         let max_scroll_for_wheel = self.max_scroll_y.clone();
+        let scroll_x_for_wheel = self.scroll_x.clone();
+        let max_scroll_x_for_wheel = self.max_scroll_x.clone();
         let line_height = row_h;
         let smooth_scrolling = self.smooth_scrolling;
         let smooth_scroll_duration = self.smooth_scroll_duration;
@@ -1494,6 +1547,11 @@ impl<T: 'static> Widget for TreeTableView<T> {
             type_ahead: self.type_ahead.clone(),
             type_ahead_label,
             type_ahead_timeout: self.type_ahead_timeout,
+            column_widths: self.column_widths.clone(),
+            pane_boundaries: *self.pane_boundaries.borrow(),
+            scroll_x: self.scroll_x.clone(),
+            max_scroll_x: self.max_scroll_x.clone(),
+            middle_viewport_width: self.middle_viewport_width.clone(),
         };
 
         // Alt+Arrow tree sibling reorder wraps the shared key handler: a move
@@ -1543,36 +1601,69 @@ impl<T: 'static> Widget for TreeTableView<T> {
             .on_scroll({
                 let overscroll_behavior = self.overscroll_behavior;
                 move |event, _ctx| match event {
-                    bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
-                        let dy = match delta {
-                            bastyde_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
-                            bastyde_core::event::ScrollDelta::Pixels { y, .. } => *y,
-                        };
-                        let current = scroll_y_for_wheel.get();
-                        let max = max_scroll_for_wheel.get();
-                        // Base off the animation target (not the rendered offset)
-                        // so a mid-fling boundary correctly chains and successive
-                        // notches accumulate instead of restarting from the
-                        // partway-animated position.
-                        let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
-                        let (new_y, moved) =
-                            crate::common::scroll::scroll_clamp_axis(base, dy, max);
-                        if moved {
-                            if smooth_scrolling {
-                                scroll_y_for_wheel.animate_to(
-                                    new_y,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                            } else {
-                                scroll_y_for_wheel.set(new_y);
+                    bastyde_core::event::WidgetEvent::Scroll { delta, modifiers } => {
+                        let (raw_dx, raw_dy) = match delta {
+                            bastyde_core::event::ScrollDelta::Lines { x, y } => {
+                                (x * line_height, y * line_height)
                             }
+                            bastyde_core::event::ScrollDelta::Pixels { x, y } => (*x, *y),
+                        };
+                        // Shift+wheel remaps a vertical-only wheel to
+                        // horizontal scroll (the `TabBar` precedent).
+                        let (dx, dy) = if modifiers.shift() && raw_dx.abs() < f32::EPSILON {
+                            (raw_dy, 0.0)
+                        } else {
+                            (raw_dx, raw_dy)
+                        };
+
+                        let mut moved_any = false;
+                        if dy.abs() > 0.0 {
+                            let current = scroll_y_for_wheel.get();
+                            let max = max_scroll_for_wheel.get();
+                            // Base off the animation target (not the rendered
+                            // offset) so a mid-fling boundary correctly chains
+                            // and successive notches accumulate instead of
+                            // restarting from the partway-animated position.
+                            let base = scroll_y_for_wheel.animation_target().unwrap_or(current);
+                            let (new_y, moved) =
+                                crate::common::scroll::scroll_clamp_axis(base, dy, max);
+                            if moved {
+                                if smooth_scrolling {
+                                    scroll_y_for_wheel.animate_to(
+                                        new_y,
+                                        smooth_scroll_duration,
+                                        Easing::EaseOut,
+                                    );
+                                } else {
+                                    scroll_y_for_wheel.set(new_y);
+                                }
+                            }
+                            moved_any |= moved;
+                        }
+                        if dx.abs() > 0.0 {
+                            let current = scroll_x_for_wheel.get();
+                            let max = max_scroll_x_for_wheel.get();
+                            let base = scroll_x_for_wheel.animation_target().unwrap_or(current);
+                            let (new_x, moved) =
+                                crate::common::scroll::scroll_clamp_axis(base, dx, max);
+                            if moved {
+                                if smooth_scrolling {
+                                    scroll_x_for_wheel.animate_to(
+                                        new_x,
+                                        smooth_scroll_duration,
+                                        Easing::EaseOut,
+                                    );
+                                } else {
+                                    scroll_x_for_wheel.set(new_x);
+                                }
+                            }
+                            moved_any |= moved;
                         }
                         // Chain to an ancestor scrollable when fully
                         // clamped (unless Contain), otherwise consume —
                         // same contract as ListView/TreeView/TableView.
                         crate::common::scroll::scroll_response(
-                            moved,
+                            moved_any,
                             overscroll_behavior == OverscrollBehavior::Contain,
                         )
                     }
@@ -1829,6 +1920,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.header_row_id = None;
         self.body_pane_id = None;
         self.scrollbar_id = None;
+        self.h_scrollbar_id = None;
         self.empty_id = None;
 
         // Header strip.
@@ -1868,6 +1960,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 cell_ids,
                 self.column_widths.clone(),
                 cp::GRID_LINE_THICKNESS,
+                *self.pane_boundaries.borrow(),
+                self.scroll_x.clone(),
             );
             self.header_row_id = Some(ctx.add(header_row));
         }
@@ -1898,6 +1992,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 columns: self.columns.clone(),
                 display_indices: self.display_indices.clone(),
                 column_widths: self.column_widths.clone(),
+                pane_boundaries: *self.pane_boundaries.borrow(),
+                scroll_x: self.scroll_x.clone(),
                 tree_display_pos,
                 indent_per_level,
                 row_metrics: self.row_metrics.clone(),
@@ -1941,6 +2037,20 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 ScrollBarMode::Thin => ScrollBarVisual::Thin,
             });
             self.scrollbar_id = Some(ctx.add(sb));
+
+            // Horizontal bar — the Middle pane only, mirrors `TableView`.
+            let hsb = ScrollBar::new(
+                ScrollBarOrientation::Horizontal,
+                self.scroll_x.clone(),
+                self.max_scroll_x.clone(),
+                self.viewport_ratio_x.clone(),
+            )
+            .visual(match self.scroll_bar_style {
+                ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+                ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+                ScrollBarMode::Thin => ScrollBarVisual::Thin,
+            });
+            self.h_scrollbar_id = Some(ctx.add(hsb));
         }
 
         // Z-order mirrors TableView: body pane first, header last so it
@@ -1954,6 +2064,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
             children.push(id);
         }
         if let Some(id) = self.scrollbar_id {
+            children.push(id);
+        }
+        if let Some(id) = self.h_scrollbar_id {
             children.push(id);
         }
         if let Some(id) = self.header_row_id {
@@ -1988,7 +2101,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         }
         let rtl = ctx.is_rtl();
         let header_h = self.effective_header_height();
-        let body_height = (bounds.height - header_h).max(0.0);
+        let body_height_provisional = (bounds.height - header_h).max(0.0);
 
         // Parent-before-child layout order means this runs before the
         // body pane's measure pass — in auto-measure mode the scrollbar
@@ -1997,21 +2110,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
             .row_metrics
             .borrow_mut()
             .total_height(self.source.visible_count());
-        let max_y = (total_height - body_height).max(0.0);
-        self.max_scroll_y.set(max_y);
-        let ratio = if total_height > 0.0 {
-            (body_height / total_height).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        self.viewport_ratio_y.set(ratio);
-        self.clamp_scroll();
-
-        let needs_scrollbar = self.show_internal_scrollbars && total_height > body_height + 0.5;
+        let needs_v_scrollbar =
+            self.show_internal_scrollbars && total_height > body_height_provisional + 0.5;
         // Permanent reserves a layout column for the bar; Overlay / Thin
         // float over the content, so the body spans the full width.
-        let reserves_bar = needs_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
-        let body_width = if reserves_bar {
+        let reserves_v_bar = needs_v_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_width = if reserves_v_bar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -2019,7 +2123,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // RTL mirror (see TableView::place_children): scrollbar to the
         // physical left, body/header band shifted right by its thickness.
         // Only shift when the bar actually reserves a column (Permanent).
-        let band_left = if rtl && reserves_bar {
+        let band_left = if rtl && reserves_v_bar {
             bounds.x + SCROLLBAR_THICKNESS
         } else {
             bounds.x
@@ -2039,7 +2143,48 @@ impl<T: 'static> Widget for TreeTableView<T> {
             cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
         );
+
+        // Pane geometry (see `TableView::place_children`).
+        let boundaries = *self.pane_boundaries.borrow();
+        let (leading_w, middle_content_w, trailing_w) = layout::pane_widths(&widths, boundaries);
+        let middle_viewport_w = (body_width - leading_w - trailing_w).max(0.0);
+        let max_x = (middle_content_w - middle_viewport_w).max(0.0);
+        self.max_scroll_x.set(max_x);
+        self.middle_viewport_width.set(middle_viewport_w);
+        let x_ratio = if middle_content_w > 0.0 {
+            (middle_viewport_w / middle_content_w).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.viewport_ratio_x.set(x_ratio);
+        {
+            let current = self.scroll_x.get();
+            let clamped = current.clamp(0.0, max_x);
+            if (clamped - current).abs() > 0.001 {
+                self.scroll_x.set(clamped);
+            }
+        }
+
         *self.column_widths.borrow_mut() = widths;
+
+        let needs_h_scrollbar = self.show_internal_scrollbars && max_x > 0.5;
+        let reserves_h_bar = needs_h_scrollbar && self.scroll_bar_style == ScrollBarMode::Permanent;
+        let body_height = if reserves_h_bar {
+            (body_height_provisional - SCROLLBAR_THICKNESS).max(0.0)
+        } else {
+            body_height_provisional
+        };
+
+        let max_y = (total_height - body_height).max(0.0);
+        self.max_scroll_y.set(max_y);
+        let y_ratio = if total_height > 0.0 {
+            (body_height / total_height).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.viewport_ratio_y.set(y_ratio);
+        self.clamp_scroll();
+
         let body_origin_y = bounds.y + header_h;
         // Cache the row-area rect for the keyboard handler's outer-scroll chase.
         self.body_bounds
@@ -2069,9 +2214,28 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // Scrollbar — alongside the body, below the header.
         if self.scrollbar_id.is_some() {
             if let Some(child) = children.get_mut(next) {
-                if needs_scrollbar {
+                if needs_v_scrollbar {
                     child.origin = Point::new(scrollbar_x, body_origin_y);
                     child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
+                } else {
+                    child.origin = bounds.origin();
+                    child.size = Size::ZERO;
+                }
+            }
+            next += 1;
+        }
+
+        // Horizontal scrollbar — the Middle pane's own band, below the body.
+        if self.h_scrollbar_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                if needs_h_scrollbar {
+                    let h_x = if rtl {
+                        band_left + trailing_w
+                    } else {
+                        band_left + leading_w
+                    };
+                    child.origin = Point::new(h_x, body_origin_y + body_height);
+                    child.size = Size::new(middle_viewport_w, SCROLLBAR_THICKNESS);
                 } else {
                     child.origin = bounds.origin();
                     child.size = Size::ZERO;
@@ -2180,27 +2344,50 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 canvas.fill_rect(rect, line_color);
             }
         }
+
+        // Pane geometry for the two column-position-dependent decorations
+        // below — see `TableView::paint`.
+        let boundaries = *self.pane_boundaries.borrow();
+        let scroll_x = self.scroll_x.get();
+        let content_bounds = Rect::new(
+            content_left,
+            body_origin_y,
+            body_width_for_paint,
+            body_height,
+        );
+        let (leading_rect, middle_rect, trailing_rect) =
+            layout::band_rects(content_bounds, &widths, boundaries, rtl);
+
         if matches!(self.grid_lines, GridLines::Vertical | GridLines::Both) {
-            let content_right = content_left + body_width_for_paint;
-            if rtl {
-                let mut x = content_right;
-                for &w in widths.iter() {
-                    x -= w;
-                    if x > content_left + 0.5 {
-                        let rect = Rect::new(x, body_origin_y, line_w, body_height);
-                        canvas.fill_rect(rect, line_color);
-                    }
-                }
-            } else {
-                let mut x = content_left;
-                for &w in widths.iter() {
-                    x += w;
-                    if x < content_right - 0.5 {
-                        let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
-                        canvas.fill_rect(rect, line_color);
-                    }
-                }
-            }
+            let leading_end = boundaries.leading_count.min(widths.len());
+            let middle_end = boundaries.middle_end.min(widths.len()).max(leading_end);
+            crate::table_view::draw_pane_dividers(
+                canvas,
+                leading_rect,
+                &widths[..leading_end],
+                0.0,
+                rtl,
+                line_color,
+                line_w,
+            );
+            crate::table_view::draw_pane_dividers(
+                canvas,
+                middle_rect,
+                &widths[leading_end..middle_end],
+                scroll_x,
+                rtl,
+                line_color,
+                line_w,
+            );
+            crate::table_view::draw_pane_dividers(
+                canvas,
+                trailing_rect,
+                &widths[middle_end..],
+                0.0,
+                rtl,
+                line_color,
+                line_w,
+            );
         }
 
         // Focus ring — keyboard-only (`:focus-visible`) and only while the
@@ -2209,11 +2396,14 @@ impl<T: 'static> Widget for TreeTableView<T> {
             && self.focus_visible.get()
             && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
+            && let Some(x_off) = layout::column_logical_x(
+                &widths,
+                boundaries,
+                scroll_x,
+                body_width_for_paint,
+                focus_col,
+            )
         {
-            let mut x_off = 0.0_f32;
-            for &w in widths.iter().take(focus_col) {
-                x_off += w;
-            }
             let cell_w = widths[focus_col];
             let (focus_top, focus_h) = {
                 let mut m = self.row_metrics.borrow_mut();
@@ -2221,6 +2411,14 @@ impl<T: 'static> Widget for TreeTableView<T> {
             };
             let y = body_origin_y + focus_top - scroll_y;
             if y + focus_h >= body_origin_y && y <= body_origin_y + body_height {
+                let pane_rect = if focus_col < boundaries.leading_count {
+                    leading_rect
+                } else if focus_col >= boundaries.middle_end {
+                    trailing_rect
+                } else {
+                    middle_rect
+                };
+                canvas.set_clip(pane_rect);
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
@@ -2236,6 +2434,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), ring_color);
                 canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
                 canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
+                canvas.clear_clip();
             }
         }
 
@@ -2332,6 +2531,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if let Some(id) = self.scrollbar_id {
             out.push(id);
         }
+        if let Some(id) = self.h_scrollbar_id {
+            out.push(id);
+        }
         if let Some(id) = self.header_row_id {
             out.push(id);
         }
@@ -2347,6 +2549,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             self.body_pane_id,
             self.empty_id,
             self.scrollbar_id,
+            self.h_scrollbar_id,
         ]
         .into_iter()
         .flatten()
@@ -3141,6 +3344,104 @@ mod tests {
             selection.selection_signal().get().len(),
             3,
             "default mode must extend a multi-row selection"
+        );
+    }
+
+    #[test]
+    fn ctrl_arrow_moves_cursor_without_touching_selection() {
+        // Explorer/Finder convention (shared with `TableView` via the
+        // common `keyboard::build_key_handler`): Ctrl+Arrow repositions the
+        // keyboard cursor without touching selection; plain Arrow keeps its
+        // existing select-follow behavior.
+        use bastyde_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(wide_tree(5));
+        let selection = bastyde_data::SelectionModel::new(bastyde_data::SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        selection.select(0);
+
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(
+                tt.focused_cell_signal().get(),
+                Some((1, 0)),
+                "cursor advances"
+            );
+        }
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "Ctrl+Arrow must not touch selection"
+        );
+
+        // Plain Arrow (no Ctrl) resumes select-follow from the cursor.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(tt.focused_cell_signal().get(), Some((2, 0)));
+        }
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "plain Arrow selects the row it lands on"
+        );
+    }
+
+    #[test]
+    fn ctrl_space_toggles_the_cursor_row_after_a_ctrl_arrow_move() {
+        use bastyde_core::event::{Key, Modifiers};
+        let proxy = SortFilterTreeModel::new(wide_tree(5));
+        let selection = bastyde_data::SelectionModel::new(bastyde_data::SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert!(selection.selected_indices().is_empty());
+
+        tree.press_key(Key::Space, Modifiers::CTRL);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "Ctrl+Space toggles the focused row on"
+        );
+
+        tree.press_key(Key::Space, Modifiers::CTRL);
+        assert!(
+            selection.selected_indices().is_empty(),
+            "Ctrl+Space toggles it back off"
         );
     }
 
@@ -4086,6 +4387,86 @@ mod tests {
     }
 
     #[test]
+    fn rows_report_sibling_position_and_size_among_siblings() {
+        // docs (root 1/2) -> readme (child 1/2), guide (child 2/2)
+        // src  (root 2/2) -> main.rs (child 1/1)
+        //
+        // `TreeView`'s `TreeItemWrapper` already announces
+        // position_in_set/size_of_set (`list_item_a11y.rs`);
+        // `TreeTableView` never wired `TreeSource::sibling_pos` into its own
+        // row wrapper (`TreeRowA11y`) despite the data being one call away.
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(400.0),
+        });
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .expand_all();
+        }
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(400.0),
+        });
+        assert_eq!(proxy.visible_count(), 5);
+
+        // Collect all Role::Row body widgets (the header shares the role but
+        // is excluded below by having no accesskit node y inside the body
+        // band — simplest: sort every Role::Row by y and drop the topmost
+        // one, which is always the header).
+        let mut rows: Vec<WidgetId> = Vec::new();
+        let mut q = vec![id];
+        while let Some(n) = q.pop() {
+            if tree.accessibility_node(n).role() == Role::Row {
+                rows.push(n);
+            }
+            for c in tree.children(n) {
+                q.push(c);
+            }
+        }
+        rows.sort_by(|a, b| tree.bounds(*a).y.partial_cmp(&tree.bounds(*b).y).unwrap());
+        assert_eq!(rows.len(), 6, "header + five body rows");
+        let body_rows = &rows[1..];
+
+        // `position_in_set`/`size_of_set` aren't on the summarized
+        // `AccessibilityInfo` — read them off the real accesskit node via a
+        // fresh `TreeUpdate`, mirroring `docking::tests::find_a11y_node`.
+        let update = tree.sync_accessibility();
+        let find = |wid: WidgetId| -> &bastyde_core::accesskit::Node {
+            let nid = widget_id_to_node_id(wid);
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == nid)
+                .map(|(_, n)| n)
+                .expect("row must be in the a11y tree")
+        };
+        let sets: Vec<(usize, usize)> = body_rows
+            .iter()
+            .map(|&r| {
+                let node = find(r);
+                (
+                    node.position_in_set().expect("position_in_set"),
+                    node.size_of_set().expect("size_of_set"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sets,
+            vec![(1, 2), (1, 2), (2, 2), (2, 2), (1, 1)],
+            "docs(1/2) readme(1/2) guide(2/2) src(2/2) main.rs(1/1)"
+        );
+    }
+
+    #[test]
     fn row_count_in_a11y_includes_header() {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -4705,5 +5086,323 @@ mod tests {
         // Re-expand → still selected.
         proxy.expand(docs);
         assert!(keyed.is_selected(&readme));
+    }
+
+    // ── Horizontal scroll ───────────────────────────────────────────────
+    //
+    // TreeTableView reuses TableView's `body::BodyRow` / `header::HeaderRow`
+    // / `layout::` pane machinery wholesale, so these mirror the TableView
+    // suite (`table_view::tests`) at reduced breadth: enough to confirm the
+    // shared plumbing threads through this widget's own `build()` /
+    // `place_children()` / `paint()` / `on_scroll` correctly, not to
+    // re-verify the pane math itself (already unit-tested in `layout.rs`
+    // and exercised end-to-end by TableView's suite).
+
+    /// Expand any AT-transparent id (the pane-band wrapper `RowBand`
+    /// inserts under column pinning — see `table_view::body`'s module
+    /// docs — never calls `set_role`, so it reads back as the
+    /// `AccessNodeBuilder` default `Role::Unknown`) into its own children,
+    /// recursively.
+    fn tt_flatten_through_bands(tree: &WidgetTree, ids: Vec<WidgetId>) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        for id in ids {
+            if matches!(
+                tree.accessibility_node(id).role(),
+                Role::GenericContainer | Role::Unknown
+            ) {
+                out.extend(tt_flatten_through_bands(tree, tree.children(id)));
+            } else {
+                out.push(id);
+            }
+        }
+        out
+    }
+
+    /// The first BODY `Role::Row` (band-flattened children include a
+    /// `Role::Cell`) — distinguishes it from the header, which shares
+    /// `Role::Row` but has only `Role::ColumnHeader` children.
+    fn tt_first_body_row_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
+        let mut walker = vec![root];
+        while let Some(id) = walker.pop() {
+            if tree.accessibility_node(id).role() == Role::Row {
+                let flat = tt_flatten_through_bands(tree, tree.children(id));
+                if flat
+                    .iter()
+                    .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
+                {
+                    return id;
+                }
+            }
+            for c in tree.children(id) {
+                walker.push(c);
+            }
+        }
+        panic!("no body Role::Row found");
+    }
+
+    fn tt_header_row_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
+        let mut walker = vec![root];
+        while let Some(id) = walker.pop() {
+            if tree.accessibility_node(id).role() == Role::Row {
+                let flat = tt_flatten_through_bands(tree, tree.children(id));
+                if !flat.is_empty()
+                    && flat
+                        .iter()
+                        .all(|&c| tree.accessibility_node(c).role() == Role::ColumnHeader)
+                {
+                    return id;
+                }
+            }
+            for c in tree.children(id) {
+                walker.push(c);
+            }
+        }
+        panic!("no header Role::Row found");
+    }
+
+    fn tt_body_row_cells(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+        tt_flatten_through_bands(tree, tree.children(tt_first_body_row_id(tree, root)))
+    }
+
+    fn tt_header_row_cells(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+        tt_flatten_through_bands(tree, tree.children(tt_header_row_id(tree, root)))
+    }
+
+    /// Leading `lead` (60px, pinned) + unpinned `mid` (`middle_w` px) +
+    /// Trailing `trail` (60px, pinned), over the default `sample_tree()`
+    /// (roots collapsed — 2 visible rows).
+    fn build_tt_pinned_scroll_table(middle_w: f32, table_w: f32) -> (WidgetTree, WidgetId) {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(
+                    Column::<&'static str>::new("lead", lit!("Lead"), |row, _: &CellContext| {
+                        Box::new(crate::primitives::TextWidget::new(lit!(*row)))
+                    })
+                    .width(ColumnWidth::Fixed(60.0))
+                    .pinned(PinnedSide::Leading),
+                )
+                .add_column(
+                    Column::<&'static str>::new("mid", lit!("Mid"), |row, _: &CellContext| {
+                        Box::new(crate::primitives::TextWidget::new(lit!(*row)))
+                    })
+                    .width(ColumnWidth::Fixed(middle_w)),
+                )
+                .add_column(
+                    Column::<&'static str>::new("trail", lit!("Trail"), |_row, _: &CellContext| {
+                        Box::new(crate::primitives::TextWidget::new(lit!("x")))
+                    })
+                    .width(ColumnWidth::Fixed(60.0))
+                    .pinned(PinnedSide::Trailing),
+                )
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(table_w),
+            height: Some(200.0),
+        });
+        (tree, id)
+    }
+
+    /// `n` unpinned Fixed columns of `col_w` px each.
+    fn build_tt_wide_unpinned_table(col_w: f32, n: usize, table_w: f32) -> (WidgetTree, WidgetId) {
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let mut tv = TreeTableView::from_projection(proxy);
+        for i in 0..n {
+            let col_id = format!("c{i}");
+            tv = tv.add_column(
+                Column::<&'static str>::new(
+                    col_id.clone(),
+                    lit!(col_id.clone()),
+                    |row, _: &CellContext| Box::new(crate::primitives::TextWidget::new(lit!(*row))),
+                )
+                .width(ColumnWidth::Fixed(col_w)),
+            );
+        }
+        let id = tree.add(tv.row_height(20.0));
+        tree.layout(SizeProposal {
+            width: Some(table_w),
+            height: Some(200.0),
+        });
+        (tree, id)
+    }
+
+    fn tt_scroll_x(tree: &WidgetTree, id: WidgetId) -> f32 {
+        tree.widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+            .scroll_x_signal()
+            .get()
+    }
+
+    fn tt_max_scroll_x(tree: &WidgetTree, id: WidgetId) -> f32 {
+        tree.widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+            .max_scroll_x_signal()
+            .get()
+    }
+
+    fn tt_set_scroll_x(tree: &WidgetTree, id: WidgetId, x: f32) {
+        tree.widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+            .scroll_x_signal()
+            .set(x);
+    }
+
+    #[test]
+    fn tt_scroll_x_clamps_after_the_pane_widens() {
+        let (mut tree, id) = build_tt_wide_unpinned_table(200.0, 3, 300.0);
+        let max = tt_max_scroll_x(&tree, id);
+        assert!(max > 0.0, "columns must overflow the narrow table");
+        tt_set_scroll_x(&tree, id, max);
+        assert_eq!(tt_scroll_x(&tree, id), max);
+
+        tree.layout(SizeProposal {
+            width: Some(700.0),
+            height: Some(200.0),
+        });
+        assert_eq!(tt_max_scroll_x(&tree, id), 0.0, "content now fits");
+        assert_eq!(
+            tt_scroll_x(&tree, id),
+            0.0,
+            "scroll_x must clamp down with the new (smaller) max_scroll_x"
+        );
+    }
+
+    #[test]
+    fn tt_pinned_columns_keep_their_bands_under_scroll() {
+        let (mut tree, id) = build_tt_pinned_scroll_table(400.0, 200.0);
+
+        let cells0 = tt_body_row_cells(&tree, id);
+        assert_eq!(cells0.len(), 3, "lead, mid, trail");
+        let lead_x0 = tree.bounds(cells0[0]).x;
+        let mid_x0 = tree.bounds(cells0[1]).x;
+        let trail_x0 = tree.bounds(cells0[2]).x;
+
+        // `tt_first_body_row_id` returns the `TreeRowA11y` wrapper (the
+        // `Role::Row` carrier); its sole child is the `.a11y_hidden()`
+        // `BodyRow`, one level further in, whose own children are the
+        // pane bands.
+        let tree_row_a11y = tt_first_body_row_id(&tree, id);
+        let body_row = tree.children(tree_row_a11y)[0];
+        let raw_bands = tree.children(body_row);
+        assert_eq!(raw_bands.len(), 3, "leading + middle + trailing bands");
+        assert!(!tree.widget_clips_children(raw_bands[0]));
+        assert!(
+            tree.widget_clips_children(raw_bands[1]),
+            "the Middle band must clip"
+        );
+        assert!(!tree.widget_clips_children(raw_bands[2]));
+
+        let max = tt_max_scroll_x(&tree, id);
+        assert!(max > 0.0);
+        tt_set_scroll_x(&tree, id, 50.0_f32.min(max));
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: Some(200.0),
+        });
+
+        let cells1 = tt_body_row_cells(&tree, id);
+        assert_eq!(tree.bounds(cells1[0]).x, lead_x0, "Leading never moves");
+        assert_eq!(tree.bounds(cells1[2]).x, trail_x0, "Trailing never moves");
+        let mid_x1 = tree.bounds(cells1[1]).x;
+        assert!(
+            (mid_x1 - (mid_x0 - 50.0)).abs() < 0.5,
+            "the Middle column shifts left by exactly scroll_x: got {mid_x1}, want ~{}",
+            mid_x0 - 50.0
+        );
+    }
+
+    #[test]
+    fn tt_header_and_body_x_offsets_agree_under_scroll() {
+        let (mut tree, id) = build_tt_pinned_scroll_table(400.0, 200.0);
+        tt_set_scroll_x(&tree, id, 37.0);
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: Some(200.0),
+        });
+
+        let header_cells = tt_header_row_cells(&tree, id);
+        let body_cells = tt_body_row_cells(&tree, id);
+        assert_eq!(header_cells.len(), body_cells.len());
+        for (i, (&h, &b)) in header_cells.iter().zip(body_cells.iter()).enumerate() {
+            let hx = tree.bounds(h).x;
+            let bx = tree.bounds(b).x;
+            assert!(
+                (hx - bx).abs() < 0.01,
+                "column {i}: header x {hx} must equal body x {bx}"
+            );
+        }
+    }
+
+    #[test]
+    fn tt_shift_wheel_scrolls_horizontally() {
+        use bastyde_canvas::Point;
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, id) = build_tt_wide_unpinned_table(200.0, 4, 300.0);
+        tree.pointer_move(Point::new(50.0, 60.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Lines { x: 0.0, y: 3.0 },
+            modifiers: Modifiers::SHIFT,
+        });
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: Some(200.0),
+        });
+        assert!(
+            tt_scroll_x(&tree, id) > 0.0,
+            "Shift+wheel must remap a vertical-only wheel to horizontal scroll"
+        );
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        assert_eq!(
+            tt.scroll_y_signal().get(),
+            0.0,
+            "Shift+wheel must not also scroll vertically"
+        );
+    }
+
+    #[test]
+    fn tt_ensure_col_visible_follows_focus_in_both_directions() {
+        use bastyde_core::event::{Key, Modifiers};
+        let (mut tree, id) = build_tt_wide_unpinned_table(150.0, 5, 300.0);
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            any.downcast_ref::<TreeTableView<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 0);
+        }
+        assert_eq!(tt_scroll_x(&tree, id), 0.0);
+
+        tree.press_key(Key::End, Modifiers::NONE);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(tt.focused_cell_signal().get(), Some((0, 4)));
+        }
+        assert!(
+            tt_scroll_x(&tree, id) > 0.0,
+            "ensure-column-visible must scroll right to reveal column 4"
+        );
+
+        tree.press_key(Key::Home, Modifiers::NONE);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            assert_eq!(tt.focused_cell_signal().get(), Some((0, 0)));
+        }
+        assert_eq!(
+            tt_scroll_x(&tree, id),
+            0.0,
+            "ensure-column-visible must scroll left back to 0 for column 0"
+        );
     }
 }

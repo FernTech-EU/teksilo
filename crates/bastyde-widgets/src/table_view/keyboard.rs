@@ -17,6 +17,8 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::EventContext;
 use bastyde_data::SelectionMode;
 
+use super::PaneBoundaries;
+use super::body::SharedColumnWidths;
 use super::column::{EditTrigger, TabTraversal};
 use super::row_navigator::RowNavigator;
 use super::selection::{CellSelectionModel, TableSelectionMode};
@@ -88,6 +90,21 @@ pub(crate) struct KeyHandlerConfig {
     pub type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>>,
     /// Reset window for the type-ahead search term.
     pub type_ahead_timeout: Duration,
+
+    /// Resolved column widths in display order — shared with the row/header
+    /// layout. Read to compute a display column's horizontal extent for
+    /// ensure-column-visible.
+    pub column_widths: SharedColumnWidths,
+    /// Pane partition (Leading/Middle/Trailing) — pinned columns never
+    /// trigger horizontal scrolling, since they're always visible by
+    /// definition. Snapshotted at build like `col_count` (a pinning/order
+    /// change rebuilds the whole table anyway).
+    pub pane_boundaries: PaneBoundaries,
+    pub scroll_x: Signal<f32>,
+    pub max_scroll_x: Signal<f32>,
+    /// Middle-pane viewport width, populated by `place_children` — the
+    /// horizontal analogue of `viewport_height`.
+    pub middle_viewport_width: Rc<std::cell::Cell<f32>>,
 }
 
 /// Build the on_key closure. Captures config by value; the closure is
@@ -283,6 +300,11 @@ pub(crate) fn build_key_handler(
                     }
                 }
             }
+            // Toggles the focused cell/row regardless of Ctrl — this is
+            // already "Ctrl+Space toggles the focused row's selection"
+            // (the Explorer/Finder pairing with Ctrl+Arrow move-only above):
+            // after a Ctrl+Arrow walk away from the selection, Space here
+            // toggles just the cursor's current cell.
             Key::Space => {
                 toggle_selection(&cfg, row, col);
                 cfg.focused_cell.set(Some((row, col)));
@@ -359,6 +381,7 @@ pub(crate) fn build_key_handler(
                     cfg.focused_cell.set(Some((nr, col)));
                     apply_selection_extension(&cfg, nr, col, false);
                     ensure_row_visible(&cfg, nr, row_count, ctx);
+                    ensure_col_visible(&cfg, col);
                     return EventResponse::Handled;
                 }
                 return EventResponse::Ignored;
@@ -380,8 +403,24 @@ pub(crate) fn build_key_handler(
 
         if let Some((nr, nc)) = new_pos {
             cfg.focused_cell.set(Some((nr, nc)));
-            apply_selection_extension(&cfg, nr, nc, modifiers.shift());
+            // Explorer/Finder convention: Ctrl+Arrow (no Shift) repositions
+            // the keyboard cursor without touching selection — the followed
+            // "select the row you land on" behavior is opt-out only via
+            // Ctrl, exactly like plain Arrow's select-follow is opt-in via
+            // nothing (default) and Shift+Arrow's extend is opt-in via
+            // Shift. `Ctrl+Space` (below, `Key::Space`'s `toggle_selection`
+            // already ignores modifiers) then toggles just the cell the
+            // cursor moved to.
+            let is_arrow = matches!(
+                key,
+                Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight
+            );
+            let move_cursor_only = is_arrow && modifiers.ctrl() && !modifiers.shift();
+            if !move_cursor_only {
+                apply_selection_extension(&cfg, nr, nc, modifiers.shift());
+            }
             ensure_row_visible(&cfg, nr, row_count, ctx);
+            ensure_col_visible(&cfg, nc);
             return EventResponse::Handled;
         }
 
@@ -428,6 +467,46 @@ fn ensure_row_visible(
         row,
         new_scroll,
     );
+}
+
+/// Scroll the Middle pane horizontally so `display_col` is fully visible —
+/// the horizontal analogue of [`ensure_row_visible`]. A no-op for a
+/// Leading/Trailing-pinned column: pinning already guarantees visibility, so
+/// the column can never trigger horizontal scrolling. Unlike rows (via
+/// `RowMetrics`, virtualized over thousands of entries), the column count is
+/// small and already fully resolved in `column_widths`, so a plain linear
+/// scan suffices — no shared "ColumnMetrics" abstraction needed.
+fn ensure_col_visible(cfg: &KeyHandlerConfig, display_col: usize) {
+    let b = cfg.pane_boundaries;
+    if display_col < b.leading_count || display_col >= b.middle_end {
+        return;
+    }
+    let widths = cfg.column_widths.borrow();
+    let Some(w) = widths.get(display_col).copied() else {
+        return;
+    };
+    // Logical x of `display_col` within the *unscrolled* Middle content
+    // strip (offset from the Middle pane's own leading edge) — i.e.
+    // `column_logical_x` with `scroll_x = 0`, restricted to the Middle
+    // pane's own local space (band_width is irrelevant here since Trailing
+    // never enters this branch).
+    let x: f32 = widths[b.leading_count..display_col].iter().sum();
+    drop(widths);
+
+    let viewport_w = cfg.middle_viewport_width.get();
+    let scroll = cfg.scroll_x.get();
+    let max = cfg.max_scroll_x.get();
+    let new_scroll = if x < scroll {
+        x
+    } else if x + w > scroll + viewport_w {
+        (x + w - viewport_w).max(0.0)
+    } else {
+        scroll
+    }
+    .clamp(0.0, max.max(0.0));
+    if (new_scroll - scroll).abs() > f32::EPSILON {
+        cfg.scroll_x.set(new_scroll);
+    }
 }
 
 fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {

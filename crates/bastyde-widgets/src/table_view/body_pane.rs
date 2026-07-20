@@ -63,6 +63,12 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) columns: Vec<Column<T>>,
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
     pub(crate) column_widths: SharedColumnWidths,
+    /// Pane partition (Leading/Middle/Trailing), snapshotted at build —
+    /// forwarded to each `BodyRow` for the pane-band split. See
+    /// `body::BodyRow`'s module docs.
+    pub(crate) pane_boundaries: super::PaneBoundaries,
+    /// Middle-pane horizontal scroll offset, forwarded to each `BodyRow`.
+    pub(crate) scroll_x: Signal<f32>,
 
     /// Row geometry shared with the `TableView` root (one handle, two
     /// holders — the root drives scrollbar totals / paint / keyboard,
@@ -398,6 +404,8 @@ impl<T: 'static> Widget for BodyPane<T> {
                 row_selected_for_a11y,
                 row_height,
                 row_widths_handle.clone(),
+                self.pane_boundaries,
+                self.scroll_x.clone(),
             );
             let row_id = ctx.add(row_widget);
 

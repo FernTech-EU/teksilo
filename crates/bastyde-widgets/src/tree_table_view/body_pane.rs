@@ -64,6 +64,12 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) columns: Vec<Column<T>>,
     pub(crate) display_indices: Rc<RefCell<Vec<usize>>>,
     pub(crate) column_widths: SharedColumnWidths,
+    /// Pane partition (Leading/Middle/Trailing), snapshotted at build —
+    /// forwarded to each `BodyRow` for the pane-band split. See
+    /// `table_view::body::BodyRow`'s module docs.
+    pub(crate) pane_boundaries: crate::table_view::PaneBoundaries,
+    /// Middle-pane horizontal scroll offset, forwarded to each `BodyRow`.
+    pub(crate) scroll_x: Signal<f32>,
     /// Display position of the tree column (indent + twist host).
     pub(crate) tree_display_pos: usize,
     pub(crate) indent_per_level: f32,
@@ -386,9 +392,19 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 row_selected,
                 row_height,
                 self.column_widths.clone(),
+                self.pane_boundaries,
+                self.scroll_x.clone(),
             )
             .a11y_hidden();
             let row_inner_id = ctx.add(row_widget);
+            // `(pos_in_set_1based, set_size)` among this row's siblings — a
+            // loading row (no metadata resolved yet) reports (1, 1), the same
+            // "unknowable yet" fallback already used for depth/has_children.
+            let (position_in_set, size_of_set) = if loading {
+                (1, 1)
+            } else {
+                self.source.sibling_pos(flat_idx)
+            };
             let tree_row_id = ctx.add(TreeRowA11y::new(
                 row_inner_id,
                 flat_idx + 2,
@@ -399,6 +415,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     None
                 },
                 row_selected,
+                position_in_set,
+                size_of_set,
             ));
             self.row_entries.push((flat_idx, tree_row_id));
 
