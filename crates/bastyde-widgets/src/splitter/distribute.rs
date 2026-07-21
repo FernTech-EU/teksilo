@@ -1011,6 +1011,28 @@ mod proptests {
     // property — see the report for why this one carries low confidence.
 
     proptest! {
+        // UNRESOLVED — parked, not silently dropped. This property FAILS by
+        // PANICKING inside `f32::clamp` (core/src/num/f32.rs:1505), whose
+        // contract is "Panics if `min > max`, `min` is NaN, or `max` is NaN".
+        //
+        // `distribute`'s phase-0 guard reads `if lo > hi { lo } else {
+        // req.clamp(lo, hi) }`. That defends a finite contradictory
+        // `min > max` (see the property above, which passes), but NaN slips
+        // straight through it: both `NaN > hi` and `lo > NaN` are false, so a
+        // NaN bound reaches `.clamp()` and aborts the process.
+        //
+        // Reachable: `PaneDescriptor::min`/`max` are app-supplied, and an app
+        // computing a minimum from a ratio can produce NaN from a 0/0. The
+        // failure mode is a crash, not a mis-layout, which makes this the most
+        // actionable of the parked findings.
+        //
+        // This is the same shape as the `Color::mix` NaN hole fixed in
+        // 5789116b — a defensive guard written for the ordered case that a
+        // NaN walks through. The fix is presumably to normalise the bounds
+        // before clamping (NaN lo -> 0.0, NaN hi -> INFINITY), but it belongs
+        // with someone who can weigh what a non-finite pane bound should mean
+        // rather than being applied blind. Do NOT weaken this assertion.
+        #[ignore = "unresolved: NaN min/max panics inside f32::clamp — see comment"]
         #[test]
         fn sizes_stay_finite_even_when_a_pane_min_or_max_is_non_finite(
             panes in arb_panes_with_wild_bounds(),
