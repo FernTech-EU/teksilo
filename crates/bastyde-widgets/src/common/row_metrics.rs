@@ -869,7 +869,6 @@ mod proptests {
         // to `PrefixSumOffsets::row_at`'s tie handling affects every consumer,
         // so it is the author's call, not a mechanical fix. Do NOT weaken this
         // assertion to make it pass.
-        #[ignore = "unresolved: uniform and exact modes disagree on all-zero heights — see comment"]
         #[test]
         fn uniform_and_exact_constant_height_modes_agree_on_every_query(
             item_height in arb_height(),

@@ -170,6 +170,42 @@ impl PrefixSumOffsets {
         if rows == 0 {
             return 0;
         }
+        // Degenerate table: every row-top is identical, because every height
+        // AND the gap are zero. `partition_point` has no meaningful answer
+        // over an all-equal slice — it resolves to the LAST tied index, which
+        // would report the final row for a table that occupies no space at
+        // all, and disagrees with `RowMetrics::uniform`, whose `step <= 0.0`
+        // early return answers row 0 for the same geometry. Answer 0 here so
+        // the two descriptions of one geometry agree.
+        //
+        // Compared against `offsets[0]` rather than `0.0` so a non-zero
+        // `top_inset` (which shifts every row-top equally) still counts as
+        // degenerate.
+        //
+        // This is deliberately narrower than resolving ties to the FIRST
+        // index in general. A PARTIALLY degenerate table — a single
+        // zero-height row between two real ones, i.e. heights `[50, 0, 50]`
+        // giving offsets `[0, 50, 50, 100]` — must keep the last-tie answer:
+        // at `y = 50` the right row is 2, the real row starting there, not
+        // the invisible row 1. That raw index is used directly as the
+        // drop-target identity in TreeView / TreeTableView DnD and as the
+        // hit-tested tile in GridView, so answering with a zero-height row
+        // would silently retarget a drop onto an invisible row. Mixed
+        // zero/non-zero heights are ordinary — `item_height_fn` /
+        // `row_height_fn` / `item_height` are public callbacks with no floor
+        // above 0.0, and spacing defaults to 0.0 — so that path is reachable
+        // and is pinned by
+        // `row_at_at_a_boundary_lands_on_real_content_not_a_zero_height_row`
+        // below.
+        // Offsets are non-decreasing, so `offsets[rows - 1] <= offsets[0]`
+        // means every row-top is equal. That alone is not enough: heights
+        // `[0, 0, 50]` also ties every top (offsets `[0, 0, 0, 50]`) while row
+        // 2 genuinely owns 50 px, and answering 0 there would be wrong. The
+        // table is degenerate only when NO row owns any span, so the last
+        // row's height must be zero too.
+        if self.offsets[rows - 1] <= self.offsets[0] && self.heights[rows - 1] <= 0.0 {
+            return 0;
+        }
         // Number of row-tops <= y; the containing row is one less.
         let pp = self.offsets[..rows].partition_point(|&o| o <= y);
         pp.saturating_sub(1).min(rows - 1)
@@ -476,6 +512,60 @@ mod proptests {
                 r_lo <= r_hi,
                 "row_at({}) = {} > row_at({}) = {}, not monotone (heights={:?}, gap={})",
                 lo, r_lo, hi, r_hi, heights, gap,
+            );
+        }
+    }
+
+    // ── 3b. a boundary y skips zero-height rows onto real content ──
+    // The PARTIALLY degenerate table, which nothing in this repo covered
+    // before: a run of zero-height rows sandwiched between two real ones, so
+    // several rows share one offset while the table as a whole occupies real
+    // space. `row_at` must resolve such a tie to the row that actually OWNS
+    // the span starting there — the one after the zero run — never to a
+    // zero-height row, which is invisible and may not even be a sibling of
+    // what the user sees.
+    //
+    // This pins the behaviour a blanket "resolve ties to the first index"
+    // fix would have broken. That fix was considered for the fully
+    // degenerate all-zero case and rejected precisely because it would
+    // retarget this one: `row_at`'s raw result is the drop-target identity
+    // in TreeView / TreeTableView DnD and the hit-tested tile in GridView,
+    // so a zero-height answer silently drops onto an invisible row while the
+    // insertion line still renders in the visually correct place. See the
+    // narrower degeneracy check in `row_at`.
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]
+        #[test]
+        fn row_at_at_a_boundary_lands_on_real_content_not_a_zero_height_row(
+            leading_height in arb_positive_height(),
+            zero_run in 1usize..=6,
+            trailing_height in arb_positive_height(),
+            top_inset in prop_oneof![Just(0.0f32), 0.5f32..40.0f32],
+        ) {
+            // heights = [positive, 0 x zero_run, positive], gap 0 so the zero
+            // rows all tie with the leading row's bottom edge.
+            let mut heights = vec![leading_height];
+            heights.extend(std::iter::repeat_n(0.0f32, zero_run));
+            heights.push(trailing_height);
+            let last = heights.len() - 1;
+
+            let mut p = build(&heights, 0.0, top_inset, 0.0);
+            // The shared offset: bottom of the leading row, where every
+            // zero-height row and the trailing row all begin.
+            let boundary = p.row_top(last);
+
+            let got = p.row_at(boundary);
+            prop_assert_eq!(
+                got, last,
+                "row_at({}) = {} landed on a zero-height row; expected the \
+                 trailing real row {} (heights={:?}, top_inset={})",
+                boundary, got, last, heights, top_inset,
+            );
+            prop_assert!(
+                p.row_height(got) > 0.0,
+                "row_at({}) = {} resolved to a row of height {}, which owns no \
+                 span (heights={:?}, top_inset={})",
+                boundary, got, p.row_height(got), heights, top_inset,
             );
         }
     }

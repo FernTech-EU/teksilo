@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 5068aa0ea2c63598e3c8eb892b87c2f0997da9f4fef66e395346d1507627caad # shrinks to heights = [0.0], gap = 5.9935365, top_inset = 4.5609703, bottom_inset = 0.0
+cc c99977810fd146cc94642f233a0fb56889bc67a9b13c2022ffae045fc66e7a90 # shrinks to zeros_before = [0.0], target_height = 0.5, zeros_after = [], gap = 0.0, frac = 0.001
