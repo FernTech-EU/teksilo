@@ -260,3 +260,274 @@ mod tests {
         assert_eq!(p.row_top(1), 58.0); // back to estimate
     }
 }
+
+/// Property-based tests for [`PrefixSumOffsets`].
+///
+/// `PrefixSumOffsets` is `pub(crate)`, so a `tests/` integration file can't
+/// reach it at all; this module lives inline (after the existing `mod
+/// tests`, so the example-based coverage stays the first thing a reader
+/// hits) and reaches straight into the struct's private fields to seed
+/// heights directly — deliberately bypassing [`set_row_height`]'s
+/// jitter-absorption (it silently no-ops when the new height is within
+/// `0.01` of the seeded `estimated`), which would otherwise make an
+/// oracle-driven test's own setup lie about what heights are actually
+/// installed.
+///
+/// This table is a binary search over a monotone cumulative-sum array —
+/// classic proptest territory: `row_at`'s `partition_point` call assumes
+/// the offsets slice is sorted, and the one thing that can make several
+/// consecutive offsets compare *equal* (still sorted, but with ties) is a
+/// run of zero-height rows combined with a zero gap. An earlier,
+/// unfinished investigation (`zzz_debug_probe_zero_height_rows`) suspected
+/// this tie could push `row_at`/`insertion_index` out of range or off the
+/// row they should report; the generators below deliberately construct
+/// exactly that degenerate shape (heavily-weighted-toward-zero heights,
+/// heavily-weighted-toward-zero gaps, explicit runs of zero-height rows
+/// around a guaranteed positive one) so the properties are exercised
+/// against it, not just against "nice" tables.
+///
+/// Contracts asserted:
+///   1. `row_top` is monotonically non-decreasing across the row index,
+///      even across a zero-height/zero-gap tie run.
+///   2. `row_at` always returns an index in `0..rows` (or `0` for an empty
+///      table) for every finite `y` — negative, zero, in-range, and far
+///      beyond the table's total.
+///   3. `row_at` is monotone non-decreasing as `y` increases.
+///   4. `row_at` agrees with an independent linear-scan oracle for any `y`
+///      strictly inside a row of POSITIVE height, even when that row is
+///      flanked by runs of zero-height rows.
+///   5. `total()` conserves the sum of every row height plus the `rows-1`
+///      inter-row gaps plus the insets (CONSERVATION, f32 epsilon).
+///
+/// 256 cases per property (the workspace default); override with
+/// `PROPTEST_CASES=4096 cargo test -p bastyde-widgets --lib row_offsets`.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Zero heights are the degenerate case under investigation: with a
+    // zero gap they make consecutive prefix-sum offsets compare equal,
+    // which is exactly what stresses `partition_point`'s tie-breaking in
+    // `row_at`. Weighted so runs of zero are common, not rare.
+    fn arb_height() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            4 => Just(0.0_f32),
+            1 => Just(1.0_f32),
+            3 => 0.5f32..400.0f32,
+        ]
+    }
+
+    // Bounded to at most 40 rows (well under the task's 60-row ceiling);
+    // each row is one f32 plus one bool, so the largest table here is a
+    // few hundred bytes — the thing this suite needs generous length for
+    // is the *chance* of a long zero-height run, not memory headroom.
+    fn arb_heights(max_len: usize) -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(arb_height(), 0..=max_len)
+    }
+
+    // A run of guaranteed-zero rows, used to build explicit zero-height
+    // "moats" around a row we then probe with the linear-scan oracle.
+    fn arb_zero_run(max_len: usize) -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(Just(0.0_f32), 0..=max_len)
+    }
+
+    fn arb_positive_height() -> impl Strategy<Value = f32> {
+        0.5f32..400.0f32
+    }
+
+    // A zero gap is required to actually collide consecutive offsets;
+    // weighted heavily toward it for the same reason as `arb_height`, but
+    // a nonzero gap must stay reachable so both regimes get covered.
+    fn arb_gap() -> impl Strategy<Value = f32> {
+        prop_oneof![3 => Just(0.0_f32), 1 => 0.5f32..20.0f32]
+    }
+
+    fn arb_inset() -> impl Strategy<Value = f32> {
+        prop_oneof![1 => Just(0.0_f32), 1 => 0.0f32..50.0f32]
+    }
+
+    // Wide enough to comfortably exceed any total this suite can build
+    // (<=40 rows * (400 max height + 20 max gap) ~= 16_800), and explicitly
+    // includes negative y and the exact origin.
+    fn arb_y() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            1 => Just(0.0_f32),
+            1 => -500.0f32..0.0f32,
+            1 => 0.0f32..2000.0f32,
+            1 => Just(100_000.0_f32),
+        ]
+    }
+
+    /// Independent re-derivation of a row's top offset by direct
+    /// summation — deliberately NOT sharing code with
+    /// `PrefixSumOffsets::rebuild`'s incremental/dirty-region bookkeeping,
+    /// so it can catch a bug in that incremental machinery rather than
+    /// just re-running it.
+    fn linear_row_top(heights: &[f32], gap: f32, top_inset: f32, row: usize) -> f32 {
+        let mut acc = top_inset;
+        for h in &heights[..row.min(heights.len())] {
+            acc += h + gap;
+        }
+        acc
+    }
+
+    fn expected_total(heights: &[f32], gap: f32, top_inset: f32, bottom_inset: f32) -> f32 {
+        let rows = heights.len();
+        if rows == 0 {
+            return 0.0;
+        }
+        let sum_heights: f32 = heights.iter().sum();
+        top_inset + sum_heights + (rows as f32 - 1.0) * gap + bottom_inset
+    }
+
+    /// Builds a table with EXACTLY the given heights. Goes straight at the
+    /// private fields (this module is a descendant of `row_offsets`, so
+    /// that's ordinary Rust privacy, not a visibility change) instead of
+    /// looping `set_row_height`, which would silently no-op — and thus
+    /// desync the oracle from what's actually installed — whenever a
+    /// generated height lands within `0.01` of the placeholder `estimated`
+    /// seed.
+    fn build(heights: &[f32], gap: f32, top_inset: f32, bottom_inset: f32) -> PrefixSumOffsets {
+        let mut p = PrefixSumOffsets::new(heights.len(), 0.0, gap, top_inset, bottom_inset);
+        p.heights = heights.to_vec();
+        p.measured = vec![true; heights.len()];
+        p.dirty_from = Some(0);
+        p
+    }
+
+    // ── 1. offsets are monotonically non-decreasing, zero-height runs included ──
+    proptest! {
+        #[test]
+        fn row_top_is_monotonically_non_decreasing_across_the_row_index(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            top_inset in arb_inset(),
+            bottom_inset in arb_inset(),
+        ) {
+            let mut p = build(&heights, gap, top_inset, bottom_inset);
+            let rows = heights.len();
+            for i in 0..rows.saturating_sub(1) {
+                let a = p.row_top(i);
+                let b = p.row_top(i + 1);
+                prop_assert!(
+                    a <= b,
+                    "row_top regressed: row_top({})={} > row_top({})={} (heights={:?}, gap={})",
+                    i, a, i + 1, b, heights, gap,
+                );
+            }
+            if rows > 0 {
+                let last_top = p.row_top(rows - 1);
+                let total = p.total();
+                // `total()` and `row_top()` reach the same value by different
+                // accumulation orders, so they can disagree in the last f32 ulp
+                // (observed: 4.56097 vs 4.5609703 for a single zero-height row
+                // under a 4.56 top inset). Compare with a tolerance scaled to
+                // the magnitude involved — asserting an exact float ordering
+                // across two summation paths tests IEEE rounding, not the
+                // offset table.
+                let tol = 1e-4 * total.abs().max(last_top.abs()).max(1.0);
+                prop_assert!(
+                    total >= last_top - tol,
+                    "total()={} fell below the last row's own top {} by more than {} (heights={:?}, gap={})",
+                    total, last_top, tol, heights, gap,
+                );
+            }
+        }
+    }
+
+    // ── 2. row_at always returns an in-range index for every finite y ──
+    proptest! {
+        #[test]
+        fn row_at_returns_an_in_range_index_for_every_finite_y(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            y in arb_y(),
+        ) {
+            let mut p = build(&heights, gap, 0.0, 0.0);
+            let rows = heights.len();
+            let r = p.row_at(y);
+            if rows == 0 {
+                prop_assert_eq!(r, 0, "row_at on an empty table must be 0, got {}", r);
+            } else {
+                prop_assert!(
+                    r < rows,
+                    "row_at({}) = {} is out of range for {} rows (heights={:?}, gap={})",
+                    y, r, rows, heights, gap,
+                );
+            }
+        }
+    }
+
+    // ── 3. row_at is monotone non-decreasing in y ──
+    proptest! {
+        #[test]
+        fn row_at_is_monotone_non_decreasing_in_y(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            y1 in arb_y(),
+            y2 in arb_y(),
+        ) {
+            let (lo, hi) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
+            let mut p = build(&heights, gap, 0.0, 0.0);
+            let r_lo = p.row_at(lo);
+            let r_hi = p.row_at(hi);
+            prop_assert!(
+                r_lo <= r_hi,
+                "row_at({}) = {} > row_at({}) = {}, not monotone (heights={:?}, gap={})",
+                lo, r_lo, hi, r_hi, heights, gap,
+            );
+        }
+    }
+
+    // ── 4. row_at oracle: a y strictly inside a positive-height row's band ──
+    proptest! {
+        #[test]
+        fn row_at_matches_a_linear_scan_oracle_inside_a_positive_band(
+            zeros_before in arb_zero_run(15),
+            target_height in arb_positive_height(),
+            zeros_after in arb_zero_run(15),
+            gap in arb_gap(),
+            frac in 0.001f32..0.999f32,
+        ) {
+            let target_index = zeros_before.len();
+            let mut heights = zeros_before.clone();
+            heights.push(target_height);
+            heights.extend(zeros_after.iter().copied());
+
+            let mut p = build(&heights, gap, 0.0, 0.0);
+            let target_top = linear_row_top(&heights, gap, 0.0, target_index);
+            let y = target_top + target_height * frac;
+
+            let r = p.row_at(y);
+            let band_end = target_top + target_height;
+            prop_assert_eq!(
+                r, target_index,
+                "y={} sits strictly inside row {}'s band [{}, {}) but row_at returned {} \
+                 (heights={:?}, gap={})",
+                y, target_index, target_top, band_end, r, heights, gap,
+            );
+        }
+    }
+
+    // ── 5. total() conserves the sum of heights, inter-row gaps and insets ──
+    proptest! {
+        #[test]
+        fn total_conserves_the_sum_of_heights_and_gaps_and_insets(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            top_inset in arb_inset(),
+            bottom_inset in arb_inset(),
+        ) {
+            let mut p = build(&heights, gap, top_inset, bottom_inset);
+            let expected = expected_total(&heights, gap, top_inset, bottom_inset);
+            let actual = p.total();
+            prop_assert!(
+                (actual - expected).abs() < 0.05,
+                "total()={} but the direct sum of heights+gaps+insets is {} \
+                 (heights={:?}, gap={}, top_inset={}, bottom_inset={})",
+                actual, expected, heights, gap, top_inset, bottom_inset,
+            );
+        }
+    }
+}

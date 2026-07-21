@@ -700,3 +700,283 @@ mod tests {
         );
     }
 }
+
+/// Property-based tests for [`RowMetrics`].
+///
+/// `RowMetrics` is `pub(crate)`, so a `tests/` integration file can't reach
+/// it at all; this module lives inline, after the existing `mod tests`, so
+/// the example-based coverage stays the first thing a reader hits.
+///
+/// The interesting surface here is the binary-search-backed `Exact`/
+/// `AutoMeasure` modes (via [`PrefixSumOffsets`], see its own `proptests`
+/// module in `row_offsets.rs` for the offset-table-level properties) versus
+/// the arithmetic `Uniform` fast path — two independently written
+/// implementations of the same row-geometry contract, which makes "do they
+/// agree" a natural oracle. The generators deliberately weight toward
+/// zero-height rows and a zero gap/spacing (the shape an earlier,
+/// unfinished investigation — `zzz_debug_probe_zero_height_rows` —
+/// suspected of breaking `row_at`/`insertion_index`), including the fully
+/// degenerate "every row height is 0.0 AND spacing is 0.0" case, which is
+/// exactly what property 3 below actually catches: `Uniform::row_at`
+/// short-circuits to `0` whenever `item_height + spacing <= 0.0`, while the
+/// `Exact` mode's offset table ties every offset to the same value and its
+/// `partition_point` search resolves the tie to the LAST row — the two
+/// disagree.
+///
+/// Contracts asserted:
+///   1. `insertion_index(y)` is always in `0..=n`.
+///   2. `insertion_index(y)` is monotone non-decreasing in `y`.
+///   3. Uniform and Exact-with-a-constant-height agree on every query
+///      (`total_height`, `row_top`, `row_at`, `insertion_index`) — see the
+///      caveat above; this is expected to fail on the fully degenerate
+///      `item_height == 0.0 && spacing == 0.0` input.
+///   4. `invalidate_from(k)` (AutoMeasure) preserves the measured prefix
+///      `[0, k)` exactly (bit-identical, not just epsilon-close — no
+///      arithmetic touches those rows).
+///   5. `total_height` (Exact mode, driven through `resize`'s
+///      callback-population loop rather than direct construction)
+///      conserves the sum of the per-row callback heights plus gaps
+///      (CONSERVATION, f32 epsilon).
+///
+/// 256 cases per property (the workspace default); override with
+/// `PROPTEST_CASES=4096 cargo test -p bastyde-widgets --lib row_metrics`.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Zero heights are the degenerate case under investigation — with a
+    // zero gap/spacing they collide consecutive prefix-sum offsets and are
+    // Uniform mode's own `step <= 0.0` special case. Weighted so this is
+    // common, not rare.
+    fn arb_height() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            4 => Just(0.0_f32),
+            1 => Just(1.0_f32),
+            3 => 0.5f32..400.0f32,
+        ]
+    }
+
+    // Bounded to at most 40 rows (well under the task's 60-row ceiling) —
+    // trivial memory either way; the length matters only for giving zero
+    // runs room to appear.
+    fn arb_heights(max_len: usize) -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(arb_height(), 0..=max_len)
+    }
+
+    // A zero gap/spacing is required to actually collide consecutive
+    // offsets (and to hit Uniform's `step <= 0.0` branch); weighted toward
+    // it, but a nonzero spacing must stay reachable.
+    fn arb_gap() -> impl Strategy<Value = f32> {
+        prop_oneof![3 => Just(0.0_f32), 1 => 0.5f32..20.0f32]
+    }
+
+    // Wide enough to comfortably exceed any total this suite can build
+    // (<=40 rows * (400 max height + 20 max gap) ~= 16_800), and explicitly
+    // includes negative y and the exact origin.
+    fn arb_y() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            1 => Just(0.0_f32),
+            1 => -500.0f32..0.0f32,
+            1 => 0.0f32..2000.0f32,
+            1 => Just(100_000.0_f32),
+        ]
+    }
+
+    /// A pure per-row height callback closing over a cloned `Vec<f32>` —
+    /// `RowMetrics::exact` needs `Rc<dyn Fn(usize) -> f32>`, and every
+    /// widget-side caller builds one the same way (see e.g. `heights_fn`
+    /// in `mod tests` above, duplicated here per this crate's proptest
+    /// house style of not sharing generators across files).
+    fn height_fn(heights: Vec<f32>) -> Rc<dyn Fn(usize) -> f32> {
+        Rc::new(move |i| heights.get(i).copied().unwrap_or(0.0))
+    }
+
+    fn expected_total(heights: &[f32], gap: f32) -> f32 {
+        let rows = heights.len();
+        if rows == 0 {
+            return 0.0;
+        }
+        let sum_heights: f32 = heights.iter().sum();
+        sum_heights + (rows as f32 - 1.0) * gap
+    }
+
+    // ── 1. insertion_index is always in 0..=n ──
+    proptest! {
+        #[test]
+        fn insertion_index_is_always_in_0_equals_n(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            y in arb_y(),
+        ) {
+            let n = heights.len();
+            let mut m = RowMetrics::exact(height_fn(heights.clone()), gap);
+            m.resize(n);
+            let idx = m.insertion_index(y);
+            prop_assert!(
+                idx <= n,
+                "insertion_index({}) = {} exceeds row count {} (heights={:?}, gap={})",
+                y, idx, n, heights, gap,
+            );
+        }
+    }
+
+    // ── 2. insertion_index is monotone non-decreasing in y ──
+    proptest! {
+        #[test]
+        fn insertion_index_is_monotone_non_decreasing_in_y(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+            y1 in arb_y(),
+            y2 in arb_y(),
+        ) {
+            let (lo, hi) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
+            let n = heights.len();
+            let mut m = RowMetrics::exact(height_fn(heights.clone()), gap);
+            m.resize(n);
+            let idx_lo = m.insertion_index(lo);
+            let idx_hi = m.insertion_index(hi);
+            prop_assert!(
+                idx_lo <= idx_hi,
+                "insertion_index({}) = {} > insertion_index({}) = {}, not monotone \
+                 (heights={:?}, gap={})",
+                lo, idx_lo, hi, idx_hi, heights, gap,
+            );
+        }
+    }
+
+    // ── 3. Uniform and Exact-with-constant-height agree on every query ──
+    proptest! {
+        // UNRESOLVED — parked, not silently dropped. This property FAILS,
+        // and the failure looks like a real bug rather than an over-strict
+        // property: `RowMetrics::uniform` and `RowMetrics::exact` are meant to
+        // be interchangeable descriptions of the same geometry, and they
+        // disagree whenever `item_height == 0.0 && spacing == 0.0`.
+        //
+        //   count = 5, all heights 0.0, gap 0.0
+        //     Uniform::row_at(0.0)          == 0    (explicit `step <= 0.0` early return)
+        //     Exact::row_at(0.0)            == 4    (partition_point resolves the
+        //                                            all-equal offsets to the LAST tie)
+        //     Uniform::insertion_index(0.0) == 1  vs Exact == 5
+        //
+        // Reachable: every row measuring zero is what a fully collapsed or
+        // fully filtered list looks like. Consequence is a click or a drop at
+        // the same y resolving to a different row depending only on which
+        // RowMetrics mode the view happens to use.
+        //
+        // Fixing it means choosing which tie-break is correct (row 0 reads as
+        // the more defensible answer) and applying it to BOTH paths — a change
+        // to `PrefixSumOffsets::row_at`'s tie handling affects every consumer,
+        // so it is the author's call, not a mechanical fix. Do NOT weaken this
+        // assertion to make it pass.
+        #[ignore = "unresolved: uniform and exact modes disagree on all-zero heights — see comment"]
+        #[test]
+        fn uniform_and_exact_constant_height_modes_agree_on_every_query(
+            item_height in arb_height(),
+            spacing in arb_gap(),
+            count in 0usize..=40,
+            y in arb_y(),
+        ) {
+            let mut u = RowMetrics::uniform(item_height, spacing);
+            u.resize(count);
+            let e_fn: Rc<dyn Fn(usize) -> f32> = Rc::new(move |_| item_height);
+            let mut e = RowMetrics::exact(e_fn, spacing);
+            e.resize(count);
+
+            let total_u = u.total_height(count);
+            let total_e = e.total_height(count);
+            prop_assert!(
+                (total_u - total_e).abs() < 0.05,
+                "total_height disagrees: uniform={} exact={} (item_height={}, spacing={}, count={})",
+                total_u, total_e, item_height, spacing, count,
+            );
+
+            if count > 0 {
+                for i in 0..count {
+                    let top_u = u.row_top(i);
+                    let top_e = e.row_top(i);
+                    prop_assert!(
+                        (top_u - top_e).abs() < 0.05,
+                        "row_top({}) disagrees: uniform={} exact={} \
+                         (item_height={}, spacing={}, count={})",
+                        i, top_u, top_e, item_height, spacing, count,
+                    );
+                }
+
+                let row_u = u.row_at(y);
+                let row_e = e.row_at(y);
+                prop_assert_eq!(
+                    row_u, row_e,
+                    "row_at({}) disagrees: uniform={} exact={} (item_height={}, spacing={}, \
+                     count={}) — expected to diverge when item_height==0.0 && spacing==0.0: \
+                     Uniform's `step <= 0.0 => return 0` fallback vs the offset table's \
+                     tie-break-to-the-last-tied-row",
+                    y, row_u, row_e, item_height, spacing, count,
+                );
+
+                let ins_u = u.insertion_index(y);
+                let ins_e = e.insertion_index(y);
+                prop_assert_eq!(
+                    ins_u, ins_e,
+                    "insertion_index({}) disagrees: uniform={} exact={} \
+                     (item_height={}, spacing={}, count={})",
+                    y, ins_u, ins_e, item_height, spacing, count,
+                );
+            }
+        }
+    }
+
+    // ── 4. invalidate_from preserves the measured prefix exactly ──
+    proptest! {
+        #[test]
+        fn invalidate_from_preserves_the_measured_prefix_exactly(
+            estimated in 1.0f32..200.0f32,
+            spacing in arb_gap(),
+            (measured_heights, k) in arb_heights(30).prop_flat_map(|heights| {
+                let len = heights.len();
+                (Just(heights), 0..=len)
+            }),
+        ) {
+            let count = measured_heights.len();
+            let mut m = RowMetrics::auto_measure(estimated, spacing);
+            m.resize(count);
+            let observations: Vec<(usize, f32)> = measured_heights
+                .iter()
+                .copied()
+                .enumerate()
+                .collect();
+            m.observe_measured(&observations, 0.0);
+
+            let before: Vec<f32> = (0..k).map(|i| m.row_top(i)).collect();
+            m.invalidate_from(k);
+            let after: Vec<f32> = (0..k).map(|i| m.row_top(i)).collect();
+
+            prop_assert_eq!(
+                &before, &after,
+                "invalidate_from({}) disturbed the measured prefix [0,{}): before={:?} after={:?} \
+                 (estimated={}, spacing={}, count={})",
+                k, k, before, after, estimated, spacing, count,
+            );
+        }
+    }
+
+    // ── 5. Exact mode's resize-driven total_height conserves the callback sum ──
+    proptest! {
+        #[test]
+        fn exact_mode_total_height_conserves_the_callback_driven_sum(
+            heights in arb_heights(40),
+            gap in arb_gap(),
+        ) {
+            let n = heights.len();
+            let mut m = RowMetrics::exact(height_fn(heights.clone()), gap);
+            let actual = m.total_height(n);
+            let expected = expected_total(&heights, gap);
+            prop_assert!(
+                (actual - expected).abs() < 0.05,
+                "total_height({})={} but the direct sum of the callback's heights plus gaps \
+                 is {} (heights={:?}, gap={})",
+                n, actual, expected, heights, gap,
+            );
+        }
+    }
+}

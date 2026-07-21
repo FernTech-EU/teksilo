@@ -1555,9 +1555,25 @@ mod proptests {
 
     /// Same-count-per-column split: assign `heights` to `k` columns as
     /// contiguous runs of near-equal *count*, ignoring the heights entirely.
-    /// This is the textbook naive multi-column partition — `balance_columns`
-    /// exists specifically to do no worse than it on the tallest column, so
-    /// it is the right comparison oracle.
+    /// This is the textbook naive multi-column partition.
+    ///
+    /// Why this (rather than literally re-implementing the "greedy fill"
+    /// mentioned in the module docs) is a sound comparison oracle:
+    /// `columns_needed` is a monotone feasibility check (a higher limit
+    /// never needs more columns), so bisecting it finds the smallest limit
+    /// any contiguous partition into `k_eff` runs can achieve — i.e. the
+    /// *true minimum* possible tallest-column extent over **every** valid
+    /// `k_eff`-way contiguous partition, not just ones `balance_columns`
+    /// happens to construct. (The reserve tweak in `balance_columns` only
+    /// ever makes an earlier column take *fewer* items to keep every column
+    /// non-empty — it can't push a column's extent past the bisected limit,
+    /// since splitting a feasible run into two contiguous sub-runs can only
+    /// keep or shrink each half's extent.) Given that, `balance_columns`'
+    /// tallest column is, by construction, less than or equal to *any*
+    /// specific `k`-way contiguous partition — the even-count split above,
+    /// a hand-rolled greedy-fill-at-the-average, or anything else — so this
+    /// oracle is valid regardless of which "naive" strategy is picked; the
+    /// even-count split is simply the simplest one to implement correctly.
     fn naive_even_split_extents(heights: &[f32], gap: f32, k: usize) -> Vec<f32> {
         let n = heights.len();
         if n == 0 {
@@ -1586,7 +1602,9 @@ mod proptests {
         ) {
             // column_of is non-decreasing in i, which is exactly what makes
             // each column's original indices a contiguous block, and
-            // concatenating the columns in order reproduce 0..n.
+            // concatenating the columns in order reproduces 0..n exactly —
+            // the property that keeps visual order == focus order == the
+            // a11y walk order (see the "Reading order" module docs above).
             let r = balance_columns(&heights, gap, k);
             for w in r.column_of.windows(2) {
                 prop_assert!(
@@ -1662,7 +1680,11 @@ mod proptests {
             // from placed geometry.
             let a = balance_columns(&heights, gap, k);
             let b = balance_columns(&heights, gap, k);
-            prop_assert_eq!(a, b, "two calls with identical input produced different partitions");
+            prop_assert_eq!(
+                &a, &b,
+                "two calls with identical input ({:?}, gap {}, k {}) produced different partitions: {:?} vs {:?}",
+                heights, gap, k, a, b
+            );
         }
     }
 
@@ -1725,8 +1747,26 @@ mod proptests {
             gap in prop_oneof![Just(0.0_f32), Just(-1.0_f32), Just(1.0e6_f32)],
             k in prop_oneof![Just(0usize), Just(1usize), Just(100usize)],
         ) {
+            let n = heights.len();
             let r = balance_columns(&heights, gap, k);
-            prop_assert_eq!(r.column_of.len(), heights.len(), "every child must be assigned a column");
+            prop_assert_eq!(
+                r.column_of.len(), n,
+                "every child must be assigned a column: heights {:?} gap {} k {} -> {:?}",
+                heights, gap, k, r.column_of
+            );
+            // Every assigned column index must be a valid index into the
+            // partition (`k_eff = k.min(n).max(1) <= n` whenever n >= 1), even
+            // when k wildly overshoots n (k = 100 against at most 2 items).
+            prop_assert!(
+                r.column_of.iter().all(|&c| c < n.max(1)),
+                "out-of-range column index in {:?} for {} items (gap {} k {})",
+                r.column_of, n, gap, k
+            );
+            prop_assert!(
+                r.height.is_finite() && r.height >= 0.0,
+                "height {} is not a finite, non-negative number for heights {:?} gap {} k {}",
+                r.height, heights, gap, k
+            );
         }
     }
 }

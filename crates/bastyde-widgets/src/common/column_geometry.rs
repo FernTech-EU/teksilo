@@ -342,8 +342,17 @@ mod tests {
 /// The module doc states the column-count rule is the CSS `auto-fill`
 /// formula `floor((avail + gap) / (min + gap))`, floored at 1, and that
 /// `with_max_columns` is a cap the formula must never exceed. Those, plus
-/// determinism-adjacent facts like "widening never loses a column" and "a
-/// negative gap is clamped, not merely tolerated", are the properties below.
+/// determinism-adjacent facts like "widening never loses a column", "a
+/// negative gap is clamped, not merely tolerated", and "`used_width` /
+/// `column_width` respect the configured `max_column_width` clamp", are the
+/// properties below.
+///
+/// **The floor formula includes an epsilon.** `0fb72869` ("column epsilon")
+/// added a `+ 1e-4` stabilizer inside `column_count` *after* this suite was
+/// first drafted, so its oracle must replicate that epsilon rather than
+/// assert a bare floor — see the comment on property 3 for why a bare-floor
+/// oracle would be a real (not hypothetical) source of flaky failures here,
+/// not merely a stricter assertion.
 ///
 /// `cargo-fuzz` needs nightly + libfuzzer-sys, which isn't assumed here;
 /// proptest with 256 cases per property (override with `PROPTEST_CASES=N`)
@@ -381,9 +390,22 @@ mod proptests {
         prop_oneof![Just(None), (1usize..6usize).prop_map(Some),]
     }
 
+    // `max_column_width` (the per-column stretch clamp) is a completely
+    // different knob from `max_columns` (the count cap) — `None` alongside
+    // a mix of concrete clamps so properties exercise both the identity
+    // path (no clamp: `column_width` == the even stretched share) and the
+    // clamped path (a genuine `used_width < available_width` gap opens up).
+    fn arb_max_column_width() -> impl Strategy<Value = Option<f32>> {
+        prop_oneof![Just(None), (1.0f32..600.0_f32).prop_map(Some),]
+    }
+
     fn adaptive(min: f32, gap: f32, max_columns: Option<usize>) -> ColumnGeometry {
-        ColumnGeometry::from_policy(WidthPolicy::Adaptive { min, max: None }, gap, EdgeInsets::ZERO)
-            .with_max_columns(max_columns)
+        ColumnGeometry::from_policy(
+            WidthPolicy::Adaptive { min, max: None },
+            gap,
+            EdgeInsets::ZERO,
+        )
+        .with_max_columns(max_columns)
     }
 
     // ── 1. column count never exceeds the configured cap ──
@@ -415,14 +437,27 @@ mod proptests {
         }
     }
 
-    // ── 3. adaptive count matches the documented CSS auto-fill formula ──
+    // ── 3. adaptive count matches the documented epsilon-stabilized floor formula ──
     proptest! {
         #[test]
         fn adaptive_count_matches_the_documented_floor_formula(
             width in 1.0f32..4000.0_f32, min in 1.0f32..600.0_f32, gap in 0.0f32..80.0_f32,
         ) {
+            // `column_count` computes `floor((avail + gap) / (min + gap) + EPSILON)`,
+            // NOT a bare floor (see the `EPSILON` comment on `column_count`,
+            // added by 0fb72869 "column epsilon" specifically so an
+            // exact-fit width landing a hair under the true boundary from
+            // upstream float noise doesn't silently drop a column). A
+            // bare-floor oracle disagrees with the real implementation
+            // whenever the ratio falls inside that ~1e-4-wide boundary band
+            // — which random continuous `width`/`min`/`gap` draws hit often
+            // enough over hundreds of cases to be a real (not hypothetical)
+            // source of spurious failures — so the oracle must replicate the
+            // same epsilon to test the actual contract rather than a
+            // slightly different one.
+            const EPSILON: f32 = 1e-4;
             let g = adaptive(min, gap, None);
-            let expected = (((width + gap) / (min + gap)).floor() as i64).max(1) as usize;
+            let expected = (((width + gap) / (min + gap) + EPSILON).floor() as i64).max(1) as usize;
             prop_assert_eq!(
                 g.column_count(width), expected,
                 "formula mismatch at width {} min {} gap {}", width, min, gap
@@ -467,18 +502,48 @@ mod proptests {
         }
     }
 
-    // ── 6. used width never exceeds the available width ──
+    // ── 6. used width never exceeds the available width, clamped or not ──
     proptest! {
         #[test]
         fn used_width_never_exceeds_available_width(
-            width in arb_width(), min in arb_min_width(), gap in arb_gap(), max in arb_max_columns(),
+            width in arb_width(), min in arb_min_width(), gap in arb_gap(),
+            max_w in arb_max_column_width(), max_columns in arb_max_columns(),
         ) {
-            let g = adaptive(min, gap, max);
+            // When `max_w` is `None` this is an algebraic identity: the
+            // "stretched" formula in `column_width` is derived exactly from
+            // `used_width`'s own equation, so `used_width` reconstructs to
+            // `available_width` regardless of which column count was
+            // chosen. The interesting case is `max_w: Some(_)` clamping
+            // columns narrower than their even share, which is where a
+            // genuine `used_width < available_width` gap can open up — both
+            // are exercised here since `arb_max_column_width` mixes `None`
+            // with concrete clamps.
+            let g = ColumnGeometry::from_policy(WidthPolicy::Adaptive { min, max: max_w }, gap, EdgeInsets::ZERO)
+                .with_max_columns(max_columns);
             let used = g.used_width(width);
             let available = g.available_width(width);
             prop_assert!(
                 used <= available + 0.05,
-                "used_width {} exceeds available_width {} at viewport {}", used, available, width
+                "used_width {} exceeds available_width {} at viewport {} (min {} gap {} max_w {:?} max_columns {:?})",
+                used, available, width, min, gap, max_w, max_columns
+            );
+        }
+    }
+
+    // ── 7. column_width never exceeds a configured max_column_width ──
+    proptest! {
+        #[test]
+        fn column_width_never_exceeds_the_configured_max_when_set(
+            width in arb_width(), min in arb_min_width(), gap in arb_gap(), max_w in 1.0f32..600.0_f32,
+        ) {
+            let g = ColumnGeometry::from_policy(
+                WidthPolicy::Adaptive { min, max: Some(max_w) }, gap, EdgeInsets::ZERO,
+            );
+            let w = g.column_width(width);
+            prop_assert!(
+                w <= max_w + 0.01,
+                "column_width {} exceeds configured max_column_width {} (viewport {} min {} gap {})",
+                w, max_w, width, min, gap
             );
         }
     }
