@@ -703,13 +703,31 @@ fn try_incremental_node_update<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>, nod
                         ord.get()
                     }
                 };
+                // A neighbour that now compares `Equal` matters as much as one
+                // we've moved past. The full reprojection sorts siblings with
+                // `Vec::sort_by`, which is stable, so a run of equal keys keeps
+                // its original *sibling* order; leaving the node where it
+                // happens to sit would make this fast path disagree with the
+                // rebuild it is meant to be an optimisation of, and the row
+                // would jump the next time an unrelated edit forced a full
+                // reprojection.
+                //
+                // Unlike the flat `SortFilterListModel` case — where the tie
+                // break is the source index and so is available right here —
+                // recovering a node's original sibling index means walking
+                // `tree.children(parent)`. Rather than pay that on every
+                // update, this bails out on any tie. The cost is that a tree
+                // sorted on a low-cardinality key (a status column, say)
+                // falls back to a full reprojection more often; if that ever
+                // shows up in a profile, comparing sibling indices on the tie
+                // path alone would recover the fast path.
                 let before = same_depth_neighbor_before(&g.flattened, old_pos, depth);
-                if before.is_some_and(|prev| cmp_nodes(prev, node) == Ordering::Greater) {
-                    return false; // moved before its predecessor
+                if before.is_some_and(|prev| cmp_nodes(prev, node) != Ordering::Less) {
+                    return false; // moved before, or now ties with, its predecessor
                 }
                 let after = same_depth_neighbor_after(&g.flattened, old_pos, depth);
-                if after.is_some_and(|next| cmp_nodes(node, next) == Ordering::Greater) {
-                    return false; // moved past its successor
+                if after.is_some_and(|next| cmp_nodes(node, next) != Ordering::Less) {
+                    return false; // moved past, or now ties with, its successor
                 }
             }
             old_pos

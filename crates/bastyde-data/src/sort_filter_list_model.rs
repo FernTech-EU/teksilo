@@ -579,13 +579,30 @@ fn try_incremental_item_update<T: 'static>(
             }
         };
         let visible = &guard.visible_to_source;
-        if visible_pos > 0 && ordered(visible[visible_pos - 1], index) == Ordering::Greater {
-            return None; // moved before its predecessor
+        // A neighbour that now compares `Equal` matters as much as one we've
+        // moved past. The full reprojection sorts with `Vec::sort_by`, which
+        // is stable, so within a run of equal keys the visible order is
+        // ascending *source* index. Keeping the row where it happens to sit
+        // would leave the fast path disagreeing with the rebuild it is meant
+        // to be an optimisation of, and the row would then appear to jump the
+        // next time any unrelated edit triggered a full reprojection. Falling
+        // back on the ties that actually violate that ordering preserves the
+        // optimisation for every other case.
+        if visible_pos > 0 {
+            let pred = visible[visible_pos - 1];
+            match ordered(pred, index) {
+                Ordering::Greater => return None, // moved before its predecessor
+                Ordering::Equal if pred > index => return None, // tie, wrong stable order
+                _ => {}
+            }
         }
-        if visible_pos + 1 < visible.len()
-            && ordered(index, visible[visible_pos + 1]) == Ordering::Greater
-        {
-            return None; // moved past its successor
+        if visible_pos + 1 < visible.len() {
+            let succ = visible[visible_pos + 1];
+            match ordered(index, succ) {
+                Ordering::Greater => return None, // moved past its successor
+                Ordering::Equal if index > succ => return None, // tie, wrong stable order
+                _ => {}
+            }
         }
     }
 
