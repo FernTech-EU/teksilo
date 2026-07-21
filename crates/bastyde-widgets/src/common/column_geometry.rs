@@ -331,3 +331,155 @@ mod tests {
         assert!((w - 150.0).abs() < 0.01, "fixed width never stretches");
     }
 }
+
+/// Property-based tests for [`ColumnGeometry`] under [`WidthPolicy::Adaptive`]
+/// — the policy `ColumnFlow` and `GridView`'s adaptive strategy both use.
+///
+/// Both `ColumnGeometry` and `WidthPolicy` are `pub(crate)` (see
+/// `pub(crate) mod column_geometry;` in `common.rs`), so this suite lives
+/// inline rather than in `tests/`, which cannot reach a `pub(crate)` item.
+///
+/// The module doc states the column-count rule is the CSS `auto-fill`
+/// formula `floor((avail + gap) / (min + gap))`, floored at 1, and that
+/// `with_max_columns` is a cap the formula must never exceed. Those, plus
+/// determinism-adjacent facts like "widening never loses a column" and "a
+/// negative gap is clamped, not merely tolerated", are the properties below.
+///
+/// `cargo-fuzz` needs nightly + libfuzzer-sys, which isn't assumed here;
+/// proptest with 256 cases per property (override with `PROPTEST_CASES=N`)
+/// covers the width/min/gap/cap combinations a hand-written example table
+/// would miss, with shrinking to a minimal counterexample on failure.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // A collapsed (0) and a hairline (1) viewport are edge cases the
+    // column-count formula must not divide-by-zero or misbehave on.
+    fn arb_width() -> impl Strategy<Value = f32> {
+        prop_oneof![Just(0.0_f32), Just(1.0_f32), 1.0f32..4000.0_f32,]
+    }
+
+    // `min <= 0.0` is a documented special case (pins to a single column);
+    // bias toward hitting it alongside ordinary card-ish widths.
+    fn arb_min_width() -> impl Strategy<Value = f32> {
+        prop_oneof![Just(0.0_f32), 1.0f32..600.0_f32,]
+    }
+
+    // Zero, negative (clamped), and a huge gap are the documented edge
+    // cases; a mid-range gap is the common case.
+    fn arb_gap() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            Just(0.0_f32),
+            Just(-25.0_f32),
+            0.0f32..80.0_f32,
+            Just(10_000.0_f32),
+        ]
+    }
+
+    fn arb_max_columns() -> impl Strategy<Value = Option<usize>> {
+        prop_oneof![Just(None), (1usize..6usize).prop_map(Some),]
+    }
+
+    fn adaptive(min: f32, gap: f32, max_columns: Option<usize>) -> ColumnGeometry {
+        ColumnGeometry::from_policy(WidthPolicy::Adaptive { min, max: None }, gap, EdgeInsets::ZERO)
+            .with_max_columns(max_columns)
+    }
+
+    // ── 1. column count never exceeds the configured cap ──
+    proptest! {
+        #[test]
+        fn column_count_never_exceeds_max_columns(
+            width in arb_width(), min in arb_min_width(), gap in arb_gap(), max in 1usize..6usize,
+        ) {
+            let g = adaptive(min, gap, Some(max));
+            let count = g.column_count(width);
+            prop_assert!(
+                count <= max,
+                "column_count {} exceeds max_columns {} at width {}", count, max, width
+            );
+        }
+    }
+
+    // ── 2. column count is never zero ──
+    proptest! {
+        #[test]
+        fn column_count_is_always_at_least_one(
+            width in arb_width(), min in arb_min_width(), gap in arb_gap(), max in arb_max_columns(),
+        ) {
+            let g = adaptive(min, gap, max);
+            prop_assert!(
+                g.column_count(width) >= 1,
+                "column_count returned 0 at width {} min {} gap {}", width, min, gap
+            );
+        }
+    }
+
+    // ── 3. adaptive count matches the documented CSS auto-fill formula ──
+    proptest! {
+        #[test]
+        fn adaptive_count_matches_the_documented_floor_formula(
+            width in 1.0f32..4000.0_f32, min in 1.0f32..600.0_f32, gap in 0.0f32..80.0_f32,
+        ) {
+            let g = adaptive(min, gap, None);
+            let expected = (((width + gap) / (min + gap)).floor() as i64).max(1) as usize;
+            prop_assert_eq!(
+                g.column_count(width), expected,
+                "formula mismatch at width {} min {} gap {}", width, min, gap
+            );
+        }
+    }
+
+    // ── 4. widening the viewport never loses a column ──
+    proptest! {
+        #[test]
+        fn column_count_is_monotone_nondecreasing_in_width(
+            min in arb_min_width(), gap in arb_gap(), max in arb_max_columns(),
+            narrow in 0.0f32..2000.0_f32, extra in 0.0f32..2000.0_f32,
+        ) {
+            let g = adaptive(min, gap, max);
+            let wide = narrow + extra;
+            let (count_narrow, count_wide) = (g.column_count(narrow), g.column_count(wide));
+            prop_assert!(
+                count_wide >= count_narrow,
+                "count dropped from {} to {} when width grew from {} to {}",
+                count_narrow, count_wide, narrow, wide
+            );
+        }
+    }
+
+    // ── 5. a negative gap behaves exactly like a zero gap ──
+    proptest! {
+        #[test]
+        fn negative_gap_is_equivalent_to_zero_gap(
+            width in arb_width(), min in arb_min_width(), neg_gap in -500.0f32..0.0_f32, max in arb_max_columns(),
+        ) {
+            let with_negative = adaptive(min, neg_gap, max);
+            let with_zero = adaptive(min, 0.0, max);
+            prop_assert_eq!(
+                with_negative.column_count(width), with_zero.column_count(width),
+                "negative gap {} was not clamped the same as zero", neg_gap
+            );
+            prop_assert!(
+                (with_negative.column_width(width) - with_zero.column_width(width)).abs() < 0.01,
+                "negative gap {} produced a different column width than zero", neg_gap
+            );
+        }
+    }
+
+    // ── 6. used width never exceeds the available width ──
+    proptest! {
+        #[test]
+        fn used_width_never_exceeds_available_width(
+            width in arb_width(), min in arb_min_width(), gap in arb_gap(), max in arb_max_columns(),
+        ) {
+            let g = adaptive(min, gap, max);
+            let used = g.used_width(width);
+            let available = g.available_width(width);
+            prop_assert!(
+                used <= available + 0.05,
+                "used_width {} exceeds available_width {} at viewport {}", used, available, width
+            );
+        }
+    }
+}

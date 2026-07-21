@@ -21,3 +21,8 @@ bastyde-i18n = { workspace = true }
 # bastyde-widgets does not depend on bastyde-scene, so this is acyclic.
 bastyde-widgets = { workspace = true }
 accesskit = { workspace = true }
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }

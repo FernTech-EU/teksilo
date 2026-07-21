@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7db688f1b31c5703df6089ea301faf892c8d19450c89525405af734dad0b5acf # shrinks to a = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }, b = Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }, factor = NaN

@@ -81,6 +81,9 @@ thiserror = { workspace = true }
 bastyde-text = { path = "../bastyde-text", version = "0.6.2", default-features = false }
 
 [dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
 accesskit_consumer = { workspace = true }
 # `menu_bar` unit tests fabricate `WidgetId`s without a real arena for
 # pure-function dispatcher coverage. Mirrors the convention used in

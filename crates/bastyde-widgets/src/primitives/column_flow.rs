@@ -1490,3 +1490,243 @@ mod tests {
         assert!((tree.bounds(ids[1]).y - 40.0).abs() < 0.01);
     }
 }
+
+/// Property-based tests for [`balance_columns`].
+///
+/// `balance_columns` is `pub(crate)`, so this suite lives inline rather than
+/// in `tests/` (an integration test cannot see it). The module docs above
+/// state a handful of unusually crisp, checkable guarantees: children are
+/// distributed as **contiguous source-order runs** (the property that keeps
+/// visual order == focus order == the a11y walk order — see the "Reading
+/// order" section at the top of this file), the partition uses **exactly**
+/// `k` columns whenever `n >= k` with **no column left empty**, the result is
+/// **deterministic** across repeated calls (`layout_response` and
+/// `place_children` each re-run the search from scratch with no persisted
+/// state, so a disagreement between two calls would desynchronise measurement
+/// from placement), and the balanced tallest column is never worse than a
+/// naive same-count-per-column split (the oracle this bisection search
+/// replaces).
+///
+/// `cargo-fuzz` needs nightly + libfuzzer-sys, which isn't assumed here;
+/// proptest with 256–512 cases per property (override with
+/// `PROPTEST_CASES=N`) gives the "never panics / never regresses on a weird
+/// shape" coverage a fuzz corpus would, plus shrinking. See `mod tests` above
+/// for the example-based regression coverage this suite deliberately does not
+/// repeat (the empty-trailing-column bug, the zero-height-still-pays-the-gap
+/// bug, etc.).
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Zero and small heights are the specific edge case `columns_needed`
+    // guards against (a run of zero-height items is still `n` items with
+    // `n-1` gaps between them) — bias toward hitting them.
+    fn arb_height() -> impl Strategy<Value = f32> {
+        prop_oneof![Just(0.0_f32), 0.0f32..500.0_f32,]
+    }
+
+    fn arb_heights() -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(arb_height(), 0..24)
+    }
+
+    // Zero, negative (clamped), and huge gaps are the documented edge cases;
+    // a mid-range gap is the common case.
+    fn arb_gap() -> impl Strategy<Value = f32> {
+        prop_oneof![
+            Just(0.0_f32),
+            Just(-5.0_f32),
+            0.0f32..50.0_f32,
+            Just(10_000.0_f32),
+        ]
+    }
+
+    // A non-negative gap for properties that compare against an oracle
+    // computed with the same, unclamped gap value.
+    fn arb_nonneg_gap() -> impl Strategy<Value = f32> {
+        prop_oneof![Just(0.0_f32), 0.0f32..50.0_f32, Just(5_000.0_f32),]
+    }
+
+    // k == 0 and k > n are the documented degenerate cases; small k is the
+    // common case.
+    fn arb_k() -> impl Strategy<Value = usize> {
+        prop_oneof![Just(0usize), 1usize..8usize,]
+    }
+
+    /// Same-count-per-column split: assign `heights` to `k` columns as
+    /// contiguous runs of near-equal *count*, ignoring the heights entirely.
+    /// This is the textbook naive multi-column partition — `balance_columns`
+    /// exists specifically to do no worse than it on the tallest column, so
+    /// it is the right comparison oracle.
+    fn naive_even_split_extents(heights: &[f32], gap: f32, k: usize) -> Vec<f32> {
+        let n = heights.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let k_eff = k.min(n).max(1);
+        let base = n / k_eff;
+        let extra = n % k_eff;
+        let mut extents = Vec::with_capacity(k_eff);
+        let mut idx = 0usize;
+        for col in 0..k_eff {
+            let take = base + usize::from(col < extra);
+            let slice = &heights[idx..idx + take];
+            let sum: f32 = slice.iter().sum();
+            extents.push(run_extent(sum, take, gap));
+            idx += take;
+        }
+        extents
+    }
+
+    // ── 1. partition is a set of contiguous, source-order runs ──
+    proptest! {
+        #[test]
+        fn column_indices_never_decrease_across_the_source_order(
+            heights in arb_heights(), gap in arb_gap(), k in arb_k(),
+        ) {
+            // column_of is non-decreasing in i, which is exactly what makes
+            // each column's original indices a contiguous block, and
+            // concatenating the columns in order reproduce 0..n.
+            let r = balance_columns(&heights, gap, k);
+            for w in r.column_of.windows(2) {
+                prop_assert!(
+                    w[1] >= w[0],
+                    "column index went backwards in {:?}", r.column_of
+                );
+            }
+        }
+    }
+
+    // ── 2. exactly k columns are used whenever n >= k ──
+    proptest! {
+        #[test]
+        fn uses_exactly_k_columns_when_there_are_enough_items(
+            heights in arb_heights(), gap in arb_gap(), k in 1usize..8usize,
+        ) {
+            let n = heights.len();
+            prop_assume!(n >= k);
+            let r = balance_columns(&heights, gap, k);
+            let used = r.column_of.iter().copied().max().map_or(0, |m| m + 1);
+            prop_assert_eq!(
+                used, k,
+                "expected exactly {} columns for {} items, used {}", k, n, used
+            );
+        }
+    }
+
+    // ── 3. no column is left empty when n >= k ──
+    proptest! {
+        #[test]
+        fn no_column_is_empty_when_there_are_enough_items(
+            heights in arb_heights(), gap in arb_gap(), k in 1usize..8usize,
+        ) {
+            let n = heights.len();
+            prop_assume!(n >= k);
+            let r = balance_columns(&heights, gap, k);
+            for col in 0..k {
+                prop_assert!(
+                    r.column_of.contains(&col),
+                    "column {} is empty in partition {:?}", col, r.column_of
+                );
+            }
+        }
+    }
+
+    // ── 4. balance never does worse than a naive even-count split ──
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]
+        #[test]
+        fn tallest_column_is_at_most_the_naive_even_split(
+            heights in arb_heights(), gap in arb_nonneg_gap(), k in arb_k(),
+        ) {
+            let r = balance_columns(&heights, gap, k);
+            let naive_tallest = naive_even_split_extents(&heights, gap, k)
+                .into_iter()
+                .fold(0.0_f32, f32::max);
+            prop_assert!(
+                r.height <= naive_tallest + 0.01,
+                "balanced height {} exceeds naive even-split height {} for {:?} gap {} k {}",
+                r.height, naive_tallest, heights, gap, k
+            );
+        }
+    }
+
+    // ── 5. determinism across repeated calls ──
+    proptest! {
+        #[test]
+        fn repeated_calls_on_the_same_input_agree_bit_for_bit(
+            heights in arb_heights(), gap in arb_gap(), k in arb_k(),
+        ) {
+            // layout_response and place_children each run the bisection from
+            // scratch; a disagreement here would desynchronise measured size
+            // from placed geometry.
+            let a = balance_columns(&heights, gap, k);
+            let b = balance_columns(&heights, gap, k);
+            prop_assert_eq!(a, b, "two calls with identical input produced different partitions");
+        }
+    }
+
+    // ── 6. reported height matches the reconstructed tallest column ──
+    proptest! {
+        #[test]
+        fn reported_height_matches_the_reconstructed_tallest_column(
+            heights in arb_heights(), gap in arb_gap(), k in arb_k(),
+        ) {
+            let r = balance_columns(&heights, gap, k);
+            let cols = r.column_of.iter().copied().max().map_or(0, |m| m + 1);
+            let mut sums = vec![0.0f32; cols];
+            let mut counts = vec![0usize; cols];
+            for (i, &h) in heights.iter().enumerate() {
+                counts[r.column_of[i]] += 1;
+                sums[r.column_of[i]] += h;
+            }
+            let clamped_gap = gap.max(0.0);
+            let tallest = (0..cols)
+                .map(|c| run_extent(sums[c], counts[c], clamped_gap))
+                .fold(0.0_f32, f32::max);
+            prop_assert!(
+                (r.height - tallest).abs() < 0.05,
+                "reported height {} disagrees with reconstructed tallest column {}",
+                r.height, tallest
+            );
+        }
+    }
+
+    // ── 7. no column ever exceeds the reported height ──
+    proptest! {
+        #[test]
+        fn no_column_extent_exceeds_the_reported_height(
+            heights in arb_heights(), gap in arb_gap(), k in arb_k(),
+        ) {
+            let r = balance_columns(&heights, gap, k);
+            let cols = r.column_of.iter().copied().max().map_or(0, |m| m + 1);
+            let mut sums = vec![0.0f32; cols];
+            let mut counts = vec![0usize; cols];
+            for (i, &h) in heights.iter().enumerate() {
+                counts[r.column_of[i]] += 1;
+                sums[r.column_of[i]] += h;
+            }
+            let clamped_gap = gap.max(0.0);
+            for c in 0..cols {
+                let extent = run_extent(sums[c], counts[c], clamped_gap);
+                prop_assert!(
+                    extent <= r.height + 0.05,
+                    "column {} extent {} exceeds reported height {}", c, extent, r.height
+                );
+            }
+        }
+    }
+
+    // ── 8. never panics on degenerate shapes (n == 0, k == 0, k > n, huge gap) ──
+    proptest! {
+        #[test]
+        fn never_panics_on_degenerate_input(
+            heights in prop::collection::vec(arb_height(), 0..3),
+            gap in prop_oneof![Just(0.0_f32), Just(-1.0_f32), Just(1.0e6_f32)],
+            k in prop_oneof![Just(0usize), Just(1usize), Just(100usize)],
+        ) {
+            let r = balance_columns(&heights, gap, k);
+            prop_assert_eq!(r.column_of.len(), heights.len(), "every child must be assigned a column");
+        }
+    }
+}

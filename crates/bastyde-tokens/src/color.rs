@@ -138,7 +138,13 @@ impl Color {
     /// Mix two colors linearly. `t=0.0` returns `self`, `t=1.0` returns `other`.
     /// Alpha is also interpolated.
     pub fn mix(self, other: Color, t: f32) -> Color {
-        let t = t.clamp(0.0, 1.0);
+        // `f32::clamp` returns NaN for a NaN input, so the clamp alone does not
+        // keep `t` in `[0, 1]` — a NaN factor would poison every channel and
+        // paint an unrenderable colour. Map NaN to `0.0` (return `self`
+        // unchanged), the safest reading of an undefined mix. `±inf` needs no
+        // special case: the clamp already maps them to `1.0` / `0.0`.
+        // Found by `tests/prop_color.rs`.
+        let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
         let inv = 1.0 - t;
         Color {
             r: self.r * inv + other.r * t,

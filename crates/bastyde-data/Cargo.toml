@@ -15,6 +15,9 @@ bastyde-core = { workspace = true }
 slotmap = "1"
 
 [dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
 # Test-only: constructing a concrete `bastyde_tokens::Color` to exercise
 # `ChartModel::set_series_color` needs the tokens crate directly (`ColorProp`
 # itself, re-exported from `bastyde-core`, has no zero-argument constructor).

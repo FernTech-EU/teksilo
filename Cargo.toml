@@ -77,6 +77,13 @@ thiserror = "2"
 toml = "1.1"
 etcetera = "0.11"
 tempfile = "3"
+# Test-only: property-based testing. `cargo-fuzz` needs a nightly toolchain
+# (libfuzzer-sys links against compiler-rt's fuzzing runtime), which isn't a
+# guaranteed CI dependency; proptest gives the same "never panics on weird
+# input" coverage plus shrinking, on stable. Matches the convention already
+# used in the sibling `text-typeset` / `text-document` repos. Never a
+# production dependency — `[dev-dependencies]` only.
+proptest = "1"
 uuid = { version = "1", features = ["v4"] }
 ureq = { version = "3.3", default-features = false, features = ["rustls"] }
 serde_json = "1"
