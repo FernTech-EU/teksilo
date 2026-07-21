@@ -6,7 +6,7 @@ name = "telemetry-codegen"
 edition = "2024"
 version.workspace = true
 license-file.workspace = true
-publish.workspace = true
+publish = false
 authors.workspace = true
 repository.workspace = true
 
