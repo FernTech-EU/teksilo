@@ -33,9 +33,16 @@ forms this workspace actually uses:
     dep = { package = "bastyde-real-name", ... }   # rename
     [target.'cfg(...)'.dependencies] / [build-dependencies] / [dev-dependencies]
 
+Crates that inherit their publishability with ``publish.workspace = true``
+resolve against the root manifest's ``[workspace.package] publish`` value,
+so flipping that one line flips every inheriting crate.
+
 Usage:
-    python3 tools/check_release_order.py [--root DIR] [--json]
+    python3 tools/check_release_order.py [--root DIR] [--json | --list]
                                          [--include-examples]
+
+``--list`` prints nothing but the publishable crates, in release order,
+one per line — ready to feed a publish loop.
 
 Exit status is non-zero when a release-blocking cycle is found, so the
 script can gate CI.
@@ -103,14 +110,43 @@ def _strip_comment(line: str) -> str:
     return line
 
 
-def parse_cargo_toml(text: str) -> tuple[str | None, bool, set[str], set[str]]:
+def parse_workspace_publish(root: str) -> bool:
+    """Read ``[workspace.package] publish`` from the root manifest.
+
+    This is the value every crate that writes ``publish.workspace = true``
+    inherits. Absent means cargo's default: publishable.
+    """
+    manifest = os.path.join(root, "Cargo.toml")
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        print(f"warning: cannot read {manifest}: {exc} "
+              f"(assuming publish = true)", file=sys.stderr)
+        return True
+
+    in_ws_package = False
+    for raw in text.splitlines():
+        line = _strip_comment(raw)
+        m = _SECTION_RE.match(line)
+        if m:
+            in_ws_package = m.group(1).strip() == "workspace.package"
+            continue
+        if in_ws_package:
+            pm = _PUBLISH_RE.match(line)
+            if pm:
+                return pm.group(1) == "true"
+    return True
+
+
+def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bool, set[str], set[str]]:
     """Return (package_name, publishable, normal_internal_deps, dev_internal_deps).
 
     package_name is None for a virtual manifest (the workspace root).
+    `workspace_publish` is the value inherited by `publish.workspace = true`.
     """
     name: str | None = None
     publish = True  # absent `publish` means publishable
-    publish_seen = False
     normal: set[str] = set()
     dev: set[str] = set()
 
@@ -131,16 +167,13 @@ def parse_cargo_toml(text: str) -> tuple[str | None, bool, set[str], set[str]]:
             if nm:
                 name = nm.group(1)
             elif _PUBLISH_WS_RE.match(line):
-                # `publish.workspace = true` inherits the workspace value,
-                # which in this repo is `false`. Treat as non-publishable
-                # unless a later explicit `publish = true` overrides.
-                if not publish_seen:
-                    publish = False
+                # `publish.workspace = true` means *inherit*, not "publish
+                # me" — resolve it against `[workspace.package] publish`.
+                publish = workspace_publish
             else:
                 pm = _PUBLISH_RE.match(line)
                 if pm:
                     publish = pm.group(1) == "true"
-                    publish_seen = True
             continue
 
         if current in ("normal", "dev"):
@@ -156,12 +189,18 @@ def parse_cargo_toml(text: str) -> tuple[str | None, bool, set[str], set[str]]:
     return name, publish, normal, dev
 
 
-def discover_crates(root: str, include_examples: bool) -> dict[str, Crate]:
+def discover_crates(root: str, include_examples: bool,
+                    workspace_publish: bool) -> dict[str, Crate]:
     """Scan the workspace for member crates and parse their manifests."""
     crates: dict[str, Crate] = {}
-    skip_dirs = {".git", "target", "node_modules", ".idea", ".vscode"}
+    # Hidden directories are skipped wholesale: besides .git/.idea/.vscode,
+    # this keeps us out of git worktrees parked under `.claude/worktrees/`,
+    # which are *full copies of this repo* — descending into one yields a
+    # second `bastyde-core` etc. that silently shadows the real crate.
+    skip_dirs = {"target", "node_modules"}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        dirnames[:] = [d for d in dirnames
+                       if d not in skip_dirs and not d.startswith(".")]
         if "Cargo.toml" not in filenames:
             continue
         manifest = os.path.join(dirpath, "Cargo.toml")
@@ -172,14 +211,23 @@ def discover_crates(root: str, include_examples: bool) -> dict[str, Crate]:
         except OSError as exc:
             print(f"warning: cannot read {manifest}: {exc}", file=sys.stderr)
             continue
-        name, publish, normal, dev = parse_cargo_toml(text)
+        name, publish, normal, dev = parse_cargo_toml(text, workspace_publish)
         if name is None:
             continue  # virtual manifest (workspace root)
-        is_example = rel.startswith("examples" + os.sep) or rel == "examples"
+        # Component-based, so a nested `.../examples/foo` is caught too — a
+        # bare `startswith("examples/")` misses anything not at the root.
+        is_example = "examples" in rel.split(os.sep)
         if is_example and not include_examples:
             # Still useful to know examples exist, but they are leaf
             # consumers (nothing depends on them) and are not published,
             # so they never affect cycles or release order.
+            continue
+        if name in crates:
+            # Two manifests declaring the same package name means we walked
+            # into a copy of the tree. Keep the first and say so loudly —
+            # silently overwriting produces a plausible-looking wrong graph.
+            print(f"warning: duplicate package '{name}' at {rel} "
+                  f"(keeping {crates[name].path})", file=sys.stderr)
             continue
         crates[name] = Crate(name=name, path=rel, publish=publish,
                               normal_deps=normal, dev_deps=dev)
@@ -282,16 +330,23 @@ def main() -> int:
     ap.add_argument("--root", default=None,
                     help="workspace root (default: parent of this script's dir)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--list", action="store_true",
+                    help="print only the publishable crates in release order, "
+                         "one per line (no report, no headers)")
     ap.add_argument("--include-examples", action="store_true",
                     help="include examples/* crates in the graph (default: skip)")
     args = ap.parse_args()
+
+    if args.json and args.list:
+        ap.error("--json and --list are mutually exclusive")
 
     if args.root:
         root = os.path.abspath(args.root)
     else:
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
-    crates = discover_crates(root, args.include_examples)
+    workspace_publish = parse_workspace_publish(root)
+    crates = discover_crates(root, args.include_examples, workspace_publish)
     if not crates:
         print(f"error: no bastyde-* crates found under {root}", file=sys.stderr)
         return 2
@@ -324,10 +379,33 @@ def main() -> int:
 
     # --- Release order over the publishable normal graph ---
     waves, leftover = release_waves(names, normal_edges)
+    flat = [n for wave in waves for n in wave]
+    publishable_order = [n for n in flat if crates[n].publish]
+
+    # A publishable crate whose normal deps include an unpublishable one
+    # cannot actually reach the registry — cargo refuses to publish a
+    # package that depends on something it can't resolve there.
+    unpublishable_deps: list[tuple[str, str]] = []
+    for n in names:
+        if not crates[n].publish:
+            continue
+        for d in sorted(normal_edges[n]):
+            if not crates[d].publish:
+                unpublishable_deps.append((n, d))
+
+    if args.list:
+        if leftover:
+            print("error: cannot order crates — release-blocking cycle "
+                  f"involving: {', '.join(leftover)}", file=sys.stderr)
+            return 1
+        for n in publishable_order:
+            print(n)
+        return 1 if blocking_cycles else 0
 
     if args.json:
         payload = {
             "root": root,
+            "workspace_publish": workspace_publish,
             "crates": {
                 n: {
                     "path": crates[n].path,
@@ -340,6 +418,9 @@ def main() -> int:
             "blocking_cycles": blocking_cycles,
             "dev_back_edges": dev_back_edges,
             "release_waves": waves,
+            "release_order": flat,
+            "publishable_release_order": publishable_order,
+            "publishable_depending_on_unpublishable": unpublishable_deps,
             "unordered_due_to_cycle": leftover,
         }
         print(json.dumps(payload, indent=2))
@@ -347,6 +428,8 @@ def main() -> int:
 
     # --- Human-readable report ---
     print(f"Bastyde dependency report  ({len(names)} internal crates under {root})")
+    print(f"[workspace.package] publish = {str(workspace_publish).lower()}"
+          "   (inherited by every `publish.workspace = true` crate)")
     print("=" * 72)
 
     print("\nPer-crate internal dependencies (normal/build + dev):")
@@ -391,11 +474,22 @@ def main() -> int:
         for n in leftover:
             print(f"      {n}")
 
+    if unpublishable_deps:
+        print("\nPublishable crates depending on unpublishable ones:")
+        for a, b in unpublishable_deps:
+            print(f"  !!  {a}  -->  {b}   ({b} has publish = false)")
+        print("  `cargo publish` will reject these: the dependency can never")
+        print("  be resolved from the registry.")
+
     # Flat order for copy/paste into a publish script.
     if not leftover:
-        flat = [n for wave in waves for n in wave]
         print("\nFlat release order:")
         print("  " + " ".join(flat))
+        skipped = len(flat) - len(publishable_order)
+        print(f"\nPublishable release order ({len(publishable_order)} crates"
+              f"{f', {skipped} skipped as publish = false' if skipped else ''}):")
+        print("  " + (" ".join(publishable_order) or "-"))
+        print("  (`--list` prints just these, one per line)")
 
     return 1 if blocking_cycles else 0
 

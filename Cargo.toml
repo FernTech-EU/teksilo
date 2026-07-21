@@ -28,7 +28,7 @@ exclude = [
 version = "0.6.2"
 edition = "2024"
 license-file = "LICENSE"
-publish = false
+publish = true
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
 repository = "https://github.com/ferntech-eu/bastyde"
 
