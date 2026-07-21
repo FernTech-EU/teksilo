@@ -272,17 +272,29 @@ impl Widget for Switcher {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        // Mirror ZStack's intrinsic-sizing rule: max of mounted
-        // children's natural sizes under an unspecified proposal.
-        // Background-style pages that return 0×0 for unspecified
-        // don't inflate the stack; content pages report their real
-        // wants.
+        // Max of the mounted pages' sizes *at the incoming proposal*, so the
+        // switcher keeps a stable size across selection changes (flipping
+        // pages must not resize the slot) without inventing width.
+        //
+        // This deliberately does NOT measure at `SizeProposal::unspecified()`.
+        // Doing so reports each page's NATURAL size: wrapped text lays out on
+        // a single line, `Wrap` never wraps, and the switcher then hands its
+        // parent a width derived from content instead of from the space it was
+        // actually offered. `place_children` below already measures at the real
+        // bounds (`exact_proposal`), so the two disagreed — the reported size
+        // said "natural" while placement said "bounds". An enclosing
+        // `ScrollArea` believed the natural figure and sized its content to it.
+        //
+        // A parent that genuinely hugs its content passes an unspecified
+        // proposal, which forwards through unchanged — so the size-to-content
+        // case (menu / popover pages) keeps its previous behaviour, including
+        // background-style pages that report 0×0 for an unspecified proposal.
         let mut max_w: f32 = 0.0;
         let mut max_h: f32 = 0.0;
         let mut any = false;
         for slot in &self.slots {
             if let Slot::Mounted(id) = slot
-                && let Some(child_size) = ctx.child_size(*id, SizeProposal::unspecified())
+                && let Some(child_size) = ctx.child_size(*id, proposal)
             {
                 max_w = max_w.max(child_size.width);
                 max_h = max_h.max(child_size.height);

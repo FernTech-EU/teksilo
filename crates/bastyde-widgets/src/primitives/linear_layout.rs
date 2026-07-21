@@ -216,12 +216,28 @@ pub(crate) fn negotiate(
         }
     }
 
-    // The main extent is always the *content* size: grow makes it equal the
-    // offered extent, shrink reduces it toward the floor, and a rigid stack
-    // reports its natural content (never over-claiming an offered extent it did
-    // not fill). The cross axis fills the offered extent when given one.
+    // Both axes report the *content* size, symmetrically.
+    //
+    // Main: grow makes it equal the offered extent, shrink reduces it toward
+    // the floor, and a rigid stack reports its natural content (never
+    // over-claiming an offered extent it did not fill).
+    //
+    // Cross: fills the offered extent when given one, but never *hides* an
+    // over-constrained child behind it. Reporting the bare offered extent
+    // (`cross_extent.unwrap_or(self_cross)`) discarded the larger natural max
+    // computed in pass 4, which made cross-axis over-constraint invisible to
+    // every ancestor: a `VStack` in a 560 dp slot containing an 800 dp `HStack`
+    // reported 560, so an enclosing `ScrollArea` concluded "no overflow",
+    // showed no horizontal scroll bar, and `clips_children` silently swallowed
+    // the excess — leaving content unreachable at *any* scroll position.
+    //
+    // `max` is a no-op whenever content fits (natural <= offered returns the
+    // offered extent, exactly as before), so this changes behaviour only where
+    // the layout is already over-constrained.
     let self_main = content_main.max(0.0);
-    let self_cross = cross_extent.unwrap_or(self_cross);
+    let self_cross = cross_extent
+        .map(|e| e.max(self_cross))
+        .unwrap_or(self_cross);
 
     let size = axis.size(self_main, self_cross);
     let min = axis.size(agg_min_main, agg_min_cross);

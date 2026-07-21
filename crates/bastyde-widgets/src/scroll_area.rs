@@ -2137,4 +2137,63 @@ mod tests {
             bounds.height
         );
     }
+
+    /// A rigid row wider than the viewport, nested inside a `VStack`, must be
+    /// reachable by scrolling horizontally.
+    ///
+    /// Regression for the cross-axis over-claim asymmetry: `negotiate` used to
+    /// end with `self_cross = cross_extent.unwrap_or(self_cross)`, discarding
+    /// the larger natural max it had already computed. A `VStack` in a 560 dp
+    /// slot holding an 800 dp `HStack` reported 560, so this `ScrollArea` —
+    /// which measures content by proposing the viewport width and reading the
+    /// size back — concluded "no overflow", showed no horizontal bar, and
+    /// `clips_children` swallowed the excess. The 4th cell sat at x=620..820 in
+    /// a 600 dp viewport and was unreachable at *any* scroll position.
+    ///
+    /// The same row placed DIRECTLY under the `ScrollArea` always scrolled;
+    /// only the intervening stack broke it, which is what made this so easy to
+    /// miss.
+    #[test]
+    fn cross_axis_overflow_through_a_vstack_is_scrollable() {
+        use crate::primitives::{HStack, Padding};
+
+        let mut tree = WidgetTree::new();
+        // 4 x 200 dp rigid cells = 800 dp of content in a 600 dp viewport.
+        let cells: Vec<_> = (0..4)
+            .map(|_| tree.add(TallLeaf::new(200.0, 40.0)))
+            .collect();
+        let mut row = HStack::new();
+        for &c in &cells {
+            row = row.add_child(c);
+        }
+        let row = tree.add(row);
+        let col = tree.add(VStack::new().add_child(row));
+        let padded = tree.add(Padding::uniform(20.0).child_id(col));
+        let _scroll = tree.add(ScrollArea::from_id(padded).smooth_scrolling(false));
+
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        let last = *cells.last().unwrap();
+        assert!(
+            tree.bounds(last).x > 600.0,
+            "precondition: the 4th cell should start beyond the viewport, got x={}",
+            tree.bounds(last).x
+        );
+
+        // Scroll right far enough to bring the last cell fully into view.
+        tree.pointer_move(Point::new(300.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 300.0, y: 0.0 },
+            modifiers: Default::default(),
+        });
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        let b = tree.bounds(last);
+        assert!(
+            b.x >= 0.0 && b.x + b.width <= 600.5,
+            "the 4th cell must be reachable by horizontal scrolling; got x={} w={}",
+            b.x,
+            b.width
+        );
+    }
 }

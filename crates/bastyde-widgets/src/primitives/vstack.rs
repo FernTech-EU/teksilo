@@ -567,4 +567,26 @@ mod tests {
         // Back to original layout
         assert!((tree.bounds(c).y - 90.0).abs() < 0.01);
     }
+
+    /// The cross-axis fix must be a no-op whenever content fits: a stack still
+    /// FILLS the width it is offered rather than shrinking to its content, or
+    /// alignment, backgrounds and stretch behaviour would all change.
+    #[test]
+    fn cross_axis_still_fills_offered_width_when_content_fits() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(100.0, 40.0));
+        let b = tree.add(FixedLeaf(100.0, 40.0));
+        let row = tree.add(crate::primitives::HStack::new().add_child(a).add_child(b));
+        let stack = tree.add(VStack::new().add_child(row));
+
+        // 200 dp of content in a 560 dp slot.
+        tree.layout(SizeProposal::exact(560.0, 400.0));
+
+        assert!(
+            (tree.bounds(stack).width - 560.0).abs() < 0.01,
+            "fitting content must still fill the offered 560 dp, not collapse \
+             to its natural 200: got {}",
+            tree.bounds(stack).width
+        );
+    }
 }
