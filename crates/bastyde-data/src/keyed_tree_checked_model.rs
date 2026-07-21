@@ -329,10 +329,7 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
         // (it may query the model / source without a double-borrow panic).
         let all: Vec<K> = self.inner.borrow().state.keys().cloned().collect();
         let stale: Vec<K> = all.into_iter().filter(|k| !exists(k)).collect();
-        if stale.is_empty() {
-            return;
-        }
-        {
+        if !stale.is_empty() {
             let mut inner = self.inner.borrow_mut();
             for k in &stale {
                 inner.state.remove(k);
@@ -342,6 +339,16 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
                 inner.bridge_observers.remove(k);
             }
         }
+        // Always reaggregate, even when `stale` came back empty: the removed
+        // node(s) may never have been explicitly checked/toggled (and so never
+        // had a `state` entry at all — an untouched leaf is the common case),
+        // which makes `stale` misleadingly empty even though the tree genuinely
+        // lost a subtree. Skipping `reaggregate()` in that case would leave a
+        // SURVIVING ancestor's cached aggregate stale forever (it was computed
+        // against the OLD child set, which included the now-gone node).
+        // `reaggregate()` is a no-op when nothing actually changed, so this
+        // costs nothing in the common case where `exists` really did accept
+        // every tracked key.
         self.reaggregate();
     }
 
@@ -354,7 +361,34 @@ impl<K: ItemKey> KeyedTreeCheckedModel<K> {
         if self.mode.get() != AggregateMode::DescendantsDriveAncestors {
             return;
         }
-        let mut keys: Vec<K> = self.inner.borrow().state.keys().cloned().collect();
+        let tracked: Vec<K> = self.inner.borrow().state.keys().cloned().collect();
+        // Expand the recompute set to every ancestor reachable by walking up
+        // from a tracked key, even one that was never itself explicitly
+        // checked/toggled (and so has no `state` entry of its own). Without
+        // this, an untouched node sitting between a tracked descendant and a
+        // tracked ancestor would read back as the `Unchecked` default —
+        // instead of being recomputed from ITS OWN (possibly freshly
+        // reshaped) children — whenever a full re-source makes it into a
+        // meaningful branch it never was before (see the module's "reload
+        // with a different shape" scenario).
+        let mut keys: HashSet<K> = tracked.iter().cloned().collect();
+        for k in &tracked {
+            let mut cur = (self.parent)(k);
+            let mut guard = 0usize;
+            while let Some(p) = cur {
+                if !keys.insert(p.clone()) {
+                    // Already queued — whoever queued it also walked (or will
+                    // walk) the rest of its ancestor chain.
+                    break;
+                }
+                guard += 1;
+                if guard > 1_000_000 {
+                    break; // bound against a malformed (cyclic) parent closure
+                }
+                cur = (self.parent)(&p);
+            }
+        }
+        let mut keys: Vec<K> = keys.into_iter().collect();
         // Deepest first, so a parent recomputes after its children are finalised.
         keys.sort_by_key(|k| std::cmp::Reverse(self.depth_of(k)));
         // No outer guard needed: `recompute_from_children` -> `write_state`

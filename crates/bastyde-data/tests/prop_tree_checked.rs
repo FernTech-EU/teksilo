@@ -681,24 +681,6 @@ proptest! {
 // (post-prune) tree shape, not the stale pre-prune one.
 
 proptest! {
-    // UNRESOLVED — parked, not silently dropped. This property FAILS.
-    //
-    //     surviving key 4 has state Indeterminate but the brute-force leaf
-    //     aggregate over the POST-prune tree shape says Checked (victim = 12)
-    //
-    // `prune_missing` (keyed_tree_checked_model.rs) removes the stale keys and
-    // then calls `reaggregate()`, which iterates `state.keys()` — i.e. only
-    // keys that already carry an explicit state entry — sorted deepest-first
-    // via `depth_of`. Two candidate mechanisms, neither confirmed:
-    //   1. an affected ancestor has no `state` entry, so `reaggregate` never
-    //      visits it and its stale tristate survives; or
-    //   2. `depth_of` resolves against the NEW tree shape while some ancestor
-    //      chain still refers to pruned nodes, so the deepest-first ordering
-    //      no longer guarantees children are finalised before parents.
-    // The docs claim prune re-aggregates "the ancestors they affected", so if
-    // this reproduces it is a real bug rather than an over-strict property.
-    // Resolve by hand-tracing the counterexample; do NOT weaken the assertion.
-    #[ignore = "unresolved: see comment — likely a real prune/reaggregate bug"]
     #[test]
     fn prune_missing_drops_removed_keys_and_reaggregates_surviving_ancestors(
         (tree_ops, ops, victim_idx) in arb_case(20, 30).prop_flat_map(|(tree_ops, ops)| {
@@ -781,12 +763,6 @@ fn arb_insert_ops_exact(n: usize) -> impl Strategy<Value = Vec<Option<u16>>> {
 }
 
 proptest! {
-    // UNRESOLVED — parked, not silently dropped. This property FAILS, and
-    // almost certainly shares a root cause with
-    // `prune_missing_drops_removed_keys_and_reaggregates_surviving_ancestors`
-    // above (both exercise re-source / re-shape then re-aggregate). Diagnose
-    // that one first; this may well fall out with it.
-    #[ignore = "unresolved: see comment — likely a real prune/reaggregate bug"]
     #[test]
     fn checked_state_survives_a_reload_with_a_different_shape_then_resyncs_on_reaggregate(
         (tree_ops, ops, tree_ops2) in arb_case(20, 30).prop_flat_map(|(tree_ops, ops)| {
