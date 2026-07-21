@@ -614,13 +614,17 @@ impl RichTextEditor {
 
     /// Install a callback fired once per batch of genuine **user content
     /// edits** (typing, paste, cut, delete) — and *not* on a programmatic
-    /// `set_djot` / `set_markdown` / `set_html` load or a document reset. The
-    /// callback runs on the UI thread during the editor's frame drain, so it
-    /// may touch `Signal`s directly — e.g. flip a "dirty" flag or kick a
-    /// debounced autosave. Replaces any prior change callback on this editor.
+    /// `set_djot` / `set_markdown` / `set_html` load or a document reset, and
+    /// *not* while an IME composition (CJK/Kana candidate preview, dead-key
+    /// accent) is still in progress — only the settled result of a commit
+    /// fires it. The callback runs on the UI thread during the editor's frame
+    /// drain, so it may touch `Signal`s directly — e.g. flip a "dirty" flag or
+    /// kick a debounced autosave. Replaces any prior change callback on this
+    /// editor.
     ///
     /// For a reactive change *token* (which also bumps on loads/format-only
-    /// changes), observe [`document_version`](Self::document_version) instead.
+    /// changes, and on intermediate IME composition steps), observe
+    /// [`document_version`](Self::document_version) instead.
     pub fn on_change(self, f: impl Fn() + 'static) -> Self {
         self.state.borrow_mut().on_change = Some(Rc::new(f));
         self
@@ -646,6 +650,16 @@ impl RichTextEditor {
     /// is no selection).
     pub fn cursor_anchor(&self) -> usize {
         self.state.borrow().cursor.anchor()
+    }
+
+    /// `true` while an IME composition (CJK/Kana candidate preview, dead-key
+    /// accent) is actively in progress — i.e. [`on_change`](Self::on_change)
+    /// is currently suppressed for this editor. Exposed so a caller doing its
+    /// own while-typing scanning (e.g. an autocorrect feature) can gate its
+    /// own trigger logic the same way, as defense-in-depth alongside
+    /// `on_change`'s own gate.
+    pub fn is_composing(&self) -> bool {
+        self.state.borrow().ime_preedit.is_some()
     }
 
     /// Reactive cursor position signal. Observers fire whenever the
@@ -2470,6 +2484,12 @@ impl EditorHandle {
     /// [`RichTextEditor::cursor_position`].
     pub fn cursor_position(&self) -> usize {
         self.state.borrow().cursor.position()
+    }
+
+    /// `true` while an IME composition is actively in progress. Mirrors
+    /// [`RichTextEditor::is_composing`].
+    pub fn is_composing(&self) -> bool {
+        self.state.borrow().ime_preedit.is_some()
     }
 
     /// Reactive caret position signal.

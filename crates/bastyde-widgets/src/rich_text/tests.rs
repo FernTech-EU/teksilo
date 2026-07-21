@@ -4641,6 +4641,68 @@ fn editor_on_change_stays_silent_for_programmatic_load() {
     );
 }
 
+#[test]
+fn editor_on_change_stays_silent_during_ime_composition_then_fires_once_on_commit() {
+    // A consumer (e.g. a while-typing autocorrect scanner) must see exactly
+    // one on_change for a whole CJK composition — not one per intermediate
+    // candidate. Each ImeComposition step still mutates the document (this
+    // must keep rendering live preedit text), but only ImeCommit is a
+    // settled edit.
+    use bastyde_core::event::WidgetEvent;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    for _ in 0..2 {
+        tick_once(&mut tree);
+    }
+    fired.set(0);
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "n".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "n",
+        "the preedit must still render live"
+    );
+    assert_eq!(
+        fired.get(),
+        0,
+        "an intermediate IME composition step must not fire on_change"
+    );
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    assert_eq!(
+        fired.get(),
+        0,
+        "a second intermediate composition step must still not fire on_change"
+    );
+
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "你".to_string(),
+    });
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "你");
+    assert_eq!(
+        fired.get(),
+        1,
+        "the commit must fire on_change exactly once for the settled result"
+    );
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // CursorAffinity at soft-wrap boundaries
 //

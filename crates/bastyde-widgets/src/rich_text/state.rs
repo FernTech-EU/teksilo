@@ -797,9 +797,17 @@ impl EditorState {
         }
 
         // Fire the user edit callback only for genuine content edits — not for
-        // a programmatic load/reset (`set_djot`/`set_markdown` repopulate).
+        // a programmatic load/reset (`set_djot`/`set_markdown` repopulate), and
+        // not while an IME composition is still in progress: each intermediate
+        // preedit keystroke (every CJK/Kana candidate change) mutates the
+        // document through this same `ContentsChanged` path, but it is not yet
+        // a settled edit. `ime_preedit` is `None` once the composition either
+        // commits (`clear_ime_preedit` runs before the commit's own insert) or
+        // is cancelled to empty, so gating on it fires `on_change` exactly once
+        // for the final, real result.
         if saw_content_change
             && !saw_reset_or_load
+            && self.ime_preedit.is_none()
             && let Some(cb) = self.on_change.clone()
         {
             cb();
