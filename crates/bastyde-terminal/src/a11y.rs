@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Accessibility for the terminal view.
 //!
 //! The terminal exposes its visible screen as a native `Role::Terminal` node

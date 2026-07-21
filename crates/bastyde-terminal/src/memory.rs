@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! An in-memory [`TerminalEngine`] test double. It performs *no* VT emulation —
 //! it records what the view writes/resizes/kills and returns a snapshot the
 //! test sets directly. Used by this crate's own headless tests and available to

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Mouse handling for the terminal view: mapping a pixel position to a grid
 //! cell, and encoding mouse events as VT reports when the child program has
 //! enabled mouse tracking. Pure, engine-independent logic (unit-tested here).

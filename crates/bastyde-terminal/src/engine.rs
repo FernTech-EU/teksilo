@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The engine boundary: a swappable [`TerminalEngine`] that owns the
 //! pseudo-terminal (PTY) and the VT emulation (parsing + grid + scrollback),
 //! plus the engine-agnostic value types the *view* consumes.

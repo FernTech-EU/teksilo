@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The pseudo-terminal: a thin wrapper over `portable-pty` that spawns the
 //! child shell/process and exposes the master's writer + resize handle + child
 //! killer for the UI thread, and hands the caller an independently-owned

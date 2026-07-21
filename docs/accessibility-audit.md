@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Bastyde Accessibility Conformance Audit — Post-Remediation
 
 **Standards basis:** WCAG 2.1 Level A/AA · EN 301 549 v3.2.1 (§9 WCAG mapping + §11 Software) · WCAG2ICT (non-web applicability guidance)

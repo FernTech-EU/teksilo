@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Keyboard → PTY byte encoding: the "heart" of the terminal view. Translates
 //! a decoded [`Key`] + [`Modifiers`] (+ the printable `text` winit already
 //! resolved) into the exact byte sequence a VT-100/xterm-class child expects,

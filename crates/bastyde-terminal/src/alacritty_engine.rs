@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The default [`TerminalEngine`] backend: `alacritty_terminal`'s VT model
 //! (parser + grid + scrollback + selection) driven over a `portable-pty` child.
 //!

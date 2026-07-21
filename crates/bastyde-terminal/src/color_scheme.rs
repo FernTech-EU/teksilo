@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Terminal colour model: the themeable 16-colour ANSI palette plus the fixed
 //! xterm 256-colour cube, and how a cell's [`TermColor`] resolves to a concrete
 //! [`bastyde_tokens::Color`].

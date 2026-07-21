@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Raw bytes of the bundled fallback fonts, for callers that need to **embed** a font somewhere
 //! else (rather than register it for on-screen shaping). The motivating consumer is Skribisto's
 //! PDF exporter, which hands these blobs to Typst so an exported PDF renders RTL scripts in the

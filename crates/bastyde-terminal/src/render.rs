@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The grid painter: turns a [`GridSnapshot`] into `Canvas` draws (cell
 //! backgrounds, glyphs, decorations, cursor, selection) against a
 //! [`ColorScheme`]. Pure given its inputs; the widget supplies the measured

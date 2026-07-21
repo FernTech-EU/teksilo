@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Known accessibility limitations
 
 This file records accessibility gaps that Bastyde **cannot** close from within

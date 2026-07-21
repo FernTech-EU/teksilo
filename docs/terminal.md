@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-FileCopyrightText: 2026 FernTech -->
+
 # Terminal (Console)
 
 `bastyde-terminal` is an embeddable, fully-accessible terminal-emulator widget —

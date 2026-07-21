@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The `Terminal` widget: the accessible, cross-platform Console view. Owns
 //! rendering, input encoding, selection, accessibility and lifecycle; the PTY +
 //! VT emulation live behind [`crate::engine::TerminalEngine`].

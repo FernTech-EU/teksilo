@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! Tier-3 styling for the terminal's chrome (the frame *around* the grid — the
 //! grid's own colours are the [`ColorScheme`]'s job). Follows the framework's
 //! per-widget style-protocol pattern: a `TerminalStyle` trait, a default

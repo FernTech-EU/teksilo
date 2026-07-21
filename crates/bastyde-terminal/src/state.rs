@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
 //! The terminal widget's mutable state, the PTY-reader background thread, and
 //! the per-frame drain that feeds the child's output into the engine.
 
