@@ -123,6 +123,37 @@ automatically:
   above the toggle — no scroll jump;
 - a sort flip invalidates from the first reordered row.
 
+### Which row a `y` coordinate resolves to
+
+`row_height_fn` / `item_height_fn` / `item_height` are public callbacks with
+no floor above `0.0`, and spacing defaults to `0.0` — a zero-height row is an
+ordinary, supported configuration (a filtered-to-nothing group header, a
+collapsed detail row), not a corner case to route around. The shared
+[`PrefixSumOffsets`](../crates/bastyde-widgets/src/common/row_offsets.rs)
+table underlies both the exact and auto-measure modes and its `row_at(y)` is
+the single place that resolves a pixel coordinate to a row index — it's what
+both a click and a drag-drop hover call, so it is also the raw drop-target
+identity in `TreeView`/`TreeTableView` DnD and the hit-tested tile in
+`GridView` (see [drag-and-drop.md §9](drag-and-drop.md)).
+
+A **fully** degenerate table — every row height *and* the spacing are
+zero, the fully-collapsed-or-filtered-to-nothing case — used to disagree
+with `RowMetrics::uniform`'s equivalent geometry: `Uniform::row_at`
+short-circuits on `step <= 0.0` and answers row 0, while the offset table
+ties every entry and `partition_point` resolved to the *last* tied index,
+answering the final row instead. `PrefixSumOffsets::row_at` now checks the
+same degeneracy structurally (every offset equal *and* the last row's own
+height is zero) and answers `0`, so a click and a drop at the same `y`
+agree regardless of which row-height mode the view uses.
+
+That check is deliberately narrower than "resolve every tie to the first
+index." A **partially** degenerate table — a run of zero-height rows
+between two real ones — must keep the *last*-tied answer: heights
+`[50, 0, 50]` give offsets `[0, 50, 50, 100]`, and at `y = 50` the right row
+is 2, the real row that actually starts there, not the invisible row 1.
+Answering with a zero-height row there would silently retarget a click or a
+drop onto a row nothing is drawn for.
+
 ---
 
 ## Column model
@@ -240,6 +271,31 @@ plays the same role, plus a `TreeFilterMode` switch:
 `TreeTableView::filter_mode(...)` forwards to the proxy in place — calling
 it on the builder mutates the shared `Rc<RefCell<…>>` even though the
 method consumes `Self`.
+
+### Incremental updates for a single-row edit
+
+A `DataChange::ItemUpdated` (list) or `TreeChange::NodeUpdated` (tree) from
+the upstream model doesn't always force the full filter/sort/flatten pass
+described above. Both proxies first try a cheap fast path: re-check just the
+edited row's filter verdict and its rank against its *current* visible
+neighbours, instead of re-filtering and re-sorting every row. They fall back
+to the full rebuild whenever the row enters/leaves the visible set, or moves
+past a neighbour — including a neighbour it now **ties** with. The tie case
+matters because the full rebuild sorts with `Vec::sort_by`, which is
+stable, so it always resolves a tie the same way (source index for the list,
+original sibling order for the tree); leaving an edited row in its old slot
+on a tie would disagree with that reprojection, and the row would visibly
+jump the next time an unrelated mutation forced a full rebuild.
+
+The two proxies pay a different price for that correctness.
+`SortFilterListModel` compares source indices directly, so it still takes
+the fast path for a tie that's already in stable order. `SortFilterTreeModel`
+would have to walk `tree.children(parent)` to recover a tied node's sibling
+index, so it bails to a full reprojection on **any** tie rather than pay that
+cost on every update. Sorting a large tree on a low-cardinality column (a
+status enum, a boolean) therefore falls back to a full reprojection more
+often than the equivalent flat list would — worth knowing when picking what
+column to sort on.
 
 ---
 
@@ -404,7 +460,10 @@ Row drag-and-drop is owned by the **backing source**, not the view (see
 `(target, position)`, asks the source `can_accept` on every hover (an
 insertion line shows an accepted landing; a `Reject` suppresses it),
 and commits via the source's `accept_drop` on release — there is no
-`on_row_drop` callback.
+`on_row_drop` callback. `target` is a row index resolved from the pointer's
+`y` the same way a click resolves one — see ["Which row a `y` coordinate
+resolves to"](#which-row-a-y-coordinate-resolves-to) above for the
+zero-height-row tie-break that keeps a click and a drop agreeing.
 
 **TableView.** Set `.reorderable(true)` **on the table** (distinct from
 `Column::reorderable`, which reorders columns and defaults to `true`; the

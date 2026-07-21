@@ -79,11 +79,20 @@ Off-screen tiles aren't built, so their heights are unknown. Two paths:
   `max(item_height(i))` over the row — exact scrollbar, zero jitter, no
   measurement.
 
+Because `PrefixSumOffsets` is shared with the 1-D row widgets, a
+zero-height row (`.item_height` has no floor above `0.0`) hit-tests the
+same way here as it does for `TableView`/`TreeTableView`'s drop targeting —
+`row_at`'s raw result is the hit-tested tile index, so see
+[table-view.md "Which row a `y` coordinate resolves to"](table-view.md) for
+the degenerate-height tie-break.
+
 ## Selection
 
 Pass a flat `SelectionModel` (`None` / `Single` / `Multi`). Mouse: click =
 select, Ctrl+click = toggle, Shift+click = reading-order range (Finder /
-Explorer). Ctrl+A = select-all. `Multi` mode adds **rubber-band marquee** — a
+Explorer). Ctrl+A = select-all — a no-op in `Single`/`None` mode, matching
+`ListView` and `TableView` (`SelectionModel::select_all` itself enforces this,
+so no per-view gating is needed). `Multi` mode adds **rubber-band marquee** — a
 drag on the empty background sweeps a rectangle and selects every intersecting
 tile (Ctrl/Shift at drag-start = additive). The hit-test is geometric, so it
 selects tiles outside the realized window. `.on_selection_changed(|set|)` fires
@@ -105,7 +114,7 @@ painted focus ring. Matrix (RTL-aware; horizontal arrows swap):
 | Space | toggle selection |
 | Enter | `.on_tile_activate` (else select) |
 | Esc | clear focus |
-| Ctrl+A | select all |
+| Ctrl+A | select all (`Multi` mode only) |
 | Alt+Arrow | reorder the focused tile (when `.reorderable`) |
 | printable | type-ahead (needs `.type_ahead_label(i)`; `.type_ahead_timeout`) |
 | Tab | `.tab_traversal(WithinGrid \| OutOfGrid)` |

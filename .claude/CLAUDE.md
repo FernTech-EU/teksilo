@@ -947,6 +947,8 @@ LayoutContext::for_testing(&theme)
 
 Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) — in `bastyde-core::test_widgets` (pub(crate)).
 
+Property-based tests (proptest) cover relational invariants (round-trip, idempotence, conservation, monotonicity, oracle-vs-brute-force) in `bastyde-tokens`, `bastyde-data`, `bastyde-scene`, `bastyde-widgets` — convention, generator cost discipline, and the mandatory `--no-run` + `ulimit` safe-run protocol are in [docs/property-testing.md](../docs/property-testing.md).
+
 ## Implementation Status
 
 ### Complete
@@ -1185,4 +1187,4 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 Framework-internals reference: [docs/architecture.md](docs/architecture.md) — scrolling, arena state, Canvas API, rendering pipeline, HiDPI, threading, testability, crate dependency graph, architectural comparisons, open questions. Subsystems with a dedicated reference doc (events, layout, animation, theming, i18n, shortcuts, accessibility, settings, multi-window, drag-and-drop, data models, …) are stubbed with one-paragraph pointers; section numbers are preserved so external `§N` refs still resolve. Doc index: [docs/SUMMARY.md](docs/SUMMARY.md).
 
-Additional documentation: [docs/widgets-overview.md](docs/widgets-overview.md), [docs/accessibility-overrides.md](docs/accessibility-overrides.md), [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/inspector.md](docs/inspector.md), [docs/web-view.md](docs/web-view.md), [docs/automation-mcp.md](docs/automation-mcp.md)
+Additional documentation: [docs/widgets-overview.md](docs/widgets-overview.md), [docs/accessibility-overrides.md](docs/accessibility-overrides.md), [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/inspector.md](docs/inspector.md), [docs/web-view.md](docs/web-view.md), [docs/automation-mcp.md](docs/automation-mcp.md), [docs/property-testing.md](docs/property-testing.md)

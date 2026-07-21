@@ -399,6 +399,30 @@ scene.items_along_path(&path) -> Vec<ItemId>        // items under a connector p
 Backed by the spatial index (default `GridHashIndex`). All query cost
 is O(visible × chain-depth), independent of total scene size.
 
+`GridHashIndex` buckets an item into every grid cell its AABB overlaps.
+Cell count grows as `(width / cell_size) * (height / cell_size)`, and
+`cell_size` clamps to a 1.0 minimum, so nothing bounds it on its own — a
+single `Scene::add_item` with a full-document backdrop or canvas rect at a
+small `cell_size` can ask for billions of cells. An item whose AABB would
+span more than `MAX_CELLS_PER_ITEM` (1024) cells is therefore **not**
+bucketed cell-by-cell at all; it is kept in a separate always-scanned
+`oversized` set and checked against every query with an exact AABB
+intersection test instead. At the default 256 px `cell_size` that threshold
+is an ~8192 px square item; at the clamped-minimum `cell_size` of 1.0 it's
+~32 px. The query rect itself gets the same treatment — `query` /
+`items_in_rect` take an arbitrary caller rect, so a "select everything"
+query over a huge area hits the identical hazard on the query side; when
+the query rect's own span exceeds the cap, the index scans the populated
+cell map directly instead of enumerating the rect's cells, bounded by how
+many cells are actually occupied rather than by the rect's area. Both
+paths preserve `GridHashIndex::query`'s broad-phase invariant: it may
+over-report (a cell-granularity false positive) but must never
+under-report — miss an item whose bounds genuinely intersect the query
+rect. `Scene::items_in_rect` (and the other collision queries above)
+narrow-phase every candidate through their own exact AABB check, so the
+over-report never reaches the app; it matters only to a caller that
+queries `GridHashIndex` directly.
+
 ---
 
 ## Magnetism

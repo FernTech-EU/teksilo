@@ -278,17 +278,17 @@ proptest! {
 proptest! {
     #[test]
     fn contrast_ratio_is_symmetric_and_bounded(a in arb_color(), b in arb_color()) {
-        let ab = a.contrast_ratio(b);
-        let ba = b.contrast_ratio(a);
+        let forward = a.contrast_ratio(b);
+        let reversed = b.contrast_ratio(a);
         prop_assert!(
-            (ab - ba).abs() < 1e-4,
+            (forward - reversed).abs() < 1e-4,
             "contrast_ratio should be symmetric: {:?} vs {:?} = {} / {}",
-            a, b, ab, ba
+            a, b, forward, reversed
         );
         prop_assert!(
-            (1.0..=21.0 + 1e-3).contains(&ab),
+            (1.0..=21.0 + 1e-3).contains(&forward),
             "contrast_ratio({:?}, {:?}) = {} out of documented 1.0..=21.0",
-            a, b, ab
+            a, b, forward
         );
     }
 }

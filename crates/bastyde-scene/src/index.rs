@@ -19,7 +19,7 @@
 //! - `query(rect)` returns deduplicated candidates from the cells the
 //!   rect overlaps; callers can narrow with a per-item AABB check.
 //! - **Oversized items.** An item whose AABB would bucket into more
-//!   than [`MAX_CELLS_PER_ITEM`] grid cells (a scene backdrop, a
+//!   than `MAX_CELLS_PER_ITEM` grid cells (a scene backdrop, a
 //!   full-document canvas rect, or any item at extreme coordinates
 //!   with large bounds — all reachable in production, not exotic) is
 //!   NOT bucketed cell-by-cell at all. It is stored instead in a
@@ -156,7 +156,7 @@ fn rects_intersect(a: Rect, b: Rect) -> bool {
 /// Uniform grid spatial hash. Each item is bucketed into every cell
 /// its AABB overlaps; queries union all items from the cells the
 /// query rect overlaps. Items whose AABB would span more than
-/// [`MAX_CELLS_PER_ITEM`] cells are NOT bucketed — see `oversized`
+/// `MAX_CELLS_PER_ITEM` cells are NOT bucketed — see `oversized`
 /// below and the module doc's "Oversized items" section.
 #[derive(Debug)]
 pub struct GridHashIndex {
@@ -165,7 +165,7 @@ pub struct GridHashIndex {
     /// Reverse lookup so `remove` and `insert` (as update) don't need
     /// to scan every cell.
     item_cells: HashMap<ItemId, Vec<(i32, i32)>>,
-    /// Items whose AABB spans more than [`MAX_CELLS_PER_ITEM`] grid
+    /// Items whose AABB spans more than `MAX_CELLS_PER_ITEM` grid
     /// cells. Never bucketed into `cells`/`item_cells` — `query`
     /// always scans this map in full instead, checking a true AABB
     /// intersection against the query rect. An `ItemId` is present in
@@ -194,7 +194,7 @@ impl GridHashIndex {
 
     /// Number of cells currently storing at least one item. Useful
     /// for diagnostics; not part of the public `SpatialIndex` trait.
-    /// Oversized items (see [`MAX_CELLS_PER_ITEM`]) never occupy a
+    /// Oversized items (see `MAX_CELLS_PER_ITEM`) never occupy a
     /// cell, so they never contribute to this count.
     pub fn cell_count(&self) -> usize {
         self.cells.len()
@@ -262,7 +262,7 @@ impl GridHashIndex {
         width.saturating_mul(height)
     }
 
-    /// Whether `r`'s grid-cell span exceeds [`MAX_CELLS_PER_ITEM`] —
+    /// Whether `r`'s grid-cell span exceeds `MAX_CELLS_PER_ITEM` —
     /// i.e. whether it must go into `oversized` instead of being
     /// bucketed cell-by-cell. See the module doc's "Oversized items"
     /// section.

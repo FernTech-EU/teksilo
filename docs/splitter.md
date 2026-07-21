@@ -62,12 +62,27 @@ or structural insert/remove.
   the surplus goes to the last pane.
 - **Min/max**: a deficit (container smaller than the sum of sizes) shrinks
   panes proportional to their room above `min`, never below it. `max`
-  clamps growth.
+  clamps growth. An **unsatisfiable** deficit (container smaller than
+  `Σ min`) floors every pane at its minimum and is accepted as overflow
+  that the container clips — on that path the returned sizes sum to *more*
+  than `available`, not `≤ available`.
 - Equal-size panes: `SplitterModel::new(n, orientation)` (each `stretch = 1`,
   no initial size) yields equal shares.
 
 `Splitter` reports its own `min` as `Σ min[i] + (N−1)·gutter`, so a
 min-respecting parent never forces overflow.
+
+`PaneDescriptor::min`/`max` are app-supplied — a minimum derived from a
+ratio can come out as `NaN` (a `0.0 / 0.0`), and `f32::clamp` panics by
+contract on a `NaN` bound. `distribute` normalises both bounds before
+clamping, behind a `debug_assert!` that still fails loudly in a debug
+build. The two bounds are **not** treated symmetrically: `max = INFINITY`
+is the ordinary way to spell "unbounded" (it's what `max_size: None`
+unwraps to), so it passes through untouched, and only a `NaN` max
+normalises to `INFINITY`; `min` has no such "unbounded" reading, so any
+non-finite `min` (`NaN` or `±INFINITY`) normalises to `0.0`. A `max` of
+`-INFINITY` is left for the existing `min > max` guard, which resolves it
+to the (finite) `min`.
 
 ## Collapse
 

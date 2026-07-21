@@ -446,10 +446,17 @@ proptest! {
 // (list-mutation ops from the shared `Op` generator are skipped here: the
 // point is to probe every selection-facing entry point against a fixed-size
 // list, not to also exercise structural drift, which property 4 already
-// covers). `select_all` in particular does not appear to special-case
-// `Single` mode in the source (it unconditionally selects `0..count`) — if
-// that is intentional, this property should be narrowed; as written it
-// states the mode's own doc comment literally.
+// covers).
+//
+// This property found a real bug when it was written: `select_all` checked
+// `SelectionMode::None` but not `Single`, so it set the whole `0..count`
+// range on a single-selection model while every other mutator (`select`,
+// `toggle`, `extend_to`, `select_indices`) collapsed to one index. Two of
+// the three call sites happened to compensate — `ListView`'s Ctrl+A gates on
+// `mode == Multi` and `TableView`'s helper matches only the Multi modes —
+// but `GridView`'s did not, so Ctrl+A selected every tile in a single-select
+// grid. `select_all` now no-ops in `Single` mode; the shrunk counterexample
+// was `len = 2, ops = [SelectAll]`.
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]

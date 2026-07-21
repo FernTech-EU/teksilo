@@ -151,6 +151,21 @@ can: the paint-time route reads the live tree and cannot go stale.
 engine, so no `ColorProp` is involved. Resolve against `ctx.effective_enabled`
 in `paint` instead.
 
+### `Color::mix` and non-finite factors
+
+`darken`, `lighten`, `desaturated`, and `ColorTokens::for_inactive_window`
+(the window-deactivation accent projection — see
+[window-activation.md](window-activation.md)) all bottom out in
+`Color::mix(other, t)`. `t` is clamped to `[0, 1]` before use, but a bare
+`t.clamp(0.0, 1.0)` is not enough on its own: `f32::clamp` returns `NaN` for
+a `NaN` input rather than saturating it, so a `NaN` factor used to poison
+every channel and produce an unrenderable colour. `Color::mix` now maps a
+`NaN` factor to `0.0` (returning `self` unchanged) before clamping — the
+safest reading of an undefined mix. `±inf` needs no such special case: the
+clamp already maps them to `1.0` / `0.0` correctly. A caller deriving `t`
+from a ratio that can legitimately divide by zero no longer needs to guard
+it before calling `mix`.
+
 ## Tier 1 — Variants
 
 Each themable widget exposes a closed `*Variant` enum naming its

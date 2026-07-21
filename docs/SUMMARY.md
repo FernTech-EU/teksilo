@@ -9,6 +9,7 @@
 
 - [Architecture](architecture.md)
 - [Milestone roadmap](bastyde-milestones.md)
+- [Property-based testing](property-testing.md)
 
 # Authoring widgets
 

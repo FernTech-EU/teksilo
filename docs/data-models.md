@@ -202,7 +202,7 @@ The selection exposes a `Signal<BTreeSet<usize>>` (via `selection_signal()`), so
 - `extend_to(index)` — Shift+click: select the range from anchor to index, keeping anchor.
 - `select_all(range)` / `clear()` — bulk ops.
 
-In `None` mode every operation is a no-op; widgets can construct a disabled selection model when selection doesn't apply (a toolbar's action list, for instance).
+In `None` mode every operation is a no-op; widgets can construct a disabled selection model when selection doesn't apply (a toolbar's action list, for instance). `select_all` is *also* a no-op in `Single` mode — every other mutator (`select`, `toggle`, `extend_to`, `select_indices`) already collapses to one index there, so "select all" has no coherent reading for a model that holds at most one item, and selecting one arbitrary row would be more surprising than doing nothing. `ListView`'s Ctrl+A handler and `TableView`'s `select_all` helper already gated on `Multi` before this was enforced in the model itself; `GridView`'s Ctrl+A handler did not, so a single-selection `GridView` used to select every tile on Ctrl+A.
 
 The selection is stored as flat indices into the view. For a `TreeView`, those are indices into the `TreeSlice`'s flat list — which means expanding or collapsing a parent changes which `NodeId`s those indices correspond to. Widgets translate at interaction time (e.g., on Ctrl+click): take the clicked `FlatEntry.node_id`, find its current flat index via the slice, then call `selection.toggle(index)`. Alternative designs where selection stores `NodeId`s directly have their own trade-offs (expansion doesn't lose selection, but the signal type changes per-widget); keeping selection index-based keeps the type uniform.
 
@@ -327,6 +327,8 @@ let checked = KeyedTreeCheckedModel::from_source(outline_slice.clone());
 ```
 
 Because state is keyed by your stable domain id, a checked node survives a full re-source. After a reload call **`prune_missing(|k| source.contains_key(k))`** (drops deleted nodes' state *and* recomputes the ancestors they affected) or **`reaggregate()`** (recompute every parent from the new shape) so the tristates stay correct across structural changes. Same cascade / `Signal<CheckState>` ↔ `Signal<bool>` bridge / `AggregateMode` as `TreeCheckedModel`.
+
+Both methods recompute more than just the keys that already carry a `state` entry, because a node only gains one once it is explicitly checked/toggled — an untouched leaf never does. `prune_missing` always calls `reaggregate()` after removing the stale keys, even when none of the pruned nodes had a `state` entry of their own: skipping that step whenever `stale` came back empty would leave a *surviving* ancestor's cached tristate computed against the child set from before the prune. `reaggregate()` itself widens its recompute set to every ancestor reachable by walking `parent` up from each tracked key, not just the tracked keys themselves — otherwise a node that was an untouched leaf before a re-source, and is now a meaningful intermediate branch under the new shape, would read back as the `Unchecked` default instead of being derived from its new children. Both changes only ever widen what gets recomputed; a key that was already correct cannot come out wrong.
 
 ## 7. MVVM flow
 
