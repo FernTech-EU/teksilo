@@ -18,4 +18,4 @@ bytemuck = { workspace = true }
 
 [dev-dependencies]
 bastyde-tokens = { workspace = true }
-pollster = "0.4"
+pollster = { workspace = true }

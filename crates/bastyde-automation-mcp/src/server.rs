@@ -778,21 +778,21 @@ impl ServerHandler for AutomationServer {
 pub fn to_result(reply: HostReply) -> CallToolResult {
     match reply {
         HostReply::Reply(AutomationReply::Ok { data }) => {
-            let mut result = CallToolResult::success(vec![Content::text(data.to_string())]);
+            let mut result = CallToolResult::success(vec![ContentBlock::text(data.to_string())]);
             result.structured_content = Some(data);
             result
         }
         HostReply::Reply(AutomationReply::Err { code, message }) => {
             let body = serde_json::json!({ "code": code, "message": message });
-            let mut result = CallToolResult::error(vec![Content::text(body.to_string())]);
+            let mut result = CallToolResult::error(vec![ContentBlock::text(body.to_string())]);
             result.structured_content = Some(body);
             result
         }
         HostReply::Image { png, warnings } => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-            let mut content = vec![Content::image(b64, "image/png".to_string())];
+            let mut content = vec![ContentBlock::image(b64, "image/png".to_string())];
             if !warnings.is_empty() {
-                content.push(Content::text(
+                content.push(ContentBlock::text(
                     serde_json::json!({ "warnings": warnings }).to_string(),
                 ));
             }

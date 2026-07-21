@@ -18,12 +18,17 @@ bastyde-render = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }
 accesskit = { workspace = true }
-accesskit_winit = "0.32"
+accesskit_winit = "0.33.2"
 arboard = { workspace = true, optional = true }
 raw-window-handle = "0.6"
-rfd = { version = "0.15", default-features = false, features = [
+# rfd 0.17 dropped the `async-std` / `tokio` runtime-selection features: it no
+# longer goes through ashpd/zbus, it speaks the XDG portal directly and drives
+# it with `pollster` (implied by `xdg-portal`). `wayland` exports the parent
+# window handle to the portal, so `set_parent` really parents the dialog under
+# a Wayland session; it is part of rfd's own default set.
+rfd = { version = "0.17.2", default-features = false, features = [
     "xdg-portal",
-    "async-std",
+    "wayland",
 ], optional = true }
 async-std = { version = "1", optional = true }
 thiserror = { workspace = true }

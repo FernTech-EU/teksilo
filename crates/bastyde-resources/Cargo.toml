@@ -16,7 +16,7 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 # The SVG validator parses candidate files with the *same* parser that renders
 # them (see `validate_svg`), so `res!` accepts exactly what `SvgIcon` can draw —
 # no second, looser notion of "valid SVG" to drift out of step. Safe as a

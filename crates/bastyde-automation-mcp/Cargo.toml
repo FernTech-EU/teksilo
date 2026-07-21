@@ -29,13 +29,13 @@ bastyde-render = { workspace = true }
 # Crate-local async stack — kept OUT of `[workspace.dependencies]` (the
 # `bastyde-tokio` precedent: runtimes stay confined to the crates that need
 # them). `rmcp` is the official Rust MCP SDK.
-rmcp = { version = "1.8", features = ["server", "macros", "transport-io", "base64"] }
+rmcp = { version = "2.2", features = ["server", "macros", "transport-io", "base64"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 base64 = "0.22"
 anyhow = "1"
 
 # Workspace deps for the offscreen screenshot path.
-pollster = "0.4"
+pollster = { workspace = true }
 wgpu = { workspace = true }
 png = { workspace = true }
 uuid = { workspace = true }

@@ -23,4 +23,4 @@ bastyde-render = { workspace = true }
 bastyde-platform = { workspace = true }
 png = { workspace = true }
 wgpu = { workspace = true }
-pollster = "0.4"
+pollster = { workspace = true }

@@ -20,4 +20,4 @@ thiserror = { workspace = true }
 raw-window-handle = "0.6"
 
 [dev-dependencies]
-accesskit_consumer = "0.35.0"
+accesskit_consumer = { workspace = true }

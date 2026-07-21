@@ -24,4 +24,4 @@ jiff = { workspace = true }
 [dev-dependencies]
 bastyde-render = { workspace = true }
 wgpu = { workspace = true }
-pollster = "0.4"
+pollster = { workspace = true }

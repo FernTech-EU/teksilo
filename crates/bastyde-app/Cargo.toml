@@ -81,7 +81,7 @@ base64 = { version = "0.22", optional = true }
 png = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 winit = { workspace = true }
-pollster = "0.4"
+pollster = { workspace = true }
 # Used by the telemetry session-id generator AND the automation bridge's
 # per-process token; pulled in with the `telemetry` or `automation` feature.
 uuid = { workspace = true, optional = true }
