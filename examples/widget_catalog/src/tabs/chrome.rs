@@ -5,11 +5,11 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Banner, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Divider, FixedSize, HStack,
-    StatusBar, Step, Stepper, TextWidget, Toolbar, VStack, Wizard,
+    Banner, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Divider, MaxSize, StatusBar, Step,
+    Stepper, TextWidget, Toolbar, VStack, Wizard, Wrap,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{Signals, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_chrome_title())
@@ -75,8 +75,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         ctx,
         lit!("Toolbar"),
         Toolbar::new().child(
-            HStack::new()
-                .spacing(6.0)
+            demo_row(6.0)
                 .child(Button::new(tr!(demo_new())).variant(ButtonVariant::Ghost))
                 .child(Button::new(tr!(demo_open())).variant(ButtonVariant::Ghost))
                 .child(Button::new(tr!(demo_save())).variant(ButtonVariant::Ghost)),
@@ -125,7 +124,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let stepper = section(
         ctx,
         lit!("Stepper (embedded)"),
-        FixedSize::new().height(220.0).child(make_stepper()),
+        MaxSize::new(560.0, 220.0).child(make_stepper()),
     );
 
     ctx.add(
@@ -148,7 +147,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // bati! Type::ctor(args) { method: value }. Wizard takes nested
     // steps with closures — pre-register.
     let wizard_widget = ctx.add(make_wizard());
-    let stepper_widget = ctx.add(FixedSize::new().height(220.0).child(make_stepper()));
+    let stepper_widget = ctx.add(MaxSize::new(560.0, 220.0).child(make_stepper()));
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -172,8 +171,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 Toolbar {
-                    HStack {
+                    Wrap {
                         spacing: 6.0
+                        line_spacing: 6.0
                         Button::new(tr!(demo_new())) {
                             variant: ButtonVariant::Ghost
                         }

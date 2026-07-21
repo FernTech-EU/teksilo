@@ -11,11 +11,11 @@
 use bastyde::prelude::*;
 use bastyde::tokens::Orientation;
 use bastyde::widgets::{
-    Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Divider, FixedSize, HStack, Link,
-    ProgressBar, Spinner, TextWidget, VStack,
+    Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Divider, FixedSize, Link, ProgressBar,
+    Spinner, TextWidget, VStack, Wrap,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{Signals, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_indicators_title())
@@ -51,8 +51,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let spinner = section(
         ctx,
         lit!("Spinner"),
-        HStack::new()
-            .spacing(16.0)
+        demo_row(16.0)
             .child(Spinner::new(20.0))
             .child(Spinner::new(28.0))
             .child(Spinner::new(36.0).label(tr!(demo_loading()))),
@@ -70,8 +69,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let badge = section(
         ctx,
         lit!("Badge"),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(Badge::new(lit!("New")))
             .child(Badge::new(lit!("Beta")))
             .child(Badge::new(lit!("Stable")).background(SurfaceRole::AccentSubtle))
@@ -81,8 +79,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let avatar = section(
         ctx,
         lit!("Avatar"),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(Avatar::with_initials(lit!("CJ")).size(AvatarSize::Medium))
             .child(
                 Avatar::with_initials(lit!("AB"))
@@ -183,8 +180,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 16.0
+                    line_spacing: 16.0
                     Spinner::new(20.0)
                     Spinner::new(28.0)
                     Spinner::new(36.0) {
@@ -218,8 +216,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Badge::new(lit!("New"))
                     Badge::new(lit!("Beta"))
                     Badge::new(lit!("Stable")) {
@@ -237,8 +236,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
+                    line_spacing: 12.0
                     Avatar::with_initials(lit!("CJ")) {
                         size: AvatarSize::Medium
                     }

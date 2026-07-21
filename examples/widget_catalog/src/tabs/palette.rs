@@ -61,6 +61,7 @@ fn text_sample(
         .child(
             TextWidget::new(lit!(PANGRAM))
                 .style(TextStyleRole::Body)
+                .overflow(TextOverflow::Ellipsis(EllipsisMode::Middle))
                 .color(color),
         )
         .child(Spacer::new())
@@ -289,6 +290,7 @@ fn text_on_accent_row() -> impl Widget + 'static {
                 .child(
                     TextWidget::new(lit!(PANGRAM))
                         .style(TextStyleRole::Body)
+                        .overflow(TextOverflow::Ellipsis(EllipsisMode::Middle))
                         .color(TextRole::OnAccent),
                 )
                 .child(Spacer::new())
@@ -693,6 +695,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                     spacing: 12.0
                                     TextWidget::new(lit!(PANGRAM)) {
                                         style: TextStyleRole::Body
+                                        overflow: TextOverflow::Ellipsis(EllipsisMode::Middle)
                                         color: fg
                                     }
                                     Spacer {}
@@ -716,6 +719,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                             spacing: 12.0
                             TextWidget::new(lit!(PANGRAM)) {
                                 style: TextStyleRole::Body
+                                overflow: TextOverflow::Ellipsis(EllipsisMode::Middle)
                                 color: TextRole::OnAccent
                             }
                             Spacer

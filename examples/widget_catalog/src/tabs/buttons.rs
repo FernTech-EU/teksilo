@@ -6,12 +6,12 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, CommandLinkButton, Divider, HStack, IconButton, IconButtonSize,
-    IconLocation, IconWidget, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget,
-    VStack,
+    Button, ButtonVariant, CommandLinkButton, Divider, IconButton, IconButtonSize, IconLocation,
+    IconWidget, MaxSize, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget,
+    VStack, Wrap,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{FIELD_MAX_WIDTH, Signals, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_buttons_title())
@@ -26,8 +26,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let variants = section(
         ctx,
         tr!(btn_heading_variants()),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(
                 Button::new(tr!(btn_default()))
                     .variant(ButtonVariant::Filled)
@@ -47,8 +46,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let states = section(
         ctx,
         tr!(btn_heading_disabled()),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(
                 Button::new(tr!(btn_default()))
                     .variant(ButtonVariant::Filled)
@@ -68,8 +66,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let with_icon = section(
         ctx,
         tr!(btn_heading_with_icon()),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(
                 Button::new(tr!(btn_confirm_label()))
                     .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
@@ -84,8 +81,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let icon_btns = section(
         ctx,
         lit!("IconButton"),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(IconButton::add().tooltip(tr!(demo_new())))
             .child(IconButton::copy().tooltip(tr!(demo_copy())))
             .child(IconButton::clear().tooltip(tr!(demo_find())))
@@ -97,8 +93,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let icon_sizes = section(
         ctx,
         lit!("IconButton — sizes"),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(
                 IconButton::search()
                     .size(IconButtonSize::Compact)
@@ -128,16 +123,24 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let cmd_link = section(
         ctx,
         lit!("CommandLinkButton"),
-        VStack::new()
-            .spacing(6.0)
-            .child(
-                CommandLinkButton::new(tr!(btn_cmdlink_signin_title()))
-                    .description(tr!(btn_cmdlink_signin_desc())),
-            )
-            .child(
-                CommandLinkButton::new(tr!(btn_cmdlink_signup_title()))
-                    .description(tr!(btn_cmdlink_signup_desc())),
-            ),
+        // CommandLinkButton is a rigid composite (see its `layout_response`)
+        // and its multi-line description is measured unwrapped during the
+        // enclosing HStack's intrinsic-width query, so it reports a
+        // natural width wider than a narrow viewport regardless of the
+        // proposal it's given. Cap + clip it like the other narrow-viewport
+        // demos in this catalog (see `FIELD_MAX_WIDTH`'s doc comment).
+        MaxSize::width(FIELD_MAX_WIDTH).child(
+            VStack::new()
+                .spacing(6.0)
+                .child(
+                    CommandLinkButton::new(tr!(btn_cmdlink_signin_title()))
+                        .description(tr!(btn_cmdlink_signin_desc())),
+                )
+                .child(
+                    CommandLinkButton::new(tr!(btn_cmdlink_signup_title()))
+                        .description(tr!(btn_cmdlink_signup_desc())),
+                ),
+        ),
     );
     let popover_btn = section(
         ctx,
@@ -231,8 +234,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(tr!(btn_default())) {
                         variant: ButtonVariant::Filled
                         on_activate_fn: |_| println!("Default")
@@ -254,8 +258,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(tr!(btn_default())) {
                         variant: ButtonVariant::Filled
                         enabled: false
@@ -277,8 +282,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     #{ icon_btn_confirm }
                     #{ icon_btn_next }
                 }
@@ -290,8 +296,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     IconButton::add() {
                         tooltip: tr!(demo_new())
                     }
@@ -316,8 +323,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
+                    line_spacing: 12.0
                     IconButton::search() {
                         size: IconButtonSize::Compact
                         tooltip: lit!("Compact · 22dp")
@@ -347,13 +355,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                VStack {
-                    spacing: 6.0
-                    CommandLinkButton::new(tr!(btn_cmdlink_signin_title())) {
-                        description: tr!(btn_cmdlink_signin_desc())
-                    }
-                    CommandLinkButton::new(tr!(btn_cmdlink_signup_title())) {
-                        description: tr!(btn_cmdlink_signup_desc())
+                MaxSize::width(FIELD_MAX_WIDTH) {
+                    VStack {
+                        spacing: 6.0
+                        CommandLinkButton::new(tr!(btn_cmdlink_signin_title())) {
+                            description: tr!(btn_cmdlink_signin_desc())
+                        }
+                        CommandLinkButton::new(tr!(btn_cmdlink_signup_title())) {
+                            description: tr!(btn_cmdlink_signup_desc())
+                        }
                     }
                 }
             }

@@ -8,7 +8,7 @@ use bastyde::prelude::*;
 use bastyde::tokens::Orientation;
 use bastyde::widgets::scroll_bar::ScrollBarOrientation;
 use bastyde::widgets::{
-    Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Padding, Panel,
+    Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, MaxSize, Padding, Panel,
     ScrollArea, ScrollBar, Splitter, SplitterModel, TabId, TabIndicatorPosition, TabInfo,
     TabWidget, TextWidget, ToolBox, ToolBoxItem, VStack,
 };
@@ -107,17 +107,13 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let tab_widget = section(
         ctx,
         lit!("TabWidget"),
-        FixedSize::new()
-            .width(420.0_f32)
-            .height(160.0_f32)
+        MaxSize::new(420.0_f32, 160.0_f32)
             .child(embedded_tab_widget(sigs.inner_tabs_selected.clone())),
     );
     let styled_tabs = section(
         ctx,
         lit!("TabWidget — per-state colours, dividers, indicator below label"),
-        FixedSize::new()
-            .width(420.0_f32)
-            .height(160.0_f32)
+        MaxSize::new(420.0_f32, 160.0_f32)
             .child(styled_tab_widget(sigs.styled_tabs_selected.clone())),
     );
     let group_box = section(
@@ -184,16 +180,13 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let scroll_area = section(
         ctx,
         lit!("ScrollArea"),
-        FixedSize::new()
-            .width(280.0_f32)
-            .height(120.0_f32)
-            .child(ScrollArea::new().child({
-                let mut col = VStack::new().spacing(4.0);
-                for _ in 0..30 {
-                    col = col.child(color_cell(SurfaceRole::AccentSubtle, "row"));
-                }
-                col
-            })),
+        MaxSize::new(280.0_f32, 120.0_f32).child(ScrollArea::new().child({
+            let mut col = VStack::new().spacing(4.0);
+            for _ in 0..30 {
+                col = col.child(color_cell(SurfaceRole::AccentSubtle, "row"));
+            }
+            col
+        })),
     );
     let sb_pos = ctx.signal(0.4_f32);
     let sb_max = ctx.signal(1.0_f32);
@@ -201,21 +194,18 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let scrollbar = section(
         ctx,
         tr!(cnt_scrollbar_standalone_heading()),
-        FixedSize::new()
-            .width(280.0_f32)
-            .height(14.0_f32)
-            .child(ScrollBar::new(
-                ScrollBarOrientation::Horizontal,
-                sb_pos,
-                sb_max,
-                sb_vp,
-            )),
+        MaxSize::new(280.0_f32, 14.0_f32).child(ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            sb_pos,
+            sb_max,
+            sb_vp,
+        )),
     );
     let split =
         section(
             ctx,
             lit!("Splitter"),
-            FixedSize::new().width(360.0_f32).height(120.0_f32).child(
+            MaxSize::new(360.0_f32, 120.0_f32).child(
                 Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
                     .pane(Panel::new().background(SurfaceRole::AccentSubtle).child(
                         TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small),
@@ -267,12 +257,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             ),
     );
     let inner_sel: Signal<Option<TabId>> = ctx.signal(None);
-    let tab_widget_widget = ctx.add(
-        FixedSize::new()
-            .width(420.0_f32)
-            .height(160.0_f32)
-            .child(embedded_tab_widget(inner_sel)),
-    );
+    let tab_widget_widget =
+        ctx.add(MaxSize::new(420.0_f32, 160.0_f32).child(embedded_tab_widget(inner_sel)));
     let toolbox_widget = ctx.add(
         ToolBox::new(sigs.tool_box_selected.clone())
             .add(ToolBoxItem::new(
@@ -448,9 +434,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                FixedSize {
-                    width: 280.0_f32
-                    height: 120.0_f32
+                MaxSize::new(280.0_f32, 120.0_f32) {
                     child_id: scroll_area_widget
                 }
             }
@@ -461,9 +445,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                FixedSize {
-                    width: 280.0_f32
-                    height: 14.0_f32
+                MaxSize::new(280.0_f32, 14.0_f32) {
                     child_id: scrollbar_widget
                 }
             }
@@ -474,9 +456,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                FixedSize {
-                    width: 360.0_f32
-                    height: 120.0_f32
+                MaxSize::new(360.0_f32, 120.0_f32) {
                     child_id: splitview_widget
                 }
             }

@@ -128,6 +128,35 @@ width — `[Expand::flex(1).child(60), Expand::flex(2).child(40)]` in
 `100 / 200`. Without it (the default), the same layout splits
 exactly `100 / 200`.
 
+# Do not use this inside a *bounded* parent
+
+The floor is a hard one: `Expand` reports `shrink = 0`, so if the
+child's natural size exceeds what the parent can offer, the resulting
+over-constraint deficit **cannot be absorbed** and later siblings are
+pushed outside the bounds.
+
+This bites hardest with children whose natural size is large and
+content-driven. A vertical `TabBar`
+answers an unbounded height query with its *stacked* height — every tab,
+one below another. So:
+
+```ignore
+// 21 tabs => the bar's natural height is ~1050 dp.
+VStack::new()
+    .child(Expand::vertical().respect_intrinsic().child(tab_widget))
+    .child(status_bar)
+```
+
+makes the `VStack` want `1050 + status_bar`, at *every* window size. The
+status bar is placed at y=1050 and stays below the fold until the window
+is grown past it — the bar never scrolls, because it was never asked to
+fit. Dropping `respect_intrinsic()` fixes it: the bar takes the slack
+left after the status bar and scrolls its tabs internally.
+
+Rule of thumb: reach for this only when the parent genuinely has no
+bound to share (`height = None`). When the parent is bounded — a window
+root, a sized pane — the default zero basis is what you want.
+
 #### `pub fn child_id(mut self, id: WidgetId) -> Self`
 
 Set child by pre-registered ID.

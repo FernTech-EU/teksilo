@@ -557,7 +557,21 @@ impl Widget for WidgetCatalog {
         }
         tw = tw.bar_trailing_slot(self.build_mode_toggle());
         let tabs_id = ctx.add(tw);
-        let tabs_filling = ctx.add(Expand::vertical().respect_intrinsic().child_id(tabs_id));
+        // Zero flex-basis (the default) — deliberately NOT `respect_intrinsic()`.
+        //
+        // `respect_intrinsic()` switches to an AUTO basis, making the child's
+        // natural size a floor. A *vertical* `TabBar` answers an unbounded
+        // height query with `natural_height_vertical` — every tab stacked, ~1050 dp
+        // for this catalog's 21 tabs (see `tab_widget/bar.rs`). That became the
+        // Expand's wanted height, so the root `VStack` wanted 1050 + status bar
+        // and, since `Expand` has `shrink = 0`, the deficit could not be absorbed:
+        // the StatusBar was placed at y=1050 and stayed below the fold until the
+        // window was grown past ~1066 dp tall.
+        //
+        // The auto basis is for a wrapper inside an *unconstrained* parent; the
+        // window gives this root a bounded height, so the zero basis is correct —
+        // the bar takes the slack left after the status bar and scrolls its tabs.
+        let tabs_filling = ctx.add(Expand::vertical().child_id(tabs_id));
 
         // ── StatusBar ────────────────────────────────────────────────
         let status = ctx.add(

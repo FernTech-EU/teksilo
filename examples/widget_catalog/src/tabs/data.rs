@@ -14,8 +14,8 @@ use bastyde::data::{
 };
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    CellContext, Center, Column, ColumnWidth, Divider, FixedSize, GridLines, GridSizing, GridView,
-    ListView, RectWidget, Repeater, StandardListItem, StandardTreeItem, TableAlignment,
+    CellContext, Center, Column, ColumnWidth, Divider, GridLines, GridSizing, GridView, ListView,
+    MaxSize, RectWidget, Repeater, StandardListItem, StandardTreeItem, TableAlignment,
     TableSelectionMode, TableView, TextWidget, TreeTableView, TreeView, VStack, ZStack,
 };
 
@@ -285,8 +285,8 @@ fn grid_view_widget() -> impl Widget + 'static {
 
 // ── Sizing helper ─────────────────────────────────────────────────────
 
-fn sized(w: f32, h: f32, body: impl Widget + 'static) -> FixedSize {
-    FixedSize::new().width(w).height(h).child(body)
+fn sized(w: f32, h: f32, body: impl Widget + 'static) -> MaxSize {
+    MaxSize::new(w, h).child(body)
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

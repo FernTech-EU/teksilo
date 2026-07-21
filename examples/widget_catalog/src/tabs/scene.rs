@@ -10,7 +10,7 @@
 
 use bastyde::canvas::{Path, Point, Rect};
 use bastyde::prelude::*;
-use bastyde::widgets::{Button, Divider, FixedSize, Panel, TextWidget, VStack};
+use bastyde::widgets::{Button, Divider, MaxSize, Panel, TextWidget, VStack};
 use bastyde_scene::{
     GroupItem, PathItem, RectItem, Scene, SceneSelectionMode, SceneView, TextItem,
 };
@@ -125,11 +125,13 @@ fn build_scene_view() -> SceneView {
         .default_size(560.0, 360.0)
 }
 
-fn sized_scene() -> FixedSize {
-    FixedSize::new()
-        .width(560.0_f32)
-        .height(360.0_f32)
-        .child(build_scene_view())
+fn sized_scene() -> MaxSize {
+    // Cap (not pin) the width: the SceneView already carries its own
+    // `default_size(560.0, 360.0)` for the unbounded-height case, so it
+    // only needs a width ceiling here — it shrinks to fit a narrow
+    // viewport instead of overflowing it (see MaxSize vs FixedSize note
+    // in shared.rs).
+    MaxSize::width(560.0_f32).child(build_scene_view())
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

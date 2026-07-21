@@ -12,7 +12,7 @@ use bastyde::core::styles::{
 };
 use bastyde::prelude::*;
 use bastyde::tokens::HAlignment;
-use bastyde::widgets::{Center, Divider, FixedSize, TextWidget, VStack};
+use bastyde::widgets::{Center, Divider, MaxSize, TextWidget, VStack};
 use bastyde_charts::{
     AxisConfig, BarChart, BarGrouping, ChartDatum, ChartModel, ChartSeries, LegendPosition,
     LineChart, PieChart, PieLabelMode,
@@ -175,8 +175,15 @@ fn make_pie() -> PieChart<String> {
         )
 }
 
-fn sized(w: f32, h: f32, body: impl Widget + 'static) -> FixedSize {
-    FixedSize::new().width(w).height(h).child(body)
+// Charts fill whatever width they're given (`layout_response` proposes
+// `proposal.width.unwrap_or(320.0)`), so cap rather than pin the width: at
+// full viewport width the cap wins (same 560dp demo box as before), and in a
+// narrow window the chart shrinks to fit instead of overshooting the tab.
+// Height still comes through as an exact value on a VStack's unbounded main
+// axis (`MaxSize` maps `(None, Some(max))` -> `Some(max)`), preserving each
+// demo's chosen height.
+fn sized(w: f32, h: f32, body: impl Widget + 'static) -> MaxSize {
+    MaxSize::new(w, h).child(body)
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

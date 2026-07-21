@@ -9,7 +9,7 @@
 use bastyde::prelude::*;
 use bastyde::text_document::TextDocument;
 use bastyde::widgets::rich_text::RichTextEditor;
-use bastyde::widgets::{Divider, FixedSize, FontPicker, TextWidget, VStack};
+use bastyde::widgets::{Divider, FontPicker, MaxSize, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -79,28 +79,33 @@ fn viewer_doc() -> TextDocument {
     doc
 }
 
-fn editor_widget() -> FixedSize {
-    FixedSize::new().width(560.0_f32).child(
+fn editor_widget() -> MaxSize {
+    // Width is a cap, not a pin: the editor's `min_lines`/`max_lines`
+    // already give it intrinsic height, so only the width axis needs
+    // bounding — it fills up to 560 dp but shrinks into a narrow viewport.
+    MaxSize::width(560.0_f32).child(
         RichTextEditor::editor(editor_doc())
             .min_lines(3)
             .max_lines(12),
     )
 }
 
-fn viewer_widget() -> FixedSize {
-    FixedSize::new()
-        .width(560.0_f32)
-        .height(240.0_f32)
-        .child(RichTextEditor::read_only(viewer_doc()))
+fn viewer_widget() -> MaxSize {
+    // Unlike `editor_widget`, the read-only viewer has no min/max-lines
+    // knob, so it stays in greedy sizing on both axes — the height cap
+    // is still load-bearing (it scrolls internally rather than reporting
+    // an unbounded height), but the width cap now shrinks with the
+    // viewport instead of pinning at a literal 560 dp.
+    MaxSize::new(560.0_f32, 240.0_f32).child(RichTextEditor::read_only(viewer_doc()))
 }
 
 /// A font-family picker: lists every installed font, previewing each name
 /// next to a script-aware sample rendered in that font, and shows the
 /// chosen family in its own typeface in the closed control.
-fn font_picker_widget() -> FixedSize {
-    FixedSize::new()
-        .width(320.0_f32)
-        .child(FontPicker::new(Signal::new(None::<String>)))
+fn font_picker_widget() -> MaxSize {
+    // FontPicker is a ComboBox preset (flex-fill by default) — cap it
+    // rather than pin it so it shrinks below 320 dp in a narrow viewport.
+    MaxSize::width(320.0_f32).child(FontPicker::new(Signal::new(None::<String>)))
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {

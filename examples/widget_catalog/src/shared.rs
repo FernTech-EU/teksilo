@@ -188,6 +188,39 @@ pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widge
 /// content width at each call site instead.
 pub const FIELD_MAX_WIDTH: f32 = 360.0;
 
+/// A **gallery row** of independent demo widgets — the catalog's standard
+/// idiom for "here are N variants of this widget side by side".
+///
+/// Returns a `Wrap`, not an `HStack`, so the row reflows onto extra lines as
+/// the window narrows. Use this for any row whose children are *peers* that
+/// merely happen to sit next to each other. Keep a real `HStack` when the
+/// horizontal relationship is meaningful (a label paired with its field, a
+/// leading icon bound to its text) — those must not break across lines.
+///
+/// # Why this is not an `HStack`
+///
+/// Each tab body is `ScrollArea → Padding → VStack → …` (see
+/// `TabContent::build` in `main.rs`). `ScrollArea` measures its content by
+/// proposing the **viewport width**, and a `VStack` given an explicit width
+/// reports exactly that width back — `linear_layout::negotiate` ends with
+/// `self_cross = cross_extent.unwrap_or(self_cross)`, so the stack's *cross*
+/// axis fills the offered extent and never over-claims.
+///
+/// The consequence: a rigid `HStack` inside the tab's `VStack` may want 800 dp
+/// in a 560 dp slot, but the `VStack` still reports 560 dp. The `ScrollArea`
+/// therefore never learns the content overflowed — no horizontal scroll bar
+/// appears, and `clips_children` silently swallows everything past the
+/// viewport edge. Demo widgets to the right of the fold become permanently
+/// unreachable at *any* scroll position.
+///
+/// `Wrap` sidesteps this entirely: it consumes the width it is offered and
+/// grows *downward*, which the enclosing `ScrollArea` already scrolls
+/// correctly.
+pub fn demo_row(spacing: f32) -> bastyde::widgets::Wrap {
+    use bastyde::widgets::Wrap;
+    Wrap::new().spacing(spacing).line_spacing(spacing)
+}
+
 /// Per-widget showcase section: bold mono title + the widget itself.
 ///
 /// `title` accepts either a plain `&str` (a **widget name** that stays

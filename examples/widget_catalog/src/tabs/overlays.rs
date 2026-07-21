@@ -9,17 +9,16 @@ use std::time::Duration;
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Divider, EventContextMessageBoxExt, Expand, HStack, MessageBox,
+    Button, ButtonVariant, Divider, EventContextMessageBoxExt, MaxSize, MessageBox,
     MessageBoxButtons, Panel, Popover, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
-    TextWidget, VStack,
+    TextWidget, VStack, Wrap,
 };
 
 /// A row of toast triggers (one per severity) plus the
 /// `NotificationCenterButton` bell. `install_toast_default()` in
 /// main.rs registers the host + archive that make these live.
 fn toast_row(archive: Option<Rc<NotificationArchiveModel>>) -> impl Widget + 'static {
-    let mut row = HStack::new()
-        .spacing(8.0)
+    let mut row = demo_row(8.0)
         .child(
             Button::new(tr!(ovr_toast_btn_info())).on_activate_fn(|ctx| {
                 ctx.show_toast(Toast::info(tr!(ovr_toast_info_msg())));
@@ -65,13 +64,13 @@ fn toast_row(archive: Option<Rc<NotificationArchiveModel>>) -> impl Widget + 'st
 
 use crate::shared::{
     KEY_STAT_FOOD, KEY_STAT_HAPPINESS, KEY_STAT_TRADE, KEY_TIP_A, KEY_TIP_B, KEY_TIP_C, Signals,
-    section, tab_header,
+    demo_row, section, tab_header,
 };
 
 // ── Cascading tooltip showcase ─────────────────────────────────────────
-// Mirrors `examples/tooltips_showcase`: three columns laid out as
-// `HStack { Expand.flex(1) × 3 }`. Each column showcases one tooltip
-// tier with cascading depth, sharing the registry built in
+// Mirrors `examples/tooltips_showcase`: three columns laid out side by
+// side in a `Wrap`. Each column showcases one tooltip tier with
+// cascading depth, sharing the registry built in
 // `shared::build_tooltip_registry`.
 
 fn cascade_plain_column() -> impl Widget + 'static {
@@ -158,8 +157,7 @@ fn province_composite_body() -> impl Widget + 'static {
         )
         .child(ProgressBar::new(0.65))
         .child(
-            HStack::new()
-                .spacing(12.0)
+            demo_row(12.0)
                 .child(Button::new(tr!(ovr_stat_food_label())).rich_tooltip(KEY_STAT_FOOD))
                 .child(Button::new(tr!(ovr_stat_trade_label())).rich_tooltip(KEY_STAT_TRADE))
                 .child(
@@ -263,37 +261,39 @@ fn cascade_composite_column() -> impl Widget + 'static {
         )
 }
 
-/// Three-column cascading tooltip showcase: plain / rich / composite
-/// tiers laid out side by side via `HStack { Expand.flex(1) × 3 }`.
+/// Cap on one cascade-tooltip column's width.
 ///
-/// `respect_intrinsic()` is the key: inside the catalog's intrinsic-
-/// sized section/scroll wrapper the parent passes an unspecified
-/// height proposal, so a default `Expand::new().flex(1)` (basis 0)
-/// would collapse to zero and the entire showcase would render as
-/// just the section heading. Falling back to the column's natural
-/// size as the basis keeps each column visible at its intrinsic
-/// height while still letting the columns share horizontal slack.
+/// Each column's `TextOverflow::Wrap` (default) content — most notably
+/// the dwell-tip sentences, ~50-80 characters of running text — has no
+/// width of its own until something proposes one: measured under an
+/// unspecified proposal (which is what every column's ancestor offers
+/// once the row is a `Wrap`, see below) it reports its single-line,
+/// unwrapped extent as its "natural" width, which is wider than the
+/// tab at *any* audited viewport. `MaxSize::width` forces a concrete
+/// proposal down through the column, so that text wraps onto more
+/// lines (taller, not wider) exactly as it would in any other bounded
+/// layout.
+const CASCADE_COLUMN_MAX_WIDTH: f32 = 300.0;
+
+/// Three-column cascading tooltip showcase: plain / rich / composite
+/// tiers laid out side by side.
+///
+/// Uses `demo_row` (a `Wrap`, not a rigid `HStack`) rather than the
+/// `Expand::new().flex(1).respect_intrinsic()` ratio-column pattern:
+/// the buttons and text inside each column are deliberately rigid, so
+/// a fixed three-across `HStack` wants at least the sum of the three
+/// columns' intrinsic widths and has no way to shrink below that — it
+/// overflowed the viewport even at the widest audited width. `Wrap`
+/// keeps the columns side by side while they fit and drops to fewer
+/// per line as the tab narrows; each column is additionally capped
+/// with [`CASCADE_COLUMN_MAX_WIDTH`] (see its doc comment) so a single
+/// column is never, by itself, wider than the narrowest audited
+/// viewport.
 fn cascade_showcase() -> impl Widget + 'static {
-    HStack::new()
-        .spacing(12.0)
-        .child(
-            Expand::new()
-                .flex(1.0)
-                .respect_intrinsic()
-                .child(cascade_plain_column()),
-        )
-        .child(
-            Expand::new()
-                .flex(1.0)
-                .respect_intrinsic()
-                .child(cascade_rich_column()),
-        )
-        .child(
-            Expand::new()
-                .flex(1.0)
-                .respect_intrinsic()
-                .child(cascade_composite_column()),
-        )
+    demo_row(12.0)
+        .child(MaxSize::width(CASCADE_COLUMN_MAX_WIDTH).child(cascade_plain_column()))
+        .child(MaxSize::width(CASCADE_COLUMN_MAX_WIDTH).child(cascade_rich_column()))
+        .child(MaxSize::width(CASCADE_COLUMN_MAX_WIDTH).child(cascade_composite_column()))
 }
 
 pub fn title() -> LocalizedString {
@@ -335,8 +335,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let messagebox = section(
         ctx,
         tr!(ovr_section_messagebox()),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(
                 Button::new(tr!(ovr_mb_info()))
                     .variant(ButtonVariant::Ghost)
@@ -481,21 +480,16 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
-                    Expand {
-                        flex: 1.0
-                        respect_intrinsic
+                    line_spacing: 12.0
+                    MaxSize::width(CASCADE_COLUMN_MAX_WIDTH) {
                         child: cascade_plain_column()
                     }
-                    Expand {
-                        flex: 1.0
-                        respect_intrinsic
+                    MaxSize::width(CASCADE_COLUMN_MAX_WIDTH) {
                         child: cascade_rich_column()
                     }
-                    Expand {
-                        flex: 1.0
-                        respect_intrinsic
+                    MaxSize::width(CASCADE_COLUMN_MAX_WIDTH) {
                         child: cascade_composite_column()
                     }
                 }
@@ -534,8 +528,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(tr!(ovr_mb_info())) {
                         variant: ButtonVariant::Ghost
                         on_activate_fn: |ctx| {

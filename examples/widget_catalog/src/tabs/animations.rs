@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Blur, Button, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize, HStack, Panel, Pulse,
-    Rotate, Scale, Shake, Slide, SlideEdge, SmoothSize, TextWidget, Toggle, VStack,
+    Blur, Button, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize, Panel, Pulse, Rotate,
+    Scale, Shake, Slide, SlideEdge, SmoothSize, TextWidget, Toggle, VStack, Wrap,
 };
 
-use crate::shared::{Signals, color_cell, section, tab_header};
+use crate::shared::{Signals, color_cell, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_animations_title())
@@ -119,8 +119,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let shake = section(
         ctx,
         lit!("Shake"),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(shake_btn)
             .child(Shake::new(shake_trigger).child(color_cell(SurfaceRole::AccentSubtle, "input"))),
     );
@@ -141,7 +140,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let rotate = section(
         ctx,
         lit!("Rotate"),
-        HStack::new().spacing(8.0).child(rotate_btn).child(
+        demo_row(8.0).child(rotate_btn).child(
             FixedSize::new()
                 .width(60.0_f32)
                 .height(60.0_f32)
@@ -353,8 +352,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(tr!(anim_shake())) {
                         on_activate_fn: move |_| shake_for_btn.set(shake_for_btn.get() + 1)
                     }
@@ -385,8 +385,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(tr!(anim_rotate())) {
                         on_activate_fn: move |_| rotate_for_btn.set(rotate_for_btn.get() + 45.0_f32.to_radians())
                     }

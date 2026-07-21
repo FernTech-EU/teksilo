@@ -42,10 +42,16 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let picker = section(
         ctx,
         lit!("ColorPicker"),
-        ColorPicker::new(pick_color)
-            .alpha_enabled(true)
-            .show_hsv_canvas(true)
-            .show_hue_strip(true),
+        // Unlike its two siblings above, the full HSV+RGB+swatches composite
+        // had no width guard at all. Cap it near its own natural content
+        // width (canvas + strips + spinner rows) so it can't grow past the
+        // tab in a narrow viewport; generous enough not to clip any row.
+        MaxSize::width(440.0).child(
+            ColorPicker::new(pick_color)
+                .alpha_enabled(true)
+                .show_hsv_canvas(true)
+                .show_hue_strip(true),
+        ),
     );
 
     ctx.add(
@@ -112,10 +118,14 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                ColorPicker::new(pick_color) {
-                    alpha_enabled: true
-                    show_hsv_canvas: true
-                    show_hue_strip: true
+                // See the matching comment in `classic()` above: the only
+                // demo in this tab with no width guard at all.
+                MaxSize::width(440.0) {
+                    ColorPicker::new(pick_color) {
+                        alpha_enabled: true
+                        show_hsv_canvas: true
+                        show_hue_strip: true
+                    }
                 }
             }
         }

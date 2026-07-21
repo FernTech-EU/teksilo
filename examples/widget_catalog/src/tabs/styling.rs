@@ -22,11 +22,11 @@ use bastyde::core::styles::{
 };
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Card, Checkbox, Divider, FixedSize, HStack, Padding, RectWidget,
-    TextWidget, Toggle, VStack, ZStack,
+    Button, ButtonVariant, Card, Checkbox, Divider, FixedSize, Padding, RectWidget, TextWidget,
+    Toggle, VStack, Wrap, ZStack,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{Signals, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_styling_title())
@@ -148,8 +148,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         VStack::new()
             .spacing(8.0)
             .child(
-                HStack::new()
-                    .spacing(8.0)
+                demo_row(8.0)
                     .child(labelled(
                         "Filled",
                         Button::new(lit!("Filled")).variant(ButtonVariant::Filled),
@@ -168,8 +167,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     )),
             )
             .child(
-                HStack::new()
-                    .spacing(8.0)
+                demo_row(8.0)
                     .child(labelled(
                         "Ghost",
                         Button::new(lit!("Ghost")).variant(ButtonVariant::Ghost),
@@ -189,8 +187,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let toggle_variants = section(
         ctx,
         tr!(sty_tier1_toggle_variant_heading()),
-        HStack::new()
-            .spacing(16.0)
+        demo_row(16.0)
             .child(labelled(
                 "Switch",
                 Toggle::new(tog_switch)
@@ -221,8 +218,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let checkbox_variants = section(
         ctx,
         tr!(sty_tier1_checkbox_variant_heading()),
-        HStack::new()
-            .spacing(16.0)
+        demo_row(16.0)
             .child(labelled(
                 "Square",
                 Checkbox::new(cb_square)
@@ -247,8 +243,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let card_variants = section(
         ctx,
         tr!(sty_tier1_card_variant_heading()),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(labelled(
                 "Plain",
                 Card::new()
@@ -281,8 +276,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let custom_button = section(
         ctx,
         tr!(sty_tier3_button_style_heading()),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(labelled(
                 "default",
                 Button::new(lit!("Default")).variant(ButtonVariant::Filled),
@@ -296,8 +290,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let custom_toggle = section(
         ctx,
         tr!(sty_tier3_toggle_style_heading()),
-        HStack::new()
-            .spacing(16.0)
+        demo_row(16.0)
             .child(labelled(
                 "default",
                 Toggle::new(tog_default).label(lit!("Default")),
@@ -370,8 +363,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(lit!("Filled")) {
                         variant: ButtonVariant::Filled
                     }
@@ -385,8 +379,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         variant: ButtonVariant::Plain
                     }
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     Button::new(lit!("Ghost")) {
                         variant: ButtonVariant::Ghost
                     }
@@ -405,8 +400,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 16.0
+                    line_spacing: 16.0
                     Toggle::new(tog_switch) {
                         variant: ToggleVariant::Switch
                         label: lit!("Switch")
@@ -432,8 +428,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 16.0
+                    line_spacing: 16.0
                     Checkbox::new(cb_square) {
                         variant: CheckboxVariant::Square
                         label: lit!("Square")
@@ -455,8 +452,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
+                    line_spacing: 12.0
                     Button::new(lit!("Default")) {
                         variant: ButtonVariant::Filled
                     }
@@ -470,8 +468,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 16.0
+                    line_spacing: 16.0
                     Toggle::new(tog_default) {
                         label: lit!("Default")
                     }

@@ -8,11 +8,11 @@ use bastyde::prelude::*;
 use bastyde::tokens::CornerRadius;
 use bastyde::widgets::primitives::{ImageMaskShape, TwistArrow};
 use bastyde::widgets::{
-    Divider, FixedSize, HStack, IconWidget, ImageFit, ImageWidget, Panel, RectWidget, TextWidget,
-    VStack,
+    Divider, FixedSize, IconWidget, ImageFit, ImageWidget, Panel, RectWidget, TextWidget, VStack,
+    Wrap,
 };
 
-use crate::shared::{Signals, section, tab_header};
+use crate::shared::{Signals, demo_row, section, tab_header};
 
 pub fn title() -> LocalizedString {
     tr!(tab_visuals_title())
@@ -60,8 +60,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let icon = section(
         ctx,
         lit!("IconWidget"),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(IconWidget::checkmark(20.0))
             .child(IconWidget::chevron_right(20.0))
             .child(IconWidget::chevron_down(20.0))
@@ -72,8 +71,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let image = section(
         ctx,
         lit!("ImageWidget"),
-        HStack::new()
-            .spacing(12.0)
+        demo_row(12.0)
             .child(
                 ImageWidget::new(star_icon)
                     .size(48.0, 48.0)
@@ -98,8 +96,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let twist = section(
         ctx,
         lit!("TwistArrow"),
-        HStack::new()
-            .spacing(8.0)
+        demo_row(8.0)
             .child(TwistArrow::new(16.0, true, true).on_click(move |_ctx| {
                 twist_classic.set(!twist_classic.get());
             }))
@@ -202,8 +199,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
+                    line_spacing: 12.0
                     IconWidget::checkmark(20.0)
                     IconWidget::chevron_right(20.0)
                     IconWidget::chevron_down(20.0)
@@ -218,8 +216,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 12.0
+                    line_spacing: 12.0
                     ImageWidget::new(star_icon) {
                         width: 48.0
                         height: 48.0
@@ -247,8 +246,9 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                HStack {
+                Wrap {
                     spacing: 8.0
+                    line_spacing: 8.0
                     TwistArrow::new(16.0, true, true) {
                         on_click: move |_ctx| { twist_for_click.set(!twist_for_click.get()); }
                     }
