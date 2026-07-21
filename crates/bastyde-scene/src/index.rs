@@ -18,12 +18,37 @@
 //!   smaller than the cell size).
 //! - `query(rect)` returns deduplicated candidates from the cells the
 //!   rect overlaps; callers can narrow with a per-item AABB check.
-//! - Pathological case (one giant item that spans hundreds of cells)
-//!   is rare and easily worked around by raising `cell_size` for
-//!   that scene. A custom `SpatialIndex` would handle non-uniform
-//!   density better — an R-tree, say, for an editor with many
-//!   overlapping items — but none ships; the trait is the place to
-//!   add one.
+//! - **Oversized items.** An item whose AABB would bucket into more
+//!   than [`MAX_CELLS_PER_ITEM`] grid cells (a scene backdrop, a
+//!   full-document canvas rect, or any item at extreme coordinates
+//!   with large bounds — all reachable in production, not exotic) is
+//!   NOT bucketed cell-by-cell at all. It is stored instead in a
+//!   separate `oversized: HashMap<ItemId, Rect>` that [`query`]
+//!   always scans in full, in addition to the cell lookup, keeping
+//!   an exact AABB-intersection test against `scene_rect` (so it
+//!   contributes no cell-fan-out false positives of its own).
+//!
+//!   This closes what used to be an unconditional, uncapped eager
+//!   allocation: `cells_for_rect` computed
+//!   `(width / cell_size) * (height / cell_size)` cells and reserved
+//!   that many `(i32, i32)` slots *before* the loop that fills them
+//!   ran — no upper bound, and using bare `i32` arithmetic that could
+//!   itself overflow for large extents (debug builds panicked,
+//!   release builds could wrap to a huge or negative `usize`). A
+//!   single 1e6 × 1e6 logical-pixel item at the clamped-minimum
+//!   `cell_size` of 1.0 asked for `(1e6+1)² ≈ 1e12` cells — roughly
+//!   8 TB for the `Vec<(i32, i32)>` alone — before any assertion or
+//!   even the fill loop ran; this was reachable from a single
+//!   `Scene::add_item` call, no adversarial input required. Even at
+//!   the default 256 px `cell_size`, a 1e6-square item alone reserved
+//!   `(1e6 / 256)² ≈ 1.5e7` cells (~122 MB) for that one item. The
+//!   same hazard applied to `query`/`items_in_rect`, since a caller
+//!   can pass an arbitrarily large `scene_rect` too — see `query`'s
+//!   own oversized-span fallback.
+//!
+//!   A custom `SpatialIndex` would still handle non-uniform density
+//!   better — an R-tree, say, for an editor with many overlapping
+//!   items — but none ships; the trait is the place to add one.
 //!
 //! Default `cell_size` is [`DEFAULT_CELL_SIZE`] (`256.0` logical pixels)
 //! — large enough that typical card-sized items (~200 px) bucket into 1–4
@@ -94,9 +119,45 @@ pub trait SpatialIndex: Send + std::fmt::Debug {
 /// queries (~800–1200 px) hit a small fan-out.
 pub const DEFAULT_CELL_SIZE: f32 = 256.0;
 
+/// Cap on how many grid cells a single item's AABB may be bucketed
+/// into before it is instead stored in the always-scanned `oversized`
+/// list (see [`GridHashIndex::insert`] and the module doc's
+/// "Oversized items" section).
+///
+/// Chosen as a small constant that keeps the bucketed fast path's
+/// worst-case per-item footprint bounded and independent of the
+/// item's actual size: at `MAX_CELLS_PER_ITEM` cells, the worst case
+/// is `MAX_CELLS_PER_ITEM` entries in `item_cells` (a
+/// `Vec<(i32, i32)>`, 8 bytes per entry) plus up to
+/// `MAX_CELLS_PER_ITEM` distinct single-item buckets in `cells` (a
+/// `HashMap` entry + a `Vec<ItemId>` each, tens of bytes) — on the
+/// order of 40–50 KB for one pathologically-shaped item, versus the
+/// previous unconditional and unbounded reservation described above.
+///
+/// 1024 is generous headroom above typical scene content: at the
+/// default `cell_size` of 256 px that's an ~8192×8192 px square item
+/// before it goes oversized; at the clamped minimum `cell_size` of
+/// 1.0 px (see [`GridHashIndex::new`]) that's a mere ~32×32 px item.
+/// Anything bigger at that cell size is exactly the shape of the bug
+/// this constant fixes: the incident's 1e6 × 1e6 item at
+/// `cell_size: 1.0` (`(1e6+1)² ≈ 1e12` cells, ~8 TB, under the old
+/// code) now falls straight into `oversized` instead.
+const MAX_CELLS_PER_ITEM: u64 = 1024;
+
+/// AABB intersection test used by [`GridHashIndex::query`]'s
+/// oversized-item scan. `mod tests` / `mod proptests` below keep their
+/// own independent copies for brute-force cross-checks — deliberately
+/// not sharing this one, so a bug here couldn't be masked by a test
+/// using the same implementation to verify itself.
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
 /// Uniform grid spatial hash. Each item is bucketed into every cell
 /// its AABB overlaps; queries union all items from the cells the
-/// query rect overlaps.
+/// query rect overlaps. Items whose AABB would span more than
+/// [`MAX_CELLS_PER_ITEM`] cells are NOT bucketed — see `oversized`
+/// below and the module doc's "Oversized items" section.
 #[derive(Debug)]
 pub struct GridHashIndex {
     cell_size: f32,
@@ -104,6 +165,13 @@ pub struct GridHashIndex {
     /// Reverse lookup so `remove` and `insert` (as update) don't need
     /// to scan every cell.
     item_cells: HashMap<ItemId, Vec<(i32, i32)>>,
+    /// Items whose AABB spans more than [`MAX_CELLS_PER_ITEM`] grid
+    /// cells. Never bucketed into `cells`/`item_cells` — `query`
+    /// always scans this map in full instead, checking a true AABB
+    /// intersection against the query rect. An `ItemId` is present in
+    /// exactly one of `item_cells` or `oversized` at any time, never
+    /// both (`insert` always calls `remove` first).
+    oversized: HashMap<ItemId, Rect>,
 }
 
 impl GridHashIndex {
@@ -115,6 +183,7 @@ impl GridHashIndex {
             cell_size: cell_size.max(1.0),
             cells: HashMap::new(),
             item_cells: HashMap::new(),
+            oversized: HashMap::new(),
         }
     }
 
@@ -125,6 +194,8 @@ impl GridHashIndex {
 
     /// Number of cells currently storing at least one item. Useful
     /// for diagnostics; not part of the public `SpatialIndex` trait.
+    /// Oversized items (see [`MAX_CELLS_PER_ITEM`]) never occupy a
+    /// cell, so they never contribute to this count.
     pub fn cell_count(&self) -> usize {
         self.cells.len()
     }
@@ -141,11 +212,22 @@ impl GridHashIndex {
         self.cells.values().any(|items| items.is_empty())
     }
 
-    fn cells_for_rect(&self, r: Rect) -> Vec<(i32, i32)> {
-        // Half-open convention: a rect that ends exactly on a cell
-        // boundary doesn't include the next cell. Otherwise an item
-        // sitting on a boundary would over-bucket and queries would
-        // double-count.
+    /// Test-only accessor: `true` if `id` is currently stored in the
+    /// `oversized` representation rather than bucketed into `cells`.
+    /// Mirrors `has_empty_bucket` — not part of the public API, added
+    /// so the proptest suite can assert on which representation an
+    /// item landed in without making `oversized` `pub`.
+    #[cfg(test)]
+    fn is_oversized(&self, id: ItemId) -> bool {
+        self.oversized.contains_key(&id)
+    }
+
+    /// The inclusive grid-cell span `[min_x, max_x] × [min_y, max_y]`
+    /// that `r` covers, using the half-open convention: a rect that
+    /// ends exactly on a cell boundary doesn't include the next cell.
+    /// Otherwise an item sitting on a boundary would over-bucket and
+    /// queries would double-count.
+    fn cell_span_for_rect(&self, r: Rect) -> (i32, i32, i32, i32) {
         let cs = self.cell_size;
         let min_x = (r.x / cs).floor() as i32;
         let min_y = (r.y / cs).floor() as i32;
@@ -160,8 +242,55 @@ impl GridHashIndex {
         } else {
             ((r.bottom() - f32::EPSILON) / cs).floor() as i32
         };
-        let mut out =
-            Vec::with_capacity(((max_x - min_x + 1).max(1) * (max_y - min_y + 1).max(1)) as usize);
+        (min_x, min_y, max_x, max_y)
+    }
+
+    /// Number of grid cells the inclusive span `[min_x, max_x] ×
+    /// [min_y, max_y]` covers.
+    ///
+    /// Computed via `i64` subtraction promoted to a saturating `u64`
+    /// multiplication — never the bare `i32 * i32` product the
+    /// original bug used, which could itself overflow for
+    /// large-extent rects (debug: panic; release: wrap, possibly to a
+    /// negative value that then reinterpreted as a huge `usize`). This
+    /// function is pure arithmetic — O(1) and allocation-free — so it
+    /// is always safe to call, even with a span that would be
+    /// catastrophic to actually enumerate.
+    fn cell_span_count(min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> u64 {
+        let width = (i64::from(max_x) - i64::from(min_x) + 1).max(1) as u64;
+        let height = (i64::from(max_y) - i64::from(min_y) + 1).max(1) as u64;
+        width.saturating_mul(height)
+    }
+
+    /// Whether `r`'s grid-cell span exceeds [`MAX_CELLS_PER_ITEM`] —
+    /// i.e. whether it must go into `oversized` instead of being
+    /// bucketed cell-by-cell. See the module doc's "Oversized items"
+    /// section.
+    fn rect_is_oversized(&self, r: Rect) -> bool {
+        let (min_x, min_y, max_x, max_y) = self.cell_span_for_rect(r);
+        Self::cell_span_count(min_x, min_y, max_x, max_y) > MAX_CELLS_PER_ITEM
+    }
+
+    /// Enumerate every grid cell `r` covers.
+    ///
+    /// Precondition upheld by both call sites — `insert` (only after
+    /// `rect_is_oversized` returns `false`) and `query`'s normal-path
+    /// branch (only after its own span-count check) — is that `r`'s
+    /// span is `<= MAX_CELLS_PER_ITEM` cells, a small constant. The
+    /// `debug_assert!` below exists to catch a future call site that
+    /// forgets that precondition during development/test, rather than
+    /// silently reintroducing the original unbounded-allocation bug in
+    /// release builds.
+    fn cells_for_rect(&self, r: Rect) -> Vec<(i32, i32)> {
+        let (min_x, min_y, max_x, max_y) = self.cell_span_for_rect(r);
+        let count = Self::cell_span_count(min_x, min_y, max_x, max_y);
+        debug_assert!(
+            count <= MAX_CELLS_PER_ITEM,
+            "cells_for_rect called with a span of {count} cells, above MAX_CELLS_PER_ITEM \
+             ({MAX_CELLS_PER_ITEM}) for rect {r:?} — callers must route anything this large \
+             through the `oversized` representation instead of enumerating cells for it",
+        );
+        let mut out = Vec::with_capacity(count as usize);
         for x in min_x..=max_x {
             for y in min_y..=max_y {
                 out.push((x, y));
@@ -179,8 +308,15 @@ impl Default for GridHashIndex {
 
 impl SpatialIndex for GridHashIndex {
     fn insert(&mut self, id: ItemId, bounds: Rect) {
-        // Re-insert: drop old buckets first.
+        // Re-insert: drop any previous bucketed OR oversized entry
+        // first, so an id can move freely between the two
+        // representations (normal→oversized and oversized→normal) on
+        // a bounds change.
         self.remove(id);
+        if self.rect_is_oversized(bounds) {
+            self.oversized.insert(id, bounds);
+            return;
+        }
         let cells = self.cells_for_rect(bounds);
         for cell in &cells {
             self.cells.entry(*cell).or_default().push(id);
@@ -189,6 +325,9 @@ impl SpatialIndex for GridHashIndex {
     }
 
     fn remove(&mut self, id: ItemId) {
+        if self.oversized.remove(&id).is_some() {
+            return;
+        }
         if let Some(cells) = self.item_cells.remove(&id) {
             for cell in cells {
                 if let Some(items) = self.cells.get_mut(&cell) {
@@ -204,15 +343,62 @@ impl SpatialIndex for GridHashIndex {
     fn query(&self, scene_rect: Rect) -> Vec<ItemId> {
         let mut seen = HashSet::new();
         let mut result = Vec::new();
-        for cell in self.cells_for_rect(scene_rect) {
-            if let Some(items) = self.cells.get(&cell) {
-                for &id in items {
-                    if seen.insert(id) {
-                        result.push(id);
+
+        let (min_x, min_y, max_x, max_y) = self.cell_span_for_rect(scene_rect);
+        let span_count = Self::cell_span_count(min_x, min_y, max_x, max_y);
+
+        if span_count <= MAX_CELLS_PER_ITEM {
+            // Normal path: the query rect itself covers a bounded
+            // number of cells (same cap as a single item), so
+            // enumerating them directly is cheap.
+            for cell in self.cells_for_rect(scene_rect) {
+                if let Some(items) = self.cells.get(&cell) {
+                    for &id in items {
+                        if seen.insert(id) {
+                            result.push(id);
+                        }
+                    }
+                }
+            }
+        } else {
+            // The QUERY rect itself spans more cells than any single
+            // item is allowed to occupy — e.g. a "select everything"
+            // or fit-to-content query over a huge area. Enumerating
+            // min_x..=max_x × min_y..=max_y directly here would hit
+            // the exact unbounded-allocation hazard `MAX_CELLS_PER_ITEM`
+            // exists to close for items, just on the query side
+            // instead. So instead scan the (much smaller) set of
+            // POPULATED cells and keep only the ones inside the span
+            // — O(populated cells) rather than O(cells the rect
+            // covers). Populated-cell count is bounded by
+            // `items_in_the_grid × MAX_CELLS_PER_ITEM`, never by the
+            // query rect's area, so this is always safe. The result is
+            // identical to the normal path's (same set of cells
+            // considered — just discovered from the other direction).
+            for (&(cx, cy), items) in &self.cells {
+                if (min_x..=max_x).contains(&cx) && (min_y..=max_y).contains(&cy) {
+                    for &id in items {
+                        if seen.insert(id) {
+                            result.push(id);
+                        }
                     }
                 }
             }
         }
+
+        // Oversized items are never bucketed into `cells` at all, so
+        // they must always be checked directly — regardless of which
+        // branch above ran — against a true AABB intersection. This
+        // is what keeps the never-under-report invariant for an item
+        // too big to cell-bucket, and (since it's an exact check, not
+        // a cell-fan-out approximation) it never contributes a false
+        // positive of its own.
+        for (&id, &bounds) in &self.oversized {
+            if rects_intersect(bounds, scene_rect) && seen.insert(id) {
+                result.push(id);
+            }
+        }
+
         // Stable order so query results are deterministic across
         // runs — useful for tests and reproducible debugging.
         result.sort_unstable();
@@ -220,11 +406,11 @@ impl SpatialIndex for GridHashIndex {
     }
 
     fn contains(&self, id: ItemId) -> bool {
-        self.item_cells.contains_key(&id)
+        self.item_cells.contains_key(&id) || self.oversized.contains_key(&id)
     }
 
     fn len(&self) -> usize {
-        self.item_cells.len()
+        self.item_cells.len() + self.oversized.len()
     }
 }
 
@@ -437,6 +623,34 @@ mod tests {
     fn rects_intersect(a: Rect, b: Rect) -> bool {
         a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
     }
+
+    #[test]
+    fn oversized_1e6_extent_at_cell_size_one_never_allocates_the_pathological_cell_count() {
+        // The literal incident input: a 1e6 x 1e6 logical-pixel rect at
+        // cell_size 1.0 used to make `cells_for_rect` reserve
+        // `(1e6+1) * (1e6+1) ~= 1e12` cells — about 8 TB for a
+        // `Vec<(i32, i32)>` alone (and risked an i32*i32 overflow along
+        // the way). It must now be classified oversized and never touch
+        // `cells`/`item_cells` at all.
+        let mut g = GridHashIndex::new(1.0);
+        let item = id(1);
+        g.insert(item, Rect::new(0.0, 0.0, 1_000_000.0, 1_000_000.0));
+        assert!(
+            g.is_oversized(item),
+            "the reboot-inducing input must be classified oversized"
+        );
+        assert!(g.contains(item));
+        assert_eq!(g.len(), 1);
+        assert_eq!(
+            g.cell_count(),
+            0,
+            "an oversized item must not touch the cell buckets"
+        );
+
+        // It must still be findable by a query that truly intersects it.
+        let hits = g.query(Rect::new(500.0, 500.0, 10.0, 10.0));
+        assert_eq!(hits, vec![item]);
+    }
 }
 
 /// Property-based tests for [`GridHashIndex`].
@@ -524,24 +738,45 @@ mod proptests {
     // Zero and near-zero extents are the "single point" edge case
     // documented in `cells_for_rect`'s width/height <= 0.0 branch; we
     // also want ordinary and very large extents.
-    /// Cap on how many cells a single generated item may span per axis.
+    /// Cap on how many cells a single generated item may span per axis, for
+    /// the GENERATORS that stress the ordinary bucketed fast path (item
+    /// count vs. query correctness, insertion-order independence, etc.).
     ///
-    /// `GridHashIndex::insert` allocates one `(i32, i32)` per covered cell
-    /// (see `cells_for_rect`), so cell count grows as
-    /// `(width / cell_size) * (height / cell_size)` with NO upper bound. An
-    /// unconstrained extent combined with the smallest `cell_size` this
-    /// suite generates (1.0) asks for `1e6 * 1e6 = 1e12` cells and OOMs the
-    /// machine before any assertion runs — which is how this suite came to
-    /// take a developer's workstation down.
+    /// Historical note — this constant is the reason the resource-
+    /// exhaustion bug was caught at all: `GridHashIndex::insert` used to
+    /// allocate one `(i32, i32)` per covered cell (see `cells_for_rect`)
+    /// with NO upper bound, so an unconstrained extent combined with the
+    /// smallest `cell_size` this suite generates (1.0) asked for
+    /// `1e6 * 1e6 = 1e12` cells and OOMed the machine before any assertion
+    /// ran — which is how this suite came to take a developer's
+    /// workstation down. That was a REAL BUG in `cells_for_rect`, not
+    /// merely a bad generator: a scene that adds one very large item (a
+    /// backdrop, a full-document canvas rect) with a small `cell_size`
+    /// would hang or OOM in production, no adversarial input required.
     ///
-    /// That unbounded growth is a REAL BUG in `cells_for_rect`, not merely a
-    /// bad generator — a scene that adds one very large item (a backdrop, a
-    /// full-document canvas rect) with a small `cell_size` will hang or OOM
-    /// in production, with no test needed to provoke it. Fixing it is a
-    /// design decision (cap coverage and keep an always-scanned "oversized"
-    /// list, or clamp to a world bound), so it is reported rather than
-    /// patched here. This constant keeps the suite able to explore geometry
-    /// safely in the meantime.
+    /// `GridHashIndex` now fixes this directly: an item (or a query rect)
+    /// whose span exceeds `MAX_CELLS_PER_ITEM` (1024) is never bucketed
+    /// cell-by-cell — see the module doc's "Oversized items" section and
+    /// the dedicated properties below (10–13) that exercise that path
+    /// specifically, including the exact 1e6-at-`cell_size:1.0` incident
+    /// input. So it would now be SAFE to relax or remove this cap — no
+    /// combination of `cell_size` and extent can OOM or overflow the index
+    /// anymore, per the arithmetic on `MAX_CELLS_PER_ITEM`.
+    ///
+    /// It is kept at 64 anyway, deliberately, for a coverage reason
+    /// unrelated to safety: `arb_extent`'s "a few cells" branch draws
+    /// `(1.0..MAX_CELLS_PER_AXIS)`, and properties 1, 2, 4, 5, 6, 8, 9 lean
+    /// on that branch to stress the NORMAL bucketed path's boundary/
+    /// precision arithmetic (the 2–64-cells-per-axis regime is where an
+    /// off-by-one or an f32 rounding slip in `cells_for_rect` would show
+    /// up). Raising this constant to, say, `1_000_000.0` to match
+    /// `arb_coord`'s large-magnitude branch would make that "a few cells"
+    /// branch draw an almost-always-oversized value instead (a uniform
+    /// draw over `[1, 1e6)` puts less than 0.1% of its mass below 1024),
+    /// silently starving those seven properties of the multi-cell-bucketing
+    /// coverage they exist for. Rather than dilute that shared generator,
+    /// the oversized path gets its own dedicated generators in properties
+    /// 10–13 below, which is why this constant is unchanged.
     const MAX_CELLS_PER_AXIS: f32 = 64.0;
 
     /// Extents are generated RELATIVE to `cell_size` so an item never spans
@@ -934,6 +1169,216 @@ mod proptests {
                 inner_hits.difference(&outer_hits).collect::<Vec<_>>(),
                 outer_hits,
             );
+        }
+    }
+
+    // Side length (in logical pixels) of a square rect guaranteed to exceed
+    // MAX_CELLS_PER_ITEM at the given cell_size, for ANY cell_size this
+    // suite's arb_cell_size() produces (1.0..=256.0): a
+    // `sqrt(MAX_CELLS_PER_ITEM)`-cells-per-axis square already sits right at
+    // the cap, so doubling it clears the cap comfortably regardless of
+    // f32-rounding at the boundary.
+    fn oversized_side_for(cell_size: f32) -> f32 {
+        cell_size * (MAX_CELLS_PER_ITEM as f32).sqrt() * 2.0
+    }
+
+    // ── 10. an oversized item is still found by a query that truly intersects it ──
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+        #[test]
+        fn oversized_item_is_found_by_a_query_that_truly_intersects_it(
+            cell_size in arb_cell_size(),
+            n in 0u64..8,
+            // Fractions used to carve a query rect that is a strict
+            // sub-rect of (hence guaranteed to truly intersect) the
+            // oversized item's bounds.
+            fx in 0.0f32..1.0,
+            fy in 0.0f32..1.0,
+            fw in 0.01f32..1.0,
+            fh in 0.01f32..1.0,
+        ) {
+            let side = oversized_side_for(cell_size);
+            let big_rect = Rect::new(0.0, 0.0, side, side);
+
+            let mut g = GridHashIndex::new(cell_size);
+            let item = id(n);
+            g.insert(item, big_rect);
+            prop_assert!(
+                g.is_oversized(item),
+                "cell_size={} side={}: item should have been classified oversized (cap={})",
+                cell_size, side, MAX_CELLS_PER_ITEM,
+            );
+
+            // A rect confined to [0, side/2) x [0, side/2) with modest
+            // width/height is always a strict sub-rect of big_rect, hence
+            // always truly intersects it.
+            let qx = fx * side * 0.5;
+            let qy = fy * side * 0.5;
+            let qw = (fw * side * 0.25).max(0.01);
+            let qh = (fh * side * 0.25).max(0.01);
+            let query_rect = Rect::new(qx, qy, qw, qh);
+
+            let hits = g.query(query_rect);
+            prop_assert!(
+                hits.contains(&item),
+                "cell_size={} query={:?}: oversized item {:?} (bounds {:?}) missed by a query \
+                 that truly intersects it — a lost click through the oversized path",
+                cell_size, query_rect, item, big_rect,
+            );
+        }
+    }
+
+    // ── 11. re-insert moves an item between normal and oversized with no ghost in either representation ──
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+        #[test]
+        fn reinsert_moves_between_normal_and_oversized_with_no_ghost(
+            cell_size in arb_cell_size(),
+            n in 0u64..8,
+        ) {
+            let small_side = cell_size.min(10.0);
+            let small_rect = Rect::new(0.0, 0.0, small_side, small_side);
+            let side = oversized_side_for(cell_size);
+            // Far enough from the origin that big_rect can never overlap
+            // small_rect, so any hit at the "wrong" location is
+            // unambiguously a ghost, not a coincidental true intersection.
+            let far = cell_size * 10_000.0;
+            let big_rect = Rect::new(far, far, side, side);
+
+            let mut g = GridHashIndex::new(cell_size);
+            let item = id(n);
+
+            // 1. Normal path.
+            g.insert(item, small_rect);
+            prop_assert!(!g.is_oversized(item), "expected the small rect to bucket normally");
+            prop_assert!(g.query(small_rect).contains(&item));
+
+            // 2. normal -> oversized.
+            g.insert(item, big_rect);
+            prop_assert!(
+                g.is_oversized(item),
+                "cell_size={} side={}: expected the big rect to be classified oversized",
+                cell_size, side,
+            );
+            prop_assert!(
+                !g.query(small_rect).contains(&item),
+                "ghost: {:?} still found at the old (normally-bucketed) rect {:?} after moving \
+                 to the oversized rect {:?}",
+                item, small_rect, big_rect,
+            );
+            prop_assert!(g.query(big_rect).contains(&item));
+
+            // 3. oversized -> normal.
+            g.insert(item, small_rect);
+            prop_assert!(
+                !g.is_oversized(item),
+                "expected re-insert with a small rect to leave the oversized representation"
+            );
+            prop_assert!(
+                !g.query(big_rect).contains(&item),
+                "ghost: {:?} still found at the old oversized rect {:?} after moving back to {:?}",
+                item, big_rect, small_rect,
+            );
+            prop_assert!(g.query(small_rect).contains(&item));
+            prop_assert_eq!(g.len(), 1, "exactly one logical item should exist throughout");
+        }
+    }
+
+    // ── 12. contains/len still track a HashMap model when oversized items are mixed in ──
+    fn arb_rect_possibly_oversized(cell_size: f32) -> impl Strategy<Value = Rect> {
+        prop_oneof![
+            3 => arb_rect(cell_size),
+            1 => {
+                let side = oversized_side_for(cell_size);
+                (-10i32..10i32, -10i32..10i32).prop_map(move |(kx, ky)| {
+                    Rect::new(kx as f32 * side, ky as f32 * side, side, side)
+                })
+            },
+        ]
+    }
+
+    fn arb_op_possibly_oversized(cell_size: f32) -> impl Strategy<Value = Op> {
+        prop_oneof![
+            3 => (0u64..12, arb_rect_possibly_oversized(cell_size)).prop_map(|(n, r)| Op::Insert(n, r)),
+            1 => (0u64..12).prop_map(Op::Remove),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]
+        #[test]
+        fn contains_and_len_track_a_hashmap_model_with_oversized_items_mixed_in(
+            (cell_size, ops) in arb_cell_size()
+                .prop_flat_map(|cs| (Just(cs), prop::collection::vec(arb_op_possibly_oversized(cs), 0..80)))
+        ) {
+            let mut g = GridHashIndex::new(cell_size);
+            let mut model: HashMap<ItemId, Rect> = HashMap::new();
+
+            for op in &ops {
+                match *op {
+                    Op::Insert(n, r) => {
+                        g.insert(id(n), r);
+                        model.insert(id(n), r);
+                    }
+                    Op::Remove(n) => {
+                        g.remove(id(n));
+                        model.remove(&id(n));
+                    }
+                }
+                prop_assert_eq!(
+                    g.len(), model.len(),
+                    "after {:?} (oversized items mixed in): index len {} != model len {} \
+                     (ops so far: {:?})",
+                    op, g.len(), model.len(), ops,
+                );
+            }
+
+            // Full-state check over the bounded id range every op draws
+            // from, since there's no "list all ids" accessor.
+            for n in 0..12u64 {
+                prop_assert_eq!(
+                    g.contains(id(n)), model.contains_key(&id(n)),
+                    "id {} contains()={} but model has_key={} after ops {:?} \
+                     (oversized items mixed in)",
+                    n, g.contains(id(n)), model.contains_key(&id(n)), ops,
+                );
+            }
+        }
+    }
+
+    // ── 13. a single item's cell footprint never exceeds MAX_CELLS_PER_ITEM, for any extent ──
+    //
+    // This is the property that would have prevented the reboots: it
+    // exercises the exact incident input (a 1e6 extent at cell_size 1.0,
+    // via the `Just(1_000_000.0_f32)` branch below) alongside other large
+    // extents and the suite's usual cell sizes, and checks the observable
+    // proxy for "did this allocate a pathological number of cells" —
+    // `cell_count()` staying within the cap regardless of how the item was
+    // classified.
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]
+        #[test]
+        fn a_single_items_cell_footprint_never_exceeds_the_per_item_cap(
+            cell_size in arb_cell_size(),
+            extent in prop_oneof![
+                Just(1_000_000.0_f32),
+                Just(500_000.0_f32),
+                Just(100_000.0_f32),
+                (1.0f32..MAX_CELLS_PER_ITEM as f32 * 4.0),
+            ],
+        ) {
+            let mut g = GridHashIndex::new(cell_size);
+            let item = id(1);
+            g.insert(item, Rect::new(0.0, 0.0, extent, extent));
+
+            prop_assert!(
+                g.cell_count() <= MAX_CELLS_PER_ITEM as usize,
+                "cell_size={} extent={}: cell_count()={} exceeds the per-item cap {} — the \
+                 resource-exhaustion bug is back",
+                cell_size, extent, g.cell_count(), MAX_CELLS_PER_ITEM,
+            );
+            prop_assert!(g.contains(item));
+            prop_assert_eq!(g.len(), 1);
         }
     }
 }
