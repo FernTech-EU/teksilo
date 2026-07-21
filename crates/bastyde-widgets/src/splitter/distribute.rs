@@ -60,6 +60,27 @@ pub fn distribute(available: f32, panes: &[PaneSnapshot], progress: &[f32]) -> V
                 p.max_size.unwrap_or(f32::INFINITY),
             )
         };
+        // `f32::clamp` panics when either bound is NaN, and the `lo > hi`
+        // guard below cannot catch that: `NaN > hi` and `lo > NaN` are both
+        // false, so a NaN bound would fall straight through it and abort the
+        // process. `PaneDescriptor` bounds are app-supplied, and a minimum
+        // derived from a ratio yields NaN from a 0/0, so normalise first:
+        // an unknown floor is 0.0 and an unknown ceiling is unbounded, which
+        // is what each field already means when left unset.
+        // The two bounds are NOT symmetric. `max = INFINITY` is the ordinary
+        // way to say "unbounded" (it is the `unwrap_or` default just above),
+        // so it must pass through untouched. A non-finite `min` is always a
+        // caller error: an infinite floor has no satisfiable size and would
+        // propagate `inf` into the returned layout.
+        debug_assert!(
+            lo.is_finite() && !hi.is_nan(),
+            "pane {i} has an invalid size bound (min={lo}, max={hi}); \
+             PaneDescriptor min must be finite and max must not be NaN",
+        );
+        let lo = if lo.is_finite() { lo } else { 0.0 };
+        let hi = if hi.is_nan() { f32::INFINITY } else { hi };
+        // A `max` of -INFINITY leaves `lo > hi`, which the guard below
+        // resolves to `lo` — finite, so no non-finite size escapes.
         emin[i] = lo;
         emax[i] = hi;
         // Defensive: an impossible [min,max] honors the min.
@@ -599,25 +620,32 @@ mod proptests {
         })
     }
 
-    /// A finite-but-wild value, or a genuinely non-finite one (NaN or
-    /// ±Infinity) — the domain used only by the dedicated non-finite-bounds
-    /// property (12), kept separate from [`arb_pane`] so the other eleven
-    /// properties exercise a domain that is known not to trip the
-    /// `f32::clamp` panic contract quoted in that property's comment.
-    fn arb_non_finite_bound() -> impl Strategy<Value = f32> {
+    /// A ceiling that may be non-finite. `INFINITY` is the ordinary
+    /// "unbounded" value — it is exactly what `max_size: None` unwraps to —
+    /// so `distribute` must handle it, and `NEG_INFINITY` exercises the
+    /// `lo > hi` contradiction path with a non-finite bound.
+    ///
+    /// NaN is deliberately absent: `distribute` now debug-asserts against it
+    /// and normalises it in release, so generating it here would only trip
+    /// that assertion, which is the intended behaviour rather than a property
+    /// this suite should contradict.
+    fn arb_non_finite_max() -> impl Strategy<Value = f32> {
         prop_oneof![
-            Just(f32::NAN),
             Just(f32::INFINITY),
             Just(f32::NEG_INFINITY),
             0.0f32..=1000.0f32,
         ]
     }
 
+    /// Floors stay finite. A non-finite `min` has no satisfiable size and is
+    /// a caller error that `distribute` debug-asserts against — the bounds
+    /// are asymmetric, and this generator has to respect that or it would
+    /// just be asserting against the assertion.
     fn arb_pane_with_wild_bounds() -> impl Strategy<Value = PaneSnapshot> {
         (
             0.0f32..=1000.0f32,
-            arb_non_finite_bound(),
-            prop_oneof![Just(None), arb_non_finite_bound().prop_map(Some)],
+            0.0f32..=1000.0f32,
+            prop_oneof![Just(None), arb_non_finite_max().prop_map(Some)],
             0.1f32..=5.0f32,
         )
             .prop_map(|(stored_size, min_size, max_size, stretch)| PaneSnapshot {
@@ -1011,28 +1039,21 @@ mod proptests {
     // property — see the report for why this one carries low confidence.
 
     proptest! {
-        // UNRESOLVED — parked, not silently dropped. This property FAILS by
-        // PANICKING inside `f32::clamp` (core/src/num/f32.rs:1505), whose
-        // contract is "Panics if `min > max`, `min` is NaN, or `max` is NaN".
+        // RESOLVED. This property used to panic: a NaN `min_size`/`max_size`
+        // reached `f32::clamp`, which panics by contract on a NaN bound, and
+        // the `lo > hi` guard could not catch it because both `NaN > hi` and
+        // `lo > NaN` are false.
         //
-        // `distribute`'s phase-0 guard reads `if lo > hi { lo } else {
-        // req.clamp(lo, hi) }`. That defends a finite contradictory
-        // `min > max` (see the property above, which passes), but NaN slips
-        // straight through it: both `NaN > hi` and `lo > NaN` are false, so a
-        // NaN bound reaches `.clamp()` and aborts the process.
+        // `distribute` now normalises the bounds first (NaN floor -> 0.0, NaN
+        // ceiling -> INFINITY) behind a `debug_assert!`, so a NaN bound is
+        // treated as a caller bug that fails loudly in development while
+        // still degrading safely in release rather than aborting the process.
         //
-        // Reachable: `PaneDescriptor::min`/`max` are app-supplied, and an app
-        // computing a minimum from a ratio can produce NaN from a 0/0. The
-        // failure mode is a crash, not a mis-layout, which makes this the most
-        // actionable of the parked findings.
-        //
-        // This is the same shape as the `Color::mix` NaN hole fixed in
-        // 5789116b — a defensive guard written for the ordered case that a
-        // NaN walks through. The fix is presumably to normalise the bounds
-        // before clamping (NaN lo -> 0.0, NaN hi -> INFINITY), but it belongs
-        // with someone who can weigh what a non-finite pane bound should mean
-        // rather than being applied blind. Do NOT weaken this assertion.
-        #[ignore = "unresolved: NaN min/max panics inside f32::clamp — see comment"]
+        // NaN is therefore no longer generated here — feeding it would only
+        // trip that `debug_assert!`, which is the intended behaviour, not a
+        // property this suite should assert against. The infinities stay:
+        // `max_size: INFINITY` is the ordinary way to say "unbounded", so
+        // handling it gracefully is a real contract rather than a courtesy.
         #[test]
         fn sizes_stay_finite_even_when_a_pane_min_or_max_is_non_finite(
             panes in arb_panes_with_wild_bounds(),
