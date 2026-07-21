@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fc9f438730cf9eaad0aa7f101076cbd49721f3c1431c8cfa57356bfd8e099bde # shrinks to (tree_ops, ops, tree_ops2) = ([None, Some(0), Some(1), Some(5), Some(16), Some(12)], [Check(1)], [None, None, None, None, None, Some(4)])
+cc deca6c0eae8ab470fa764688e05966a1b3fd9721df4be90c7f5003a3e4b58611 # shrinks to (tree_ops, ops, victim_idx) = ([Some(8), Some(13), Some(3), Some(10), Some(1), Some(2), Some(18), None, Some(10), None, None, Some(15), Some(16), Some(19), Some(7), Some(11), Some(7), Some(12), Some(14), Some(12)], [ToggleLeaf(15)], 12)
