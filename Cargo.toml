@@ -152,7 +152,7 @@ bastyde-theme-fluent = { path = "crates/bastyde-theme-fluent", version = "0.6.2"
 # consumer (`bastyde-analytics-bastyde`) owns its own tonic / prost / tokio
 # versions since no other framework crate uses them.
 bastyde-collector-proto = { path = "../bastyde-collector-proto", version = "0.1.0" }
-bastyde-analytics-bastyde = { path = "crates/bastyde-analytics-bastyde", version = "0.2.0" }
+bastyde-analytics-bastyde = { path = "crates/bastyde-analytics-bastyde", version = "0.7.0" }
 bastyde-telemetry-codegen = { path = "crates/bastyde-telemetry-codegen", version = "0.6.2" }
 
 

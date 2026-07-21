@@ -37,6 +37,12 @@ Crates that inherit their publishability with ``publish.workspace = true``
 resolve against the root manifest's ``[workspace.package] publish`` value,
 so flipping that one line flips every inheriting crate.
 
+Directories listed in the root manifest's ``[workspace] exclude`` are
+skipped: they are not workspace members, so ``cargo publish -p <name>``
+from the root cannot reach them and they must not appear in a release
+order derived from this workspace. They are reported by name in the
+human-readable output rather than dropped silently.
+
 Usage:
     python3 tools/check_release_order.py [--root DIR] [--json | --list]
                                          [--include-examples]
@@ -67,6 +73,8 @@ _PACKAGE_NAME_RE = re.compile(r'^\s*name\s*=\s*"([^"]+)"')
 _PUBLISH_RE = re.compile(r"^\s*publish\s*=\s*(true|false)\b")
 _PUBLISH_WS_RE = re.compile(r"^\s*publish\.workspace\s*=\s*true")
 _SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+_EXCLUDE_RE = re.compile(r"^\s*exclude\s*=\s*\[(.*)$")
+_ARRAY_STR_RE = re.compile(r'"([^"]*)"')
 
 
 @dataclass
@@ -139,6 +147,58 @@ def parse_workspace_publish(root: str) -> bool:
     return True
 
 
+def parse_workspace_exclude(root: str) -> set[str]:
+    """Read ``[workspace] exclude`` from the root manifest.
+
+    An excluded path is not a workspace member, so it cannot be reached by
+    ``cargo publish -p <name>`` from the root and must not appear in a
+    release order derived from that workspace. Cargo excludes the listed
+    directory *and everything beneath it*, so the returned paths are used
+    as path prefixes rather than exact matches.
+
+    Handles both array spellings this workspace might use:
+    ``exclude = ["a", "b"]`` and the multi-line form.
+    """
+    manifest = os.path.join(root, "Cargo.toml")
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        print(f"warning: cannot read {manifest}: {exc} "
+              f"(assuming nothing is excluded)", file=sys.stderr)
+        return set()
+
+    excluded: set[str] = set()
+    in_workspace = False
+    collecting = False
+    for raw in text.splitlines():
+        line = _strip_comment(raw)
+        if collecting:
+            excluded.update(_ARRAY_STR_RE.findall(line))
+            if "]" in line:
+                collecting = False
+            continue
+        m = _SECTION_RE.match(line)
+        if m:
+            in_workspace = m.group(1).strip() == "workspace"
+            continue
+        if not in_workspace:
+            continue
+        em = _EXCLUDE_RE.match(line)
+        if em:
+            rest = em.group(1)
+            excluded.update(_ARRAY_STR_RE.findall(rest))
+            collecting = "]" not in rest
+    return {os.path.normpath(p) for p in excluded if p}
+
+
+def is_excluded(rel: str, excluded: set[str]) -> bool:
+    """True when `rel` is an excluded directory or lives beneath one."""
+    parts = os.path.normpath(rel).split(os.sep)
+    return any(os.sep.join(parts[:i]) in excluded
+               for i in range(1, len(parts) + 1))
+
+
 def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bool, set[str], set[str]]:
     """Return (package_name, publishable, normal_internal_deps, dev_internal_deps).
 
@@ -190,8 +250,17 @@ def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bo
 
 
 def discover_crates(root: str, include_examples: bool,
-                    workspace_publish: bool) -> dict[str, Crate]:
-    """Scan the workspace for member crates and parse their manifests."""
+                    workspace_publish: bool,
+                    excluded_paths: set[str] | None = None,
+                    ) -> tuple[dict[str, Crate], list[str]]:
+    """Scan the workspace for member crates and parse their manifests.
+
+    Returns (crates, excluded) where `excluded` names the crates skipped
+    because `[workspace] exclude` lists them — they are not workspace
+    members, so they can never be part of this workspace's release order.
+    """
+    excluded_paths = excluded_paths or set()
+    excluded: list[str] = []
     crates: dict[str, Crate] = {}
     # Hidden directories are skipped wholesale: besides .git/.idea/.vscode,
     # this keeps us out of git worktrees parked under `.claude/worktrees/`,
@@ -220,7 +289,16 @@ def discover_crates(root: str, include_examples: bool,
         if is_example and not include_examples:
             # Still useful to know examples exist, but they are leaf
             # consumers (nothing depends on them) and are not published,
-            # so they never affect cycles or release order.
+            # so they never affect cycles or release order. Tested before
+            # the exclude check so an excluded *example* isn't reported as
+            # a missing crate in a mode where no example is listed anyway.
+            continue
+        if is_excluded(rel, excluded_paths):
+            # Listed in `[workspace] exclude`: not a member, so `cargo
+            # publish -p <name>` from the root cannot even see it. Record
+            # the name so the report can say so instead of silently
+            # dropping a crate the reader expects to find.
+            excluded.append(name)
             continue
         if name in crates:
             # Two manifests declaring the same package name means we walked
@@ -231,7 +309,7 @@ def discover_crates(root: str, include_examples: bool,
             continue
         crates[name] = Crate(name=name, path=rel, publish=publish,
                               normal_deps=normal, dev_deps=dev)
-    return crates
+    return crates, sorted(excluded)
 
 
 def tarjan_sccs(nodes: list[str], edges: dict[str, set[str]]) -> list[list[str]]:
@@ -346,7 +424,9 @@ def main() -> int:
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
     workspace_publish = parse_workspace_publish(root)
-    crates = discover_crates(root, args.include_examples, workspace_publish)
+    workspace_exclude = parse_workspace_exclude(root)
+    crates, excluded_crates = discover_crates(
+        root, args.include_examples, workspace_publish, workspace_exclude)
     if not crates:
         print(f"error: no bastyde-* crates found under {root}", file=sys.stderr)
         return 2
@@ -406,6 +486,8 @@ def main() -> int:
         payload = {
             "root": root,
             "workspace_publish": workspace_publish,
+            "workspace_exclude": sorted(workspace_exclude),
+            "excluded_crates": excluded_crates,
             "crates": {
                 n: {
                     "path": crates[n].path,
@@ -430,6 +512,11 @@ def main() -> int:
     print(f"Bastyde dependency report  ({len(names)} internal crates under {root})")
     print(f"[workspace.package] publish = {str(workspace_publish).lower()}"
           "   (inherited by every `publish.workspace = true` crate)")
+    if excluded_crates:
+        print(f"[workspace] exclude skipped {len(excluded_crates)} crate(s): "
+              f"{', '.join(excluded_crates)}")
+        print("   Not workspace members — `cargo publish -p <name>` from the")
+        print("   root cannot see them, so they are left out of the order.")
     print("=" * 72)
 
     print("\nPer-crate internal dependencies (normal/build + dev):")
