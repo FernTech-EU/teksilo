@@ -70,6 +70,10 @@ Skribisto, a rich-text writing tool built with Bastyde, was ported from C++/Qt t
 
 A widget catalog example is available if you run `cargo run -p widget-catalog` in the Bastyde repo. It shows most of the widgets, with live property editing and multi-variant rendering.
 
+## Documentation
+
+Available in `docs/` and on [Cloudflare Pages](https://bastyde.pages.dev).
+
 ## Who is this for
 
 Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect keyboard-first interaction, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the boilerplate above.
