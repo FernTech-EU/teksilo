@@ -45,7 +45,7 @@ model.add_item(item, Point::new(50.0, 50.0));
 
 ## Builder methods at a glance
 
-`fill`, `stroke`, `stroke_cosmetic`, `label`, `draggable`
+`fill`, `stroke`, `stroke_cosmetic`, `stroke_styled`, `label`, `draggable`
 
 ## API reference
 
@@ -75,20 +75,29 @@ A path with a caller-provided AABB in local coordinates. The
 path's points are interpreted as local — `(0, 0)` is the
 item's anchor.
 
-#### `pub fn fill(mut self, color: Color) -> Self`
+#### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self`
 
-Fill color.
+Fill colour. Accepts a plain `Color`, a theme role, a
+`Signal<Color>`, or a `Signal<Role>` — resolved against the active
+theme at paint time.
 
-#### `pub fn stroke(mut self, color: Color, width: f32) -> Self`
+#### `pub fn stroke(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
-Stroke color and width in **scene-coordinate** pixels — the stroke
+Stroke colour and width in **scene-coordinate** pixels — the stroke
 scales with the view zoom.
 
-#### `pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self`
+#### `pub fn stroke_cosmetic(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Cosmetic stroke: the connector holds a constant **device-pixel** width
 at any zoom (it never thins out or thickens). The renderer keeps the
 path body sharp at the current zoom, so joins/caps stay correct.
+
+#### `pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self`
+
+Stroke with an explicit `StrokeStyle` — dashed, dotted, or custom caps
+/ joins. E.g. `.stroke_styled(color, StrokeStyle::dashed(2.0, 6.0, 4.0))`
+distinguishes a pending connector from a solid confirmed one. The style
+is stored verbatim (dash pattern/offset, `Logical` vs `Device` space).
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 

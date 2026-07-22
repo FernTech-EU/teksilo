@@ -11,7 +11,7 @@ Every public type in `bastyde-scene`, grouped by category. Each page links to it
 - [ImageItem](image.md) — `ImageItem` — a raster image at a local-coord rectangle
 - [PathItem](path.md) — `PathItem` — vector path with optional fill and stroke
 - [RectItem](rect.md) — `RectItem` — filled / stroked rectangle in local item coords
-- [TextItem](text.md) — `TextItem` — unstyled text in a local-coord rectangle
+- [TextAlign](text.md) — `TextItem` — text in a local-coord rectangle, with alignment + rotation
 
 ## Scene
 
@@ -23,6 +23,7 @@ Every public type in `bastyde-scene`, grouped by category. Each page links to it
 - [ItemId](item.md) — The `SceneItem` trait and its supporting context types
 - [Magnet](magnet.md) — Magnetism: typed snap-and-connect between anchor points on scene items
 - [Scene](scene.md) — The `Scene` data model — the owner of all items in a pannable/zoomable
+- [SceneListAdapter](scene_list_adapter.md) — `SceneListAdapter` — keep lightweight scene items in sync with a
 - [SceneMinimap](minimap.md) — `SceneMinimap` — a small thumbnail of a `Scene`
 - [SceneModel](scene_model.md) — `SceneModel` — a shared, cloneable handle to a `Scene`
 - [SceneScrollView](scroll_view.md) — `SceneScrollView` — a thin composite that gives a `SceneView` draggable

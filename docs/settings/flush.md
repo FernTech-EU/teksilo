@@ -42,18 +42,40 @@ All `DebouncedWriter`s in a process share **one** background I/O thread
 * keeps a per-id `(deadline, patch queue)`,
 * blocks on the next-due deadline (or waits for a message if nothing is
   pending),
-* coalesces rapid `Schedule` bursts by **appending** to the queue and
-  resetting the deadline — so debouncing collapses *writes*, never
-  *mutations*. (The old design could overwrite the pending payload precisely
+* coalesces rapid `Schedule` bursts by **appending** to the queue,
+  resetting the failure streak (a just-queued patch has never itself
+  failed to write) and moving the deadline **forward, never backward** —
+  so debouncing collapses *writes*, never *mutations*, and a live
+  `RETRY_BACKOFF` deadline installed after a failed attempt can't be
+  clobbered back to "now" by an unrelated new patch on a zero-delay
+  writer. (The old design could overwrite the pending payload precisely
   because each payload was a complete, self-superseding rendering.)
 
 A failed write **retains** the queue and retries with backoff, up to
 `MAX_WRITE_ATTEMPTS` — the patches replay cleanly against whatever is on
-disk then, which is the correct merge rather than a stale overwrite.
+disk then, which is the correct merge rather than a stale overwrite. Once
+the cap is reached (or a writer is dropped mid-failure at process
+teardown), the queue is discarded for good and reported through the
+process-wide `WriteFailureSink` (registered via
+`set_write_failure_sink`) in addition to the existing log — the write
+side's analogue of `crate::reload::Reloadable`'s read-side contract.
+Conversely, every writer may also register a `WriteLandedSink` (via
+`DebouncedWriter::set_landed_sink`) to learn the *real* on-disk stamp
+the instant its queued patches land successfully — useful to a caller
+whose own `apply()`-style API schedules a write and returns before it's
+actually on disk.
+
+The locked read-merge-write (`apply_and_write`) acquires its advisory
+lock **non-blocking**: because every writer in the process shares this
+one thread, a lock held by a peer process must never stall it — a
+contended lock is just another transient `FlushError::Io`, retried
+with the same backoff as any other write failure.
 
 Application logic stays single-threaded — `SettingsStore` and friends never
 block on I/O. `Drop` sends an `Unregister` that synchronously flushes the
-queue before returning, so end-of-process state is never lost.
+queue before returning, so end-of-process state is never lost (unless the
+flush itself is still failing, in which case the discard is reported
+through `WriteFailureSink` exactly as above).
 
 ## Why one thread, not one-per-writer
 
@@ -63,7 +85,7 @@ worker is leaner and has identical semantics from the caller's point of view.
 
 ## Builder methods at a glance
 
-`flush_now`, `path`, `delay`
+`flush_now`, `set_landed_sink`, `path`, `delay`
 
 ## API reference
 
@@ -82,6 +104,60 @@ pub enum FlushError { /* variants */ }
 - **`Disconnected`** — The shared I/O worker thread has panicked or shut down; writes can no longer be delivered.
 - **`Io`** — The atomic write (temp-file + rename) failed at the OS level.
 - **`Merge`** — A `Patch` could not be applied to the document currently on disk — e.g. a peer wrote something this process cannot parse or migrate.
+
+## `pub type WriteFailureSink`
+
+Invoked (off the caller's thread — on the shared worker thread) when a
+`DebouncedWriter`'s queued patches are **permanently** discarded: either
+`flush_writer` gave up after `MAX_WRITE_ATTEMPTS`, or the writer was
+dropped (`Unregister`) while its final flush was still failing. This is
+the write-side analogue of `crate::reload::Reloadable`'s read-side
+contract — the previous behaviour was a bare `eprintln!` that never left
+the worker thread, so a permanently unwritable settings file (read-only
+mount, revoked permissions, disk full) silently ate every change for the
+rest of the session with zero signal to the application. Registered
+process-wide via `set_write_failure_sink`.
+
+```rust
+pub type WriteFailureSink = Arc<dyn Fn(PathBuf, u32, usize, String) + Send + Sync + 'static>;
+```
+
+## `pub fn set_write_failure_sink(...)`
+
+Register a process-wide sink invoked whenever any `DebouncedWriter`
+permanently discards a queued write (see `WriteFailureSink`). There is
+only one slot: a later call replaces an earlier one. `bastyde-app` uses
+this to forward the failure to the UI thread as a typed `AppEvent`.
+
+```rust
+pub fn set_write_failure_sink(sink: WriteFailureSink);
+```
+
+## `pub type LandedStamp`
+
+The `(mtime, len)` stamp `disk_stamp` computes for a settings file —
+named so every `Arc<Mutex<...>>` wrapping it (here and in
+`WindowStateService`) reads as one term instead of clippy's
+`type_complexity`-tripping nested-generics spelling.
+
+```rust
+pub type LandedStamp = (Option<SystemTime>, Option<u64>);
+```
+
+## `pub type WriteLandedSink`
+
+Invoked on the shared worker thread the instant a `DebouncedWriter`'s
+queued patches land successfully, with the fresh on-disk `(mtime, len)`
+stamp (one extra `fs::metadata`, computed once, right after the write —
+negligible cost). The write-side analogue of `WriteFailureSink`. `Send +
+Sync` because it runs off the caller's thread — a consumer that needs to
+update `!Send` state (an `Rc<Cell<_>>`) must copy the value out on its
+own thread the next time it looks (see
+`WindowStateService::reload_from_disk`).
+
+```rust
+pub type WriteLandedSink = Arc<dyn Fn(LandedStamp) + Send + Sync + 'static>;
+```
 
 ## `pub struct DebouncedWriter`
 
@@ -110,6 +186,21 @@ worker's very next iteration — useful for tests.
 
 Force any queued patches to disk synchronously. Returns `Ok(())` if
 there was nothing queued.
+
+#### `pub fn set_landed_sink(&self, sink: WriteLandedSink)`
+
+Register a sink for this writer's successful-flush stamp (opt-in; a
+writer with none behaves exactly as today). May be called any time
+after construction — including after the writer has already flushed
+once, since the sink is only ever consulted on a *future* successful
+flush.
+
+This is how a caller learns the *real* on-disk stamp resulting from
+its own debounced write, without guessing: `apply()` schedules a
+patch and returns before it lands, so only the worker thread — right
+after the write actually succeeds — knows the resulting `(mtime,
+len)`. See `WindowStateService::reload_from_disk` for the consumer
+side (F11).
 
 #### `pub fn path(&self) -> &Path`
 

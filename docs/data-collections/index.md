@@ -7,6 +7,11 @@ Every public type in `bastyde-data`, grouped by category. Each page links to its
 
 ## Models
 
+- [ChartAggregate](chart_aggregate.md) — `ChartAggregate<T>` — a bucket/rollup projection over a `crate::ChartModel`
+- [ChartChange](chart_change.md) — ChartChange — change notifications and stable series identifiers for chart collections
+- [ChartModel](chart_model.md) — `ChartModel<T>` — concrete reactive multi-series chart data model
+- [ChartSelection](chart_selection.md) — `ChartSelection` — point-level selection state for chart widgets
+- [ChartWindow](chart_window.md) — `ChartWindow<T>` — a "last N points per series" streaming projection over
 - [CheckedModel](checked_model.md) — `CheckedModel` — per-row checkbox state for flat collection widgets
 - [CheckState](check_state.md) — `CheckState` — tri-state checkbox value shared by the data layer and widgets
 - [DataChange](data_change.md) — `DataChange` — change notifications for flat collections

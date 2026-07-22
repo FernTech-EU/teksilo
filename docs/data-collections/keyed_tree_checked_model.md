@@ -132,6 +132,15 @@ or filter against the current tree yourself.
 
 Reset all known nodes to `CheckState::Unchecked`.
 
+Writes every tracked key directly via the internal `write_state`
+helper (per-key cascade-suppressed) instead of `signal_for(..).set(..)`'s normal
+path, which would, for every currently-checked key, cascade the
+write down its whole descendant subtree and recompute every
+ancestor up to the root — redundant here, since every tracked key
+ends up `Unchecked` and "all children unchecked" is already the
+correct parent aggregate. See `TreeCheckedModel::clear`
+for the non-keyed twin of this same optimization.
+
 #### `pub fn prune_missing(&self, exists: impl Fn(&K) -> bool)`
 
 Drop cached check state (and its signals/observers) for every key for

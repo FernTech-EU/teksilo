@@ -62,3 +62,31 @@ state (selection, checked-set) to follow items across a reorder.
 ```rust
 pub fn map_index_after_move(idx: usize, from: usize, to: usize, count: usize) -> usize;
 ```
+
+## `pub fn adjust_single_index_for_change(...)`
+
+Map a **single** index anchor (not a selection set) through a
+`DataChange`, or `None` if the row the anchor pointed at no longer
+exists (it was removed, or the whole list was reset).
+
+This is the same shift semantics as `map_index_after_move` /
+`SelectionModel::adjust_for_*` / `CheckedModel::adjust_for_*`, specialized
+for a bare `Option<usize>` anchor that has no "membership" to prune —
+e.g. `ListView`'s keyboard-focus index. Used so a single-anchor consumer
+doesn't have to re-derive insert/remove/move shift logic by hand.
+
+- `ItemsInserted`: the anchor shifts up by the inserted count if it sat
+  at or after the insertion point, otherwise it's untouched.
+- `ItemsRemoved`: the anchor shifts down past the removed range; if the
+  anchor itself pointed *into* the removed range, it is dropped (`None`)
+  — the row it followed is gone.
+- `ItemsMoved`: delegates to `map_index_after_move` (the anchor follows
+  its row, or shifts around the moved block like everyone else).
+- `ItemUpdated` / `WindowLoaded`: no structural shift — the anchor is
+  unchanged.
+- `Reset`: the anchor is dropped (`None`) — nothing about the old
+  indexing survives a wholesale replacement.
+
+```rust
+pub fn adjust_single_index_for_change(idx: usize, change: &DataChange) -> Option<usize>;
+```

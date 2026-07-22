@@ -44,7 +44,7 @@ struct DotItem { bounds: Rect }
 impl SceneItem for DotItem {
     fn local_bounds(&self) -> Rect { self.bounds }
     fn set_local_bounds(&mut self, b: Rect) { self.bounds = b; }
-    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext<'_>) {
         canvas.fill_rect(self.bounds, Color::RED);
     }
 }
@@ -85,22 +85,40 @@ that's painting this item; the canvas already has the item's
 `scene_transform` pushed, so paint methods work in local coords
 without further matrix math.
 
+`theme`, `window_active`, and `enabled` mirror the widget-tier
+`PaintContext` so lightweight items
+can resolve theme-aware colours exactly like widgets do — call
+`some_color_prop.resolve(ctx.theme, ctx.enabled)` in `paint`. `theme` is
+already the fully-projected theme for this pass (the render walker swaps in
+the inactive-window / high-contrast variant *before* handing it here), so
+items never call `Theme::for_inactive_window` themselves; reading
+`ctx.theme` grants automatic window-blur desaturation of accent roles.
+
 ```rust
-pub struct SceneItemPaintContext { /* fields */ }
+pub struct SceneItemPaintContext<'a> { /* fields */ }
 ```
 
 ### Methods
 
-#### `pub fn new(view_transform: Transform2D, dirty_scene_rect: Option<Rect>) -> Self`
+#### `pub fn new( view_transform: Transform2D, dirty_scene_rect: Option<Rect>, theme: &'a Theme, ) -> Self`
 
-Construct a paint context with the given view transform and
-optional dirty region. `text_scale` defaults to `1.0`; use
-`with_text_scale` to carry the accessibility
-scale from the widget paint pass.
+Construct a paint context with the given view transform, optional dirty
+region, and the active theme. `text_scale` defaults to `1.0`,
+`window_active` and `enabled` to `true`; use the `with_*` builders to
+carry the accessibility scale, window-active state, and per-item enabled
+state from the widget paint pass.
 
 #### `pub fn with_text_scale(mut self, text_scale: f32) -> Self`
 
 Set the global accessibility text-scale factor carried to opted-in items.
+
+#### `pub fn with_window_active(mut self, window_active: bool) -> Self`
+
+Set whether the host window is currently active (focused and unoccluded).
+
+#### `pub fn with_enabled(mut self, enabled: bool) -> Self`
+
+Set the effective enabled state of the item being painted.
 
 ## `pub struct SceneItemA11yContext`
 

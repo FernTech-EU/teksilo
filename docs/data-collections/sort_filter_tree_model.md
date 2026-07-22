@@ -23,6 +23,16 @@ The proxy owns its own expand/collapse state (independent of any
 every projection rebuild — `TreeTableView` binds to that to know when to
 rebuild its row tree.
 
+A single-node `TreeChange::NodeUpdated` with **no filter active** skips
+the full filter/sort/flatten recompute: the node's rank among its
+siblings is checked against its immediate neighbours (tree sort never
+crosses levels) and, if stable, only `first_changed_index()` and
+`version_signal()` advance. Any active filter falls back to the full
+rebuild (a node's own match verdict can cascade to ancestors and/or
+descendants depending on `TreeFilterMode`, so cheaply proving no
+cascade isn't possible without re-deriving visibility). See
+`try_incremental_node_update` for the full reasoning.
+
 ## Selection semantics
 
 Selection on a sorted/filtered tree view is tracked by **flat (visible)
@@ -155,7 +165,9 @@ Return a clone of the `FlatEntry` at `flat_index`, or `None` if out of range.
 
 #### `pub fn flat_index_of(&self, node: NodeId) -> Option<usize>`
 
-Return the flat index of `node` in the current visible list, or `None` if it is not visible.
+Return the flat index of `node` in the current visible list, or `None`
+if it is not visible. O(1) — backed by a position map rebuilt on
+every projection rebuild.
 
 #### `pub fn is_expanded(&self, node: NodeId) -> bool`
 

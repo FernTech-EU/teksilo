@@ -18,7 +18,8 @@ Every read and every write goes through the exclusive advisory lock on
 * `load` acquires the lock, reads + migrates the file
   fresh, and retains the `Migrator` for the handle's whole lifetime —
   not just for this one read — because `mutate`,
-  `replace`, `reload_if_stale`
+  `replace`,
+  `reload_if_stale`
   and `reload_from_disk` all need
   to re-migrate a peer's still-older on-disk schema on demand, not just
   once at construction.
@@ -112,9 +113,31 @@ the handle: every later locked read re-runs it, since a peer might
 still be on an older on-disk schema at any point, not just at
 startup.
 
-On parse / migration failure the offending file is renamed to
-`<path>.broken-<ts>` and the returned `SettingsFile` starts from
-`T::default()`. Use `load_strict` in tests that
+On a genuine parse failure (the bytes are not valid TOML at all,
+surviving `MAX_READ_ATTEMPTS` retries) the offending file is
+renamed to `<path>.broken-<ts>` and the returned `SettingsFile`
+starts from `T::default()` — the file really is corrupt, and the
+quarantine lets the next launch start clean instead of repeatedly
+failing to load it.
+
+A `SettingsFileError::Migrate` or `SettingsFileError::Io`
+failure, by contrast, is **not** quarantined:
+
+* `Migrate` means the TOML parsed fine, but this build's own
+  `Migrator` chain doesn't know how to bring it up to
+  `T::CURRENT_VERSION` — the classic symptom of an *older* build
+  opening a file a *newer* peer process already wrote in a newer
+  schema. The file is not corrupt; renaming it would destroy that
+  peer's live, legitimate, still-in-use data.
+* `Io` means we couldn't even read the file (permissions, a
+  transient failure) — we never saw its content, so there is no
+  basis at all for deciding it's corrupt, and renaming (itself
+  another I/O operation, on a path we just failed to read) would
+  be reckless.
+
+In both of those cases the handle falls back to `T::default()` for
+this session only, but the file on disk is left completely
+untouched. Use `load_strict` in tests that
 want to assert on the specific failure instead.
 
 #### `pub fn load_strict(path: PathBuf, migrator: Migrator<T>) -> Result<Self, SettingsFileError>`
@@ -175,10 +198,12 @@ alone).
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
-Synchronously write any pending payload to disk. Always a
-harmless no-op: `mutate` / `replace` already write synchronously,
-so nothing is ever pending. Kept so callers that hold a
-`SettingsFile` alongside debounced types (`SettingsStore`,
+Synchronously write any pending payload to disk. A genuine no-op:
+`mutate` / `replace` already write synchronously on the calling
+thread, so nothing is ever pending — this type never registers
+with the shared debounced-write worker pool at all, so there is
+nothing to flush and nothing that can fail. Kept so callers that
+hold a `SettingsFile` alongside debounced types (`SettingsStore`,
 `PersistedListModel`) can flush everything uniformly without
 special-casing this type.
 

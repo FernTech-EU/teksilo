@@ -92,6 +92,7 @@ Get the depth at the given flat index.
 #### `pub fn flat_index_of(&self, node: NodeId) -> Option<usize>`
 
 Find the flat index for a given `NodeId`, or `None` if not visible.
+O(1) — backed by a position map rebuilt on every reflatten.
 
 #### `pub fn is_expanded(&self, node: NodeId) -> bool`
 

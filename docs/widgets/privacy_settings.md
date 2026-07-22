@@ -59,7 +59,7 @@ let panel = PrivacySettings::new()
 
 ## API reference
 
-📖 [Full rustdoc API for this module](../api/bastyde_widgets/index.html)
+📖 [Full rustdoc API for this module](../api/bastyde_widgets/privacy_settings/index.html)
 
 ## `pub struct PrivacySettings`
 

@@ -60,7 +60,7 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## Builder methods at a glance
 
-`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_at`, `colliding_items`, `items_along_path`, `items_at`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
+`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_at`, `colliding_items`, `items_along_path`, `items_at`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
 
 ## API reference
 
@@ -92,6 +92,7 @@ pub enum ItemChange { /* variants */ }
 - **`Removed`** — `remove`: item is gone.
 - **`Added`** — `add_item` / `add_widget`: item was inserted.
 - **`PayloadChanged`** — `set_payload`: the type-erased payload of a `Delegated` heavyweight entry was replaced. A `SceneView` rebuilds that entry's widget (re-invokes its delegate) on the next build. Routed through `emit_item_change`, so `mutation_seq` advances and the AT-walk gate notices.
+- **`AppearanceChanged`** — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.
 
 ## `pub enum SceneLayer`
 
@@ -386,6 +387,57 @@ Read an item's local opacity multiplier (`1.0` by default).
 #### `pub fn set_opacity(&mut self, id: ItemId, opacity: f32)`
 
 Set an item's local opacity, clamped to `[0.0, 1.0]`.
+
+#### `pub fn set_item_fill(&mut self, id: ItemId, fill: impl Into<ColorProp>)`
+
+Replace a lightweight item's fill colour live, emitting
+`ItemChange::AppearanceChanged` — **always repaint-only**, never a
+relayout, rebuild, or AccessKit re-walk. The colour is a `ColorProp`,
+so it accepts a plain `Color`, a theme role, a
+`Signal<Color>`, or a `Signal<Role>`. No-op for item kinds without a fill
+(e.g. `ImageItem`).
+
+# Reactivity contract
+
+A colour becomes **continuously** reactive by being registered at build
+time (`SceneItem::register_bindings`). So:
+
+- **Construct** the item with a `Signal`/role colour (`.fill(my_signal)`)
+  for a colour that tracks its signal forever. This is the recommended
+  path and needs no mutator at all.
+- **This mutator** installs a *snapshot*: it repaints immediately, which
+  is all a static colour ever needs. If you pass a `Signal`/dynamic role
+  here, it paints the signal's current value now and starts tracking it
+  continuously from the owning view's next rebuild (whenever some other
+  structural change re-runs `register_bindings`). Deliberately *not*
+  forced: a colour change must never cost a rebuild + AT re-walk.
+
+#### `pub fn clear_item_fill(&mut self, id: ItemId)`
+
+Clear a lightweight item's fill (Rect/Path/Group become fill-less),
+emitting `ItemChange::AppearanceChanged` (repaint-only). No-op for items
+whose fill can't be cleared (e.g. `TextItem`, which always has a
+foreground colour).
+
+#### `pub fn set_item_stroke(&mut self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`
+
+Replace a lightweight item's stroke (colour + `StrokeStyle`) live,
+emitting `ItemChange::AppearanceChanged` (repaint-only). No-op for item
+kinds without a stroke slot (`TextItem` / `ImageItem`). See
+`set_item_fill` for the reactivity contract.
+
+#### `pub fn clear_item_stroke(&mut self, id: ItemId)`
+
+Clear a lightweight item's stroke, emitting
+`ItemChange::AppearanceChanged` (repaint-only). No-op for item kinds
+without a stroke.
+
+#### `pub fn add_boxed_item(&mut self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId`
+
+Insert an already-boxed lightweight item at `local_pos`, returning its
+id. The boxed-`dyn` counterpart of `add_item` — used by
+`SceneListAdapter` whose delegate yields
+`Box<dyn SceneItem>`.
 
 #### `pub fn set_item_handlers(&mut self, id: ItemId, handlers: Option<SceneItemHandlerSet>)`
 

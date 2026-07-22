@@ -118,7 +118,11 @@ Change the cascade behaviour; takes effect on the next write to any node's signa
 
 Writable `Signal<CheckState>` for `node`. Cached: repeat calls
 return the same root. External writes (e.g. from a `Checkbox`)
-trigger the configured aggregation pass.
+trigger the configured aggregation pass. The cascade observer is
+wired **idempotently** — including for a signal first materialised by
+a cascade (`write_state`) before its own `signal_for` was ever called
+(a lazily/virtualized-realised row) — so a later external write to it
+still cascades.
 
 #### `pub fn bool_signal_for(&self, node: NodeId) -> Signal<bool>`
 
@@ -168,3 +172,16 @@ the signals were first registered — see the module-level limitation note.
 #### `pub fn clear(&self)`
 
 Reset all known nodes to `CheckState::Unchecked` and notify observers.
+
+Writes every tracked node directly via the internal `write_state`
+helper (per-node cascade-suppressed, like the recompute pass) instead of going
+through `check`/`uncheck`'s normal `signal_for(..).set(..)` path —
+the latter would, for every currently-checked node, cascade the
+write down its entire descendant subtree and recompute every
+ancestor up to the root, all *before* the outer loop even reaches
+those same nodes. Since every tracked node ends up `Unchecked` here,
+there is nothing left to aggregate: "all children unchecked" is
+already the correct parent state, so skipping the cascade and
+ancestor recompute entirely still leaves every node's state
+consistent — one direct write per tracked node instead of a
+cascade+recompute pass per *checked* one.

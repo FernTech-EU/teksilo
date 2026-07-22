@@ -126,6 +126,17 @@ where the selected set is an arbitrary subset rather than a range. In
 
 Select all indices from 0 to count-1.
 
+A no-op in `None` mode, and also in `Single` mode — "select all" has
+no coherent meaning for a control that holds at most one item, and
+silently selecting one arbitrary row would be worse than doing
+nothing. This mirrors what the gated call sites already do
+(`ListView`'s Ctrl+A handler, which documents it as "Multi selection
+only — a no-op for Single / None, matching every list control", and
+`TableView`'s `select_all` helper, which matches only the Multi
+modes). Enforcing it here too keeps an ungated caller — `GridView`'s
+Ctrl+A handler is one — from breaking the `Single` invariant that
+every other mutator on this type upholds.
+
 #### `pub fn clear(&self)`
 
 Clear the selection.

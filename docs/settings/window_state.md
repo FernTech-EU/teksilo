@@ -14,30 +14,14 @@ migrated through `Migrator` steps (currently v1 → v2: `maximized:
 bool` → `placement: WindowPlacement`) before deserializing, and
 corrupt files are quarantined automatically by `SettingsFile`.
 
-## `record` is synchronous, not debounced
+## `record` is debounced, not synchronous
 
-This type is built on `SettingsFile<WindowStateFile>`, whose writes
-are always a synchronous locked read-modify-write (see `file.rs`'s
-module docs) — there is no debounce window to coalesce a burst of
-calls into one flush. `record` therefore takes a lock, re-reads and
-re-migrates the file, applies the change, and writes it back *on the
-calling thread*, every single time it is invoked. That is the right
-trade-off for how this type is meant to be called — a handful of
-writes around a window's lifetime — but `bastyde-app`'s
-`window_persist` module (`crates/bastyde-app/src/window_persist.rs`)
-currently wires `record` to fire on *every* `Signal` change of a
-window's size/position/placement, which on X11/Windows/macOS means
-once per frame during a live drag or resize (Wayland mostly spares
-position, since the compositor rarely notifies apps of it — see the
-Wayland caveat below — but size still updates during a resize).
-Concretely: a live window drag currently does a synchronous
-lock-acquire + file read + parse + serialize + atomic write on every
-reported geometry change, not a debounced one. This is a known,
-intentional-for-now performance characteristic of the current
-wiring, not of `WindowStateService` itself — a caller that wants to
-coalesce a drag into one write should debounce at the call site
-(e.g. only call `record` from a "drag ended" / periodic-timer
-observer) rather than from every raw geometry `Signal`.
+See `WindowStateService`'s "Why this is debounced, unlike
+`SettingsFile`" doc below for the full rationale: `record`/`forget`
+update the in-memory state instantly and schedule a coalesced, locked
+read-merge-write via a `DebouncedWriter` — a live window drag (which
+calls `record` once per reported geometry frame) costs one disk
+write per debounce window, not one per frame.
 
 In a typical Bastyde app, `WindowStateService` is managed by the
 framework's `SettingsBundle` and wired automatically when the
@@ -134,11 +118,26 @@ connected.
 
 Persistent, in-memory-backed store for per-window geometry.
 
-Holds a `SettingsFile`-backed collection of `PerWindowState` entries
-keyed by a stable string label. Each `record` call performs a
-synchronous locked read-modify-write to disk (see the module docs'
-"`record` is synchronous, not debounced" section — this is not a
-debounced flush); `state_for` reads directly from memory with no I/O.
+Entries are `PerWindowState`, keyed by a stable string label. `state_for`
+reads straight from memory with no I/O.
+
+## Why this is debounced, unlike `SettingsFile`
+
+`SettingsFile`'s `mutate` is a *synchronous* locked read-modify-write, which
+is right for a document written rarely (a settings change; one record per
+backup). Window geometry is the opposite: `bastyde-app`'s `window_persist`
+observes the `size` / `position` / `placement` signals and calls `record`
+on **every change** — i.e. once per frame while the user drags a window. A
+synchronous `flock` + read + parse + serialize + fsync per frame would make
+dragging visibly janky.
+
+So this service owns its own `DebouncedWriter` and schedules a
+`WindowOp` patch per `record`, exactly like [`crate::PersistedListModel`]:
+in-memory state updates instantly (so `state_for` is always current), and
+the burst collapses into **one** locked read-merge-write at the debounce
+deadline. Frequent writes ⇒ debounced patch; rare writes ⇒ synchronous
+locked RMW. Both are cross-process correct; they differ only in when the
+disk write happens.
 
 
 ```rust
@@ -153,31 +152,26 @@ Open the window-state file at the standard location inside `paths`.
 
 #### `pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError>`
 
-Open the window-state file at the standard location inside `paths`.
-
-`delay` is accepted (and ignored) purely so `crate::SettingsBundle`
-can open every service it manages with one uniform debounce
-argument: `SettingsFile`'s writes are always synchronous locked
-read-modify-writes now (see `file.rs`'s module docs) — `record` /
-`forget` calls are one disk write per record, immediately, with no
-burst to coalesce.
+Open at the standard location with an explicit debounce window.
 
 #### `pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError>`
 
-Open the window-state file at an explicit `path`. `delay` is
-accepted and ignored — see `open_with_delay`.
+Open the window-state file at an explicit `path`.
+
+`delay` is the debounce window: geometry changes arriving inside it
+coalesce into a single disk write. `Duration::ZERO` writes on the
+worker's next tick (used by tests).
 
 #### `pub fn state_for(&self, label: &str) -> Option<PerWindowState>`
 
-Saved state for the window with `label`, or `None` if there's
-no entry yet.
+Saved state for the window with `label`, or `None` if there's no entry.
 
 #### `pub fn record(&self, state: PerWindowState) -> Result<(), SettingsFileError>`
 
-Record the current geometry for `label`. Replaces any prior
-entry. Synchronous: performs a locked read-modify-write to disk
-immediately, on the calling thread — see the module docs' "`record`
-is synchronous, not debounced" section.
+Record the current geometry for `label`, replacing any prior entry.
+
+Updates memory immediately and schedules a debounced, locked
+read-merge-write — so a drag costs one write, not one per frame.
 
 #### `pub fn forget(&self, label: &str) -> Result<(), SettingsFileError>`
 
@@ -189,11 +183,11 @@ All recorded labels. Useful for "restore last session" features.
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
-A harmless no-op: `record` / `forget`
-already write synchronously, so nothing is ever pending. Kept so
-callers that hold a `WindowStateService` alongside debounced
-services (`SettingsStore`, `MruList`) can flush everything
-uniformly without special-casing this type.
+Flush any pending geometry to disk immediately, bypassing the debounce.
+
+Flushes the **op queue**, never a re-derived snapshot of the in-memory
+document — dumping the snapshot is exactly how a cleanly-exiting process
+would erase a peer's window entry.
 
 #### `pub fn path(&self) -> &Path`
 

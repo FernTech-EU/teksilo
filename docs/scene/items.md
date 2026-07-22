@@ -129,3 +129,40 @@ Convenience: prune all descendants from the AT tree.
 ```rust
 pub fn access_exclude_subtree(mut self) -> Self;
 ```
+
+## `pub fn access_value(...)`
+
+Announce a string value for this item (e.g. a formatted data
+reading like `"42 %"`). Mirrors the widget-tier `.access_value`.
+
+```rust
+pub fn access_value(mut self, value: impl Into<LocalizedString>) -> Self;
+```
+
+## `pub fn access_numeric_value(...)`
+
+Announce a numeric value for this item, for slider/gauge-like data
+marks whose magnitude assistive tech should describe. Pair with
+`access_numeric_range` /
+`access_numeric_step` for full
+range semantics.
+
+```rust
+pub fn access_numeric_value(mut self, value: f64) -> Self;
+```
+
+## `pub fn access_numeric_range(...)`
+
+Announce the numeric min/max bounds for this item.
+
+```rust
+pub fn access_numeric_range(mut self, min: f64, max: f64) -> Self;
+```
+
+## `pub fn access_numeric_step(...)`
+
+Announce the numeric step (per-arrow increment) for this item.
+
+```rust
+pub fn access_numeric_step(mut self, step: f64) -> Self;
+```

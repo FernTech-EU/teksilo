@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -346,13 +346,17 @@ shares the app's typesetter and this registrar is ignored.
 
 Install a callback fired once per batch of genuine **user content
 edits** (typing, paste, cut, delete) — and *not* on a programmatic
-`set_djot` / `set_markdown` / `set_html` load or a document reset. The
-callback runs on the UI thread during the editor's frame drain, so it
-may touch `Signal`s directly — e.g. flip a "dirty" flag or kick a
-debounced autosave. Replaces any prior change callback on this editor.
+`set_djot` / `set_markdown` / `set_html` load or a document reset, and
+*not* while an IME composition (CJK/Kana candidate preview, dead-key
+accent) is still in progress — only the settled result of a commit
+fires it. The callback runs on the UI thread during the editor's frame
+drain, so it may touch `Signal`s directly — e.g. flip a "dirty" flag or
+kick a debounced autosave. Replaces any prior change callback on this
+editor.
 
 For a reactive change *token* (which also bumps on loads/format-only
-changes), observe `document_version` instead.
+changes, and on intermediate IME composition steps), observe
+`document_version` instead.
 
 #### `pub fn document_version(&self) -> Signal<u64>`
 
@@ -370,6 +374,15 @@ caret position externally (status bar, outline panel, etc.).
 
 Current selection anchor (equal to `cursor_position` when there
 is no selection).
+
+#### `pub fn is_composing(&self) -> bool`
+
+`true` while an IME composition (CJK/Kana candidate preview, dead-key
+accent) is actively in progress — i.e. `on_change`
+is currently suppressed for this editor. Exposed so a caller doing its
+own while-typing scanning (e.g. an autocorrect feature) can gate its
+own trigger logic the same way, as defense-in-depth alongside
+`on_change`'s own gate.
 
 #### `pub fn cursor_position_signal(&self) -> Signal<usize>`
 
@@ -623,6 +636,27 @@ for apps that need fields beyond the dedicated
 Set the paragraph alignment for the current block (or the block
 containing the selection anchor).
 
+#### `pub fn clear_direction(&self)`
+
+Unset the block's direction, handing the paragraph back to
+automatic detection.
+
+Not the same as setting left-to-right. An explicit direction
+*pins* the paragraph and overrides the bidi algorithm, so
+"clearing" a direction by writing `LeftToRight` would force
+Arabic and Hebrew prose to lay out backwards. Only an unset
+direction lets the text speak for itself.
+
+#### `pub fn set_direction(&self, direction: TextDirection)`
+
+Set the base reading direction of the current block.
+
+This is the *paragraph* direction, not a character property: it
+decides which edge unaligned text sits against and, more
+importantly, overrides the bidi algorithm's first-strong-character
+guess — which misreads an Arabic paragraph opening with a Latin
+acronym as left-to-right.
+
 #### `pub fn set_heading_level(&self, level: u8)`
 
 Set the heading level of the current block. `0` = plain
@@ -759,6 +793,11 @@ current block format.
 #### `pub fn get_alignment(&self) -> Alignment`
 
 Current block alignment.
+
+#### `pub fn get_direction(&self) -> Option<TextDirection>`
+
+The block's explicitly-set reading direction, if it has one.
+`None` means the bidi algorithm decides from the text.
 
 #### `pub fn undo(&self)`
 
@@ -1221,6 +1260,22 @@ Apply an arbitrary `BlockFormat` to the caret's block.
 
 Set paragraph alignment for the caret's block.
 
+#### `pub fn clear_direction(&self)`
+
+Unset the block's direction, handing the paragraph back to
+automatic detection.
+
+Not the same as setting left-to-right. An explicit direction
+*pins* the paragraph and overrides the bidi algorithm, so
+"clearing" a direction by writing `LeftToRight` would force
+Arabic and Hebrew prose to lay out backwards. Only an unset
+direction lets the text speak for itself.
+
+#### `pub fn set_direction(&self, direction: TextDirection)`
+
+Set the base reading direction of the caret's block. See
+`RichTextEditor::set_direction`.
+
 #### `pub fn set_heading_level(&self, level: u8)`
 
 Set heading level for the caret's block. `0` = plain paragraph,
@@ -1229,6 +1284,15 @@ Set heading level for the caret's block. `0` = plain paragraph,
 #### `pub fn get_alignment(&self) -> Alignment`
 
 Current block alignment.
+
+#### `pub fn get_direction(&self) -> Option<TextDirection>`
+
+The block's explicitly-set reading direction, if it has one.
+
+`None` means the writer never chose — the bidi algorithm decides
+from the text. That is a genuinely different state from an
+explicit left-to-right, so it is reported rather than defaulted:
+a toggle needs to show "auto" as its own setting.
 
 #### `pub fn get_heading_level(&self) -> u8`
 
@@ -1402,6 +1466,11 @@ behind a just-typed printable character (the insert is deferred to the frame loo
 signal is only re-synced on the *next* caret event), this always reflects the true caret —
 what a host that recomputes highlights on a frame tick must read. Mirrors
 `RichTextEditor::cursor_position`.
+
+#### `pub fn is_composing(&self) -> bool`
+
+`true` while an IME composition is actively in progress. Mirrors
+`RichTextEditor::is_composing`.
 
 #### `pub fn cursor_position_signal(&self) -> Signal<usize>`
 

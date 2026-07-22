@@ -23,11 +23,19 @@ that drops directly into `TableView`, `ListView`, or `Repeater` via
 Three independent change vectors trigger a rebuild of the visible-index
 map:
 
-- The upstream source emits any `DataChange`. The proxy collapses every
-  upstream change into a single `DataChange::Reset` for its own
-  observers — translating fine-grained inserts / updates through a sort
-  projection is correctness-fragile (an updated item's sort key can move
-  it to a different visible row), so a Reset is the safe contract.
+- The upstream source emits any `DataChange`. Most changes collapse to
+  a single `DataChange::Reset` for the proxy's own observers —
+  translating fine-grained inserts / removes / moves through a sort
+  projection is correctness-fragile (an item's sort key can move it to a
+  different visible row), so `Reset` is the safe default contract. The
+  one exception is [`DataChange::ItemUpdated`]: the proxy re-evaluates
+  just that row's filter verdict and its position against its current
+  visible neighbours (not the whole list), and if neither changed,
+  forwards a scoped `ItemUpdated` at the mapped visible index instead of
+  paying for a full re-filter + re-sort + `Reset` on every edit to a
+  live-updating source. Any verdict change (entering/leaving the visible
+  set, or needing to move past a neighbour) still falls back to the full
+  rebuild.
 - A bound sort signal updates: rebuild and emit `Reset`.
 - A bound filters signal updates: rebuild and emit `Reset`.
 

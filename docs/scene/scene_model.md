@@ -42,7 +42,7 @@ later).
 
 ## Builder methods at a glance
 
-`with_index`, `from_scene`, `handle_count`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `set_local_pos`, `set_local_bounds`, `set_transform`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `item_at`, `items_at`, `colliding_items`, `a11y_parent_of`
+`with_index`, `from_scene`, `handle_count`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `item_at`, `items_at`, `colliding_items`, `a11y_parent_of`
 
 ## API reference
 
@@ -108,6 +108,12 @@ Add a lightweight `SceneItem` at `local_pos`.
 
 Add a lightweight item with signal-driven (dynamic) bounds.
 
+#### `pub fn add_boxed_item(&self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId`
+
+Add an already-boxed lightweight item at `local_pos`. The boxed-`dyn`
+counterpart of `add_item`, used by
+`SceneListAdapter`.
+
 #### `pub fn set_local_pos(&self, id: ItemId, local_pos: Point)`
 
 Move `id` to `local_pos` in its parent's coordinate space; notifies all views.
@@ -135,6 +141,26 @@ Show or hide `id` (also hides its descendants); notifies all views.
 #### `pub fn set_opacity(&self, id: ItemId, opacity: f32)`
 
 Set the paint opacity of `id` (0.0 = transparent, 1.0 = opaque); notifies all views.
+
+#### `pub fn set_item_fill(&self, id: ItemId, fill: impl Into<ColorProp>)`
+
+Replace a lightweight item's fill colour live; every view repaints
+(no relayout/rebuild). Accepts a plain `Color`,
+a theme role, a `Signal<Color>`, or a `Signal<Role>`. See
+`Scene::set_item_fill` for the reactive-colour contract.
+
+#### `pub fn clear_item_fill(&self, id: ItemId)`
+
+Clear a lightweight item's fill; every view repaints.
+
+#### `pub fn set_item_stroke(&self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`
+
+Replace a lightweight item's stroke (colour + `StrokeStyle`) live;
+every view repaints (no relayout/rebuild).
+
+#### `pub fn clear_item_stroke(&self, id: ItemId)`
+
+Clear a lightweight item's stroke; every view repaints.
 
 #### `pub fn set_z(&self, id: ItemId, z: f32)`
 

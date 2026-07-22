@@ -8,7 +8,6 @@
 # Architecture & roadmap
 
 - [Architecture](architecture.md)
-- [Milestone roadmap](bastyde-milestones.md)
 - [Property-based testing](property-testing.md)
 
 # Authoring widgets
@@ -222,6 +221,11 @@
 
 <!-- BEGIN GENERATED DATA-COLLECTIONS -->
 - [Overview](data-collections/index.md)
+- [ChartAggregate](data-collections/chart_aggregate.md)
+- [ChartChange](data-collections/chart_change.md)
+- [ChartModel](data-collections/chart_model.md)
+- [ChartSelection](data-collections/chart_selection.md)
+- [ChartWindow](data-collections/chart_window.md)
 - [CheckedModel](data-collections/checked_model.md)
 - [CheckState](data-collections/check_state.md)
 - [DataChange](data-collections/data_change.md)
@@ -276,6 +280,7 @@
 - [PathItem](scene/path.md)
 - [RectItem](scene/rect.md)
 - [Scene](scene/scene.md)
+- [SceneListAdapter](scene/scene_list_adapter.md)
 - [SceneMinimap](scene/minimap.md)
 - [SceneModel](scene/scene_model.md)
 - [SceneScrollView](scene/scroll_view.md)
@@ -283,5 +288,5 @@
 - [SceneTapEvent](scene/item_handlers.md)
 - [SceneViewState](scene/state.md)
 - [SpatialIndex](scene/index_.md)
-- [TextItem](scene/text.md)
+- [TextAlign](scene/text.md)
 <!-- END GENERATED SCENE -->

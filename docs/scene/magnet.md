@@ -352,14 +352,10 @@ view transform pushed).
 The key that toggles keyboard connect mode while the SceneView is
 focused. Default `m`.
 
-#### `pub fn enabled(mut self, on: bool) -> Self`
+#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
 
-Set the initial enabled state (default enabled). Replaces the
-internal signal.
-
-#### `pub fn enabled(mut self, signal: Signal<bool>) -> Self`
-
-Drive enabled/disabled from an app-owned signal (toolbar toggle).
+Set the enabled state, statically or reactively (an app-owned
+signal drives enabled/disabled from e.g. a toolbar toggle).
 
 #### `pub fn enabled_signal(&self) -> Signal<bool>`
 

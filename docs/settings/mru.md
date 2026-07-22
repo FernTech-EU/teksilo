@@ -70,7 +70,7 @@ assert_eq!(recents.model().len(), 1);
 
 ## Builder methods at a glance
 
-`open`, `open_with_delay`, `open_at`, `model`, `max_items`, `add`, `remove`, `touch`, `set_pinned`, `clear`, `flush_now`, `path`
+`open`, `open_with_delay`, `open_at`, `model`, `max_items`, `add`, `remove`, `touch`, `set_pinned`, `is_pinned`, `clear`, `flush_now`, `path`
 
 ## API reference
 
@@ -158,6 +158,23 @@ Set the pin flag of the entry whose key matches to exactly
 `pinned` (idempotent — unlike a toggle, replaying this against an
 already-applied peer change does not flip it back). No-op when no
 entry matches.
+
+#### `pub fn is_pinned<Q>(&self, key: &Q) -> bool where T::Key: Borrow<Q>, Q: Eq + ?Sized,`
+
+Is the entry with this key currently pinned? `false` when no entry
+matches.
+
+The counterpart `set_pinned` deliberately takes the
+*desired* value rather than toggling, because a toggle is not idempotent:
+replayed against a peer process's already-applied toggle it would flip
+the value straight back, inverting their change. A pin **button** still
+needs to toggle, though — so read the current value here and pass its
+negation:
+
+```ignore
+let pinned = mru.is_pinned(path);
+mru.set_pinned(path, !pinned);
+```
 
 #### `pub fn clear(&self)`
 

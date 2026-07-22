@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 FernTech
 
 # Build the documentation site and publish it to Cloudflare Pages
-# (https://bastyde-docs.pages.dev). The site has two layers:
+# (https://bastyde.pages.dev). The site has two layers:
 #   * mdBook — the curated guides under docs/ plus a generated Widget Catalog,
 #     at the site root.
 #   * rustdoc — the deep API reference under /api/ (catalog pages deep-link in).
@@ -35,7 +35,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   MDBOOK_VERSION: "0.4.52"
-  BASE_URL: "https://bastyde-docs.pages.dev"
+  BASE_URL: "https://bastyde.pages.dev"
 
 jobs:
   build:
@@ -136,15 +136,88 @@ jobs:
           ## Documentation
 
           - [Introduction](${BASE_URL}/introduction.html): Overview and where to start
-          - [Widget Catalog](${BASE_URL}/widgets/index.html): Per-widget discovery pages (abilities + example + API link)
+
+          ### Architecture & roadmap
+
+          - [Architecture](${BASE_URL}/architecture.html): Framework internals reference
+          - [Property-based testing](${BASE_URL}/property-testing.html): proptest conventions and safe-run protocol
+
+          ### Authoring widgets
+
           - [Widgets overview](${BASE_URL}/widgets-overview.html): Every shipped widget, categorized
           - [Layout primitives](${BASE_URL}/layout-primitives.html): HStack/VStack/ZStack, Grid, Wrap, size wrappers
           - [Events & gestures](${BASE_URL}/events-and-gestures.html): Dispatch, attached handlers, gestures
           - [Styling system](${BASE_URL}/styling-system.html): Tokens → variants → recipes → style protocols
+          - [Reactive theme](${BASE_URL}/reactive-theme.html): Live theme swaps without a rebuild
+          - [Animation](${BASE_URL}/animation.html): Signal-tween, shader-quad, and per-frame-effect motion
+          - [Idle & animation](${BASE_URL}/idle-and-animation.html): Visibility-aware scheduling, idle fps
           - [Accessibility overrides](${BASE_URL}/accessibility-overrides.html): Builder-level .access_* modifiers
-          - [Data models](${BASE_URL}/data-models.html): ListModel/TreeModel/SelectionModel and projections
+          - [Global text scale](${BASE_URL}/text-scale.html): App-wide "grow all text" accessibility setting
+          - [Window-active appearance](${BASE_URL}/window-activation.html): Inactive-window dimming and desaturation
+          - [Internationalization](${BASE_URL}/i18n.html): Fluent-rs runtime, locale-aware formatting
+          - [Grid view](${BASE_URL}/grid-view.html): Virtualized 2D tile grid
+
+          ### bati! DSL & formatting
+
+          - [bati! macro reference](${BASE_URL}/bati-macro-reference.html): Surface language and desugaring cheat sheet
+          - [bati! language spec](${BASE_URL}/bati-language-spec-v3.html): Design spec with worked translations
+          - [bastyde-fmt](${BASE_URL}/bastyde-fmt.html): bati! source formatter
+          - [bastyde-fmt in VS Code](${BASE_URL}/bastyde-fmt-vscode.html): Editor integration
+
+          ### Input, navigation, chrome
+
           - [Shortcuts, intents & actions](${BASE_URL}/shortcut-intent-action.html): The input-to-behaviour pipeline
-          - [Architecture](${BASE_URL}/architecture.html): Framework internals reference
+          - [Tooltips](${BASE_URL}/tooltips.html): Plain, rich, and composite tooltip tiers
+          - [Toasts & notifications](${BASE_URL}/toast.html): Stackable notifications + persistent log
+          - [Native menus](${BASE_URL}/native-menu.html): In-window MenuBar + native OS menu bar
+          - [WebView](${BASE_URL}/web-view.html): Embedded HTML/web-content widget
+          - [Drag & drop](${BASE_URL}/drag-and-drop.html): In-app and OS drag-and-drop
+          - [Multi-window](${BASE_URL}/multi-window.html): Window management, modal dialogs, custom title bars
+          - [Title bar](${BASE_URL}/title-bar.html): Custom chrome across platforms
+          - [Toolbar](${BASE_URL}/toolbar.html): Overflow-aware command bar
+
+          ### Data, persistence, telemetry
+
+          - [Data models](${BASE_URL}/data-models.html): ListModel/TreeModel/SelectionModel and projections
+          - [Data sources](${BASE_URL}/data-source.html): External/lazy-loaded data sources
+          - [Settings & persistence](${BASE_URL}/settings.html): SettingsStore, SettingsFile, MruList, window state
+          - [Telemetry](${BASE_URL}/telemetry.html): Privacy-respecting product analytics
+
+          ### Async & concurrency
+
+          - [Async executor](${BASE_URL}/async.html): Opt-in main-thread async executor
+
+          ### Specialized widgets
+
+          - [Splitter](${BASE_URL}/splitter.html): N-pane resizable split container
+          - [Docking layout](${BASE_URL}/docking.html): VS Code-style dockable IDE shell
+          - [Table & tree-table views](${BASE_URL}/table-view.html): Virtualized multi-column data views
+          - [Code & plain-text editors](${BASE_URL}/code-editor.html): Gutter, highlighting, completion
+          - [Log view (streaming)](${BASE_URL}/log-view.html): Read-only tail-following streaming view
+          - [Tab widget](${BASE_URL}/tab-widget.html): TabBar/TabWidget with overflow and drag-reorder
+          - [Font picker](${BASE_URL}/font-picker.html): Installed-font browser with live preview
+          - [Charts](${BASE_URL}/charts.html): BarChart/LineChart/PieChart
+          - [Scene viewport](${BASE_URL}/bastyde-scene.html): Pannable/zoomable canvas with magnetism
+          - [Scene accessibility](${BASE_URL}/bastyde-scene-a11y.html): Accessibility support for the scene viewport
+
+          ### Visuals & resources
+
+          - [Icons & resources](${BASE_URL}/icons-and-resources.html): Resource embedding and icon usage
+
+          ### Tooling
+
+          - [Debug inspector](${BASE_URL}/inspector.html): In-app introspection panel
+          - [Automation MCP](${BASE_URL}/automation-mcp.html): Drive a Bastyde app via the Model Context Protocol
+
+          ### Catalogs
+
+          - [Widget Catalog](${BASE_URL}/widgets/index.html): Per-widget discovery pages (abilities + example + API link)
+          - [Data Collections catalog](${BASE_URL}/data-collections/index.html): Reactive data-model API reference
+          - [Settings catalog](${BASE_URL}/settings/index.html): Settings/persistence API reference
+          - [Scene catalog](${BASE_URL}/scene/index.html): Scene-viewport API reference
+
+          ### API reference
+
           - [API reference](${BASE_URL}/api/bastyde_widgets/index.html): rustdoc for every public item
           EOF
 
@@ -170,4 +243,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy book --project-name=bastyde-docs
+          command: pages deploy book --project-name=bastyde

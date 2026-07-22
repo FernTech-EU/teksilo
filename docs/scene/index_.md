@@ -20,12 +20,37 @@ via `Scene::with_index`.
   smaller than the cell size).
 - `query(rect)` returns deduplicated candidates from the cells the
   rect overlaps; callers can narrow with a per-item AABB check.
-- Pathological case (one giant item that spans hundreds of cells)
-  is rare and easily worked around by raising `cell_size` for
-  that scene. A custom `SpatialIndex` would handle non-uniform
-  density better — an R-tree, say, for an editor with many
-  overlapping items — but none ships; the trait is the place to
-  add one.
+- **Oversized items.** An item whose AABB would bucket into more
+  than `MAX_CELLS_PER_ITEM` grid cells (a scene backdrop, a
+  full-document canvas rect, or any item at extreme coordinates
+  with large bounds — all reachable in production, not exotic) is
+  NOT bucketed cell-by-cell at all. It is stored instead in a
+  separate `oversized: HashMap<ItemId, Rect>` that `query`
+  always scans in full, in addition to the cell lookup, keeping
+  an exact AABB-intersection test against `scene_rect` (so it
+  contributes no cell-fan-out false positives of its own).
+
+  This closes what used to be an unconditional, uncapped eager
+  allocation: `cells_for_rect` computed
+  `(width / cell_size) * (height / cell_size)` cells and reserved
+  that many `(i32, i32)` slots *before* the loop that fills them
+  ran — no upper bound, and using bare `i32` arithmetic that could
+  itself overflow for large extents (debug builds panicked,
+  release builds could wrap to a huge or negative `usize`). A
+  single 1e6 × 1e6 logical-pixel item at the clamped-minimum
+  `cell_size` of 1.0 asked for `(1e6+1)² ≈ 1e12` cells — roughly
+  8 TB for the `Vec<(i32, i32)>` alone — before any assertion or
+  even the fill loop ran; this was reachable from a single
+  `Scene::add_item` call, no adversarial input required. Even at
+  the default 256 px `cell_size`, a 1e6-square item alone reserved
+  `(1e6 / 256)² ≈ 1.5e7` cells (~122 MB) for that one item. The
+  same hazard applied to `query`/`items_in_rect`, since a caller
+  can pass an arbitrarily large `scene_rect` too — see `query`'s
+  own oversized-span fallback.
+
+  A custom `SpatialIndex` would still handle non-uniform density
+  better — an R-tree, say, for an editor with many overlapping
+  items — but none ships; the trait is the place to add one.
 
 Default `cell_size` is `DEFAULT_CELL_SIZE` (`256.0` logical pixels)
 — large enough that typical card-sized items (~200 px) bucket into 1–4
@@ -74,7 +99,9 @@ pub const DEFAULT_CELL_SIZE: f32 = 256.0;
 
 Uniform grid spatial hash. Each item is bucketed into every cell
 its AABB overlaps; queries union all items from the cells the
-query rect overlaps.
+query rect overlaps. Items whose AABB would span more than
+`MAX_CELLS_PER_ITEM` cells are NOT bucketed — see `oversized`
+below and the module doc's "Oversized items" section.
 
 ```rust
 pub struct GridHashIndex { /* fields */ }
@@ -96,3 +123,5 @@ The configured cell size in logical pixels.
 
 Number of cells currently storing at least one item. Useful
 for diagnostics; not part of the public `SpatialIndex` trait.
+Oversized items (see `MAX_CELLS_PER_ITEM`) never occupy a
+cell, so they never contribute to this count.
