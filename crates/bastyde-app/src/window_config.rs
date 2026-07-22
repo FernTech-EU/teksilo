@@ -10,6 +10,6 @@
 
 pub use bastyde_core::window::SizeToContent;
 pub use bastyde_core::{
-    BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig, WindowRemovedCallback,
-    WindowRemovedEvent,
+    BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig,
+    WindowRemovedCallback, WindowRemovedEvent,
 };

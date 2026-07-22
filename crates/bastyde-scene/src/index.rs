@@ -23,7 +23,7 @@
 //!   full-document canvas rect, or any item at extreme coordinates
 //!   with large bounds — all reachable in production, not exotic) is
 //!   NOT bucketed cell-by-cell at all. It is stored instead in a
-//!   separate `oversized: HashMap<ItemId, Rect>` that [`query`]
+//!   separate `oversized: HashMap<ItemId, Rect>` that `query`
 //!   always scans in full, in addition to the cell lookup, keeping
 //!   an exact AABB-intersection test against `scene_rect` (so it
 //!   contributes no cell-fan-out false positives of its own).

@@ -17,8 +17,8 @@ pub use app_event_observers::AppEventObservers;
 pub use automation_bridge::BastydeAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
 pub use window_config::{
-    BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig, WindowRemovedCallback,
-    WindowRemovedEvent,
+    BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig,
+    WindowRemovedCallback, WindowRemovedEvent,
 };
 pub use window_manager::WindowManager;
 

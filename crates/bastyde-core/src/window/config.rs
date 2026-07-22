@@ -229,10 +229,7 @@ impl std::fmt::Debug for WindowConfig {
                 "on_close_blocked",
                 &self.on_close_blocked.as_ref().map(|_| "<closure>"),
             )
-            .field(
-                "on_removed",
-                &self.on_removed.as_ref().map(|_| "<closure>"),
-            )
+            .field("on_removed", &self.on_removed.as_ref().map(|_| "<closure>"))
             .finish()
     }
 }
@@ -722,7 +719,8 @@ mod tests {
 
         let seen: Rc<RefCell<Vec<WindowRemovedEvent>>> = Rc::new(RefCell::new(Vec::new()));
         let log = seen.clone();
-        let mut config = WindowConfig::new().on_removed(move |ev| log.borrow_mut().push(ev.clone()));
+        let mut config =
+            WindowConfig::new().on_removed(move |ev| log.borrow_mut().push(ev.clone()));
 
         assert!(config.on_removed.is_some());
 
