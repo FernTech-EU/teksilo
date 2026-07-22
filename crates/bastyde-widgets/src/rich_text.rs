@@ -74,8 +74,7 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
     Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, SelectionType,
-    TextDirection,
-    TextDocument, TextFormat,
+    TextDirection, TextDocument, TextFormat,
 };
 use bastyde_text::{
     EditorTypographyDefaults, FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode,

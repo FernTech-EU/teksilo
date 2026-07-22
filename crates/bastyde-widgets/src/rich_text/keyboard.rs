@@ -16,10 +16,10 @@
 
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
-use bastyde_text::{CursorAffinity, TextDirection};
 use bastyde_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
 };
+use bastyde_text::{CursorAffinity, TextDirection};
 
 use super::clipboard;
 use super::policy::EditCommandKind;
