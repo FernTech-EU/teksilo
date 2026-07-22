@@ -39,9 +39,11 @@ pub(super) enum KeyAction {
     /// Ctrl+Home/Ctrl+End, Backspace/Delete/Enter/typing, paste, etc.
     ClearPreferredX,
     /// Visual-line edge motion that went through
-    /// [`move_cursor_to_line_edge`]. The helper already set
+    /// [`move_cursor_to_line_edge`], or horizontal motion that had to
+    /// choose a side of a direction seam. The handler already set
     /// `cursor_affinity` itself, so the post-processing must NOT
-    /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End.
+    /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End
+    /// and the arrow keys.
     LineEdgeMotion,
     /// Vertical motion (Up/Down/PageUp/PageDown): the sticky column
     /// must be preserved so repeated vertical presses land on the
@@ -124,7 +126,8 @@ pub(super) fn handle_key(
                 } else {
                     let op = visual_move(&st, VisualDirection::Left, ctrl);
                     st.cursor.move_position(op, mode, 1);
-                    KeyAction::ClearPreferredX
+                    settle_affinity_at_seam(&mut st, VisualDirection::Left);
+                    KeyAction::LineEdgeMotion
                 }
             }
             Key::ArrowRight if filter.accepts(EditCommandKind::MoveRight) => {
@@ -133,7 +136,8 @@ pub(super) fn handle_key(
                 } else {
                     let op = visual_move(&st, VisualDirection::Right, ctrl);
                     st.cursor.move_position(op, mode, 1);
-                    KeyAction::ClearPreferredX
+                    settle_affinity_at_seam(&mut st, VisualDirection::Right);
+                    KeyAction::LineEdgeMotion
                 }
             }
             Key::ArrowUp if filter.accepts(EditCommandKind::MoveUp) => {
@@ -1011,6 +1015,34 @@ fn visual_move(st: &EditorState, pressed: VisualDirection, word: bool) -> MoveOp
         (false, false) => MoveOperation::Left,
         (false, true) => MoveOperation::WordLeft,
     }
+}
+
+/// Pick which side of a direction seam the caret belongs to after a
+/// horizontal move.
+///
+/// Where an LTR run meets an RTL one, a single character position has
+/// two visual homes on the same line — often at opposite ends of it —
+/// and only affinity says which. Landing on a seam without choosing
+/// leaves the caret wherever the previous keystroke's affinity happened
+/// to put it, which reads as the caret teleporting across the line.
+///
+/// The rule is that the caret stays on the side the user came *from*:
+/// arriving from the left it attaches to the text before the offset
+/// (downstream), arriving from the right to the text after it
+/// (upstream). Away from a seam affinity is a no-op, so this leaves the
+/// existing value alone rather than resetting it and disturbing the
+/// soft-wrap placement the other handlers maintain.
+fn settle_affinity_at_seam(st: &mut EditorState, pressed: VisualDirection) {
+    let pos = st.cursor.position();
+    if !st.engine.is_direction_boundary_at(pos) {
+        // Not a seam: match what ClearPreferredX would have done.
+        st.cursor_affinity = CursorAffinity::Downstream;
+        return;
+    }
+    st.cursor_affinity = match pressed {
+        VisualDirection::Right => CursorAffinity::Downstream,
+        VisualDirection::Left => CursorAffinity::Upstream,
+    };
 }
 
 /// Move the cursor to the start or end of the current visual line,

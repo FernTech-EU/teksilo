@@ -663,6 +663,16 @@ impl RichTextEngine {
         self.flow.paragraph_direction_at(position)
     }
 
+    /// Whether `position` sits on a direction boundary, where an LTR run
+    /// meets an RTL one and the caret has two possible x on one line.
+    ///
+    /// At an ordinary position affinity makes no visible difference and
+    /// can be left alone; at a seam the caret lands at the wrong end of
+    /// the line if it carries the wrong one.
+    pub fn is_direction_boundary_at(&self, position: usize) -> bool {
+        self.flow.is_direction_boundary_at(position)
+    }
+
     /// Document positions of the logical start and end of the visual
     /// line containing `position` — what Home and End move to.
     ///
