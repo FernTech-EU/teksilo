@@ -68,6 +68,8 @@ fn main() {
 
 Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect keyboard-first interaction, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the boilerplate above.
 
+Default styles are inspired by JetBrains' Int UI, with a light and dark theme that meet WCAG 2.1 AA contrast out of the box. No Win95-style "classic" theme is provided; the framework is intended for modern desktop applications.
+
 Particularly relevant to projects with regulatory accessibility or internationalization requirements (EU Accessibility Act, US Section 508, France RGAA, government procurement, regulated industries such as healthcare and finance). Accessibility and localization are architectural, not retrofitted: a real AccessKit bridge binds on every window on Linux, Windows, and macOS; every widget declares its role, name, and value at the trait level, with a per-widget override surface for labels, descriptions, and relationships; and Fluent-backed translations are checked at compile time. The default light and dark themes meet WCAG 2.1 AA contrast out of the box, enforced by a CI gate; an opt-in high-contrast variant tracks the OS "increase contrast" setting live; and keyboard alternatives cover the primary drag interactions. Conformance obligations attach to your application, not the toolkit: Bastyde's role is to supply correct primitives and stay out of the way. See [`docs/accessibility-audit.md`](docs/accessibility-audit.md) for a code-verified conformance assessment, including known gaps.
 
 Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI ecosystem for a specific component (rich text editor, table view, tree view, scene canvas, calendar, color picker) to drop into your app.
@@ -92,7 +94,7 @@ Bastyde builds on two earlier MPL-2.0 crates already at v1.x: [text-document](ht
 
 Production deployment is currently limited to FernTech's own applications; the 0.x version label reflects this scope. The known gaps are listed at the end of this README.
 
-This is one developer's project. Architecture, design reviews, code review and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral Medium) under that review.
+Project. Architecture, design reviews, code review and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral Medium) under that review.
 
 **Scale:** 30+ framework crates · 200k+ lines of Rust · 100+ widgets · 1000+ builder methods.
 
