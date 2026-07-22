@@ -16,7 +16,7 @@
 
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
-use bastyde_text::CursorAffinity;
+use bastyde_text::{CursorAffinity, TextDirection};
 use bastyde_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
 };
@@ -40,9 +40,8 @@ pub(super) enum KeyAction {
     ClearPreferredX,
     /// Visual-line edge motion that went through
     /// [`move_cursor_to_line_edge`]. The helper already set
-    /// `cursor_affinity` from the typesetter's hit-test, so the
-    /// post-processing must NOT clobber it. Clears the sticky column.
-    /// Covers non-Ctrl Home/End.
+    /// `cursor_affinity` itself, so the post-processing must NOT
+    /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End.
     LineEdgeMotion,
     /// Vertical motion (Up/Down/PageUp/PageDown): the sticky column
     /// must be preserved so repeated vertical presses land on the
@@ -123,11 +122,7 @@ pub(super) fn handle_key(
                 if shift && try_extend_cell_selection(&mut st, -1, 0) {
                     KeyAction::ClearPreferredX
                 } else {
-                    let op = if ctrl {
-                        MoveOperation::WordLeft
-                    } else {
-                        MoveOperation::Left
-                    };
+                    let op = visual_move(&st, VisualDirection::Left, ctrl);
                     st.cursor.move_position(op, mode, 1);
                     KeyAction::ClearPreferredX
                 }
@@ -136,11 +131,7 @@ pub(super) fn handle_key(
                 if shift && try_extend_cell_selection(&mut st, 1, 0) {
                     KeyAction::ClearPreferredX
                 } else {
-                    let op = if ctrl {
-                        MoveOperation::WordRight
-                    } else {
-                        MoveOperation::Right
-                    };
+                    let op = visual_move(&st, VisualDirection::Right, ctrl);
                     st.cursor.move_position(op, mode, 1);
                     KeyAction::ClearPreferredX
                 }
@@ -987,8 +978,44 @@ enum LineEdge {
     End,
 }
 
-/// Move the cursor to the start or end of the current visual line
-/// using the typesetter's `hit_test`. Solves two bugs at once:
+/// The way the user pressed, in screen terms.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VisualDirection {
+    Left,
+    Right,
+}
+
+/// The logical move that carries the caret one step in the direction the
+/// user actually pressed.
+///
+/// text-document's `MoveOperation::Left`/`Right` are *logical* aliases —
+/// `Left` is "previous character", `Right` is "next character" — which
+/// is correct for left-to-right text and backwards for right-to-left,
+/// where the next character is drawn further left. Pressing → inside an
+/// Arabic word therefore walked the caret leftward across the screen.
+///
+/// The direction is taken at the caret rather than from the paragraph,
+/// so an English quotation inside Arabic prose steps the way it reads.
+/// `resolve_move` stays pure logical stepping; choosing *which* logical
+/// primitive to invoke is the widget layer's job, because only it knows
+/// how the text was laid out.
+fn visual_move(st: &EditorState, pressed: VisualDirection, word: bool) -> MoveOperation {
+    let rtl = st.engine.direction_at(st.cursor.position()) == TextDirection::RightToLeft;
+    let forward = match pressed {
+        VisualDirection::Right => !rtl,
+        VisualDirection::Left => rtl,
+    };
+    match (forward, word) {
+        (true, false) => MoveOperation::Right,
+        (true, true) => MoveOperation::WordRight,
+        (false, false) => MoveOperation::Left,
+        (false, true) => MoveOperation::WordLeft,
+    }
+}
+
+/// Move the cursor to the start or end of the current visual line,
+/// asking the typesetter for the line's logical extent. Solves two bugs
+/// at once:
 ///  * A second End press after landing at line end is a no-op,
 ///    avoiding text-document's block-boundary ambiguity where
 ///    `get_block_at_position(block_end_pos)` returns the next block.
@@ -996,31 +1023,57 @@ enum LineEdge {
 ///    Home/End semantics).
 ///
 /// Affinity handling: read the current `st.cursor_affinity` so the
-/// `caret_rect` query sees the line the user is visually on (matters
-/// at soft-wrap boundaries), then overwrite `st.cursor_affinity` with
-/// the hit's affinity so the post-move caret renders on the matched
-/// line (Home from end-of-K → start-of-K = Upstream-of-K+1's-start;
-/// End from start-of-K+1 → end-of-K = Downstream-of-K's-end).
+/// range query picks the line the user is visually on (matters at
+/// soft-wrap boundaries), then set it to match the edge just moved to —
+/// Upstream when Home lands on a wrap continuation, Downstream
+/// otherwise.
 fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
     }
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
-    let line_y = caret[1] + caret[3] * 0.5;
-    // Probe far outside the viewport horizontally; the typesetter
-    // clamps the hit to the actual line extent and returns a valid
-    // position at either edge.
-    let probe_x = match edge {
-        LineEdge::Start => -1.0e6,
-        LineEdge::End => 1.0e6,
+
+    // Ask the typesetter for the line's logical extent rather than
+    // hit-testing a far-off-screen x. The probe used to be purely
+    // visual — leftmost for Home, rightmost for End — which is only the
+    // same thing in left-to-right text; in an RTL paragraph the logical
+    // start is drawn on the right, so Home and End landed on each
+    // other's ends. Asking for the range directly sidesteps both that
+    // and the question of how a hit-test clamps coordinates far outside
+    // the text.
+    let Some((line_start, line_end)) = st.engine.visual_line_range_at(pos, st.cursor_affinity)
+    else {
+        return;
     };
-    if let Some(hit) = st.engine.hit_test(probe_x, line_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-        st.cursor_affinity = hit.affinity;
+
+    let target = match edge {
+        LineEdge::Start => line_start,
+        LineEdge::End => line_end,
+    };
+    if target != pos {
+        st.cursor.set_position(target, mode);
     }
+
+    // Keep the caret drawn on the line it was sent to. Only a soft-wrap
+    // boundary — a position that both ends one line and starts the next
+    // — has two placements to choose between; anywhere else affinity is
+    // a no-op and the convention is the `Downstream` default.
+    //
+    // End always wants Downstream (the end of the line it just moved
+    // to). Home wants Upstream, but only where that means something: at
+    // a block's first line, position 0 starts a line without ending one,
+    // and claiming Upstream there would report a wrap continuation that
+    // does not exist.
+    let starts_a_wrap_continuation = |st: &EditorState, at: usize| {
+        matches!(
+            st.engine.visual_line_range_at(at, CursorAffinity::Downstream),
+            Some((_, end)) if end == at
+        )
+    };
+    st.cursor_affinity = match edge {
+        LineEdge::Start if starts_a_wrap_continuation(st, target) => CursorAffinity::Upstream,
+        LineEdge::Start | LineEdge::End => CursorAffinity::Downstream,
+    };
 }
 
 /// Move the cursor up or down by one visual line, using the

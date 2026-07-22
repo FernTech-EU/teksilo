@@ -74,6 +74,7 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{
     Alignment, BlockFormat, CharVerticalAlignment, ListStyle, MoveMode, SelectionType,
+    TextDirection,
     TextDocument, TextFormat,
 };
 use bastyde_text::{
@@ -1134,6 +1135,35 @@ impl RichTextEditor {
         });
     }
 
+    /// Unset the block's direction, handing the paragraph back to
+    /// automatic detection.
+    ///
+    /// Not the same as setting left-to-right. An explicit direction
+    /// *pins* the paragraph and overrides the bidi algorithm, so
+    /// "clearing" a direction by writing `LeftToRight` would force
+    /// Arabic and Hebrew prose to lay out backwards. Only an unset
+    /// direction lets the text speak for itself.
+    pub fn clear_direction(&self) {
+        self.apply_block_format(BlockFormat {
+            clear_direction: true,
+            ..Default::default()
+        });
+    }
+
+    /// Set the base reading direction of the current block.
+    ///
+    /// This is the *paragraph* direction, not a character property: it
+    /// decides which edge unaligned text sits against and, more
+    /// importantly, overrides the bidi algorithm's first-strong-character
+    /// guess — which misreads an Arabic paragraph opening with a Latin
+    /// acronym as left-to-right.
+    pub fn set_direction(&self, direction: TextDirection) {
+        self.apply_block_format(BlockFormat {
+            direction: Some(direction),
+            ..Default::default()
+        });
+    }
+
     /// Set the heading level of the current block. `0` = plain
     /// paragraph; `1..=6` follow the HTML `<h1>..<h6>` convention.
     pub fn set_heading_level(&self, level: u8) {
@@ -1388,6 +1418,17 @@ impl RichTextEditor {
             .ok()
             .and_then(|f| f.alignment)
             .unwrap_or(Alignment::Left)
+    }
+
+    /// The block's explicitly-set reading direction, if it has one.
+    /// `None` means the bidi algorithm decides from the text.
+    pub fn get_direction(&self) -> Option<TextDirection> {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.direction)
     }
 
     // --- History ---------------------------------------------------------
@@ -2132,6 +2173,30 @@ impl EditorHandle {
         });
     }
 
+    /// Unset the block's direction, handing the paragraph back to
+    /// automatic detection.
+    ///
+    /// Not the same as setting left-to-right. An explicit direction
+    /// *pins* the paragraph and overrides the bidi algorithm, so
+    /// "clearing" a direction by writing `LeftToRight` would force
+    /// Arabic and Hebrew prose to lay out backwards. Only an unset
+    /// direction lets the text speak for itself.
+    pub fn clear_direction(&self) {
+        self.apply_block_format(BlockFormat {
+            clear_direction: true,
+            ..Default::default()
+        });
+    }
+
+    /// Set the base reading direction of the caret's block. See
+    /// [`RichTextEditor::set_direction`].
+    pub fn set_direction(&self, direction: TextDirection) {
+        self.apply_block_format(BlockFormat {
+            direction: Some(direction),
+            ..Default::default()
+        });
+    }
+
     /// Set heading level for the caret's block. `0` = plain paragraph,
     /// `1..=6` follow the HTML `<h1>..<h6>` convention.
     pub fn set_heading_level(&self, level: u8) {
@@ -2150,6 +2215,21 @@ impl EditorHandle {
             .ok()
             .and_then(|f| f.alignment)
             .unwrap_or(Alignment::Left)
+    }
+
+    /// The block's explicitly-set reading direction, if it has one.
+    ///
+    /// `None` means the writer never chose — the bidi algorithm decides
+    /// from the text. That is a genuinely different state from an
+    /// explicit left-to-right, so it is reported rather than defaulted:
+    /// a toggle needs to show "auto" as its own setting.
+    pub fn get_direction(&self) -> Option<TextDirection> {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.direction)
     }
 
     /// Current heading level (0 = plain paragraph).

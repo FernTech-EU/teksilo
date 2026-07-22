@@ -1047,6 +1047,7 @@ mod tests {
     fn make_test_block(id: usize, text: &str) -> text_typeset::layout::block::BlockLayoutParams {
         use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
         BlockLayoutParams {
+            base_direction: Default::default(),
             block_id: id,
             position: 0,
             text: text.to_string(),

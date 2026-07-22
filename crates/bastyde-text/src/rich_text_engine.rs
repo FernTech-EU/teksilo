@@ -643,6 +643,40 @@ impl RichTextEngine {
         self.flow.character_geometry(block_id, char_start, char_end)
     }
 
+    /// Reading direction of the text at `position` — the direction of
+    /// the bidi run the caret sits in, not the paragraph's.
+    ///
+    /// Arrow keys need this: stepping one character *forward logically*
+    /// moves the caret visually left inside right-to-left text, so a
+    /// handler that maps ArrowRight straight to "next character" sends
+    /// the caret backwards on screen.
+    pub fn direction_at(&self, position: usize) -> text_typeset::TextDirection {
+        self.flow.direction_at(position)
+    }
+
+    /// Base direction of the paragraph containing `position`.
+    ///
+    /// Home and End want this rather than [`Self::direction_at`]: they
+    /// move to the *logical* ends of the line, and which visual edge
+    /// those sit on is a property of the paragraph.
+    pub fn paragraph_direction_at(&self, position: usize) -> text_typeset::TextDirection {
+        self.flow.paragraph_direction_at(position)
+    }
+
+    /// Document positions of the logical start and end of the visual
+    /// line containing `position` — what Home and End move to.
+    ///
+    /// Logical, not visual: in a right-to-left paragraph the start is
+    /// drawn on the right. `affinity` disambiguates a soft-wrap
+    /// boundary, where one position ends one line and starts the next.
+    pub fn visual_line_range_at(
+        &self,
+        position: usize,
+        affinity: text_typeset::CursorAffinity,
+    ) -> Option<(usize, usize)> {
+        self.flow.visual_line_range_at(position, affinity)
+    }
+
     pub fn ensure_caret_visible(&mut self) -> Option<f32> {
         self.flow.ensure_caret_visible()
     }
@@ -837,6 +871,7 @@ mod tests {
         use text_typeset::{UnderlineStyle, VerticalAlignment};
 
         BlockLayoutParams {
+            base_direction: Default::default(),
             block_id,
             position: 0,
             text: text.to_string(),

@@ -27,7 +27,8 @@ pub use text_typeset::{
     BlockVisualInfo, CharacterGeometry, CursorAffinity, CursorDisplay,
     DecorationKind as TypesetterDecorationKind, DecorationRect, FontFaceId, FontFamilyInfo,
     GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad, RelayoutError,
-    RenderFrame, TextFontService, WritingSystem, WritingSystemIndexBuilder, WritingSystemSet,
+    RenderFrame, TextDirection, TextFontService, WritingSystem, WritingSystemIndexBuilder,
+    WritingSystemSet,
 };
 
 pub use text_document;

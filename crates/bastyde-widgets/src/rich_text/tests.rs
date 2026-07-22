@@ -6180,3 +6180,119 @@ fn superscript_and_subscript_are_mutually_exclusive() {
         "raising a subscript run must clear the subscript"
     );
 }
+
+// ── Bidirectional caret motion ─────────────────────────────────
+
+/// "שלום" (shalom) — four Hebrew letters, so the paragraph
+/// auto-detects as right-to-left without any explicit block format.
+const SHALOM: &str = "\u{05E9}\u{05DC}\u{05D5}\u{05DD}";
+
+/// Drive an editor headlessly with the caret parked at `at`.
+///
+/// A render pass is mandatory before the keyboard handlers can consult
+/// direction: without layout there are no shaped runs, and
+/// `direction_at` falls back to left-to-right.
+fn rtl_editor(text: &str, at: usize) -> (WidgetTree, bastyde_core::signal::Signal<usize>) {
+    let doc = TextDocument::new();
+    doc.set_plain_text(text).unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let caret = editor.cursor_position_signal();
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    // Click to focus — key events only reach a focused widget — then
+    // park the caret exactly where the test wants it.
+    tree.dispatch_event(bastyde_core::event::WidgetEvent::PointerDown {
+        position: bastyde_canvas::Point::new(1.0, 8.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::NONE,
+    });
+    handle.select_range(at, at);
+    assert_eq!(caret.get(), at, "caret should start at {at}");
+    (tree, caret)
+}
+
+fn press(tree: &mut WidgetTree, key: bastyde_core::event::Key) {
+    tree.dispatch_event(bastyde_core::event::WidgetEvent::KeyDown {
+        key,
+        modifiers: bastyde_core::event::Modifiers::NONE,
+        text: None,
+    });
+}
+
+#[test]
+fn arrow_keys_follow_the_screen_in_rtl_text() {
+    use bastyde_core::event::Key;
+
+    let (mut tree, caret) = rtl_editor(SHALOM, 2);
+
+    // In right-to-left text the *next* character is drawn further left,
+    // so pressing → has to step logically backwards to move the caret
+    // rightwards on screen. Mapping ArrowRight straight onto "next
+    // character" — which is what it used to do — walked the caret the
+    // wrong way across the word.
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        caret.get(),
+        1,
+        "ArrowRight in RTL text must step logically backwards so the \
+         caret moves right on screen"
+    );
+
+    press(&mut tree, Key::ArrowLeft);
+    assert_eq!(caret.get(), 2, "ArrowLeft must undo it");
+
+    press(&mut tree, Key::ArrowLeft);
+    assert_eq!(caret.get(), 3, "and keep travelling logically forwards");
+}
+
+#[test]
+fn arrow_keys_are_unchanged_in_ltr_text() {
+    use bastyde_core::event::Key;
+
+    // The direction lookup must not disturb ordinary Latin editing.
+    let (mut tree, caret) = rtl_editor("Hello world", 2);
+
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(caret.get(), 3, "ArrowRight still advances in LTR text");
+
+    press(&mut tree, Key::ArrowLeft);
+    assert_eq!(caret.get(), 2, "ArrowLeft still retreats in LTR text");
+}
+
+#[test]
+fn home_and_end_reach_the_logical_ends_of_an_rtl_line() {
+    use bastyde_core::event::Key;
+
+    let len = SHALOM.chars().count();
+    let (mut tree, caret) = rtl_editor(SHALOM, 2);
+
+    // Home and End are logical, not visual: Home goes to the start of
+    // the text regardless of which screen edge that sits on. The old
+    // code probed the visual left edge for Home, which in an RTL line
+    // is the logical *end* — so Home and End both landed on the wrong
+    // side of the word.
+    press(&mut tree, Key::Home);
+    assert_eq!(caret.get(), 0, "Home must reach the logical start");
+
+    press(&mut tree, Key::End);
+    assert_eq!(caret.get(), len, "End must reach the logical end");
+}
+
+#[test]
+fn home_and_end_still_work_in_ltr_text() {
+    use bastyde_core::event::Key;
+
+    let text = "Hello world";
+    let (mut tree, caret) = rtl_editor(text, 4);
+
+    press(&mut tree, Key::Home);
+    assert_eq!(caret.get(), 0);
+
+    press(&mut tree, Key::End);
+    assert_eq!(caret.get(), text.chars().count());
+}
