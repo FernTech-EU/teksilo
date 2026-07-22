@@ -93,6 +93,42 @@ pub type CloseGuard = Rc<dyn Fn(&mut EventContext) -> CloseResponse>;
 /// confirmation UI.
 pub type CloseBlockedCallback = Rc<dyn Fn(&mut EventContext)>;
 
+/// Snapshot handed to a [`WindowConfig::on_removed`] callback once its
+/// window has finished tearing down.
+///
+/// There is no [`EventContext`] here, unlike [`CloseGuard`] /
+/// [`CloseBlockedCallback`]: those run *before* teardown, while the
+/// window's own tree is still alive to build a context from; `on_removed`
+/// runs *after* — the tree, platform window, and every framework
+/// registry entry for this window are already gone (see `on_removed`'s
+/// doc comment for exactly where in teardown it fires).
+#[derive(Debug, Clone)]
+pub struct WindowRemovedEvent {
+    /// Identity of the window that was just removed. Redundant with
+    /// whatever the closure already captured — a `WindowConfig` callback
+    /// is inherently per-window — but useful when one closure is shared
+    /// across several windows (e.g. `Rc<dyn Fn>` cloned onto every window
+    /// opened for the same document).
+    pub id: BastydeWindowId,
+    /// The window's `string_id`, if it had one (persistence key / stable
+    /// handle apps use to correlate a window with their own bookkeeping).
+    pub string_id: Option<String>,
+    /// How many windows remain across the whole app, counted AFTER this
+    /// one's removal. `0` means this was the last window standing. The
+    /// framework has no notion of "this app's Work/document" grouping —
+    /// an app that needs a *scoped* last-window answer (e.g. "last window
+    /// for this particular Work") combines this fact with its own
+    /// window-to-Work bookkeeping; this field only answers "last window,
+    /// full stop".
+    pub remaining_windows: usize,
+}
+
+/// Signature of the [`on_removed`](WindowConfig::on_removed) callback —
+/// the framework's window-teardown hook. See [`WindowRemovedEvent`] and
+/// [`WindowConfig::on_removed`] for exactly when it runs and what it
+/// receives.
+pub type WindowRemovedCallback = Rc<dyn Fn(&WindowRemovedEvent)>;
+
 /// Configuration for creating a new window.
 pub struct WindowConfig {
     pub title: String,
@@ -153,6 +189,9 @@ pub struct WindowConfig {
     /// signal blocks a close — the hook that presents the confirmation
     /// UI. See [`WindowConfig::on_close_blocked`].
     pub on_close_blocked: Option<CloseBlockedCallback>,
+    /// Optional teardown hook, fired once this window has been fully
+    /// removed from the window manager. See [`WindowConfig::on_removed`].
+    pub on_removed: Option<WindowRemovedCallback>,
 }
 
 impl std::fmt::Debug for WindowConfig {
@@ -189,6 +228,10 @@ impl std::fmt::Debug for WindowConfig {
             .field(
                 "on_close_blocked",
                 &self.on_close_blocked.as_ref().map(|_| "<closure>"),
+            )
+            .field(
+                "on_removed",
+                &self.on_removed.as_ref().map(|_| "<closure>"),
             )
             .finish()
     }
@@ -256,6 +299,7 @@ impl WindowConfig {
             on_close_requested: None,
             can_close: None,
             on_close_blocked: None,
+            on_removed: None,
         }
     }
 
@@ -525,6 +569,54 @@ impl WindowConfig {
         self.on_close_blocked.take()
     }
 
+    /// Register a teardown hook for this window: an `Fn`, not `FnOnce` or
+    /// `FnMut`, because a shared closure (`Rc`-cloned config, or a
+    /// closure built once and attached to several windows opened for the
+    /// same document) may run once per window it's attached to.
+    ///
+    /// Fires exactly once, no matter which of the two ways this window
+    /// closes:
+    /// - a *guarded* close ([`EventContext::close_window`](crate::widget::EventContext::close_window)
+    ///   / the OS close button / `Alt+F4` / `Cmd+W`), once
+    ///   [`can_close`](Self::can_close) / [`on_close_requested`](Self::on_close_requested)
+    ///   let it through;
+    /// - a *forced* close ([`EventContext::close_window_forced`](crate::widget::EventContext::close_window_forced) /
+    ///   [`EventContext::close_window_by_id`](crate::widget::EventContext::close_window_by_id)),
+    ///   which bypasses the guard entirely;
+    ///
+    /// because the window manager funnels both through the same, single
+    /// teardown routine.
+    ///
+    /// Runs **after** the window is gone: its tree has been dropped, its
+    /// platform window destroyed, and every framework-internal
+    /// registration for it (native menu, drag-and-drop target, pending
+    /// async completions, …) purged. This is the deliberate choice — it
+    /// is what lets [`WindowRemovedEvent::remaining_windows`] already
+    /// exclude the window being removed, so a handler that wants to know
+    /// "was this the last window [for my Work]" gets an unambiguous
+    /// answer rather than having to remember to subtract one. The
+    /// trade-off is that the callback cannot reach into the removed
+    /// window's own widget tree — by the time it runs, there isn't one.
+    /// If a hook needs to read tree state before it's torn down, that has
+    /// to happen earlier, in [`on_close_requested`](Self::on_close_requested)
+    /// or [`on_close_blocked`](Self::on_close_blocked).
+    ///
+    /// The intended use is releasing whatever an app keeps keyed by a
+    /// window's [`BastydeWindowId`] — a shared-document refcount, an
+    /// entry in the app's own "windows open for this Work" map — so that
+    /// bookkeeping is decremented exactly when the framework agrees the
+    /// window is really gone, instead of a hand-maintained registry that
+    /// only ever grows.
+    pub fn on_removed(mut self, hook: impl Fn(&WindowRemovedEvent) + 'static) -> Self {
+        self.on_removed = Some(Rc::new(hook));
+        self
+    }
+
+    /// Take the `on_removed` teardown hook out of the config.
+    pub fn take_on_removed(&mut self) -> Option<WindowRemovedCallback> {
+        self.on_removed.take()
+    }
+
     pub fn is_modal(&self) -> bool {
         self.modal.is_some()
     }
@@ -567,6 +659,7 @@ mod tests {
         assert!(config.on_close_requested.is_none());
         assert!(config.can_close.is_none());
         assert!(config.on_close_blocked.is_none());
+        assert!(config.on_removed.is_none());
         // Geometry is restored unless an app explicitly opts out.
         assert!(config.restore_geometry);
     }
@@ -620,6 +713,39 @@ mod tests {
         // The taken signal is the same handle the caller passed in.
         signal.unwrap().as_signal().set(true);
         assert!(may_close.get());
+    }
+
+    #[test]
+    fn on_removed_builder_sets_and_takes() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Vec<WindowRemovedEvent>>> = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let mut config = WindowConfig::new().on_removed(move |ev| log.borrow_mut().push(ev.clone()));
+
+        assert!(config.on_removed.is_some());
+
+        // The window manager drains this exactly once at create_window
+        // time, same discipline as the close-guard fields above.
+        let hook = config.take_on_removed();
+        assert!(hook.is_some());
+        assert!(config.on_removed.is_none());
+
+        // The taken callback is the same closure the caller passed in,
+        // and it receives exactly the event it's handed — no field is
+        // dropped or reordered on the way through the `Rc<dyn Fn>`.
+        let id = BastydeWindowId::new(7);
+        hook.unwrap()(&WindowRemovedEvent {
+            id,
+            string_id: Some("main".to_string()),
+            remaining_windows: 0,
+        });
+        let logged = seen.borrow();
+        assert_eq!(logged.len(), 1);
+        assert_eq!(logged[0].id, id);
+        assert_eq!(logged[0].string_id.as_deref(), Some("main"));
+        assert_eq!(logged[0].remaining_windows, 0);
     }
 
     #[test]

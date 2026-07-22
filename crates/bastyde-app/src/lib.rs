@@ -16,7 +16,10 @@ pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
 pub use automation_bridge::BastydeAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
-pub use window_config::{BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
+pub use window_config::{
+    BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig, WindowRemovedCallback,
+    WindowRemovedEvent,
+};
 pub use window_manager::WindowManager;
 
 // Re-export the bastyde-core multi-window types so `use bastyde_app::...`

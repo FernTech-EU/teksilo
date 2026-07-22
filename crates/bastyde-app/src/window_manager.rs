@@ -220,6 +220,12 @@ pub(crate) struct ManagedWindow {
     /// blocks a close, from
     /// [`WindowConfig::on_close_blocked`](bastyde_core::WindowConfig::on_close_blocked).
     pub on_close_blocked: Option<CloseBlockedCallback>,
+    /// Optional teardown hook from
+    /// [`WindowConfig::on_removed`](bastyde_core::WindowConfig::on_removed).
+    /// Invoked once by [`close_window`](WindowManager::close_window),
+    /// after this window is fully gone from every `WindowManager`
+    /// registry — see that method's doc comment for why.
+    pub on_removed: Option<bastyde_core::WindowRemovedCallback>,
     /// Glyph-atlas content version last uploaded to THIS window's
     /// renderer (`AtlasInfo::version`). Each window compares this
     /// against the shared bridge's current version on its own redraw
@@ -476,6 +482,7 @@ impl WindowManager {
         let close_guard = config.take_close_guard();
         let can_close = config.take_can_close();
         let on_close_blocked = config.take_close_blocked();
+        let on_removed = config.take_on_removed();
         let state = WindowState::new(WindowStateInit {
             id: bastyde_id,
             string_id: config.string_id.clone(),
@@ -946,6 +953,7 @@ impl WindowManager {
             close_guard,
             can_close,
             on_close_blocked,
+            on_removed,
             atlas_uploaded_version: primed_atlas_version,
         };
 
@@ -992,6 +1000,15 @@ impl WindowManager {
     }
 
     /// Close a window by its BastydeWindowId.
+    ///
+    /// The single choke point every close funnels through:
+    /// [`process_pending`](Self::process_pending) calls this both for a
+    /// forced close ([`queue_close`](Self::queue_close) /
+    /// `close_window_by_id`) and for a guarded one
+    /// ([`request_close`](Self::request_close)) once its guard has
+    /// passed. That makes this the one place to fire
+    /// [`WindowConfig::on_removed`](bastyde_core::WindowConfig::on_removed)
+    /// so both paths are covered by a single call site instead of two.
     pub fn close_window(&mut self, bastyde_id: BastydeWindowId) {
         // Purge any pending file-dialog callbacks owned by the
         // soon-to-close window before its tree is dropped — see
@@ -1054,6 +1071,11 @@ impl WindowManager {
         {
             registry.purge_window(bastyde_id);
         }
+        // Stashed here (rather than invoked inline) so the hook can run
+        // AFTER `managed` — and with it the tree, platform window, and
+        // this whole `if let` block's own cleanup — is completely gone.
+        // See `WindowConfig::on_removed` for why "after" is load-bearing.
+        let mut removed_hook: Option<(bastyde_core::WindowRemovedCallback, Option<String>)> = None;
         if let Some(winit_id) = self.bastyde_to_winit.remove(&bastyde_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
@@ -1071,9 +1093,25 @@ impl WindowManager {
             {
                 self.modal_blocked.remove(&parent_id);
             }
+            if let Some(hook) = managed.on_removed.take() {
+                removed_hook = Some((hook, managed.string_id.clone()));
+            }
         }
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&bastyde_id);
+
+        // Fire the teardown hook last, once every registry above
+        // (`windows`, `bastyde_to_winit`, `string_to_id`, `modal_blocked`)
+        // no longer mentions this window — `remaining_windows` below is
+        // `self.windows.len()` read at this point, so it already excludes
+        // the window being removed.
+        if let Some((hook, string_id)) = removed_hook {
+            hook(&bastyde_core::WindowRemovedEvent {
+                id: bastyde_id,
+                string_id,
+                remaining_windows: self.windows.len(),
+            });
+        }
     }
 
     /// Queue an **unconditional** window closure (processed in the next
@@ -1572,6 +1610,97 @@ impl WindowManager {
                 managed.platform_window.request_redraw();
             }
         }
+    }
+
+    /// Reconcile every window's reactive (`Signal`-bound) state and
+    /// request redraw ONLY on the ones that come out of that with pending
+    /// layout or paint work (`WidgetTree::needs_render`). Returns how many
+    /// windows were poked, purely so a caller can log/trace it.
+    ///
+    /// # The problem
+    ///
+    /// A `Signal` mutation made by a handler in one window's dispatch
+    /// (e.g. writing to an app-level `Signal` a *sibling* window's widget
+    /// also reads) is supposed to make that sibling dirty too — that's the
+    /// whole point of sharing a `Signal` across windows. But only the
+    /// dispatching window's own event-handling path calls
+    /// `request_redraw()` on itself (see the `WindowEvent::CursorMoved` /
+    /// `MouseInput` / `KeyboardInput` arms); nothing tells winit to
+    /// schedule a `RedrawRequested` for the sibling, so it shows a stale
+    /// frame until the user focuses it (which finally earns it a paint).
+    ///
+    /// # Why this can't just check `needs_render()`
+    ///
+    /// A `Signal` write only flips a dirty flag on the signal itself and
+    /// in `bastyde_core`'s `BindingRegistry` (a deliberately lazy design —
+    /// a signal has no reference back into any `WidgetTree`'s arena to
+    /// mark node-level dirty bits synchronously). Those flags are only
+    /// walked into `arena.needs_layout` / `needs_paint` — i.e. into what
+    /// `needs_render()` actually reads — by `WidgetTree`'s internal
+    /// `process_state_changes` step, which today runs *only* at the top
+    /// of that tree's own `layout()`. A window's own
+    /// `layout()` runs *only* as part of handling its own
+    /// `RedrawRequested` (see `handle_redraw_requested` in `app.rs`). So a
+    /// sibling window that never redraws never reconciles its bindings
+    /// either — its `needs_render()` reads `false` forever, not just
+    /// "until it happens to repaint", because nothing ever performed the
+    /// walk that would make it `true`. Checking `needs_render()` without
+    /// reconciling first would make this method a permanent no-op for
+    /// exactly the case it exists to fix.
+    ///
+    /// That's why every window's `tree.layout()` is called here first, at
+    /// its OWN current size (`proposal_changed` stays `false`) — cheap
+    /// when nothing is pending: `layout()` runs the reconcile pass, then
+    /// short-circuits before the expensive per-node geometry recursion
+    /// once it finds nothing dirty and the proposal unchanged. This is
+    /// strictly more expensive per dispatched event than
+    /// `request_redraw_due` (which only reads an already-computed
+    /// deadline) — it walks every window's `BindingRegistry` every time —
+    /// but it is still far cheaper than an actual GPU repaint, and it is
+    /// the only place in the framework doing this specific reconciliation
+    /// for a plain app-level `Signal` (the theme/locale/text-scale/
+    /// follow-system broadcasts sidestep the whole problem by mutating
+    /// each tree directly through `&mut self.windows`, not through a
+    /// shared `Signal`, so they always know synchronously that every
+    /// window needs a redraw).
+    ///
+    /// One known limitation: this uses `WidgetTree::layout` (a
+    /// `NoopWindowOps` sink), not `layout_with_ops`, so a handler that
+    /// this reconcile pass happens to run (a data-driven rebuild reacting
+    /// to the very state change being reconciled) cannot synchronously
+    /// open a window from here. That is acceptable for a background
+    /// reconciliation pass — the window still opens correctly the next
+    /// time this sibling performs its own real redraw with a real
+    /// `WindowOps` sink, exactly the way an app that never called this
+    /// method at all would have behaved.
+    ///
+    /// # Why `needs_render()`, not `needs_redraw()`
+    ///
+    /// Deliberately narrower than the broader `needs_redraw()`, which
+    /// also reports `true` while a per-frame shader animation is merely
+    /// *running*, with no dirty paint or layout at all. Treating "an
+    /// animation is running" as a reason to force an extra redraw here —
+    /// on top of whatever other window's event just got dispatched —
+    /// would effectively re-couple that animating window's frame rate to
+    /// the dispatch rate of every OTHER window's input (a fast mouse-move
+    /// stream can exceed 60 Hz), defeating the 60 Hz `WaitUntil` pacing
+    /// those animations already get from `next_timer_deadline` /
+    /// `request_redraw_due` and reintroducing the exact uncapped
+    /// free-running redraw behaviour that pacing was written to remove.
+    pub fn request_redraw_needing_render(&mut self) -> usize {
+        let mut poked = 0;
+        for managed in self.windows.values_mut() {
+            let size = managed.platform_window.surface_size();
+            let sf = managed.platform_window.scale_factor() as f32;
+            let proposal =
+                bastyde_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
+            managed.tree.layout(proposal);
+            if managed.tree.needs_render() {
+                managed.platform_window.request_redraw();
+                poked += 1;
+            }
+        }
+        poked
     }
 
     /// Drain pending modal requests from all windows.
@@ -2205,6 +2334,41 @@ mod close_guard_tests {
         let guarded = wm.pending_closes.iter().find(|p| p.id == b).unwrap();
         assert!(forced.force, "queue_close must enqueue a forced close");
         assert!(!guarded.force, "request_close must enqueue a guarded close");
+    }
+
+    /// Guard rail matching `close_window_on_an_unknown_id_is_a_harmless_no_op`
+    /// below: with no windows open, `request_redraw_needing_render` must
+    /// not panic and must report that it poked nothing. The substantive
+    /// claim this method rests on — that reconciling a tree's reactive
+    /// state before checking `needs_render()` is what actually surfaces a
+    /// cross-window `Signal` mutation — is covered at the `WidgetTree`
+    /// level in `bastyde_core::widget_tree::cross_window_redraw_signal_tests`,
+    /// since a real `ManagedWindow` needs a real `PlatformWindow` this
+    /// crate's headless tests cannot stand up.
+    #[test]
+    fn request_redraw_needing_render_on_an_empty_manager_pokes_nothing() {
+        let mut wm = WindowManager::new(bastyde_core::presets::intui::light());
+        assert_eq!(wm.request_redraw_needing_render(), 0);
+    }
+
+    /// `close_window` — the single choke point both `queue_close` (forced)
+    /// and `request_close` (once guarded) funnel through, and the one
+    /// place that fires `WindowConfig::on_removed` — must be a no-op for
+    /// a `BastydeWindowId` it has never seen (already closed, or never
+    /// existed). Constructing a real `ManagedWindow` needs an actual
+    /// `PlatformWindow` (a live winit window + wgpu surface), which is
+    /// not available in a headless unit test — see `on_removed`'s own
+    /// round-trip test in `bastyde_core::window::config` for the part of
+    /// this feature that IS testable in isolation. This test instead
+    /// pins down the guard-rail: no window, no hook to misfire, no panic.
+    #[test]
+    fn close_window_on_an_unknown_id_is_a_harmless_no_op() {
+        let mut wm = WindowManager::new(bastyde_core::presets::intui::light());
+        assert_eq!(wm.window_count(), 0);
+
+        wm.close_window(BastydeWindowId::new(42));
+
+        assert_eq!(wm.window_count(), 0, "still no windows — nothing to remove");
     }
 }
 

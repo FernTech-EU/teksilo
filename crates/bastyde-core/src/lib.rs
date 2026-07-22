@@ -116,7 +116,8 @@ pub use window::state::WindowStateInit;
 pub use window::{
     BastydeWindowId, CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig,
     NoopWindowOps, PostRootBuilder, RootBuilder, SizeToContent, UserAttentionKind, WindowCommand,
-    WindowConfig, WindowIcon, WindowOps, WindowPlacement, WindowState,
+    WindowConfig, WindowIcon, WindowOps, WindowPlacement, WindowRemovedCallback, WindowRemovedEvent,
+    WindowState,
 };
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,

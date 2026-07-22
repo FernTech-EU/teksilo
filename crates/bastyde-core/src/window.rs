@@ -32,7 +32,7 @@ pub mod state;
 pub use command::{UserAttentionKind, WindowCommand};
 pub use config::{
     CloseBlockedCallback, CloseGuard, CloseResponse, ModalConfig, PostRootBuilder, RootBuilder,
-    SizeToContent, WindowConfig,
+    SizeToContent, WindowConfig, WindowRemovedCallback, WindowRemovedEvent,
 };
 pub use decorations::DecorationsMode;
 pub use icon::WindowIcon;

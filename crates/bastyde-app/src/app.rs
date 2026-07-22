@@ -285,6 +285,11 @@ struct IdleTrace {
     /// similar). Surfaces the only redraw source that was previously
     /// invisible to the trace.
     frame_request_redraws: u64,
+    /// Windows poked by `WindowManager::request_redraw_needing_render`
+    /// (a sibling window dirtied by another window's `Signal` mutation),
+    /// distinct from `request_redraw_all` — surfaces how often the
+    /// targeted cross-window path actually fires versus the blanket one.
+    cross_window_redraws: u64,
     idle_callbacks_run: u64,
     control_flow_wait: u64,
     control_flow_wait_until: u64,
@@ -308,6 +313,7 @@ impl IdleTrace {
                 keyboard_redraw_requests: 0,
                 resize_redraw_requests: 0,
                 frame_request_redraws: 0,
+                cross_window_redraws: 0,
                 idle_callbacks_run: 0,
                 control_flow_wait: 0,
                 control_flow_wait_until: 0,
@@ -354,6 +360,11 @@ impl IdleTrace {
         self.maybe_report();
     }
 
+    fn note_cross_window_redraw(&mut self, windows: usize) {
+        self.cross_window_redraws += windows as u64;
+        self.maybe_report();
+    }
+
     fn note_resume_time_reached(&mut self) {
         self.resume_time_reached += 1;
         self.maybe_report();
@@ -380,11 +391,12 @@ impl IdleTrace {
         }
 
         eprintln!(
-            "bastyde_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "bastyde_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.redraw_requested,
             self.rendered_frames,
             self.resume_time_reached,
             self.request_redraw_all,
+            self.cross_window_redraws,
             self.cursor_redraw_requests,
             self.mouse_input_redraw_requests,
             self.mouse_wheel_redraw_requests,
@@ -404,6 +416,7 @@ impl IdleTrace {
         self.redraw_requested = 0;
         self.rendered_frames = 0;
         self.request_redraw_all = 0;
+        self.cross_window_redraws = 0;
         self.cursor_redraw_requests = 0;
         self.mouse_input_redraw_requests = 0;
         self.mouse_wheel_redraw_requests = 0;
@@ -698,6 +711,17 @@ impl BastydeAppHandler {
                 trace.note_request_redraw_all();
             }
             self.wm.request_redraw_all();
+        }
+        // Targeted counterpart to the blanket call above: a handler may have
+        // mutated an app-level `Signal` that sibling windows also read,
+        // dirtying their trees without those windows ever seeing the
+        // triggering event. See `WindowManager::request_redraw_needing_render`
+        // for why this is filtered rather than another `request_redraw_all()`.
+        let cross_window_redraws = self.wm.request_redraw_needing_render();
+        if cross_window_redraws > 0
+            && let Some(trace) = &mut self.idle_trace
+        {
+            trace.note_cross_window_redraw(cross_window_redraws);
         }
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);

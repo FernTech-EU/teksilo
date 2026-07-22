@@ -3379,6 +3379,141 @@ mod text_scale_tests {
     }
 }
 
+/// Covers the `WidgetTree`-level facts
+/// `bastyde_app::WindowManager::request_redraw_needing_render` (the
+/// targeted cross-window redraw added for shared-`Signal` dispatch
+/// fan-out) relies on. Neither test touches windows at all — they exist
+/// to pin down `needs_render()`'s contract in isolation, since
+/// bastyde-app cannot stand up a real `PlatformWindow` in a unit test.
+#[cfg(test)]
+mod cross_window_redraw_signal_tests {
+    use super::*;
+    use crate::signal::Signal;
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use bastyde_canvas::SizeProposal;
+
+    /// The premise the fix acts on, AND the trap a naive fix would fall
+    /// into. A `Signal` shared by two independent trees (standing in for
+    /// two windows) is supposed to dirty both when mutated, even though
+    /// only one of them is the tree whose dispatch made the mutation —
+    /// but `Signal::set` only flips a dirty flag on the signal itself and
+    /// in the `BindingRegistry`; nothing walks that into a tree's
+    /// `needs_layout` / `needs_paint` bits (what `needs_render()` reads)
+    /// except that tree's OWN `process_state_changes`, run at the top of
+    /// its OWN `layout()`. So immediately after the mutation, with
+    /// neither tree having re-run `layout()`, BOTH read clean — a naive
+    /// "just check `needs_render()`" cross-window redraw would see
+    /// nothing to do and stay a permanent no-op. Once tree B's `layout()`
+    /// runs (what `request_redraw_needing_render` does for every window
+    /// before checking it), the same mutation is finally visible there.
+    ///
+    /// Each tree wraps its gated leaf in a `StackWidget` parent (rather
+    /// than gating a bare root leaf) so the fact under test — an ACTIVE
+    /// widget ending up dirty — is unambiguous: `any_needs_layout()` /
+    /// `any_needs_paint()` only ever look at `Active` nodes, and a leaf
+    /// that itself goes dormant is deliberately excluded from both (a
+    /// hidden widget has nothing to paint). What must go dirty here is
+    /// the STILL-ACTIVE stack, via `mark_ancestors_need_layout` — the
+    /// same mechanism that makes a real window's content re-flow around
+    /// a child that just appeared or disappeared.
+    #[test]
+    fn a_shared_signal_mutation_only_shows_up_after_that_trees_own_layout_reconciles_it() {
+        let shared = Signal::new(true);
+
+        let mut tree_a = WidgetTree::new();
+        let stack_a = tree_a.add(StackWidget::new());
+        let id_a = tree_a.add_child(stack_a, FillWidget::new());
+        tree_a.visible_when(id_a, shared.clone());
+
+        let mut tree_b = WidgetTree::new();
+        let stack_b = tree_b.add(StackWidget::new());
+        let id_b = tree_b.add_child(stack_b, FillWidget::new());
+        tree_b.visible_when(id_b, shared.clone());
+
+        let proposal = SizeProposal::exact(100.0, 100.0);
+
+        // Bring both to the same clean baseline a real event loop reaches
+        // after its initial layout + paint.
+        tree_a.layout(proposal);
+        tree_a.render();
+        tree_b.layout(proposal);
+        tree_b.render();
+        assert!(!tree_a.needs_render(), "precondition: tree A starts clean");
+        assert!(!tree_b.needs_render(), "precondition: tree B starts clean");
+
+        // Simulate a handler mutating the shared Signal during tree A's
+        // dispatch. Neither tree re-runs layout() here yet.
+        shared.set(false);
+
+        assert!(
+            !tree_a.needs_render(),
+            "the mutation alone does not retroactively dirty tree A either — \
+             a Signal write cannot poke an arena directly, only the next \
+             process_state_changes (inside layout()) can"
+        );
+        assert!(
+            !tree_b.needs_render(),
+            "and tree B reads exactly as clean as tree A does at this point — \
+             checking needs_render() without reconciling first cannot tell them apart"
+        );
+
+        // This is what `request_redraw_needing_render` does for every
+        // window before checking `needs_render()` — reconcile at the
+        // window's OWN current size, which is cheap (short-circuits
+        // before any real geometry work) whenever nothing turns out to
+        // be dirty, but IS what walks a pending Signal-driven dirty flag
+        // into the arena.
+        tree_b.layout(proposal);
+
+        assert!(
+            tree_b.needs_render(),
+            "tree B, which merely OBSERVES the shared Signal, is now dirty — \
+             this is the cross-tree fan-out request_redraw_needing_render \
+             exists to notice (via its own reconcile-then-check) and repaint"
+        );
+    }
+
+    /// `needs_render()` (paint/layout dirt only) must stay `false` while a
+    /// per-frame `Signal<f32>` animation is merely *running*, with nothing
+    /// new to paint. `request_redraw_needing_render` filters on
+    /// `needs_render()`, not the broader `needs_redraw()`, precisely so a
+    /// window with a live animation isn't forced into an extra immediate
+    /// redraw on every sibling-window event — that would defeat the 60 Hz
+    /// `WaitUntil` pacing those animations already get elsewhere and
+    /// reintroduce the uncapped free-running redraw bug that pacing was
+    /// written to remove.
+    #[test]
+    fn needs_render_excludes_a_running_animation_with_no_dirty_paint() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.render();
+        assert!(!tree.needs_render(), "precondition: tree starts clean");
+        assert!(!tree.needs_redraw(), "precondition: nothing running yet");
+
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        anim.animate_to(
+            1.0,
+            std::time::Duration::from_millis(200),
+            bastyde_tokens::Easing::Linear,
+        );
+        // `process_pending_animations` (which picks up the pending
+        // `animate_to` and starts it on the scheduler) runs inside `layout`.
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        assert!(
+            tree.needs_redraw(),
+            "an animation just started, so needs_redraw() (has_running()) must be true"
+        );
+        assert!(
+            !tree.needs_render(),
+            "but nothing is actually dirty for paint/layout — needs_render() must stay false, \
+             which is the whole point of using it (not needs_redraw()) as the cross-window filter"
+        );
+    }
+}
+
 #[cfg(test)]
 mod effective_enabled_signal_tests {
     use super::*;
