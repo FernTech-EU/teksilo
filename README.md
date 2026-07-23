@@ -247,7 +247,7 @@ For priority bug fixes, written support, or an indemnification agreement, contac
 
 ## Trademark
 
-"Bastyde" is trademark of FernTech (EUIPO application 019381386, filed 2026-06-16). The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Bastyde", "Bastyde-compatible widget", articles describing Bastyde) is fine. For other uses, contact <trademarks@ferntech.eu>.
+"Bastyde" is a trademark of FernTech. The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Bastyde", "Bastyde-compatible widget", articles describing Bastyde) is fine. See [TRADEMARKS.md](TRADEMARKS.md) for the full policy; for anything it doesn't cover, contact <trademarks@ferntech.eu>.
 
 ## Acknowledgments
 
