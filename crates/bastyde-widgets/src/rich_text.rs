@@ -442,7 +442,7 @@ impl RichTextEditor {
     ///
     /// Enable this **only** for an editor deliberately laid out at its full
     /// document height inside an outer [`ScrollArea`](crate::ScrollArea)
-    /// (`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "bastard
+    /// (`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "dubious
     /// mode". Such an editor's own viewport spans the whole document, so the
     /// viewport-derived render cull keeps nothing; this makes it cull to the
     /// visible clip band instead, so a huge document only rasterizes the rows on
@@ -2960,7 +2960,7 @@ impl Widget for RichTextEditorBody {
         let scroll_y_logical = st.scroll_y.get();
         st.engine.set_scroll_offset(scroll_y_logical);
 
-        // Window the render to the visible clip when opted in (bastard mode).
+        // Window the render to the visible clip when opted in (dubious mode).
         // The editor is laid out at its full document height inside an outer
         // ScrollArea, so its own viewport spans the whole document and the
         // viewport-derived cull keeps everything. `ctx.clip_bounds` is the
@@ -2978,7 +2978,7 @@ impl Widget for RichTextEditorBody {
                 // scaled only by `apply_zoom` afterwards), so divide through by the
                 // engine zoom — matching text-typeset's own `effective_vh = vh/zoom`.
                 // The visible band's top in content space is the editor's own scroll
-                // offset plus however far its top sits above the clip: in bastard
+                // offset plus however far its top sits above the clip: in dubious
                 // mode `scroll_offset` is pinned to 0, but including it keeps the
                 // window correct (rather than mis-culling) even for a self-scrolling
                 // editor, so this can't silently render the wrong rows.

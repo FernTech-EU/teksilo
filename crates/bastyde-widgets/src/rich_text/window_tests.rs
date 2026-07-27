@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `window_to_clip` — the bastard-mode render-window wiring.
+//! `window_to_clip` — the dubious-mode render-window wiring.
 //!
 //! Phase A made the accessibility rebuild cheap; this is Phase B, cutting the
 //! *render*. An editor laid out at full document height inside an outer
@@ -36,7 +36,7 @@ fn make_editor(window: bool) -> RichTextEditor {
         .v_scroll_policy(ScrollPolicy::AlwaysOff)
         .h_scroll_policy(ScrollPolicy::AlwaysOff)
         // `min_lines` switches to INTRINSIC sizing, so the editor reports its full
-        // document height inside the outer ScrollArea (bastard mode) — the whole
+        // document height inside the outer ScrollArea (dubious mode) — the whole
         // point. Without it a greedy editor just fills the 700px viewport and there
         // is nothing to window or scroll.
         .min_lines(1)

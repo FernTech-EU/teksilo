@@ -210,7 +210,7 @@ this editor's own bounds.
 
 Enable this **only** for an editor deliberately laid out at its full
 document height inside an outer `ScrollArea`
-(`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "bastard
+(`v_scroll_policy(ScrollPolicy::AlwaysOff)`, no `max_lines`) — "dubious
 mode". Such an editor's own viewport spans the whole document, so the
 viewport-derived render cull keeps nothing; this makes it cull to the
 visible clip band instead, so a huge document only rasterizes the rows on

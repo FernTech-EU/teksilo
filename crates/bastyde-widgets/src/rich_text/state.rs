@@ -122,7 +122,7 @@ pub(crate) struct EditorState {
     /// Window the render to the accumulated ancestor clip instead of this
     /// widget's own bounds. `false` by default: a normal self-scrolling editor
     /// culls correctly from its own `scroll_y`. An editor laid out at full
-    /// document height inside an outer `ScrollArea` ("bastard mode") sets this
+    /// document height inside an outer `ScrollArea` ("dubious mode") sets this
     /// `true` so paint-time culling follows the visible clip band rather than
     /// the whole-document viewport. Read in `paint()`; drives
     /// `engine.set_render_window`. See

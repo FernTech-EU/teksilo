@@ -66,7 +66,7 @@ pub struct PaintContext<'a> {
     /// The paint walker already computes this to skip fully-offscreen subtrees;
     /// surfacing it lets a widget that is laid out larger than its visible slot
     /// — an editor at full document height inside an outer `ScrollArea`
-    /// ("bastard mode") — window its own expensive work to `clip ∩ bounds`
+    /// ("dubious mode") — window its own expensive work to `clip ∩ bounds`
     /// instead of processing the whole document. Correct under arbitrary
     /// nesting, since it is the intersection of *all* clipping ancestors.
     pub clip_bounds: Option<Rect>,
