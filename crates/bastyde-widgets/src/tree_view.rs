@@ -202,7 +202,7 @@ pub struct TreeView<T: 'static> {
     /// `activate_on`, or Enter/Space on the focused row) — distinct from
     /// *selection*, which also moves on arrow navigation. Lets a view
     /// open/commit a row without firing on every navigation step.
-    on_activate: Option<Rc<dyn Fn(usize)>>,
+    on_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,
     /// Whether activation is a single or double click (default `DoubleClick`).
     activate_on: crate::data_views::ActivateOn,
 

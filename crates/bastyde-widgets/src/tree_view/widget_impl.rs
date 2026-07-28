@@ -447,7 +447,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 sel.select(current);
                             }
                             if let Some(ref cb) = activate_key {
-                                cb(current);
+                                cb(current, ctx);
                             }
                             return bastyde_core::event::EventResponse::Handled;
                         }
@@ -928,7 +928,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         let a = self.source.anchor(i);
                         let handlers = match self.activate_on {
                             crate::data_views::ActivateOn::SingleClick => {
-                                HandlerSet::new().on_tap(move |tap, _ctx| {
+                                HandlerSet::new().on_tap(move |tap, ctx| {
                                     // A Ctrl/Shift click is a selection-extension
                                     // gesture (applied on PointerDown), not an
                                     // activation — suppress open/commit so a
@@ -940,14 +940,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                         return;
                                     }
                                     if let Some(cur) = a.index() {
-                                        cb(cur)
+                                        cb(cur, ctx)
                                     }
                                 })
                             }
                             crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
-                                .on_double_tap(move |_tap, _ctx| {
+                                .on_double_tap(move |_tap, ctx| {
                                     if let Some(cur) = a.index() {
-                                        cb(cur)
+                                        cb(cur, ctx)
                                     }
                                 }),
                         };

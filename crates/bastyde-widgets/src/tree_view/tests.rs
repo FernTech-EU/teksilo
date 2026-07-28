@@ -296,7 +296,7 @@ fn flat_tree_view(
             .item_height(20.0)
             .selection(sel)
             .type_ahead_label(|s: &String| s.clone())
-            .on_activate(|_| {}),
+            .on_activate(|_, _| {}),
     );
     (wtree, tv, selection)
 }
@@ -473,7 +473,7 @@ fn space_toggles_enter_activates() {
         TreeView::new(tree, |_i, _e, _s| Box::new(FixedLeaf(120.0, 20.0)))
             .item_height(20.0)
             .selection(sel)
-            .on_activate(move |i| act.set(Some(i))),
+            .on_activate(move |i, _| act.set(Some(i))),
     );
     wtree.layout(SizeProposal::exact(400.0, 200.0));
     wtree.focus(tv);
@@ -1921,7 +1921,7 @@ fn view_focus_active_tracks_view_focus_for_rows() {
         // arenas on each row — verify they don't preempt focusing the view.
         .reorderable(true)
         .activate_on(crate::data_views::ActivateOn::SingleClick)
-        .on_activate(|_| {}),
+        .on_activate(|_, _| {}),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let rows = tree.children(tv);
@@ -2547,7 +2547,7 @@ fn focused_index_clears_when_its_row_is_removed() {
             Box::new(FixedLeaf(120.0, 20.0))
         })
         .item_height(20.0)
-        .on_activate(move |i| act.set(Some(i))),
+        .on_activate(move |i, _| act.set(Some(i))),
     );
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     wtree.focus(tv);
@@ -2601,7 +2601,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
         })
         .item_height(28.0)
         .row_click_expands(false)
-        .on_activate(move |i| act.set(Some(i))),
+        .on_activate(move |i, _| act.set(Some(i))),
     );
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     wtree.focus(tv);

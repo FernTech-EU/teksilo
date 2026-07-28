@@ -325,6 +325,7 @@ impl Widget for SearchField {
         let highlighted_for_submit = highlighted.clone();
         let suggestions_for_submit = suggestions.clone();
         let dismissed_for_submit = dismissed.clone();
+        let has_suggestions = self.suggestion_provider.is_some();
 
         let mut input = TextInput::new(self.text.clone())
             .placeholder(placeholder)
@@ -353,7 +354,17 @@ impl Widget for SearchField {
                     handler(ctx);
                 }
                 dismissed_for_submit.set(true);
-                ctx.dismiss_all_except_hosts();
+                // Closing overlays here exists solely to take down the
+                // *suggestion panel*. With no provider there is no panel, and
+                // this call is pure collateral damage: `dismiss_scope` is a
+                // single slot, so it silently overwrites whatever the caller's
+                // own `on_submit` handler just asked for. A `SearchField` inside
+                // a popover — a "go to" palette, a picker — could therefore
+                // never close its own popover on Enter, and the reason was
+                // invisible from the call site.
+                if has_suggestions {
+                    ctx.dismiss_all_except_hosts();
+                }
             });
         if let Some(label) = &self.label {
             input = input.label(label.clone());

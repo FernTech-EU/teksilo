@@ -412,7 +412,10 @@ impl<T: 'static> TreeView<T> {
     /// **Space** move / toggle the selection but do **not** activate, so a view
     /// can open/commit a row on a deliberate click/Enter without firing on
     /// every navigation step.
-    pub fn on_activate(mut self, f: impl Fn(usize) + 'static) -> Self {
+    pub fn on_activate(
+        mut self,
+        f: impl Fn(usize, &mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
         self.on_activate = Some(Rc::new(f));
         self
     }
