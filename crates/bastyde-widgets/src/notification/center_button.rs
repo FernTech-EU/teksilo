@@ -46,9 +46,13 @@ use bastyde_tokens::Alignment;
 use crate::badge::Badge;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::notification::log::NotificationLog;
-use crate::notification::{ArchivedAction, NotificationArchiveModel, NotificationEntry};
+use crate::notification::{
+    ArchivedAction, NotificationArchiveModel, NotificationEntry, route_visible,
+};
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::ZStack;
+use crate::toast::{ToastAudience, ToastRoute};
+use bastyde_core::window::BastydeWindowId;
 
 /// Bell-icon trigger + unread-count badge + popover that contains a
 /// [`NotificationLog`]. On popover open the archive's `mark_all_read`
@@ -71,6 +75,13 @@ pub struct NotificationCenterButton {
     /// Composite tooltip body (arbitrary widget tree).
     /// Mutually exclusive with `tooltip_text` and `rich_tooltip_source`.
     composite_tooltip_content: Option<Box<dyn Widget>>,
+    /// `None` (default) = unscoped — the badge counts every unread
+    /// entry in the whole shared archive and the popover shows every
+    /// entry, matching this widget's behaviour before routing existed.
+    /// `Some(route)` restricts both to entries matching `route` (plus
+    /// `Broadcast`, always counted/shown). Set via [`Self::for_window`]
+    /// / [`Self::for_audience`].
+    route_scope: Option<ToastRoute>,
 }
 
 impl NotificationCenterButton {
@@ -88,7 +99,26 @@ impl NotificationCenterButton {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
+            route_scope: None,
         }
+    }
+
+    /// Scope this bell to window `window_id`: its badge counts unread
+    /// among entries routed to that window (plus any `Broadcast`
+    /// entry), and its popover shows only those. Overrides any
+    /// previous `for_window` / `for_audience` call.
+    pub fn for_window(mut self, window_id: BastydeWindowId) -> Self {
+        self.route_scope = Some(ToastRoute::Window(window_id));
+        self
+    }
+
+    /// Scope this bell to `audience`: its badge counts unread among
+    /// entries routed to that audience (plus any `Broadcast` entry),
+    /// and its popover shows only those. Overrides any previous
+    /// `for_window` / `for_audience` call.
+    pub fn for_audience(mut self, audience: ToastAudience) -> Self {
+        self.route_scope = Some(ToastRoute::Audience(audience));
+        self
     }
 
     /// Bell-icon size. Default `IconButtonSize::Toolbar` (30 dp) —
@@ -199,12 +229,22 @@ impl Widget for NotificationCenterButton {
         let archive = self.archive.clone();
         let max_badge = self.max_badge_count;
         let show_when_zero = self.show_badge_when_zero;
+        let scope = self.route_scope;
 
-        // Bind to the unread count at Rebuild so any push/dismiss
-        // rebuilds the button (Badge has no signal-bound label
-        // surface — we re-create it on each rebuild with the current
-        // count baked in).
-        archive.unread_count().bind_to(
+        // Bind to the archive's mutation version (not `unread_count`)
+        // at Rebuild — a scoped bell's badge count is a local scan
+        // over `archive.entries()` (see below), so it must rebuild on
+        // ANY archive mutation that could change which of ITS entries
+        // are unread, not just the (global, unscoped) `unread_count`
+        // signal. Matches `NotificationLog`'s own binding.
+        //
+        // Bound to THIS window's own rebuild signal, not the shared
+        // one — see `NotificationArchiveModel::window_version_signal`'s
+        // doc comment: a bell in window B must not silently miss a
+        // mutation just because window A's tree happened to reconcile
+        // (and clear the shared dirty flag) first.
+        let my_window = ctx.window().map(|w| w.id());
+        archive.rebuild_signal_for(my_window).bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Rebuild,
@@ -213,9 +253,16 @@ impl Widget for NotificationCenterButton {
         // Bell trigger: an IconButton(bell) at the requested size.
         let trigger = IconButton::bell().size(self.size);
 
-        // Popover content: a NotificationLog. The on_action_invoked
-        // hook is forwarded if present.
+        // Popover content: a NotificationLog, scoped identically to
+        // this bell so the popover body and the badge always agree on
+        // which entries "belong" to this window/audience. The
+        // on_action_invoked hook is forwarded if present.
         let mut log = NotificationLog::new(archive.clone());
+        log = match scope {
+            Some(ToastRoute::Window(w)) => log.for_window(w),
+            Some(ToastRoute::Audience(a)) => log.for_audience(a),
+            Some(ToastRoute::Broadcast) | None => log,
+        };
         if let Some(cb) = self.on_action_invoked.clone() {
             log = log.on_action_invoked(move |e, a, ctx| cb(e, a, ctx));
         }
@@ -226,23 +273,40 @@ impl Widget for NotificationCenterButton {
         // free — no manual `Panel` needed.
 
         // Bell + popover combo. Mark archive entries read when the
-        // popover *closes*, NOT when it opens. `mark_all_read` bumps
-        // the unread-count signal, which fires this widget's `Rebuild`
-        // binding — and a rebuild on OPEN would tear down the
+        // popover *closes*, NOT when it opens — mutating the archive
+        // bumps `version_signal`, which fires this widget's `Rebuild`
+        // binding, and a rebuild on OPEN would tear down the
         // `PopoverIconButton` (and its just-shown overlay) and replace
         // it with a fresh, closed one, so the popover would flash and
         // vanish, leaving only the cleared badge. Deferring to close
         // lets the rebuild happen after the popover is already gone.
+        // Scoped exactly like the toolbar's mark-all-read above: a
+        // scoped bell must only mark ITS entries read, never every
+        // window's/audience's history.
         let archive_for_close = archive.clone();
         let pib = PopoverIconButton::new(trigger)
             .content(log)
             .placement(self.placement.clone())
             .dismiss_behavior(DismissBehavior::EscapeOrClickOutside)
-            .on_close(move || archive_for_close.mark_all_read());
+            .on_close(move || match scope {
+                Some(s) => archive_for_close.mark_read_where(|e| route_visible(e.route, Some(s))),
+                None => archive_for_close.mark_all_read(),
+            });
         let pib_id = ctx.add(pib);
 
-        // Compute the badge label for this build.
-        let unread_count = archive.unread_count().get();
+        // Compute the badge label for this build — a local scan over
+        // the (bounded, ≤ DEFAULT_ARCHIVE_LIMIT) archive entries rather
+        // than a dedicated per-audience counter signal: cheap, and it
+        // is the single source of truth `route_visible` already uses
+        // for the popover body, so the two can never disagree.
+        let model = archive.entries();
+        let unread_count = (0..model.len())
+            .filter(|&i| {
+                model
+                    .with_item(i, |e| !e.read && route_visible(e.route, scope))
+                    .unwrap_or(false)
+            })
+            .count();
         let label = if unread_count == 0 {
             String::new()
         } else if unread_count > max_badge as usize {
@@ -339,6 +403,10 @@ mod tests {
     use bastyde_core::widget_tree::WidgetTree;
 
     fn entry(title: &str) -> NotificationEntry {
+        entry_with_route(title, ToastRoute::Broadcast)
+    }
+
+    fn entry_with_route(title: &str, route: ToastRoute) -> NotificationEntry {
         NotificationEntry {
             id: 0,
             severity: BannerSeverity::Info,
@@ -352,6 +420,7 @@ mod tests {
             read: false,
             dedup_id: None,
             updates: Vec::new(),
+            route,
         }
     }
 
@@ -506,6 +575,246 @@ mod tests {
         assert!(
             tree.find_by_label("99+").is_some(),
             "badge caps at '99+' for counts above max"
+        );
+    }
+
+    #[test]
+    fn scoped_bell_only_counts_its_audience_and_broadcast_unread() {
+        use crate::toast::ToastAudience;
+
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        let audience_a = ToastAudience::new(1);
+        let audience_b = ToastAudience::new(2);
+
+        archive.push(entry_with_route("for a", ToastRoute::Audience(audience_a)));
+        archive.push(entry_with_route("for b", ToastRoute::Audience(audience_b)));
+        archive.push(entry_with_route("for b again", ToastRoute::Audience(audience_b)));
+        archive.push(entry_with_route("everyone", ToastRoute::Broadcast));
+        assert_eq!(
+            archive.unread_count().get(),
+            4,
+            "the shared archive's global counter sees all four"
+        );
+
+        // Bell scoped to Window(1): no entry is routed to that window,
+        // so only the broadcast one counts → badge shows "1". This
+        // proves window-scoping and audience-scoping are independent:
+        // a window-scoped bell shows only Window(_) + Broadcast, never
+        // an Audience(_) entry.
+        let tree_a = tree_with(NotificationCenterButton::new(archive.clone()).for_window(
+            BastydeWindowId::new(1),
+        ));
+        assert!(
+            tree_a.find_by_label("1").is_some(),
+            "no entry is routed to Window(1); only the broadcast one should count"
+        );
+
+        // Bell scoped to audience A: "for a" (1) + "everyone" (1) = 2.
+        let tree_scoped_a =
+            tree_with(NotificationCenterButton::new(archive.clone()).for_audience(audience_a));
+        assert!(
+            tree_scoped_a.find_by_label("2").is_some(),
+            "audience A's bell counts its own entry plus the broadcast one"
+        );
+
+        // Bell scoped to audience B: "for b" + "for b again" (2) +
+        // "everyone" (1) = 3.
+        let tree_scoped_b =
+            tree_with(NotificationCenterButton::new(archive.clone()).for_audience(audience_b));
+        assert!(
+            tree_scoped_b.find_by_label("3").is_some(),
+            "audience B's bell counts both of its own entries plus the broadcast one"
+        );
+
+        // Unscoped bell (legacy, back-compat path): sees the whole
+        // shared archive, exactly like before routing existed.
+        let tree_unscoped = tree_with(NotificationCenterButton::new(archive));
+        assert!(
+            tree_unscoped.find_by_label("4").is_some(),
+            "an unscoped bell keeps the old 'see everything' behaviour"
+        );
+    }
+
+    /// End-to-end counterpart of `scoped_bell_only_counts_its_audience_and_broadcast_unread`
+    /// above: that test (and every other one in this file) proves the
+    /// SCOPING FILTER is correct by hand-building `NotificationEntry`
+    /// rows with `entry_with_route`. It never goes through the real
+    /// `ToastRegistry::enqueue` → archive-mirror path, so it can't
+    /// catch a regression in the OTHER half of the seam: whether a
+    /// toast's resolved route actually survives the trip into the
+    /// archive at all (see `toast.rs`'s
+    /// `registry_mirrors_the_resolved_route_onto_the_archived_entry`
+    /// for that half in isolation). This test drives both halves
+    /// together — real toasts, real routes, real archive mirror, real
+    /// scoped bell — the shape a Skribisto per-Work bell actually sees.
+    #[test]
+    fn scoped_bell_reflects_toasts_presented_through_the_real_registry_pipeline() {
+        use crate::toast::host::ToastInstallOptions;
+        use crate::toast::{Toast, ToastAudience, ToastRegistry};
+
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        let registry = ToastRegistry::with_archive(
+            ToastInstallOptions {
+                archive: None,
+                ..ToastInstallOptions::default()
+            },
+            archive.clone(),
+        );
+        let audience_a = ToastAudience::new(1);
+        let audience_b = ToastAudience::new(2);
+
+        registry.enqueue(Toast::info(lit!("for a")).target(audience_a));
+        registry.enqueue(Toast::info(lit!("for b")).target(audience_b));
+        registry.enqueue(Toast::warning(lit!("everyone")).broadcast());
+        assert_eq!(
+            archive.unread_count().get(),
+            3,
+            "all three toasts were mirrored into the shared archive"
+        );
+
+        let tree_a =
+            tree_with(NotificationCenterButton::new(archive.clone()).for_audience(audience_a));
+        assert!(
+            tree_a.find_by_label("2").is_some(),
+            "audience A's bell must count its own real toast plus the broadcast one \
+             (2), excluding B's — not 3 (everything) and not 1 (missing the broadcast)"
+        );
+
+        let tree_b = tree_with(NotificationCenterButton::new(archive).for_audience(audience_b));
+        assert!(
+            tree_b.find_by_label("2").is_some(),
+            "audience B's bell must count its own real toast plus the broadcast one, \
+             excluding A's"
+        );
+    }
+
+    #[test]
+    fn scoped_bell_close_only_marks_its_own_entries_read() {
+        use crate::primitives::{FixedSize, Spacer, VStack};
+        use crate::toast::ToastAudience;
+
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        let audience_a = ToastAudience::new(1);
+        let audience_b = ToastAudience::new(2);
+        archive.push(entry_with_route("for a", ToastRoute::Audience(audience_a)));
+        archive.push(entry_with_route("for b", ToastRoute::Audience(audience_b)));
+        assert_eq!(archive.unread_count().get(), 2);
+
+        // Mirror `bell_popover_open_check`'s status-bar layout (bell
+        // pinned to the bottom of a normal-sized window via a leading
+        // spacer) rather than the bare `tree_with` 120x60 helper: in a
+        // window that tiny, `BelowPreferred`'s popover has nowhere to
+        // go but directly over the bell, so the second synthesized
+        // click (which re-hit-tests at the bell's screen coordinate)
+        // lands on the popover instead of toggling the trigger closed.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
+        let bell =
+            tree.add(NotificationCenterButton::new(archive.clone()).for_audience(audience_a));
+        tree.add(VStack::new().add_child(spacer).add_child(bell));
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+
+        // Open then close the popover — closing is what triggers the
+        // scoped mark-read.
+        tree.click(bell);
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+        tree.click(bell); // PopoverIconButton toggles: second click closes it.
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+
+        assert_eq!(
+            archive.unread_count().get(),
+            1,
+            "only audience A's entry was marked read; audience B's stays unread"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Multi-window delivery — two REAL `NotificationCenterButton`s in
+    // two REAL `WidgetTree`s sharing one archive, mirroring
+    // `toast::host::tests::two_window_hosts`. Every test above builds
+    // at most one tree/bell, so none of them can catch a bell in a
+    // second window silently missing an archive mutation because the
+    // first window's tree already consumed the shared version signal's
+    // dirty flag — see `NotificationArchiveModel::window_version_signal`'s
+    // doc comment.
+    // -----------------------------------------------------------------
+
+    /// Two independent windows (ids 1 and 2), each with its own
+    /// `WidgetTree` + unscoped `NotificationCenterButton`, both bound
+    /// to ONE shared archive.
+    fn two_window_bells(archive: Rc<NotificationArchiveModel>) -> (WidgetTree, WidgetTree) {
+        use bastyde_core::window::state::WindowStateInit;
+        use bastyde_core::window::{WindowPlacement, WindowState};
+
+        let build_window = |window_id: u64| {
+            let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+            tree.set_window_state(WindowState::new(WindowStateInit {
+                id: BastydeWindowId::new(window_id),
+                string_id: Some(format!("w{window_id}")),
+                placement: WindowPlacement::Floating,
+                title: "Test".to_string(),
+                size: (400, 600),
+                position: (0, 0),
+                focused: false,
+                resizable: true,
+                always_on_top: false,
+            }));
+            tree.add(NotificationCenterButton::new(archive.clone()));
+            tree.layout(SizeProposal::exact(400.0, 600.0));
+            tree
+        };
+
+        (build_window(1), build_window(2))
+    }
+
+    /// An archive push must update EVERY open window's bell badge —
+    /// and must keep doing so regardless of which window's
+    /// `WidgetTree` reconciles first, exactly like `WindowManager::
+    /// request_redraw_needing_render` sweeping windows in whatever
+    /// order its internal `HashMap` iterates them.
+    #[test]
+    fn both_unscoped_bells_pick_up_a_badge_change_regardless_of_reconcile_order() {
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        let (mut tree1, mut tree2) = two_window_bells(archive.clone());
+        assert!(tree1.find_by_label("1").is_none());
+        assert!(tree2.find_by_label("1").is_none());
+
+        archive.push(entry("new"));
+
+        // Window 1 reconciles first.
+        tree1.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(
+            tree1.find_by_label("1").is_some(),
+            "window 1's bell must show the new unread badge"
+        );
+        // Window 2 reconciles SECOND — this is exactly the case that
+        // silently missed the badge update before per-window signals:
+        // the shared flag was already cleared by window 1's flush.
+        tree2.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(
+            tree2.find_by_label("1").is_some(),
+            "window 2's bell must ALSO show the badge, even reconciling second"
+        );
+    }
+
+    /// Same scenario with the reconcile order flipped, to prove
+    /// delivery genuinely doesn't depend on iteration order.
+    #[test]
+    fn both_unscoped_bells_pick_up_a_badge_change_in_the_reverse_reconcile_order_too() {
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        let (mut tree1, mut tree2) = two_window_bells(archive.clone());
+
+        archive.push(entry("new"));
+
+        tree2.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(
+            tree2.find_by_label("1").is_some(),
+            "window 2's bell must show the badge when it reconciles first"
+        );
+        tree1.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(
+            tree1.find_by_label("1").is_some(),
+            "window 1's bell must ALSO show it, even reconciling second"
         );
     }
 

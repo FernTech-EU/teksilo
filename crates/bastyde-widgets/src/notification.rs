@@ -39,6 +39,8 @@ use bastyde_core::styles::{BannerSeverity, ToastPriority};
 use bastyde_settings::Keyed;
 use serde::{Deserialize, Serialize};
 
+use crate::toast::ToastRoute;
+
 pub use archive::{
     ARCHIVE_FILE_NAME, DEFAULT_ARCHIVE_LIMIT, NotificationArchive, NotificationArchiveError,
     NotificationArchiveModel,
@@ -83,6 +85,21 @@ pub struct NotificationEntry {
     /// In-place updates from subsequent `Toast::id(...)` presents.
     /// Empty on a freshly-pushed entry.
     pub updates: Vec<NotificationUpdate>,
+    /// Mirrored from the originating `LiveEntry::route` (see
+    /// `ToastRegistry::entry_to_archive`) — drives which bell(s) show
+    /// this entry and which bell's "mark all read" / "clear" affects
+    /// it. Defaults to [`ToastRoute::Broadcast`] on deserialization
+    /// when the field is absent (a `notifications.toml` written before
+    /// this feature existed): treating pre-upgrade history as
+    /// broadcast keeps it visible in every window's bell, rather than
+    /// it silently vanishing from all of them the moment routing scopes
+    /// are introduced.
+    #[serde(default = "default_notification_route")]
+    pub route: ToastRoute,
+}
+
+fn default_notification_route() -> ToastRoute {
+    ToastRoute::Broadcast
 }
 
 /// Keyed by the stable, never-reused archive `id` (not the transient
@@ -142,4 +159,19 @@ pub struct ArchivedAction {
     /// archive row itself doesn't dismiss (since it's not a live
     /// toast).
     pub closes_on_invoke: bool,
+}
+
+/// Whether an entry carrying `route` should be visible to a bell/log
+/// scoped to `scope`. `scope: None` means "unscoped" — the legacy
+/// "see everything" behaviour, so an existing single-window app that
+/// never calls `NotificationCenterButton::for_window` /
+/// `for_audience` (or the matching `NotificationLog` methods) keeps
+/// showing every entry exactly as before this feature existed.
+/// `Broadcast` entries are always visible regardless of `scope` —
+/// that's the entire point of a genuinely app-wide message.
+pub(crate) fn route_visible(route: ToastRoute, scope: Option<ToastRoute>) -> bool {
+    match scope {
+        None => true,
+        Some(scope) => route == scope || matches!(route, ToastRoute::Broadcast),
+    }
 }

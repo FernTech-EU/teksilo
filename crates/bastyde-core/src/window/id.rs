@@ -11,7 +11,15 @@ use std::fmt;
 /// and passed back to the app via [`WindowState::id`](super::state::WindowState::id)
 /// or the return value of window-opening APIs. IDs are `Copy`, unique
 /// within a process, and never reused after a window closes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// `Serialize`/`Deserialize` so it can appear inside a persisted type
+/// (e.g. `bastyde_widgets::toast::ToastRoute::Window` mirrored into an
+/// archived `NotificationEntry`) — but note the id is NOT stable across
+/// process restarts, only "unique within a process": a persisted
+/// window-scoped route from a previous run will not match any window
+/// in the current one, which is the intended, accepted behaviour for
+/// something that was inherently about a transient session's window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BastydeWindowId(u64);
 
 impl BastydeWindowId {

@@ -240,8 +240,8 @@ pub mod prelude {
     pub use bastyde_widgets::{
         EventContextToastExt, NotificationArchive, NotificationArchiveModel,
         NotificationCenterButton, NotificationEntry, NotificationLog, NotificationLogDialog, Toast,
-        ToastAction, ToastActionStyle, ToastDismissCause, ToastHandle, ToastHost,
-        ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity,
+        ToastAction, ToastActionStyle, ToastAudience, ToastDismissCause, ToastHandle, ToastHost,
+        ToastInstallOptions, ToastPriority, ToastRegistry, ToastRoute, ToastSeverity,
     };
 
     // WebView. The extension trait adds `install_web_view{,_default}()` to

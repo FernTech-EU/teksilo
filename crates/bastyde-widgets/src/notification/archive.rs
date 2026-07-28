@@ -20,11 +20,14 @@
 //!   `enqueue` push goes through the model and the on-disk file
 //!   gets re-serialized on the shared bastyde-settings I/O thread.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_core::signal::Signal;
+use bastyde_core::window::BastydeWindowId;
 use bastyde_data::ListModel;
 use bastyde_settings::{AppPaths, Migrator, PersistedListModel, SettingsFileError};
 
@@ -225,6 +228,16 @@ pub struct NotificationArchiveModel {
     /// [`OverlayManager::version`](bastyde_core::overlay::OverlayManager::version)
     /// and [`ToastRegistry::version_signal`](crate::toast::ToastRegistry::version_signal).
     version: Signal<u64>,
+    /// Per-window rebuild signal — mirrors
+    /// [`ToastRegistry::window_version_signal`](crate::toast::ToastRegistry::window_version_signal).
+    /// A single `Signal` shared by every window's `NotificationCenterButton`
+    /// / `NotificationLog` has exactly the same failure mode as the
+    /// toast registry's shared `version` would: only the first
+    /// window's `WidgetTree` to reconcile after a mutation observes
+    /// the dirty flag before clearing it, so every other open window's
+    /// bell/log silently never rebuilds for that mutation. See that
+    /// method's doc comment for the full mechanism.
+    window_versions: Rc<RefCell<HashMap<BastydeWindowId, Signal<u64>>>>,
 }
 
 impl NotificationArchiveModel {
@@ -266,6 +279,7 @@ impl NotificationArchiveModel {
             next_id: Cell::new(next_id_seed),
             unread_count: Signal::new(initial_unread),
             version: Signal::new(0),
+            window_versions: Rc::new(RefCell::new(HashMap::new())),
         })
     }
 
@@ -280,6 +294,7 @@ impl NotificationArchiveModel {
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
             version: Signal::new(0),
+            window_versions: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -301,13 +316,54 @@ impl NotificationArchiveModel {
         &self.version
     }
 
+    /// Get-or-create the rebuild signal for `window_id` — the
+    /// window-scoped counterpart of [`Self::version_signal`]. A real
+    /// `NotificationCenterButton` / `NotificationLog` attached to a
+    /// window should bind to this (via [`Self::rebuild_signal_for`])
+    /// instead of the shared `version_signal`, for the same reason
+    /// [`ToastRegistry::window_version_signal`](crate::toast::ToastRegistry::window_version_signal)
+    /// exists: sharing one `Signal` across independently-reconciled
+    /// windows means only the first window to reconcile after a
+    /// mutation ever sees it dirty.
+    pub(crate) fn window_version_signal(&self, window_id: BastydeWindowId) -> Signal<u64> {
+        self.window_versions
+            .borrow_mut()
+            .entry(window_id)
+            .or_insert_with(|| Signal::new(0))
+            .clone()
+    }
+
+    /// The rebuild signal a window-attached widget should bind to:
+    /// window-specific when a real window id is known, the legacy
+    /// shared signal otherwise (headless unit-test trees, which never
+    /// have more than one such consumer).
+    pub(crate) fn rebuild_signal_for(&self, window_id: Option<BastydeWindowId>) -> Signal<u64> {
+        match window_id {
+            Some(w) => self.window_version_signal(w),
+            None => self.version.clone(),
+        }
+    }
+
     pub fn limit(&self) -> usize {
         self.limit
     }
 
+    /// Bump the legacy shared signal AND every per-window signal — see
+    /// [`Self::window_version_signal`] for why a single shared bump
+    /// alone cannot reliably reach more than one window's bell/log.
+    /// Collects the per-window signals into a `Vec` before calling
+    /// `set` on any of them, so a rebuild triggered synchronously by
+    /// one of these `set` calls can't panic on a re-entrant `RefCell`
+    /// borrow if it happens to allocate a new window's entry in this
+    /// same map mid-iteration.
     fn bump_version(&self) {
         let v = self.version.get();
         self.version.set(v.wrapping_add(1));
+        let per_window: Vec<Signal<u64>> = self.window_versions.borrow().values().cloned().collect();
+        for sig in per_window {
+            let v = sig.get();
+            sig.set(v.wrapping_add(1));
+        }
     }
 
     /// Force the persistent backing file to disk synchronously.
@@ -410,6 +466,40 @@ impl NotificationArchiveModel {
         self.unread_count.set(n.saturating_add(1));
     }
 
+    /// Mark every UNREAD entry matching `predicate` as read,
+    /// decrementing `unread_count` by exactly how many were flipped.
+    /// This is the scoped counterpart of [`mark_all_read`](Self::mark_all_read):
+    /// a bell scoped to one window/audience must only mark ITS
+    /// entries read on close — calling the unscoped `mark_all_read`
+    /// from a scoped bell would incorrectly clear every OTHER
+    /// window's/audience's unread state too.
+    pub fn mark_read_where(&self, mut predicate: impl FnMut(&NotificationEntry) -> bool) {
+        let model = self.backend.model();
+        let ids: Vec<u64> = (0..model.len())
+            .filter_map(|i| {
+                model
+                    .with_item(i, |e| (!e.read && predicate(e)).then_some(e.id))
+                    .flatten()
+            })
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let mut mutated = false;
+        for id in ids {
+            if let Some((_, mut entry)) = self.backend.find_by_id(id) {
+                entry.read = true;
+                self.backend.update_in_place(entry);
+                mutated = true;
+                let n = self.unread_count.get();
+                self.unread_count.set(n.saturating_sub(1));
+            }
+        }
+        if mutated {
+            self.bump_version();
+        }
+    }
+
     /// Mark every archived entry as read; reset `unread_count` to 0.
     /// Called by `NotificationCenterButton` when its popover opens.
     pub fn mark_all_read(&self) {
@@ -442,6 +532,39 @@ impl NotificationArchiveModel {
         self.backend.clear();
         self.unread_count.set(0);
         if !was_empty {
+            self.bump_version();
+        }
+    }
+
+    /// Remove every entry matching `predicate`, decrementing
+    /// `unread_count` for each removed entry that was unread. The
+    /// scoped counterpart of [`clear`](Self::clear): a bell scoped to
+    /// one window/audience must only clear ITS entries — the unscoped
+    /// `clear()` wipes the ENTIRE shared archive (every window's
+    /// history), which would be wrong for a scoped "Clear" button.
+    pub fn clear_where(&self, mut predicate: impl FnMut(&NotificationEntry) -> bool) {
+        let model = self.backend.model();
+        let matches: Vec<(u64, bool)> = (0..model.len())
+            .filter_map(|i| {
+                model
+                    .with_item(i, |e| predicate(e).then_some((e.id, !e.read)))
+                    .flatten()
+            })
+            .collect();
+        if matches.is_empty() {
+            return;
+        }
+        let mut removed_any = false;
+        for (id, was_unread) in matches {
+            if self.backend.remove(id) {
+                removed_any = true;
+                if was_unread {
+                    let n = self.unread_count.get();
+                    self.unread_count.set(n.saturating_sub(1));
+                }
+            }
+        }
+        if removed_any {
             self.bump_version();
         }
     }
@@ -504,6 +627,7 @@ impl std::fmt::Debug for NotificationArchiveModel {
 mod tests {
     use super::*;
     use crate::notification::ArchivedActionStyle;
+    use crate::toast::ToastRoute;
     use bastyde_core::styles::{BannerSeverity, ToastPriority};
 
     fn entry(title: &str) -> NotificationEntry {
@@ -520,6 +644,7 @@ mod tests {
             read: false,
             dedup_id: None,
             updates: Vec::new(),
+            route: ToastRoute::Broadcast,
         }
     }
 
@@ -572,6 +697,7 @@ mod tests {
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
             version: Signal::new(0),
+            window_versions: Rc::new(RefCell::new(HashMap::new())),
         };
         for i in 0..5 {
             m.push(entry(&format!("t{i}")));
@@ -1012,6 +1138,64 @@ mod tests {
     }
 
     #[test]
+    fn mark_read_where_only_flips_matching_unread_entries() {
+        use crate::toast::ToastAudience;
+        let m = NotificationArchiveModel::in_memory();
+        let mut a = entry("audience a");
+        a.route = ToastRoute::Audience(ToastAudience::new(1));
+        m.push(a);
+        let mut b = entry("audience b");
+        b.route = ToastRoute::Audience(ToastAudience::new(2));
+        m.push(b);
+        assert_eq!(m.unread_count().get(), 2);
+
+        // Scoped mark-read for audience 1 only.
+        m.mark_read_where(|e| e.route == ToastRoute::Audience(ToastAudience::new(1)));
+        assert_eq!(
+            m.unread_count().get(),
+            1,
+            "only audience 1's entry was marked read"
+        );
+        let a_read = m
+            .entries()
+            .with_item(1, |e| e.read)
+            .expect("audience a is the oldest, at index 1");
+        let b_read = m
+            .entries()
+            .with_item(0, |e| e.read)
+            .expect("audience b is newest, at index 0");
+        assert!(a_read, "audience a's entry is now read");
+        assert!(!b_read, "audience b's entry is untouched");
+    }
+
+    #[test]
+    fn clear_where_only_removes_matching_entries() {
+        use crate::toast::ToastAudience;
+        let m = NotificationArchiveModel::in_memory();
+        let mut a = entry("audience a");
+        a.route = ToastRoute::Audience(ToastAudience::new(1));
+        m.push(a);
+        let mut b = entry("audience b");
+        b.route = ToastRoute::Audience(ToastAudience::new(2));
+        m.push(b);
+        assert_eq!(m.entries().len(), 2);
+        assert_eq!(m.unread_count().get(), 2);
+
+        m.clear_where(|e| e.route == ToastRoute::Audience(ToastAudience::new(1)));
+        assert_eq!(m.entries().len(), 1, "only audience 1's entry is removed");
+        assert_eq!(
+            m.unread_count().get(),
+            1,
+            "unread_count decrements for the removed unread entry"
+        );
+        assert_eq!(
+            m.entries().with_item(0, |e| e.title.clone()),
+            Some("audience b".to_string()),
+            "audience b's entry survives"
+        );
+    }
+
+    #[test]
     fn entry_serde_round_trip() {
         // NotificationEntry must be round-trippable through TOML
         // (PersistedListModel's serialization format).
@@ -1033,6 +1217,7 @@ mod tests {
             read: false,
             dedup_id: Some("build-1".into()),
             updates: vec![],
+            route: ToastRoute::Audience(crate::toast::ToastAudience::new(7)),
         };
         // Wrap in a Vec because TOML doesn't allow a top-level
         // non-table value, and our ListFile is `{ version, items }`.

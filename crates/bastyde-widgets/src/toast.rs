@@ -44,6 +44,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_core::widget::{EventContext, Widget};
+use bastyde_core::window::BastydeWindowId;
 
 pub use bastyde_core::styles::{ToastPriority, ToastStyleConfig};
 pub use ext::EventContextToastExt;
@@ -86,6 +87,64 @@ pub enum ToastDismissCause {
     /// always fires once per toast — apps that track outstanding
     /// toasts via the callback don't leak.
     SlotPoolFull,
+}
+
+// =====================================================================
+// Routing — ToastAudience / ToastRoute
+// =====================================================================
+
+/// Opaque per-app routing token. bastyde has no notion of what an
+/// "audience" means to the host app (a document, a project, a user
+/// session, …) — it only ever compares and hashes this value. Apps
+/// mint their own tokens (typically one per open document/window
+/// group) via [`ToastAudience::new`] and pass the same value to
+/// `Toast::target(...)` and `ToastRegistry::set_window_audience(...)`
+/// to link the two sides of the routing decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ToastAudience(u64);
+
+impl ToastAudience {
+    /// Construct a token from an app-chosen `u64`. The app owns the
+    /// meaning entirely — bastyde never inspects the value beyond
+    /// equality/hash.
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The raw numeric value, for debugging/serialization by the app.
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+/// Resolved delivery target for a toast (and, mirrored, its archived
+/// `NotificationEntry`).
+///
+/// Three levels, from narrowest to widest:
+/// - `Window` — exactly the window that presented the toast. This is
+///   the default when a `Toast` carries no explicit `.target()` /
+///   `.broadcast()` and was presented through a real `EventContext`
+///   (i.e. `ctx.show_toast(...)` / `toast.present(ctx)` from an actual
+///   input handler) — see `EventContextToastExt::show_toast`.
+/// - `Audience` — every window currently assigned the given
+///   [`ToastAudience`] via `ToastRegistry::set_window_audience`.
+/// - `Broadcast` — every window, unconditionally. Also the fallback
+///   when a toast is enqueued with no window AND no explicit target
+///   (e.g. `ToastRegistry::show_settings_write_failed`, which fires
+///   from a background `AppEvent` observer with no `EventContext` at
+///   all) — an app-wide message with nothing narrower to route by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ToastRoute {
+    /// Delivered only to the window with this id. Never publicly
+    /// constructible from a `Toast` builder — only the framework
+    /// stamps this, from a real `EventContext::window()` at present
+    /// time — so an app can't accidentally fabricate a route to a
+    /// window it doesn't own.
+    Window(BastydeWindowId),
+    /// Delivered to every window currently assigned this audience.
+    Audience(ToastAudience),
+    /// Delivered to every window, unconditionally.
+    Broadcast,
 }
 
 // =====================================================================
@@ -347,6 +406,12 @@ pub struct Toast {
     pub(crate) closable_on_escape: bool,
     pub(crate) archive: bool,
     pub(crate) style_override: Option<bastyde_core::styles::SharedToastStyle>,
+    /// Resolved lazily: `None` here means "unset" — `show_toast`
+    /// stamps `Some(ToastRoute::Window(origin))` from the presenting
+    /// `EventContext` when the app didn't call `.target()` /
+    /// `.broadcast()` explicitly. See [`ToastRoute`] for the full
+    /// three-level contract.
+    pub(crate) target: Option<ToastRoute>,
 }
 
 impl std::fmt::Debug for Toast {
@@ -359,6 +424,7 @@ impl std::fmt::Debug for Toast {
             .field("id", &self.id)
             .field("auto_dismiss_after", &self.auto_dismiss_after)
             .field("actions_count", &self.actions.len())
+            .field("target", &self.target)
             .finish()
     }
 }
@@ -382,6 +448,7 @@ impl Toast {
             closable_on_escape: true,
             archive: true,
             style_override: None,
+            target: None,
         }
     }
 
@@ -542,6 +609,26 @@ impl Toast {
     /// theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.
     pub fn style(mut self, style: impl bastyde_core::styles::ToastStyle) -> Self {
         self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    // ----- Routing -----
+
+    /// Route this toast to every window currently assigned `audience`
+    /// (via `ToastRegistry::set_window_audience`), instead of the
+    /// default origin-window. Overrides any previous `.target()` /
+    /// `.broadcast()` call — last setter wins.
+    pub fn target(mut self, audience: ToastAudience) -> Self {
+        self.target = Some(ToastRoute::Audience(audience));
+        self
+    }
+
+    /// Route this toast to every window, unconditionally — for
+    /// genuinely app-wide messages (a data-loss warning, an update
+    /// available notice) rather than one window's concern. Overrides
+    /// any previous `.target()` call — last setter wins.
+    pub fn broadcast(mut self) -> Self {
+        self.target = Some(ToastRoute::Broadcast);
         self
     }
 
@@ -1078,6 +1165,40 @@ mod tests {
         assert!(archived, "archive defaults to true");
     }
 
+    #[test]
+    fn registry_mirrors_the_resolved_route_onto_the_archived_entry() {
+        // Both the render-side host filter (`ToastHost::build`) and
+        // the bell/log scoping filter (`notification::route_visible`)
+        // trust `NotificationEntry::route` to match the LIVE entry's
+        // resolved `ToastRoute`. Every existing scoped-bell test
+        // (`notification::center_button`'s `scoped_bell_*` tests)
+        // proves the FILTER is correct by hand-building a
+        // `NotificationEntry` with an explicit route — none of them go
+        // through the real `enqueue` → `entry_to_archive` mirror, so
+        // none of them would notice if that mirror stopped copying the
+        // route (e.g. a refactor that hardcoded `Broadcast` at the
+        // mirror site, or dropped the field). This is that missing
+        // link: enqueue through the real pipeline and check the
+        // archived copy.
+        use crate::notification::NotificationArchiveModel;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+
+        let audience = ToastAudience::new(99);
+        let (h, _) = registry.enqueue(Toast::info(lit!("scoped")).target(audience));
+        let live_route = registry.with_entry(h.entry_id(), |e| e.route).unwrap();
+        assert_eq!(live_route, ToastRoute::Audience(audience));
+
+        let archived_route = archive.entries().with_item(0, |e| e.route).unwrap();
+        assert_eq!(
+            archived_route,
+            ToastRoute::Audience(audience),
+            "the archived NotificationEntry must carry the SAME route as the live \
+             entry it was mirrored from"
+        );
+    }
+
     // -----------------------------------------------------------------
     // AT role/live mapping (via ToastSurface)
     // -----------------------------------------------------------------
@@ -1311,6 +1432,172 @@ mod tests {
             !r.live_entry_ids().contains(&h.entry_id()),
             "after un-hover, entry expires"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Routing — origin window default / .target() / .broadcast()
+    // -----------------------------------------------------------------
+
+    /// A toast presented through a real `EventContext` (an actual
+    /// input handler, not a bare `enqueue` call) with no explicit
+    /// `.target()` / `.broadcast()` must be tagged with the
+    /// *presenting window's* id — the whole point of the "default =
+    /// origin window" design is that existing single-window apps get
+    /// correct routing for free.
+    #[test]
+    fn show_toast_default_targets_the_originating_window() {
+        use crate::button::Button;
+        use std::any::{Any, TypeId};
+        use std::collections::HashMap;
+
+        use bastyde_core::window::state::WindowStateInit;
+        use bastyde_core::window::{BastydeWindowId, WindowPlacement, WindowState};
+
+        let registry = fresh_registry();
+        let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        app_state.insert(TypeId::of::<ToastRegistry>(), Box::new(registry.clone()));
+
+        let mut tree = bastyde_core::widget_tree::WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light());
+        tree.set_app_context(Rc::new(
+            bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state),
+        ));
+        tree.set_window_state(WindowState::new(WindowStateInit {
+            id: BastydeWindowId::new(1),
+            string_id: Some("test".to_string()),
+            placement: WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: false,
+            resizable: true,
+            always_on_top: false,
+        }));
+
+        let btn = tree.add(Button::new(lit!("Save")).on_activate_fn(|ctx| {
+            let _ = Toast::info(lit!("Saved")).present(ctx);
+        }));
+        tree.layout(bastyde_canvas::SizeProposal::exact(400.0, 300.0));
+
+        tree.click(btn);
+
+        assert_eq!(registry.live_count(), 1, "the click must have enqueued a toast");
+        let eid = registry.live_entry_ids()[0];
+        registry
+            .with_entry(eid, |e| {
+                assert_eq!(
+                    e.route,
+                    ToastRoute::Window(BastydeWindowId::new(1)),
+                    "no explicit target + a real window at present time → origin-window route"
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn target_routes_to_the_matching_audience_only() {
+        let r = fresh_registry();
+        let audience = ToastAudience::new(42);
+        let (h, _) = r.enqueue(Toast::info(lit!("scoped")).target(audience));
+        r.with_entry(h.entry_id(), |e| {
+            assert_eq!(e.route, ToastRoute::Audience(audience));
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn broadcast_routes_regardless_of_window_or_audience() {
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(Toast::warning(lit!("everyone")).broadcast());
+        r.with_entry(h.entry_id(), |e| {
+            assert_eq!(e.route, ToastRoute::Broadcast);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn no_window_no_target_falls_back_to_broadcast() {
+        // Mirrors `show_settings_write_failed`'s call path: `enqueue`
+        // called directly, no `EventContext`, no explicit `.target()`.
+        // The only sensible default for a routeless, contextless toast
+        // is app-wide, not "nowhere".
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(Toast::error(lit!("no context here")));
+        r.with_entry(h.entry_id(), |e| {
+            assert_eq!(e.route, ToastRoute::Broadcast);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn per_audience_admission_one_burst_does_not_starve_another_audience() {
+        // Decision 1: `max_visible` is enforced PER routing bucket.
+        // A burst of audience A's toasts past the pool size must not
+        // touch audience B's slots at all.
+        let r = small_registry(2);
+        let audience_a = ToastAudience::new(1);
+        let audience_b = ToastAudience::new(2);
+
+        let (a1, _) = r.enqueue(Toast::info(lit!("a1")).target(audience_a));
+        let (a2, _) = r.enqueue(Toast::info(lit!("a2")).target(audience_a));
+        // A's bucket is now full (max_visible = 2). A third A toast
+        // must be dropped exactly like the single-bucket overflow test.
+        let (a3, _) = r.enqueue(Toast::info(lit!("a3")).target(audience_a));
+        assert!(!a3.is_alive(), "audience A's third toast overflows its own bucket");
+        assert!(a1.is_alive() && a2.is_alive());
+
+        // Audience B has its own, untouched pool of 2 slots.
+        let (b1, _) = r.enqueue(Toast::info(lit!("b1")).target(audience_b));
+        let (b2, _) = r.enqueue(Toast::info(lit!("b2")).target(audience_b));
+        assert!(
+            b1.is_alive() && b2.is_alive(),
+            "audience B's own admission must be unaffected by A's burst"
+        );
+        assert_eq!(
+            r.live_count(),
+            4,
+            "2 live A entries + 2 live B entries — B was never starved"
+        );
+
+        // A third B toast still overflows B's own bucket (proves the
+        // bucketing is real, not just "everything fits because global
+        // max_visible was raised somewhere").
+        let (b3, _) = r.enqueue(Toast::info(lit!("b3")).target(audience_b));
+        assert!(!b3.is_alive());
+        assert_eq!(r.live_count(), 4);
+    }
+
+    #[test]
+    fn per_audience_high_priority_evicts_oldest_normal_within_the_same_bucket_only() {
+        let r = small_registry(2);
+        let audience_a = ToastAudience::new(1);
+        let audience_b = ToastAudience::new(2);
+
+        let (a_old, _) = r.enqueue(Toast::info(lit!("a-old")).target(audience_a));
+        let (a_new, _) = r.enqueue(Toast::info(lit!("a-new")).target(audience_a));
+        let (b1, _) = r.enqueue(Toast::info(lit!("b1")).target(audience_b));
+        let (b2, _) = r.enqueue(Toast::info(lit!("b2")).target(audience_b));
+
+        // A High-priority arrival targeting audience A must evict only
+        // the oldest Normal entry WITHIN audience A's bucket — B's
+        // entries must survive untouched.
+        let (a_high, _) = r.enqueue(
+            Toast::info(lit!("a-urgent"))
+                .target(audience_a)
+                .priority(ToastPriority::High),
+        );
+        let live_ids = r.live_entry_ids();
+        assert!(
+            !live_ids.contains(&a_old.entry_id()),
+            "oldest Normal within audience A's bucket is evicted"
+        );
+        assert!(live_ids.contains(&a_new.entry_id()));
+        assert!(live_ids.contains(&a_high.entry_id()));
+        assert!(
+            live_ids.contains(&b1.entry_id()) && live_ids.contains(&b2.entry_id()),
+            "audience B's entries must be untouched by A's High-priority eviction"
+        );
+        assert_eq!(r.live_count(), 4);
     }
 
     #[test]

@@ -15,26 +15,30 @@
 //! - [`crate::toast::surface::ToastSurface`] — calls back into the
 //!   registry to dismiss its entry on close-click / action-invoked.
 //!
-//! Current limitation: a single shared host state. Multi-window apps
-//! that install `ToastHost` in every window share one queue; toasts
-//! show up in whichever window's host last bound. Multi-window
-//! routing is planned as a follow-up.
+//! Routing: every live entry (and its mirrored archive row) carries a
+//! resolved [`ToastRoute`] — the presenting window by default, or an
+//! explicit audience/broadcast target. `max_visible` admission and
+//! High/Urgent eviction are bucketed per route (see [`enqueue`]) so a
+//! burst of one window's/audience's toasts can never starve another's
+//! slot pool. [`ToastHost`](super::host::ToastHost) does the
+//! complementary filtering on the render side.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{SharedToastStyle, ToastPriority};
 use bastyde_core::widget::{EventContext, Widget};
+use bastyde_core::window::BastydeWindowId;
 
 use crate::notification::{
     ArchivedAction, ArchivedActionStyle, NotificationArchiveModel, NotificationEntry,
 };
 use crate::toast::{
-    Toast, ToastAction, ToastActionStyle, ToastDismissCallback, ToastDismissCause, ToastHandle,
-    ToastHandleInner, ToastSeverity,
+    Toast, ToastAction, ToastActionStyle, ToastAudience, ToastDismissCallback, ToastDismissCause,
+    ToastHandle, ToastHandleInner, ToastRoute, ToastSeverity,
 };
 use bastyde_i18n::{LocalizedString, tr_widget};
 
@@ -60,6 +64,22 @@ pub struct ToastRegistry {
     /// drives the bell-button badge. `None` when the install helper
     /// was configured with `archive: None`.
     archive: Option<Rc<NotificationArchiveModel>>,
+    /// Per-window audience assignment. `ToastHost::build` calls
+    /// [`Self::window_audience_signal`] to get-or-create a stable
+    /// signal for its own window id and binds to it at
+    /// `BindingLevel::Rebuild`; app code retargets a window (e.g. when
+    /// its active document changes) by calling
+    /// [`Self::set_window_audience`] — reached the same way the
+    /// registry itself is reached (`ctx.app_state::<ToastRegistry>()`),
+    /// so no new `app_state` type is needed. Lives on the registry
+    /// (not as a second `app_state` entry) because `app_state` holds
+    /// exactly one instance per type for the whole app — there is no
+    /// per-window slot to put this in anywhere else.
+    window_audiences: Rc<RefCell<HashMap<BastydeWindowId, Signal<Option<ToastAudience>>>>>,
+    /// Per-window rebuild signal. See [`Self::window_version_signal`]
+    /// for why a single shared `version` cannot, by itself, reliably
+    /// notify more than one window's `ToastHost`.
+    window_versions: Rc<RefCell<HashMap<BastydeWindowId, Signal<u64>>>>,
 }
 
 pub(crate) struct ToastRegistryInner {
@@ -70,9 +90,11 @@ pub(crate) struct ToastRegistryInner {
     /// `.on_pointer_event` handler drains this on the next pointer
     /// event so the user callback runs with a real `EventContext`.
     pub(crate) pending_user_dismiss_callbacks: Vec<(ToastDismissCause, ToastDismissCallback)>,
-    /// Maximum simultaneous live entries — overflow toasts are dropped
-    /// with cause `SlotPoolFull` (Normal priority) or evict the
-    /// oldest Normal entry (High / Urgent priority).
+    /// Maximum simultaneous live entries PER ROUTE BUCKET (window /
+    /// audience / broadcast each count separately) — overflow toasts
+    /// are dropped with cause `SlotPoolFull` (Normal priority) or evict
+    /// the oldest Normal entry in the SAME bucket (High / Urgent
+    /// priority). See `enqueue`'s bucketing.
     pub(crate) max_visible: usize,
     pub(crate) pause_on_hover_group: bool,
 }
@@ -108,6 +130,10 @@ pub(crate) struct LiveEntry {
     /// out of the persistent archive mirror (transient toasts like
     /// quick "Copied!" feedback that shouldn't pollute the log).
     pub(crate) archive: bool,
+    /// Resolved delivery target — see [`ToastRoute`]. Drives both
+    /// `ToastHost`'s render-side filter and the per-route slot-pool
+    /// admission/eviction bucketing in [`ToastRegistry::enqueue`].
+    pub(crate) route: ToastRoute,
 }
 
 impl ToastRegistry {
@@ -145,6 +171,8 @@ impl ToastRegistry {
             hover_count: Signal::new(0),
             version: Signal::new(0),
             archive,
+            window_audiences: Rc::new(RefCell::new(HashMap::new())),
+            window_versions: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -155,10 +183,71 @@ impl ToastRegistry {
         self.archive.clone()
     }
 
-    /// Reactive signal bumped on every queue mutation. The host binds
-    /// to this at `BindingLevel::Rebuild`.
+    /// Reactive signal bumped on every queue mutation. Used by hosts
+    /// with no known window (headless trees / tests that never call
+    /// `set_window_state`) — a real, window-attached `ToastHost`
+    /// should bind to [`Self::window_version_signal`] instead, via
+    /// [`Self::rebuild_signal_for`]. Kept public because it predates
+    /// the per-window signal and existing callers poll it directly to
+    /// assert "did something change" without going through a widget
+    /// tree at all.
     pub fn version_signal(&self) -> &Signal<u64> {
         &self.version
+    }
+
+    /// Get-or-create the rebuild signal for `window_id`. The first
+    /// call for a given window allocates a fresh `Signal::new(0)`;
+    /// every later call returns the SAME signal.
+    ///
+    /// Why a per-window signal exists at all, instead of every
+    /// `ToastHost` just binding to [`Self::version_signal`]: a
+    /// `Signal`'s dirty flag lives on ONE shared `Rc<RefCell<..>>`
+    /// inner. `WidgetTree` reconciliation (`BindingRegistry::
+    /// flush_all_dirty`) both *reads* and *clears* that flag in the
+    /// same pass. When N independent `WidgetTree`s (one per open
+    /// window) each bind to the SAME `Signal`, only the first tree to
+    /// reconcile after a mutation observes it dirty — its
+    /// `flush_all_dirty` clears the shared flag, so every other
+    /// window's reconcile pass (run afterwards in the same sweep, by
+    /// `WindowManager::request_redraw_needing_render`, or in a later
+    /// sweep) reads `is_dirty() == false` and silently skips its own,
+    /// otherwise-correct, `Rebuild` binding — not a delayed rebuild,
+    /// a permanently missed one, until an unrelated later mutation
+    /// happens to dirty the same signal again and race some window
+    /// into observing it first. This is exactly the trap
+    /// `WindowManager::request_redraw_needing_render`'s doc comment
+    /// warns about ("the theme/locale/... broadcasts sidestep the
+    /// whole problem by mutating each tree directly ... not through a
+    /// shared Signal") — toast/notification routing is the first
+    /// feature to need a shared-state-fans-out-to-every-window signal,
+    /// so it is also the first to hit the trap.
+    ///
+    /// Giving each window its own `Signal` sidesteps it entirely: each
+    /// window's `BindingRegistry` group now watches a DIFFERENT
+    /// `MutableInner`, so one window's flush clearing its own flag has
+    /// no effect on any other window's. [`Self::bump_version`] fans
+    /// the bump out to every signal in this map (plus the legacy
+    /// shared one) on every mutation, since routing/filtering happens
+    /// at render time in `ToastHost::build`, not at bump time — any
+    /// mutation could be relevant to any window.
+    pub(crate) fn window_version_signal(&self, window_id: BastydeWindowId) -> Signal<u64> {
+        self.window_versions
+            .borrow_mut()
+            .entry(window_id)
+            .or_insert_with(|| Signal::new(0))
+            .clone()
+    }
+
+    /// The rebuild signal a `ToastHost` should bind to: the window-
+    /// specific one when the host is attached to a real window, the
+    /// legacy shared one otherwise (headless trees in unit tests never
+    /// call `set_window_state`, and there's only ever one such
+    /// consumer per test, so the shared-flag trap doesn't apply).
+    pub(crate) fn rebuild_signal_for(&self, window_id: Option<BastydeWindowId>) -> Signal<u64> {
+        match window_id {
+            Some(w) => self.window_version_signal(w),
+            None => self.version.clone(),
+        }
     }
 
     /// Shared hover-pause refcount. Surfaces increment / decrement
@@ -167,15 +256,57 @@ impl ToastRegistry {
         self.hover_count.clone()
     }
 
+    /// Get-or-create the audience signal for `window_id`. The first
+    /// call for a given window allocates a fresh `Signal::new(None)`;
+    /// every later call (from that window's `ToastHost`, or from app
+    /// code) returns the SAME signal, so binding to it once and
+    /// mutating it later both work through this one accessor.
+    pub fn window_audience_signal(&self, window_id: BastydeWindowId) -> Signal<Option<ToastAudience>> {
+        self.window_audiences
+            .borrow_mut()
+            .entry(window_id)
+            .or_insert_with(|| Signal::new(None))
+            .clone()
+    }
+
+    /// Assign (or clear, with `None`) the audience for `window_id`.
+    /// Retargets that window's toast host + bell immediately — both
+    /// are bound to this signal at `BindingLevel::Rebuild`. Reached
+    /// exactly like the registry itself: `ctx.app_state::<ToastRegistry>()`.
+    /// Typical call site: a window-activation / active-document-changed
+    /// handler that keeps a window's audience in sync with what it's
+    /// currently showing.
+    pub fn set_window_audience(&self, window_id: BastydeWindowId, audience: Option<ToastAudience>) {
+        self.window_audience_signal(window_id).set(audience);
+    }
+
+    /// Bump the legacy shared signal AND every per-window signal —
+    /// see [`Self::window_version_signal`] for why a single shared
+    /// bump cannot, by itself, reliably reach more than one window.
+    /// Collects the per-window signals into a `Vec` before calling
+    /// `set` on any of them so this can't panic on a re-entrant
+    /// `RefCell` borrow if a bound widget's rebuild (triggered
+    /// synchronously by one of these `set` calls further down the
+    /// line) itself calls back into `window_version_signal` — e.g. a
+    /// brand-new window's first build, allocating its own entry in
+    /// this very map.
     pub(crate) fn bump_version(&self) {
         let v = self.version.get();
         self.version.set(v.wrapping_add(1));
+        let per_window: Vec<Signal<u64>> = self.window_versions.borrow().values().cloned().collect();
+        for sig in per_window {
+            let v = sig.get();
+            sig.set(v.wrapping_add(1));
+        }
     }
 
     /// Enqueue a toast. Called by `show_toast`. Returns a stable
-    /// [`ToastHandle`]. Slot-pool exhaustion: Normal-priority toasts
-    /// are dropped with cause [`ToastDismissCause::SlotPoolFull`];
-    /// High / Urgent evict the oldest Normal entry.
+    /// [`ToastHandle`]. Slot-pool exhaustion is evaluated PER ROUTE
+    /// BUCKET (see [`ToastRoute`]): Normal-priority toasts are dropped
+    /// with cause [`ToastDismissCause::SlotPoolFull`] once their own
+    /// bucket is full; High / Urgent evict the oldest Normal entry in
+    /// that SAME bucket — a burst of one window's or one audience's
+    /// toasts never touches another's slots.
     pub(crate) fn enqueue(
         &self,
         toast: Toast,
@@ -183,6 +314,14 @@ impl ToastRegistry {
         ToastHandle,
         Option<(ToastDismissCause, ToastDismissCallback)>,
     ) {
+        // Resolved once, up front: `toast.target` is `None` for a
+        // toast that reached `enqueue` directly with no `EventContext`
+        // and no explicit `.target()`/`.broadcast()` (the
+        // `show_settings_write_failed` path) — `Broadcast` is the only
+        // sensible default for an app-wide, contextless notification.
+        // Every other caller (`EventContextToastExt::show_toast`) has
+        // already resolved `None` to `Window(origin)` before this runs.
+        let resolved_route = toast.target.unwrap_or(ToastRoute::Broadcast);
         let mut inner = self.inner.borrow_mut();
 
         // Update-in-place: a toast carrying a `Toast::id(...)` value
@@ -200,6 +339,11 @@ impl ToastRegistry {
         {
             let severity_changed = existing.severity != toast.severity;
             existing.severity = toast.severity;
+            // A retargeting update (e.g. a progress toast whose
+            // audience becomes known partway through) takes effect —
+            // subsequent admission/eviction and host filtering use the
+            // new route immediately.
+            existing.route = resolved_route;
             existing.priority = toast.priority;
             existing.title = toast.title;
             existing.body = toast.body;
@@ -267,8 +411,17 @@ impl ToastRegistry {
         let entry_id = inner.next_entry_id;
         inner.next_entry_id += 1;
 
-        // Slot-pool admission.
-        let at_capacity = inner.live_entries.len() >= inner.max_visible;
+        // Slot-pool admission, bucketed per route (decision: `max_visible`
+        // is a per-audience/per-window/per-broadcast budget, not a
+        // whole-app one) — a burst of one window's or one audience's
+        // toasts fills only ITS bucket, so it can never starve another
+        // window's or audience's admission.
+        let bucket_count = inner
+            .live_entries
+            .iter()
+            .filter(|e| e.route == resolved_route)
+            .count();
+        let at_capacity = bucket_count >= inner.max_visible;
         if at_capacity {
             match toast.priority {
                 ToastPriority::Normal => {
@@ -288,11 +441,14 @@ impl ToastRegistry {
                     return (handle, None);
                 }
                 ToastPriority::High | ToastPriority::Urgent => {
-                    // Evict the oldest Normal-priority entry.
+                    // Evict the oldest Normal-priority entry WITHIN
+                    // this same route bucket — a High/Urgent arrival
+                    // for one audience must never bump an unrelated
+                    // window's/audience's Normal entry out of its slot.
                     let evict_idx = inner
                         .live_entries
                         .iter()
-                        .position(|e| matches!(e.priority, ToastPriority::Normal));
+                        .position(|e| e.route == resolved_route && matches!(e.priority, ToastPriority::Normal));
                     if let Some(idx) = evict_idx {
                         let removed = inner.live_entries.remove(idx).unwrap();
                         if let Some(cb) = removed.on_dismiss.clone() {
@@ -329,6 +485,7 @@ impl ToastRegistry {
             leading: toast.leading,
             id: toast.id,
             archive: toast.archive,
+            route: resolved_route,
         };
         // Mirror to the archive BEFORE the entry is pushed to the
         // live queue — that way an `archive(false)` toast (e.g. a
@@ -422,6 +579,7 @@ impl ToastRegistry {
             read: false,
             dedup_id: entry.id.clone(),
             updates: Vec::new(),
+            route: entry.route,
         }
     }
 

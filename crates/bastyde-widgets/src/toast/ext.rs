@@ -13,7 +13,7 @@
 use bastyde_core::widget::EventContext;
 
 use crate::toast::registry::ToastRegistry;
-use crate::toast::{Toast, ToastHandle};
+use crate::toast::{Toast, ToastHandle, ToastRoute};
 
 /// Convenience methods on [`EventContext`] for the toast system. The
 /// registry is looked up via [`EventContext::app_state`] — the
@@ -39,7 +39,18 @@ pub trait EventContextToastExt {
 }
 
 impl EventContextToastExt for EventContext<'_> {
-    fn show_toast(&mut self, toast: Toast) -> ToastHandle {
+    fn show_toast(&mut self, mut toast: Toast) -> ToastHandle {
+        // Default routing: a toast presented with no explicit
+        // `.target()` / `.broadcast()` is tagged with the presenting
+        // window's id. This is the one join point that has both a
+        // `Toast` and a real `EventContext` (hence a real window) —
+        // it's what makes every pre-existing `Toast::info(...).present(ctx)`
+        // call site in every app correct with zero changes: a
+        // single-window app has exactly one window, so "origin
+        // window" behaves identically to the old "one shared queue".
+        if toast.target.is_none() {
+            toast.target = self.window().map(|w| ToastRoute::Window(w.id()));
+        }
         let Some(registry) = self.app_state::<ToastRegistry>().cloned() else {
             warn_missing_install();
             // Return a dropped handle — `is_alive` returns false,

@@ -46,11 +46,14 @@ use crate::button::{Button, ButtonVariant};
 use crate::link::Link;
 use crate::notification::{
     ArchivedAction, ArchivedActionStyle, NotificationArchiveModel, NotificationEntry,
+    route_visible,
 };
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::scroll_area::ScrollArea;
 use crate::severity_badge::SeverityBadge;
 use crate::standard_item::StandardListItem;
+use crate::toast::{ToastAudience, ToastRoute};
+use bastyde_core::window::BastydeWindowId;
 use bastyde_i18n::LocalizedString;
 
 /// Configurable archive log. Shipped chrome:
@@ -70,6 +73,12 @@ pub struct NotificationLog {
     on_entry_invoked: Option<Rc<dyn Fn(&NotificationEntry, &mut EventContext)>>,
     on_action_invoked: Option<Rc<dyn Fn(&NotificationEntry, &ArchivedAction, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
+    /// `None` (default) = unscoped — every entry is shown, matching
+    /// this widget's behaviour before routing existed. `Some(route)`
+    /// restricts the rendered rows AND the toolbar's mark-all-read /
+    /// clear actions to entries matching `route` (plus `Broadcast`,
+    /// always visible). Set via [`Self::for_window`] / [`Self::for_audience`].
+    route_scope: Option<ToastRoute>,
 }
 
 impl NotificationLog {
@@ -83,7 +92,25 @@ impl NotificationLog {
             on_entry_invoked: None,
             on_action_invoked: None,
             root_child_id: None,
+            route_scope: None,
         }
+    }
+
+    /// Scope this log to entries routed to window `window_id` (plus
+    /// any `Broadcast` entry) — the shape a `NotificationCenterButton`
+    /// mounted in that window wants for its popover body. Overrides
+    /// any previous `for_window` / `for_audience` call.
+    pub fn for_window(mut self, window_id: BastydeWindowId) -> Self {
+        self.route_scope = Some(ToastRoute::Window(window_id));
+        self
+    }
+
+    /// Scope this log to entries routed to `audience` (plus any
+    /// `Broadcast` entry). Overrides any previous `for_window` /
+    /// `for_audience` call.
+    pub fn for_audience(mut self, audience: ToastAudience) -> Self {
+        self.route_scope = Some(ToastRoute::Audience(audience));
+        self
     }
 
     /// Whether to render the toolbar row (mark-all-read + clear).
@@ -209,15 +236,38 @@ impl Widget for NotificationLog {
         // day-bucket headers must re-compute when entries appear /
         // disappear, and StandardListItem's read/unread title style
         // needs to flip on mark_all_read.
-        archive.version_signal().bind_to(
+        //
+        // Bound to THIS window's own rebuild signal — see
+        // `NotificationArchiveModel::window_version_signal`'s doc
+        // comment for why a log embedded in one window must not share
+        // a dirty flag with a log (or bell) embedded in another.
+        let my_window = ctx.window().map(|w| w.id());
+        archive.rebuild_signal_for(my_window).bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Rebuild,
         );
 
+        let scope = self.route_scope;
+
+        // Snapshot + filter entries up front — both the empty-state
+        // decision and the toolbar/section rendering below need the
+        // SCOPED view, not the raw archive (a scoped log must look
+        // empty when only other windows'/audiences' entries exist,
+        // not fall through to the unscoped empty-state check).
+        let model = archive.entries();
+        let entries: Vec<NotificationEntry> = (0..model.len())
+            .filter_map(|i| model.with_item(i, |e| e.clone()))
+            .filter(|e| route_visible(e.route, scope))
+            .collect();
+
         let mut column = VStack::new().spacing(6.0);
 
-        // Toolbar row.
+        // Toolbar row. Mark-read/clear are scoped identically to the
+        // rendered rows: a scoped log must only affect ITS entries —
+        // reaching for the unscoped `mark_all_read`/`clear` from a
+        // scoped log would incorrectly touch every other window's or
+        // audience's history too.
         if self.show_toolbar {
             let archive_for_mark = archive.clone();
             let archive_for_clear = archive.clone();
@@ -228,21 +278,32 @@ impl Widget for NotificationLog {
                     ctx.add(
                         Button::new(bastyde_i18n::tr_widget!(notifications_mark_all_read()))
                             .variant(ButtonVariant::Plain)
-                            .on_activate_fn(move |_| archive_for_mark.mark_all_read()),
+                            .on_activate_fn(move |_| match scope {
+                                Some(s) => {
+                                    archive_for_mark.mark_read_where(|e| route_visible(e.route, Some(s)))
+                                }
+                                None => archive_for_mark.mark_all_read(),
+                            }),
                     ),
                 )
                 .add_child(
                     ctx.add(
                         Button::new(bastyde_i18n::tr_widget!(notifications_clear()))
                             .variant(ButtonVariant::Plain)
-                            .on_activate_fn(move |_| archive_for_clear.clear()),
+                            .on_activate_fn(move |_| match scope {
+                                Some(s) => {
+                                    archive_for_clear.clear_where(|e| route_visible(e.route, Some(s)))
+                                }
+                                None => archive_for_clear.clear(),
+                            }),
                     ),
                 );
             column = column.add_child(ctx.add(toolbar));
         }
 
-        // Empty state or bucketed sections.
-        if archive.entries().is_empty() {
+        // Empty state or bucketed sections — against the SCOPED
+        // entries snapshot taken above, not the raw archive.
+        if entries.is_empty() {
             let empty = match self.empty_state.take() {
                 Some(w) => ctx.add_boxed(w),
                 None => ctx.add(
@@ -253,17 +314,12 @@ impl Widget for NotificationLog {
             };
             column = column.add_child(empty);
         } else {
-            // Snapshot entries + compute buckets relative to the
-            // local "today". Bucket transitions across midnight are
-            // recomputed on the next archive mutation (the log's
-            // version-signal binding); a log that stays open across
-            // midnight without any push will keep stale labels
-            // until the user closes / reopens it — acceptable for a
-            // popover-shaped UI.
-            let model = archive.entries();
-            let entries: Vec<NotificationEntry> = (0..model.len())
-                .filter_map(|i| model.with_item(i, |e| e.clone()))
-                .collect();
+            // Compute buckets relative to the local "today". Bucket
+            // transitions across midnight are recomputed on the next
+            // archive mutation (the log's version-signal binding); a
+            // log that stays open across midnight without any push
+            // will keep stale labels until the user closes / reopens
+            // it — acceptable for a popover-shaped UI.
             let now = jiff::Zoned::now();
             let today = now.date();
             let zone = now.time_zone().clone();
@@ -472,6 +528,7 @@ mod tests {
             read: false,
             dedup_id: None,
             updates: Vec::new(),
+            route: ToastRoute::Broadcast,
         }
     }
 

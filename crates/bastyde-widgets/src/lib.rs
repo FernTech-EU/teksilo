@@ -246,8 +246,9 @@ pub use theme_switcher::ThemeSwitcher;
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toast::{
-    EventContextToastExt, Toast, ToastAction, ToastActionStyle, ToastDismissCause, ToastHandle,
-    ToastHost, ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity, ToastSurface,
+    EventContextToastExt, Toast, ToastAction, ToastActionStyle, ToastAudience, ToastDismissCause,
+    ToastHandle, ToastHost, ToastInstallOptions, ToastPriority, ToastRegistry, ToastRoute,
+    ToastSeverity, ToastSurface,
 };
 pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
