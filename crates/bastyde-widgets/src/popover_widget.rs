@@ -210,6 +210,9 @@ pub struct PopoverWidget<T: PopoverTrigger> {
     content: Option<Box<dyn Widget>>,
 
     popover_open: Signal<bool>,
+    /// Name of the global action that toggles this popover, if the caller asked
+    /// for one. See [`PopoverWidget::open_action`].
+    open_action: Option<&'static str>,
     placement: OverlayPlacement,
     dismiss_behavior: DismissBehavior,
     fade_duration: Option<Duration>,
@@ -276,6 +279,7 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
             trigger: Some(trigger),
             content: None,
             popover_open: Signal::new(false),
+            open_action: None,
             placement: OverlayPlacement::BelowPreferred,
             dismiss_behavior: DismissBehavior::EscapeOrClickOutside,
             fade_duration: None,
@@ -359,12 +363,44 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
         self
     }
 
-    /// Observe-only handle to the popover-open state. Apps can
-    /// `ctx.effect(&pb.open_signal(), ...)` from their composite to react
-    /// with full `EventContext` — `on_open` / `on_close` are
-    /// notification-only (no ctx).
+    /// Observe-only handle to the popover-open state.
+    ///
+    /// **Read-back only — writing this does not open the popover.** Presenting
+    /// an overlay needs an `EventContext` (`show_overlay` + `request_focus`),
+    /// which no signal observer has; this field is the mirror the trigger writes
+    /// after it has done that work. To open the popover from somewhere other
+    /// than its trigger, use [`open_action`](Self::open_action).
     pub fn open_signal(&self) -> Signal<bool> {
         self.popover_open.clone()
+    }
+
+    /// Register a **named global action** that toggles this popover, so a menu
+    /// entry, a global shortcut or `ctx.send_intent(...)` can open it — not only
+    /// a click on its own trigger.
+    ///
+    /// Without this a popover is reachable by pointer alone. `on_open` /
+    /// `on_close` are notification-only and `open_signal` is a read-back mirror
+    /// (see its doc), so an app that wanted "Go to… ⌘G" next to its button had
+    /// no way to wire the second half. Action handlers are the one place that
+    /// *does* get an `EventContext`, which is exactly what presenting an overlay
+    /// requires — so the action runs the identical toggle the trigger runs, and
+    /// the two can never drift.
+    ///
+    /// Registered with `register_action_global`, deliberately: intents walk
+    /// source-widget → root, and a menu renders in an **overlay** that is a
+    /// sibling of the popover's own subtree, so a plain `register_action` would
+    /// never be reached from a menu item. Pair it with
+    /// `register_shortcut_global` in the app for the keystroke.
+    ///
+    /// ```ignore
+    /// PopoverButton::new(Button::new(tr!(go_to())))
+    ///     .content(palette)
+    ///     .open_action("go.to")
+    /// // elsewhere: MenuEntry::new(tr!(go_to())).intent("go.to").shortcut("go.to")
+    /// ```
+    pub fn open_action(mut self, intent: &'static str) -> Self {
+        self.open_action = Some(intent);
+        self
     }
 
     /// Choose which themed [`PopoverVariant`] surface wraps the content.
@@ -549,7 +585,12 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
         // Activate handler installed onto the trigger. Toggles the
         // popover: if open, dismiss; if closed, wake the dormant content,
         // request the overlay, and move focus into it.
-        let activate = {
+        //
+        // Built as an `Rc` so `open_action` can register the *same* closure as a
+        // named global action. Sharing it (rather than writing a second, similar
+        // one) is the point: a menu entry and the trigger must not be able to
+        // disagree about what opening this popover means.
+        let activate: Rc<dyn Fn(&mut EventContext)> = Rc::new({
             let popover_open = popover_open.clone();
             let dismiss_cb = dismiss_cb.clone();
             let on_open = on_open.clone();
@@ -580,7 +621,19 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     }
                 }
             }
-        };
+        });
+
+        // The named-action door. Registered global, not local: intents walk
+        // source-widget → root, and a menu renders in an overlay that is a
+        // sibling of this widget's subtree, so a plain `register_action` would
+        // never be reached from a menu item.
+        if let Some(intent) = self.open_action {
+            let act = activate.clone();
+            ctx.register_action_global(
+                bastyde_core::action::Action::new(intent)
+                    .on_invoke(move |_intent, ctx_evt| act(ctx_evt)),
+            );
+        }
 
         // With a caret, allocate the interaction signal up-front and
         // share it with the trigger so the caret's color tracks the
@@ -593,7 +646,10 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 .with_shared_interaction(interaction)
                 .with_has_popup(self.has_popup)
                 .with_expanded_when(popover_open.clone())
-                .with_on_activate(activate);
+                .with_on_activate({
+                    let act = activate.clone();
+                    move |c: &mut EventContext| act(c)
+                });
             let trigger_id = ctx.add(trigger);
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().add_child(trigger_id).add_child(caret_id));
@@ -623,7 +679,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
         let trigger = trigger
             .with_has_popup(self.has_popup)
             .with_expanded_when(popover_open.clone())
-            .with_on_activate(activate);
+            .with_on_activate(move |c: &mut EventContext| activate(c));
         let trigger_id = ctx.add(trigger);
         self.root_child_id = Some(trigger_id);
         if let Some(content) = self.composite_tooltip_content.take() {
@@ -767,6 +823,95 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         assert!(open_signal.get(), "Enter should open the popover");
+    }
+
+    /// `open_action` opens the popover from a **sibling** widget's intent.
+    ///
+    /// The sibling placement is the test, not incidental scenery: intents walk
+    /// source-widget → root, so a locally-registered action would never be
+    /// reached from a menu — which renders in an overlay that is a sibling of
+    /// the popover's subtree, exactly like this button. Firing from a child of
+    /// the popover would pass with either registration and prove nothing.
+    #[test]
+    fn open_action_opens_the_popover_from_a_sibling_intent() {
+        use crate::primitives::VStack;
+        use bastyde_core::intent::Intent;
+
+        let mut tree = light_tree();
+        let pb = PopoverButton::new(Button::new(lit!("Open")))
+            .content(dummy_content())
+            .open_action("test.open");
+        let open_signal = pb.open_signal();
+        let pb_id = tree.add(pb);
+        let fire_id = tree.add(
+            Button::new(lit!("Fire"))
+                .on_activate_fn(|ctx| ctx.send_intent(Intent::new("test.open"))),
+        );
+        tree.add(VStack::new().add_child(pb_id).add_child(fire_id));
+        tree.layout(SizeProposal::exact(300.0, 160.0));
+
+        assert!(!open_signal.get(), "starts closed");
+
+        let fire_btn = tree
+            .first_focusable_descendant(fire_id)
+            .unwrap_or(fire_id);
+        tree.focus(fire_btn);
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            open_signal.get(),
+            "the named action must open the popover from off its own subtree"
+        );
+    }
+
+    /// The action *toggles*, sharing one closure with the trigger — so a menu
+    /// entry and a click can never disagree about what the popover does.
+    #[test]
+    fn open_action_toggles_rather_than_only_opening() {
+        use crate::primitives::VStack;
+        use bastyde_core::intent::Intent;
+
+        let mut tree = light_tree();
+        let pb = PopoverButton::new(Button::new(lit!("Open")))
+            .content(dummy_content())
+            .open_action("test.toggle");
+        let open_signal = pb.open_signal();
+        let pb_id = tree.add(pb);
+        let fire_id = tree.add(
+            Button::new(lit!("Fire"))
+                .on_activate_fn(|ctx| ctx.send_intent(Intent::new("test.toggle"))),
+        );
+        tree.add(VStack::new().add_child(pb_id).add_child(fire_id));
+        tree.layout(SizeProposal::exact(300.0, 160.0));
+
+        let fire_btn = tree
+            .first_focusable_descendant(fire_id)
+            .unwrap_or(fire_id);
+        tree.focus(fire_btn);
+        let fire = |tree: &mut WidgetTree| {
+            tree.focus(fire_btn);
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+            tree.dispatch_event(WidgetEvent::KeyUp {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+            });
+        };
+
+        fire(&mut tree);
+        assert!(open_signal.get(), "first fire opens");
+        fire(&mut tree);
+        assert!(!open_signal.get(), "second fire closes");
     }
 
     #[test]
