@@ -284,6 +284,28 @@ impl std::fmt::Debug for ActiveOverlay {
 pub(crate) const MAX_OVERLAY_NESTING_DEPTH: usize = 12;
 
 /// Manages the overlay stack — creation, positioning, dismissal, cascading.
+/// Leading-edge-aligned x for a `Below` / `Above` overlay, clamped so the
+/// overlay stays inside the viewport.
+///
+/// In LTR the leading edge is `anchor.x`; in RTL it is the anchor's physical
+/// right edge. **Both are clamped.** The LTR arm used to be a bare `anchor.x`,
+/// which silently ran a popover off the right edge of the window whenever its
+/// trigger sat near that edge and its content was wider than the trigger — the
+/// ordinary case for a status-bar or toolbar-trailing control. The RTL arm has
+/// always clamped; there was no reason for the two to differ.
+///
+/// `max(0.0)` last, so a viewport narrower than the overlay pins it to the
+/// leading edge and clips at the trailing one, rather than pushing its start
+/// off-screen where the first thing the reader needs would be the part lost.
+fn leading_aligned_x(anchor: Rect, actual_width: f32, vw: f32, rtl: bool) -> f32 {
+    let leading = if rtl {
+        anchor.x + anchor.width - actual_width
+    } else {
+        anchor.x
+    };
+    leading.min(vw - actual_width).max(0.0)
+}
+
 pub struct OverlayManager {
     pub(crate) stack: Vec<ActiveOverlay>,
     next_id: u64,
@@ -1114,15 +1136,7 @@ impl OverlayManager {
             overlay.bounds = match &overlay.placement {
                 OverlayPlacement::Below => {
                     let actual_width = content_size.width.max(anchor.width);
-                    // Align leading edges: in LTR the leading edge is anchor.x;
-                    // in RTL the leading edge is anchor.x + anchor.width (physical right).
-                    let x = if rtl {
-                        (anchor.x + anchor.width - actual_width)
-                            .min(vw - actual_width)
-                            .max(0.0)
-                    } else {
-                        anchor.x
-                    };
+                    let x = leading_aligned_x(anchor, actual_width, vw, rtl);
                     Rect::new(
                         x,
                         anchor.y + anchor.height + 4.0,
@@ -1132,13 +1146,7 @@ impl OverlayManager {
                 }
                 OverlayPlacement::Above => {
                     let actual_width = content_size.width.max(anchor.width);
-                    let x = if rtl {
-                        (anchor.x + anchor.width - actual_width)
-                            .min(vw - actual_width)
-                            .max(0.0)
-                    } else {
-                        anchor.x
-                    };
+                    let x = leading_aligned_x(anchor, actual_width, vw, rtl);
                     Rect::new(
                         x,
                         anchor.y - content_size.height - 4.0,
@@ -1323,6 +1331,46 @@ mod tests {
 
     fn fake_id(n: u64) -> WidgetId {
         KeyData::from_ffi(n).into()
+    }
+
+    /// A `Below`/`Above` overlay must stay inside the viewport in **LTR**, not
+    /// only RTL.
+    ///
+    /// The LTR arm was a bare `anchor.x`, so a popover whose trigger sat near
+    /// the right edge — a status-bar button, a toolbar-trailing control — ran
+    /// off the screen and lost its trailing edge. Nothing caught it because the
+    /// RTL arm, which has always clamped, is the one that looks like it needs
+    /// the arithmetic.
+    #[test]
+    fn a_wide_overlay_near_the_trailing_edge_is_clamped_into_the_viewport() {
+        let vw = 1200.0;
+        // A 380 px-wide popover under a 90 px button whose left edge is at 1035:
+        // unclamped it would end at 1415, 215 px past the window.
+        let anchor = Rect::new(1035.0, 760.0, 90.0, 28.0);
+        let x = leading_aligned_x(anchor, 380.0, vw, false);
+        assert!(
+            x + 380.0 <= vw + 0.01,
+            "overlay must not extend past the viewport: x={x}"
+        );
+        assert!(x >= 0.0, "and must not start off the leading edge: x={x}");
+
+        // Comfortably inside, the leading edge is still honoured exactly —
+        // clamping must not nudge overlays that already fit.
+        let inside = Rect::new(100.0, 760.0, 90.0, 28.0);
+        assert_eq!(leading_aligned_x(inside, 380.0, vw, false), 100.0);
+
+        // RTL keeps aligning to the anchor's physical right edge.
+        let x_rtl = leading_aligned_x(inside, 380.0, vw, true);
+        assert!(x_rtl >= 0.0 && x_rtl + 380.0 <= vw + 0.01);
+    }
+
+    /// A viewport narrower than the overlay pins the **leading** edge and clips
+    /// the trailing one — losing the start of the content would hide the first
+    /// thing the reader needs (a search field, a title).
+    #[test]
+    fn an_overlay_wider_than_the_viewport_keeps_its_leading_edge_visible() {
+        let x = leading_aligned_x(Rect::new(40.0, 10.0, 60.0, 20.0), 900.0, 500.0, false);
+        assert_eq!(x, 0.0);
     }
 
     #[test]
