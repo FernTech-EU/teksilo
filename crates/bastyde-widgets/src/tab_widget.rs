@@ -300,8 +300,10 @@ pub struct TabWidget {
     on_external_drop: Option<Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>>,
     bar_leading_slot: Option<BarSlot>,
     bar_trailing_slot: Option<BarSlot>,
-    /// Tab-strip visibility policy. See [`TabBarVisibility`].
-    bar_visibility: TabBarVisibility,
+    /// Tab-strip visibility policy, statically or reactively. See
+    /// [`TabBarVisibility`]. Bound at [`BindingLevel::Rebuild`] so a flip
+    /// re-runs `build` and re-derives `show_bar`.
+    bar_visibility: Prop<TabBarVisibility>,
 
     root_child_id: Option<WidgetId>,
 
@@ -389,7 +391,7 @@ impl TabWidget {
             bar_leading_slot: None,
             bar_trailing_slot: None,
             tab_bar_height: None,
-            bar_visibility: TabBarVisibility::Always,
+            bar_visibility: Prop::Static(TabBarVisibility::Always),
             root_child_id: None,
             enabled: Prop::Static(true),
         }
@@ -408,8 +410,19 @@ impl TabWidget {
     /// to hide the strip while a single tab is present, or
     /// [`TabBarVisibility::Never`] when an external selector (e.g. a
     /// docking activity rail) drives selection.
-    pub fn bar_visibility(mut self, visibility: TabBarVisibility) -> Self {
-        self.bar_visibility = visibility;
+    ///
+    /// Accepts a plain [`TabBarVisibility`] or a `Signal<TabBarVisibility>`.
+    /// Bound reactively, the strip appears and disappears in place — the
+    /// `TabWidget` itself is never torn down, so per-tab content state
+    /// (caret, scroll offset, focus) survives the flip. That is the point
+    /// of binding rather than swapping two `TabWidget`s in a `Switcher`:
+    /// an app-level "hide the chrome" mode must not cost the user their
+    /// place in the document.
+    ///
+    /// A derived signal (`.map(..)` / `.zip(..)`) is fine here: binding
+    /// resolves through to the mutable roots and never calls `observe`.
+    pub fn bar_visibility(mut self, visibility: impl Into<Prop<TabBarVisibility>>) -> Self {
+        self.bar_visibility = visibility.into();
         self
     }
 
@@ -1282,10 +1295,21 @@ impl Widget for TabWidget {
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(total)));
 
+        // Bind the visibility policy itself before reading it, so a bound
+        // policy flipping (e.g. an app-level distraction-free mode swapping
+        // `Always` for `Never`) rebuilds this widget and re-derives
+        // `show_bar` below. Registered unconditionally — outside the
+        // `show_bar` block, for the same reason as `sizing` / `tab_display`
+        // further down: while the strip is hidden there is no bar widget to
+        // carry the binding, so a hidden strip could never learn it should
+        // come back.
+        self.bar_visibility
+            .register_if_bound(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+
         // Decide whether the tab strip is shown this build. Reactive
         // for `WhenMultiple`: a dynamic-model mutation rebuilds the
         // widget (the version observer above), so `total` is current.
-        let show_bar = match self.bar_visibility {
+        let show_bar = match self.bar_visibility.get() {
             TabBarVisibility::Always => true,
             TabBarVisibility::Never => false,
             TabBarVisibility::WhenMultiple => total >= 2,

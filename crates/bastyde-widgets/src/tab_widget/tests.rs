@@ -2767,6 +2767,108 @@ fn bar_visibility_when_multiple_is_reactive_and_preserves_content() {
     assert_eq!(pane_builds.get(), 2, "no pane rebuild on the 2→1 toggle");
 }
 
+/// A **bound** policy flips the strip in place, and the panes underneath
+/// survive it. This is the contract an app-level "hide the chrome" mode
+/// depends on: entering and leaving the mode must not cost the user their
+/// caret or scroll position, which swapping two `TabWidget`s in a
+/// `Switcher` would.
+#[test]
+fn bar_visibility_bound_signal_toggles_strip_without_rebuilding_panes() {
+    use crate::tab_widget::TabBarVisibility;
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let policy = Signal::new(TabBarVisibility::Always);
+    let pane_builds = Rc::new(Cell::new(0));
+    let model: ListModel<TabHandle> = ListModel::from_vec(vec![
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("A")), ()),
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("B")), ()),
+    ]);
+
+    let pb = pane_builds.clone();
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected)
+            .dynamic_tab::<()>("doc", move |_h, _s| {
+                pb.set(pb.get() + 1);
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
+            .dynamic_model(model)
+            .bar_visibility(policy.clone()),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "a bound Always renders the strip"
+    );
+    let built_before = pane_builds.get();
+    assert!(built_before > 0, "panes built at least once up front");
+
+    // Flip to Never — the strip goes away without a teardown of the content.
+    policy.set(TabBarVisibility::Never);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        !subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "flipping the bound policy to Never must hide the strip"
+    );
+    assert_eq!(
+        pane_builds.get(),
+        built_before,
+        "hiding the strip must not rebuild the panes"
+    );
+
+    // ...and back. A hidden strip still learns it should return, which is
+    // why the binding is registered outside the `show_bar` block.
+    policy.set(TabBarVisibility::Always);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "flipping back to Always must bring the strip back"
+    );
+    assert_eq!(
+        pane_builds.get(),
+        built_before,
+        "restoring the strip must not rebuild the panes either"
+    );
+}
+
+/// A **derived** (`.map`) signal drives the policy too. Derived signals are
+/// read-only and panic under `observe`, so this pins that the binding path
+/// resolves through to the mutable roots instead — the app-side shape is
+/// `focus_mode_signal().map(..)`, which has no mutable
+/// `Signal<TabBarVisibility>` behind it.
+#[test]
+fn bar_visibility_accepts_a_derived_signal() {
+    use crate::tab_widget::TabBarVisibility;
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let focus_mode = Signal::new(false);
+    let policy = focus_mode.map(|on| {
+        if *on {
+            TabBarVisibility::Never
+        } else {
+            TabBarVisibility::Always
+        }
+    });
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let root = tree.add(
+        TabWidget::new(selected)
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .bar_visibility(policy),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "derived policy resolves to Always while the source is false"
+    );
+
+    focus_mode.set(true);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        !subtree_has_role(&tree, root, accesskit::Role::TabList),
+        "setting the derived signal's mutable root must re-derive the policy"
+    );
+}
+
 // ─── Appearance API — per-state colours, dividers, indicator ────────
 
 use bastyde_core::styles::TabIndicatorPosition;
