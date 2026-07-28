@@ -348,6 +348,52 @@ impl NotificationArchiveModel {
         self.limit
     }
 
+    /// Drop `window_id`'s entry from [`Self::window_versions`]. Call
+    /// this from the app's window-teardown hook — the same place that
+    /// tears down whatever `NotificationLog` / `NotificationCenterButton`
+    /// was mounted in that window. Mirrors
+    /// [`ToastRegistry::forget_window`](crate::toast::ToastRegistry::forget_window),
+    /// which now cascades into this method automatically for any app
+    /// reached through the registry; this method exists in its own
+    /// right (and is `pub`, not `pub(crate)`) for the case
+    /// [`ToastRegistry::forget_window`]'s doc comment calls out: a bell
+    /// can be constructed against an archive directly, with no
+    /// registry in the picture, so an app in that shape must be able
+    /// to call this itself.
+    ///
+    /// This is not only a memory leak fix. [`Self::bump_version`]
+    /// iterates every entry in [`Self::window_versions`] on EVERY
+    /// archive mutation (push, mark-read, clear, remove) — a dead
+    /// window's forgotten `Signal` isn't just sitting there unused, it
+    /// costs one extra `get`/`set` on every single notification the
+    /// app raises for the rest of the process's life. A long session
+    /// that opens and closes many windows turns that iteration longer
+    /// and longer even though no window is left to observe most of the
+    /// entries in it — a permanent, ever-growing CPU cost hiding behind
+    /// what looks like a plain leak. Forgetting closed windows keeps
+    /// that iteration bounded by the number of windows actually open.
+    ///
+    /// Safe even if some other code still holds a clone of the removed
+    /// `Signal`: a `Signal` is `Rc<RefCell<..>>` under the hood, so
+    /// dropping this map's entry only drops *this* reference to it —
+    /// any clone a still-alive holder kept keeps reading/writing
+    /// exactly as before. It just stops being reachable from
+    /// [`Self::bump_version`]'s iteration, which is the whole point:
+    /// nothing is bound to a torn-down window's signal any more, so no
+    /// rebuild is missed by excluding it.
+    ///
+    /// Idempotent: forgetting a window id that was never registered
+    /// (or was already forgotten) is a safe no-op — `HashMap::remove`
+    /// on a missing key does nothing. And because
+    /// [`Self::window_version_signal`] is get-or-create, a later call
+    /// for the same id (e.g. a window id reused much later in the
+    /// process, or a stray call from code that doesn't know the window
+    /// is gone) transparently starts fresh with a brand-new
+    /// `Signal::new(0)` rather than erroring or reviving stale state.
+    pub fn forget_window(&self, window_id: BastydeWindowId) {
+        self.window_versions.borrow_mut().remove(&window_id);
+    }
+
     /// Bump the legacy shared signal AND every per-window signal — see
     /// [`Self::window_version_signal`] for why a single shared bump
     /// alone cannot reliably reach more than one window's bell/log.
@@ -1230,5 +1276,91 @@ mod tests {
             toml::from_str(&serialized).expect("deserialize");
         assert_eq!(parsed.items.len(), 1);
         assert_eq!(parsed.items[0], original);
+    }
+
+    // ----- `forget_window` -----
+
+    #[test]
+    fn forget_window_removes_the_entry() {
+        let m = NotificationArchiveModel::in_memory();
+        let w = BastydeWindowId::new(1);
+        let _ = m.window_version_signal(w);
+        assert!(m.window_versions.borrow().contains_key(&w));
+
+        m.forget_window(w);
+
+        assert!(
+            !m.window_versions.borrow().contains_key(&w),
+            "forget_window must remove the window's version-map entry"
+        );
+    }
+
+    #[test]
+    fn forget_window_on_an_unknown_window_is_a_safe_no_op() {
+        let m = NotificationArchiveModel::in_memory();
+        let known = BastydeWindowId::new(1);
+        let unknown = BastydeWindowId::new(999);
+        let _ = m.window_version_signal(known);
+
+        // Forgetting a window that was never registered must not
+        // panic and must not disturb any other window's entry.
+        m.forget_window(unknown);
+        assert!(
+            m.window_versions.borrow().contains_key(&known),
+            "an unrelated window's entry must survive forgetting a different, unknown window"
+        );
+
+        // Idempotent: forgetting it twice is equally a safe no-op.
+        m.forget_window(known);
+        m.forget_window(known);
+        assert!(!m.window_versions.borrow().contains_key(&known));
+    }
+
+    #[test]
+    fn forgotten_windows_signal_is_no_longer_touched_by_bump_version() {
+        // The throughput point, not just the memory one: a forgotten
+        // window's `Signal` must drop out of `bump_version`'s
+        // iteration, so a live clone someone else still holds stops
+        // being mutated by every subsequent archive push.
+        let m = NotificationArchiveModel::in_memory();
+        let w = BastydeWindowId::new(1);
+        let held_clone = m.window_version_signal(w);
+        assert_eq!(held_clone.get(), 0);
+
+        m.forget_window(w);
+
+        // A mutation after forgetting must NOT bump the forgotten
+        // window's signal any more, even though this held clone keeps
+        // it alive (Signal is Rc<RefCell<..>> — dropping the map entry
+        // doesn't drop the value, it just stops `bump_version` from
+        // reaching it).
+        m.push(entry("after forget"));
+        assert_eq!(
+            held_clone.get(),
+            0,
+            "bump_version must no longer iterate a forgotten window's signal"
+        );
+
+        // A later call for the SAME window id transparently starts
+        // fresh rather than erroring or reviving the old value.
+        let fresh = m.window_version_signal(w);
+        assert_eq!(fresh.get(), 0);
+        m.push(entry("after re-registering"));
+        assert_eq!(fresh.get(), 1);
+    }
+
+    #[test]
+    fn forgetting_one_window_leaves_anothers_signal_live() {
+        let m = NotificationArchiveModel::in_memory();
+        let w1 = BastydeWindowId::new(1);
+        let w2 = BastydeWindowId::new(2);
+        let sig1 = m.window_version_signal(w1);
+        let sig2 = m.window_version_signal(w2);
+
+        m.forget_window(w1);
+        m.push(entry("still bumping w2"));
+
+        assert_eq!(sig1.get(), 0, "forgotten window must not be bumped");
+        assert_eq!(sig2.get(), 1, "still-live window must still be bumped");
     }
 }

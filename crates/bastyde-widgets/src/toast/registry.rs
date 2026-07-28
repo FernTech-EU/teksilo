@@ -316,20 +316,36 @@ impl ToastRegistry {
     /// (or was already forgotten) is a safe no-op — `HashMap::remove`
     /// on a missing key does nothing.
     ///
-    /// This cleans only the two maps this registry owns. A sibling
-    /// per-window map lives on
-    /// [`NotificationArchiveModel`](crate::notification::NotificationArchiveModel)
-    /// (reachable from here via [`Self::archive`]) — its own
-    /// `window_versions`, consulted directly by `NotificationLog` /
-    /// `NotificationCenterButton` rather than through this registry.
-    /// It has no forget API of its own today, so an app that mounts
-    /// those widgets per-window still needs an equivalent cleanup for
-    /// that model (or a future symmetrical method there) alongside
-    /// this call — `forget_window` does not reach into `self.archive`
-    /// on your behalf.
+    /// Also cascades into
+    /// [`NotificationArchiveModel::forget_window`](crate::notification::NotificationArchiveModel::forget_window)
+    /// when [`Self::archive`] is configured, so this one call cleans
+    /// BOTH this registry's own two maps AND the archive's sibling
+    /// `window_versions` map — an app reached through the registry
+    /// (the common case: `ToastRegistry::with_archive`) cannot
+    /// half-clean by forgetting to also call the archive's method
+    /// separately. An app that constructs a bell against an archive
+    /// directly, with no registry in the picture, still needs to call
+    /// [`NotificationArchiveModel::forget_window`] itself — there is no
+    /// registry here to cascade from in that shape.
+    ///
+    /// Cascading unconditionally is safe for the one alternate shape
+    /// worth naming — an archive shared by two registries (e.g. two
+    /// independent toast surfaces mirroring into one combined log):
+    /// `NotificationArchiveModel::forget_window` only ever removes
+    /// `window_id`'s OWN entry, keyed by the same `BastydeWindowId`
+    /// both registries would use for that same physical window, and is
+    /// itself idempotent — so a second registry's teardown calling this
+    /// again for a window already forgotten by the first is just a
+    /// no-op, never a double-free or a removal of some other window's
+    /// state. There is no scenario where forgetting a window in one
+    /// registry should leave that SAME window's archive entry alive
+    /// for another registry to still consult.
     pub fn forget_window(&self, window_id: BastydeWindowId) {
         self.window_audiences.borrow_mut().remove(&window_id);
         self.window_versions.borrow_mut().remove(&window_id);
+        if let Some(archive) = &self.archive {
+            archive.forget_window(window_id);
+        }
     }
 
     /// Bump the legacy shared signal AND every per-window signal —
@@ -1058,5 +1074,95 @@ mod tests {
         // allocates a fresh one (documented behaviour, not a panic).
         let fresh = r.window_audience_signal(w);
         assert!(fresh.get().is_none(), "a re-created signal starts fresh, not with the old audience");
+    }
+
+    #[test]
+    fn forget_window_cascades_into_the_archive() {
+        // This is the test that would catch someone later
+        // "simplifying" the cascade away: forgetting a window through
+        // the registry must ALSO clean the archive's own per-window
+        // map, not just the registry's two maps. `window_versions` is
+        // private to each type, so this is proved behaviourally: get-
+        // or-create semantics mean a REMOVED entry comes back as a
+        // brand-new `Signal::new(0)`, while a surviving entry would
+        // still read back the value it was bumped to.
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let r = ToastRegistry::with_archive(ToastInstallOptions::default(), archive.clone());
+        let w = BastydeWindowId::new(1);
+
+        // Seed the ARCHIVE's own per-window entry, the way a real
+        // `NotificationCenterButton`/`NotificationLog` mounted in
+        // window `w` would by calling `archive.window_version_signal`
+        // directly (per `NotificationArchiveModel`'s doc comment,
+        // those widgets consume the archive, not the registry).
+        // `bump_version` only reaches entries already in the map, so
+        // without this the archive has no entry for `w` yet and the
+        // "sanity" push below would bump nothing.
+        let _ = archive.window_version_signal(w);
+        // A push through the registry mirrors into the archive,
+        // bumping the archive's per-window signal to a known nonzero
+        // value the way real usage would.
+        let (_h, _overflow) = r.enqueue(Toast::info(lit!("first")));
+        let stale = archive.window_version_signal(w);
+        assert_eq!(
+            stale.get(),
+            1,
+            "sanity: the mirrored push must have bumped the archive's per-window signal"
+        );
+
+        r.forget_window(w);
+
+        // If the cascade removed the archive's map entry, asking for
+        // the same window id again allocates a brand-new
+        // `Signal::new(0)`. If the cascade didn't happen, this would
+        // return the same stale signal still reading 1.
+        let after = archive.window_version_signal(w);
+        assert_eq!(
+            after.get(),
+            0,
+            "forget_window must cascade into the archive so a later lookup for the same window \
+             starts fresh, not stale"
+        );
+    }
+
+    #[test]
+    fn forget_window_cascade_stops_bump_version_from_touching_the_archives_forgotten_signal() {
+        // The throughput point, proved through the registry entry
+        // point apps actually call: forgetting a window must stop
+        // *both* `bump_version`s (registry's and archive's) from
+        // touching that window's signal, not merely free the memory.
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let r = ToastRegistry::with_archive(ToastInstallOptions::default(), archive.clone());
+        let w = BastydeWindowId::new(1);
+
+        let archive_sig = archive.window_version_signal(w);
+        assert_eq!(archive_sig.get(), 0);
+
+        r.forget_window(w);
+
+        // A toast pushed after forgetting mirrors into the archive
+        // (bumping the archive's `bump_version`) but must NOT reach
+        // the forgotten window's signal, even though this held clone
+        // keeps it alive.
+        let (_h, _overflow) = r.enqueue(Toast::info(lit!("after forget")));
+        assert_eq!(
+            archive_sig.get(),
+            0,
+            "the archive's bump_version must no longer iterate a window forgotten via the registry cascade"
+        );
+    }
+
+    #[test]
+    fn forget_window_without_an_archive_configured_does_not_panic() {
+        // Registries built via `new` (no archive) must cascade as a
+        // safe no-op, not unwrap a `None`.
+        let r = registry();
+        assert!(r.archive().is_none());
+        let w = BastydeWindowId::new(1);
+        let _ = r.window_version_signal(w);
+
+        r.forget_window(w);
+
+        assert!(!r.window_versions.borrow().contains_key(&w));
     }
 }
