@@ -295,7 +295,7 @@ impl Widget for ControlButton {
 /// [`ControlButton`]s. Each cell forwards taps to the supplied host.
 pub struct WindowControls {
     host: Rc<dyn PlatformTitleBarHost>,
-    is_maximized: Signal<bool>,
+    show_restore: Signal<bool>,
     /// User-supplied override for the close action — see
     /// [`crate::title_bar::TitleBar::close_action`].
     close_action: Option<CloseAction>,
@@ -313,17 +313,26 @@ impl std::fmt::Debug for WindowControls {
 }
 
 impl WindowControls {
-    /// Build the minimize / maximize / close cluster for the given platform host. `is_maximized`
-    /// drives the maximize ↔ restore glyph swap; `close_action` overrides the default
-    /// `ctx.close_window()` behaviour (e.g. to show a "save before closing?" dialog).
+    /// Build the minimize / maximize / close cluster for the given platform host.
+    ///
+    /// `show_restore` drives the maximize ↔ restore swap: `true` renders the
+    /// **Restore** affordance (a11y name and action), `false` the **Maximize**
+    /// one. It is deliberately not called `is_maximized`: a window is also
+    /// restorable — and must not offer "maximize" — while it is
+    /// [`WindowPlacement::Fullscreen`](bastyde_core::WindowPlacement::Fullscreen),
+    /// which `WindowPlacement::is_maximized` reports as `false`. See
+    /// [`crate::title_bar::TitleBar`]'s own derivation.
+    ///
+    /// `close_action` overrides the default `ctx.close_window()` behaviour (e.g.
+    /// to show a "save before closing?" dialog).
     pub fn new(
         host: Rc<dyn PlatformTitleBarHost>,
-        is_maximized: Signal<bool>,
+        show_restore: Signal<bool>,
         close_action: Option<CloseAction>,
     ) -> Self {
         Self {
             host,
-            is_maximized,
+            show_restore,
             close_action,
             root_child_id: None,
             layout_sink: None,
@@ -374,10 +383,22 @@ impl Widget for WindowControls {
         });
         let maximize_action: ControlAction = Rc::new(move |ctx| {
             if let Some(w) = ctx.window() {
-                let next = if w.placement().get().is_maximized() {
-                    bastyde_core::WindowPlacement::Floating
-                } else {
-                    bastyde_core::WindowPlacement::Maximized
+                use bastyde_core::WindowPlacement as P;
+                // Fullscreen restores, it does not maximize. Reading only
+                // `is_maximized()` here used to send a fullscreen window to
+                // `Maximized` — a state no command asked for, and one that
+                // silently drops fullscreen while an app-level "hide the
+                // chrome" mode keyed off it stays collapsed.
+                //
+                // Restoring to `Floating` (rather than to whatever the window
+                // was before it went fullscreen) is the framework's honest
+                // answer: `WindowState` keeps no pre-fullscreen memory. An app
+                // that wants "back to exactly where I was" owns that memory
+                // itself and should drive the transition through its own
+                // command rather than this button.
+                let next = match w.placement().get() {
+                    P::Maximized | P::Fullscreen => P::Floating,
+                    P::Floating | P::Minimized => P::Maximized,
                 };
                 w.placement().set(next);
             }
@@ -440,7 +461,7 @@ impl Widget for WindowControls {
         //   - the action (toggles correctly via `WindowState::placement`).
         // A future pass can swap the glyph for custom rect-primitive
         // icons to restore the visual delta.
-        let switcher_idx = self.is_maximized.map(|b| if *b { 1usize } else { 0usize });
+        let switcher_idx = self.show_restore.map(|b| if *b { 1usize } else { 0usize });
         let maximize_action_restore = maximize_action.clone();
         // Both Switcher children share the same external_hover
         // signal: only one is visible at a time, and the host

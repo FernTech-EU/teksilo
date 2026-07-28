@@ -38,6 +38,7 @@ use bastyde_core::widget::{
     WidgetTreeView,
 };
 use bastyde_core::widget_id::WidgetId;
+use bastyde_core::signal::Prop;
 use bastyde_core::{HitRegions, PlatformTitleBarHost, Signal};
 use bastyde_tokens::{Color, CornerRadius};
 
@@ -74,6 +75,20 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 /// controls (minimize / maximize / close) are rendered only when the host
 /// advertises [`PlatformTitleBarHost::renders_custom_controls`] — i.e. on
 /// Windows and Wayland but not on macOS.
+///
+/// ## This widget builds exactly once
+///
+/// `build` consumes the leading / center / trailing slots with `take()`, so a
+/// second pass finds them all `None` and produces a bar containing nothing but
+/// window controls — no menu, no title, no tools. Nothing here may therefore
+/// carry a [`BindingLevel::Rebuild`](bastyde_core::binding::BindingLevel)
+/// binding. Reactive state on this widget is expressed either as a
+/// `RepaintOnly` colour prop or, for structure, as dormancy via
+/// [`BuildContext::visible_when`] on an always-built child — which is how
+/// [`controls_visible`](TitleBar::controls_visible) works. Memoising the
+/// resolved slot ids is *not* a workaround: a rebuild replaces the inner row
+/// and prunes its subtree, so the cached ids dangle and re-adding them yields
+/// an empty bar just the same.
 pub struct TitleBar {
     host: Rc<dyn PlatformTitleBarHost>,
     leading: Option<PendingChild>,
@@ -95,6 +110,11 @@ pub struct TitleBar {
     /// per-button ids during build. `None` when no controls are
     /// rendered (macOS, where the OS draws traffic lights).
     controls_layout: Rc<Cell<Option<WindowControlsLayout>>>,
+    /// Whether the minimize/maximize/close cluster is shown, statically or
+    /// reactively. Applied with [`BuildContext::visible_when`] — **never** a
+    /// `Rebuild`-level binding. See [`TitleBar::controls_visible`] and
+    /// [`TitleBar`]'s own "builds once" note.
+    controls_visible: Prop<bool>,
 }
 
 impl std::fmt::Debug for TitleBar {
@@ -128,7 +148,35 @@ impl TitleBar {
             root_child_id: None,
             drag_region_id: Cell::new(None),
             controls_layout: Rc::new(Cell::new(None)),
+            controls_visible: Prop::Static(true),
         }
+    }
+
+    /// Show or hide the minimize / maximize / close cluster. Default `true`.
+    ///
+    /// Accepts a plain `bool` or a `Signal<bool>`. Applied through the
+    /// framework's own dormancy ([`BuildContext::visible_when`]), so a flip
+    /// costs a relayout and **never a rebuild** of the bar: a dormant node is
+    /// skipped by layout, hit-test, focus and paint, so a hidden cluster takes
+    /// no space and receives no input. A derived (`.map`) signal is fine —
+    /// binding resolves through to the mutable roots and never calls `observe`.
+    ///
+    /// The case this exists for is **fullscreen**.
+    /// [`WindowPlacement::Fullscreen`](bastyde_core::WindowPlacement::Fullscreen)
+    /// is documented as "covers the entire display, title bar and all chrome
+    /// hidden", and every desktop convention agrees: macOS hides the traffic
+    /// lights, Windows fullscreen has no caption buttons, browsers and editors
+    /// hide their chrome outright. Minimize and maximize are meaningless for a
+    /// window with no frame. An app drawing custom chrome
+    /// ([`DecorationsMode::CustomChrome`](bastyde_core::DecorationsMode)) owns
+    /// that decision itself, because the framework cannot hide a title bar the
+    /// app composed — so it gates it here.
+    ///
+    /// An app that hides these **must** keep some other visible way out of
+    /// fullscreen: a menu item, an on-screen button, or a documented shortcut.
+    pub fn controls_visible(mut self, visible: impl Into<Prop<bool>>) -> Self {
+        self.controls_visible = visible.into();
+        self
     }
 
     /// Set the title bar's logical-pixel height. Default: 40.
@@ -249,22 +297,40 @@ impl Widget for TitleBar {
         let drag_region_id = ctx.add(drag_region);
         self.drag_region_id.set(Some(drag_region_id));
 
-        // Derive the maximize signal from the hosting window's
+        // Derive the restore signal from the hosting window's
         // `WindowState::placement`. When no state is attached (standalone
         // / tests) fall back to a static `false`.
-        let is_maximized_signal = ctx
+        //
+        // `is_maximized() || is_fullscreen()`, not `is_maximized()` alone: a
+        // fullscreen window is restorable and must not be offered "maximize",
+        // which is meaningless for a window with no frame. See
+        // `WindowControls::new`'s `show_restore` doc.
+        let show_restore_signal = ctx
             .window()
-            .map(|w| w.placement().map(|p| p.is_maximized()))
+            .map(|w| w.placement().map(|p| p.is_maximized() || p.is_fullscreen()))
             .unwrap_or_else(|| Signal::new(false));
-        let controls: Option<WindowControls> = if renders_controls {
-            Some(
-                WindowControls::new(
-                    self.host.clone(),
-                    is_maximized_signal,
-                    self.close_action.clone(),
-                )
-                .layout_sink(self.controls_layout.clone()),
+        // The cluster is always *built* when the platform renders custom
+        // controls; `controls_visible` gates its **activity**, via the
+        // framework's own dormancy (`visible_when`), not by rebuilding.
+        //
+        // This is deliberate and load-bearing: `build` consumes its slots with
+        // `take()`, so it can only ever run once — a second pass would find
+        // leading/center/trailing all `None` and silently produce a bar with
+        // nothing in it but window controls. A `Rebuild`-level binding here did
+        // exactly that. `visible_when` binds at `Relayout` instead: a dormant
+        // node is skipped by layout, hit-test, focus and paint, so the cluster
+        // takes no space and receives no input while hidden, and comes back
+        // without the bar ever being rebuilt.
+        let controls_id: Option<WidgetId> = if renders_controls {
+            let controls = WindowControls::new(
+                self.host.clone(),
+                show_restore_signal,
+                self.close_action.clone(),
             )
+            .layout_sink(self.controls_layout.clone());
+            let id = ctx.add(controls);
+            ctx.visible_when(id, self.controls_visible.clone());
+            Some(id)
         } else {
             None
         };
@@ -302,8 +368,8 @@ impl Widget for TitleBar {
             row = row.child(FixedSize::new().width(trailing_inset.width).height(height));
         }
 
-        if let Some(controls) = controls {
-            row = row.child(controls);
+        if let Some(id) = controls_id {
+            row = row.add_child(id);
         }
 
         let root = ctx.add(row);
@@ -383,6 +449,16 @@ impl Widget for TitleBar {
                 // title-bar control in a `DeadZone` and it works on both layers.
                 collect_dead_zones(view, drag_id, drag_bounds, &mut regions.no_drag);
             }
+        }
+
+        // A hidden cluster publishes no control regions. The sink is populated
+        // at build time and survives the cluster going dormant, so without this
+        // guard Windows would keep returning `HTMINBUTTON`/`HTMAXBUTTON`/
+        // `HTCLOSE` for a strip of the caption that no longer has buttons in it
+        // — invisible controls, still clickable.
+        if !self.controls_visible.get() {
+            self.host.update_hit_regions(&regions);
+            return;
         }
 
         if let Some(layout) = self.controls_layout.take() {
@@ -605,6 +681,264 @@ mod tests {
             "maximize Switcher should expose 2 ControlButtons (□ + ❐), got {max_buttons:?}"
         );
         [inner_kids[0], max_buttons[0], inner_kids[2]]
+    }
+
+    /// Whether the control cluster is currently *live* — built and active.
+    ///
+    /// Deliberately not a child count: the cluster is always built, and
+    /// `controls_visible` parks it dormant rather than removing it. Counting
+    /// children would report it present in both states.
+    fn controls_are_live(tree: &WidgetTree, bar: WidgetId) -> bool {
+        let row = tree.children(bar)[0];
+        tree.children(row)
+            .last()
+            .is_some_and(|&id| tree.is_active(id) && tree.bounds(id).width > 0.0)
+    }
+
+    /// Build a bar over a real `WindowState` at `placement`, so `ctx.window()`
+    /// resolves and the restore/maximize derivation is exercised for real
+    /// rather than falling back to its no-window `false`.
+    fn tree_at_placement(placement: bastyde_core::WindowPlacement) -> (WidgetTree, WidgetId) {
+        use crate::primitives::VStack;
+        use bastyde_core::window::WindowState;
+        use bastyde_core::{BastydeWindowId, WindowStateInit};
+
+        let host = Rc::new(TestHost::default());
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        tree.set_window_state(WindowState::new(WindowStateInit {
+            id: BastydeWindowId::new(1),
+            string_id: Some("w1".to_string()),
+            placement,
+            title: "Test".to_string(),
+            size: (900, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        }));
+        let bar_id = tree.add(TitleBar::new(host as Rc<dyn PlatformTitleBarHost>).height(40.0));
+        let body_id = tree.add(Expand::new());
+        let _root = tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .add_child(bar_id)
+                .add_child(body_id),
+        );
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        (tree, bar_id)
+    }
+
+    /// The maximize slot's *visible* page: its index (0 = Maximize,
+    /// 1 = Restore) and its `WidgetId`. Read off which Switcher child is
+    /// active rather than off the glyph, since both pages deliberately draw
+    /// the same `□`.
+    ///
+    /// The id matters as much as the index: `locate_control_buttons` always
+    /// returns page 0, so clicking *that* in a state where page 1 is showing
+    /// hits an inactive widget and silently does nothing.
+    fn visible_maximize_page(tree: &WidgetTree, bar: WidgetId) -> (usize, WidgetId) {
+        let row = tree.children(bar)[0];
+        let controls = tree.children(row)[1];
+        let inner = tree.children(controls)[0];
+        let switcher = tree.children(inner)[1];
+        let pages = tree.children(switcher);
+        pages
+            .iter()
+            .enumerate()
+            .find(|&(_, &p)| tree.is_active(p))
+            .map(|(i, &p)| (i, p))
+            .expect("one maximize page must be active")
+    }
+
+    /// **Rebuilding a `TitleBar` must not eat its slots.**
+    ///
+    /// `build` used to `take()` leading/center/trailing, so it worked exactly
+    /// once. Nothing bound the bar at `Rebuild` level, so nothing ever rebuilt
+    /// it and the bug was unreachable — until `controls_visible` added the
+    /// first such binding, at which point the very first fullscreen toggle
+    /// emptied the bar of its menu, title and tools while leaving the window
+    /// controls (which *are* rebuilt each pass) in place.
+    ///
+    /// Driven through the real `controls_visible` binding rather than a
+    /// synthetic rebuild: that is the path that broke, and a test that forced
+    /// a rebuild some other way could pass while the shipping one still ate
+    /// the slots.
+    #[test]
+    fn rebuilding_keeps_the_leading_and_trailing_slots() {
+        use crate::primitives::VStack;
+        use crate::TextWidget;
+        use bastyde_i18n::lit;
+
+        let host = Rc::new(TestHost::default());
+        let visible = Signal::new(true);
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        let bar = tree.add(
+            TitleBar::new(host as Rc<dyn PlatformTitleBarHost>)
+                .height(40.0)
+                .leading(TextWidget::new(lit!("MENU")))
+                .center(TextWidget::new(lit!("TITLE")))
+                .trailing(TextWidget::new(lit!("TOOLS")))
+                .controls_visible(visible.clone()),
+        );
+        let body = tree.add(Expand::new());
+        let _root = tree.add(VStack::new().spacing(0.0).add_child(bar).add_child(body));
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+
+        // row = [leading, drag_region, trailing, controls]. Asserted as a shape
+        // plus the drag region's width, because that is exactly what the real
+        // failure looked like: the row collapsed to the three 46 px control
+        // cells (138 px total), with the spacer and both slots gone, so the
+        // buttons ended up flush LEFT against an otherwise empty bar.
+        let shape = |t: &WidgetTree| {
+            let row = t.children(bar)[0];
+            let kids = t.children(row);
+            let drag_w = kids.get(1).map(|&id| t.bounds(id).width).unwrap_or(0.0);
+            (kids.len(), drag_w > 0.0, t.bounds(row).width)
+        };
+
+        let (n, drag_fills, row_w) = shape(&tree);
+        assert_eq!(n, 4, "leading + drag + trailing + controls");
+        assert!(drag_fills, "the drag region is a spacer and must have width");
+        assert!((row_w - 900.0).abs() < 1.0, "row spans the bar: {row_w}");
+
+        // Toggle the gate, twice, in both directions.
+        visible.set(false);
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(
+            !controls_are_live(&tree, bar),
+            "the cluster parks when the gate goes false"
+        );
+        let (n, drag_fills, row_w) = shape(&tree);
+        assert_eq!(n, 4, "the cluster parks, it is not removed");
+        assert!(drag_fills && (row_w - 900.0).abs() < 1.0, "slots intact");
+
+        visible.set(true);
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(controls_are_live(&tree, bar), "and comes back");
+        let (n, drag_fills, row_w) = shape(&tree);
+        assert_eq!(
+            n, 4,
+            "the leading/center/trailing slots must survive a gate flip — \
+             `build` consumes them, so anything that rebuilds this bar empties it"
+        );
+        assert!(drag_fills && (row_w - 900.0).abs() < 1.0, "slots still intact");
+    }
+
+    #[test]
+    fn controls_visible_false_parks_the_cluster() {
+        let host = Rc::new(TestHost::default());
+        let (tree, bar) = build_realistic_tree(host, |b| b.controls_visible(false));
+        assert!(
+            !controls_are_live(&tree, bar),
+            "controls_visible(false) must leave the cluster dormant and zero-width"
+        );
+    }
+
+    #[test]
+    fn controls_visible_defaults_to_showing_them() {
+        let host = Rc::new(TestHost::default());
+        let (tree, bar) = build_realistic_tree(host, |b| b);
+        assert!(controls_are_live(&tree, bar), "default is shown");
+    }
+
+    /// A bound gate flips a MOUNTED bar in both directions. The two tests above
+    /// each build a fresh bar, so they would pass even if the gate were read
+    /// once and frozen — this is the path an app takes when it enters and
+    /// leaves fullscreen with the bar already on screen.
+    #[test]
+    fn controls_visible_flips_a_mounted_bar_both_ways() {
+        use crate::primitives::VStack;
+        let host = Rc::new(TestHost::default());
+        let visible = Signal::new(true);
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        let bar = tree.add(
+            TitleBar::new(host as Rc<dyn PlatformTitleBarHost>)
+                .height(40.0)
+                .controls_visible(visible.clone()),
+        );
+        let body = tree.add(Expand::new());
+        let _root = tree.add(VStack::new().spacing(0.0).add_child(bar).add_child(body));
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(controls_are_live(&tree, bar), "starts shown");
+
+        visible.set(false);
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(
+            !controls_are_live(&tree, bar),
+            "hiding must park the cluster on a mounted bar"
+        );
+
+        visible.set(true);
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(
+            controls_are_live(&tree, bar),
+            "and a hidden cluster must still learn to come back"
+        );
+    }
+
+    /// Fullscreen offers **Restore**, not Maximize. `WindowPlacement::is_maximized`
+    /// reports `false` in `Fullscreen`, so reading it alone used to render the
+    /// Maximize affordance over a window that has no frame to maximize.
+    #[test]
+    fn fullscreen_shows_the_restore_page_not_maximize() {
+        use bastyde_core::WindowPlacement as P;
+        let (tree, bar) = tree_at_placement(P::Floating);
+        assert_eq!(
+            visible_maximize_page(&tree, bar).0,
+            0,
+            "floating offers Maximize"
+        );
+
+        let (tree, bar) = tree_at_placement(P::Maximized);
+        assert_eq!(
+            visible_maximize_page(&tree, bar).0,
+            1,
+            "maximized offers Restore"
+        );
+
+        let (tree, bar) = tree_at_placement(P::Fullscreen);
+        assert_eq!(
+            visible_maximize_page(&tree, bar).0,
+            1,
+            "fullscreen must offer Restore — maximize is meaningless there"
+        );
+    }
+
+    /// ...and activating it from fullscreen restores, rather than sending the
+    /// window to `Maximized` — a state no command asked for, and one that
+    /// silently drops fullscreen while an app-level mode keyed off it stays on.
+    #[test]
+    fn activating_restore_from_fullscreen_leaves_fullscreen() {
+        use bastyde_core::WindowPlacement as P;
+        let (mut tree, bar) = tree_at_placement(P::Fullscreen);
+        let (_, restore) = visible_maximize_page(&tree, bar);
+        let b = tree.bounds(restore);
+        let centre = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+        tree.pointer_down_button(centre, PointerButton::Primary);
+        tree.pointer_up_button(centre, PointerButton::Primary);
+
+        let placement = tree
+            .window_state()
+            .expect("window state attached")
+            .placement()
+            .get();
+        assert_eq!(
+            placement,
+            P::Floating,
+            "restore from fullscreen must not land on Maximized"
+        );
     }
 
     #[test]
