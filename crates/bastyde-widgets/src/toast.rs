@@ -542,9 +542,39 @@ impl Toast {
     // ----- Update-in-place identity -----
 
     /// Stable identity for the "progress toast updates in place"
-    /// pattern. Two toasts presented with the same id reuse the same
-    /// slot (mutation hooks are not yet implemented; the id is captured
-    /// and archived but each present allocates a new slot).
+    /// pattern. A subsequent `enqueue` whose `Toast` carries the same
+    /// `id` as a still-live entry mutates that entry's fields
+    /// (severity, title/body, route, …) in place instead of appending
+    /// a new toast — see `ToastRegistry::enqueue`'s update-in-place
+    /// merge for the exact behaviour.
+    ///
+    /// # Hazard: this id must be unique per logical operation, not just per call site
+    ///
+    /// The merge matches on `id` ALONE — no route/window/audience
+    /// check — and then OVERWRITES the existing entry's route with
+    /// the new toast's resolved target. That's intentional: it's what
+    /// lets a progress toast whose audience becomes known partway
+    /// through retarget itself in place. But it also means that if
+    /// TWO DIFFERENT windows (or two different audiences) each
+    /// present a toast using the SAME `id` for what are, to the app,
+    /// two DIFFERENT operations, the second `enqueue` finds the
+    /// first window's still-live entry, mutates its text/severity to
+    /// the second operation's, and steals its route out from under
+    /// it — the first window's toast is not dismissed, not
+    /// callback'd, just silently overwritten and gone, while the
+    /// second window's operation ends up displayed under the wrong
+    /// route besides.
+    ///
+    /// bastyde deliberately does NOT make the dedup key route-aware
+    /// (matching on `(id, route)` together) — that would break the
+    /// intentional retargeting case above. So in a multi-window /
+    /// multi-document app, do not reuse one static string id across
+    /// windows for what is conceptually a per-document (or otherwise
+    /// per-audience) operation — export, delete, save, etc. Fold the
+    /// document/audience identity into the id yourself, e.g.
+    /// `format!("export-{work_id}")` rather than a bare `"export"`
+    /// constant, so two windows running the same *kind* of operation
+    /// on two different documents never collide on one entry.
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self

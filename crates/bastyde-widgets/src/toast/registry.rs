@@ -280,6 +280,58 @@ impl ToastRegistry {
         self.window_audience_signal(window_id).set(audience);
     }
 
+    /// Drop `window_id`'s entries from BOTH per-window maps
+    /// ([`Self::window_audiences`] and [`Self::window_versions`]).
+    /// Call this from the app's window-teardown hook — the same place
+    /// that tears down the `ToastHost` mounted in that window.
+    ///
+    /// **`set_window_audience(window_id, None)` is NOT a substitute.**
+    /// That call only overwrites the signal's *value*; the map entry
+    /// (and the `Signal`'s backing `Rc<RefCell<..>>` allocation) stays
+    /// alive. Without a call to `forget_window`, every window ever
+    /// opened for the life of the process leaves one live `Signal` in
+    /// each map behind forever — an unbounded leak in exactly the
+    /// shape a long-running, multi-window app has (open/close windows
+    /// repeatedly across a session).
+    ///
+    /// Safe even if some other code still holds a clone of the
+    /// removed `Signal`: a `Signal` is `Rc<RefCell<..>>` under the
+    /// hood, so dropping the registry's map entry only drops *this*
+    /// reference to it — any clone a still-alive holder kept keeps
+    /// reading/writing exactly as before, unaffected by the map
+    /// removal (`Rc` content doesn't disappear just because one owner
+    /// let go of it). The only real hazard is calling this too early:
+    /// [`Self::window_audience_signal`] / [`Self::window_version_signal`]
+    /// are get-or-create, so if the torn-down window's own `ToastHost`
+    /// (or any other live widget) calls either accessor again AFTER
+    /// `forget_window`, it transparently allocates a brand-new
+    /// `Signal::new(_)` under the same key rather than erroring — fine
+    /// for a window that is genuinely gone (nothing is bound to the
+    /// discarded signal any more, so no rebuild is missed), but it
+    /// means this must be called from teardown itself, not from a
+    /// handler the window's own event loop might still reach
+    /// afterwards.
+    ///
+    /// Idempotent: forgetting a window id that was never registered
+    /// (or was already forgotten) is a safe no-op — `HashMap::remove`
+    /// on a missing key does nothing.
+    ///
+    /// This cleans only the two maps this registry owns. A sibling
+    /// per-window map lives on
+    /// [`NotificationArchiveModel`](crate::notification::NotificationArchiveModel)
+    /// (reachable from here via [`Self::archive`]) — its own
+    /// `window_versions`, consulted directly by `NotificationLog` /
+    /// `NotificationCenterButton` rather than through this registry.
+    /// It has no forget API of its own today, so an app that mounts
+    /// those widgets per-window still needs an equivalent cleanup for
+    /// that model (or a future symmetrical method there) alongside
+    /// this call — `forget_window` does not reach into `self.archive`
+    /// on your behalf.
+    pub fn forget_window(&self, window_id: BastydeWindowId) {
+        self.window_audiences.borrow_mut().remove(&window_id);
+        self.window_versions.borrow_mut().remove(&window_id);
+    }
+
     /// Bump the legacy shared signal AND every per-window signal —
     /// see [`Self::window_version_signal`] for why a single shared
     /// bump cannot, by itself, reliably reach more than one window.
@@ -906,5 +958,105 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    // ----- F3: `forget_window` -----
+
+    #[test]
+    fn forget_window_removes_entries_from_both_maps() {
+        let r = registry();
+        let w = BastydeWindowId::new(1);
+
+        // Populate both maps the way real usage would: a `ToastHost`
+        // binding to the rebuild signal, and app code assigning an
+        // audience.
+        let _ = r.window_version_signal(w);
+        r.set_window_audience(w, Some(ToastAudience::new(42)));
+
+        assert!(r.window_audiences.borrow().contains_key(&w));
+        assert!(r.window_versions.borrow().contains_key(&w));
+
+        r.forget_window(w);
+
+        assert!(
+            !r.window_audiences.borrow().contains_key(&w),
+            "forget_window must remove the window's audience-map entry"
+        );
+        assert!(
+            !r.window_versions.borrow().contains_key(&w),
+            "forget_window must remove the window's version-map entry"
+        );
+    }
+
+    #[test]
+    fn forget_window_on_an_unknown_window_is_a_safe_no_op() {
+        let r = registry();
+        let known = BastydeWindowId::new(1);
+        let unknown = BastydeWindowId::new(999);
+        r.set_window_audience(known, Some(ToastAudience::new(7)));
+
+        // Forgetting a window that was never registered must not
+        // panic and must not disturb any other window's entries.
+        r.forget_window(unknown);
+
+        assert!(
+            r.window_audiences.borrow().contains_key(&known),
+            "an unrelated window's entry must survive forgetting a different, unknown window"
+        );
+
+        // Forgetting it twice (idempotent teardown, or a duplicate
+        // teardown hook call) is equally a safe no-op.
+        r.forget_window(known);
+        r.forget_window(known);
+        assert!(!r.window_audiences.borrow().contains_key(&known));
+    }
+
+    #[test]
+    fn forgetting_a_windows_audience_does_not_panic_a_still_live_toast_routed_to_it() {
+        // Reproduces the exact shape `forget_window` must handle
+        // safely: a window is torn down (and forgotten) while a toast
+        // that was routed to its audience is still live in the queue.
+        // Nothing about tearing down the window's map entries should
+        // reach into, or otherwise disturb, unrelated live entries —
+        // the entry keeps existing with its already-resolved route
+        // until something explicitly dismisses it.
+        let r = registry();
+        let w = BastydeWindowId::new(1);
+        let audience = ToastAudience::new(11);
+        r.set_window_audience(w, Some(audience));
+
+        let (_handle, overflow) = r.enqueue(Toast::info(lit!("still going")).target(audience));
+        assert!(overflow.is_none());
+        assert_eq!(r.live_count(), 1);
+
+        // The window closes: app code forgets it.
+        r.forget_window(w);
+
+        // The live entry (already routed to the audience, independent
+        // of the now-removed per-window map entries) is untouched.
+        assert_eq!(
+            r.live_count(),
+            1,
+            "forgetting the window must not evict or otherwise touch live entries"
+        );
+        let eid = r.live_entry_ids()[0];
+        r.with_entry(eid, |e| {
+            assert_eq!(e.route, ToastRoute::Audience(audience));
+        })
+        .unwrap();
+
+        // A further enqueue against the now-forgotten window's old
+        // audience still works fine (routing lives on the entry /
+        // resolved at enqueue time, not on the per-window maps) —
+        // proves nothing panics or gets corrupted by the map removal.
+        let (_h2, overflow2) = r.enqueue(Toast::info(lit!("another one")).target(audience));
+        assert!(overflow2.is_none());
+        assert_eq!(r.live_count(), 2);
+
+        // And re-deriving a signal for the forgotten window id after
+        // the fact is safe too — get-or-create transparently
+        // allocates a fresh one (documented behaviour, not a panic).
+        let fresh = r.window_audience_signal(w);
+        assert!(fresh.get().is_none(), "a re-created signal starts fresh, not with the old audience");
     }
 }
