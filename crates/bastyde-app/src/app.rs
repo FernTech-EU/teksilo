@@ -429,9 +429,31 @@ impl IdleTrace {
     }
 }
 
+/// An app-supplied router for [`AppEvent::External`] payloads that need to
+/// perform **window operations** — open a window, focus one, look one up by its
+/// string id.
+///
+/// Registered with [`BastydeAppBuilder::on_external_with_ctx`]. Returns `true`
+/// to say "this payload was mine"; `false` leaves it unclaimed.
+///
+/// The plain [`on_app_event`](BastydeAppBuilder::on_app_event) hook receives only
+/// `&AppEvent` — no tree, no [`WindowOps`](bastyde_core::WindowOps) — so a handler
+/// there cannot call `open_window` at all: `EventContext::open_window` panics on a
+/// standalone context. This one runs against a real window's tree with a real ops
+/// sink, which is what makes the multi-window recipes in `docs/multi-window.md`
+/// reachable from a background thread (a single-instance app's IPC listener being
+/// the motivating case: a second launch forwards its command line and the running
+/// process opens the document window).
+pub type ExternalCtxHandler =
+    Box<dyn FnMut(&(dyn std::any::Any + Send), &mut bastyde_core::widget::EventContext) -> bool>;
+
 struct BastydeAppHandler {
     wm: WindowManager,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
+    /// App-supplied `AppEvent::External` router with window ops — see
+    /// [`ExternalCtxHandler`]. Consulted only for payloads no framework router
+    /// and no built-in downcast arm claimed.
+    external_ctx_handler: Option<ExternalCtxHandler>,
     initial_window: Option<WindowConfig>,
     initial_created: bool,
     idle_budget: Duration,
@@ -493,6 +515,7 @@ impl BastydeAppHandler {
         Self {
             wm,
             app_event_handler,
+            external_ctx_handler: None,
             initial_window: Some(initial_window),
             initial_created: false,
             idle_budget: Duration::from_millis(4),
@@ -1142,6 +1165,51 @@ impl BastydeAppHandler {
         }
 
         self.wm.reinsert_managed(winit_id, current);
+    }
+
+    /// Last stop for an `AppEvent::External` payload: hand it to the app's own
+    /// [`ExternalCtxHandler`] (if one was registered) with a live
+    /// [`EventContext`](bastyde_core::widget::EventContext), so it can open,
+    /// find and focus windows.
+    ///
+    /// **Target window** = the focused one, else the primary — the same
+    /// resolution [`try_route_automation_payload`](Self::try_route_automation_payload)
+    /// uses. The handler is about *application*-level intent ("open this
+    /// document"), so which window hosts the context is an implementation
+    /// detail; it just has to be a real one, because `open_window` on a
+    /// standalone context panics.
+    ///
+    /// The handler is `take`n for the duration of the call and put back
+    /// afterwards: [`run_in_window`](Self::run_in_window) needs `&mut self`, and
+    /// the handler lives on `self`. Re-entrancy (a handler whose body somehow
+    /// pumps another external event) therefore sees `None` and is a no-op rather
+    /// than a double borrow.
+    ///
+    /// No window open (the instant between the last close and loop exit) is a
+    /// silent no-op — there is nowhere to mint a context from.
+    fn route_external_with_ctx(
+        &mut self,
+        payload: &(dyn std::any::Any + Send),
+        event_loop: &ActiveEventLoop,
+    ) {
+        let Some(mut handler) = self.external_ctx_handler.take() else {
+            return;
+        };
+        let target = self
+            .wm
+            .iter()
+            .find(|m| m.focused)
+            .map(|m| m.bastyde_id)
+            .unwrap_or_else(|| self.wm.primary_window_id());
+        if let Some(winit_id) = self.wm.winit_id_for_bastyde(target) {
+            let handler = &mut handler;
+            self.run_in_window(winit_id, event_loop, move |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    handler(payload, ctx);
+                });
+            });
+        }
+        self.external_ctx_handler = Some(handler);
     }
 
     /// Try to route an `AppEvent::External` payload as a
@@ -2547,6 +2615,17 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                     Some(payload) => self.try_route_automation_payload(payload, event_loop).err(),
                 };
                 if let Some(payload) = payload {
+                    // Did one of the framework's own built-in arms below claim
+                    // it? Only what is left over is offered to the app's
+                    // `on_external_with_ctx` router (see
+                    // `route_external_with_ctx`). The framework arms run FIRST,
+                    // so an app router that returns `true` too eagerly can never
+                    // swallow a `CloseWindowRequest` or a title-bar synthetic
+                    // event; and because the answer is the chain's own trailing
+                    // `else`, a built-in arm added later is withheld from the
+                    // app router automatically — there is no second list of
+                    // "framework-owned types" to keep in step.
+                    let mut consumed = true;
                     {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
                             // Custom-chrome (Bastyde-drawn) title-bar close
@@ -2609,7 +2688,12 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                             {
                                 managed.tree.mark_all_needs_paint_only();
                             }
+                        } else {
+                            consumed = false;
                         }
+                    }
+                    if !consumed {
+                        self.route_external_with_ctx(&*payload, event_loop);
                     }
                 }
             }
@@ -2761,6 +2845,7 @@ pub struct BastydeAppBuilder {
     #[cfg(feature = "text")]
     font_registrars: Vec<Box<dyn bastyde_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
+    external_ctx_handler: Option<ExternalCtxHandler>,
     on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
     /// Type-erased adapter for the application's backend event source.
@@ -2821,6 +2906,7 @@ impl BastydeAppBuilder {
             #[cfg(feature = "text")]
             font_registrars: Vec::new(),
             app_event_handler: None,
+            external_ctx_handler: None,
             on_ready: Vec::new(),
             initial_window: None,
             event_source: None,
@@ -3187,6 +3273,55 @@ impl BastydeAppBuilder {
     /// Register a handler for `AppEvent`s received from background threads.
     pub fn on_app_event(mut self, handler: impl FnMut(&AppEvent) + 'static) -> Self {
         self.app_event_handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Register a router for [`AppEvent::External`] payloads that needs to
+    /// **open, find or focus windows** — see [`ExternalCtxHandler`].
+    ///
+    /// [`on_app_event`](Self::on_app_event) is the hook for reacting to an event;
+    /// this is the hook for *acting on the window set* because of one. The
+    /// difference is not stylistic: `on_app_event` receives `&AppEvent` and
+    /// nothing else, and `EventContext::open_window` panics on a standalone
+    /// context, so there is no way to open a window from there at all.
+    ///
+    /// The handler runs against the focused window's tree (or the primary
+    /// window's) with a real [`WindowOps`](bastyde_core::WindowOps) sink, and is
+    /// consulted **only** for payloads that no framework router and no built-in
+    /// downcast arm claimed — so it never has to defend against
+    /// `CloseWindowRequest` and friends. Return `true` when the payload was
+    /// yours.
+    ///
+    /// Unlike [`register_app_event_observer`](Self::register_app_event_observer),
+    /// this is a single slot: calling it twice replaces the first router, the
+    /// same way `on_app_event` does.
+    ///
+    /// ```ignore
+    /// // A single-instance app: a second launch forwards its argv over a socket,
+    /// // the listener posts it with `AppEventProxy::send_external`, and this
+    /// // opens (or raises) the document window — the "document window" recipe in
+    /// // docs/multi-window.md, driven from off the UI thread.
+    /// .on_external_with_ctx(move |payload, ctx| {
+    ///     let Some(req) = payload.downcast_ref::<OpenDocument>() else {
+    ///         return false;
+    ///     };
+    ///     let wid = window_id_for(&req.path);
+    ///     match ctx.find_window(&wid) {
+    ///         Some(id) => ctx.focus_window(id),
+    ///         None => { ctx.open_window(document_window_config(&req.path)); }
+    ///     }
+    ///     true
+    /// })
+    /// ```
+    pub fn on_external_with_ctx(
+        mut self,
+        handler: impl FnMut(
+            &(dyn std::any::Any + Send),
+            &mut bastyde_core::widget::EventContext,
+        ) -> bool
+        + 'static,
+    ) -> Self {
+        self.external_ctx_handler = Some(Box::new(handler));
         self
     }
 
@@ -3649,6 +3784,11 @@ impl BastydeAppBuilder {
             settings_watcher,
             proxy.clone(),
         );
+        // Hand over the app's own ops-bearing external-event router, if any —
+        // moved onto the handler after construction (like `loop_tick` below)
+        // rather than threaded through `BastydeAppHandler::new`'s already long
+        // parameter list.
+        app.external_ctx_handler = self.external_ctx_handler;
         // Hand over any registered loop-tick hook (e.g. the `bastyde-async`
         // executor poll). Async-agnostic: just a closure + a poll flag.
         app.loop_tick = self.loop_tick;
@@ -3897,6 +4037,62 @@ mod tests {
         assert!(
             *observer_fired.borrow(),
             "the registered observer must also fire"
+        );
+    }
+
+    /// `on_external_with_ctx` is a third, independent slot: registering it must
+    /// not disturb `on_app_event`'s handler or the composable observers, and
+    /// they must not disturb it. Same shape (and same limitation) as the test
+    /// above — driving the real `ApplicationHandler::user_event` needs a live
+    /// winit event loop, so this proves slot independence and the router's own
+    /// claim contract; that it truly receives a window-capable `EventContext`
+    /// is proven end-to-end by Skribisto's `scripts/automation_single_instance.py`.
+    #[test]
+    fn on_external_with_ctx_is_a_slot_of_its_own() {
+        use crate::app_event_observers::AppEventObservers;
+
+        let mut builder = BastydeAppBuilder::new()
+            .on_external_with_ctx(|_payload, _ctx| true)
+            .on_app_event(|_event| {})
+            .register_app_event_observer(|_event| {});
+
+        assert!(
+            builder.external_ctx_handler.is_some(),
+            "the external router must survive a later on_app_event/observer registration"
+        );
+        assert!(
+            builder.app_event_handler.is_some(),
+            "on_app_event must survive on_external_with_ctx"
+        );
+        assert!(
+            builder
+                .app_state_registry
+                .get(&TypeId::of::<AppEventObservers>())
+                .is_some(),
+            "observers must survive on_external_with_ctx"
+        );
+
+        // Single slot, like `on_app_event`: registering twice replaces.
+        let builder = builder.on_external_with_ctx(|_payload, _ctx| false);
+        let mut router = builder
+            .external_ctx_handler
+            .expect("the second registration is the live one");
+        // Exercise the claim contract — the `bool` `user_event` branches on to
+        // decide whether the payload was the app's — through a real, headless
+        // `EventContext`. `NoopWindowOps` is the same sink `window_manager`'s
+        // own close-guard tests use; the live `WindowOpsImpl` only arrives with
+        // a winit event loop.
+        let mut tree = bastyde_core::WidgetTree::new();
+        let mut claimed = true;
+        tree.run_with_event_context(
+            &mut bastyde_core::NoopWindowOps,
+            |ctx: &mut bastyde_core::widget::EventContext| {
+                claimed = router(&42i32, ctx);
+            },
+        );
+        assert!(
+            !claimed,
+            "the replacing router's answer is the one that decides"
         );
     }
 

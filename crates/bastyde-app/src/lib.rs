@@ -11,7 +11,10 @@ pub mod window_config;
 pub mod window_manager;
 pub(crate) mod window_persist;
 
-pub use app::{AppEventProxy, BastydeAppBuilder, HeadlessApp, SyntheticImeInject, ThemeMode};
+pub use app::{
+    AppEventProxy, BastydeAppBuilder, ExternalCtxHandler, HeadlessApp, SyntheticImeInject,
+    ThemeMode,
+};
 pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
 pub use automation_bridge::BastydeAppBuilderAutomationExt;

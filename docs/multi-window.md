@@ -401,6 +401,55 @@ Nothing is deferred.
 })
 ```
 
+**Opening a window from a background thread** (`on_external_with_ctx`):
+
+Both recipes above run inside a handler, where an `EventContext` already
+exists. A background thread has none — and neither does
+`BastydeAppBuilder::on_app_event`, which receives `&AppEvent` and nothing
+else, so `ctx.open_window` is simply not reachable from there (calling it on
+a standalone context panics: "open_window called outside of a dispatch").
+
+`on_external_with_ctx` is the hook for that case. It is offered every
+`AppEvent::External` payload that no framework router claimed, together with
+a live `EventContext` minted from the focused window (or the primary one),
+and returns `true` when the payload was the app's:
+
+```rust
+// A single-instance app. The second launch forwards its argv over a socket
+// and exits; this process's listener thread posts it with
+// `AppEventProxy::send_external`, and the "document window" recipe above
+// runs against the resulting context.
+BastydeAppBuilder::new()
+    .on_ready(spawn_ipc_listener)          // background thread → send_external
+    .on_external_with_ctx(move |payload, ctx| {
+        let Some(req) = payload.downcast_ref::<OpenDocument>() else {
+            return false;                  // not ours — leave it unclaimed
+        };
+        let wid = format!("doc:{}", req.path.display());
+        match ctx.find_window(&wid) {
+            Some(id) => ctx.focus_window(id),
+            None => { ctx.open_window(document_window_config(&req.path)); }
+        }
+        true
+    })
+```
+
+Notes:
+
+- Framework payload types (file-dialog results, async completions, native-menu
+  choices, `CloseWindowRequest`, title-bar synthetics, `RepaintWindowRequest`)
+  are handled *before* this hook and never reach it, so it never has to
+  defend against them.
+- It is a **single slot**, like `on_app_event` — a second call replaces the
+  first. For fan-out use `register_app_event_observer`, which composes (but
+  gets no context).
+- With no window open there is nowhere to mint a context from, and the call
+  is silently skipped.
+- On Wayland, a launcher that hands you an `XDG_ACTIVATION_TOKEN` should have
+  it forwarded in the payload and applied via
+  `WindowState::set_activation_token` before `focus()`, or the compositor
+  treats the raise as unsolicited.
+
 **Cross-window read** (dim the inspector when the main window is
 fullscreen):
 
