@@ -390,13 +390,42 @@ impl Widget for CodeEditor {
             st.frame_wake_at = Some(ctx.wake_at_handle());
             st.self_id = Some(ctx.self_id());
         }
-        ctx.request_frame();
+        // Same dormancy discipline as `RichTextEditor` / `TextInputField`: a
+        // code or plain-text editor parked in a non-selected Switcher branch
+        // must not keep the event loop awake. `PlainTextEditor` is a thin
+        // wrap of this widget, so it inherits the gate for free.
+        let activation = ctx.activation_signal(ctx.self_id());
+        if activation.get() {
+            ctx.request_frame();
+        }
 
-        // Frame-tick effect: drain events, blink, lay out, publish metrics.
         {
             let state = self.state.clone();
+            ctx.effect(&activation, move |&active| {
+                if active {
+                    return;
+                }
+                let mut st = state.borrow_mut();
+                if st.has_focus {
+                    st.has_focus = false;
+                    st.focus_signal.set_if_changed(false);
+                }
+                st.caret_visible.set_if_changed(false);
+                st.blink.reset();
+            });
+        }
+
+        // Frame-tick effect: drain events, blink, lay out, publish metrics.
+        // Skipped while dormant so multi-tab / multi-page hosts do not pay
+        // O(open editors) per wake for surfaces nobody can see.
+        {
+            let state = self.state.clone();
+            let active = activation.clone();
             let tick_signal = ctx.frame_tick();
             ctx.effect(&tick_signal, move |delta| {
+                if !active.get() {
+                    return;
+                }
                 let mut st = state.borrow_mut();
                 let more = super::frame_loop::tick(&mut st, *delta);
                 if more && let Some(handle) = &st.frame_request {
@@ -406,14 +435,16 @@ impl Widget for CodeEditor {
         }
 
         // Window-active effect: hide the caret synchronously on deactivation
-        // (the loop may not tick while the window is inactive).
+        // (the loop may not tick while the window is inactive). Re-arm the
+        // frame loop only while this editor is itself active.
         {
             let state = self.state.clone();
+            let active = activation.clone();
             let wa_signal = ctx.window_active_signal();
-            ctx.effect(&wa_signal, move |&active| {
+            ctx.effect(&wa_signal, move |&window_active| {
                 let mut st = state.borrow_mut();
-                st.window_active = active;
-                if active {
+                st.window_active = window_active;
+                if window_active {
                     let show =
                         st.has_focus && !matches!(st.policy.caret_policy, CaretPolicy::Hidden);
                     if show {
@@ -424,7 +455,9 @@ impl Widget for CodeEditor {
                     st.caret_visible.set_if_changed(false);
                     st.blink.reset();
                 }
-                if let Some(handle) = &st.frame_request {
+                if active.get()
+                    && let Some(handle) = &st.frame_request
+                {
                     handle.set(true);
                 }
             });

@@ -216,13 +216,38 @@ impl Widget for LogView {
             st.frame_wake_at = Some(ctx.wake_at_handle());
             st.self_id = Some(ctx.self_id());
         }
-        ctx.request_frame();
+        // Same dormancy discipline as `CodeEditor` / `RichTextEditor`: a log
+        // view parked in a non-selected Switcher branch must not keep the
+        // event loop awake via its streaming tick or window-active re-arm.
+        let activation = ctx.activation_signal(ctx.self_id());
+        if activation.get() {
+            ctx.request_frame();
+        }
 
-        // Frame-tick effect: the streaming step (drain, evict, window, follow).
         {
             let state = self.state.clone();
+            ctx.effect(&activation, move |&active| {
+                if active {
+                    return;
+                }
+                let mut st = state.borrow_mut();
+                if st.has_focus {
+                    st.has_focus = false;
+                    st.focus_signal.set_if_changed(false);
+                }
+            });
+        }
+
+        // Frame-tick effect: the streaming step (drain, evict, window, follow).
+        // Skipped while dormant so a hidden log pane does not pump frames.
+        {
+            let state = self.state.clone();
+            let active = activation.clone();
             let tick_signal = ctx.frame_tick();
             ctx.effect(&tick_signal, move |delta| {
+                if !active.get() {
+                    return;
+                }
                 let mut st = state.borrow_mut();
                 let more = log_stream::tick(&mut st, *delta);
                 if more && let Some(handle) = &st.frame_request {
@@ -232,14 +257,18 @@ impl Widget for LogView {
         }
 
         // Window-active effect: mirror the flag so the selection desaturates in
-        // an inactive window (there is no caret to hide).
+        // an inactive window (there is no caret to hide). Re-arm only while
+        // this view is itself active.
         {
             let state = self.state.clone();
+            let active = activation.clone();
             let wa_signal = ctx.window_active_signal();
-            ctx.effect(&wa_signal, move |&active| {
+            ctx.effect(&wa_signal, move |&window_active| {
                 let mut st = state.borrow_mut();
-                st.window_active = active;
-                if let Some(handle) = &st.frame_request {
+                st.window_active = window_active;
+                if active.get()
+                    && let Some(handle) = &st.frame_request
+                {
                     handle.set(true);
                 }
             });

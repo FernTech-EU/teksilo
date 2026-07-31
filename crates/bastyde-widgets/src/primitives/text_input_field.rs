@@ -1015,7 +1015,35 @@ impl Widget for TextInputField {
             st.field_widget_id = Some(ctx.self_id());
         }
 
-        ctx.request_frame();
+        // Same dormancy discipline as `RichTextEditor`: a field parked in a
+        // non-selected `Switcher` / `visible_when(false)` branch must not
+        // keep the event loop awake (caret `wake_at`, frame-tick work,
+        // window-active re-arm). See that widget's build for the full story.
+        let activation = ctx.activation_signal(ctx.self_id());
+        if activation.get() {
+            ctx.request_frame();
+        }
+
+        {
+            let state = self.state().clone();
+            let interaction = self.interaction.clone();
+            ctx.effect(&activation, move |&active| {
+                if active {
+                    return;
+                }
+                let mut st = state.borrow_mut();
+                if st.has_focus {
+                    st.has_focus = false;
+                    // Mirror the on_focus(false) interaction write so a
+                    // Focused chrome style doesn't stick on a parked field.
+                    interaction.set(InteractionState::Idle);
+                }
+                if st.caret_visible.get() {
+                    st.caret_visible.set(false);
+                }
+                st.blink.reset();
+            });
+        }
 
         // Frame-tick effect: flushes pending chars, drains document
         // events, drives the caret blink, and debounces undo/redo
@@ -1028,8 +1056,12 @@ impl Widget for TextInputField {
         // across `signal.set()` would panic.
         {
             let state = self.state().clone();
+            let active = activation.clone();
             let tick_signal = ctx.frame_tick();
             ctx.effect(&tick_signal, move |delta| {
+                if !active.get() {
+                    return;
+                }
                 let (more, pending_text) = {
                     let mut st = state.borrow_mut();
                     let more = tick(&mut st, *delta);
@@ -1058,18 +1090,20 @@ impl Widget for TextInputField {
         // since `ctx.effect` can't observe a derived theme×active signal). The
         // loop may not tick while the window is inactive (animation scheduler
         // parked), so on deactivation hide the caret synchronously here and
-        // request a frame so it reaches a paint pass.
+        // request a frame so it reaches a paint pass — only while this field
+        // is itself active (a dormant field must not re-arm the loop).
         {
             let state = self.state().clone();
+            let active = activation.clone();
             let wa_signal = ctx.window_active_signal();
             let theme_for_sel = theme_signal.clone();
-            ctx.effect(&wa_signal, move |&active| {
+            ctx.effect(&wa_signal, move |&window_active| {
                 let mut st = state.borrow_mut();
-                st.window_active = active;
+                st.window_active = window_active;
                 let theme = theme_for_sel.get();
                 st.engine
-                    .set_selection_color(field_selection_color(&theme.colors, active));
-                if active {
+                    .set_selection_color(field_selection_color(&theme.colors, window_active));
+                if window_active {
                     // Reactivated: show the caret immediately if still focused
                     // (restart the blink phase), rather than waiting one interval.
                     if st.has_focus && !st.caret_visible.get() {
@@ -1084,7 +1118,9 @@ impl Widget for TextInputField {
                     }
                     st.blink.reset();
                 }
-                if let Some(handle) = &st.frame_request {
+                if active.get()
+                    && let Some(handle) = &st.frame_request
+                {
                     handle.set(true);
                 }
             });
