@@ -3345,16 +3345,58 @@ impl Widget for RichTextEditor {
 
         // Kick off the first frame so the initial layout/paint runs
         // through the tick path and populates max_scroll / content
-        // metrics.
-        ctx.request_frame();
+        // metrics. Gated by activation: a tab content pane parked in a
+        // non-selected `Switcher` branch must not keep the event loop
+        // awake just because it was built (TabWidget pre-mounts every
+        // open tab).
+        let activation = ctx.activation_signal(ctx.self_id());
+        if activation.get() {
+            ctx.request_frame();
+        }
+
+        // When this editor is parked dormant (tab switch, collapsed
+        // pane, …) clear local focus state synchronously. The tree may
+        // also dispatch FocusLost via revalidate, but a race between
+        // selection change and pointer focus — or a programmatic
+        // selection change that never moves focus — used to leave
+        // `has_focus = true` on every visited tab. Each stuck editor
+        // kept scheduling caret `wake_at`s, and every open tab's
+        // frame-tick effect still ran on those wakes (observers are
+        // not dormancy-gated). Rapid tab switching made CPU climb.
+        {
+            let state = self.state.clone();
+            ctx.effect(&activation, move |&active| {
+                if active {
+                    return;
+                }
+                let mut st = state.borrow_mut();
+                if st.has_focus {
+                    st.has_focus = false;
+                    st.focus_signal.set(false);
+                }
+                if st.caret_visible.get() {
+                    st.caret_visible.set(false);
+                }
+                st.blink.reset();
+                // Do not re-arm frame_request here: a dormant editor has
+                // nothing to paint, and re-arming is exactly the leak
+                // this gate exists to stop.
+            });
+        }
 
         // Frame-tick effect — drains document events, blinks the
         // caret, runs drag auto-scroll. Re-arms the tree's
         // frame-request flag while there's still pending work.
+        // Skipped entirely while dormant so a multi-tab TabWidget does
+        // not pay O(open tabs) per wake for editors nobody can see.
         {
             let state = self.state.clone();
+            let active = activation.clone();
             let tick_signal = ctx.frame_tick();
             ctx.effect(&tick_signal, move |delta| {
+                if !active.get() {
+                    return;
+                }
                 let mut st = state.borrow_mut();
                 let more = frame_loop::tick(&mut st, *delta);
                 // Signal::set is unconditional (clones+invokes every
@@ -3377,14 +3419,17 @@ impl Widget for RichTextEditor {
         // caret. The frame loop may not tick while the window is inactive (the
         // animation scheduler is parked), so on deactivation we hide the caret
         // *synchronously* here rather than waiting for a tick, and request a
-        // frame so the change reaches a paint pass.
+        // frame so the change reaches a paint pass — but only while this
+        // editor is itself active. A dormant tab must not re-arm the frame
+        // loop just because the host window blinked.
         {
             let state = self.state.clone();
+            let active = activation.clone();
             let wa_signal = ctx.window_active_signal();
-            ctx.effect(&wa_signal, move |&active| {
+            ctx.effect(&wa_signal, move |&window_active| {
                 let mut st = state.borrow_mut();
-                st.window_active = active;
-                if active {
+                st.window_active = window_active;
+                if window_active {
                     // Reactivated: if the editor still holds focus, show the
                     // caret immediately (restart the blink phase) rather than
                     // waiting up to one blink interval. `Hidden` policy stays
@@ -3403,7 +3448,9 @@ impl Widget for RichTextEditor {
                     }
                     st.blink.reset();
                 }
-                if let Some(handle) = &st.frame_request {
+                if active.get()
+                    && let Some(handle) = &st.frame_request
+                {
                     handle.set(true);
                 }
                 drop(st);

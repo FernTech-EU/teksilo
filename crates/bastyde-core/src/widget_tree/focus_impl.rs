@@ -785,6 +785,7 @@ fn step_to_sibling(scope: &ScopeNode, from: usize, reverse: bool, is_root: bool)
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
+    use crate::widget_builder::WidgetBuilder;
 
     #[test]
     fn focus_widget() {
@@ -1075,6 +1076,58 @@ mod tests {
 
         tree.press_key(Key::Tab, Modifiers::NONE);
         assert_eq!(tree.focused(), Some(c));
+    }
+
+    /// Parking a focused widget dormant (Switcher / `visible_when`) must
+    /// deliver `FocusLost` so the widget clears local focus state. Without
+    /// that, a rich-text editor keeps `has_focus` and schedules caret wakes
+    /// forever — the multi-tab CPU creep Skribisto hit on rapid tab switches.
+    #[test]
+    fn revalidate_delivers_focus_lost_when_focused_widget_goes_dormant() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let lost = Rc::new(Cell::new(0_u32));
+        let gained = Rc::new(Cell::new(0_u32));
+        let lost_c = lost.clone();
+        let gained_c = gained.clone();
+
+        let mut tree = WidgetTree::new();
+        let editor = tree.add(
+            FillWidget::new()
+                .focusable()
+                .on_focus(move |is_gained, _ctx| {
+                    if is_gained {
+                        gained_c.set(gained_c.get() + 1);
+                    } else {
+                        lost_c.set(lost_c.get() + 1);
+                    }
+                }),
+        );
+        let _other = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(editor);
+        assert_eq!(tree.focused(), Some(editor));
+        assert_eq!(gained.get(), 1, "focus() delivers FocusGained");
+        assert_eq!(lost.get(), 0);
+
+        // Park the focused editor dormant — the Switcher / tab-switch path.
+        tree.set_dormant(editor);
+        // Revalidate is what layout runs after the visibility pass.
+        let mut noop = crate::window::NoopWindowOps;
+        tree.revalidate_interaction_state(&mut noop);
+
+        assert_eq!(
+            tree.focused(),
+            None,
+            "tree focus must clear when the target is dormant"
+        );
+        assert_eq!(
+            lost.get(),
+            1,
+            "FocusLost must reach the dormant widget so it can clear has_focus / caret blink"
+        );
     }
 
     #[test]

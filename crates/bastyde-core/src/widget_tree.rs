@@ -1572,20 +1572,44 @@ impl WidgetTree {
         self.user_text_scale
     }
 
-    /// After a rebuild that destroyed subtrees, drop any interaction state
-    /// (focus, hover) whose target `WidgetId` is no longer valid. Preserves
-    /// state when the target still exists in the arena. Called from
-    /// data-driven rebuild paths (`process_state_changes`); theme and locale
-    /// switches no longer rebuild.
+    /// After a rebuild that destroyed subtrees — or after a `visible_when` /
+    /// `Switcher` pass parks the focused widget dormant — drop any interaction
+    /// state (focus, hover) whose target `WidgetId` is no longer active.
+    ///
+    /// **FocusLost is load-bearing.** Clearing `self.focused` alone leaves the
+    /// widget's own `on_focus` / `has_focus` / caret-blink state thinking it is
+    /// still focused. A rich-text editor in that state keeps scheduling
+    /// `wake_at` caret toggles and re-arming `frame_request` from its tick
+    /// effect — and because `frame_tick` observers are **not** gated on
+    /// dormancy, every open tab's editor (TabWidget mounts them all) still runs
+    /// on those wakes. Rapid tab switches that park a focused editor without a
+    /// real focus move (programmatic selection, race with pointer focus) used
+    /// to accumulate stuck "focused" editors and unbounded frame work. Dispatch
+    /// `FocusLost` first so widgets clear that state, then drop the tree's
+    /// focus pointer.
+    ///
+    /// Preserves state when the target still exists *and* is active. Called from
+    /// data-driven rebuild paths (`process_state_changes`) and after every
+    /// rebuild drain; theme and locale switches no longer rebuild.
     pub(crate) fn revalidate_interaction_state(&mut self, ops: &mut dyn crate::window::WindowOps) {
         if let Some(id) = self.focused
             && !self.arena.is_active(id)
         {
             let old = self.focused;
+            // Deliver FocusLost while the node still exists (dormant or about to
+            // be torn down). Skip if the node is already gone — destroy paths
+            // take care of bookkeeping without a deliverable target.
+            if self.arena.get(id).is_some() {
+                // Direct: no bubble through dormant ancestors, no overlay
+                // dismiss side-effects — this is a teardown signal, not a
+                // user-driven focus move.
+                self.dispatch_to_widget_direct(id, &crate::event::WidgetEvent::FocusLost, &mut *ops);
+            }
             self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
             self.update_view_focus_signals(old, None);
+            self.a11y_dirty = true;
         }
         if self.focused.is_none() {
             self.focus_origin = None;
