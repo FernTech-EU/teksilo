@@ -59,6 +59,14 @@ impl std::fmt::Debug for Probe {
     }
 }
 
+/// The window an `opens_window()` probe asks for, whichever route reached it.
+fn probe_child_window() -> bastyde_core::window::WindowConfig {
+    bastyde_core::window::WindowConfig::new()
+        .title("probe child")
+        .id("probe-child")
+        .size(200, 100)
+}
+
 impl Probe {
     fn new(role: accesskit::Role, label: &str) -> Self {
         Self {
@@ -125,6 +133,12 @@ impl Widget for Probe {
         let value_sig = self.value.clone();
         let accept_set = self.accept_set_value;
         let opens_window = self.opens_window;
+        // The same "this command opens a window" behaviour, reachable through
+        // the two *synthetic input* routes as well as the AT action — that is
+        // what proves the executor keeps its real `WindowOps` on every path and
+        // not just the AT one (see `executor`'s "Synthetic input" section).
+        let opens_on_tap = self.opens_window;
+        let opens_on_key = self.opens_window;
         let handles_show = self.handles_show_context_menu;
         let taps = self.taps.clone();
         let typed = self.typed.clone();
@@ -139,12 +153,7 @@ impl Widget for Probe {
                 accesskit::Action::Click => {
                     clicks.set(clicks.get() + 1);
                     if opens_window {
-                        ctx.open_window(
-                            bastyde_core::window::WindowConfig::new()
-                                .title("probe child")
-                                .id("probe-child")
-                                .size(200, 100),
-                        );
+                        ctx.open_window(probe_child_window());
                     }
                     EventResponse::Handled
                 }
@@ -164,11 +173,17 @@ impl Widget for Probe {
                 }
                 _ => EventResponse::Ignored,
             })
-            .on_tap(move |_e: &TapEvent, _ctx| {
+            .on_tap(move |_e: &TapEvent, ctx| {
                 taps.set(taps.get() + 1);
+                if opens_on_tap {
+                    ctx.open_window(probe_child_window());
+                }
             })
-            .on_key(move |event, _ctx| {
+            .on_key(move |event, ctx| {
                 if let WidgetEvent::KeyDown { key, .. } = event {
+                    if opens_on_key {
+                        ctx.open_window(probe_child_window());
+                    }
                     let mut log = received.get();
                     log.push(match key {
                         Key::Character(c) => format!("char:{c}"),
@@ -940,6 +955,87 @@ fn recording_window_ops_captures_open_without_panic() {
         "open_window must be recorded, not panic"
     );
     assert_eq!(ops.opened[0].title, "probe child");
+    assert_eq!(ops.opened[0].string_id.as_deref(), Some("probe-child"));
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic input must carry the caller's `WindowOps`
+// ---------------------------------------------------------------------------
+//
+// The regression: `InjectPointer`/`InjectKey`/`TypeText`/`DragNode` went through
+// `WidgetTree`'s test API, which dispatches with a `NoopWindowOps` — whose
+// `open_window` *panics*. Against a live app the executor is handed the real
+// ops and threw them away, so an injected click or keystroke on any command
+// that opens a window killed the whole application. The AT-action path above
+// never had the bug; these two are its synthetic-input counterparts.
+//
+// `RecordingWindowOps` is what makes the failure legible here: with the bug, the
+// panic came from `NoopWindowOps` deep inside the tree; without it, the request
+// lands in `ops.opened` where it can be asserted.
+
+#[test]
+fn an_injected_click_reaches_the_callers_window_ops() {
+    let probe = Probe::new(accesskit::Role::Button, "New Window").opens_window();
+    let (mut tree, id) = laid_out(probe);
+    let bounds = tree.bounds(id);
+    let mut ops = RecordingWindowOps::new();
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InjectPointer {
+            x: bounds.center().x,
+            y: bounds.center().y,
+            action: PointerAction::Click,
+            button: Default::default(),
+        },
+        &default_settle(),
+    );
+
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(
+        ops.opened.len(),
+        1,
+        "a synthetic click must reach the caller's WindowOps, not a NoopWindowOps"
+    );
+    assert_eq!(ops.opened[0].string_id.as_deref(), Some("probe-child"));
+}
+
+#[test]
+fn an_injected_key_reaches_the_callers_window_ops() {
+    // `Probe` is focusable by default, which key routing needs.
+    let probe = Probe::new(accesskit::Role::Button, "New Window").opens_window();
+    let (mut tree, id) = laid_out(probe);
+    let mut ops = RecordingWindowOps::new();
+    // Key events route by focus, so focus the probe first — through the
+    // executor, so this exercises the real op sequence a probe script uses.
+    let focused = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::FocusNode { node: node_ref(id) },
+        &default_settle(),
+    );
+    assert!(focused.is_ok(), "{focused:?}");
+
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::InjectKey {
+            key: "n".into(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+            meta: false,
+        },
+        &default_settle(),
+    );
+
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(
+        ops.opened.len(),
+        1,
+        "an injected keystroke must reach the caller's WindowOps, not a NoopWindowOps"
+    );
     assert_eq!(ops.opened[0].string_id.as_deref(), Some("probe-child"));
 }
 

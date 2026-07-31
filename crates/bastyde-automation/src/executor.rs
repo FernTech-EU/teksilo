@@ -120,7 +120,7 @@ pub fn execute(
             let c = center(tree.bounds(widget));
             // Route the wheel: hover the target first (scroll dispatches to
             // the hovered/focused widget), then deliver the delta.
-            tree.pointer_move(c);
+            pointer_move(tree, ops, c);
             tree.dispatch_event_with_ops(
                 WidgetEvent::Scroll {
                     delta: ScrollDelta::Pixels { x: *dx, y: *dy },
@@ -142,12 +142,12 @@ pub fn execute(
             let p = Point::new(*x, *y);
             let btn = button.to_core();
             match action {
-                PA::Move => tree.pointer_move(p),
-                PA::Down => tree.pointer_down_button(p, btn),
-                PA::Up => tree.pointer_up_button(p, btn),
+                PA::Move => pointer_move(tree, ops, p),
+                PA::Down => pointer_down(tree, ops, p, btn),
+                PA::Up => pointer_up(tree, ops, p, btn),
                 PA::Click => {
-                    tree.pointer_down_button(p, btn);
-                    tree.pointer_up_button(p, btn);
+                    pointer_down(tree, ops, p, btn);
+                    pointer_up(tree, ops, p, btn);
                 }
             }
             finish_settle(tree, ops, settle)
@@ -163,8 +163,8 @@ pub fn execute(
             let Some(p) = node_point(tree, &update, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
-            tree.pointer_down_button(p, bastyde_core::PointerButton::Secondary);
-            tree.pointer_up_button(p, bastyde_core::PointerButton::Secondary);
+            pointer_down(tree, ops, p, bastyde_core::PointerButton::Secondary);
+            pointer_up(tree, ops, p, bastyde_core::PointerButton::Secondary);
             finish_settle(tree, ops, settle)
         }
         AutomationOp::InjectKey {
@@ -177,7 +177,7 @@ pub fn execute(
             let Some(k) = key_from_str(key) else {
                 return AutomationReply::err(codes::UNKNOWN_NAME, format!("unknown key '{key}'"));
             };
-            tree.press_key(k, modifiers(*ctrl, *shift, *alt, *meta));
+            press_key(tree, ops, k, modifiers(*ctrl, *shift, *alt, *meta));
             finish_settle(tree, ops, settle)
         }
         AutomationOp::TypeText { node, text } => {
@@ -187,7 +187,7 @@ pub fn execute(
             };
             // `type_text` routes to the *focused* widget, so focus first.
             tree.focus_ops(widget, ops);
-            tree.type_text(widget, text);
+            type_text(tree, ops, text);
             finish_settle(tree, ops, settle)
         }
         AutomationOp::TypeIme {
@@ -239,7 +239,7 @@ pub fn execute(
                     "drag_node needs to_node or (to_x, to_y)",
                 );
             };
-            tree.drag(from, to);
+            drag(tree, ops, from, to);
             finish_settle(tree, ops, settle)
         }
 
@@ -307,6 +307,101 @@ pub fn execute(
             "screenshot pixels are produced by the host (offscreen renderer / platform window)",
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic input
+// ---------------------------------------------------------------------------
+//
+// `WidgetTree`'s `test_api` has a ready-made method for each of these
+// (`pointer_move`, `press_key`, `drag`, …) and this module used to call them.
+// It must not: every one of them goes through
+// [`WidgetTree::dispatch_event`](bastyde_core::WidgetTree::dispatch_event), the
+// *standalone-tree* variant, which substitutes a `NoopWindowOps` — and
+// `NoopWindowOps::open_window` **panics**, by design, because a standalone tree
+// has no winit back-end to create a window in.
+//
+// Against a live app that is the wrong sink and it is not a degraded one: the
+// executor is handed the real `WindowOpsImpl` (`bastyde-app`'s `run_in_window`)
+// and then threw it away, so an injected click or keystroke on any command that
+// opens, enumerates or focuses a window took the whole application down —
+// mid-probe, with a panic naming a "standalone WidgetTree" that the automated
+// session plainly was not. Found driving a real "New Window" menu command.
+//
+// The AT-action ops (`invoke_action` and friends) never had the problem: they
+// go through `dispatch_action_and_settle`, which passes `ops` down. So did
+// `scroll`. These helpers make the synthetic-input ops behave the same way —
+// same events, same order, real ops.
+
+fn pointer_move(tree: &mut WidgetTree, ops: &mut dyn WindowOps, position: Point) {
+    tree.dispatch_event_with_ops(WidgetEvent::PointerMove { position }, ops);
+}
+
+fn pointer_down(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    position: Point,
+    button: bastyde_core::PointerButton,
+) {
+    tree.dispatch_event_with_ops(
+        WidgetEvent::PointerDown {
+            position,
+            button,
+            modifiers: Modifiers::NONE,
+        },
+        ops,
+    );
+}
+
+fn pointer_up(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    position: Point,
+    button: bastyde_core::PointerButton,
+) {
+    tree.dispatch_event_with_ops(
+        WidgetEvent::PointerUp {
+            position,
+            button,
+            modifiers: Modifiers::NONE,
+        },
+        ops,
+    );
+}
+
+fn press_key(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers: Modifiers) {
+    tree.dispatch_event_with_ops(
+        WidgetEvent::KeyDown {
+            key,
+            modifiers,
+            text: None,
+        },
+        ops,
+    );
+    tree.dispatch_event_with_ops(WidgetEvent::KeyUp { key, modifiers }, ops);
+}
+
+/// Type `text` into the focused widget, one `KeyDown` per character — the
+/// caller focuses the target first (`focus_ops`). Mirrors `test_api::type_text`,
+/// whose `widget` parameter is likewise unused: focus is what routes a key
+/// event, not the node the caller named.
+fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
+    for ch in text.chars() {
+        tree.dispatch_event_with_ops(
+            WidgetEvent::KeyDown {
+                key: Key::Character(ch),
+                modifiers: Modifiers::NONE,
+                text: Some(ch.to_string()),
+            },
+            ops,
+        );
+    }
+}
+
+fn drag(tree: &mut WidgetTree, ops: &mut dyn WindowOps, from: Point, to: Point) {
+    pointer_down(tree, ops, from, bastyde_core::PointerButton::Primary);
+    pointer_move(tree, ops, to);
+    pointer_up(tree, ops, to, bastyde_core::PointerButton::Primary);
 }
 
 // ---------------------------------------------------------------------------
