@@ -11,7 +11,7 @@
 //!   * The render map claimed every blink-driven redraw re-pays O(whole document)
 //!     even though no dirty flag misfires: `sync_accessibility`'s cache-*hit* still
 //!     `.clone()`s the entire `TreeUpdate`, and `render_cursor_only` touches ALL
-//!     glyphs + retains ALL ~10k decorations — amplified by "bastard mode"
+//!     glyphs + retains ALL ~10k decorations — amplified by "dubious mode"
 //!     (`ScrollPolicy::AlwaysOff`, full-height editor, no viewport culling).
 //!   * The a11y map claimed the cache-hit clone is *cheap*; the expensive part —
 //!     `extract_paint_spans`, suspected O(m²) per block — only recurs on an edit
@@ -55,7 +55,7 @@ const WIDTH: f32 = 900.0;
 /// The viewport HEIGHT handed to the editor. Deliberately taller than any
 /// 13k-word document, so the editor's viewport ⊇ its content and text-typeset's
 /// culling (`view_bottom = scroll + viewport_height`) never trims anything — the
-/// exact "bastard mode" Skribisto creates by giving an `AlwaysOff` editor a
+/// exact "dubious mode" Skribisto creates by giving an `AlwaysOff` editor a
 /// full-height slot inside an outer `ScrollArea`. A width-only proposal instead
 /// lets the editor settle at a small intrinsic height, which culls the render and
 /// hides the very cost under test.
@@ -146,7 +146,7 @@ fn a11y_ms(tree: &mut WidgetTree) -> f64 {
 
 /// One simulated frame: request a tick, advance the sim clock (which fires the
 /// frame-tick effect → `frame_loop::tick` → `CaretBlink::tick`), and re-lay-out
-/// at the full-height (bastard-mode) viewport. Mirrors `rich_text/tests.rs::tick_once`.
+/// at the full-height (dubious-mode) viewport. Mirrors `rich_text/tests.rs::tick_once`.
 fn tick(tree: &mut WidgetTree) {
     tree.request_frame();
     tree.tick_animations(Duration::from_millis(16));
@@ -296,7 +296,7 @@ fn editor_freeze_profile() {
         .collect();
 
     eprintln!();
-    eprintln!("editor freeze profile — all times in ms, one focused RichTextEditor, bastard mode");
+    eprintln!("editor freeze profile — all times in ms, one focused RichTextEditor, dubious mode");
     eprintln!(
         "{:<20} {:>7} {:>8} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9} | {:>9} {:>9}",
         "config",
