@@ -154,7 +154,8 @@ pub struct MenuItem {
     action: Option<CommandFactory>,
     /// Enabled-state (static or signal-bound); forwarded to the arena at build
     /// time via `enabled_when`, so a bound signal disables/enables the item
-    /// reactively (paint, cursor, AT all follow).
+    /// reactively (paint and AT follow). Cursor stays `Pointer` — see
+    /// the cursor assignment in `build` for why it is not derived from this.
     enabled: Prop<bool>,
     /// Plain / Check / Radio — see [`MenuItemMode`].
     mode: MenuItemMode,
@@ -329,9 +330,11 @@ impl MenuItem {
     }
 
     /// Set the enabled state — static or signal-bound. A bound `Signal<bool>`
-    /// enables/disables the item reactively (paint, cursor, and AT all follow),
-    /// so `MenuItem::new(...).enabled(can_save_signal)` greys out live without a
-    /// rebuild.
+    /// enables/disables the item reactively (paint and AT follow), so
+    /// `MenuItem::new(...).enabled(can_save_signal)` greys out live without a
+    /// rebuild. Cursor is always `Pointer` (see `build`); disabled items are
+    /// gated by the arena before hover runs, so a `NotAllowed` cursor cannot
+    /// be applied from a build-time snapshot of this prop either.
     pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
         self.enabled = enabled.into();
         self
@@ -604,7 +607,7 @@ impl Widget for MenuItem {
         let self_id = ctx.self_id();
         // Forward enabled (static or signal-bound) into the arena. A bound
         // signal makes enable/disable reactive — the framework's
-        // effective_enabled drives paint / cursor / AT.
+        // effective_enabled drives paint / AT (and event gating).
         ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
@@ -1355,15 +1358,19 @@ impl Widget for MenuItem {
             }
         });
 
-        // Cursor: NotAllowed when effectively disabled (the original
-        // intent), Pointer otherwise. Sourced from the arena via the
-        // reactive effective_enabled signal so it reacts to
-        // `enabled_when` flips.
-        handler_set = handler_set.cursor(if effective_enabled.get() {
-            CursorIcon::Pointer
-        } else {
-            CursorIcon::NotAllowed
-        });
+        // Cursor is always Pointer. `HandlerSet::cursor` stores a *static*
+        // `CursorIcon` on the node — there is no reactive form — so reading
+        // `effective_enabled.get()` here only snapshots the value at build
+        // time. Menu-bar dropdowns materialise their items while dormant
+        // (often with every enablement signal still `false`), so that
+        // snapshot permanently stuck rows on `NotAllowed` even after the
+        // signal later went true and clicks started working. The framework
+        // also gates *all* events — including `PointerEnter`, the path that
+        // applies `node_cursor` — on `arena.is_enabled`, so a `NotAllowed`
+        // icon could never show for a truly-disabled item either. Match
+        // `Button` / `IconButton`: Pointer while interactive; greyed paint
+        // + gated events while disabled.
+        handler_set = handler_set.cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
 
@@ -1910,6 +1917,47 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Regression: a signal-bound `.enabled(...)` that starts `false` and
+    /// later flips `true` must not leave the item on a permanent
+    /// `NotAllowed` cursor. Menu-bar Format/Go rows hit this path — they
+    /// are built dormant before any editor is attached, then enable when
+    /// a scene has focus.
+    #[test]
+    fn menu_item_cursor_stays_pointer_after_enabled_signal_flips_true() {
+        use bastyde_core::widget::CursorIcon;
+        use bastyde_canvas::Point;
+
+        let enabled = Signal::new(false);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Bold")).enabled(enabled.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let bounds = t.bounds(item_id);
+        let center = Point::new(
+            bounds.origin().x + bounds.size().width / 2.0,
+            bounds.origin().y + bounds.size().height / 2.0,
+        );
+
+        // Still disabled at first hover: framework gates PointerEnter, so
+        // the item never applies its node_cursor — cursor stays Default.
+        t.pointer_move(center);
+        // Flip enablement without rebuilding the item (the real menubar
+        // path: signals update, paint/AT follow, handlers stay put).
+        enabled.set(true);
+        // Leave and re-enter so PointerEnter re-applies node_cursor under
+        // the now-enabled gate.
+        t.pointer_move(Point::new(0.0, 0.0));
+        layout(&mut t); // flush effective_enabled + any dirty paint
+        t.pointer_move(center);
+        assert_eq!(
+            t.current_cursor(),
+            CursorIcon::Pointer,
+            "enabled menu item must show Pointer, not a build-time NotAllowed snapshot"
+        );
     }
 
     #[test]
