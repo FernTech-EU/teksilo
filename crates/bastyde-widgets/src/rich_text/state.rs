@@ -121,9 +121,10 @@ pub(crate) struct EditorState {
     /// host asked for one. `None` — the default — costs nothing: no session is registered on
     /// the document at all.
     pub caret_highlight: Option<CaretHighlightSession>,
-    /// `has_focus` as the band last saw it, so `frame_loop` can notice a change without the
-    /// focus path having to know the band exists.
-    pub caret_highlight_focused: bool,
+    /// Whether the band was last told to draw — focus *and* no selection, as `frame_loop`
+    /// computes it. Tracked here so a change is noticed without the focus or selection paths
+    /// having to know the band exists.
+    pub caret_highlight_active: bool,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
@@ -576,7 +577,7 @@ impl EditorState {
             pending_recolor: false,
             pending_recolor_range: None,
             caret_highlight: None,
-            caret_highlight_focused: false,
+            caret_highlight_active: false,
             wrap_mode,
             show_highlights: true,
             window_to_clip: false,

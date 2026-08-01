@@ -9,13 +9,19 @@
 //! [`FindSession`](super::find_session::FindSession) — same registry, same staleness discipline,
 //! opposite intent. Find answers "where is this text"; this answers "where am I".
 //!
-//! ## Only the focused view bands
+//! ## Only the view being written in bands
 //!
-//! Two panes over one document each own a session, and an **unfocused view clears its range**.
+//! Two panes over one document each own a session, and an **inactive view clears its range**.
 //! So the union of what the document carries is exactly one band, at the caret of the pane
 //! being written in, and neither view needs a [`HighlightMask`] to say so. That is also what
 //! makes the band vanish the moment focus leaves the editor, which is what you want: the band
 //! marks where you are *writing*, not where a caret happens to rest.
+//!
+//! A **selection** makes a view inactive for the same reason. The band answers "where am I
+//! writing"; a selection answers it better and more precisely, so while one is up the band is
+//! redundant. It was also actively wrong: the range is resolved from the caret, which during a
+//! selection is its *moving end*, so the band skipped from sentence to sentence underneath a
+//! growing selection.
 //!
 //! ## Priority, not registration order
 //!
@@ -79,10 +85,11 @@ pub struct CaretHighlight {
 pub(crate) struct CaretHighlightSession {
     doc: TextDocument,
     session: SessionId,
-    /// What to draw, or `None` while the feature is off. Kept even when unfocused, so regaining
-    /// focus needs no re-push from the host.
+    /// What to draw, or `None` while the feature is off. Kept even while inactive, so becoming
+    /// active again needs no re-push from the host.
     config: RefCell<Option<CaretHighlight>>,
-    focused: Cell<bool>,
+    /// Whether this view should be showing a band at all — see [`set_active`](Self::set_active).
+    active: Cell<bool>,
     /// The range last pushed, so an unchanged recompute skips the push — and so a format-only
     /// change (a theme switch) can re-push the same extent without re-deriving it.
     last: Cell<Option<(usize, usize)>>,
@@ -95,7 +102,7 @@ pub(crate) struct CaretHighlightSession {
 
 impl CaretHighlightSession {
     /// Attach an idle band session to `doc`. Draws nothing until
-    /// [`set_config`](Self::set_config) and [`set_focused`](Self::set_focused) both say so.
+    /// [`set_config`](Self::set_config) and [`set_active`](Self::set_active) both say so.
     pub(crate) fn new(doc: &TextDocument) -> Self {
         let session = doc.add_range_session_with_priority(CARET_HIGHLIGHT_PRIORITY);
         let dirty = Arc::new(AtomicBool::new(false));
@@ -122,7 +129,7 @@ impl CaretHighlightSession {
             doc: doc.clone(),
             session,
             config: RefCell::new(None),
-            focused: Cell::new(false),
+            active: Cell::new(false),
             last: Cell::new(None),
             dirty,
             _sub: sub,
@@ -177,21 +184,22 @@ impl CaretHighlightSession {
         }
     }
 
-    /// Tell the session whether its view has focus. An unfocused view draws no band — see the
-    /// module docs for why that is what makes split panes work without a mask.
+    /// Tell the session whether its view should be banding right now: focused, and not in the
+    /// middle of a selection. An inactive view draws no band — see the module docs for why that
+    /// is what makes both split panes and selections behave.
     ///
     /// Returns `true` if a repaint is owed.
-    pub(crate) fn set_focused(&self, focused: bool) -> bool {
-        if self.focused.replace(focused) == focused {
+    pub(crate) fn set_active(&self, active: bool) -> bool {
+        if self.active.replace(active) == active {
             return false;
         }
-        if focused { true } else { self.clear() }
+        if active { true } else { self.clear() }
     }
 
     /// Re-resolve the band for `caret` and push it if it moved. Returns `true` if the pushed
     /// range changed, so the caller can pump a frame.
     ///
-    /// Cheap to call every frame: an unfocused or unconfigured session returns immediately, and
+    /// Cheap to call every frame: an inactive or unconfigured session returns immediately, and
     /// a caret that stayed inside the same sentence pushes nothing.
     pub(crate) fn refresh(&self, caret: usize) -> bool {
         let stale = self.dirty.swap(false, Ordering::Relaxed);
@@ -199,7 +207,7 @@ impl CaretHighlightSession {
         let Some(config) = config else {
             return false;
         };
-        if !self.focused.get() {
+        if !self.active.get() {
             return false;
         }
         let range = self.resolve(caret, &config);
@@ -313,7 +321,7 @@ mod tests {
     fn live(d: &TextDocument, scope: CaretHighlightScope) -> CaretHighlightSession {
         let s = CaretHighlightSession::new(d);
         s.set_config(Some(band(scope)));
-        s.set_focused(true);
+        s.set_active(true);
         s
     }
 
@@ -356,18 +364,18 @@ mod tests {
     }
 
     #[test]
-    fn an_unfocused_view_draws_no_band() {
+    fn an_inactive_view_draws_no_band() {
         let d = doc("One is first. Two is second.");
         let s = live(&d, CaretHighlightScope::Sentence);
         s.refresh(2);
         assert!(!spans(&d, 0).is_empty());
 
-        assert!(s.set_focused(false), "losing focus is a repaint");
+        assert!(s.set_active(false), "going inactive is a repaint");
         assert!(spans(&d, 0).is_empty(), "the band goes away");
-        assert!(!s.refresh(2), "and stays away while unfocused");
+        assert!(!s.refresh(2), "and stays away while inactive");
         assert!(spans(&d, 0).is_empty());
 
-        s.set_focused(true);
+        s.set_active(true);
         s.refresh(2);
         assert!(!spans(&d, 0).is_empty(), "focus brings it back");
     }

@@ -6802,6 +6802,88 @@ mod caret_band {
     }
 }
 
+/// What the band does while text is selected.
+#[cfg(test)]
+mod caret_band_selection {
+    use super::caret_band::*;
+    use super::*;
+    use crate::rich_text::caret_highlight::CaretHighlightScope;
+
+    /// **A selection replaces the band.**
+    ///
+    /// The band answers "where am I writing". A selection answers that better, and more
+    /// precisely — so while one exists the band is noise. Worse than noise, in fact: it is
+    /// resolved from the caret, which during a selection is the *moving end*, so it jumped from
+    /// sentence to sentence underneath the selection as it grew.
+    #[test]
+    fn a_selection_hides_the_band() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first. Two is second. Three is third.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        handle.select_range(2, 2);
+        tick_once(&mut tree);
+        assert_eq!(banded(&doc), [(0, 13)], "a collapsed caret bands");
+
+        // Select across into the second sentence.
+        handle.select_range(2, 20);
+        tick_once(&mut tree);
+        assert!(
+            banded(&doc).is_empty(),
+            "no band while a selection is up; got {:?}",
+            banded(&doc)
+        );
+
+        // Collapsing the selection brings it back.
+        handle.select_range(20, 20);
+        tick_once(&mut tree);
+        assert_eq!(banded(&doc), [(14, 14)], "and it returns on collapse");
+    }
+
+    /// Growing a selection must not make the band flicker through the sentences it crosses —
+    /// the "wild" part. Every step of the drag stays bandless.
+    #[test]
+    fn growing_a_selection_never_flickers_the_band() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first. Two is second. Three is third.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        handle.select_range(2, 2);
+        tick_once(&mut tree);
+
+        for head in 3..=42 {
+            handle.select_range(2, head);
+            tick_once(&mut tree);
+            assert!(
+                banded(&doc).is_empty(),
+                "band reappeared mid-drag at head {head}: {:?}",
+                banded(&doc)
+            );
+        }
+    }
+
+    /// A backwards selection is still a selection.
+    #[test]
+    fn a_backwards_selection_hides_the_band_too() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first. Two is second.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        handle.select_range(25, 5);
+        tick_once(&mut tree);
+        assert!(banded(&doc).is_empty(), "got {:?}", banded(&doc));
+    }
+}
+
 /// Regressions for two ways the band escaped its own rules, both found in review.
 #[cfg(test)]
 mod caret_band_regressions {

@@ -61,15 +61,18 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // — pressing Enter, pasting paragraphs, undo — left the band on the old extent until some
     // unrelated event happened to pump another recolor.
     if state.caret_highlight.is_some() {
-        let focused = state.has_focus;
+        // A selection suppresses the band as surely as losing focus does: it already says where
+        // the writer is, more precisely, and the band would otherwise chase the selection's
+        // moving end from sentence to sentence underneath it.
+        let active = state.has_focus && !state.cursor.has_selection();
         let caret = state.cursor.position();
         let band = state.caret_highlight.as_ref().expect("checked above");
         let mut changed = false;
-        if state.caret_highlight_focused != focused {
-            changed |= band.set_focused(focused);
+        if state.caret_highlight_active != active {
+            changed |= band.set_active(active);
         }
         changed |= band.refresh(caret);
-        state.caret_highlight_focused = focused;
+        state.caret_highlight_active = active;
         if changed {
             // Drain the event the push just queued, so this tick's layout/recolor sees it.
             let (more, more_pos) = state.drain_events();

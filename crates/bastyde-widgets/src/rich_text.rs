@@ -3524,9 +3524,9 @@ impl Widget for RichTextEditor {
                 // over the same document would show two. Clearing `has_focus` above is not
                 // enough; nothing would ever act on it.
                 if let Some(band) = &st.caret_highlight {
-                    band.set_focused(false);
+                    band.set_active(false);
                 }
-                st.caret_highlight_focused = false;
+                st.caret_highlight_active = false;
                 // Do not re-arm frame_request here: a dormant editor has
                 // nothing to paint, and re-arming is exactly the leak
                 // this gate exists to stop.
@@ -4031,14 +4031,15 @@ fn set_caret_highlight(state: &SharedState, highlight: Option<caret_highlight::C
             session.set_config(highlight);
             // The frame loop hands it the focus state and the caret on the next tick, so a band
             // switched on mid-session appears without the editor having to be touched.
-            session.set_focused(st.has_focus);
-            st.caret_highlight_focused = st.has_focus;
+            let active = st.has_focus && !st.cursor.has_selection();
+            session.set_active(active);
+            st.caret_highlight_active = active;
             st.caret_highlight = Some(session);
         }
         (Some(_), None) => {
             // Dropping the session retires its highlight layer.
             st.caret_highlight = None;
-            st.caret_highlight_focused = false;
+            st.caret_highlight_active = false;
         }
         (Some(session), Some(_)) => {
             session.set_config(highlight);
