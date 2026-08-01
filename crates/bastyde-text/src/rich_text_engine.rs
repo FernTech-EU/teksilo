@@ -328,6 +328,41 @@ impl RichTextEngine {
         self.flow.apply_paint_spans_for(spans);
     }
 
+    /// Recolor **just the block** containing `[position, position + length)`, from that block's
+    /// own masked snapshot. Returns the block's id, or `None` when the extent straddles blocks
+    /// (or names none) — the caller then falls back to
+    /// [`apply_paint_highlights`](Self::apply_paint_highlights).
+    ///
+    /// The whole-flow path materializes the text and fragments of every block in the document,
+    /// which is a real per-keystroke cost on a long scene: search, spell-check and the caret
+    /// band all re-push their ranges as the writer types. When the change is confined to one
+    /// paragraph — which it almost always is — this reads and recolors that paragraph alone.
+    ///
+    /// Like the incremental relayout path this reapplies the block's overlay wholesale, so an
+    /// emptied session correctly clears the colours it had put there.
+    pub fn apply_paint_highlights_for_range(
+        &mut self,
+        doc: &TextDocument,
+        position: usize,
+        length: usize,
+        mask: &text_document::HighlightMask,
+    ) -> Option<usize> {
+        if length == 0 {
+            return None;
+        }
+        let snap = doc.snapshot_block_at_position_masked(position, mask)?;
+        // The extent must lie wholly inside this block; a range crossing a paragraph break
+        // would leave the neighbour holding stale colours.
+        if position < snap.position || position + length > snap.position + snap.length {
+            return None;
+        }
+        let block_id = snap.block_id;
+        let spans = text_typeset::bridge::convert_paint_spans(&snap);
+        self.flow
+            .apply_block_paint_spans(block_id, &spans)
+            .then_some(block_id)
+    }
+
     /// Incremental relayout of a single block. Falls back to
     /// `layout_full` when no valid full layout is installed for
     /// this engine — either we've never run one, or the HiDPI

@@ -6556,3 +6556,350 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
     key(&mut tree, bastyde_core::event::Key::ArrowDown);
     assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.5)));
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// The ambient caret band, through a mounted editor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+mod caret_band {
+    use super::*;
+    use crate::rich_text::caret_highlight::{CaretHighlight, CaretHighlightScope};
+    use bastyde_text::text_document::{
+        Color, FlowElementSnapshot, HighlightFormat, HighlightMask,
+    };
+
+    const BAND: Color = Color { red: 255, green: 254, blue: 235, alpha: 255 };
+
+    pub(super) fn band(scope: CaretHighlightScope) -> CaretHighlight {
+        CaretHighlight {
+            scope,
+            format: HighlightFormat {
+                background_color: Some(BAND),
+                ..Default::default()
+            },
+            content_locale: Some("en".into()),
+        }
+    }
+
+    /// The band's extents on the first block, as `(start, length)`.
+    pub(super) fn banded(doc: &TextDocument) -> Vec<(usize, usize)> {
+        match &doc.snapshot_flow_masked(&HighlightMask::all()).elements[0] {
+            FlowElementSnapshot::Block(b) => b
+                .paint_highlights
+                .iter()
+                .filter(|s| s.background_color == Some(BAND))
+                .map(|s| (s.start, s.length))
+                .collect(),
+            _ => panic!("expected a block"),
+        }
+    }
+
+    /// Everything a test needs to drive one mounted editor.
+    pub(super) struct Mounted {
+        pub tree: WidgetTree,
+        pub doc: TextDocument,
+        pub handle: crate::rich_text::EditorHandle,
+        pub state: crate::rich_text::state::SharedState,
+    }
+
+    /// A mounted, focused editor over `text`, already through one frame.
+    pub(super) fn mounted(text: &str) -> Mounted {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let state = editor.state_handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        tick_once(&mut tree);
+        Mounted {
+            tree,
+            doc,
+            handle,
+            state,
+        }
+    }
+
+    /// The whole chain: a band set through the handle reaches the document as a real paint
+    /// highlight over the caret's sentence, driven only by the frame loop.
+    #[test]
+    fn setting_a_band_paints_the_caret_sentence() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first. Two is second.");
+        assert!(banded(&doc).is_empty(), "no band before it is asked for");
+
+        handle.select_range(16, 16);
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+
+        assert_eq!(banded(&doc), [(14, 14)], "\"Two is second.\" is banded");
+    }
+
+    #[test]
+    fn the_band_follows_the_caret_and_the_scope() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first. Two is second.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        handle.select_range(2, 2);
+        tick_once(&mut tree);
+        assert_eq!(banded(&doc), [(0, 13)]);
+
+        handle.select_range(16, 16);
+        tick_once(&mut tree);
+        assert_eq!(banded(&doc), [(14, 14)], "it followed the caret");
+
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        assert_eq!(banded(&doc), [(0, 28)], "and widened with the scope");
+    }
+
+    #[test]
+    fn clearing_the_band_removes_it_from_the_document() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            ..
+        } = mounted("One is first.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+        assert!(!banded(&doc).is_empty());
+
+        handle.set_caret_highlight(None);
+        tick_once(&mut tree);
+        assert!(banded(&doc).is_empty(), "and its session is gone");
+        assert_eq!(handle.get_caret_highlight(), None);
+    }
+
+    /// **Why an unfocused view clears its band.** Two panes over one shared document each own a
+    /// session, and both are configured. Only the focused one may draw, or the writer would see
+    /// a second band sitting wherever the other pane's caret happens to rest — and no
+    /// `HighlightMask` is needed to arrange it.
+    #[test]
+    fn only_the_focused_pane_of_a_split_bands() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first. Two is second.").unwrap();
+
+        let left = RichTextEditor::editor(doc.clone());
+        let left_handle = left.handle();
+        let right = RichTextEditor::editor(doc.clone());
+        let right_handle = right.handle();
+
+        let mut tree = WidgetTree::new();
+        let left_id = tree.add(left);
+        let right_id = tree.add(right);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        left_handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        right_handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        left_handle.select_range(2, 2);
+        right_handle.select_range(16, 16);
+
+        tree.focus(left_id);
+        tick_once(&mut tree);
+        assert_eq!(
+            banded(&doc),
+            [(0, 13)],
+            "exactly one band, at the focused pane's caret"
+        );
+
+        tree.focus(right_id);
+        tick_once(&mut tree);
+        tick_once(&mut tree);
+        assert_eq!(
+            banded(&doc),
+            [(14, 14)],
+            "still exactly one band, now at the other pane's caret"
+        );
+    }
+
+    /// **The performance contract.** A band move must recolor, never reshape: no full layout,
+    /// and the recolor must take the block-scoped path rather than re-snapshotting the document.
+    #[test]
+    fn moving_the_band_recolors_one_block_and_never_relayouts() {
+        let Mounted {
+            mut tree,
+            handle,
+            state,
+            ..
+        } = mounted("One is first. Two is second.\nA second paragraph.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+
+        {
+            let mut st = state.borrow_mut();
+            st.needs_full_layout = false;
+            st.pending_recolor = false;
+            st.pending_recolor_range = None;
+        }
+
+        handle.select_range(16, 16);
+        // Drain the caret move into the session without running the recolor, so the accumulated
+        // extent can be inspected before `tick` consumes it.
+        {
+            let mut st = state.borrow_mut();
+            let caret = st.cursor.position();
+            let changed = st
+                .caret_highlight
+                .as_ref()
+                .expect("a band was set")
+                .refresh(caret);
+            assert!(changed, "the caret moved to another sentence");
+            st.drain_events();
+        }
+
+        let st = state.borrow();
+        assert!(st.pending_recolor, "a band move asks for a recolor");
+        assert!(
+            !st.needs_full_layout,
+            "a band move must never force a reshape"
+        );
+        let (start, length) = st
+            .pending_recolor_range
+            .expect("the extent must be known, or the fast path cannot fire");
+        assert!(
+            length > 0 && start + length <= 28,
+            "the extent must stay inside the first block; got {start}..{}",
+            start + length
+        );
+    }
+
+    /// A read-only view keeps highlights off, so the band is inert there without special-casing.
+    #[test]
+    fn a_read_only_view_paints_no_band() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first.").unwrap();
+        let editor = RichTextEditor::read_only(doc.clone());
+        let handle = editor.handle();
+        let state = editor.state_handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        tick_once(&mut tree);
+
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+
+        assert!(
+            !state.borrow().show_highlights,
+            "read_only defaults highlights off"
+        );
+        assert!(
+            !state.borrow().pending_recolor,
+            "so a band change is a pure no-op for this view"
+        );
+    }
+}
+
+/// Regressions for two ways the band escaped its own rules, both found in review.
+#[cfg(test)]
+mod caret_band_regressions {
+    use super::caret_band::*;
+    use super::*;
+    use crate::rich_text::caret_highlight::CaretHighlightScope;
+
+    /// **A parked editor must drop its band.**
+    ///
+    /// Only `frame_loop::tick` pushes focus through to the session, and the tick effect is
+    /// skipped entirely while dormant — so clearing `has_focus` in the dormancy effect was not
+    /// enough: nothing ever acted on it. A tab parked with a band left it registered on the
+    /// shared document forever, and a split pane over that document showed two bands.
+    #[test]
+    fn parking_an_editor_retires_its_band() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first. Two is second.").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        tick_once(&mut tree);
+
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+        assert!(!banded(&doc).is_empty(), "banded while live and focused");
+
+        // Park it, exactly as a TabWidget does when its tab stops being the visible one.
+        tree.set_dormant(id);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert!(
+            banded(&doc).is_empty(),
+            "a dormant editor must leave no band on a document its siblings still show"
+        );
+    }
+
+    /// **A band change must survive a full layout in the same tick.**
+    ///
+    /// The band used to be resolved *after* the layout step, so on any edit that forced a full
+    /// layout (Enter, a multi-paragraph paste, undo) `layout_full` baked the PREVIOUS band and
+    /// the recolor step then discarded the correction as redundant — leaving the band on the
+    /// old extent until something unrelated pumped another recolor.
+    #[test]
+    fn a_band_move_survives_a_full_layout_in_the_same_tick() {
+        let Mounted {
+            mut tree,
+            doc,
+            handle,
+            state,
+        } = mounted("One is first. Two is second.");
+        handle.set_caret_highlight(Some(band(CaretHighlightScope::Sentence)));
+        handle.select_range(2, 2);
+        // Render between ticks: only `paint()` consumes `pending_full_render`, and the recolor
+        // step skips while it is set — so a tick-only loop never exercises the paint path at all.
+        tick_once(&mut tree);
+        let _ = tree.render();
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert_eq!(banded(&doc), [(0, 13)], "banding the first sentence");
+
+        // The band the LAYOUT actually carries, as x-extents of its background rects. Asserting
+        // on the document's session ranges would not catch this bug: those were always updated
+        // correctly — it was the baked layout that kept the stale colours.
+        let painted = |state: &crate::rich_text::state::SharedState| -> Vec<(i64, i64)> {
+            state.borrow_mut().engine.with_render_frame(|frame| {
+                let mut v: Vec<(i64, i64)> = frame
+                    .decorations
+                    .iter()
+                    .filter(|d| d.kind == bastyde_text::TypesetterDecorationKind::TextBackground)
+                    .map(|d| (d.rect[0].round() as i64, (d.rect[0] + d.rect[2]).round() as i64))
+                    .collect();
+                v.sort();
+                v
+            })
+        };
+        let first = painted(&state);
+        assert!(!first.is_empty(), "the first sentence is painted");
+
+        // Force the full-layout branch, and move the caret into the second sentence, in one go.
+        state.borrow_mut().needs_full_layout = true;
+        handle.select_range(16, 16);
+        tick_once(&mut tree);
+        let _ = tree.render();
+
+        assert_eq!(
+            banded(&doc),
+            [(14, 14)],
+            "the document carries the new extent (this part was never broken)"
+        );
+        let second = painted(&state);
+        assert!(!second.is_empty(), "the second sentence is painted");
+        assert_ne!(
+            first, second,
+            "the PAINTED band must move too — it used to keep the pre-edit extent, because \
+             layout_full baked the old band and the recolor step then dropped the correction"
+        );
+    }
+}

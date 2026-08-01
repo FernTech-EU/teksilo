@@ -28,6 +28,7 @@
 //!     .wrap_mode(WrapMode::Word);
 //! ```
 
+pub mod caret_highlight;
 mod clipboard;
 mod context_menu;
 mod find_session;
@@ -1707,6 +1708,28 @@ impl RichTextEditor {
         self.state.borrow().typewriter
     }
 
+    /// Draw an ambient band behind the sentence — or paragraph — the caret is in.
+    ///
+    /// `None` (the default) draws nothing and registers no session on the document. The band
+    /// shows only while **this** editor has focus, so two panes over one document never band
+    /// twice, and it disappears when focus leaves the editor entirely.
+    ///
+    /// The band is registered below every other highlight layer, so a find match or a spell
+    /// squiggle always paints over it. Give it a paint-only `format` — a background colour —
+    /// or it will force a reshape on every caret move.
+    pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>) {
+        set_caret_highlight(&self.state, highlight);
+    }
+
+    /// What this editor's caret band is currently configured to draw.
+    pub fn get_caret_highlight(&self) -> Option<caret_highlight::CaretHighlight> {
+        self.state
+            .borrow()
+            .caret_highlight
+            .as_ref()
+            .and_then(|s| s.config())
+    }
+
     /// The caret's rectangle in **absolute window (tree) coordinates**, or
     /// `None` when the editor is unfocused or has not been laid out yet.
     ///
@@ -2151,6 +2174,22 @@ impl EditorHandle {
     /// Current typewriter anchor.
     pub fn get_typewriter(&self) -> Option<f32> {
         self.state.borrow().typewriter
+    }
+
+    /// Draw an ambient band behind the caret's sentence or paragraph — the [`EditorHandle`]
+    /// counterpart of [`RichTextEditor::set_caret_highlight`], for hosts that re-push it from a
+    /// settings or theme effect after the editor is mounted.
+    pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>) {
+        set_caret_highlight(&self.state, highlight);
+    }
+
+    /// What this editor's caret band is currently configured to draw.
+    pub fn get_caret_highlight(&self) -> Option<caret_highlight::CaretHighlight> {
+        self.state
+            .borrow()
+            .caret_highlight
+            .as_ref()
+            .and_then(|s| s.config())
     }
 
     /// The caret's rectangle in **absolute window (tree) coordinates** — the
@@ -3478,6 +3517,16 @@ impl Widget for RichTextEditor {
                     st.caret_visible.set(false);
                 }
                 st.blink.reset();
+                // Retire the caret band here too. Only `frame_loop::tick` pushes the band's
+                // focus state through to the document, and the tick effect below is skipped
+                // entirely while dormant — so a parked editor would keep its last band
+                // registered on a document its siblings are still showing, and a split pane
+                // over the same document would show two. Clearing `has_focus` above is not
+                // enough; nothing would ever act on it.
+                if let Some(band) = &st.caret_highlight {
+                    band.set_focused(false);
+                }
+                st.caret_highlight_focused = false;
                 // Do not re-arm frame_request here: a dormant editor has
                 // nothing to paint, and re-arming is exactly the leak
                 // this gate exists to stop.
@@ -3964,6 +4013,45 @@ fn reveal_range_impl(
             ctx.ensure_visible_aligned(area, fraction, bastyde_core::event::ScrollMotion::Smooth)
         }
         None => ctx.ensure_visible(area),
+    }
+}
+
+/// Set (or clear) an editor's ambient caret band. Shared by
+/// [`RichTextEditor::set_caret_highlight`] and its [`EditorHandle`] mirror.
+///
+/// The session is created on first use and torn down when the band is cleared, so an editor
+/// that never asks for one registers nothing on the document at all — which matters, since
+/// every read-only preview pane shares the documents the writing panes are editing.
+fn set_caret_highlight(state: &SharedState, highlight: Option<caret_highlight::CaretHighlight>) {
+    let mut st = state.borrow_mut();
+    match (&st.caret_highlight, &highlight) {
+        (None, None) => return,
+        (None, Some(_)) => {
+            let session = caret_highlight::CaretHighlightSession::new(&st.document);
+            session.set_config(highlight);
+            // The frame loop hands it the focus state and the caret on the next tick, so a band
+            // switched on mid-session appears without the editor having to be touched.
+            session.set_focused(st.has_focus);
+            st.caret_highlight_focused = st.has_focus;
+            st.caret_highlight = Some(session);
+        }
+        (Some(_), None) => {
+            // Dropping the session retires its highlight layer.
+            st.caret_highlight = None;
+            st.caret_highlight_focused = false;
+        }
+        (Some(session), Some(_)) => {
+            session.set_config(highlight);
+        }
+    }
+    // A band that appeared, vanished or changed colour needs a frame to draw it — and the
+    // resolve-and-push itself only happens in `frame_loop::tick`, so without waking the tree an
+    // idle editor stays configured-but-unbanded until some unrelated interaction pumps a frame.
+    // Same poke `set_typography_defaults` / `set_font_size_scale` make, for the same reason:
+    // these are the ctx-less setters a host calls from a settings or theme effect.
+    st.content_dirty = true;
+    if let Some(handle) = &st.frame_request {
+        handle.set(true);
     }
 }
 

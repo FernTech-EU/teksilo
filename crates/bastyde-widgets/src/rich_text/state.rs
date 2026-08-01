@@ -21,6 +21,7 @@ use bastyde_text::text_document::{
 };
 use bastyde_text::{CursorAffinity, RichTextEngine, WrapMode};
 
+use super::caret_highlight::CaretHighlightSession;
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
 use crate::common::editor_runtime::{CaretBlink, Debounce};
@@ -105,6 +106,24 @@ pub(crate) struct EditorState {
     /// reshape/reflow. Distinct from `needs_full_layout` — a paint-only change
     /// never changes glyph metrics.
     pub pending_recolor: bool,
+
+    /// The document extent a pending recolor covers, from
+    /// [`DocumentEvent::HighlightPaintChanged`]. `None` means "unknown — the whole document",
+    /// which is what the document-wide operations report (installing or retiring a highlighter,
+    /// a full rehighlight) and what several accumulated changes collapse to.
+    ///
+    /// When it *is* known and fits inside one block, `frame_loop::tick` recolors that block
+    /// alone instead of re-snapshotting the document — the difference between O(block) and
+    /// O(document) on every keystroke that moves a caret band, a find match or a spell squiggle.
+    pub pending_recolor_range: Option<(usize, usize)>,
+
+    /// This view's ambient caret band (the sentence or paragraph being written in), when the
+    /// host asked for one. `None` — the default — costs nothing: no session is registered on
+    /// the document at all.
+    pub caret_highlight: Option<CaretHighlightSession>,
+    /// `has_focus` as the band last saw it, so `frame_loop` can notice a change without the
+    /// focus path having to know the band exists.
+    pub caret_highlight_focused: bool,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
@@ -555,6 +574,9 @@ impl EditorState {
             content_dirty: true,
             pending_full_render: true,
             pending_recolor: false,
+            pending_recolor_range: None,
+            caret_highlight: None,
+            caret_highlight_focused: false,
             wrap_mode,
             show_highlights: true,
             window_to_clip: false,
@@ -746,7 +768,7 @@ impl EditorState {
                     self.needs_full_layout = true;
                     single_pos = None;
                 }
-                DocumentEvent::HighlightPaintChanged { .. } => {
+                DocumentEvent::HighlightPaintChanged { position, length } => {
                     // A view with highlights off never shows paint highlights,
                     // so this event is a pure no-op for it: don't recolor, don't
                     // even dirty the AT snapshot (its clean snapshot is
@@ -756,6 +778,16 @@ impl EditorState {
                         // Paint-only highlight change: the shaping input is
                         // unchanged, so recolor the cached layout without a
                         // reshape/reflow. `tick` consumes `pending_recolor`.
+                        //
+                        // Accumulate BEFORE setting the flag: `pending_recolor` is what
+                        // distinguishes "first change this frame" (adopt its extent) from
+                        // "widen what is already accumulated".
+                        self.pending_recolor_range = accumulate_recolor_range(
+                            self.pending_recolor,
+                            self.pending_recolor_range,
+                            position,
+                            length,
+                        );
                         self.pending_recolor = true;
                         // Colors on TextRun nodes changed, so the AT snapshot is
                         // stale — but node identity is unaffected, so keep the
@@ -881,5 +913,73 @@ impl EditorState {
     pub fn invalidate_accessibility_cache(&self) {
         *self.accessibility_flow_snapshot.borrow_mut() = None;
         self.synthetic_to_element.borrow_mut().clear();
+    }
+}
+
+/// Fold a `HighlightPaintChanged` extent into whatever this frame has accumulated so far.
+///
+/// `pending` says whether anything is accumulated yet: the **first** change of a frame adopts
+/// its own extent, later ones widen it. Without that distinction the initial `None` — which
+/// means *unknown* — would swallow every real extent and the block-scoped recolor could never
+/// fire at all.
+///
+/// A `length` of `0` is text-document's "unknown — assume the whole document", and it is
+/// **sticky**: once one lands in a frame the accumulated range collapses to `None` and stays
+/// there until the recolor consumes it. That is what keeps the fast path safe for the
+/// operations that still report `0, 0` — installing or retiring a highlighter, a full
+/// rehighlight — which really do change everything.
+pub(crate) fn accumulate_recolor_range(
+    pending: bool,
+    current: Option<(usize, usize)>,
+    position: usize,
+    length: usize,
+) -> Option<(usize, usize)> {
+    if length == 0 {
+        return None;
+    }
+    if !pending {
+        return Some((position, length));
+    }
+    match current {
+        // Already unknown: nothing narrows it back down.
+        None => None,
+        Some((start, len)) => {
+            let lo = start.min(position);
+            let hi = (start + len).max(position + length);
+            Some((lo, hi - lo))
+        }
+    }
+}
+
+#[cfg(test)]
+mod recolor_range_tests {
+    use super::accumulate_recolor_range;
+
+    /// The bug this function's `pending` flag exists to prevent: the field starts at `None`
+    /// (unknown), so a first change that folded into it would collapse to unknown and the
+    /// block-scoped recolor would never run.
+    #[test]
+    fn the_first_change_of_a_frame_adopts_its_own_extent() {
+        assert_eq!(accumulate_recolor_range(false, None, 40, 12), Some((40, 12)));
+    }
+
+    #[test]
+    fn later_changes_widen_what_is_accumulated() {
+        let acc = accumulate_recolor_range(false, None, 40, 12);
+        assert_eq!(accumulate_recolor_range(true, acc, 10, 5), Some((10, 42)));
+    }
+
+    #[test]
+    fn an_unknown_extent_is_sticky_in_both_directions() {
+        // An unknown change poisons an accumulated range…
+        let acc = accumulate_recolor_range(false, None, 40, 12);
+        assert_eq!(accumulate_recolor_range(true, acc, 0, 0), None);
+        // …and a later known change cannot narrow it back down.
+        assert_eq!(accumulate_recolor_range(true, None, 40, 12), None);
+    }
+
+    #[test]
+    fn an_unknown_first_change_stays_unknown() {
+        assert_eq!(accumulate_recolor_range(false, None, 0, 0), None);
     }
 }

@@ -46,7 +46,47 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     }
 
     // Step 2: drain the per-widget event queue populated by on_change.
-    let (had_events, single_pos) = state.drain_events();
+    let (mut had_events, mut single_pos) = state.drain_events();
+
+    // Step 2b: the ambient caret band (the sentence or paragraph being written in).
+    //
+    // Resolved from `state.cursor`, which is authoritative right now — the caret *signal* lags a
+    // frame behind a just-typed character — and re-resolved every tick rather than on caret
+    // moves, because an edit *ahead* of the band moves it without the caret moving at all.
+    //
+    // **Before the layout step on purpose.** The push emits `HighlightPaintChanged`, and the
+    // layout below snapshots the document. Resolving the band *after* the layout let
+    // `layout_full` bake the PREVIOUS band and then let step 4b discard the correction as
+    // redundant (it skips whenever a full layout ran this frame), so a block-count-changing edit
+    // — pressing Enter, pasting paragraphs, undo — left the band on the old extent until some
+    // unrelated event happened to pump another recolor.
+    if state.caret_highlight.is_some() {
+        let focused = state.has_focus;
+        let caret = state.cursor.position();
+        let band = state.caret_highlight.as_ref().expect("checked above");
+        let mut changed = false;
+        if state.caret_highlight_focused != focused {
+            changed |= band.set_focused(focused);
+        }
+        changed |= band.refresh(caret);
+        state.caret_highlight_focused = focused;
+        if changed {
+            // Drain the event the push just queued, so this tick's layout/recolor sees it.
+            let (more, more_pos) = state.drain_events();
+            had_events |= more;
+            // The band's own push is paint-only, so it never reports a block position. Anything
+            // that does arrive here came from another view of the shared document between the
+            // two drains, and cannot be merged with the first drain's single-block answer —
+            // take the whole-document path rather than relayout the wrong block.
+            if more_pos.is_some() {
+                if single_pos.is_none() {
+                    single_pos = more_pos;
+                } else if more_pos != single_pos {
+                    state.needs_full_layout = true;
+                }
+            }
+        }
+    }
 
     // Caret blink — see `common::editor_runtime::CaretBlink`. Driven by
     // wall-clock time (not accumulated delta) so the cadence stays locked to
@@ -144,12 +184,32 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
             && viewport_ready
             && state.engine.has_full_layout()
         {
-            let flow = state.flow_snapshot();
-            state.engine.apply_paint_highlights(&flow);
+            // Prefer recoloring the one block the change actually covers. `flow_snapshot()`
+            // materializes the text and fragments of EVERY block, so on a long scene the
+            // whole-document path costs more per keystroke than the edit itself — and a caret
+            // band, a find match and a spell squiggle all push on nearly every keystroke.
+            // `None` (an unknown extent, or one straddling blocks) falls back to the full pass.
+            let mask = state.effective_mask();
+            let scoped = state
+                .pending_recolor_range
+                .and_then(|(position, length)| {
+                    state.engine.apply_paint_highlights_for_range(
+                        &state.document,
+                        position,
+                        length,
+                        &mask,
+                    )
+                })
+                .is_some();
+            if !scoped {
+                let flow = state.flow_snapshot();
+                state.engine.apply_paint_highlights(&flow);
+            }
             state.content_dirty = true;
             state.pending_full_render = true;
         }
         state.pending_recolor = false;
+        state.pending_recolor_range = None;
     }
 
     // Step 5: update cursor display on the typesetter — but only if
