@@ -685,6 +685,10 @@ impl WidgetTree {
             }
             self.set_hovered(target);
             self.update_hover_within_signals(previously_hovered, target);
+        } else if let Some(target) = target {
+            // Same hover target — restart pending tooltip timers if the
+            // pointer is still moving beyond the stationary slop.
+            self.tooltip_pointer_moved(target, position);
         }
 
         if let Some(target) = target {

@@ -132,14 +132,25 @@ pub struct MotionTokens {
     /// motion without strobing.
     #[serde(with = "duration_millis")]
     pub duration_indeterminate_sweep: Duration,
-    /// ~200 ms — hover dwell before a plain or rich tooltip shows.
+    /// ~500 ms — hover dwell before a plain or rich tooltip shows.
+    ///
+    /// Matches the Windows / GTK / WinForms desktop default (Windows ties
+    /// this to the system double-click time, 500 ms out of the box). Short
+    /// enough to feel responsive once the pointer has paused; long enough
+    /// that sweeping a dense toolbar does not flash tips.
     #[serde(with = "duration_millis", default = "default_tooltip_delay")]
     pub tooltip_delay: Duration,
-    /// ~400 ms — hover dwell for heavyweight tooltips (composite surfaces,
+    /// ~700 ms — hover dwell for heavyweight tooltips (composite surfaces,
     /// scene-item tips). Longer so heavy content doesn't pop on transient
     /// hover.
     #[serde(with = "duration_millis", default = "default_tooltip_delay_heavy")]
     pub tooltip_delay_heavy: Duration,
+    /// ~100 ms — shortened delay when a tooltip was just shown or dismissed
+    /// and the pointer moves to another anchor (Windows `TTDT_RESHOW`).
+    /// Keeps scanning adjacent controls fluent after the first tip has
+    /// established intent.
+    #[serde(with = "duration_millis", default = "default_tooltip_reshow_delay")]
+    pub tooltip_reshow_delay: Duration,
     /// Standard easing curve. Int UI uses one mild ease-out everywhere.
     pub easing_standard: Easing,
 }
@@ -147,12 +158,17 @@ pub struct MotionTokens {
 /// Serde default for [`MotionTokens::tooltip_delay`] — keeps themes
 /// serialized before this field deserializable.
 fn default_tooltip_delay() -> Duration {
-    Duration::from_millis(200)
+    Duration::from_millis(500)
 }
 
 /// Serde default for [`MotionTokens::tooltip_delay_heavy`].
 fn default_tooltip_delay_heavy() -> Duration {
-    Duration::from_millis(400)
+    Duration::from_millis(700)
+}
+
+/// Serde default for [`MotionTokens::tooltip_reshow_delay`].
+fn default_tooltip_reshow_delay() -> Duration {
+    Duration::from_millis(100)
 }
 
 impl Default for MotionTokens {
@@ -164,8 +180,9 @@ impl Default for MotionTokens {
             duration_slow: Duration::from_millis(300),
             duration_collapse: Duration::from_millis(200),
             duration_indeterminate_sweep: Duration::from_millis(900),
-            tooltip_delay: Duration::from_millis(200),
-            tooltip_delay_heavy: Duration::from_millis(400),
+            tooltip_delay: Duration::from_millis(500),
+            tooltip_delay_heavy: Duration::from_millis(700),
+            tooltip_reshow_delay: Duration::from_millis(100),
             easing_standard: Easing::EaseOut,
         }
     }
@@ -196,7 +213,19 @@ mod tests {
         assert!(m.duration_instant < m.duration_fast);
         assert!(m.duration_fast < m.duration_normal);
         assert!(m.duration_normal < m.duration_slow);
+        assert!(m.tooltip_reshow_delay < m.tooltip_delay);
         assert!(m.tooltip_delay <= m.tooltip_delay_heavy);
+    }
+
+    #[test]
+    fn tooltip_delays_match_desktop_os_norms() {
+        // Windows TTDT_INITIAL ≈ double-click time (500 ms); GTK
+        // gtk-tooltip-timeout default 500 ms; WinForms InitialDelay 500 ms.
+        // Reshow is Windows TTDT_RESHOW (initial / 5 ≈ 100 ms).
+        let m = MotionTokens::default();
+        assert_eq!(m.tooltip_delay, Duration::from_millis(500));
+        assert_eq!(m.tooltip_delay_heavy, Duration::from_millis(700));
+        assert_eq!(m.tooltip_reshow_delay, Duration::from_millis(100));
     }
 
     #[test]

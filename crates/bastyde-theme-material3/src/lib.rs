@@ -238,4 +238,17 @@ mod tests {
         // M3 softens shadows, but dark still needs more alpha than light.
         assert!(dark().shape.shadow_lg.color.a() > light().shape.shadow_lg.color.a());
     }
+
+    #[test]
+    fn motion_inherits_desktop_tooltip_delays() {
+        // Material 3 overrides colour/shape/type/slots only — motion stays
+        // on `MotionTokens::default()` so tooltip feel tracks the shared
+        // desktop norms (500 / 700 / 100 ms).
+        use std::time::Duration;
+        for t in [light(), dark()] {
+            assert_eq!(t.motion.tooltip_delay, Duration::from_millis(500));
+            assert_eq!(t.motion.tooltip_delay_heavy, Duration::from_millis(700));
+            assert_eq!(t.motion.tooltip_reshow_delay, Duration::from_millis(100));
+        }
+    }
 }

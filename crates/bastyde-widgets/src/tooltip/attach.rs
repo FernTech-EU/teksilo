@@ -276,7 +276,7 @@ mod tests {
             "tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(500) + Duration::from_millis(50));
 
         assert_eq!(
             tree.active_overlays().len(),
@@ -302,7 +302,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(500) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
         // The stale plain text must NOT be reachable — the rich tooltip
@@ -378,8 +378,8 @@ mod tests {
             tree.active_overlays().is_empty(),
             "plain tooltip should not appear instantly — waits for delay"
         );
-        // Plain tooltip uses the Button-specific 200 ms delay.
-        tree.advance_time(Duration::from_millis(250));
+        // Plain tooltip uses theme `tooltip_delay` (500 ms default).
+        tree.advance_time(Duration::from_millis(550));
         assert_eq!(
             tree.active_overlays().len(),
             1,
@@ -396,7 +396,7 @@ mod tests {
         let btn = tree.add(Button::new(lit!("Go")).rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(500) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
 
@@ -660,7 +660,7 @@ mod tests {
         let btn = tree.add(Button::new(lit!("Hover")).rich_tooltip("k"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(Duration::from_millis(250)); // past the hover delay → shown
+        tree.advance_time(Duration::from_millis(550)); // past the hover delay → shown
         // A render pins `last_frame_time` at ~= the show instant.
         tree.layout(SizeProposal::exact(400.0, 200.0));
         assert_eq!(tree.active_overlays().len(), 1, "rich tooltip shown");
@@ -694,7 +694,7 @@ mod tests {
         let btn = tree.add(Button::new(lit!("Hover")).tooltip(lit!("Plain")));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(Duration::from_millis(250));
+        tree.advance_time(Duration::from_millis(550));
         assert_eq!(tree.active_overlays().len(), 1, "plain tooltip shown");
         tree.layout(SizeProposal::exact(400.0, 200.0));
 

@@ -168,6 +168,13 @@ pub struct WidgetTree {
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
     tooltips: Vec<TooltipEntry>,
+    /// Simulated-clock end of the tooltip "reshow session". While any tip is
+    /// visible, or until this instant after the last tip dismissed, subsequent
+    /// anchors use `MotionTokens::tooltip_reshow_delay` instead of the full
+    /// initial delay (Windows `TTDT_RESHOW` behaviour).
+    tooltip_session_until_sim: Option<std::time::Instant>,
+    /// Real-clock counterpart of [`Self::tooltip_session_until_sim`].
+    tooltip_session_until_real: Option<std::time::Instant>,
     /// The tooltip currently surfaced by keyboard menu navigation
     /// (`show_highlight_tooltip`): `(overlay_id, content_id)`. At most one
     /// is shown at a time; moving the highlight or closing the menu clears
@@ -447,6 +454,18 @@ pub struct WidgetTree {
 /// full; `announcements_since` only ever returns the retained tail.
 const AUTOMATION_ANNOUNCE_CAP: usize = 256;
 
+/// How long the shortened reshow delay stays active after the last tooltip
+/// dismisses. Long enough to cover moving between adjacent toolbar icons;
+/// short enough that a later, deliberate hover still pays the full initial
+/// delay. Not a theme token — it is session bookkeeping, not a visual feel.
+const TOOLTIP_SESSION_GRACE: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// Max pointer travel (logical px) from the hover-origin before a pending
+/// tooltip timer restarts. Mirrors Windows hover-tracking slop
+/// (`SPI_GETMOUSEHOVERWIDTH` / height, typically ~4 px): the tip waits for a
+/// *paused* pointer, not merely "entered the bounds."
+const TOOLTIP_STATIONARY_SLOP: f32 = 4.0;
+
 /// A tooltip attachment managed by the WidgetTree.
 struct TooltipEntry {
     anchor_id: WidgetId,
@@ -456,6 +475,10 @@ struct TooltipEntry {
     hover_start: Option<std::time::Instant>,
     /// Real hover start (for windowed apps via layout).
     real_hover_start: Option<std::time::Instant>,
+    /// Pointer position when the current pending hover started. Used to
+    /// restart the delay if the pointer keeps moving inside the anchor
+    /// (stationary-pointer intent filter).
+    hover_origin: Option<bastyde_canvas::Point>,
     overlay_id: Option<crate::overlay::OverlayId>,
     /// When set, the tooltip auto-promotes to "sticky" after this
     /// much elapsed time since it was shown. The entry stays in the
@@ -543,6 +566,8 @@ impl WidgetTree {
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
+            tooltip_session_until_sim: None,
+            tooltip_session_until_real: None,
             highlight_tooltip: None,
             layout_direction: crate::environment::LayoutDirection::default(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),

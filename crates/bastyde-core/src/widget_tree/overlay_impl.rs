@@ -128,6 +128,7 @@ impl WidgetTree {
             delay,
             hover_start: None,
             real_hover_start: None,
+            hover_origin: None,
             overlay_id: None,
             sticky_after,
             is_sticky: false,
@@ -162,25 +163,67 @@ impl WidgetTree {
 
     pub(super) fn process_tooltips(&mut self) {
         let sim_now = self.sim_clock;
-        self.process_tooltips_impl(|entry| {
-            entry
-                .hover_start
-                .map(|start| sim_now.saturating_duration_since(start))
-        });
+        let session_active = self.tooltip_session_active_sim(sim_now);
+        self.process_tooltips_impl(
+            |entry| {
+                entry
+                    .hover_start
+                    .map(|start| sim_now.saturating_duration_since(start))
+            },
+            session_active,
+            true,
+        );
     }
 
     pub(super) fn process_tooltips_real(&mut self) {
         let real_now = std::time::Instant::now();
-        self.process_tooltips_impl(|entry| {
-            entry
-                .real_hover_start
-                .map(|start| real_now.saturating_duration_since(start))
-        });
+        let session_active = self.tooltip_session_active_real(real_now);
+        self.process_tooltips_impl(
+            |entry| {
+                entry
+                    .real_hover_start
+                    .map(|start| real_now.saturating_duration_since(start))
+            },
+            session_active,
+            false,
+        );
+    }
+
+    /// Whether the shortened reshow delay applies right now (sim clock).
+    fn tooltip_session_active_sim(&self, now: std::time::Instant) -> bool {
+        self.tooltips.iter().any(|e| e.overlay_id.is_some())
+            || self
+                .tooltip_session_until_sim
+                .is_some_and(|until| now < until)
+    }
+
+    /// Whether the shortened reshow delay applies right now (real clock).
+    fn tooltip_session_active_real(&self, now: std::time::Instant) -> bool {
+        self.tooltips.iter().any(|e| e.overlay_id.is_some())
+            || self
+                .tooltip_session_until_real
+                .is_some_and(|until| now < until)
+    }
+
+    /// Resolve the delay for a pending tooltip: full initial delay, or the
+    /// shorter reshow delay while a tooltip session is active.
+    fn effective_tooltip_delay(
+        &self,
+        entry_delay: std::time::Duration,
+        session_active: bool,
+    ) -> std::time::Duration {
+        if session_active {
+            entry_delay.min(self.theme.motion.tooltip_reshow_delay)
+        } else {
+            entry_delay
+        }
     }
 
     fn process_tooltips_impl(
         &mut self,
         elapsed_fn: impl Fn(&TooltipEntry) -> Option<std::time::Duration>,
+        session_active: bool,
+        use_sim_clock: bool,
     ) {
         // Reconcile externally-dismissed overlays (audit G12): a shown tooltip's
         // overlay may have been removed by the overlay stack's PointerLeave
@@ -196,6 +239,7 @@ impl WidgetTree {
                 _ => None,
             })
             .collect();
+        let any_dismissed = !dismissed_indices.is_empty();
         for i in dismissed_indices {
             let e = &mut self.tooltips[i];
             e.overlay_id = None;
@@ -203,26 +247,54 @@ impl WidgetTree {
             e.promoted_by_focus = false;
             e.shown_at_sim = None;
             e.shown_at_real = None;
+            e.hover_origin = None;
             if let Some(sink) = e.shown_at_sink.as_ref() {
                 sink.set(None);
             }
         }
+        // Keep the reshow session warm for a short grace after dismiss so
+        // moving to the next toolbar icon does not pay the full initial delay.
+        if any_dismissed {
+            let grace = super::TOOLTIP_SESSION_GRACE;
+            if use_sim_clock {
+                self.tooltip_session_until_sim = Some(self.sim_clock + grace);
+            } else {
+                self.tooltip_session_until_real =
+                    Some(std::time::Instant::now() + grace);
+            }
+        }
+
+        // Re-evaluate session after dismiss bookkeeping: a still-visible
+        // sibling tip, or the grace we just opened, both count.
+        let session_active = session_active
+            || self.tooltips.iter().any(|e| e.overlay_id.is_some())
+            || if use_sim_clock {
+                self.tooltip_session_active_sim(self.sim_clock)
+            } else {
+                self.tooltip_session_active_real(std::time::Instant::now())
+            };
 
         let mut to_show = Vec::new();
-        for entry in &mut self.tooltips {
-            if entry.overlay_id.is_some() {
-                continue;
-            }
-            if !self.arena.is_active(entry.anchor_id) {
-                continue;
-            }
-            if let Some(elapsed) = elapsed_fn(entry)
-                && elapsed >= entry.delay
-            {
-                to_show.push((entry.anchor_id, entry.content_id, entry.placement));
-                entry.hover_start = None;
-                entry.real_hover_start = None;
-            }
+        // Collect show candidates first so we don't hold a mutable borrow
+        // across `arena.is_active` (which needs `&self`).
+        let pending: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.overlay_id.is_none())
+            .filter(|(_, entry)| self.arena.is_active(entry.anchor_id))
+            .filter_map(|(i, entry)| {
+                let delay = self.effective_tooltip_delay(entry.delay, session_active);
+                let elapsed = elapsed_fn(entry)?;
+                (elapsed >= delay).then_some(i)
+            })
+            .collect();
+        for index in pending {
+            let entry = &mut self.tooltips[index];
+            to_show.push((entry.anchor_id, entry.content_id, entry.placement));
+            entry.hover_start = None;
+            entry.real_hover_start = None;
+            entry.hover_origin = None;
         }
         let sim_now = self.sim_clock;
         let real_now = std::time::Instant::now();
@@ -904,10 +976,65 @@ impl WidgetTree {
             .collect();
         let now = self.sim_clock;
         let real_now = std::time::Instant::now();
+        let origin = self.last_pointer_position;
         for index in matching {
+            // Don't restart a timer for a tip that is already showing.
+            if self.tooltips[index].overlay_id.is_some() {
+                continue;
+            }
             self.tooltips[index].hover_start = Some(now);
             self.tooltips[index].real_hover_start = Some(real_now);
+            self.tooltips[index].hover_origin = origin;
             self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
+        }
+    }
+
+    /// Restart a pending tooltip's delay when the pointer keeps moving
+    /// inside the same anchor beyond the stationary slop. Called from
+    /// pointer-move when the hover target has not changed.
+    pub(super) fn tooltip_pointer_moved(
+        &mut self,
+        widget_id: WidgetId,
+        position: bastyde_canvas::Point,
+    ) {
+        let matching: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.overlay_id.is_none()
+                    && entry.hover_start.is_some()
+                    && self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if matching.is_empty() {
+            return;
+        }
+        let now = self.sim_clock;
+        let real_now = std::time::Instant::now();
+        let slop = super::TOOLTIP_STATIONARY_SLOP;
+        let slop_sq = slop * slop;
+        for index in matching {
+            let origin = match self.tooltips[index].hover_origin {
+                Some(o) => o,
+                None => {
+                    // Enter happened without a recorded position (tests that
+                    // call `tooltip_pointer_enter` directly) — adopt this
+                    // position as the origin without restarting the timer.
+                    self.tooltips[index].hover_origin = Some(position);
+                    continue;
+                }
+            };
+            let dx = position.x - origin.x;
+            let dy = position.y - origin.y;
+            if dx * dx + dy * dy <= slop_sq {
+                continue;
+            }
+            // Pointer has moved meaningfully since hover began — restart.
+            self.tooltips[index].hover_start = Some(now);
+            self.tooltips[index].real_hover_start = Some(real_now);
+            self.tooltips[index].hover_origin = Some(position);
         }
     }
 
@@ -965,6 +1092,7 @@ impl WidgetTree {
             // the delay timer.
             self.tooltips[index].hover_start = None;
             self.tooltips[index].real_hover_start = None;
+            self.tooltips[index].hover_origin = None;
             // Audit G12 (WCAG 1.4.13 Hoverable): do NOT dismiss a *shown*
             // tooltip here on anchor-leave — that killed it the instant the
             // pointer crossed the 8px gap toward the tooltip. Dismissal of a
@@ -981,11 +1109,17 @@ impl WidgetTree {
 
     /// Returns the earliest deadline for a pending tooltip or delayed overlay (if any).
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
+        let now = std::time::Instant::now();
+        let session_active = self.tooltip_session_active_real(now);
         let tooltip_deadline = self
             .tooltips
             .iter()
             .filter(|entry| entry.overlay_id.is_none())
-            .filter_map(|entry| entry.real_hover_start.map(|start| start + entry.delay))
+            .filter_map(|entry| {
+                let start = entry.real_hover_start?;
+                let delay = self.effective_tooltip_delay(entry.delay, session_active);
+                Some(start + delay)
+            })
             .min();
 
         // Sticky-on-dwell wake-ups: once a rich tooltip is shown, wake every
@@ -1217,19 +1351,28 @@ impl WidgetTree {
         // tooltips dismissed via Escape/click-outside would keep
         // their `is_sticky` flag and stale `overlay_id`, and the
         // next hover would never re-show them.
+        let mut any_tooltip_dismissed = false;
         for &id in content_ids {
             if let Some(entry) = self.tooltips.iter_mut().find(|e| e.content_id == id) {
                 entry.overlay_id = None;
                 entry.is_sticky = false;
                 entry.hover_start = None;
                 entry.real_hover_start = None;
+                entry.hover_origin = None;
                 entry.shown_at_sim = None;
                 entry.shown_at_real = None;
                 entry.promoted_by_focus = false;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(None);
                 }
+                any_tooltip_dismissed = true;
             }
+        }
+        if any_tooltip_dismissed {
+            let grace = super::TOOLTIP_SESSION_GRACE;
+            self.tooltip_session_until_sim = Some(self.sim_clock + grace);
+            self.tooltip_session_until_real =
+                Some(std::time::Instant::now() + grace);
         }
         for &id in content_ids {
             let focused_in_subtree = self
@@ -1876,6 +2019,75 @@ mod tests {
 
         tree.advance_time(std::time::Duration::from_millis(500));
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn tooltip_reshow_uses_short_delay_after_prior_tip() {
+        // Windows TTDT_RESHOW: while a tip is open (or just dismissed), the
+        // next anchor pays the short reshow delay, not the full initial delay.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        let tip_a = tree.add(FillWidget::new().label("Tip A"));
+        let tip_b = tree.add(FillWidget::new().label("Tip B"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let delay = std::time::Duration::from_millis(500);
+        tree.attach_tooltip(a, tip_a, delay);
+        tree.attach_tooltip(b, tip_b, delay);
+
+        // First tip: full initial delay (drive via enter so anchors may
+        // share layout bounds without hit-test ambiguity).
+        tree.tooltip_pointer_enter(a);
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "must not appear before full initial delay"
+        );
+        tree.advance_time(std::time::Duration::from_millis(400));
+        assert_eq!(tree.active_overlays().len(), 1, "first tip after initial delay");
+        assert!(tree.find_by_label("Tip A").is_some());
+
+        // While A is still shown the reshow session is active — B uses 100 ms.
+        let mut noop = crate::window::NoopWindowOps;
+        tree.tooltip_pointer_leave(a, &mut noop);
+        tree.tooltip_pointer_enter(b);
+        tree.advance_time(std::time::Duration::from_millis(120));
+        assert!(
+            tree.find_by_label("Tip B").is_some(),
+            "second tip should use the short reshow delay while session is warm"
+        );
+    }
+
+    #[test]
+    fn tooltip_timer_restarts_when_pointer_keeps_moving() {
+        // Stationary-pointer filter: travel beyond ~4 px from hover origin
+        // restarts the delay so a sweeping cursor does not pop tips.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tooltip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
+
+        let start = tree.bounds(anchor).center();
+        tree.pointer_move(start);
+        tree.advance_time(std::time::Duration::from_millis(300));
+        // Still pending; move well past the 4 px slop inside the same anchor.
+        tree.pointer_move(Point::new(start.x + 20.0, start.y));
+        // Another 300 ms would have completed the *original* 500 ms timer,
+        // but the restart means we need a full 500 ms from the move.
+        tree.advance_time(std::time::Duration::from_millis(300));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "moving past stationary slop must restart the delay"
+        );
+        tree.advance_time(std::time::Duration::from_millis(250));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "tooltip appears after a full delay of stillness"
+        );
     }
 
     #[test]

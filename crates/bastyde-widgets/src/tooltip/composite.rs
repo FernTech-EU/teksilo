@@ -460,7 +460,7 @@ mod tests {
             "composite tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(700) + Duration::from_millis(50));
         assert_eq!(
             tree.active_overlays().len(),
             1,
@@ -476,7 +476,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(700) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         // Pointer leaves before sticky promotion → dismiss.
@@ -499,7 +499,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(700) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         let content_id = tooltip_id_sink

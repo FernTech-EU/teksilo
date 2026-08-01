@@ -113,8 +113,8 @@ flips `Tooltip → Dialog`, dismiss swaps to `EscapeOrClickOutside`, and the
 surface becomes Tab-reachable. Rare interactive descendants (a "Pin"
 button, an internal `TabWidget`) work cleanly post-promotion.
 
-The default delay is `theme.motion.tooltip_delay_heavy` (400 ms — slower than
-the 200 ms `tooltip_delay` used by plain/rich tooltips, because composite
+The default delay is `theme.motion.tooltip_delay_heavy` (700 ms — slower than
+the 500 ms `tooltip_delay` used by plain/rich tooltips, because composite
 surfaces are heavier and shouldn't pop on transient hover). Default
 `max_width` × `max_height` are
 both 480 dp (`COMPOSITE_TOOLTIP_MAX_WIDTH` / `COMPOSITE_TOOLTIP_MAX_HEIGHT`
@@ -342,11 +342,17 @@ in one place. Each widget reads the value at `build()` time via
 
 | Path | Field | Default |
 |------|-------|---------|
-| Plain + rich tooltips (all widgets) | `motion.tooltip_delay` | `200 ms` |
-| Composite tooltips + scene-item tips | `motion.tooltip_delay_heavy` | `400 ms` |
+| Plain + rich tooltips (all widgets) | `motion.tooltip_delay` | `500 ms` |
+| Composite tooltips + scene-item tips | `motion.tooltip_delay_heavy` | `700 ms` |
+| Subsequent tip while a tip is open / just dismissed | `motion.tooltip_reshow_delay` | `100 ms` |
 
-There is no token for plain-tooltip delay yet; widgets that need a custom
-value pass an explicit `Duration` to `attach_tooltip`.
+Defaults match desktop OS norms (Windows `TTDT_INITIAL` / GTK
+`gtk-tooltip-timeout` ≈ 500 ms; Windows `TTDT_RESHOW` ≈ 100 ms). Themes
+(including Material 3) inherit `MotionTokens::default()` unless they
+override `motion`.
+
+Widgets that need a custom value pass an explicit `Duration` to
+`attach_tooltip`.
 
 ### `BuildContext` surface
 
@@ -365,17 +371,26 @@ The `WidgetTree` keeps a `Vec<TooltipEntry>` and visits it once per processed
 event batch. The state-machine is:
 
 1. **Hover enter** (`tooltip_pointer_enter`). Every entry whose `anchor_id`
-   contains the entered widget records `hover_start = now`. No overlay yet.
-2. **Delay tick** (`process_tooltips` / `process_tooltips_real`). Each entry
-   whose elapsed time since `hover_start` ≥ `delay` is shown — `arena.activate`
-   on the dormant content, `show_overlay` with placement `NearAnchor { offset: (0, 8) }`
-   and dismiss behavior `PointerLeave { delay: 100 ms }`. The
-   `shown_at_sim` / `shown_at_real` timestamps are recorded; the optional
-   `shown_at_sink` is updated.
-3. **Fade-in.** Tooltips fade in over `MotionTokens::duration_fast` (~120 ms).
+   contains the entered widget records `hover_start = now` and the pointer
+   position as `hover_origin`. No overlay yet.
+2. **Stationary filter** (`tooltip_pointer_moved`). While the tip is still
+   pending, moving more than ~4 logical px from `hover_origin` restarts the
+   timer (Windows-style hover-tracking slop). Intentional pause, not
+   fly-by, shows the tip.
+3. **Delay tick** (`process_tooltips` / `process_tooltips_real`). Each entry
+   whose elapsed time since `hover_start` ≥ the *effective* delay is shown.
+   Effective delay is the entry's `delay`, or `min(delay, tooltip_reshow_delay)`
+   while a tooltip session is active (any tip currently shown, or within
+   ~1 s of the last dismiss — Windows `TTDT_RESHOW`). On show:
+   `arena.activate` on the dormant content, `show_overlay` with placement
+   `NearAnchor { offset: (0, 8) }` and dismiss behavior
+   `PointerLeave { delay: 100 ms }`. The `shown_at_sim` / `shown_at_real`
+   timestamps are recorded; the optional `shown_at_sink` is updated.
+4. **Fade-in.** Tooltips fade in over `MotionTokens::duration_fast` (~120 ms).
    Reduced-motion users get an instant snap (no fade animation).
-4. **Hover leave** (`tooltip_pointer_leave`). Plain tooltips dismiss
-   immediately and clear `hover_start`. Sticky tooltips (post-promotion)
+5. **Hover leave** (`tooltip_pointer_leave`). Pending timers are cancelled.
+   Shown non-sticky tips stay until the overlay stack's 100 ms
+   leave-grace (WCAG 1.4.13 Hoverable). Sticky tooltips (post-promotion)
    survive — the user dismisses them via `EscapeOrClickOutside`.
 
 `WidgetTree::next_timer_deadline()` returns the earliest pending tooltip /
