@@ -13,6 +13,19 @@ mark-all-read and clear buttons. Unread rows show the title in
 `BodyBold`; read rows use `Body`. An empty-state hint is shown when the
 archive is empty.
 
+## Sizing
+
+The log grows into a host that bounds its height and compresses
+inside one shorter than its natural height (floored at one row);
+only a host that hugs its content — which is how the overlay layer
+measures the `NotificationCenterButton`
+popover — falls back to `preferred_width` /
+`preferred_height`. Row text is
+**elided**, not wrapped, with the full text on the row's rich
+tooltip: notification prose is arbitrary and the log does not
+control its own width, so a wrapping row would over-constrain
+itself and push its trailing action buttons out of view.
+
 ## When to use
 
 - Embed directly inside a side panel or settings page for an in-app
@@ -34,7 +47,7 @@ let log = NotificationLog::new(archive)
 
 ## Builder methods at a glance
 
-`show_toolbar`, `empty_state`, `on_entry_invoked`, `on_action_invoked`
+`for_window`, `for_audience`, `show_toolbar`, `empty_state`, `preferred_width`, `preferred_height`, `on_entry_invoked`, `on_action_invoked`
 
 ## API reference
 
@@ -64,17 +77,62 @@ pub struct NotificationLog { /* fields */ }
 Construct a log bound to the shared archive. The archive is
 expected to outlive the log (typically held in `app_state`).
 
+#### `pub fn for_window(mut self, window_id: BastydeWindowId) -> Self`
+
+Scope this log to entries routed to window `window_id` (plus
+any `Broadcast` entry) — the shape a `NotificationCenterButton`
+mounted in that window wants for its popover body. Overrides
+any previous `for_window` / `for_audience` call.
+
+#### `pub fn for_audience(mut self, audience: ToastAudience) -> Self`
+
+Scope this log to entries routed to `audience` (plus any
+`Broadcast` entry). Overrides any previous `for_window` /
+`for_audience` call.
+
 #### `pub fn show_toolbar(mut self, show: bool) -> Self`
 
 Whether to render the toolbar row (mark-all-read + clear).
 Default `true`. Apps that want a chrome-less log (e.g. inside
 a custom panel that supplies its own toolbar) pass `false`.
 
-#### `pub fn empty_state(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn empty_state(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
-Override the empty-state hint widget. Default: a centered
-"No notifications" text. Pass any widget for a custom empty
-view (illustration, call-to-action, …).
+Override the empty-state hint. Default: a centered
+"No notifications" text. Pass a factory returning any widget
+for a custom empty view (illustration, call-to-action, …).
+
+A factory rather than a widget because the log rebuilds on
+every archive mutation: the view has to be re-creatable each
+time the archive goes empty again, not just the first time.
+
+```ignore
+log.empty_state(|| Box::new(TextWidget::new(tr!(inbox_zero()))))
+```
+
+#### `pub fn preferred_width(mut self, width: f32) -> Self`
+
+Width the log reports when the host proposes an unbounded one.
+Default `380` dp.
+
+This is load-bearing for the popover presentation
+(`NotificationCenterButton`):
+the overlay layer measures its content with a fully unbounded
+proposal, and a `StandardListItem` asked for an intrinsic
+width reports only its chrome, so without a preferred width
+the popover inherited whatever the two toolbar buttons
+happened to measure (~248 dp) and elided every title down to a
+few words. Hosts that DO bound the width (a dialog, a side
+panel) ignore this value.
+
+#### `pub fn preferred_height(mut self, height: f32) -> Self`
+
+Height of the scrolling list area when the host proposes an
+unbounded height. Default `320` dp.
+
+The log always *grows* into a host that bounds its height (it
+reports a flex weight), so this only sets the natural height a
+content-hugging host — again, the popover — sizes itself to.
 
 #### `pub fn on_entry_invoked( mut self, f: impl Fn(&NotificationEntry, &mut EventContext) + 'static, ) -> Self`
 

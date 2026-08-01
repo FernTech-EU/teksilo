@@ -445,12 +445,36 @@ severity glyph leading, title in `BodyBold` (unread) / `Body`
 (read), body as subtitle, action buttons trailing. Outer node
 carries `Role::List` + `set_name("Notifications")`.
 
+Title and body are **elided**, not wrapped, and the full text is
+carried on the row's rich tooltip. Notification text is arbitrary
+app-supplied prose and the log does not control its own width, so a
+wrapping row (`StandardListItem`'s default) would report its full
+one-line intrinsic width, over-constrain the row, and push the
+trailing action buttons outside it — clipped, with no horizontal
+scrollbar to reach them.
+
+### Sizing
+
+The log **grows into** a host that bounds its height (a dialog, a
+side panel) and **compresses** inside one shorter than its natural
+height, down to a one-row floor. Only a host that hugs its content —
+which is how the overlay layer measures the
+`NotificationCenterButton` popover — falls back to the preferred
+size, since rows cannot report a meaningful intrinsic width of their
+own:
+
+```rust
+NotificationLog::new(archive)
+    .preferred_width(380.0)   // default — width when the host proposes none
+    .preferred_height(320.0)  // default — list height when the host proposes none
+```
+
 ### Builder
 
 ```rust
 NotificationLog::new(archive: Rc<NotificationArchiveModel>)
     .show_toolbar(true)                                       // default true
-    .empty_state(my_empty_widget)                             // override default text
+    .empty_state(|| Box::new(my_empty_widget()))              // factory: re-run per rebuild
     .on_entry_invoked(|entry, ctx| open_details(entry, ctx))  // click-row callback
     .on_action_invoked(|entry, action, ctx| {                 // archive-replay callback
         match action.intent_name.as_deref() {
