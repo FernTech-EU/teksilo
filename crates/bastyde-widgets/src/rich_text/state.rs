@@ -315,6 +315,32 @@ pub(crate) struct EditorState {
     /// after the user has deliberately scrolled the caret off-screen.
     pub last_chase_pos: Option<usize>,
 
+    /// Window-space `y` of the caret at the most recent **pinned** chase, used
+    /// to extend the `last_chase_pos` dedup while typewriter scrolling is on.
+    ///
+    /// Position alone is not enough for a pin: a reflow — a soft-wrap change, a
+    /// typography or zoom change, a window resize — moves the caret's *rect*
+    /// while its document offset stands still, and a pin that skipped those
+    /// would silently drift off its line and stay there.
+    pub last_chase_y: Option<f32>,
+
+    /// Typewriter scrolling: where to pin the caret line in the enclosing scroll
+    /// area, as a fraction of the viewport height (`0.5` = centred). `None`
+    /// (default) leaves the plain minimal-reveal follow in charge. Set from
+    /// [`RichTextEditor::typewriter`](crate::rich_text::RichTextEditor::typewriter).
+    pub typewriter: Option<f32>,
+
+    /// Whether the caret was last placed by the **pointer**. While set, the
+    /// typewriter pin stands down and the click position becomes the new
+    /// resting place; the next keystroke clears it and pinning resumes.
+    ///
+    /// Every well-regarded typewriter implementation converges on this rule
+    /// (Ulysses' "Variable", the CodeMirror plugins' `movedByMouse`, Sublime's
+    /// trigger list, VS Code's `cursorSurroundingLinesStyle`), and the editors
+    /// that omit it — Typora, Zettlr — carry open bugs about the view fighting
+    /// the mouse and about drag-selection becoming unusable.
+    pub mouse_anchored: bool,
+
     /// Last IME candidate-window rectangle reported to the platform via
     /// [`report_ime_cursor_area`](super::keyboard::report_ime_cursor_area).
     /// Reporting is deduped against this: re-sending an unchanged area is not
@@ -556,6 +582,9 @@ impl EditorState {
             ime_preedit: None,
             ime_preedit_range: None,
             last_chase_pos: None,
+            last_chase_y: None,
+            typewriter: None,
+            mouse_anchored: false,
             last_ime_area: None,
             // `Debounce::new` starts already-expired so the first tick
             // flushes initial state instead of waiting out a window.

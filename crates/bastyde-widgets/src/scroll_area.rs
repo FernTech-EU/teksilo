@@ -37,7 +37,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -112,6 +112,9 @@ pub struct ScrollArea {
     /// boundary scroll bubble to an ancestor scrollable; `Contain` absorbs it
     /// (the web's `overscroll-behavior`).
     overscroll_behavior: OverscrollBehavior,
+    /// Extra scrollable range past the end of the content, as a fraction of the
+    /// viewport height. See [`Self::scroll_past_end`].
+    scroll_past_end: Prop<f32>,
 
     // --- shared reactive state ---
     /// Vertical scroll position (0.0 = top).
@@ -184,6 +187,7 @@ impl ScrollArea {
             preferred_size: None,
             preferred_height: None,
             overscroll_behavior: OverscrollBehavior::default(),
+            scroll_past_end: Prop::Static(0.0),
             scroll_y: Signal::new_animated(0.0),
             scroll_x: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
@@ -278,6 +282,32 @@ impl ScrollArea {
         self
     }
 
+    /// Allow scrolling past the end of the content by `fraction` of the
+    /// viewport height (default `0.0` — the last pixel of content stops flush
+    /// with the bottom of the viewport).
+    ///
+    /// This extends the scroll **range** only. It adds no widget, no padding and
+    /// no layout, so it cannot interfere with the content's own padding — a
+    /// distinction worth keeping, since padding-based implementations of this
+    /// idea in other toolkits are a recurring source of "single-line content is
+    /// scrollable" bugs.
+    ///
+    /// The motivating case is typewriter scrolling: to pin the caret's line at
+    /// the middle of the viewport, the view must be able to scroll half a
+    /// viewport past the last line, or the pin quietly stops working over the
+    /// final page — exactly where a writer spends their time. Pair with
+    /// [`EventContext::ensure_visible_aligned`], passing `1.0 - fraction` here
+    /// for a pin at `fraction`.
+    ///
+    /// Accepts a literal or a `Signal<f32>`, so it can follow a setting live.
+    /// Negative values are treated as `0.0`.
+    ///
+    /// [`EventContext::ensure_visible_aligned`]: bastyde_core::widget::EventContext::ensure_visible_aligned
+    pub fn scroll_past_end(mut self, fraction: impl Into<Prop<f32>>) -> Self {
+        self.scroll_past_end = fraction.into();
+        self
+    }
+
     /// Set a preferred size returned when the parent proposes unconstrained
     /// dimensions. If not set, falls back to cached content size or 300×200.
     ///
@@ -357,11 +387,20 @@ impl ScrollArea {
     }
 
     /// Maximum vertical scroll offset for the current content
-    /// (`content_height − viewport_height`, or 0 when content fits).
+    /// (`content_height − viewport_height`, or 0 when content fits), plus any
+    /// range bought with [`scroll_past_end`](Self::scroll_past_end).
     /// External callers bind to this for "is there more to scroll?"
     /// chrome (e.g. trailing scroll-arrow visibility).
     pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
         &self.max_scroll_y
+    }
+
+    /// Fraction of the scrollable height currently visible (`1.0` when
+    /// everything fits) — what sizes the vertical scroll bar's thumb. Accounts
+    /// for [`scroll_past_end`](Self::scroll_past_end), so the thumb stays
+    /// proportional to the range the user can actually travel.
+    pub fn viewport_ratio_y_signal(&self) -> &Signal<f32> {
+        &self.viewport_ratio_y
     }
 
     /// Maximum horizontal scroll offset for the current content.
@@ -388,6 +427,14 @@ impl ScrollArea {
 }
 
 impl Widget for ScrollArea {
+    /// Opt into concrete-type introspection so a host's tests can read the
+    /// scroll metrics of an area built deep inside a composite (a page whose
+    /// `ScrollArea` no caller holds a reference to) rather than only of one they
+    /// constructed themselves.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let mut ids = Vec::new();
 
@@ -459,6 +506,11 @@ impl Widget for ScrollArea {
             .bind_to(self_id, registry, BindingLevel::Relayout);
         self.scroll_x
             .bind_to(self_id, registry, BindingLevel::Relayout);
+        // An *input* to the scroll range, unlike the metrics published at the
+        // bottom of `layout` — binding it at `Relayout` is safe (nothing writes
+        // it during layout) and is what makes a live settings change re-measure.
+        self.scroll_past_end
+            .register_if_bound(self_id, registry, BindingLevel::Relayout);
 
         self.child_ids = ids.clone();
 
@@ -513,7 +565,6 @@ impl Widget for ScrollArea {
             let max_scroll_x = max_scroll_x.clone();
             let viewport_size = viewport_size.clone();
             let viewport_origin = viewport_origin.clone();
-            let clamp_and_set = clamp_and_set.clone();
             handlers = handlers.on_scroll(move |event, _ctx| match event {
                 WidgetEvent::Scroll { delta, .. } => {
                     let max_y = max_scroll_y.get();
@@ -553,6 +604,8 @@ impl Widget for ScrollArea {
                 WidgetEvent::ScrollIntoView {
                     target_bounds,
                     margin,
+                    align,
+                    motion,
                     applied_scroll,
                 } => {
                     // `target_bounds` is in absolute tree coordinates (the
@@ -579,11 +632,24 @@ impl Widget for ScrollArea {
                     let target_bottom = target_top + target_bounds.height + margin * 2.0;
 
                     let mut new_y = sy;
-                    if !(target_top <= viewport_top && target_bottom >= viewport_bottom) {
-                        if target_top < viewport_top {
-                            new_y = target_top;
-                        } else if target_bottom > viewport_bottom {
-                            new_y = target_bottom - vp.height;
+                    match align {
+                        // Pin: put the target at `f` of the way down the
+                        // viewport regardless of where it currently sits. The
+                        // margin is deliberately not applied — a pin already
+                        // names an exact position, and padding it would only
+                        // shift the pin by an amount the caller did not ask for.
+                        bastyde_core::event::ScrollAlign::Fraction(f) => {
+                            let target_top = target_bounds.y - vo.y + sy;
+                            new_y = target_top - (vp.height - target_bounds.height) * f;
+                        }
+                        bastyde_core::event::ScrollAlign::Minimal => {
+                            if !(target_top <= viewport_top && target_bottom >= viewport_bottom) {
+                                if target_top < viewport_top {
+                                    new_y = target_top;
+                                } else if target_bottom > viewport_bottom {
+                                    new_y = target_bottom - vp.height;
+                                }
+                            }
                         }
                     }
 
@@ -601,15 +667,32 @@ impl Widget for ScrollArea {
                         }
                     }
 
-                    scroll_y.set(new_y);
-                    scroll_x.set(new_x);
-                    clamp_and_set();
-                    // Report the actually-applied (post-clamp) scroll delta so a
-                    // nested outer container can re-target the same rect.
+                    // Clamp up front rather than setting then calling
+                    // `clamp_and_set`: an animated scroll must be aimed at a
+                    // reachable offset, or the tween would start toward a
+                    // target the clamp immediately retracts.
+                    let new_y = new_y.clamp(0.0, max_scroll_y.get());
+                    let new_x = new_x.clamp(0.0, max_scroll_x.get());
+
+                    match motion {
+                        bastyde_core::event::ScrollMotion::Smooth if smooth_scrolling => {
+                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                            scroll_x.animate_to(new_x, smooth_scroll_duration, Easing::EaseOut);
+                        }
+                        _ => {
+                            scroll_y.set(new_y);
+                            scroll_x.set(new_x);
+                        }
+                    }
+                    // Report the applied scroll delta so a nested outer
+                    // container can re-target the same rect. Computed from the
+                    // clamped *targets*, not the live signal, so an animated
+                    // scroll reports where it is heading rather than the single
+                    // frame it has travelled so far.
                     if let Some(cell) = applied_scroll
                         && let Ok(mut d) = cell.lock()
                     {
-                        *d = bastyde_canvas::Point::new(scroll_x.get() - sx, scroll_y.get() - sy);
+                        *d = bastyde_canvas::Point::new(new_x - sx, new_y - sy);
                     }
                     EventResponse::Handled
                 }
@@ -840,13 +923,20 @@ impl Widget for ScrollArea {
             }
         };
 
-        let max_y = (placed_content_size.height - viewport_height).max(0.0);
+        // Scrolling past the end extends the *range* the user can reach without
+        // changing the content's height. Everything downstream (the max offsets,
+        // the thumb proportions) therefore works off this effective height, so
+        // the scroll bar keeps telling the truth about how far there is to go.
+        let past_end = (self.scroll_past_end.get().max(0.0)) * viewport_height;
+        let scrollable_height = placed_content_size.height + past_end;
+
+        let max_y = (scrollable_height - viewport_height).max(0.0);
         let max_x = (placed_content_size.width - viewport_width).max(0.0);
         set_if_changed(&self.max_scroll_y, max_y);
         set_if_changed(&self.max_scroll_x, max_x);
 
-        let ratio_y = if placed_content_size.height > 0.0 {
-            (viewport_height / placed_content_size.height).clamp(0.0, 1.0)
+        let ratio_y = if scrollable_height > 0.0 {
+            (viewport_height / scrollable_height).clamp(0.0, 1.0)
         } else {
             1.0
         };
@@ -1827,6 +1917,185 @@ mod tests {
             target_after.bottom(),
             viewport_top,
             viewport_bottom
+        );
+    }
+
+    // --- Typewriter scrolling: alignment + scroll-past-end ------------------
+
+    /// A `ScrollArea` over `content_h` of content, laid out at `200 x
+    /// viewport_h`, with a focused child inside it that issues an aligned
+    /// reveal when it receives a key.
+    ///
+    /// The request goes through the real path — `EventContext` →
+    /// `collect_from_ctx` → the clipping-ancestor walk → the area's handler —
+    /// because `ScrollIntoView` is deliberately inert in the top-level event
+    /// router and only ever arrives that way.
+    struct PinFixture {
+        tree: WidgetTree,
+        bounds: Rect,
+        viewport_h: f32,
+        scroll_y: Signal<f32>,
+        max_scroll_y: Signal<f32>,
+        ratio_y: Signal<f32>,
+        /// The rect the actor will ask to have pinned, in window space, plus the
+        /// fraction to pin it at. Rewritten before each key.
+        request: Rc<Cell<(Rect, f32)>>,
+    }
+
+    fn pin_fixture(content_h: f32, viewport_h: f32, past_end: f32) -> PinFixture {
+        let request = Rc::new(Cell::new((Rect::new(0.0, 0.0, 0.0, 0.0), 0.5)));
+        let mut tree = WidgetTree::new();
+
+        let req = request.clone();
+        let actor = tree.add(TallLeaf::new(200.0, content_h).focusable(true).on_key(
+            move |_ev, ctx| {
+                let (rect, fraction) = req.get();
+                ctx.ensure_visible_aligned(
+                    rect,
+                    fraction,
+                    bastyde_core::event::ScrollMotion::Instant,
+                );
+                EventResponse::Handled
+            },
+        ));
+        let content = tree.add(VStack::new().add_child(actor));
+        let sa = ScrollArea::from_id(content)
+            .smooth_scrolling(false)
+            .scroll_past_end(past_end);
+        let scroll_y = sa.scroll_y_signal().clone();
+        let max_scroll_y = sa.max_scroll_y_signal().clone();
+        let ratio_y = sa.viewport_ratio_y_signal().clone();
+        let scroll = tree.add(sa);
+        tree.layout(SizeProposal::exact(200.0, viewport_h));
+        tree.focus(actor);
+        // Focusing fires a Minimal reveal of the (viewport-sized) actor; settle
+        // it before the tests measure.
+        tree.layout(SizeProposal::exact(200.0, viewport_h));
+        scroll_y.set(0.0);
+
+        let bounds = tree.bounds(scroll);
+        PinFixture {
+            tree,
+            bounds,
+            viewport_h,
+            scroll_y,
+            max_scroll_y,
+            ratio_y,
+            request,
+        }
+    }
+
+    impl PinFixture {
+        /// Pin a `height`-tall line whose top sits at `content_y` in content
+        /// space, at `fraction` of the viewport.
+        fn pin(&mut self, content_y: f32, height: f32, fraction: f32) {
+            let window_y = self.bounds.y + content_y - self.scroll_y.get();
+            self.request
+                .set((Rect::new(0.0, window_y, 200.0, height), fraction));
+            self.tree.dispatch_event(WidgetEvent::KeyDown {
+                key: bastyde_core::event::Key::ArrowDown,
+                modifiers: Default::default(),
+                text: None,
+            });
+            self.tree
+                .layout(SizeProposal::exact(200.0, self.viewport_h));
+        }
+    }
+
+    #[test]
+    fn scroll_past_end_extends_the_range_without_changing_the_content() {
+        // 300px of content in a 100px viewport scrolls 200px normally.
+        let plain = pin_fixture(300.0, 100.0, 0.0);
+        assert_eq!(plain.max_scroll_y.get(), 200.0);
+
+        // Half a viewport past the end buys exactly 50px more.
+        let padded = pin_fixture(300.0, 100.0, 0.5);
+        assert_eq!(
+            padded.max_scroll_y.get(),
+            250.0,
+            "scroll_past_end(0.5) must add half a viewport of range"
+        );
+    }
+
+    #[test]
+    fn scroll_past_end_keeps_the_thumb_proportional() {
+        // The thumb must size against the range the user can actually travel,
+        // or the scroll bar claims there is less document left than there is.
+        let f = pin_fixture(300.0, 100.0, 0.5);
+        // Effective scrollable height is 300 + 50 = 350.
+        let expected = 100.0 / 350.0;
+        assert!(
+            (f.ratio_y.get() - expected).abs() < 1e-4,
+            "thumb ratio must use the extended range, got {}",
+            f.ratio_y.get()
+        );
+    }
+
+    #[test]
+    fn scroll_past_end_lets_the_last_line_reach_a_centre_pin() {
+        // The case that motivates the feature: a line at the very bottom of the
+        // content cannot reach the middle of the viewport without range past
+        // the end — and that is exactly where a writer spends their time.
+        let mut f = pin_fixture(300.0, 100.0, 0.5);
+        f.pin(280.0, 20.0, 0.5);
+
+        // Centring a 20px line in a 100px viewport puts its top at 40px, so the
+        // offset must be 280 - 40 = 240 — reachable only because
+        // scroll_past_end(0.5) raised the maximum from 200 to 250.
+        assert_eq!(
+            f.scroll_y.get(),
+            240.0,
+            "the last line must be able to sit at the pin"
+        );
+    }
+
+    #[test]
+    fn without_scroll_past_end_the_last_line_cannot_reach_the_pin() {
+        // The negative control for the test above: same geometry, no extra
+        // range, so the pin is clamped short and the line stays at the bottom.
+        let mut f = pin_fixture(300.0, 100.0, 0.0);
+        f.pin(280.0, 20.0, 0.5);
+        assert_eq!(f.scroll_y.get(), 200.0, "clamped to the un-extended maximum");
+    }
+
+    #[test]
+    fn a_pin_near_the_document_start_clamps_instead_of_scrolling_negative() {
+        // Deliberate design choice: no padding above the content, so the caret
+        // rides above the pin until there is room to honour it.
+        let mut f = pin_fixture(300.0, 100.0, 0.5);
+        f.pin(0.0, 20.0, 0.5);
+        assert_eq!(
+            f.scroll_y.get(),
+            0.0,
+            "the first line must clamp at the top, never scroll past it"
+        );
+    }
+
+    #[test]
+    fn a_fraction_pin_places_the_target_at_that_height() {
+        // 0.25 → the target's top sits a quarter of the way down the free space.
+        let mut f = pin_fixture(600.0, 100.0, 0.0);
+        f.pin(300.0, 20.0, 0.25);
+        // Free space = 100 - 20 = 80; a quarter of that is 20 → offset 280.
+        assert_eq!(f.scroll_y.get(), 280.0);
+    }
+
+    #[test]
+    fn a_pin_re_asserts_on_an_already_visible_target() {
+        // The property that separates a pin from a reveal. Park the view so the
+        // target is comfortably on screen, then pin it and check the view still
+        // moved to put it exactly on the mark.
+        let mut f = pin_fixture(600.0, 100.0, 0.0);
+        f.scroll_y.set(250.0);
+        f.tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Content-space 300 is visible at offset 250 (50px down the viewport).
+        f.pin(300.0, 20.0, 0.5);
+
+        assert_eq!(
+            f.scroll_y.get(),
+            260.0,
+            "a pin must move an already-visible target onto the mark"
         );
     }
 

@@ -14,7 +14,7 @@
 //! All functions take `&SharedState` so they can be called from inside
 //! `HandlerSet` closures without borrowing the widget struct.
 
-use bastyde_core::event::{EventResponse, Key, WidgetEvent};
+use bastyde_core::event::{EventResponse, Key, ScrollMotion, WidgetEvent};
 use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
@@ -52,6 +52,13 @@ pub(super) enum KeyAction {
     /// also lives here since it leaves the caret position unchanged
     /// and any current affinity is still valid.
     KeepPreferredX,
+    /// PageUp/PageDown. Behaves exactly like [`KeyAction::KeepPreferredX`] —
+    /// the helper set affinity, the sticky column must survive — but is kept
+    /// distinct so the typewriter pin can *glide* to the new position instead
+    /// of snapping. A page jump is a deliberate, screen-sized move where the
+    /// animation helps the reader keep their bearings, unlike the per-keystroke
+    /// re-pin, which must be instant.
+    PageMotion,
     /// The key was not handled.
     Unhandled,
 }
@@ -158,11 +165,11 @@ pub(super) fn handle_key(
             }
             Key::PageUp if filter.accepts(EditCommandKind::PageUp) => {
                 move_cursor_page(&mut st, -1, mode);
-                KeyAction::KeepPreferredX
+                KeyAction::PageMotion
             }
             Key::PageDown if filter.accepts(EditCommandKind::PageDown) => {
                 move_cursor_page(&mut st, 1, mode);
-                KeyAction::KeepPreferredX
+                KeyAction::PageMotion
             }
             Key::Home if filter.accepts(EditCommandKind::MoveHome) => {
                 if ctrl {
@@ -500,6 +507,11 @@ pub(super) fn handle_key(
             // both `preferred_x` and `cursor_affinity` unchanged.
             caret_moved_epilogue(state, ctx)
         }
+        KeyAction::PageMotion => {
+            // As `KeepPreferredX`, but the typewriter pin glides — see the
+            // variant's docs.
+            caret_moved_epilogue_with(state, ctx, ScrollMotion::Smooth)
+        }
     }
 }
 
@@ -509,10 +521,23 @@ pub(super) fn handle_key(
 /// into any enclosing scroll area ([`chase_caret_into_view`]), and requests a
 /// frame. Always returns [`EventResponse::Handled`].
 fn caret_moved_epilogue(state: &SharedState, ctx: &mut EventContext) -> EventResponse {
+    caret_moved_epilogue_with(state, ctx, ScrollMotion::Instant)
+}
+
+/// [`caret_moved_epilogue`] with an explicit typewriter-pin motion — see
+/// [`chase_caret_into_view_with`]. Used by the page-sized jumps, which glide.
+fn caret_moved_epilogue_with(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    motion: ScrollMotion,
+) -> EventResponse {
+    // Any keyboard-driven caret move hands control back to the typewriter pin
+    // after a click or drag stood it down.
+    state.borrow_mut().mouse_anchored = false;
     ensure_caret_visible(state);
     sync_cursor_signals(state);
     report_ime_cursor_area(state, ctx);
-    chase_caret_into_view(state, ctx);
+    chase_caret_into_view_with(state, ctx, motion);
     ctx.request_frame();
     EventResponse::Handled
 }
@@ -632,11 +657,51 @@ pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
 /// the next keystroke. Structural edits (Enter/Backspace/Delete) mutate the
 /// cursor synchronously and are exact.
 pub(super) fn chase_caret_into_view(state: &SharedState, ctx: &mut EventContext) {
-    let area = {
+    chase_caret_into_view_with(state, ctx, ScrollMotion::Instant);
+}
+
+/// [`chase_caret_into_view`] with an explicit scroll motion for the typewriter
+/// pin.
+///
+/// Only the pin reads it — a minimal reveal is always instant, because it fires
+/// on ordinary caret movement where an animation would just add lag. The pin,
+/// by contrast, re-asserts on **every** keystroke, so animating it is what
+/// produces the "screen bouncing" complaint typewriter modes attract in other
+/// editors: hence [`ScrollMotion::Instant`] for typing and character-level
+/// navigation, and [`ScrollMotion::Smooth`] reserved for the deliberate jumps
+/// (page up/down, a search hit) where a glide reads as orientation rather than
+/// noise.
+pub(super) fn chase_caret_into_view_with(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    motion: ScrollMotion,
+) {
+    let (area, pin) = {
         let mut st = state.borrow_mut();
         if !st.follow_caret_in_page {
             return;
         }
+        // The pin stands down while the pointer owns the caret: a click just
+        // places the caret and *becomes* the new resting position, and a
+        // drag-selection is never interrupted by a scroll (which would make
+        // precise selection nearly impossible — a real, filed bug in editors
+        // that re-centre on pointer input).
+        let pin = match st.typewriter {
+            Some(f)
+                if !st.mouse_anchored
+                    && !matches!(st.drag_state, super::state::DragState::Selecting { .. }) =>
+            {
+                Some(f)
+            }
+            _ => None,
+        };
+
+        let pos = st.cursor.position();
+        let rect = match caret_window_rect(&st) {
+            Some(a) => a,
+            None => return,
+        };
+
         // Reveal the caret only when it actually MOVES. A repeat call at the
         // same document position — IME preedit churn (Linux ibus/fcitx floods
         // empty `Ime::Preedit` events), a no-op nav key, a redundant click —
@@ -646,21 +711,45 @@ pub(super) fn chase_caret_into_view(state: &SharedState, ctx: &mut EventContext)
         // later, so within a fast burst several keystrokes share one pre-insert
         // position; the one-line look-ahead below covers that batch, and the
         // next real move re-chases.
-        let pos = st.cursor.position();
-        if st.last_chase_pos == Some(pos) {
-            return;
+        //
+        // A pin additionally compares the caret's window `y`, because it must
+        // survive a reflow that moves the caret's *rect* without moving its
+        // offset — a soft-wrap change, a typography or zoom change, a resize.
+        // Deduping a pin on position alone lets it drift off its line and stay
+        // there, which is the shape of the zoom-dependent jitter bugs that
+        // dog other implementations.
+        let same_pos = st.last_chase_pos == Some(pos);
+        if pin.is_some() {
+            let same_y = st
+                .last_chase_y
+                .is_some_and(|y| (y - rect.y).abs() <= f32::EPSILON);
+            if same_pos && same_y {
+                return;
+            }
+            st.last_chase_y = Some(rect.y);
+        } else {
+            if same_pos {
+                return;
+            }
+            st.last_chase_y = None;
         }
         st.last_chase_pos = Some(pos);
-        match caret_window_rect(&st) {
-            Some(a) => a,
-            None => return,
-        }
+        (rect, pin)
     };
-    // Extend downward by one line so the line a wrapping character would land
-    // on is revealed together with the current caret line.
-    let line = area.height.max(1.0);
-    let area = bastyde_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
-    ctx.ensure_visible(area);
+
+    match pin {
+        // The bare caret rect, with no look-ahead: alignment is computed from
+        // the target's height, so padding it by a line would shift the pin by
+        // half a line and put the text permanently off the mark.
+        Some(fraction) => ctx.ensure_visible_aligned(area, fraction, motion),
+        None => {
+            // Extend downward by one line so the line a wrapping character would
+            // land on is revealed together with the current caret line.
+            let line = area.height.max(1.0);
+            let area = bastyde_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
+            ctx.ensure_visible(area);
+        }
+    }
 }
 
 /// Ctrl+A escalation ladder. Mirrors godot rich_text_edit.rs:690-727.

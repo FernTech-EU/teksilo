@@ -140,6 +140,35 @@ a fast flick to feel smooth instead of jumping.
 
 Set the duration of the smooth scroll animation (default: 150ms).
 
+#### `pub fn scroll_past_end(mut self, fraction: impl Into<Prop<f32>>) -> Self`
+
+Allow scrolling past the end of the content by `fraction` of the viewport
+height (default `0.0` — the last pixel of content stops flush with the bottom
+of the viewport).
+
+This extends the scroll **range** only. It adds no widget, no padding and no
+layout, so it cannot interfere with the content's own padding — a distinction
+worth keeping, since padding-based implementations of this idea in other
+toolkits are a recurring source of "single-line content is scrollable" bugs.
+The scroll bar's thumb sizes against the extended range too, so it keeps
+telling the truth about how far there is left to travel.
+
+The motivating case is **typewriter scrolling**: to pin the caret's line at the
+middle of the viewport, the view must be able to scroll half a viewport past the
+last line, or the pin quietly stops working over the final page — exactly where
+a writer spends their time. Pair with `EventContext::ensure_visible_aligned`,
+passing `1.0 - fraction` here for a pin at `fraction`.
+
+Accepts a literal or a `Signal<f32>`, so it can follow a setting live. Negative
+values are treated as `0.0`.
+
+```rust,ignore
+// A writing page whose caret is pinned at the middle.
+ScrollArea::new()
+    .scroll_past_end(0.5)
+    .child(page)
+```
+
 #### `pub fn preferred_size(mut self, width: f32, height: f32) -> Self`
 
 Set a preferred size returned when the parent proposes unconstrained

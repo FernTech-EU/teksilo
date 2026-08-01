@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -241,6 +241,55 @@ inside an outer `ScrollArea`) track the caret at all — there the editor's
 internal caret-visibility is a no-op, so the enclosing-page follow is the
 only mechanism that reveals the caret. Pass `false` for the rare layout
 where a caret change must never move the surrounding page.
+
+#### `pub fn typewriter(self, anchor: Option<f32>) -> Self`
+
+**Typewriter scrolling**: pin the caret's line at `anchor` of the way down the
+enclosing scroll area — `0.0` at the top, `0.5` centred, `1.0` at the bottom —
+and let the document scroll under it. `None` (the default) leaves the ordinary
+minimal-reveal follow in charge.
+
+Unlike that follow, which only acts once the caret would leave the viewport, a
+pin re-asserts on every caret move, so the line being written holds a constant
+height on screen. The classic writing-app feature.
+
+Three behaviours come with it, each of them the consensus answer among the
+editors that ship this well:
+
+- **The pointer stands the pin down.** A click places the caret without
+  scrolling, and that position becomes the new resting place; a drag-selection is
+  never interrupted. The next keystroke resumes pinning. Editors that re-centre
+  on pointer input instead have open bugs about the view fighting the mouse and
+  about drag-selection becoming unusable.
+- **The rendered row is pinned, not the paragraph.** Under soft wrap a long
+  paragraph spans several visual rows; pinning the logical line would leave the
+  caret far from the mark.
+- **Typing snaps, page jumps glide.** PageUp/PageDown and `reveal_range` (a
+  search hit) animate; everything else is instant. Animating a pin that updates
+  on every keystroke is what produces the "screen bouncing" complaint other
+  implementations attract.
+
+Requires `follow_caret_in_page` (on by default). `anchor` is clamped to
+`0.0..=1.0`.
+
+Near the start of the document the pin gives way to the scroll range — the caret
+rides above its line until there is room — and near the end it would do the same,
+which is usually not what you want: pair with
+`ScrollArea::scroll_past_end(1.0 - anchor)` so the last line can still reach the
+pin.
+
+Takes a plain value, like `typography_defaults`; to follow a setting live, push
+changes onto the handle with `EditorHandle::set_typewriter`.
+
+```rust,ignore
+// A flowing page whose caret stays centred.
+let editor = RichTextEditor::editor(doc)
+    .min_lines(10)
+    .v_scroll_policy(ScrollPolicy::AlwaysOff)   // the page scrolls, not the editor
+    .typewriter(Some(0.5));
+
+ScrollArea::new().scroll_past_end(0.5).child(editor)
+```
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 

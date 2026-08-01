@@ -402,6 +402,51 @@ pub enum ScrollDelta {
     Pixels { x: f32, y: f32 },
 }
 
+/// Where a [`WidgetEvent::ScrollIntoView`] target should come to rest on the
+/// scroll container's vertical axis.
+///
+/// The horizontal axis is always revealed minimally — a fraction only has an
+/// obvious meaning for the axis the request is *about*, and pinning a caret
+/// vertically must not yank a horizontally-scrolled view sideways.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScrollAlign {
+    /// Scroll the least amount that makes the target fully visible, and not at
+    /// all when it already is. This is what focus-driven reveals and
+    /// [`EventContext::ensure_visible`](crate::widget::EventContext::ensure_visible)
+    /// use, and it is the behaviour every scroll container had before
+    /// alignment existed.
+    Minimal,
+    /// Pin the target at `f` of the way down the viewport — `0.0` flush with
+    /// the top, `0.5` centred, `1.0` flush with the bottom — **whether or not
+    /// it is already visible**. Being unconditional is the whole point: a
+    /// typewriter-scrolling caret that only moved the view when it fell off
+    /// the edge would not be pinned at all.
+    ///
+    /// The container still clamps to its scroll range, so a target near the
+    /// start or end of the content comes to rest as close to `f` as the range
+    /// allows. See [`ScrollArea::scroll_past_end`] for buying range past the
+    /// end of the content so the last line can still reach the pin.
+    ///
+    /// [`ScrollArea::scroll_past_end`]: https://docs.rs/bastyde-widgets
+    Fraction(f32),
+}
+
+/// Whether a [`WidgetEvent::ScrollIntoView`] should jump or glide.
+///
+/// Split out from the container's own `smooth_scrolling` setting because the
+/// right answer depends on the *request*, not the container: a caret pinned on
+/// every keystroke must snap (animating it is what produces the "screen
+/// bouncing" typewriter-mode users complain about in other editors), while the
+/// same container gliding for a page-down or a search hit reads as polish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollMotion {
+    /// Jump straight to the target offset.
+    Instant,
+    /// Animate to the target offset, if the container has smooth scrolling
+    /// enabled. Containers with `smooth_scrolling(false)` still jump.
+    Smooth,
+}
+
 /// Events dispatched to widgets.
 #[derive(Debug, Clone)]
 pub enum WidgetEvent {
@@ -478,6 +523,15 @@ pub enum WidgetEvent {
         /// Extra margin (in logical pixels) to keep around the target
         /// when scrolling it into view. Defaults to 0.0.
         margin: f32,
+        /// Where the target should end up on the scroll container's
+        /// **vertical** axis. [`ScrollAlign::Minimal`] (the default, and what
+        /// every focus-driven reveal uses) only scrolls when the target is not
+        /// already fully visible; [`ScrollAlign::Fraction`] *pins* it to a
+        /// fixed height in the viewport whether or not it was already visible.
+        align: ScrollAlign,
+        /// Whether the container should jump to the new offset or glide to it.
+        /// See [`ScrollMotion`].
+        motion: ScrollMotion,
         /// Optional back-channel for the handling scroll container to report
         /// how far it actually scrolled (`(dx, dy)` in content pixels). When
         /// several nested scroll containers must each reveal the same target,

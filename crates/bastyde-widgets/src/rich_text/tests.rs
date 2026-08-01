@@ -6296,3 +6296,263 @@ fn home_and_end_still_work_in_ltr_text() {
     press(&mut tree, Key::End);
     assert_eq!(caret.get(), text.chars().count());
 }
+
+// ---------------------------------------------------------------------------
+// Typewriter scrolling
+// ---------------------------------------------------------------------------
+
+/// What the enclosing scroll container was asked for, if anything.
+type PinRecord = Rc<Cell<Option<bastyde_core::event::ScrollAlign>>>;
+
+/// An editor in "flowing page" mode (its own scroll suppressed, intrinsic
+/// height) inside a `clips_children` container that records the alignment of
+/// every `ScrollIntoView` it receives — the exact shape Skribisto's writing
+/// column uses, and the only one where the enclosing page does the scrolling.
+fn typewriter_fixture(
+    anchor: Option<f32>,
+) -> (WidgetTree, super::EditorHandle, PinRecord, bastyde_core::widget_id::WidgetId) {
+    use bastyde_core::event::{EventResponse, WidgetEvent};
+    use bastyde_core::widget_builder::WidgetBuilder;
+    use crate::primitives::VStack;
+    use super::ScrollPolicy;
+
+    let doc = TextDocument::new();
+    // Enough lines that a pin has somewhere to scroll to.
+    doc.set_plain_text(&(1..=40).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n"))
+        .unwrap();
+
+    let editor = RichTextEditor::editor(doc)
+        .min_lines(1)
+        .v_scroll_policy(ScrollPolicy::AlwaysOff)
+        .typewriter(anchor);
+    let handle = editor.handle();
+
+    let recorded: PinRecord = Rc::new(Cell::new(None));
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    let rec = recorded.clone();
+    let _container = tree.add(
+        VStack::new()
+            .add_child(id)
+            .on_scroll(move |ev, _ctx| match ev {
+                WidgetEvent::ScrollIntoView { align, .. } => {
+                    rec.set(Some(*align));
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            })
+            .clips_children(true),
+    );
+    tree.layout(SizeProposal::exact(400.0, 120.0));
+    let _ = tree.render();
+    (tree, handle, recorded, id)
+}
+
+/// A **complete** click. The release matters: without it the editor stays in
+/// `DragState::Selecting`, which legitimately suppresses the pin (a pin must
+/// never fight a selection gesture in progress), so a down-only "click" would
+/// silently disable typewriter scrolling for the rest of the test.
+fn click_at(tree: &mut WidgetTree, y: f32) {
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(20.0, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(20.0, y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+}
+
+fn key(tree: &mut WidgetTree, key: bastyde_core::event::Key) {
+    use bastyde_core::event::{Modifiers, WidgetEvent};
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+}
+
+#[test]
+fn a_keyboard_caret_move_pins_when_typewriter_is_on() {
+    use bastyde_core::event::{Key, ScrollAlign};
+
+    let (mut tree, _handle, recorded, _id) = typewriter_fixture(Some(0.5));
+    click_at(&mut tree, 8.0);
+    recorded.set(None);
+
+    key(&mut tree, Key::ArrowDown);
+
+    assert_eq!(
+        recorded.get(),
+        Some(ScrollAlign::Fraction(0.5)),
+        "a keyboard caret move must ask the enclosing page for a pin"
+    );
+}
+
+#[test]
+fn without_typewriter_a_caret_move_only_reveals_minimally() {
+    use bastyde_core::event::{Key, ScrollAlign};
+
+    let (mut tree, _handle, recorded, _id) = typewriter_fixture(None);
+    click_at(&mut tree, 8.0);
+    recorded.set(None);
+
+    // Walk far enough down that the caret genuinely leaves the 120px viewport,
+    // so a minimal reveal actually fires and we observe its alignment.
+    for _ in 0..30 {
+        key(&mut tree, Key::ArrowDown);
+    }
+
+    assert_eq!(
+        recorded.get(),
+        Some(ScrollAlign::Minimal),
+        "with typewriter off the page must keep its plain reveal behaviour"
+    );
+}
+
+#[test]
+fn a_mouse_click_never_pins() {
+    let (mut tree, _handle, recorded, _id) = typewriter_fixture(Some(0.5));
+    // Place the caret once so the editor is focused and laid out.
+    click_at(&mut tree, 8.0);
+    recorded.set(None);
+
+    // A second click, elsewhere: the caret moves, but the page must not be
+    // yanked to re-centre on it — the click becomes the new resting position.
+    click_at(&mut tree, 60.0);
+
+    assert!(
+        !matches!(
+            recorded.get(),
+            Some(bastyde_core::event::ScrollAlign::Fraction(_))
+        ),
+        "clicking must not pin — it is the gesture that stands the pin down"
+    );
+}
+
+#[test]
+fn the_next_keystroke_resumes_pinning_after_a_click() {
+    use bastyde_core::event::{Key, ScrollAlign};
+
+    let (mut tree, _handle, recorded, _id) = typewriter_fixture(Some(0.5));
+    click_at(&mut tree, 8.0);
+    click_at(&mut tree, 60.0);
+    recorded.set(None);
+
+    key(&mut tree, Key::ArrowDown);
+
+    assert_eq!(
+        recorded.get(),
+        Some(ScrollAlign::Fraction(0.5)),
+        "the pin must take over again as soon as the keyboard is used"
+    );
+}
+
+#[test]
+fn the_anchor_is_clamped_into_the_viewport() {
+    let (_tree, handle, _recorded, _id) = typewriter_fixture(Some(4.2));
+    assert_eq!(
+        handle.get_typewriter(),
+        Some(1.0),
+        "an out-of-range anchor must clamp rather than aim the pin off-screen"
+    );
+
+    handle.set_typewriter(Some(-3.0));
+    assert_eq!(handle.get_typewriter(), Some(0.0));
+}
+
+#[test]
+fn set_typewriter_toggles_pinning_live() {
+    use bastyde_core::event::{Key, ScrollAlign};
+
+    let (mut tree, handle, recorded, _id) = typewriter_fixture(None);
+    click_at(&mut tree, 8.0);
+
+    // Off: no pin.
+    recorded.set(None);
+    key(&mut tree, Key::ArrowDown);
+    assert!(!matches!(recorded.get(), Some(ScrollAlign::Fraction(_))));
+
+    // Turned on at runtime — the way a settings change reaches a live editor.
+    handle.set_typewriter(Some(0.25));
+    recorded.set(None);
+    key(&mut tree, Key::ArrowDown);
+    assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.25)));
+
+    // And back off again.
+    handle.set_typewriter(None);
+    recorded.set(None);
+    key(&mut tree, Key::ArrowDown);
+    assert!(!matches!(recorded.get(), Some(ScrollAlign::Fraction(_))));
+}
+
+#[test]
+fn a_pin_re_asserts_after_a_reflow_at_the_same_caret_offset() {
+    use bastyde_core::event::{Key, ScrollAlign};
+
+    let (mut tree, handle, recorded, _id) = typewriter_fixture(Some(0.5));
+    click_at(&mut tree, 8.0);
+    key(&mut tree, Key::ArrowDown);
+
+    // Same caret offset as the last chase. The plain follow dedups on offset
+    // alone and would decline — but a zoom change moves the caret's *rect*, so
+    // the pin has to notice and re-assert or it silently drifts off its line.
+    // This is the shape of the zoom-dependent jitter other editors report.
+    handle.set_zoom_level(2.0);
+    for _ in 0..3 {
+        tick_once(&mut tree);
+    }
+    recorded.set(None);
+
+    // A no-op nav at the document start: the offset does not change, only the
+    // geometry did.
+    key(&mut tree, Key::ArrowLeft);
+    key(&mut tree, Key::ArrowRight);
+
+    assert_eq!(
+        recorded.get(),
+        Some(ScrollAlign::Fraction(0.5)),
+        "a pin must survive a reflow that leaves the caret offset untouched"
+    );
+}
+
+#[test]
+fn a_drag_selection_is_never_interrupted_by_the_pin() {
+    use bastyde_core::event::{Modifiers, PointerButton, ScrollAlign, WidgetEvent};
+
+    let (mut tree, _handle, recorded, _id) = typewriter_fixture(Some(0.5));
+    click_at(&mut tree, 8.0);
+
+    // Press and drag downward without releasing — an in-progress selection.
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(20.0, 8.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    recorded.set(None);
+    for y in [20.0, 40.0, 60.0, 90.0] {
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(20.0, y),
+        });
+    }
+
+    assert!(
+        !matches!(recorded.get(), Some(ScrollAlign::Fraction(_))),
+        "the view must hold still while a selection is being dragged — \
+         re-centring mid-drag is what makes precise selection impossible"
+    );
+
+    // Releasing leaves the pin stood down (the pointer placed the caret);
+    // the keyboard takes it back.
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(20.0, 90.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    recorded.set(None);
+    key(&mut tree, bastyde_core::event::Key::ArrowDown);
+    assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.5)));
+}

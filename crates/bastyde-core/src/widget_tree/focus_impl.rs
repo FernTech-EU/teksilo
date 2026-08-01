@@ -112,7 +112,14 @@ impl WidgetTree {
             .get(focused_id)
             .and_then(|node| node.widget.focus_reveal_rect(focused_bounds))
             .unwrap_or(focused_bounds);
-        self.scroll_rect_into_view(focused_id, reveal, 0.0, &mut *ops);
+        self.scroll_rect_into_view(
+            focused_id,
+            reveal,
+            0.0,
+            crate::event::ScrollAlign::Minimal,
+            crate::event::ScrollMotion::Instant,
+            &mut *ops,
+        );
     }
 
     /// Reveal `rect` (in **absolute tree coordinates**) inside every
@@ -142,11 +149,25 @@ impl WidgetTree {
     /// that doesn't report a delta (leaves the cell zero) simply gets no
     /// re-targeting, which is exact for the common single-enclosing-scroller
     /// case.
+    ///
+    /// **Alignment applies to the innermost clipping ancestor only.** A
+    /// [`ScrollAlign::Fraction`] request names a height in *one* viewport; the
+    /// containers further out have their own, differently-sized viewports and no
+    /// claim on where the rect should sit inside them, so they fall back to
+    /// [`ScrollAlign::Minimal`] — their job is to bring the inner viewport on
+    /// screen. A `Fraction` request also bypasses the already-visible gate on
+    /// that innermost container: pinning is unconditional by definition, whereas
+    /// `Minimal` keeps the "don't scroll what's already visible" behaviour.
+    ///
+    /// [`ScrollAlign::Fraction`]: crate::event::ScrollAlign::Fraction
+    /// [`ScrollAlign::Minimal`]: crate::event::ScrollAlign::Minimal
     pub(super) fn scroll_rect_into_view(
         &mut self,
         from: WidgetId,
         rect: Rect,
         margin: f32,
+        align: crate::event::ScrollAlign,
+        motion: crate::event::ScrollMotion,
         ops: &mut dyn crate::window::WindowOps,
     ) {
         // Shared back-channel: each handling scroll container reports how far it
@@ -157,12 +178,19 @@ impl WidgetTree {
         let applied = std::sync::Arc::new(std::sync::Mutex::new(Point::ZERO));
         let mut rect = rect;
         let mut current = self.arena.parent(from);
+        // Consumed by the first clipping ancestor reached; every one after it
+        // reveals minimally.
+        let mut pending_align = align;
         while let Some(ancestor_id) = current {
             if let Some(node) = self.arena.get(ancestor_id)
                 && node.clips_children
             {
                 let viewport = node.bounds;
-                let needs_scroll = rect.y - margin < viewport.y
+                let align = std::mem::replace(&mut pending_align, crate::event::ScrollAlign::Minimal);
+                // A pin must re-assert itself every time, so it never consults
+                // whether the target already happens to be on screen.
+                let needs_scroll = matches!(align, crate::event::ScrollAlign::Fraction(_))
+                    || rect.y - margin < viewport.y
                     || rect.bottom() + margin > viewport.bottom()
                     || rect.x - margin < viewport.x
                     || rect.right() + margin > viewport.right();
@@ -174,6 +202,8 @@ impl WidgetTree {
                         &WidgetEvent::ScrollIntoView {
                             target_bounds: rect,
                             margin,
+                            align,
+                            motion,
                             applied_scroll: Some(applied.clone()),
                         },
                         &mut *ops,

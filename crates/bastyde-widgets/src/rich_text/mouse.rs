@@ -140,6 +140,11 @@ pub(super) fn handle_pointer_event(
                 // Ctrl+A starts fresh at level 1.
                 st.select_all_level = 0;
                 st.select_all_anchor_cell = None;
+                // The pointer now owns the caret: stand the typewriter pin down
+                // so this click *becomes* the resting position instead of the
+                // page lurching to re-centre on it. Cleared by the next
+                // keyboard-driven caret move, which resumes pinning.
+                st.mouse_anchored = true;
             }
             sync_cursor_signals(state);
             // Reveal the placed caret in any enclosing scroll area, so
@@ -293,6 +298,10 @@ pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut Event
 }
 
 fn tap_select(state: &SharedState, pos: Point, kind: SelectionType) {
+    // Double/triple-click is pointer-driven selection: same rule as a plain
+    // click — the pin stands down rather than yanking the page under a
+    // selection the user is making with the mouse.
+    state.borrow_mut().mouse_anchored = true;
     let local = to_engine_local(state, &pos);
     let hit = {
         let st = state.borrow();

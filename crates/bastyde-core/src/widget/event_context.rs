@@ -25,6 +25,27 @@ pub(crate) enum DismissScope {
     Top,
 }
 
+/// One queued "reveal this rectangle" request, drained after the handler
+/// returns and turned into a [`WidgetEvent::ScrollIntoView`] per clipping
+/// ancestor.
+///
+/// A struct rather than a tuple because the three modifiers (margin, alignment,
+/// motion) are independent and positional tuples of that width stop being
+/// readable at the call site.
+///
+/// [`WidgetEvent::ScrollIntoView`]: crate::event::WidgetEvent::ScrollIntoView
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ScrollRevealRequest {
+    /// The target, in absolute tree (window) coordinates.
+    pub(crate) rect: bastyde_canvas::Rect,
+    /// Breathing room to keep around the target, in logical pixels.
+    pub(crate) margin: f32,
+    /// Where the target should come to rest vertically.
+    pub(crate) align: crate::event::ScrollAlign,
+    /// Whether to jump or glide.
+    pub(crate) motion: crate::event::ScrollMotion,
+}
+
 /// Context available during event handling.
 pub struct EventContext<'ops> {
     pub(crate) cursor_request: Option<CursorIcon>,
@@ -103,7 +124,7 @@ pub struct EventContext<'ops> {
     /// with a caller-supplied rectangle instead of a widget's own bounds
     /// (so a caret, a virtualized row, or a scrolled-off tab header can be
     /// revealed even though it is not itself a distinct focused node).
-    pub(crate) scroll_into_view_requests: Vec<(bastyde_canvas::Rect, f32)>,
+    pub(crate) scroll_into_view_requests: Vec<ScrollRevealRequest>,
     /// Widget-id-based "scroll this into view" requests, queued by
     /// [`ensure_widget_visible`](EventContext::ensure_widget_visible) /
     /// [`ensure_widget_visible_with_margin`](EventContext::ensure_widget_visible_with_margin).
@@ -1147,7 +1168,12 @@ impl<'ops> EventContext<'ops> {
     /// See [`ensure_visible_with_margin`](Self::ensure_visible_with_margin) to
     /// keep breathing room around the target.
     pub fn ensure_visible(&mut self, rect: bastyde_canvas::Rect) {
-        self.scroll_into_view_requests.push((rect, 0.0));
+        self.scroll_into_view_requests.push(ScrollRevealRequest {
+            rect,
+            margin: 0.0,
+            align: crate::event::ScrollAlign::Minimal,
+            motion: crate::event::ScrollMotion::Instant,
+        });
     }
 
     /// Like [`ensure_visible`](Self::ensure_visible), but keeps `margin`
@@ -1156,7 +1182,47 @@ impl<'ops> EventContext<'ops> {
     /// the bottom line, the selected row at the fold). `rect` is in absolute
     /// tree (window) coordinates.
     pub fn ensure_visible_with_margin(&mut self, rect: bastyde_canvas::Rect, margin: f32) {
-        self.scroll_into_view_requests.push((rect, margin.max(0.0)));
+        self.scroll_into_view_requests.push(ScrollRevealRequest {
+            rect,
+            margin: margin.max(0.0),
+            align: crate::event::ScrollAlign::Minimal,
+            motion: crate::event::ScrollMotion::Instant,
+        });
+    }
+
+    /// **Pin** `rect` at `fraction` of the way down the innermost enclosing
+    /// scroll container — `0.0` flush with the top, `0.5` centred, `1.0` flush
+    /// with the bottom — instead of merely revealing it.
+    ///
+    /// The difference from [`ensure_visible`](Self::ensure_visible) is that this
+    /// scrolls **even when the target is already visible**. That is what makes
+    /// it usable for typewriter scrolling: a caret that only moved the view once
+    /// it fell off the edge would not be pinned to anything.
+    ///
+    /// Only the **innermost** clipping ancestor aligns; any further ancestors
+    /// out fall back to a minimal reveal, since an outer container's job is to
+    /// bring the inner viewport on screen, not to align a rectangle it does not
+    /// own.
+    ///
+    /// `fraction` is clamped to `0.0..=1.0`. The container additionally clamps
+    /// to its own scroll range, so a target near the start or end of the content
+    /// lands as close to `fraction` as the range permits — see the scroll
+    /// container's `scroll_past_end` for buying range past the content's end so
+    /// the last line can still reach the pin.
+    ///
+    /// `rect` is in absolute tree (window) coordinates.
+    pub fn ensure_visible_aligned(
+        &mut self,
+        rect: bastyde_canvas::Rect,
+        fraction: f32,
+        motion: crate::event::ScrollMotion,
+    ) {
+        self.scroll_into_view_requests.push(ScrollRevealRequest {
+            rect,
+            margin: 0.0,
+            align: crate::event::ScrollAlign::Fraction(fraction.clamp(0.0, 1.0)),
+            motion,
+        });
     }
 
     /// Scroll a specific mounted widget into view inside every enclosing

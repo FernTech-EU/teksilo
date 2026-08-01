@@ -483,6 +483,48 @@ impl RichTextEditor {
         self
     }
 
+    /// **Typewriter scrolling**: pin the caret's line at `fraction` of the way
+    /// down the enclosing scroll area — `0.0` at the top, `0.5` centred, `1.0`
+    /// at the bottom — and let the document scroll under it. `None` (the
+    /// default) leaves the ordinary minimal-reveal follow in charge.
+    ///
+    /// Unlike that follow, which only acts once the caret would leave the
+    /// viewport, a pin re-asserts on every caret move, so the line being written
+    /// holds a constant height on screen. The classic writing-app feature.
+    ///
+    /// Three behaviours come with it, each of them the consensus answer among
+    /// the editors that ship this well:
+    ///
+    /// - **The pointer stands the pin down.** A click places the caret without
+    ///   scrolling, and that position becomes the new resting place; a
+    ///   drag-selection is never interrupted. The next keystroke resumes
+    ///   pinning. Editors that re-centre on pointer input instead have open bugs
+    ///   about the view fighting the mouse and about drag-selection becoming
+    ///   unusable.
+    /// - **The rendered row is pinned, not the paragraph.** Under soft wrap a
+    ///   long paragraph spans several visual rows; pinning the logical line
+    ///   would leave the caret far from the mark.
+    /// - **Typing snaps, page jumps glide.** Animating a pin that updates on
+    ///   every keystroke is what produces the "screen bouncing" complaint other
+    ///   implementations attract.
+    ///
+    /// Requires [`follow_caret_in_page`](Self::follow_caret_in_page) (on by
+    /// default). `fraction` is clamped to `0.0..=1.0`.
+    ///
+    /// Near the start of the document the pin gives way to the scroll range —
+    /// the caret rides above its line until there is room — and near the end it
+    /// would do the same, which is usually not what you want: pair this with
+    /// `ScrollArea::scroll_past_end(1.0 - fraction)` so the last line can still
+    /// reach the pin.
+    ///
+    /// Takes a plain value, like [`typography_defaults`](Self::typography_defaults);
+    /// to follow a setting live, push changes onto the handle with
+    /// [`EditorHandle::set_typewriter`].
+    pub fn typewriter(self, anchor: Option<f32>) -> Self {
+        self.state.borrow_mut().typewriter = anchor.map(|f| f.clamp(0.0, 1.0));
+        self
+    }
+
     /// Set the wheel scroll-chaining behavior at the editor's boundary
     /// (default [`OverscrollBehavior::Chain`]). With `Chain`, a wheel event the
     /// editor can no longer absorb (already at the top/bottom, or content that
@@ -931,17 +973,19 @@ impl RichTextEditor {
     /// Reveals an **arbitrary** offset range — the current search match — rather than the live
     /// caret the follow-into-view path tracks, and works whether or not the editor is focused.
     /// A no-op until the editor has a full layout.
+    ///
+    /// Under [`typewriter`](Self::typewriter) scrolling the range is *pinned* to
+    /// the anchor rather than merely revealed, so a search walks matches to the
+    /// same height the caret writes at instead of leaving them wherever they
+    /// happened to fall. Because a search jump is a deliberate, screen-sized
+    /// move, it glides.
     pub fn reveal_range(
         &self,
         ctx: &mut bastyde_core::widget::EventContext,
         start: usize,
         end: usize,
     ) {
-        let area = match self::keyboard::range_window_rect(&self.state.borrow(), start, end) {
-            Some(a) => a,
-            None => return,
-        };
-        ctx.ensure_visible(area);
+        reveal_range_impl(&self.state, ctx, start, end);
     }
 
     // --- Character-format commands ----------------------------------------
@@ -1627,6 +1671,35 @@ impl RichTextEditor {
         self.state.borrow().engine.typography_defaults().clone()
     }
 
+    /// Set the typewriter-scrolling anchor at runtime — see
+    /// [`typewriter`](Self::typewriter). `None` turns pinning off.
+    ///
+    /// Takes effect on the next caret move rather than scrolling immediately: a
+    /// pin is a follow rule, and re-anchoring the page the instant a setting
+    /// changes would jump the view under a reader who is not even typing.
+    pub fn set_typewriter(&self, anchor: Option<f32>) {
+        let mut st = self.state.borrow_mut();
+        st.typewriter = anchor.map(|f| f.clamp(0.0, 1.0));
+        // Drop the pin's dedup memory: the *next* caret move must re-pin even if
+        // it lands where the last chase already was.
+        st.last_chase_y = None;
+    }
+
+    /// Current typewriter anchor (see [`typewriter`](Self::typewriter)).
+    pub fn get_typewriter(&self) -> Option<f32> {
+        self.state.borrow().typewriter
+    }
+
+    /// The caret's rectangle in **absolute window (tree) coordinates**, or
+    /// `None` when the editor is unfocused or has not been laid out yet.
+    ///
+    /// The same rect the OS-IME reporting and the caret follow use, exposed for
+    /// hosts that need to position something against the caret (and for tests
+    /// that need to assert where a pin actually put it).
+    pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect> {
+        self::keyboard::caret_window_rect(&self.state.borrow())
+    }
+
     // --- Observability: reactive version counters -------------------------
 
     /// Signal that bumps on every format-only document event (bold /
@@ -1910,11 +1983,7 @@ impl EditorHandle {
         start: usize,
         end: usize,
     ) {
-        let area = match self::keyboard::range_window_rect(&self.state.borrow(), start, end) {
-            Some(a) => a,
-            None => return,
-        };
-        ctx.ensure_visible(area);
+        reveal_range_impl(&self.state, ctx, start, end);
     }
 
     /// Move keyboard focus onto the editor. Lets a control built *above* the
@@ -2045,6 +2114,30 @@ impl EditorHandle {
     /// Current zoom level.
     pub fn get_zoom_level(&self) -> f32 {
         self.state.borrow().engine.zoom()
+    }
+
+    /// Set the typewriter-scrolling anchor — the [`EditorHandle`] counterpart of
+    /// [`RichTextEditor::set_typewriter`]. `None` turns pinning off.
+    ///
+    /// This is the door a host uses to keep the pin following a live setting,
+    /// the same way [`set_typography_defaults`](Self::set_typography_defaults)
+    /// keeps typography following one.
+    pub fn set_typewriter(&self, anchor: Option<f32>) {
+        let mut st = self.state.borrow_mut();
+        st.typewriter = anchor.map(|f| f.clamp(0.0, 1.0));
+        st.last_chase_y = None;
+    }
+
+    /// Current typewriter anchor.
+    pub fn get_typewriter(&self) -> Option<f32> {
+        self.state.borrow().typewriter
+    }
+
+    /// The caret's rectangle in **absolute window (tree) coordinates** — the
+    /// [`EditorHandle`] counterpart of [`RichTextEditor::caret_window_rect`].
+    /// `None` when unfocused or not yet laid out.
+    pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect> {
+        self::keyboard::caret_window_rect(&self.state.borrow())
     }
 
     /// Apply an arbitrary [`TextFormat`] (escape hatch for fields not
@@ -3836,6 +3929,36 @@ impl Widget for RichTextEditor {
 // Event handlers — take `&SharedState` so they can be boxed into handler
 // closures without borrowing `self`.
 // ---------------------------------------------------------------------------
+
+/// Shared body of [`RichTextEditor::reveal_range`] and its
+/// [`EditorHandle`] twin — one implementation so the two can never drift on the
+/// typewriter-pin rule.
+///
+/// The pin applies here even though the range is not the caret: with typewriter
+/// scrolling on, walking search hits should bring each one to the same height
+/// the writer works at. Unlike the caret chase, a pointer anchor does *not*
+/// suppress it — the user asked for this jump explicitly by pressing Find Next,
+/// so there is no gesture to fight.
+fn reveal_range_impl(
+    state: &SharedState,
+    ctx: &mut bastyde_core::widget::EventContext,
+    start: usize,
+    end: usize,
+) {
+    let (area, pin) = {
+        let st = state.borrow();
+        match self::keyboard::range_window_rect(&st, start, end) {
+            Some(a) => (a, st.typewriter),
+            None => return,
+        }
+    };
+    match pin {
+        Some(fraction) => {
+            ctx.ensure_visible_aligned(area, fraction, bastyde_core::event::ScrollMotion::Smooth)
+        }
+        None => ctx.ensure_visible(area),
+    }
+}
 
 /// Push the current cursor position / anchor / selection flag into
 /// the state's reactive signals. Called after every cursor mutation

@@ -1828,8 +1828,15 @@ impl WidgetTree {
         // gated on the container not already showing the rect, so ordering is
         // harmless. The source widget itself is excluded from the walk — it
         // owns revealing an interior rect inside its own viewport.
-        for (rect, margin) in ctx.scroll_into_view_requests {
-            self.scroll_rect_into_view(source_widget, rect, margin, &mut *ops);
+        for req in ctx.scroll_into_view_requests {
+            self.scroll_rect_into_view(
+                source_widget,
+                req.rect,
+                req.margin,
+                req.align,
+                req.motion,
+                &mut *ops,
+            );
         }
         // Id-based `ctx.ensure_widget_visible`: resolve to the target's current
         // absolute bounds and walk *its* ancestors (skip if it was destroyed
@@ -1840,7 +1847,14 @@ impl WidgetTree {
         for (id, margin) in ctx.scroll_widget_into_view_requests {
             if self.arena.get(id).is_some() {
                 let bounds = self.arena.bounds(id);
-                self.scroll_rect_into_view(id, bounds, margin, &mut *ops);
+                self.scroll_rect_into_view(
+                    id,
+                    bounds,
+                    margin,
+                    crate::event::ScrollAlign::Minimal,
+                    crate::event::ScrollMotion::Instant,
+                    &mut *ops,
+                );
             }
         }
 
@@ -4481,6 +4495,174 @@ mod tests {
             recorded.get(),
             Some(rect),
             "the margin must widen the visibility test so a near-edge rect scrolls"
+        );
+    }
+
+    /// A `clips_children` container that records the alignment and motion of the
+    /// `ScrollIntoView` it receives.
+    fn recording_align_container(
+        tree: &mut WidgetTree,
+        child: WidgetId,
+        recorded: std::rc::Rc<
+            std::cell::Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>,
+        >,
+    ) -> WidgetId {
+        use crate::test_widgets::StackWidget;
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_scroll(move |ev, _ctx| match ev {
+                    WidgetEvent::ScrollIntoView { align, motion, .. } => {
+                        recorded.set(Some((*align, *motion)));
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                })
+                .clips_children(true),
+        )
+    }
+
+    #[test]
+    fn ensure_visible_aligned_scrolls_even_when_already_visible() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_scroll_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Comfortably inside the viewport — a *minimal* reveal would decline
+        // (see `ensure_visible_is_noop_when_rect_already_visible`). A pin must
+        // still fire: re-asserting unconditionally is the whole difference
+        // between "keep it on screen" and "hold it at this height".
+        let target = Rect::new(10.0, 10.0, 20.0, 15.0);
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(target, 0.5, crate::event::ScrollMotion::Instant);
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            Some(target),
+            "an aligned reveal must dispatch even when the rect is already visible"
+        );
+    }
+
+    #[test]
+    fn ensure_visible_aligned_forwards_fraction_and_motion() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_align_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(
+            Rect::new(10.0, 10.0, 20.0, 15.0),
+            0.25,
+            crate::event::ScrollMotion::Smooth,
+        );
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            Some((
+                crate::event::ScrollAlign::Fraction(0.25),
+                crate::event::ScrollMotion::Smooth
+            )),
+            "the container must receive the requested fraction and motion verbatim"
+        );
+    }
+
+    #[test]
+    fn ensure_visible_aligned_clamps_the_fraction() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_align_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(
+            Rect::new(10.0, 10.0, 20.0, 15.0),
+            4.2,
+            crate::event::ScrollMotion::Instant,
+        );
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get().map(|(a, _)| a),
+            Some(crate::event::ScrollAlign::Fraction(1.0)),
+            "an out-of-range fraction must clamp rather than aim the pin off-screen"
+        );
+    }
+
+    #[test]
+    fn plain_ensure_visible_requests_minimal_alignment() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let recorded: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let _container = recording_align_container(&mut tree, actor, recorded.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible(Rect::new(10.0, 500.0, 20.0, 15.0));
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            recorded.get(),
+            Some((
+                crate::event::ScrollAlign::Minimal,
+                crate::event::ScrollMotion::Instant
+            )),
+            "the pre-existing reveal API must keep its exact semantics"
+        );
+    }
+
+    #[test]
+    fn only_the_innermost_container_aligns() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let inner_rec: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+        let outer_rec: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let inner = recording_align_container(&mut tree, actor, inner_rec.clone());
+        let _outer = recording_align_container(&mut tree, inner, outer_rec.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Off-screen, so the outer container is asked too (a `Minimal` request
+        // is gated on visibility).
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(
+            Rect::new(10.0, 500.0, 20.0, 15.0),
+            0.5,
+            crate::event::ScrollMotion::Instant,
+        );
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            inner_rec.get().map(|(a, _)| a),
+            Some(crate::event::ScrollAlign::Fraction(0.5)),
+            "the innermost clipping ancestor owns the pin"
+        );
+        assert_eq!(
+            outer_rec.get().map(|(a, _)| a),
+            Some(crate::event::ScrollAlign::Minimal),
+            "an outer container must only bring the inner viewport into view — a \
+             fraction names a height in one viewport, not in every ancestor's"
         );
     }
 
