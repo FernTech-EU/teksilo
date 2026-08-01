@@ -186,7 +186,6 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     let metrics = ScrollMetrics::compute(
         state.engine.content_height(),
         state.engine.max_content_width(),
-        state.engine.zoom(),
         viewport_width,
         viewport_height,
     );

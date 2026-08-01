@@ -362,24 +362,13 @@ impl RichTextEditor {
         }
     }
 
-    /// Set the initial zoom factor (`1.0` = 100 %). Applied before the first
-    /// layout pass. Use [`set_zoom_level`](Self::set_zoom_level) after the
-    /// widget is mounted.
-    pub fn zoom(self, zoom: f32) -> Self {
-        {
-            let mut st = self.state.borrow_mut();
-            st.engine.set_zoom(zoom);
-            st.needs_full_layout = true;
-        }
-        self
-    }
-
     /// Set the initial non-destructive default typography (font family / line
     /// height / first-line indent) applied to runs and blocks that carry no
     /// explicit override. Applied before the first layout. These are display
     /// defaults — they never mutate the bound document (no undo entry, no
     /// `modified`); use [`set_typography_defaults`](Self::set_typography_defaults)
     /// or [`EditorHandle::set_typography_defaults`] to change them after mount.
+    /// Preferred text size is [`font_size_scale`](Self::font_size_scale).
     pub fn typography_defaults(self, defaults: EditorTypographyDefaults) -> Self {
         {
             let mut st = self.state.borrow_mut();
@@ -582,10 +571,29 @@ impl RichTextEditor {
     /// surface, the editor magnifies when the user raises the app-wide text
     /// size. Pass `false` for an editor whose font sizes are **document
     /// content** (a WYSIWYG / print-layout editor) that must stay at its true
-    /// point size regardless of the reader's UI accessibility setting. The
-    /// programmatic zoom (`set_zoom`) is unaffected either way.
+    /// point size regardless of the reader's UI accessibility setting.
+    ///
+    /// Composed with [`font_size_scale`](Self::font_size_scale):  
+    /// `engine.font_scale = (follow ? text_scale : 1.0) × font_size_scale`.
     pub fn follow_text_scale(self, follow: bool) -> Self {
         self.state.borrow_mut().follow_text_scale = follow;
+        self
+    }
+
+    /// Per-editor logical font-size multiplier (`1.0` = 100 %). Applied
+    /// *before* shaping (same channel as accessibility text scale), so text
+    /// grows, re-wraps, and stays sharp — the knob for a "Text size"
+    /// preference. Composed as
+    /// `(follow_text_scale ? ctx.text_scale : 1.0) × font_size_scale`.
+    /// Clamped to `[0.1, 10.0]`. Use [`set_font_size_scale`](Self::set_font_size_scale)
+    /// after mount.
+    pub fn font_size_scale(self, scale: f32) -> Self {
+        {
+            let mut st = self.state.borrow_mut();
+            st.font_size_scale = scale.clamp(0.1, 10.0);
+            st.needs_full_layout = true;
+            st.content_dirty = true;
+        }
         self
     }
 
@@ -791,7 +799,7 @@ impl RichTextEditor {
     // --- Context-menu support (external menus) --------------------------
 
     /// Classify what is under `point` in the widget's local coordinates
-    /// (origin at the widget's top-left, scroll offset and zoom handled
+    /// (origin at the widget's top-left, scroll offset handled
     /// internally by the typesetter), for applications building an
     /// external context menu. Returns `None` if the point does not
     /// land on any hit region.
@@ -1638,20 +1646,29 @@ impl RichTextEditor {
         clipboard::can_paste(ctx)
     }
 
-    // --- Runtime zoom -----------------------------------------------------
-
-    /// Set the editor's zoom level. Re-lays out immediately; triggers
-    /// a repaint via the engine's dirty tracking on the next frame.
-    pub fn set_zoom_level(&self, zoom: f32) {
+    /// Set the per-editor logical font-size multiplier (`1.0` = 100 %).
+    /// Composed with accessibility text scale at paint; forces relayout.
+    /// See [`font_size_scale`](Self::font_size_scale).
+    pub fn set_font_size_scale(&self, scale: f32) {
         let mut st = self.state.borrow_mut();
-        st.engine.set_zoom(zoom.clamp(0.1, 10.0));
+        let scale = scale.clamp(0.1, 10.0);
+        if (st.font_size_scale - scale).abs() <= f32::EPSILON {
+            return;
+        }
+        st.font_size_scale = scale;
+        // Force the paint pass to re-push engine font_scale (it compares
+        // against `last_font_scale` only).
+        st.last_font_scale = f32::NAN;
         st.needs_full_layout = true;
         st.content_dirty = true;
+        if let Some(handle) = &st.frame_request {
+            handle.set(true);
+        }
     }
 
-    /// Current zoom level.
-    pub fn get_zoom_level(&self) -> f32 {
-        self.state.borrow().engine.zoom()
+    /// Current per-editor font-size scale (`1.0` = 100 %).
+    pub fn get_font_size_scale(&self) -> f32 {
+        self.state.borrow().font_size_scale
     }
 
     /// Set the non-destructive default typography at runtime. Re-lays out and
@@ -2074,7 +2091,7 @@ impl EditorHandle {
         });
     }
 
-    // --- Default typography / zoom (non-destructive, whole editor) ---------
+    // --- Default typography / font size (non-destructive, whole editor) ---
 
     /// Set the non-destructive default typography (font family / line height /
     /// first-line indent) filled onto runs and blocks with no explicit
@@ -2097,13 +2114,16 @@ impl EditorHandle {
         self.state.borrow().engine.typography_defaults().clone()
     }
 
-    /// Set the whole-editor zoom (`1.0` = 100 %), clamped to `[0.1, 10.0]`. A
-    /// pure display transform (no document mutation). Schedules a relayout +
-    /// repaint. The [`EditorHandle`] counterpart of
-    /// [`RichTextEditor::set_zoom_level`].
-    pub fn set_zoom_level(&self, zoom: f32) {
+    /// Set the per-editor logical font-size multiplier. See
+    /// [`RichTextEditor::set_font_size_scale`].
+    pub fn set_font_size_scale(&self, scale: f32) {
         let mut st = self.state.borrow_mut();
-        st.engine.set_zoom(zoom.clamp(0.1, 10.0));
+        let scale = scale.clamp(0.1, 10.0);
+        if (st.font_size_scale - scale).abs() <= f32::EPSILON {
+            return;
+        }
+        st.font_size_scale = scale;
+        st.last_font_scale = f32::NAN;
         st.needs_full_layout = true;
         st.content_dirty = true;
         if let Some(handle) = &st.frame_request {
@@ -2111,9 +2131,9 @@ impl EditorHandle {
         }
     }
 
-    /// Current zoom level.
-    pub fn get_zoom_level(&self) -> f32 {
-        self.state.borrow().engine.zoom()
+    /// Current per-editor font-size scale (`1.0` = 100 %).
+    pub fn get_font_size_scale(&self) -> f32 {
+        self.state.borrow().font_size_scale
     }
 
     /// Set the typewriter-scrolling anchor — the [`EditorHandle`] counterpart of
@@ -2776,7 +2796,7 @@ impl Widget for RichTextEditorBody {
         // delayed by up to 500ms (in sync with the next caret toggle).
         //
         // The cursor_only render path inside text-typeset falls back to
-        // a full render automatically when scroll/zoom drifted since
+        // a full render automatically when scroll drifted since
         // the last full render, so this binding is correctness-safe.
         {
             let st = self.state.borrow();
@@ -2849,11 +2869,7 @@ impl Widget for RichTextEditorBody {
         // engine's font_scale. Scale the per-line bound to match, or a
         // text-scaled editor would clip at `max_lines` / under-size at
         // `min_lines`.
-        let line_scale = if st.follow_text_scale {
-            ctx.text_scale
-        } else {
-            1.0
-        };
+        let line_scale = st.effective_font_scale(ctx.text_scale);
         let line_h = st.engine.default_line_height() * line_scale;
         let content_h = st.engine.content_height();
         drop(st);
@@ -2978,17 +2994,14 @@ impl Widget for RichTextEditorBody {
         // — this is a render-pipeline concern, invisible to the
         // widget author.
 
-        // Global accessibility text scale: grow the document's logical font
-        // size unless the editor opted out (`follow_text_scale(false)`). Like
-        // the code-block colours above this is baked at `layout_full`, so a
-        // change forces a relayout + render this frame.
+        // Logical font scale: a11y text scale (if followed) × per-editor
+        // `font_size_scale`. Baked at `layout_full`, so a change forces a
+        // relayout + render this frame.
         {
-            let target = if st.follow_text_scale {
-                ctx.text_scale
-            } else {
-                1.0
-            };
-            if (st.last_font_scale - target).abs() > f32::EPSILON {
+            let target = st.effective_font_scale(ctx.text_scale);
+            if st.last_font_scale.is_nan()
+                || (st.last_font_scale - target).abs() > f32::EPSILON
+            {
                 st.last_font_scale = target;
                 st.engine.set_font_scale(target);
                 st.needs_full_layout = true;
@@ -3067,17 +3080,13 @@ impl Widget for RichTextEditorBody {
         let render_window = if st.window_to_clip {
             ctx.clip_bounds.map(|clip| {
                 // `clip` and `bounds` are screen-space; the render cull works in
-                // logical (pre-zoom) content space (block Y positions are pre-zoom,
-                // scaled only by `apply_zoom` afterwards), so divide through by the
-                // engine zoom — matching text-typeset's own `effective_vh = vh/zoom`.
-                // The visible band's top in content space is the editor's own scroll
+                // content space. The visible band's top is the editor's own scroll
                 // offset plus however far its top sits above the clip: in dubious
                 // mode `scroll_offset` is pinned to 0, but including it keeps the
                 // window correct (rather than mis-culling) even for a self-scrolling
                 // editor, so this can't silently render the wrong rows.
-                let zoom = st.engine.zoom().max(0.0001);
-                let vis_top = (scroll_y_logical + (clip.y - bounds.y) / zoom).max(0.0);
-                let vis_h = (clip.height / zoom).max(0.0);
+                let vis_top = (scroll_y_logical + (clip.y - bounds.y)).max(0.0);
+                let vis_h = clip.height.max(0.0);
                 let margin = vis_h * 0.5;
                 ((vis_top - margin).max(0.0), vis_h + 2.0 * margin)
             })
@@ -3108,7 +3117,7 @@ impl Widget for RichTextEditorBody {
         //   paint — only the cursor blink or selection updated.
         //   Reuses every cached glyph and just refreshes cursor /
         //   selection decorations. Falls back to full render
-        //   internally if scroll or zoom drifted.
+        //   internally if scroll drifted.
         //
         // Pre-fix, paint() unconditionally called `with_render_frame`,
         // which walked every block on every paint — visible as a
@@ -3408,17 +3417,15 @@ impl Widget for RichTextEditor {
             let mut st = self.state.borrow_mut();
             let wrap = st.wrap_mode;
             // Carry over builder-set engine config that the swap would otherwise
-            // drop — `.typography_defaults()`, `.zoom()`, `.echo_char()` are set
-            // on the private engine before mount, and this runs on every rebuild.
+            // drop — `.typography_defaults()`, `.echo_char()` are set on the
+            // private engine before mount, and this runs on every rebuild.
             // (Theme colours / font-scale re-derive themselves in `paint()`.)
             let typography = st.engine.typography_defaults().clone();
-            let zoom = st.engine.zoom();
             let echo = st.engine.echo_char();
             let mut engine = RichTextEngine::from_shared(shared.clone());
             engine.set_wrap_mode(wrap);
             engine.set_hyphenate_justified(true);
             engine.set_typography_defaults(typography);
-            engine.set_zoom(zoom);
             engine.set_echo_char(echo);
             st.engine = engine;
             st.needs_full_layout = true;

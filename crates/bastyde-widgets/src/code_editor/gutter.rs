@@ -236,7 +236,7 @@ fn caret_line_index(st: &super::state::CodeEditorState, line_h: f32) -> Option<u
 ///
 /// Deliberately the theme's body style rather than the editor's own: the numbers
 /// are chrome, and pinning them to the document's face would make them grow with
-/// a WYSIWYG zoom that has nothing to do with them. The global accessibility text
+/// a display magnify that has nothing to do with them. The global accessibility text
 /// scale still reaches them — the theme's typography is already scaled by it, so
 /// they track the UI, which is what they are.
 fn number_style(theme: &bastyde_core::styles::Theme) -> bastyde_tokens::TextStyle {

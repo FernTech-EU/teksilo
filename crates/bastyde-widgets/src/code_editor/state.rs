@@ -187,6 +187,9 @@ pub(crate) struct CodeEditorState {
 
     // --- Appearance --------------------------------------------------------
     pub follow_text_scale: bool,
+    /// Per-editor logical font-size multiplier (`1.0` = 100 %), composed with
+    /// a11y text scale at paint. Default `1.0`.
+    pub font_size_scale: f32,
     pub last_font_scale: f32,
     pub text_color_prop: Option<bastyde_core::color_prop::ColorProp>,
     pub caret_color_prop: Option<bastyde_core::color_prop::ColorProp>,
@@ -322,6 +325,7 @@ impl CodeEditorState {
             preferred_x: None,
             cursor_affinity: CursorAffinity::default(),
             follow_text_scale: true,
+            font_size_scale: 1.0,
             last_font_scale: 1.0,
             text_color_prop: None,
             caret_color_prop: None,
@@ -337,6 +341,17 @@ impl CodeEditorState {
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
             announce_appends: false,
         }))
+    }
+
+    /// Engine `font_scale` for this frame: a11y text scale (if followed) ×
+    /// per-editor [`font_size_scale`](Self::font_size_scale).
+    pub fn effective_font_scale(&self, text_scale: f32) -> f32 {
+        let a11y = if self.follow_text_scale {
+            text_scale
+        } else {
+            1.0
+        };
+        (a11y * self.font_size_scale).clamp(0.1, 10.0)
     }
 
     /// Adopt the body's final bounds. Returns whether the viewport actually

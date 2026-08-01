@@ -347,9 +347,7 @@ pub(crate) struct ScrollMetrics {
 }
 
 impl ScrollMetrics {
-    /// Derive the metrics. `content_height` / `max_content_width` are the
-    /// engine's *unzoomed* logical metrics; `zoom` scales them into the
-    /// viewport's coordinate space.
+    /// Derive the metrics from the engine's content size and the viewport.
     ///
     /// A ratio is the visible fraction of the content on that axis, which is
     /// what a scroll bar sizes its thumb from. It is `1.0` (full thumb, i.e.
@@ -358,22 +356,19 @@ impl ScrollMetrics {
     pub(crate) fn compute(
         content_height: f32,
         max_content_width: f32,
-        zoom: f32,
         viewport_width: f32,
         viewport_height: f32,
     ) -> Self {
-        let scaled_h = content_height * zoom;
-        let scaled_w = max_content_width * zoom;
         Self {
-            max_x: (scaled_w - viewport_width).max(0.0),
-            max_y: (scaled_h - viewport_height).max(0.0),
+            max_x: (max_content_width - viewport_width).max(0.0),
+            max_y: (content_height - viewport_height).max(0.0),
             ratio_x: if max_content_width > 0.0 && viewport_width > 0.0 {
-                (viewport_width / scaled_w).clamp(0.0, 1.0)
+                (viewport_width / max_content_width).clamp(0.0, 1.0)
             } else {
                 1.0
             },
             ratio_y: if content_height > 0.0 && viewport_height > 0.0 {
-                (viewport_height / scaled_h).clamp(0.0, 1.0)
+                (viewport_height / content_height).clamp(0.0, 1.0)
             } else {
                 1.0
             },
@@ -554,7 +549,7 @@ mod tests {
 
     #[test]
     fn scroll_metrics_report_no_overflow_when_content_fits() {
-        let m = ScrollMetrics::compute(50.0, 80.0, 1.0, 100.0, 100.0);
+        let m = ScrollMetrics::compute(50.0, 80.0, 100.0, 100.0);
         assert_eq!(m.max_x, 0.0);
         assert_eq!(m.max_y, 0.0);
         assert_eq!(m.ratio_x, 1.0);
@@ -562,16 +557,16 @@ mod tests {
     }
 
     #[test]
-    fn scroll_metrics_account_for_zoom() {
-        // 100pt of content at 2x zoom is 200px against a 100px viewport.
-        let m = ScrollMetrics::compute(100.0, 100.0, 2.0, 100.0, 100.0);
+    fn scroll_metrics_report_overflow_when_content_exceeds_viewport() {
+        // 200pt of content against a 100px viewport → max 100, ratio 0.5.
+        let m = ScrollMetrics::compute(200.0, 200.0, 100.0, 100.0);
         assert_eq!(m.max_y, 100.0);
         assert!((m.ratio_y - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn scroll_metrics_ratio_is_full_on_an_empty_document() {
-        let m = ScrollMetrics::compute(0.0, 0.0, 1.0, 100.0, 100.0);
+        let m = ScrollMetrics::compute(0.0, 0.0, 100.0, 100.0);
         assert_eq!(
             m.ratio_y, 1.0,
             "an empty document must show a full thumb, not a zero-height one"
@@ -588,7 +583,7 @@ mod tests {
         let (mx, my) = (Signal::new(0.0), Signal::new(0.0));
         let (rx, ry) = (Signal::new(1.0), Signal::new(1.0));
         // 400x200 of content in a 100x100 viewport: overflows on both axes.
-        let m = ScrollMetrics::compute(200.0, 400.0, 1.0, 100.0, 100.0);
+        let m = ScrollMetrics::compute(200.0, 400.0, 100.0, 100.0);
         m.publish(&sx, &sy, &mx, &my, &rx, &ry);
 
         assert_eq!(
@@ -615,7 +610,7 @@ mod tests {
         let (mx, my) = (Signal::new(0.0), Signal::new(500.0));
         let (rx, ry) = (Signal::new(1.0), Signal::new(1.0));
         // The document shrank: content now fits entirely.
-        let m = ScrollMetrics::compute(50.0, 50.0, 1.0, 100.0, 100.0);
+        let m = ScrollMetrics::compute(50.0, 50.0, 100.0, 100.0);
         m.publish(&sx, &sy, &mx, &my, &rx, &ry);
         assert_eq!(
             sy.get(),

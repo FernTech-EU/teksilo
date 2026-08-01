@@ -6,7 +6,7 @@
 //! `RichTextEngine` is a thin driver that runs a
 //! [`text_typeset::DocumentFlow`] through the layout / render /
 //! hit-test cycle needed by `RichTextEditor`. It owns its own
-//! `DocumentFlow` — every engine has an independent viewport, zoom,
+//! `DocumentFlow` — every engine has an independent viewport,
 //! scroll offset, caret, wrap mode, and flow layout — and borrows a
 //! shared [`TextFontService`] (via [`SharedTypesetter`]) at layout
 //! and render time so glyphs from every widget land in the same
@@ -55,7 +55,7 @@ pub struct RichTextEngine {
     /// Per-widget flow state. Every layout and render call borrows
     /// the shared font service through `shared` but mutates this
     /// flow directly, so two engines on the same bridge keep
-    /// independent viewports / zooms / scroll offsets / cursors.
+    /// independent viewports / scroll offsets / cursors.
     flow: DocumentFlow,
     default_face: Option<FontFaceId>,
     wrap_mode: WrapMode,
@@ -137,24 +137,10 @@ impl RichTextEngine {
         self.wrap_mode
     }
 
-    /// Set the user-facing zoom factor (1.0 = normal). Forwarded
-    /// to this engine's own `DocumentFlow` — pure display
-    /// transform, glyph rasterization size is unaffected, HiDPI
-    /// crispness comes from the service's scale factor instead.
-    pub fn set_zoom(&mut self, zoom: f32) {
-        self.flow.set_zoom(zoom);
-    }
-
-    pub fn zoom(&self) -> f32 {
-        self.flow.zoom()
-    }
-
-    /// Set the logical font-scale factor (`1.0` = none). Unlike
-    /// [`set_zoom`](Self::set_zoom) (a display transform that leaves font
-    /// metrics untouched), this multiplies the resolved logical font size
-    /// *before* shaping, so the text genuinely grows and re-wraps — the
-    /// per-engine mechanism behind an app-wide "grow all text" accessibility
-    /// setting. Takes effect on the next `layout_full`.
+    /// Set the logical font-scale factor (`1.0` = none). Multiplies the
+    /// resolved logical font size *before* shaping, so the text genuinely
+    /// grows and re-wraps — preferred text size and accessibility "grow all
+    /// text". Takes effect on the next `layout_full`.
     pub fn set_font_scale(&mut self, font_scale: f32) {
         self.flow.set_font_scale(font_scale);
     }

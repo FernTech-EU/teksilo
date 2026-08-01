@@ -152,6 +152,11 @@ pub(crate) struct EditorState {
     /// content (e.g. a WYSIWYG editor) that should not inflate with the UI
     /// accessibility setting.
     pub follow_text_scale: bool,
+    /// Per-editor logical font-size multiplier (`1.0` = 100 %), composed with
+    /// the a11y text scale at paint:
+    /// `engine.font_scale = (follow ? ctx.text_scale : 1.0) × font_size_scale`.
+    /// Sharp "text size" — real shaping at a larger ppem. Default `1.0`.
+    pub font_size_scale: f32,
     /// Last `font_scale` pushed to the engine. Tracked so the paint pass only
     /// re-sets it (and forces a relayout) when the effective scale changes.
     pub last_font_scale: f32,
@@ -556,6 +561,7 @@ impl EditorState {
             highlight_mask: HighlightMask::all(),
             last_text_color: None,
             follow_text_scale: true,
+            font_size_scale: 1.0,
             last_font_scale: 1.0,
             last_cursor_color: None,
             last_selection_color: None,
@@ -646,6 +652,18 @@ impl EditorState {
         } else {
             HighlightMask::none()
         }
+    }
+
+    /// Engine `font_scale` for this frame: a11y text scale (if followed) ×
+    /// per-editor [`font_size_scale`](Self::font_size_scale). Clamped to the
+    /// same band as [`DocumentFlow::set_font_scale`].
+    pub fn effective_font_scale(&self, text_scale: f32) -> f32 {
+        let a11y = if self.follow_text_scale {
+            text_scale
+        } else {
+            1.0
+        };
+        (a11y * self.font_size_scale).clamp(0.1, 10.0)
     }
 
     /// Snapshot the document's flow in this view's highlight flavor — only the sessions

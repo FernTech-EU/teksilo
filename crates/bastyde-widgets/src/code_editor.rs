@@ -248,14 +248,12 @@ impl Widget for CodeEditorBody {
             st.pending_full_render = true;
         }
 
-        // The global accessibility text scale. Unlike a colour this changes
+        // Logical font scale: a11y × per-editor `font_size_scale`. Changes
         // glyph advances, so it forces a relayout, not just a re-render.
-        let target_scale = if st.follow_text_scale {
-            ctx.text_scale
-        } else {
-            1.0
-        };
-        if (st.last_font_scale - target_scale).abs() > f32::EPSILON {
+        let target_scale = st.effective_font_scale(ctx.text_scale);
+        if st.last_font_scale.is_nan()
+            || (st.last_font_scale - target_scale).abs() > f32::EPSILON
+        {
             st.last_font_scale = target_scale;
             st.engine.set_font_scale(target_scale);
             st.needs_full_layout = true;
@@ -307,9 +305,8 @@ impl Widget for CodeEditorBody {
         // positions or hit-testing — it only limits what is emitted.
         let render_window = if st.window_to_clip {
             ctx.clip_bounds.map(|clip| {
-                let zoom = st.engine.zoom().max(0.0001);
-                let vis_top = (scroll_y + (clip.y - bounds.y) / zoom).max(0.0);
-                let vis_h = (clip.height / zoom).max(0.0);
+                let vis_top = (scroll_y + (clip.y - bounds.y)).max(0.0);
+                let vis_h = clip.height.max(0.0);
                 let margin = vis_h * 0.5;
                 ((vis_top - margin).max(0.0), vis_h + 2.0 * margin)
             })
@@ -425,11 +422,9 @@ pub(crate) fn adopt_shared_typesetter(state: &SharedState, ctx: &mut BuildContex
     let mut st = state.borrow_mut();
     let wrap = st.wrap_mode;
     let typography = st.engine.typography_defaults().clone();
-    let zoom = st.engine.zoom();
     let mut engine = RichTextEngine::from_shared(shared.clone());
     engine.set_wrap_mode(wrap);
     engine.set_typography_defaults(typography);
-    engine.set_zoom(zoom);
     st.engine = engine;
     st.needs_full_layout = true;
 }

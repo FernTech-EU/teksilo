@@ -13,8 +13,9 @@
 //! typesetter. So they create no undo entry, never set `document.modified`, and
 //! never touch a run / block the user actually authored.
 //!
-//! Size / zoom is deliberately **not** modelled here — it is a pure display
-//! transform on the engine ([`RichTextEngine::set_zoom`](crate::RichTextEngine::set_zoom)),
+//! Size is deliberately **not** modelled here — preferred text size is a
+//! logical font-scale on the engine
+//! ([`RichTextEngine::set_font_scale`](crate::RichTextEngine::set_font_scale)),
 //! not a per-run default fill.
 
 use text_document::{BlockSnapshot, FlowElementSnapshot, FlowSnapshot, FragmentContent};

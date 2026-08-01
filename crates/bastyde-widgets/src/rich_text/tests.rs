@@ -3401,17 +3401,17 @@ fn edit_block_closes_even_when_the_body_returns_early() {
 }
 
 #[test]
-fn widget_runtime_zoom_setter_roundtrips() {
+fn widget_runtime_font_size_scale_roundtrips() {
     let doc = TextDocument::new();
-    doc.set_plain_text("zoom me").unwrap();
+    doc.set_plain_text("size me").unwrap();
     let editor = RichTextEditor::editor(doc);
-    editor.set_zoom_level(2.5);
-    assert!((editor.get_zoom_level() - 2.5).abs() < 1e-4);
+    editor.set_font_size_scale(2.5);
+    assert!((editor.get_font_size_scale() - 2.5).abs() < 1e-4);
     // Clamp to allowed range.
-    editor.set_zoom_level(100.0);
+    editor.set_font_size_scale(100.0);
     assert!(
-        editor.get_zoom_level() <= 10.0,
-        "zoom must clamp to the 0.1..=10.0 range"
+        editor.get_font_size_scale() <= 10.0,
+        "font_size_scale must clamp to the 0.1..=10.0 range"
     );
 }
 
@@ -3447,11 +3447,11 @@ fn widget_runtime_typography_defaults_roundtrip_via_editor_and_handle() {
     handle.set_typography_defaults(other.clone());
     assert_eq!(editor.get_typography_defaults(), other);
 
-    // The handle's zoom mirror clamps like the editor's.
-    handle.set_zoom_level(1.4);
-    assert!((editor.get_zoom_level() - 1.4).abs() < 1e-4);
-    handle.set_zoom_level(50.0);
-    assert!(handle.get_zoom_level() <= 10.0);
+    // The handle's font_size_scale mirror clamps like the editor's.
+    handle.set_font_size_scale(1.4);
+    assert!((editor.get_font_size_scale() - 1.4).abs() < 1e-4);
+    handle.set_font_size_scale(50.0);
+    assert!(handle.get_font_size_scale() <= 10.0);
 }
 
 #[test]
@@ -6498,10 +6498,10 @@ fn a_pin_re_asserts_after_a_reflow_at_the_same_caret_offset() {
     key(&mut tree, Key::ArrowDown);
 
     // Same caret offset as the last chase. The plain follow dedups on offset
-    // alone and would decline — but a zoom change moves the caret's *rect*, so
-    // the pin has to notice and re-assert or it silently drifts off its line.
-    // This is the shape of the zoom-dependent jitter other editors report.
-    handle.set_zoom_level(2.0);
+    // alone and would decline — but a font-size change moves the caret's
+    // *rect*, so the pin has to notice and re-assert or it silently drifts
+    // off its line.
+    handle.set_font_size_scale(2.0);
     for _ in 0..3 {
         tick_once(&mut tree);
     }

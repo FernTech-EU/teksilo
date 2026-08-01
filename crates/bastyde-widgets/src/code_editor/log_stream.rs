@@ -598,7 +598,6 @@ fn compute_metrics(st: &CodeEditorState) -> ScrollMetrics {
     ScrollMetrics::compute(
         st.engine.content_height(),
         st.engine.max_content_width(),
-        st.engine.zoom(),
         st.viewport_width,
         st.viewport_height,
     )

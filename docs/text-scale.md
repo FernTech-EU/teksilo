@@ -85,20 +85,33 @@ height, and wrapping all grow correctly. Driven automatically from
 
 This is distinct from two pre-existing factors — see the comparison below.
 
-### `font_scale` vs `scale_factor` vs `zoom`
+### `font_scale` vs `scale_factor`
 
-| | `scale_factor` | `font_scale` | `zoom` |
-|---|---|---|---|
-| Question | physical px per logical px (HiDPI) | how big, *logically* (accessibility) | stretch the finished picture |
-| Acts at | rasterization | **shaping** (size before layout) | after layout (output coords) |
-| Changes logical metrics? | No (cancels out) | **Yes** (grows + reflows) | No (display only) |
-| Scope | global service | per-engine | per-engine |
+| | `scale_factor` | `font_scale` |
+|---|---|---|
+| Question | physical px per logical px (HiDPI) | how big, *logically* (a11y + per-editor size) |
+| Acts at | rasterization | **shaping** (size before layout) |
+| Changes logical metrics? | No (cancels out) | **Yes** (grows + reflows) |
+| Glyph sharpness | densifies | densifies (larger ppem) |
+| Scope | global service | per-engine |
 
 They are orthogonal and never double-count: physical shaping size =
 `base_pt × font_scale × scale_factor`; logical metrics = `base_pt × font_scale`.
 The standalone single-line shapers used by `TextWidget`/`Canvas` pass
 `font_scale = 1.0` (their size is already theme-scaled), which is what keeps
 label text from being scaled twice.
+
+### Per-editor text size
+
+`RichTextEditor` / `CodeEditor` / `PlainTextEditor::font_size_scale(f)` (and
+`set_font_size_scale` on the rich-text handle) multiplies into the engine font
+scale alongside a11y:
+
+```text
+engine.font_scale = (follow_text_scale ? ctx.text_scale : 1.0) × font_size_scale
+```
+
+Use that for a "Text size 125%" preference. Editors no longer expose page zoom.
 
 ---
 

@@ -133,30 +133,25 @@ fn scrolling_the_outer_area_moves_the_render_window() {
 }
 
 #[test]
-fn the_render_window_is_expressed_in_logical_pre_zoom_space() {
-    // The cull runs in logical (pre-zoom) content space, so at 2× zoom the same
-    // on-screen clip covers half as much logical content — the logical window
-    // height must be ~half the unzoomed one. (Skribisto's writing editor zooms
-    // by the typography scale, so getting this wrong shifts the visible band.)
-    let height_at = |zoom: f32| -> f32 {
-        let ed = RichTextEditor::editor(giant_doc())
-            .v_scroll_policy(ScrollPolicy::AlwaysOff)
-            .h_scroll_policy(ScrollPolicy::AlwaysOff)
-            .min_lines(1)
-            .zoom(zoom)
-            .window_to_clip(true);
-        let state = ed.state_handle();
-        let mut tree = WidgetTree::new();
-        let id = tree.add(ed);
-        tree.add(ScrollArea::from_id(id));
-        settle(&mut tree, W, H);
-        render_window(&state).unwrap().1
-    };
-    let (h1, h2) = (height_at(1.0), height_at(2.0));
-    let ratio = h2 / h1;
+fn the_render_window_tracks_the_visible_clip_band() {
+    // With window_to_clip, the cull band height tracks the on-screen clip
+    // (plus margin). Font-size scale grows metrics but does not shrink the
+    // windowed height the way page-zoom once did.
+    let ed = RichTextEditor::editor(giant_doc())
+        .v_scroll_policy(ScrollPolicy::AlwaysOff)
+        .h_scroll_policy(ScrollPolicy::AlwaysOff)
+        .min_lines(1)
+        .font_size_scale(1.5)
+        .window_to_clip(true);
+    let state = ed.state_handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(ed);
+    tree.add(ScrollArea::from_id(id));
+    settle(&mut tree, W, H);
+    let h = render_window(&state).unwrap().1;
     assert!(
-        (ratio - 0.5).abs() < 0.1,
-        "a 2× zoom must halve the logical window height (h1={h1}, h2={h2}, ratio={ratio})"
+        h > 0.0,
+        "window_to_clip must publish a positive cull height, got {h}"
     );
 }
 

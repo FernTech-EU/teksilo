@@ -605,20 +605,17 @@ impl Widget for LogViewBody {
         };
         st.engine.set_selection_color(new_sel);
 
-        // The global text scale changes glyph advances (and the row height), so
-        // a change forces a re-window — and the scroll offset must be rescaled
-        // into the new row-height coordinate space, or a view scrolled away from
-        // the tail would jump to a different set of lines.
-        let target_scale = if st.follow_text_scale {
-            ctx.text_scale
-        } else {
-            1.0
-        };
+        // Logical font scale (a11y × font_size_scale) changes glyph advances
+        // and the row height, so a change forces a re-window — and the scroll
+        // offset must be rescaled into the new row-height coordinate space, or
+        // a view scrolled away from the tail would jump to a different set of
+        // lines.
+        let target_scale = st.effective_font_scale(ctx.text_scale);
         let old_scale = st.last_font_scale;
-        if (old_scale - target_scale).abs() > f32::EPSILON {
+        if old_scale.is_nan() || (old_scale - target_scale).abs() > f32::EPSILON {
             st.last_font_scale = target_scale;
             st.engine.set_font_scale(target_scale);
-            if old_scale > 0.0 {
+            if old_scale.is_finite() && old_scale > 0.0 {
                 let ratio = target_scale / old_scale;
                 let scaled = st.scroll_y.get() * ratio;
                 st.scroll_y.set_if_changed(scaled);

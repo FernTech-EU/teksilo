@@ -201,12 +201,14 @@ impl CodeEditor {
         self
     }
 
-    /// Display zoom (1.0 = 100 %), a post-layout magnification distinct from the
-    /// global accessibility text scale.
-    pub fn zoom(self, zoom: f32) -> Self {
+    /// Per-editor logical font-size multiplier (`1.0` = 100 %), composed with
+    /// the accessibility text scale when [`follow_text_scale`](Self::follow_text_scale)
+    /// is on. Sharp — shapes at a larger ppem.
+    pub fn font_size_scale(self, scale: f32) -> Self {
         {
             let mut st = self.state.borrow_mut();
-            st.engine.set_zoom(zoom.max(0.1));
+            st.font_size_scale = scale.clamp(0.1, 10.0);
+            st.last_font_scale = f32::NAN;
             st.needs_full_layout = true;
         }
         self
@@ -214,7 +216,7 @@ impl CodeEditor {
 
     /// Whether the editor grows text with the global accessibility text scale
     /// (default `true`). Turn off for a WYSIWYG surface whose font sizes are
-    /// document content.
+    /// document content. Composed with [`font_size_scale`](Self::font_size_scale).
     pub fn follow_text_scale(self, follow: bool) -> Self {
         self.state.borrow_mut().follow_text_scale = follow;
         self
@@ -381,7 +383,7 @@ impl CodeEditor {
 impl Widget for CodeEditor {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Swap the private engine for one sharing the app's typesetter (no-op
-        // headless), carrying over builder-set typography / zoom.
+        // headless), carrying over builder-set typography.
         adopt_shared_typesetter(&self.state, ctx);
 
         {
@@ -632,11 +634,7 @@ impl Widget for CodeEditor {
         }
 
         let st = self.state.borrow();
-        let line_scale = if st.follow_text_scale {
-            ctx.text_scale
-        } else {
-            1.0
-        };
+        let line_scale = st.effective_font_scale(ctx.text_scale);
         let line_h = st.engine.default_line_height() * line_scale;
         let content_h = st.engine.content_height();
         drop(st);
@@ -893,6 +891,12 @@ impl PlainTextEditor {
     /// Whether the editor follows the global accessibility text scale.
     pub fn follow_text_scale(mut self, follow: bool) -> Self {
         self.map(|e| e.follow_text_scale(follow));
+        self
+    }
+
+    /// Per-editor logical font-size multiplier (`1.0` = 100 %).
+    pub fn font_size_scale(mut self, scale: f32) -> Self {
+        self.map(|e| e.font_size_scale(scale));
         self
     }
 
