@@ -21,15 +21,15 @@
 //!
 //! Routing: each host filters `live_entry_ids()` down to entries whose
 //! `ToastRoute` matches its own window id / assigned audience, or that
-//! are `Broadcast`. Each host binds to its OWN per-window rebuild
-//! signal (`ToastRegistry::window_version_signal`, reached through
-//! `rebuild_signal_for`) rather than one signal shared by every
-//! window — see that method's doc comment for why sharing one
-//! `Signal` across independently-reconciled windows silently drops
-//! rebuilds for every window but the first to flush each mutation. A
-//! host that matches nothing in a given rebuild just produces zero
-//! new surfaces, which is cheap and lets one shared queue serve every
-//! window without a per-window registry.
+//! are `Broadcast`. Every host binds the SAME
+//! `ToastRegistry::version_signal` at `BindingLevel::Rebuild` — one
+//! signal reaches N windows, because each window's `WidgetTree` owns
+//! its own `BindingRegistry` and that registry remembers the
+//! generation it last reconciled (see
+//! `bastyde_core::binding::BindingRegistry`). A host that matches
+//! nothing in a given rebuild just produces zero new surfaces, which
+//! is cheap and lets one shared queue serve every window without a
+//! per-window registry.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -240,11 +240,13 @@ impl Widget for ToastHost {
         let my_window = ctx.window().map(|w| w.id());
 
         // Rebuild on any queue mutation (show, dismiss, timer expiry).
-        // Bound to THIS window's own rebuild signal, not one shared by
-        // every window — see `ToastRegistry::window_version_signal`'s
-        // doc comment for why a single shared signal cannot reliably
-        // notify more than one open window.
-        self.registry.rebuild_signal_for(my_window).bind_to(
+        // One signal, shared by every window's host: this window's own
+        // `BindingRegistry` tracks the generation it last reconciled,
+        // so no other window's reconcile can consume the notification
+        // (see `ToastRegistry::version_signal`). Routing/filtering is
+        // decided below at render time, so every host wants every
+        // mutation regardless of which window it targets.
+        self.registry.version_signal().bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Rebuild,
@@ -799,9 +801,9 @@ mod tests {
     // either half of the routing contract: (a) that a host actually
     // EXCLUDES an entry that isn't routed to it, and (b) that delivery
     // doesn't depend on which window's `WidgetTree` happens to
-    // reconcile first — see `ToastRegistry::window_version_signal`'s
-    // doc comment for why a single signal shared by every window's
-    // host could silently starve whichever window reconciled second.
+    // reconcile first — the single signal shared by every window's
+    // host used to silently starve whichever window reconciled
+    // second, see `ToastRegistry::version_signal`.
     // -----------------------------------------------------------------
 
     /// Two independent windows (ids 1 and 2), each with its own

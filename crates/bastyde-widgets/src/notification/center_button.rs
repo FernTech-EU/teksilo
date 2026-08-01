@@ -238,13 +238,11 @@ impl Widget for NotificationCenterButton {
         // are unread, not just the (global, unscoped) `unread_count`
         // signal. Matches `NotificationLog`'s own binding.
         //
-        // Bound to THIS window's own rebuild signal, not the shared
-        // one — see `NotificationArchiveModel::window_version_signal`'s
-        // doc comment: a bell in window B must not silently miss a
-        // mutation just because window A's tree happened to reconcile
-        // (and clear the shared dirty flag) first.
-        let my_window = ctx.window().map(|w| w.id());
-        archive.rebuild_signal_for(my_window).bind_to(
+        // One signal for every window's bell: this window's own
+        // `BindingRegistry` remembers the generation it last
+        // reconciled, so a bell in window B cannot miss a mutation
+        // just because window A's tree reconciled first.
+        archive.version_signal().bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Rebuild,
@@ -542,6 +540,61 @@ mod tests {
         );
     }
 
+    /// Two trees with NO window state, sharing one archive: one push,
+    /// **both** must come out needing a render.
+    ///
+    /// Distinct from `both_unscoped_bells_pick_up_a_badge_change_*`
+    /// below, which give their trees real `BastydeWindowId`s. Those
+    /// used to be served by a per-window duplicate of the version
+    /// signal; a windowless tree fell through to the shared one and was
+    /// exactly the configuration that broke. Dirty tracking used to be
+    /// a `bool` on the signal that each tree's reconcile pass read *and
+    /// cleared*, so whichever tree laid out first consumed it and the
+    /// other silently — and permanently — kept a stale badge. Verified
+    /// against the pre-fix tree: this test failed on window B.
+    ///
+    /// Reconciles in the opposite order the second time round. The old
+    /// failure picked its victim by `HashMap` iteration order, so a
+    /// test that only ever laid out A-then-B could pass against a
+    /// "fix" that merely moved which window loses.
+    #[test]
+    fn two_windowless_trees_both_rebuild_on_one_archive_push() {
+        use crate::primitives::{FixedSize, Spacer, VStack};
+
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+
+        let mut window = |_| {
+            let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+            let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
+            let bell = tree.add(NotificationCenterButton::new(archive.clone()));
+            tree.add(VStack::new().add_child(spacer).add_child(bell));
+            tree.layout(SizeProposal::exact(400.0, 600.0));
+            tree.render();
+            tree
+        };
+        let (mut a, mut b) = (window(()), window(()));
+        assert!(!a.needs_render() && !b.needs_render(), "both start clean");
+
+        // Round 1 — reconcile A first, then B.
+        archive.push(entry("from somewhere"));
+        a.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(a.needs_render(), "window A's bell must rebuild");
+        b.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(
+            b.needs_render(),
+            "window B's bell must rebuild too — A's reconcile consumed nothing"
+        );
+        a.render();
+        b.render();
+
+        // Round 2 — same push, opposite reconcile order.
+        archive.push(entry("and again"));
+        b.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(b.needs_render(), "window B first this time");
+        a.layout(SizeProposal::exact(400.0, 600.0));
+        assert!(a.needs_render(), "and window A still follows");
+    }
+
     #[test]
     fn bell_popover_opens_with_unread_badge() {
         // Regression: a centered, hit-testable badge swallowed the tap,
@@ -735,8 +788,9 @@ mod tests {
     // at most one tree/bell, so none of them can catch a bell in a
     // second window silently missing an archive mutation because the
     // first window's tree already consumed the shared version signal's
-    // dirty flag — see `NotificationArchiveModel::window_version_signal`'s
-    // doc comment.
+    // change notification — see `NotificationArchiveModel::version_signal`
+    // and `bastyde_core::binding::BindingRegistry` for why one signal
+    // can now serve every window.
     // -----------------------------------------------------------------
 
     /// Two independent windows (ids 1 and 2), each with its own

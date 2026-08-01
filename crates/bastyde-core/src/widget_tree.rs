@@ -50,6 +50,15 @@ impl AnimatedRegistration {
         let request = signal.take_pending_animation()?;
         Some((signal, request, self.owner))
     }
+
+    /// Non-consuming counterpart to [`take_pending_animation`](Self::take_pending_animation),
+    /// for [`WidgetTree::needs_reconcile`] — which must be able to ask
+    /// "is there work here?" without doing any.
+    fn has_pending_animation(&self) -> bool {
+        self.weak
+            .upgrade()
+            .is_some_and(|signal| signal.has_pending_animation())
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -1267,6 +1276,52 @@ impl WidgetTree {
     /// Whether a render pass is needed (any widget needs layout or paint).
     pub fn needs_render(&self) -> bool {
         self.arena.any_needs_layout() || self.arena.any_needs_paint()
+    }
+
+    /// Whether this tree has reactive work that only a `layout()` pass can
+    /// turn into arena dirt — i.e. whether reconciling it right now could
+    /// change what [`needs_render`](Self::needs_render) reports.
+    ///
+    /// Read-only and cheap: `O(unique bound sources)` `u64` comparisons
+    /// plus one peek per registered animated signal. No arena walk, no
+    /// rebuilds, no geometry. Asking does not consume the answer, so it
+    /// can be asked every dispatch.
+    ///
+    /// # Why this is exactly the right question, and no broader
+    ///
+    /// `bastyde_app::WindowManager::request_redraw_needing_render` exists
+    /// for ONE case: a handler in window A wrote a `Signal` that window
+    /// B's widgets also bind, and B — which never saw the event — must be
+    /// reconciled before anyone can tell it needs repainting. Every OTHER
+    /// thing `layout_with_ops` drives already has its own scheduling
+    /// path and does not need this sweep:
+    ///
+    /// - tooltip dwell + sticky steps, delayed overlays, auto-dismiss,
+    ///   overlay fades, the animation scheduler, animated quads,
+    ///   gestures, `wake_at` and the 60 Hz frame tick are all timing
+    ///   driven, and every one of them contributes to
+    ///   [`next_timer_deadline`](Self::next_timer_deadline) — which
+    ///   `request_redraw_due` polls to wake precisely the due windows;
+    /// - drag ticks follow that window's own pointer stream;
+    /// - a handler that called `request_rebuild` marked the arena
+    ///   directly, so `needs_render()` is already true without any
+    ///   reconcile.
+    ///
+    /// So the two terms below are what the sweep uniquely covers:
+    /// binding-registry staleness (the whole point), and a *pending*
+    /// `animate_to` — which the scheduler has not started yet, so it
+    /// contributes no deadline, and which only `process_pending_animations`
+    /// (inside `layout`) can promote into one. The second term is
+    /// belt-and-braces: arming an animation also advances the signal's
+    /// generation, so a bound animated signal is already covered by the
+    /// first — but an animated signal registered without being bound
+    /// would not be, and this makes that impossible to get wrong.
+    pub fn needs_reconcile(&self) -> bool {
+        self.binding_registry.any_dirty()
+            || self
+                .animated_values
+                .iter()
+                .any(AnimatedRegistration::has_pending_animation)
     }
 
     /// Register a `Signal<f32>` for animation support. The framework
@@ -3506,12 +3561,20 @@ mod cross_window_redraw_signal_tests {
              checking needs_render() without reconciling first cannot tell them apart"
         );
 
-        // This is what `request_redraw_needing_render` does for every
-        // window before checking `needs_render()` — reconcile at the
-        // window's OWN current size, which is cheap (short-circuits
-        // before any real geometry work) whenever nothing turns out to
-        // be dirty, but IS what walks a pending Signal-driven dirty flag
-        // into the arena.
+        // ...but they are NOT indistinguishable to `needs_reconcile()`,
+        // which is what `request_redraw_needing_render` actually gates
+        // its reconcile on. Both trees observe the shared Signal, so
+        // both report pending reactive work here — and asking is
+        // read-only, so asking tree A first does not answer for tree B.
+        assert!(
+            tree_a.needs_reconcile() && tree_b.needs_reconcile(),
+            "both trees must report pending reactive work from the shared write"
+        );
+
+        // This is what `request_redraw_needing_render` does for a window
+        // whose gate is open — reconcile at the window's OWN current
+        // size, which is what walks a pending Signal-driven change into
+        // the arena.
         tree_b.layout(proposal);
 
         assert!(
@@ -3519,6 +3582,81 @@ mod cross_window_redraw_signal_tests {
             "tree B, which merely OBSERVES the shared Signal, is now dirty — \
              this is the cross-tree fan-out request_redraw_needing_render \
              exists to notice (via its own reconcile-then-check) and repaint"
+        );
+        assert!(
+            !tree_b.needs_reconcile(),
+            "and having reconciled, tree B's gate closes again"
+        );
+        assert!(
+            tree_a.needs_reconcile(),
+            "while tree A — which has NOT reconciled — is still waiting; one \
+             window's reconcile must never close another's gate"
+        );
+    }
+
+    /// The gate `request_redraw_needing_render` gained must stay SHUT for
+    /// a window with nothing reactive pending, or it saves nothing: that
+    /// method runs after every dispatched event, and an open gate costs
+    /// a full `layout_with_ops` — a dozen per-frame passes (pending
+    /// animations, frame tick, scheduler tick, drag tick,
+    /// `process_state_changes`, tooltips, four overlay passes) before it
+    /// reaches the geometry short-circuit, for every open window, on
+    /// every event of a fast mouse-move stream.
+    #[test]
+    fn needs_reconcile_is_false_for_an_idle_tree() {
+        let shared = Signal::new(true);
+        let mut idle = WidgetTree::new();
+        let stack = idle.add(StackWidget::new());
+        let leaf = idle.add_child(stack, FillWidget::new());
+        idle.visible_when(leaf, shared.clone());
+        idle.layout(SizeProposal::exact(100.0, 100.0));
+        idle.render();
+
+        assert!(!idle.needs_reconcile(), "nothing written — gate shut");
+        assert!(!idle.needs_reconcile(), "and asking does not open it");
+
+        shared.set(false);
+        assert!(idle.needs_reconcile(), "a write opens it");
+        idle.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(!idle.needs_reconcile(), "reconciling closes it again");
+    }
+
+    /// A *pending* `animate_to` contributes no scheduler deadline until
+    /// `process_pending_animations` promotes it, so `next_timer_deadline`
+    /// (and therefore `request_redraw_due`) cannot see it. The gate must,
+    /// or arming an animation from another window's handler would leave
+    /// it parked until something unrelated woke the window.
+    #[test]
+    fn needs_reconcile_sees_an_animation_armed_but_not_yet_started() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.render();
+
+        // Registered but deliberately NOT bound to any widget, so the
+        // binding-registry term cannot be what notices it.
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        assert!(!tree.needs_reconcile(), "precondition: nothing armed yet");
+
+        anim.animate_to(
+            1.0,
+            std::time::Duration::from_millis(200),
+            bastyde_tokens::Easing::Linear,
+        );
+        assert!(
+            tree.needs_reconcile(),
+            "an armed-but-unstarted animation is reactive work only layout() can pick up"
+        );
+        assert!(
+            anim.has_pending_animation(),
+            "and asking must not have consumed the request"
+        );
+
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert!(
+            !anim.has_pending_animation(),
+            "the reconcile promoted it into the scheduler"
         );
     }
 

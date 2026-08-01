@@ -1631,11 +1631,12 @@ impl WindowManager {
     ///
     /// # Why this can't just check `needs_render()`
     ///
-    /// A `Signal` write only flips a dirty flag on the signal itself and
-    /// in `bastyde_core`'s `BindingRegistry` (a deliberately lazy design —
-    /// a signal has no reference back into any `WidgetTree`'s arena to
-    /// mark node-level dirty bits synchronously). Those flags are only
-    /// walked into `arena.needs_layout` / `needs_paint` — i.e. into what
+    /// A `Signal` write only advances a change generation on the signal
+    /// itself (a deliberately lazy design — a signal has no reference
+    /// back into any `WidgetTree`'s arena to mark node-level dirty bits
+    /// synchronously). That generation is only compared against what
+    /// each window's `BindingRegistry` last acted on, and walked into
+    /// `arena.needs_layout` / `needs_paint` — i.e. into what
     /// `needs_render()` actually reads — by `WidgetTree`'s internal
     /// `process_state_changes` step, which today runs *only* at the top
     /// of that tree's own `layout()`. A window's own
@@ -1648,21 +1649,55 @@ impl WindowManager {
     /// reconciling first would make this method a permanent no-op for
     /// exactly the case it exists to fix.
     ///
-    /// That's why every window's `tree.layout()` is called here first, at
-    /// its OWN current size (`proposal_changed` stays `false`) — cheap
-    /// when nothing is pending: `layout()` runs the reconcile pass, then
-    /// short-circuits before the expensive per-node geometry recursion
-    /// once it finds nothing dirty and the proposal unchanged. This is
-    /// strictly more expensive per dispatched event than
-    /// `request_redraw_due` (which only reads an already-computed
-    /// deadline) — it walks every window's `BindingRegistry` every time —
-    /// but it is still far cheaper than an actual GPU repaint, and it is
-    /// the only place in the framework doing this specific reconciliation
-    /// for a plain app-level `Signal` (the theme/locale/text-scale/
-    /// follow-system broadcasts sidestep the whole problem by mutating
-    /// each tree directly through `&mut self.windows`, not through a
-    /// shared `Signal`, so they always know synchronously that every
-    /// window needs a redraw).
+    /// That's why a window's `tree.layout()` is called here first, at
+    /// its OWN current size (`proposal_changed` stays `false`), whenever
+    /// [`WidgetTree::needs_reconcile`] says reconciling could change the
+    /// answer. This is the only place in the framework doing this
+    /// specific reconciliation for a plain app-level `Signal` (the
+    /// theme/locale/text-scale/follow-system broadcasts sidestep the
+    /// whole problem by mutating each tree directly through
+    /// `&mut self.windows`, not through a shared `Signal`, so they
+    /// always know synchronously that every window needs a redraw).
+    ///
+    /// # Why the reconcile is gated rather than unconditional
+    ///
+    /// It was unconditional at first, on the grounds that `layout()`
+    /// short-circuits before the per-node geometry recursion when
+    /// nothing is dirty. That undersells the cost: `layout_with_ops`
+    /// runs a dozen per-frame passes *before* it gets near that
+    /// short-circuit — pending animations, the frame tick, the animation
+    /// scheduler tick, drag ticks, the whole of `process_state_changes`,
+    /// tooltips, delayed / pointer-leave / auto-dismiss overlays and
+    /// overlay fades — and it ran all of them for every open window on
+    /// every dispatched event, including a fast mouse-move stream.
+    ///
+    /// `needs_reconcile()` is cheap enough to ask instead (`u64`
+    /// comparisons over unique bound sources, no arena walk) and answers
+    /// precisely the question this sweep is for. It is safe to skip the
+    /// rest because everything in that list has its own scheduling path
+    /// — the timing-driven passes all feed `WidgetTree::next_timer_deadline`,
+    /// which `request_redraw_due` polls — see `needs_reconcile`'s own doc
+    /// for the case-by-case argument.
+    ///
+    /// The `needs_render()` check stays OUTSIDE the gate on purpose: a
+    /// window can need a repaint for reasons that never involved a
+    /// binding (a handler called `request_rebuild`, an event dirtied a
+    /// node directly), and skipping the reconcile must not also skip
+    /// poking it.
+    ///
+    /// # Reconciling here does not rob the window of its own reconcile
+    ///
+    /// Load-bearing, and it was not always true. Dirty tracking used to
+    /// be a `bool` living on the `Signal`, which the first registry to
+    /// flush both read AND cleared — so this very sweep was the thing
+    /// that broke shared-`Signal` fan-out: whichever window it happened
+    /// to visit first consumed the change and every later window's
+    /// reconcile found nothing, permanently. `Signal` now exposes a
+    /// monotone generation and each `BindingRegistry` remembers what it
+    /// last acted on (see `bastyde_core::binding::BindingGroup`), so
+    /// visiting windows in any order — this method iterates a `HashMap`,
+    /// so the order is arbitrary and varies run to run — delivers the
+    /// change to all of them.
     ///
     /// One known limitation: this uses `WidgetTree::layout` (a
     /// `NoopWindowOps` sink), not `layout_with_ops`, so a handler that
@@ -1690,11 +1725,13 @@ impl WindowManager {
     pub fn request_redraw_needing_render(&mut self) -> usize {
         let mut poked = 0;
         for managed in self.windows.values_mut() {
-            let size = managed.platform_window.surface_size();
-            let sf = managed.platform_window.scale_factor() as f32;
-            let proposal =
-                bastyde_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
-            managed.tree.layout(proposal);
+            if managed.tree.needs_reconcile() {
+                let size = managed.platform_window.surface_size();
+                let sf = managed.platform_window.scale_factor() as f32;
+                let proposal =
+                    bastyde_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
+                managed.tree.layout(proposal);
+            }
             if managed.tree.needs_render() {
                 managed.platform_window.request_redraw();
                 poked += 1;

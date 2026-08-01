@@ -237,12 +237,10 @@ impl Widget for NotificationLog {
         // disappear, and StandardListItem's read/unread title style
         // needs to flip on mark_all_read.
         //
-        // Bound to THIS window's own rebuild signal — see
-        // `NotificationArchiveModel::window_version_signal`'s doc
-        // comment for why a log embedded in one window must not share
-        // a dirty flag with a log (or bell) embedded in another.
-        let my_window = ctx.window().map(|w| w.id());
-        archive.rebuild_signal_for(my_window).bind_to(
+        // One signal for every window's log — a log embedded in one
+        // window shares the signal with a log (or bell) in another
+        // without either being able to consume the other's rebuild.
+        archive.version_signal().bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Rebuild,

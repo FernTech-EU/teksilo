@@ -20,14 +20,11 @@
 //!   `enqueue` push goes through the model and the on-disk file
 //!   gets re-serialized on the shared bastyde-settings I/O thread.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::cell::Cell;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_core::signal::Signal;
-use bastyde_core::window::BastydeWindowId;
 use bastyde_data::ListModel;
 use bastyde_settings::{AppPaths, Migrator, PersistedListModel, SettingsFileError};
 
@@ -228,16 +225,6 @@ pub struct NotificationArchiveModel {
     /// [`OverlayManager::version`](bastyde_core::overlay::OverlayManager::version)
     /// and [`ToastRegistry::version_signal`](crate::toast::ToastRegistry::version_signal).
     version: Signal<u64>,
-    /// Per-window rebuild signal — mirrors
-    /// [`ToastRegistry::window_version_signal`](crate::toast::ToastRegistry::window_version_signal).
-    /// A single `Signal` shared by every window's `NotificationCenterButton`
-    /// / `NotificationLog` has exactly the same failure mode as the
-    /// toast registry's shared `version` would: only the first
-    /// window's `WidgetTree` to reconcile after a mutation observes
-    /// the dirty flag before clearing it, so every other open window's
-    /// bell/log silently never rebuilds for that mutation. See that
-    /// method's doc comment for the full mechanism.
-    window_versions: Rc<RefCell<HashMap<BastydeWindowId, Signal<u64>>>>,
 }
 
 impl NotificationArchiveModel {
@@ -279,7 +266,6 @@ impl NotificationArchiveModel {
             next_id: Cell::new(next_id_seed),
             unread_count: Signal::new(initial_unread),
             version: Signal::new(0),
-            window_versions: Rc::new(RefCell::new(HashMap::new())),
         })
     }
 
@@ -294,7 +280,6 @@ impl NotificationArchiveModel {
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
             version: Signal::new(0),
-            window_versions: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -310,106 +295,28 @@ impl NotificationArchiveModel {
     }
 
     /// Reactive handle on the archive's mutation version. Widgets
-    /// that render the archive (e.g. `NotificationLog`) bind to
-    /// this at `BindingLevel::Rebuild`.
+    /// that render the archive (`NotificationLog`,
+    /// `NotificationCenterButton`) bind to this at
+    /// `BindingLevel::Rebuild`, in every window — one signal is enough
+    /// for N of them, see
+    /// [`ToastRegistry::version_signal`](crate::toast::ToastRegistry::version_signal)
+    /// for the history of why that had to be said out loud.
     pub fn version_signal(&self) -> &Signal<u64> {
         &self.version
-    }
-
-    /// Get-or-create the rebuild signal for `window_id` — the
-    /// window-scoped counterpart of [`Self::version_signal`]. A real
-    /// `NotificationCenterButton` / `NotificationLog` attached to a
-    /// window should bind to this (via [`Self::rebuild_signal_for`])
-    /// instead of the shared `version_signal`, for the same reason
-    /// [`ToastRegistry::window_version_signal`](crate::toast::ToastRegistry::window_version_signal)
-    /// exists: sharing one `Signal` across independently-reconciled
-    /// windows means only the first window to reconcile after a
-    /// mutation ever sees it dirty.
-    pub(crate) fn window_version_signal(&self, window_id: BastydeWindowId) -> Signal<u64> {
-        self.window_versions
-            .borrow_mut()
-            .entry(window_id)
-            .or_insert_with(|| Signal::new(0))
-            .clone()
-    }
-
-    /// The rebuild signal a window-attached widget should bind to:
-    /// window-specific when a real window id is known, the legacy
-    /// shared signal otherwise (headless unit-test trees, which never
-    /// have more than one such consumer).
-    pub(crate) fn rebuild_signal_for(&self, window_id: Option<BastydeWindowId>) -> Signal<u64> {
-        match window_id {
-            Some(w) => self.window_version_signal(w),
-            None => self.version.clone(),
-        }
     }
 
     pub fn limit(&self) -> usize {
         self.limit
     }
 
-    /// Drop `window_id`'s entry from [`Self::window_versions`]. Call
-    /// this from the app's window-teardown hook — the same place that
-    /// tears down whatever `NotificationLog` / `NotificationCenterButton`
-    /// was mounted in that window. Mirrors
-    /// [`ToastRegistry::forget_window`](crate::toast::ToastRegistry::forget_window),
-    /// which now cascades into this method automatically for any app
-    /// reached through the registry; this method exists in its own
-    /// right (and is `pub`, not `pub(crate)`) for the case
-    /// [`ToastRegistry::forget_window`]'s doc comment calls out: a bell
-    /// can be constructed against an archive directly, with no
-    /// registry in the picture, so an app in that shape must be able
-    /// to call this itself.
-    ///
-    /// This is not only a memory leak fix. [`Self::bump_version`]
-    /// iterates every entry in [`Self::window_versions`] on EVERY
-    /// archive mutation (push, mark-read, clear, remove) — a dead
-    /// window's forgotten `Signal` isn't just sitting there unused, it
-    /// costs one extra `get`/`set` on every single notification the
-    /// app raises for the rest of the process's life. A long session
-    /// that opens and closes many windows turns that iteration longer
-    /// and longer even though no window is left to observe most of the
-    /// entries in it — a permanent, ever-growing CPU cost hiding behind
-    /// what looks like a plain leak. Forgetting closed windows keeps
-    /// that iteration bounded by the number of windows actually open.
-    ///
-    /// Safe even if some other code still holds a clone of the removed
-    /// `Signal`: a `Signal` is `Rc<RefCell<..>>` under the hood, so
-    /// dropping this map's entry only drops *this* reference to it —
-    /// any clone a still-alive holder kept keeps reading/writing
-    /// exactly as before. It just stops being reachable from
-    /// [`Self::bump_version`]'s iteration, which is the whole point:
-    /// nothing is bound to a torn-down window's signal any more, so no
-    /// rebuild is missed by excluding it.
-    ///
-    /// Idempotent: forgetting a window id that was never registered
-    /// (or was already forgotten) is a safe no-op — `HashMap::remove`
-    /// on a missing key does nothing. And because
-    /// [`Self::window_version_signal`] is get-or-create, a later call
-    /// for the same id (e.g. a window id reused much later in the
-    /// process, or a stray call from code that doesn't know the window
-    /// is gone) transparently starts fresh with a brand-new
-    /// `Signal::new(0)` rather than erroring or reviving stale state.
-    pub fn forget_window(&self, window_id: BastydeWindowId) {
-        self.window_versions.borrow_mut().remove(&window_id);
-    }
-
-    /// Bump the legacy shared signal AND every per-window signal — see
-    /// [`Self::window_version_signal`] for why a single shared bump
-    /// alone cannot reliably reach more than one window's bell/log.
-    /// Collects the per-window signals into a `Vec` before calling
-    /// `set` on any of them, so a rebuild triggered synchronously by
-    /// one of these `set` calls can't panic on a re-entrant `RefCell`
-    /// borrow if it happens to allocate a new window's entry in this
-    /// same map mid-iteration.
+    /// Bump the version every bell / log binds at
+    /// `BindingLevel::Rebuild` — see [`Self::version_signal`]. One
+    /// write reaches every window: each window's own `BindingRegistry`
+    /// tracks the generation it last reconciled, so none of them can
+    /// consume the notification out from under the others.
     fn bump_version(&self) {
         let v = self.version.get();
         self.version.set(v.wrapping_add(1));
-        let per_window: Vec<Signal<u64>> = self.window_versions.borrow().values().cloned().collect();
-        for sig in per_window {
-            let v = sig.get();
-            sig.set(v.wrapping_add(1));
-        }
     }
 
     /// Force the persistent backing file to disk synchronously.
@@ -743,7 +650,6 @@ mod tests {
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
             version: Signal::new(0),
-            window_versions: Rc::new(RefCell::new(HashMap::new())),
         };
         for i in 0..5 {
             m.push(entry(&format!("t{i}")));
@@ -1278,89 +1184,43 @@ mod tests {
         assert_eq!(parsed.items[0], original);
     }
 
-    // ----- `forget_window` -----
+    // ----- multi-window rebuild notification -----
 
+    /// What the deleted `window_versions` map used to buy, now a
+    /// property of the shared signal itself: N windows' bells / logs
+    /// each bind the SAME `version_signal` at `Rebuild`, and every one
+    /// of them registers the mutation.
+    ///
+    /// Three independent `BindingRegistry`s stand in for three windows,
+    /// bound the way `NotificationCenterButton::build` and
+    /// `NotificationLog::build` bind. The reconcile-order half of the
+    /// property — that one window's flush does not consume another's —
+    /// needs real trees, and is covered by
+    /// `center_button::tests::two_windows_bells_both_rebuild_on_one_archive_push`.
     #[test]
-    fn forget_window_removes_the_entry() {
+    fn every_windows_binding_sees_an_archive_mutation() {
+        use bastyde_core::binding::{BindingLevel, BindingRegistry};
+        use bastyde_core::widget_id::WidgetId;
+
         let m = NotificationArchiveModel::in_memory();
-        let w = BastydeWindowId::new(1);
-        let _ = m.window_version_signal(w);
-        assert!(m.window_versions.borrow().contains_key(&w));
+        let bell: WidgetId = slotmap::KeyData::from_ffi(1).into();
+        let windows: Vec<BindingRegistry> = (0..3).map(|_| BindingRegistry::new()).collect();
+        for reg in &windows {
+            m.version_signal().bind_to(bell, reg, BindingLevel::Rebuild);
+        }
+        for reg in &windows {
+            assert!(!reg.any_dirty(), "a fresh binding starts clean");
+        }
 
-        m.forget_window(w);
+        m.push(entry("first"));
 
-        assert!(
-            !m.window_versions.borrow().contains_key(&w),
-            "forget_window must remove the window's version-map entry"
-        );
+        for (i, reg) in windows.iter().enumerate() {
+            assert!(
+                reg.any_dirty(),
+                "window {i} missed the archive mutation — asking window 0 \
+                 must not have consumed it"
+            );
+        }
     }
 
-    #[test]
-    fn forget_window_on_an_unknown_window_is_a_safe_no_op() {
-        let m = NotificationArchiveModel::in_memory();
-        let known = BastydeWindowId::new(1);
-        let unknown = BastydeWindowId::new(999);
-        let _ = m.window_version_signal(known);
-
-        // Forgetting a window that was never registered must not
-        // panic and must not disturb any other window's entry.
-        m.forget_window(unknown);
-        assert!(
-            m.window_versions.borrow().contains_key(&known),
-            "an unrelated window's entry must survive forgetting a different, unknown window"
-        );
-
-        // Idempotent: forgetting it twice is equally a safe no-op.
-        m.forget_window(known);
-        m.forget_window(known);
-        assert!(!m.window_versions.borrow().contains_key(&known));
-    }
-
-    #[test]
-    fn forgotten_windows_signal_is_no_longer_touched_by_bump_version() {
-        // The throughput point, not just the memory one: a forgotten
-        // window's `Signal` must drop out of `bump_version`'s
-        // iteration, so a live clone someone else still holds stops
-        // being mutated by every subsequent archive push.
-        let m = NotificationArchiveModel::in_memory();
-        let w = BastydeWindowId::new(1);
-        let held_clone = m.window_version_signal(w);
-        assert_eq!(held_clone.get(), 0);
-
-        m.forget_window(w);
-
-        // A mutation after forgetting must NOT bump the forgotten
-        // window's signal any more, even though this held clone keeps
-        // it alive (Signal is Rc<RefCell<..>> — dropping the map entry
-        // doesn't drop the value, it just stops `bump_version` from
-        // reaching it).
-        m.push(entry("after forget"));
-        assert_eq!(
-            held_clone.get(),
-            0,
-            "bump_version must no longer iterate a forgotten window's signal"
-        );
-
-        // A later call for the SAME window id transparently starts
-        // fresh rather than erroring or reviving the old value.
-        let fresh = m.window_version_signal(w);
-        assert_eq!(fresh.get(), 0);
-        m.push(entry("after re-registering"));
-        assert_eq!(fresh.get(), 1);
-    }
-
-    #[test]
-    fn forgetting_one_window_leaves_anothers_signal_live() {
-        let m = NotificationArchiveModel::in_memory();
-        let w1 = BastydeWindowId::new(1);
-        let w2 = BastydeWindowId::new(2);
-        let sig1 = m.window_version_signal(w1);
-        let sig2 = m.window_version_signal(w2);
-
-        m.forget_window(w1);
-        m.push(entry("still bumping w2"));
-
-        assert_eq!(sig1.get(), 0, "forgotten window must not be bumped");
-        assert_eq!(sig2.get(), 1, "still-live window must still be bumped");
-    }
 }

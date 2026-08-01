@@ -20,8 +20,8 @@ impl WidgetTree {
         // a visual level and `AccessibilityOnly` (e.g. a Button's
         // `label` re-registers the same Signal at RepaintOnly
         // *and* AccessibilityOnly) flips both. Two separate flushes
-        // would race on the shared per-Signal dirty flag and the
-        // second flush would always see it cleared.
+        // would each advance this registry's last-seen generation for
+        // that source, so the second would find nothing to report.
         let (dirty_widgets, a11y_binding_dirty) = self.binding_registry.flush_all_dirty();
         for (id, level) in &dirty_widgets {
             match level {
@@ -109,6 +109,15 @@ impl WidgetTree {
         // bridge) after the whole visibility pass has committed — not from
         // inside the set_dormant/activate recursion above.
         self.flush_activation_signals();
+
+        // Reclaim binding groups nothing points at any more. Deliberately
+        // last: `unregister_for_widget` leaves emptied groups in place so
+        // that a rebuild — which is unregister-then-re-register — keeps
+        // the group's `last_seen` ledger and cannot swallow a write its
+        // own `build()` made before re-binding. By here every rebuild in
+        // this pass has re-registered, so anything still empty belongs to
+        // a widget that is genuinely gone.
+        self.binding_registry.reclaim_empty_groups();
     }
 
     /// Dismiss any active overlay whose content widget is no longer

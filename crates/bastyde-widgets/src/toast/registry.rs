@@ -76,10 +76,6 @@ pub struct ToastRegistry {
     /// exactly one instance per type for the whole app — there is no
     /// per-window slot to put this in anywhere else.
     window_audiences: Rc<RefCell<HashMap<BastydeWindowId, Signal<Option<ToastAudience>>>>>,
-    /// Per-window rebuild signal. See [`Self::window_version_signal`]
-    /// for why a single shared `version` cannot, by itself, reliably
-    /// notify more than one window's `ToastHost`.
-    window_versions: Rc<RefCell<HashMap<BastydeWindowId, Signal<u64>>>>,
 }
 
 pub(crate) struct ToastRegistryInner {
@@ -172,7 +168,6 @@ impl ToastRegistry {
             version: Signal::new(0),
             archive,
             window_audiences: Rc::new(RefCell::new(HashMap::new())),
-            window_versions: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -183,71 +178,26 @@ impl ToastRegistry {
         self.archive.clone()
     }
 
-    /// Reactive signal bumped on every queue mutation. Used by hosts
-    /// with no known window (headless trees / tests that never call
-    /// `set_window_state`) — a real, window-attached `ToastHost`
-    /// should bind to [`Self::window_version_signal`] instead, via
-    /// [`Self::rebuild_signal_for`]. Kept public because it predates
-    /// the per-window signal and existing callers poll it directly to
-    /// assert "did something change" without going through a widget
-    /// tree at all.
+    /// Reactive signal bumped on every queue mutation. Every
+    /// `ToastHost` binds this at `BindingLevel::Rebuild`, in every
+    /// window, and app code may also poll it directly to assert "did
+    /// something change" without going through a widget tree at all.
+    ///
+    /// One signal is enough for N windows. It was not always: dirty
+    /// tracking used to be a `bool` living on the signal that each
+    /// `WidgetTree`'s reconcile pass read *and cleared*, so whichever
+    /// window reconciled first consumed the flag and every other
+    /// window's `ToastHost` silently — and permanently — skipped its
+    /// rebuild. Toast routing was the first feature to need
+    /// shared-state-fanned-out-to-every-window, so it was the first to
+    /// hit that, and it carried a `HashMap<BastydeWindowId, Signal<u64>>`
+    /// of per-window duplicates plus a fan-out on every bump to work
+    /// around it. `Signal` now tracks a monotone generation and each
+    /// `BindingRegistry` remembers what it last acted on
+    /// (`bastyde_core::binding::BindingGroup::last_seen`), so consumers
+    /// no longer contend and the duplicates are gone.
     pub fn version_signal(&self) -> &Signal<u64> {
         &self.version
-    }
-
-    /// Get-or-create the rebuild signal for `window_id`. The first
-    /// call for a given window allocates a fresh `Signal::new(0)`;
-    /// every later call returns the SAME signal.
-    ///
-    /// Why a per-window signal exists at all, instead of every
-    /// `ToastHost` just binding to [`Self::version_signal`]: a
-    /// `Signal`'s dirty flag lives on ONE shared `Rc<RefCell<..>>`
-    /// inner. `WidgetTree` reconciliation (`BindingRegistry::
-    /// flush_all_dirty`) both *reads* and *clears* that flag in the
-    /// same pass. When N independent `WidgetTree`s (one per open
-    /// window) each bind to the SAME `Signal`, only the first tree to
-    /// reconcile after a mutation observes it dirty — its
-    /// `flush_all_dirty` clears the shared flag, so every other
-    /// window's reconcile pass (run afterwards in the same sweep, by
-    /// `WindowManager::request_redraw_needing_render`, or in a later
-    /// sweep) reads `is_dirty() == false` and silently skips its own,
-    /// otherwise-correct, `Rebuild` binding — not a delayed rebuild,
-    /// a permanently missed one, until an unrelated later mutation
-    /// happens to dirty the same signal again and race some window
-    /// into observing it first. This is exactly the trap
-    /// `WindowManager::request_redraw_needing_render`'s doc comment
-    /// warns about ("the theme/locale/... broadcasts sidestep the
-    /// whole problem by mutating each tree directly ... not through a
-    /// shared Signal") — toast/notification routing is the first
-    /// feature to need a shared-state-fans-out-to-every-window signal,
-    /// so it is also the first to hit the trap.
-    ///
-    /// Giving each window its own `Signal` sidesteps it entirely: each
-    /// window's `BindingRegistry` group now watches a DIFFERENT
-    /// `MutableInner`, so one window's flush clearing its own flag has
-    /// no effect on any other window's. [`Self::bump_version`] fans
-    /// the bump out to every signal in this map (plus the legacy
-    /// shared one) on every mutation, since routing/filtering happens
-    /// at render time in `ToastHost::build`, not at bump time — any
-    /// mutation could be relevant to any window.
-    pub(crate) fn window_version_signal(&self, window_id: BastydeWindowId) -> Signal<u64> {
-        self.window_versions
-            .borrow_mut()
-            .entry(window_id)
-            .or_insert_with(|| Signal::new(0))
-            .clone()
-    }
-
-    /// The rebuild signal a `ToastHost` should bind to: the window-
-    /// specific one when the host is attached to a real window, the
-    /// legacy shared one otherwise (headless trees in unit tests never
-    /// call `set_window_state`, and there's only ever one such
-    /// consumer per test, so the shared-flag trap doesn't apply).
-    pub(crate) fn rebuild_signal_for(&self, window_id: Option<BastydeWindowId>) -> Signal<u64> {
-        match window_id {
-            Some(w) => self.window_version_signal(w),
-            None => self.version.clone(),
-        }
     }
 
     /// Shared hover-pause refcount. Surfaces increment / decrement
@@ -280,8 +230,7 @@ impl ToastRegistry {
         self.window_audience_signal(window_id).set(audience);
     }
 
-    /// Drop `window_id`'s entries from BOTH per-window maps
-    /// ([`Self::window_audiences`] and [`Self::window_versions`]).
+    /// Drop `window_id`'s entry from [`Self::window_audiences`].
     /// Call this from the app's window-teardown hook — the same place
     /// that tears down the `ToastHost` mounted in that window.
     ///
@@ -290,7 +239,7 @@ impl ToastRegistry {
     /// (and the `Signal`'s backing `Rc<RefCell<..>>` allocation) stays
     /// alive. Without a call to `forget_window`, every window ever
     /// opened for the life of the process leaves one live `Signal` in
-    /// each map behind forever — an unbounded leak in exactly the
+    /// the map behind forever — an unbounded leak in exactly the
     /// shape a long-running, multi-window app has (open/close windows
     /// repeatedly across a session).
     ///
@@ -301,71 +250,31 @@ impl ToastRegistry {
     /// reading/writing exactly as before, unaffected by the map
     /// removal (`Rc` content doesn't disappear just because one owner
     /// let go of it). The only real hazard is calling this too early:
-    /// [`Self::window_audience_signal`] / [`Self::window_version_signal`]
-    /// are get-or-create, so if the torn-down window's own `ToastHost`
-    /// (or any other live widget) calls either accessor again AFTER
-    /// `forget_window`, it transparently allocates a brand-new
-    /// `Signal::new(_)` under the same key rather than erroring — fine
-    /// for a window that is genuinely gone (nothing is bound to the
-    /// discarded signal any more, so no rebuild is missed), but it
-    /// means this must be called from teardown itself, not from a
-    /// handler the window's own event loop might still reach
-    /// afterwards.
+    /// [`Self::window_audience_signal`] is get-or-create, so if the
+    /// torn-down window's own `ToastHost` (or any other live widget)
+    /// calls it again AFTER `forget_window`, it transparently
+    /// allocates a brand-new `Signal::new(_)` under the same key
+    /// rather than erroring — fine for a window that is genuinely gone
+    /// (nothing is bound to the discarded signal any more, so no
+    /// rebuild is missed), but it means this must be called from
+    /// teardown itself, not from a handler the window's own event loop
+    /// might still reach afterwards.
     ///
     /// Idempotent: forgetting a window id that was never registered
     /// (or was already forgotten) is a safe no-op — `HashMap::remove`
     /// on a missing key does nothing.
-    ///
-    /// Also cascades into
-    /// [`NotificationArchiveModel::forget_window`](crate::notification::NotificationArchiveModel::forget_window)
-    /// when [`Self::archive`] is configured, so this one call cleans
-    /// BOTH this registry's own two maps AND the archive's sibling
-    /// `window_versions` map — an app reached through the registry
-    /// (the common case: `ToastRegistry::with_archive`) cannot
-    /// half-clean by forgetting to also call the archive's method
-    /// separately. An app that constructs a bell against an archive
-    /// directly, with no registry in the picture, still needs to call
-    /// [`NotificationArchiveModel::forget_window`] itself — there is no
-    /// registry here to cascade from in that shape.
-    ///
-    /// Cascading unconditionally is safe for the one alternate shape
-    /// worth naming — an archive shared by two registries (e.g. two
-    /// independent toast surfaces mirroring into one combined log):
-    /// `NotificationArchiveModel::forget_window` only ever removes
-    /// `window_id`'s OWN entry, keyed by the same `BastydeWindowId`
-    /// both registries would use for that same physical window, and is
-    /// itself idempotent — so a second registry's teardown calling this
-    /// again for a window already forgotten by the first is just a
-    /// no-op, never a double-free or a removal of some other window's
-    /// state. There is no scenario where forgetting a window in one
-    /// registry should leave that SAME window's archive entry alive
-    /// for another registry to still consult.
     pub fn forget_window(&self, window_id: BastydeWindowId) {
         self.window_audiences.borrow_mut().remove(&window_id);
-        self.window_versions.borrow_mut().remove(&window_id);
-        if let Some(archive) = &self.archive {
-            archive.forget_window(window_id);
-        }
     }
 
-    /// Bump the legacy shared signal AND every per-window signal —
-    /// see [`Self::window_version_signal`] for why a single shared
-    /// bump cannot, by itself, reliably reach more than one window.
-    /// Collects the per-window signals into a `Vec` before calling
-    /// `set` on any of them so this can't panic on a re-entrant
-    /// `RefCell` borrow if a bound widget's rebuild (triggered
-    /// synchronously by one of these `set` calls further down the
-    /// line) itself calls back into `window_version_signal` — e.g. a
-    /// brand-new window's first build, allocating its own entry in
-    /// this very map.
+    /// Bump the version every `ToastHost` binds at
+    /// `BindingLevel::Rebuild` — see [`Self::version_signal`]. One
+    /// write reaches every window: each window's own `BindingRegistry`
+    /// tracks the generation it last reconciled, so none of them can
+    /// consume the notification out from under the others.
     pub(crate) fn bump_version(&self) {
         let v = self.version.get();
         self.version.set(v.wrapping_add(1));
-        let per_window: Vec<Signal<u64>> = self.window_versions.borrow().values().cloned().collect();
-        for sig in per_window {
-            let v = sig.get();
-            sig.set(v.wrapping_add(1));
-        }
     }
 
     /// Enqueue a toast. Called by `show_toast`. Returns a stable
@@ -979,18 +888,12 @@ mod tests {
     // ----- F3: `forget_window` -----
 
     #[test]
-    fn forget_window_removes_entries_from_both_maps() {
+    fn forget_window_removes_the_windows_audience_entry() {
         let r = registry();
         let w = BastydeWindowId::new(1);
 
-        // Populate both maps the way real usage would: a `ToastHost`
-        // binding to the rebuild signal, and app code assigning an
-        // audience.
-        let _ = r.window_version_signal(w);
         r.set_window_audience(w, Some(ToastAudience::new(42)));
-
         assert!(r.window_audiences.borrow().contains_key(&w));
-        assert!(r.window_versions.borrow().contains_key(&w));
 
         r.forget_window(w);
 
@@ -998,10 +901,33 @@ mod tests {
             !r.window_audiences.borrow().contains_key(&w),
             "forget_window must remove the window's audience-map entry"
         );
-        assert!(
-            !r.window_versions.borrow().contains_key(&w),
-            "forget_window must remove the window's version-map entry"
-        );
+    }
+
+    /// Audience assignment is per-window state and stays that way.
+    /// Rebuild *notification* is not: one `version_signal` reaches
+    /// every window's `ToastHost`, because each window's own
+    /// `BindingRegistry` tracks the generation it last reconciled.
+    #[test]
+    fn one_version_signal_notifies_every_windows_host() {
+        use bastyde_core::binding::{BindingLevel, BindingRegistry};
+        use bastyde_core::widget_id::WidgetId;
+
+        let r = registry();
+        let host: WidgetId = slotmap::KeyData::from_ffi(1).into();
+        let windows: Vec<BindingRegistry> = (0..3).map(|_| BindingRegistry::new()).collect();
+        for reg in &windows {
+            r.version_signal().bind_to(host, reg, BindingLevel::Rebuild);
+        }
+
+        let (_handle, _overflow) = r.enqueue(Toast::info(lit!("hello")));
+
+        for (i, reg) in windows.iter().enumerate() {
+            assert!(
+                reg.any_dirty(),
+                "window {i}'s host missed the enqueue — an earlier window \
+                 looking must not consume it"
+            );
+        }
     }
 
     #[test]
@@ -1076,93 +1002,43 @@ mod tests {
         assert!(fresh.get().is_none(), "a re-created signal starts fresh, not with the old audience");
     }
 
+    /// An archive mirrors every enqueue, and its own version signal
+    /// must reach every window too — the bell in window B updates for
+    /// a toast raised from window A. Covers the registry → archive
+    /// hand-off, which is where the mirrored bump originates.
     #[test]
-    fn forget_window_cascades_into_the_archive() {
-        // This is the test that would catch someone later
-        // "simplifying" the cascade away: forgetting a window through
-        // the registry must ALSO clean the archive's own per-window
-        // map, not just the registry's two maps. `window_versions` is
-        // private to each type, so this is proved behaviourally: get-
-        // or-create semantics mean a REMOVED entry comes back as a
-        // brand-new `Signal::new(0)`, while a surviving entry would
-        // still read back the value it was bumped to.
+    fn a_mirrored_push_notifies_every_windows_bell() {
+        use bastyde_core::binding::{BindingLevel, BindingRegistry};
+        use bastyde_core::widget_id::WidgetId;
+
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
         let r = ToastRegistry::with_archive(ToastInstallOptions::default(), archive.clone());
-        let w = BastydeWindowId::new(1);
+        let bell: WidgetId = slotmap::KeyData::from_ffi(2).into();
+        let windows: Vec<BindingRegistry> = (0..2).map(|_| BindingRegistry::new()).collect();
+        for reg in &windows {
+            archive
+                .version_signal()
+                .bind_to(bell, reg, BindingLevel::Rebuild);
+        }
 
-        // Seed the ARCHIVE's own per-window entry, the way a real
-        // `NotificationCenterButton`/`NotificationLog` mounted in
-        // window `w` would by calling `archive.window_version_signal`
-        // directly (per `NotificationArchiveModel`'s doc comment,
-        // those widgets consume the archive, not the registry).
-        // `bump_version` only reaches entries already in the map, so
-        // without this the archive has no entry for `w` yet and the
-        // "sanity" push below would bump nothing.
-        let _ = archive.window_version_signal(w);
-        // A push through the registry mirrors into the archive,
-        // bumping the archive's per-window signal to a known nonzero
-        // value the way real usage would.
-        let (_h, _overflow) = r.enqueue(Toast::info(lit!("first")));
-        let stale = archive.window_version_signal(w);
-        assert_eq!(
-            stale.get(),
-            1,
-            "sanity: the mirrored push must have bumped the archive's per-window signal"
-        );
+        let (_h, _overflow) = r.enqueue(Toast::info(lit!("mirrored")));
 
-        r.forget_window(w);
-
-        // If the cascade removed the archive's map entry, asking for
-        // the same window id again allocates a brand-new
-        // `Signal::new(0)`. If the cascade didn't happen, this would
-        // return the same stale signal still reading 1.
-        let after = archive.window_version_signal(w);
-        assert_eq!(
-            after.get(),
-            0,
-            "forget_window must cascade into the archive so a later lookup for the same window \
-             starts fresh, not stale"
-        );
-    }
-
-    #[test]
-    fn forget_window_cascade_stops_bump_version_from_touching_the_archives_forgotten_signal() {
-        // The throughput point, proved through the registry entry
-        // point apps actually call: forgetting a window must stop
-        // *both* `bump_version`s (registry's and archive's) from
-        // touching that window's signal, not merely free the memory.
-        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
-        let r = ToastRegistry::with_archive(ToastInstallOptions::default(), archive.clone());
-        let w = BastydeWindowId::new(1);
-
-        let archive_sig = archive.window_version_signal(w);
-        assert_eq!(archive_sig.get(), 0);
-
-        r.forget_window(w);
-
-        // A toast pushed after forgetting mirrors into the archive
-        // (bumping the archive's `bump_version`) but must NOT reach
-        // the forgotten window's signal, even though this held clone
-        // keeps it alive.
-        let (_h, _overflow) = r.enqueue(Toast::info(lit!("after forget")));
-        assert_eq!(
-            archive_sig.get(),
-            0,
-            "the archive's bump_version must no longer iterate a window forgotten via the registry cascade"
-        );
+        for (i, reg) in windows.iter().enumerate() {
+            assert!(reg.any_dirty(), "window {i}'s bell missed the mirrored push");
+        }
     }
 
     #[test]
     fn forget_window_without_an_archive_configured_does_not_panic() {
-        // Registries built via `new` (no archive) must cascade as a
+        // Registries built via `new` (no archive) must tear down as a
         // safe no-op, not unwrap a `None`.
         let r = registry();
         assert!(r.archive().is_none());
         let w = BastydeWindowId::new(1);
-        let _ = r.window_version_signal(w);
+        r.set_window_audience(w, Some(ToastAudience::new(3)));
 
         r.forget_window(w);
 
-        assert!(!r.window_versions.borrow().contains_key(&w));
+        assert!(!r.window_audiences.borrow().contains_key(&w));
     }
 }

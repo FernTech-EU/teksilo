@@ -7,7 +7,7 @@
 //! property type for static values and signal bindings. `ObserverHandle`
 //! is an RAII guard — dropping it removes the observer callback.
 
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::rc::{Rc, Weak};
 
 use crate::binding::{Binding, BindingLevel, BindingRegistry};
@@ -122,7 +122,25 @@ struct ObserverEntry<T> {
 
 struct MutableInner<T> {
     value: T,
-    dirty: bool,
+    /// Monotonic change counter, advanced by every write (`try_set`, and
+    /// arming an animation). **Never reset.**
+    ///
+    /// This replaced a plain `dirty: bool` because a boolean is
+    /// *consumer-shaped state stored on the producer*: one flag, but
+    /// potentially many independent consumers. Each open window owns its
+    /// own [`crate::binding::BindingRegistry`], and that registry's flush
+    /// pass both read AND cleared the flag — so with two windows bound to
+    /// one signal, whichever tree reconciled first consumed the flag and
+    /// every other window silently skipped its otherwise-correct binding.
+    /// Not a delayed rebuild: a permanently missed one, until an unrelated
+    /// later write raced a different window into observing it first (which
+    /// window lost was decided by `HashMap` iteration order).
+    ///
+    /// A counter moves the per-consumer half of that state to the
+    /// consumer: nothing here is consumed, and each registry remembers the
+    /// generation it last acted on (`BindingGroup::last_seen`). N readers
+    /// are then trivially independent.
+    generation: u64,
     observers: Vec<ObserverEntry<T>>,
     next_observer_id: u64,
     /// Drop guards attached to this signal via `attach_keepalive`. Used
@@ -215,15 +233,72 @@ impl WeakAnimatedSignal {
 ///
 /// A single-source derived signal (the typical `map` case) carries one
 /// entry; multi-source derived signals (`zip`, `zip3`, `and`, `or`)
-/// carry one per observed mutable root. Dirty-tracking walks the whole
-/// vec: `is_dirty` is the OR, `clear_dirty` iterates all clears.
+/// carry one per observed mutable root. Change-tracking walks the whole
+/// vec — a consumer is stale if *any* entry's generation moved past what
+/// that consumer last acted on.
+///
+/// **Every `generation` closure in the system is monotonically
+/// non-decreasing**, whether it reads a mutable root's counter directly
+/// or is a composite built by [`coalesced_source`]. Callers rely on that:
+/// it is what lets [`Signal::generation`] fold a multi-source derived
+/// signal down to a single `u64` by summing, with no risk that one
+/// source's advance is cancelled by another's retreat.
 #[derive(Clone)]
 struct DerivedSource {
-    dirty: Rc<dyn Fn() -> bool>,
-    clear: Rc<dyn Fn()>,
+    /// Current generation of this upstream. Compare against a remembered
+    /// value to decide staleness; never "clear" it.
+    generation: Rc<dyn Fn() -> u64>,
     /// Stable identity of the upstream mutable root — used by
     /// [`BindingRegistry`] to dedup repeated `bind_to` calls.
     source_id: usize,
+}
+
+/// Fold an arbitrary — and possibly *changing* — set of upstream
+/// generations into ONE monotone counter, presented as a single
+/// [`DerivedSource`].
+///
+/// `inputs` is polled on demand and returns the current generation of
+/// every upstream the composite currently depends on. Whenever that
+/// vector differs from the one seen at the previous poll (in length or
+/// in any element), the composite's own counter advances by one.
+///
+/// Summing the inputs would be enough for a *fixed* set of monotone
+/// upstreams, but not for [`Signal::flat_map`], whose selected inner
+/// signal is re-chosen on every poll: switching inners makes its
+/// generation term jump arbitrarily, including downwards, and a drop
+/// that exactly cancelled an increase elsewhere would hide a real
+/// change. Re-deriving an own counter from "did the input vector change
+/// at all" is immune to that, and keeps this source monotone for
+/// everyone downstream.
+///
+/// Crucially the memo is **never consumed**: the first registry to poll
+/// advances the counter, and every registry polling afterwards reads the
+/// same, already-advanced value and compares it against its OWN
+/// last-seen. That is what makes one composite safe to share between N
+/// independently-reconciled `WidgetTree`s — the property the whole
+/// generation scheme exists to provide.
+fn coalesced_source(inputs: Rc<dyn Fn() -> Vec<u64>>) -> DerivedSource {
+    // The token anchors a unique heap address used as `source_id`; the
+    // closure below owns it, so the address stays valid — and therefore
+    // unambiguous — for exactly as long as this source is reachable.
+    let token: Rc<()> = Rc::new(());
+    let source_id = Rc::as_ptr(&token) as *const () as usize;
+    let state: Rc<(Cell<u64>, RefCell<Option<Vec<u64>>>)> =
+        Rc::new((Cell::new(0), RefCell::new(None)));
+    DerivedSource {
+        generation: Rc::new(move || {
+            let _keep = &token;
+            let now = inputs();
+            let (own, seen) = &*state;
+            let mut seen = seen.borrow_mut();
+            if seen.as_deref() != Some(now.as_slice()) {
+                *seen = Some(now);
+                own.set(own.get().wrapping_add(1));
+            }
+            own.get()
+        }),
+        source_id,
+    }
 }
 
 enum SignalKind<T> {
@@ -257,7 +332,7 @@ impl<T: 'static> Signal<T> {
             kind: SignalKind::Mutable {
                 inner: Rc::new(RefCell::new(MutableInner {
                     value,
-                    dirty: false,
+                    generation: 0,
                     observers: Vec::new(),
                     next_observer_id: 1,
                     keepalive: Vec::new(),
@@ -429,7 +504,7 @@ impl<T: Clone + 'static> Signal<T> {
                 let (snapshot, callbacks) = {
                     let mut guard = inner.borrow_mut();
                     guard.value = value;
-                    guard.dirty = true;
+                    guard.generation = guard.generation.wrapping_add(1);
                     let callbacks: Vec<_> =
                         guard.observers.iter().map(|e| e.callback.clone()).collect();
                     (guard.value.clone(), callbacks)
@@ -553,28 +628,9 @@ impl<T: Clone + 'static> Signal<T> {
             // to plain map to avoid an extra indirection.
             return self.map(f);
         }
-        // The token anchors a unique heap address used as `source_id`.
-        // Each closure captures a clone so the Rc lives as long as the
-        // resulting signal's source vec.
-        let token: Rc<()> = Rc::new(());
-        let source_id = Rc::as_ptr(&token) as usize;
-        let dirty_token = token.clone();
-        let dirty_underlying = underlying.clone();
-        let clear_token = token;
-        let clear_underlying = underlying;
-        let coalesced = DerivedSource {
-            dirty: Rc::new(move || {
-                let _keep = &dirty_token;
-                dirty_underlying.iter().any(|s| (s.dirty)())
-            }),
-            clear: Rc::new(move || {
-                let _keep = &clear_token;
-                for s in &clear_underlying {
-                    (s.clear)();
-                }
-            }),
-            source_id,
-        };
+        let coalesced = coalesced_source(Rc::new(move || {
+            underlying.iter().map(|s| (s.generation)()).collect()
+        }));
         Signal {
             kind: SignalKind::Derived {
                 compute: Rc::new(move || f(&compute())),
@@ -618,42 +674,34 @@ impl<T: Clone + 'static> Signal<T> {
             Rc::new(move || f(&outer_compute()).get())
         };
 
-        // One composite source: dirty when the outer sources are dirty OR
-        // the *current* inner signal's sources are dirty. The token anchors
-        // a unique heap address used as the stable `source_id`.
-        let token: Rc<()> = Rc::new(());
-        let source_id = Rc::as_ptr(&token) as usize;
-
-        let dirty: Rc<dyn Fn() -> bool> = {
-            let token = token.clone();
-            let f = f.clone();
-            let outer_compute = outer_compute.clone();
-            let outer_sources = outer_sources.clone();
-            Rc::new(move || {
-                let _keep = &token;
-                outer_sources.iter().any(|s| (s.dirty)()) || f(&outer_compute()).is_dirty()
-            })
-        };
-        let clear: Rc<dyn Fn()> = {
+        // One composite source, whose inputs are the outer sources' own
+        // generations PLUS the generations of whichever inner signal is
+        // selected right now. The inner half is spliced in as its
+        // individual leaf generations rather than as one folded `u64`:
+        // the selected inner can change identity between polls, so the
+        // *shape* of the input vector is itself information — a switch
+        // from a 1-source inner to a 2-source one is a change even if
+        // the numbers happen to line up. `coalesced_source` turns the
+        // whole vector back into a monotone counter.
+        let composite = coalesced_source({
             let f = f.clone();
             let outer_compute = outer_compute.clone();
             Rc::new(move || {
-                let _keep = &token;
-                for s in &outer_sources {
-                    (s.clear)();
-                }
-                f(&outer_compute()).clear_dirty();
+                let mut gens: Vec<u64> = outer_sources.iter().map(|s| (s.generation)()).collect();
+                gens.extend(
+                    f(&outer_compute())
+                        .as_sources()
+                        .iter()
+                        .map(|s| (s.generation)()),
+                );
+                gens
             })
-        };
+        });
 
         Signal {
             kind: SignalKind::Derived {
                 compute,
-                sources: vec![DerivedSource {
-                    dirty,
-                    clear,
-                    source_id,
-                }],
+                sources: vec![composite],
             },
         }
     }
@@ -687,8 +735,7 @@ impl<T: Clone + 'static> Signal<T> {
             registry.register(Binding {
                 widget_id,
                 level,
-                is_dirty: src.dirty,
-                clear_dirty: src.clear,
+                generation: src.generation,
                 source_id: src.source_id,
             });
         }
@@ -700,12 +747,13 @@ impl<T: Clone + 'static> Signal<T> {
     fn as_sources(&self) -> Vec<DerivedSource> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
-                let dirty_src = inner.clone();
-                let clear_src = inner.clone();
+                let gen_src = inner.clone();
                 let source_id = Rc::as_ptr(inner) as *const () as usize;
                 vec![DerivedSource {
-                    dirty: Rc::new(move || dirty_src.borrow().dirty),
-                    clear: Rc::new(move || clear_src.borrow_mut().dirty = false),
+                    // The closure owns an `Rc` clone of the inner, so the
+                    // address used as `source_id` cannot be recycled by a
+                    // different signal while this source is reachable.
+                    generation: Rc::new(move || gen_src.borrow().generation),
                     source_id,
                 }]
             }
@@ -730,21 +778,30 @@ impl<T: 'static> Signal<T> {
         matches!(self.kind, SignalKind::Mutable { .. })
     }
 
-    pub fn is_dirty(&self) -> bool {
+    /// This signal's current change generation — a monotonically
+    /// non-decreasing counter advanced by every write. Two reads returning
+    /// the same value mean nothing changed in between; any difference
+    /// means something did.
+    ///
+    /// There is deliberately no way to *reset* it. Dirty tracking is
+    /// "compare against what I last acted on", and the remembered value
+    /// belongs to the consumer — see
+    /// [`BindingRegistry`](crate::binding::BindingRegistry), which keeps
+    /// one per bound source. A resettable flag on the signal itself would
+    /// mean N consumers fighting over one slot, which is precisely the bug
+    /// this counter replaced (see [`MutableInner::generation`]).
+    ///
+    /// For a derived signal this folds every upstream into one number by
+    /// summing. That is exact rather than merely convenient: every
+    /// upstream generation is itself monotone, so a sum can only stay put
+    /// when all of them do.
+    pub fn generation(&self) -> u64 {
         match &self.kind {
-            SignalKind::Mutable { inner, .. } => inner.borrow().dirty,
-            SignalKind::Derived { sources, .. } => sources.iter().any(|s| (s.dirty)()),
-        }
-    }
-
-    pub fn clear_dirty(&self) {
-        match &self.kind {
-            SignalKind::Mutable { inner, .. } => inner.borrow_mut().dirty = false,
-            SignalKind::Derived { sources, .. } => {
-                for s in sources {
-                    (s.clear)();
-                }
-            }
+            SignalKind::Mutable { inner, .. } => inner.borrow().generation,
+            SignalKind::Derived { sources, .. } => sources
+                .iter()
+                .map(|s| (s.generation)())
+                .fold(0u64, u64::wrapping_add),
         }
     }
 }
@@ -785,7 +842,7 @@ impl Signal<f32> {
             kind: SignalKind::Mutable {
                 inner: Rc::new(RefCell::new(MutableInner {
                     value,
-                    dirty: false,
+                    generation: 0,
                     observers: Vec::new(),
                     next_observer_id: 1,
                     keepalive: Vec::new(),
@@ -916,7 +973,11 @@ impl Signal<f32> {
                 anim.target = Some(request.target);
                 anim.pending = Some(request);
                 drop(anim);
-                inner.borrow_mut().dirty = true;
+                // Arming an animation is a change like any other write:
+                // bound widgets must reconcile so the tree picks the
+                // pending request up in `process_pending_animations`.
+                let mut guard = inner.borrow_mut();
+                guard.generation = guard.generation.wrapping_add(1);
                 Ok(())
             }
             SignalKind::Mutable {
@@ -994,7 +1055,7 @@ impl<T: std::fmt::Debug + 'static> std::fmt::Debug for Signal<T> {
             SignalKind::Mutable { inner, .. } => f
                 .debug_struct("Signal::Mutable")
                 .field("value", &inner.borrow().value)
-                .field("dirty", &inner.borrow().dirty)
+                .field("generation", &inner.borrow().generation)
                 .finish(),
             SignalKind::Derived { .. } => f.write_str("Signal::Derived(..)"),
         }
@@ -1111,13 +1172,53 @@ mod tests {
     }
 
     #[test]
-    fn signal_dirty_tracking() {
+    fn generation_advances_on_every_write_and_never_resets() {
         let s = Signal::new(0);
-        assert!(!s.is_dirty());
+        let start = s.generation();
+        assert_eq!(s.generation(), start, "reading is not a change");
+
         s.set(1);
-        assert!(s.is_dirty());
-        s.clear_dirty();
-        assert!(!s.is_dirty());
+        let after_one = s.generation();
+        assert_ne!(after_one, start, "a write advances the generation");
+
+        s.set(1);
+        let after_republish = s.generation();
+        assert_ne!(
+            after_republish, after_one,
+            "`set` is unconditional — a republish of the same value is still \
+             a write, and callers who want the equality guard use \
+             `set_if_changed`"
+        );
+
+        assert!(!s.set_if_changed(1), "value is unchanged");
+        assert_eq!(
+            s.generation(),
+            after_republish,
+            "`set_if_changed` with an identical value writes nothing at all"
+        );
+    }
+
+    /// The property every consumer relies on: staleness is "the
+    /// generation moved since I last looked", and looking is free of
+    /// consequence — so any number of independent consumers can each
+    /// track the same signal without interfering.
+    #[test]
+    fn observing_the_generation_does_not_consume_it() {
+        let s = Signal::new(0);
+        let (mut seen_a, mut seen_b) = (s.generation(), s.generation());
+
+        s.set(1);
+        assert_ne!(s.generation(), seen_a);
+        seen_a = s.generation();
+        assert_ne!(
+            s.generation(),
+            seen_b,
+            "consumer A catching up must leave consumer B behind, not clean"
+        );
+        seen_b = s.generation();
+
+        assert_eq!(s.generation(), seen_a);
+        assert_eq!(s.generation(), seen_b);
     }
 
     #[test]
@@ -1149,14 +1250,14 @@ mod tests {
     }
 
     #[test]
-    fn signal_derived_dirty_tracks_source() {
+    fn signal_derived_generation_tracks_source() {
         let s = Signal::new(0);
         let derived = s.map(|v| v + 1);
-        assert!(!derived.is_dirty());
+        let seen = derived.generation();
         s.set(5);
-        assert!(derived.is_dirty());
-        derived.clear_dirty();
-        assert!(!derived.is_dirty());
+        assert_ne!(derived.generation(), seen, "the source's write shows through");
+        let seen = derived.generation();
+        assert_eq!(derived.generation(), seen, "and settles with no further write");
     }
 
     #[test]
@@ -1179,36 +1280,92 @@ mod tests {
     }
 
     #[test]
-    fn flat_map_dirty_tracks_outer_and_current_inner() {
+    fn flat_map_generation_tracks_outer_and_current_inner() {
         let a = Signal::new(0);
         let b = Signal::new(0);
         let which = Signal::new(0usize);
         let (a2, b2) = (a.clone(), b.clone());
         let out = which.flat_map(move |i| if *i == 0 { a2.clone() } else { b2.clone() });
-        out.clear_dirty();
-        assert!(!out.is_dirty());
+        let mut seen = out.generation();
 
-        // The current inner (a) flipping makes the result dirty.
+        // The current inner (a) flipping advances the result.
         a.set(5);
-        assert!(out.is_dirty());
-        out.clear_dirty();
-        assert!(!out.is_dirty());
+        assert_ne!(out.generation(), seen);
+        seen = out.generation();
+        assert_eq!(out.generation(), seen);
 
         // The non-selected inner (b) flipping does NOT.
         b.set(7);
-        assert!(!out.is_dirty());
+        assert_eq!(out.generation(), seen, "b is not selected");
 
-        // The outer selector flipping makes the result dirty.
+        // The outer selector flipping does.
         which.set(1);
-        assert!(out.is_dirty());
-        out.clear_dirty();
+        assert_ne!(out.generation(), seen);
+        seen = out.generation();
 
         // Now b is selected, so b flipping is tracked and a is ignored.
         b.set(8);
-        assert!(out.is_dirty());
-        out.clear_dirty();
+        assert_ne!(out.generation(), seen);
+        seen = out.generation();
         a.set(9);
-        assert!(!out.is_dirty());
+        assert_eq!(out.generation(), seen, "a is no longer selected");
+    }
+
+    /// `flat_map` is why the composite source memoises a counter rather
+    /// than summing its inputs. Switching the selected inner makes that
+    /// term jump arbitrarily — here it jumps *down*, from a heavily
+    /// written signal to a fresh one, by exactly as much as the outer
+    /// selector's own write advanced. A sum would land on the same total
+    /// and report "nothing changed" for a switch that changed everything.
+    #[test]
+    fn flat_map_survives_an_inner_switch_that_would_cancel_out_in_a_sum() {
+        let hot = Signal::new(0_i32);
+        let cold = Signal::new(0_i32);
+        // `which` reaches generation 1 on the switch below, so drive
+        // `hot` exactly one generation ahead of `cold`: switching from
+        // hot to cold then costs -1 while `which` contributes +1.
+        hot.set(1);
+        let (hot2, cold2) = (hot.clone(), cold.clone());
+        let which = Signal::new(0usize);
+        let out = which.flat_map(move |i| if *i == 0 { hot2.clone() } else { cold2.clone() });
+
+        assert_eq!(out.get(), 1, "starts on `hot`");
+        let seen = out.generation();
+
+        which.set(1);
+
+        assert_eq!(out.get(), 0, "the value really did change");
+        assert_ne!(
+            out.generation(),
+            seen,
+            "and the generation says so — a plain sum of (outer + inner) \
+             would have been unchanged here"
+        );
+    }
+
+    /// The cross-window property at the level of a composite source: a
+    /// `flat_map`'s memo advances once and is then read, unchanged, by
+    /// every consumer polling afterwards. If the memo were consumed by
+    /// the first reader (the way the old `clear_dirty` consumed a shared
+    /// flag) the second window would never rebuild.
+    #[test]
+    fn a_composite_sources_generation_is_readable_by_every_consumer() {
+        let inner = Signal::new(0_i32);
+        let inner2 = inner.clone();
+        let which = Signal::new(0usize);
+        let out = which.flat_map(move |_| inner2.clone());
+
+        let (window_a, window_b) = (out.generation(), out.generation());
+        inner.set(1);
+
+        let a_now = out.generation();
+        assert_ne!(a_now, window_a, "window A notices");
+        assert_ne!(
+            out.generation(),
+            window_b,
+            "and window B still notices, after A already looked"
+        );
+        assert_eq!(out.generation(), a_now, "both see the SAME new generation");
     }
 
     #[test]
@@ -1428,35 +1585,43 @@ mod tests {
     }
 
     #[test]
-    fn zip_is_dirty_when_either_source_dirty() {
+    fn zip_generation_advances_when_either_source_is_written() {
         let a = Signal::new(0_i32);
         let b = Signal::new(0_i32);
         let z = a.zip(&b);
-        assert!(!z.is_dirty());
+        let mut seen = z.generation();
 
         a.set(1);
-        assert!(z.is_dirty(), "dirty from first source must propagate");
-        z.clear_dirty();
-        assert!(!z.is_dirty());
+        assert_ne!(z.generation(), seen, "a write to the first source shows");
+        seen = z.generation();
 
         b.set(2);
-        assert!(z.is_dirty(), "dirty from second source must propagate");
-        z.clear_dirty();
-        assert!(!z.is_dirty());
+        assert_ne!(z.generation(), seen, "a write to the second source shows");
+        seen = z.generation();
+
+        assert_eq!(z.generation(), seen, "and settles with no further write");
     }
 
+    /// A multi-source derived signal folds its upstreams into one number
+    /// by summing, and that is only sound because every upstream
+    /// generation is monotone: writes to *different* sources can never
+    /// cancel each other out.
     #[test]
-    fn zip_clear_dirty_clears_all_sources() {
+    fn zip_generation_reflects_writes_to_both_sources_independently() {
         let a = Signal::new(0_i32);
         let b = Signal::new(0_i32);
         let z = a.zip(&b);
+
+        let start = z.generation();
         a.set(1);
+        let after_a = z.generation();
         b.set(1);
-        assert!(a.is_dirty() && b.is_dirty() && z.is_dirty());
-        z.clear_dirty();
-        assert!(!a.is_dirty());
-        assert!(!b.is_dirty());
-        assert!(!z.is_dirty());
+        let after_b = z.generation();
+
+        assert!(
+            after_a > start && after_b > after_a,
+            "monotone in both sources: {start} < {after_a} < {after_b}"
+        );
     }
 
     #[test]
@@ -1471,22 +1636,18 @@ mod tests {
     }
 
     #[test]
-    fn zip3_is_dirty_when_any_source_dirty() {
+    fn zip3_generation_advances_for_any_source() {
         let a = Signal::new(0_i32);
         let b = Signal::new(0_i32);
         let c = Signal::new(0_i32);
         let z = a.zip3(&b, &c);
+        let mut seen = z.generation();
 
-        c.set(99);
-        assert!(z.is_dirty());
-        z.clear_dirty();
-
-        b.set(7);
-        assert!(z.is_dirty());
-        z.clear_dirty();
-
-        a.set(1);
-        assert!(z.is_dirty());
+        for write in [&c, &b, &a] {
+            write.set(1);
+            assert_ne!(z.generation(), seen);
+            seen = z.generation();
+        }
     }
 
     #[test]
@@ -1614,17 +1775,37 @@ mod tests {
         // Plain `map` would produce 4 sources; `map_coalesced` 1.
         assert_eq!(composite.as_sources().len(), 1);
         assert_eq!(composite.get(), 10);
-        // Dirtying any underlying source flips the composite's
-        // dirty bit; clearing the composite clears all underlying.
-        assert!(!composite.is_dirty());
+        // Writing ANY underlying source advances the composite's single
+        // generation, and it stays put in between.
+        let mut seen = composite.generation();
         a.set(10);
-        assert!(composite.is_dirty());
-        composite.clear_dirty();
-        assert!(!composite.is_dirty());
-        assert!(!a.is_dirty());
-        // Setting another underlying after clear should re-dirty.
+        assert_ne!(composite.generation(), seen);
+        seen = composite.generation();
+        assert_eq!(composite.generation(), seen);
         c.set(30);
-        assert!(composite.is_dirty());
+        assert_ne!(composite.generation(), seen);
+    }
+
+    /// The coalesced composite is one memo shared by every consumer of
+    /// the derived signal — including two different windows' binding
+    /// registries. Reading it must not consume it.
+    #[test]
+    fn map_coalesced_generation_is_readable_by_every_consumer() {
+        let a = Signal::new(1u32);
+        let b = Signal::new(2u32);
+        let composite = a.zip(&b).map_coalesced(|(x, y)| *x + *y);
+
+        let (window_a, window_b) = (composite.generation(), composite.generation());
+        b.set(5);
+
+        let a_now = composite.generation();
+        assert_ne!(a_now, window_a);
+        assert_ne!(
+            composite.generation(),
+            window_b,
+            "the first read must not have cleared anything"
+        );
+        assert_eq!(composite.generation(), a_now);
     }
 
     #[test]
