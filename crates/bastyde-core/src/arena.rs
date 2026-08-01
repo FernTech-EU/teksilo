@@ -63,6 +63,22 @@ pub struct WidgetNode {
     pub parent: Option<WidgetId>,
     pub children: Vec<WidgetId>,
     pub activation: ActivationState,
+    /// Whether this node is dormant **on its own account** — parked by a
+    /// direct [`WidgetArena::set_dormant`] rather than swept along by an
+    /// ancestor going dormant.
+    ///
+    /// This is the ungated twin of `visible_state`, and [`WidgetArena::activate`]
+    /// honours the two identically: a self-parked child is left asleep when an
+    /// ancestor wakes, because the ancestor's dormancy was never why it was
+    /// asleep. Cleared the moment a caller activates this node *by id*, which is
+    /// exactly how pre-registered overlay content is shown.
+    ///
+    /// Without it, every widget that pre-builds hidden content as a child with
+    /// `ctx.add(..)` + `ctx.set_dormant(..)` — `SplitButton`'s dropdown,
+    /// `MenuBar`'s menus, `Popover`, `Snackbar`, the date editors' calendars —
+    /// spilled that content onto the screen as soon as any ancestor completed a
+    /// dormancy cycle, laid out inline with no overlay behind it.
+    pub(crate) self_dormant: bool,
     pub dirty: DirtyFlags,
     pub bounds: bastyde_canvas::Rect,
     pub(crate) theme_override: Option<ThemeOverride>,
@@ -332,6 +348,7 @@ impl WidgetNode {
             parent,
             children: Vec::new(),
             activation: ActivationState::Active,
+            self_dormant: false,
             dirty: DirtyFlags {
                 needs_layout: true,
                 needs_paint: true,
@@ -930,10 +947,29 @@ impl WidgetArena {
 
     /// Set a widget subtree to dormant state (state preserved, not rendered).
     /// Recursively dormants all children.
+    ///
+    /// The node named here is marked [self-parked](WidgetNode::self_dormant);
+    /// the descendants swept along by the recursion are not, since their
+    /// dormancy belongs to this ancestor rather than to them. That distinction
+    /// is what lets [`activate`](Self::activate) put the subtree back exactly as
+    /// it found it instead of waking content that was already closed.
     pub fn set_dormant(&mut self, id: WidgetId) {
+        self.park(id, true);
+    }
+
+    /// [`set_dormant`](Self::set_dormant)'s body, plus whether `id` is being
+    /// parked on its own account or dragged along by an ancestor.
+    ///
+    /// A node already self-parked stays that way when an ancestor sweeps over
+    /// it — the flag is only ever set here, never cleared, so nesting two
+    /// dormancy cycles cannot lose the inner one.
+    fn park(&mut self, id: WidgetId, on_its_own_account: bool) {
         if let Some(node) = self.nodes.get_mut(id) {
             let was_active = node.activation == ActivationState::Active;
             node.activation = ActivationState::Dormant;
+            if on_its_own_account {
+                node.self_dormant = true;
+            }
             // Record the Active→Dormant transition for nodes that opted into an
             // activation signal; the signal is fired later by
             // `WidgetTree::flush_activation_signals`, not here — see the
@@ -944,7 +980,7 @@ impl WidgetArena {
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
-            self.set_dormant(child);
+            self.park(child, false);
         }
     }
 
@@ -970,6 +1006,7 @@ impl WidgetArena {
             // future non-Active state — is never resurrected or signalled.
             let was_dormant = node.activation == ActivationState::Dormant;
             node.activation = ActivationState::Active;
+            node.self_dormant = false;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
             if was_dormant && node.activation_signal.is_some() {
@@ -978,13 +1015,15 @@ impl WidgetArena {
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
-            let gated_hidden = self
+            let asleep_on_its_own_account = self
                 .nodes
                 .get(child)
-                .and_then(|n| n.visible_state.as_ref())
-                .map(|vs| !vs.get())
+                .map(|n| {
+                    n.self_dormant
+                        || n.visible_state.as_ref().map(|vs| !vs.get()).unwrap_or(false)
+                })
                 .unwrap_or(false);
-            if gated_hidden {
+            if asleep_on_its_own_account {
                 continue;
             }
             self.activate(child);
@@ -1438,6 +1477,96 @@ mod tests {
         assert!(
             !arena.is_active(gated_child),
             "a visible_when(false) child stays dormant when its parent reactivates"
+        );
+    }
+
+    #[test]
+    fn activate_skips_a_child_parked_directly_by_set_dormant() {
+        // The ungated twin of the test above, and the one that was missing.
+        //
+        // Widgets that pre-build hidden content register it as a child with
+        // `ctx.add(..)` + `ctx.set_dormant(..)` and show it through an overlay:
+        // `SplitButton` and `MenuBar` menus, `Popover`, `Snackbar`, the date
+        // editors' calendars. Such a child carries no `visible_state`, so the
+        // gate check alone let an ancestor's dormancy cycle wake it — and it
+        // then rendered inline, with no overlay behind it, because the overlay
+        // presentation never ran. Seen as export menu-item labels floating
+        // under the title bar after leaving a mode that parked the shell.
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let visible_child = arena.insert_child(parent, Box::new(FillWidget::new()));
+        let menu = arena.insert_child(parent, Box::new(FillWidget::new()));
+        let menu_row = arena.insert_child(menu, Box::new(FillWidget::new()));
+
+        // The widget parks its own closed menu — no gate involved.
+        arena.set_dormant(menu);
+        assert!(!arena.is_active(menu));
+
+        // An ancestor now goes dormant and comes back.
+        arena.set_dormant(parent);
+        arena.activate(parent);
+
+        assert!(arena.is_active(parent), "the targeted node activates");
+        assert!(
+            arena.is_active(visible_child),
+            "an ordinary child activates with its parent"
+        );
+        assert!(
+            !arena.is_active(menu),
+            "the ancestor's dormancy cycle woke a menu that was closed before it \
+             started — its content is now on screen with no overlay behind it"
+        );
+        assert!(
+            !arena.is_active(menu_row),
+            "the closed menu's own subtree woke with it"
+        );
+
+        // …and opening it still works: activating by id is how the overlay
+        // shows this content, so it must clear the self-parked mark.
+        arena.activate(menu);
+        assert!(arena.is_active(menu), "the menu can still be opened");
+        assert!(arena.is_active(menu_row), "…along with its rows");
+    }
+
+    #[test]
+    fn a_reopened_menu_parks_again_and_survives_the_next_cycle() {
+        // The flag must be re-armed by every `set_dormant`, not just the first:
+        // open the menu, close it, then put an ancestor through another
+        // dormancy cycle. Without re-arming, the second cycle leaks.
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let menu = arena.insert_child(parent, Box::new(FillWidget::new()));
+
+        arena.set_dormant(menu);
+        arena.activate(menu); // opened
+        arena.set_dormant(menu); // dismissed
+
+        arena.set_dormant(parent);
+        arena.activate(parent);
+        assert!(
+            !arena.is_active(menu),
+            "a menu that was opened once no longer stays closed across a \
+             dormancy cycle"
+        );
+    }
+
+    #[test]
+    fn an_ancestor_cycle_does_not_strand_an_open_menu() {
+        // The mirror risk of the fix: `park` marks only the node it is given,
+        // so a menu that is *open* when an ancestor parks must come back with
+        // that ancestor rather than being stranded closed.
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let menu = arena.insert_child(parent, Box::new(FillWidget::new()));
+
+        arena.set_dormant(menu);
+        arena.activate(menu); // open when the ancestor parks
+
+        arena.set_dormant(parent);
+        arena.activate(parent);
+        assert!(
+            arena.is_active(menu),
+            "an open menu was stranded closed by its ancestor's dormancy cycle"
         );
     }
 
