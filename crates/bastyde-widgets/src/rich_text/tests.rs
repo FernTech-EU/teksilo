@@ -6903,3 +6903,119 @@ mod caret_band_regressions {
         );
     }
 }
+
+#[cfg(test)]
+mod vertical_movement {
+    use super::*;
+    use bastyde_core::{Key, Modifiers, WidgetEvent};
+    use bastyde_text::EditorTypographyDefaults;
+
+    /// An editor whose paragraphs set `line_height`, the way prose does.
+    fn editor_with_line_height(
+        line_height: f32,
+    ) -> (crate::rich_text::EditorHandle, WidgetTree) {
+        let doc = TextDocument::new();
+        doc.set_plain_text("Line one here.\nLine two here.\nLine three here.\nLine four here.")
+            .unwrap();
+        let editor = RichTextEditor::editor(doc).typography_defaults(EditorTypographyDefaults {
+            line_height,
+            ..Default::default()
+        });
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        (handle, tree)
+    }
+
+    fn press(tree: &mut WidgetTree, key: Key) {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tick_once(tree);
+    }
+
+    /// **ArrowDown must cross to the next line whatever the line spacing.**
+    ///
+    /// The step used to be the caret's own height — ascent plus descent — while the distance to
+    /// the next line is the line's advance, which is larger for any spacing above 1.0. Stepping
+    /// by the caret height from the top of a line landed inside that same line, so Down did
+    /// nothing at all. `1.0` is the case that always worked; the rest are what prose uses.
+    #[test]
+    fn arrow_down_crosses_a_line_at_every_line_height() {
+        for line_height in [1.0f32, 1.2, 1.5, 1.6, 2.0] {
+            let (handle, mut tree) = editor_with_line_height(line_height);
+            handle.select_range(2, 2);
+            tick_once(&mut tree);
+            let _ = tree.render();
+
+            press(&mut tree, Key::ArrowDown);
+            let after = handle.cursor_position();
+            assert!(
+                after >= 15,
+                "line_height {line_height}: ArrowDown must reach the second line, got {after}"
+            );
+        }
+    }
+
+    /// Up kept working through the bug, by luck. Pin it so the fix cannot break it.
+    #[test]
+    fn arrow_up_crosses_a_line_at_every_line_height() {
+        for line_height in [1.0f32, 1.6, 2.0] {
+            let (handle, mut tree) = editor_with_line_height(line_height);
+            handle.select_range(20, 20); // on the second line
+            tick_once(&mut tree);
+            let _ = tree.render();
+
+            press(&mut tree, Key::ArrowUp);
+            let after = handle.cursor_position();
+            assert!(
+                after < 15,
+                "line_height {line_height}: ArrowUp must reach the first line, got {after}"
+            );
+        }
+    }
+
+    /// Down and Up must compose back to where they started, at any spacing.
+    #[test]
+    fn down_then_up_returns_to_the_starting_line() {
+        for line_height in [1.0f32, 1.6] {
+            let (handle, mut tree) = editor_with_line_height(line_height);
+            handle.select_range(2, 2);
+            tick_once(&mut tree);
+            let _ = tree.render();
+
+            press(&mut tree, Key::ArrowDown);
+            let middle = handle.cursor_position();
+            press(&mut tree, Key::ArrowUp);
+            let back = handle.cursor_position();
+            assert!(middle > 2, "line_height {line_height}: down moved");
+            assert_eq!(back, 2, "line_height {line_height}: and up came back");
+        }
+    }
+
+    /// At the top and bottom edges the caret must simply stay put.
+    #[test]
+    fn vertical_movement_stops_at_the_document_edges() {
+        let (handle, mut tree) = editor_with_line_height(1.6);
+        handle.select_range(0, 0);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        press(&mut tree, Key::ArrowUp);
+        assert_eq!(handle.cursor_position(), 0, "no running off the top");
+
+        let end = 60;
+        handle.select_range(end, end);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        for _ in 0..5 {
+            press(&mut tree, Key::ArrowDown);
+        }
+        assert!(handle.cursor_position() <= 61, "no running off the bottom");
+    }
+}

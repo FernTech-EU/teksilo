@@ -1210,21 +1210,92 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
 /// position's affinity is read off the hit-test (which sets Upstream
 /// when the matched line's start coincides with the previous line's
 /// end).
+/// The vertical midpoint of the visual line one step `direction` from the one holding `pos`, in
+/// document space — the y a hit test should probe to land on the neighbouring line.
+///
+/// **Not the caret's own height.** `caret_rect`'s height is the caret: ascent plus descent of
+/// the text it sits in. The distance to the next line is the line's *advance*, which is larger
+/// whenever the paragraph sets any line spacing above 1.0 — as prose typically does. Stepping by
+/// the caret height then lands inside the line you started on, and the hit test hands back the
+/// position you already had.
+///
+/// That failed asymmetrically, which is what made it easy to miss: moving **up** from the lower
+/// part of a tall line still crosses into the previous line, so Up kept working while Down, from
+/// the top of a line, never reached the next one and did nothing at all.
+///
+/// Derived from the real line geometry instead: the neighbouring line is found through the
+/// character just past (or before) the current visual line, and its caret rect gives that line's
+/// band. Falls back to the caret-height step only when the engine cannot name the line — better
+/// an approximate move than none.
+fn neighbour_line_center_y(
+    st: &EditorState,
+    pos: usize,
+    direction: i32,
+    caret: [f32; 4],
+) -> Option<f32> {
+    let fallback = || {
+        let center_y = caret[1] + caret[3] * 0.5;
+        Some(center_y + (direction as f32) * caret[3].max(16.0))
+    };
+    let Some((start, end)) = st.engine.visual_line_range_at(pos, st.cursor_affinity) else {
+        return fallback();
+    };
+
+    // A position just outside the current visual line sits on the neighbouring one — but where
+    // "just outside" is depends on how the line ended. `end` is exclusive: after a **soft wrap**
+    // it is already the next line's first character, while after a **hard break** it is the
+    // block's own end, which still maps back to the line being left. So going down, try both and
+    // take the first that is genuinely lower; going up, the character before the line's start is
+    // on the previous line either way.
+    let candidates: [usize; 2] = if direction > 0 {
+        [end, end.saturating_add(1)]
+    } else if start == 0 {
+        // Nothing above the first line.
+        return None;
+    } else {
+        [start - 1, start.saturating_sub(2)]
+    };
+
+    // Ask with the affinity that binds a wrap boundary to the line being moved *to*.
+    let affinity = if direction > 0 {
+        CursorAffinity::Upstream
+    } else {
+        CursorAffinity::Downstream
+    };
+    for probe in candidates {
+        let neighbour = st.engine.caret_rect(probe, affinity);
+        // A degenerate rect names no line; and a rect on the wrong side of the caret is the
+        // same line answering again, which is exactly the failure this function exists to fix.
+        if neighbour[3] <= 0.0 {
+            continue;
+        }
+        let crossed = if direction > 0 {
+            neighbour[1] > caret[1]
+        } else {
+            neighbour[1] < caret[1]
+        };
+        if crossed {
+            return Some(neighbour[1] + neighbour[3] * 0.5);
+        }
+    }
+    fallback()
+}
+
 fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
     }
     let pos = st.cursor.position();
     let caret = st.engine.caret_rect(pos, st.cursor_affinity);
-    let line_height = caret[3].max(16.0);
-    let center_y = caret[1] + caret[3] * 0.5;
 
     let x = st.preferred_x.unwrap_or(caret[0]);
     if st.preferred_x.is_none() {
         st.preferred_x = Some(caret[0]);
     }
 
-    let target_y = center_y + (direction as f32) * line_height;
+    let Some(target_y) = neighbour_line_center_y(st, pos, direction, caret) else {
+        return;
+    };
     if target_y < 0.0 || target_y > st.engine.content_height() {
         return;
     }
