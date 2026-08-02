@@ -11,20 +11,44 @@ impl<T: 'static> Widget for TreeView<T> {
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
 
-        // --- Version signal for rebuild triggering ---
-        // A persistent field (not `ctx.signal`) so the realization
-        // re-check in `place_children` can bump it after measurement.
-        let version = self.version.clone();
-        version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // The root builds exactly two children — the body pane and the
+        // scrollbar — and neither depends on the source, the selection or the
+        // scroll offset. So it declares no `Rebuild`-level binding at all:
+        // row realization is the pane's job (see `body_pane`'s module docs for
+        // why that separation is load-bearing), and what the root still owns
+        // resolves at `Relayout` / `RepaintOnly`.
+
+        // Scrollbar totals + the content-width decision live in the root's
+        // `place_children`; a source change or a pane measurement that moves
+        // the content total re-places the root through this.
+        self.layout_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        // Container focus ring: painted only while nothing is selected, so a
+        // selection change has to reach the root's paint — without rebuilding
+        // it and taking the scrollbar down with it.
+        self.paint_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
 
         // Bind scroll_y at Relayout so place_children runs on every scroll
-        // position change (repositions items) without a full rebuild.
+        // position change (re-clamps and refreshes the thumb) without a
+        // rebuild. The pane holds the matching binding for its rows.
         self.scroll_y.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
 
+        // Register the animated signal for smooth scrolling on the ROOT and
+        // only the root: the scheduler keys an animation to the widget that
+        // registered its signal last and cancels it when that widget rebuilds,
+        // so registering from the pane too would make every buffer-exit
+        // rebuild abort an in-flight fling.
         ctx.register_animated_signal(&self.scroll_y);
 
         // Bind drop_feedback at RepaintOnly so `set(...)` calls from
@@ -61,12 +85,18 @@ impl<T: 'static> Widget for TreeView<T> {
         );
 
         // --- Observe source version (covers both data mutations and expand/collapse) ---
+        // One observer, root-owned, doing the bookkeeping the pane can't
+        // (metrics divergence, selection prune, keyboard cursor) and then
+        // fanning out: rebuild the pane (row content changed) and re-place the
+        // root (the content total, hence the thumb, changed).
         let source_version = self.source.version_signal();
-        let version_for_data = version.clone();
+        let pane_version_for_data = self.pane_version.clone();
+        let layout_refresh_for_data = self.layout_refresh.clone();
         let data_ver = Rc::new(Cell::new(0_u64));
         ctx.effect(&source_version, {
             let dv = data_ver.clone();
-            let ver = version_for_data.clone();
+            let ver = pane_version_for_data.clone();
+            let layout = layout_refresh_for_data.clone();
             let metrics = self.metrics.clone();
             let source = self.source.clone();
             let row_sel = self.row_selection.clone();
@@ -120,61 +150,29 @@ impl<T: 'static> Widget for TreeView<T> {
                 let next = dv.get() + 1;
                 dv.set(next);
                 ver.set(next);
+                layout.set(next);
             }
         });
 
-        // --- Observe selection changes (rebuild to update delegate's `selected` param) ---
+        // --- Observe selection changes ---
+        // The pane runs its own selection observer for the delegate's
+        // `selected` argument; the root only needs its container focus ring
+        // repainted, since that ring is suppressed once anything is selected.
         if let Some(ref rs) = self.row_selection {
-            let version_for_sel = version.clone();
+            let paint_refresh_for_sel = self.paint_refresh.clone();
             let sel_ver = Rc::new(Cell::new(0_u64));
             let handle = rs.observe_for_rebuild(move || {
                 let next = sel_ver.get() + 1;
                 sel_ver.set(next);
-                version_for_sel.set(next);
+                paint_refresh_for_sel.set(next);
             });
             ctx.own_handle(handle);
         }
 
-        // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
-        let viewport_h = self.viewport_height.clone();
-        // Track the buffered range from this build. Only trigger a rebuild
-        // when the visible range exceeds the buffer — most scrolls just need
-        // a relayout (handled by scroll_y's Relayout binding above).
-        let (built_start, built_end) = self.visible_range();
-        self.prev_built_start.set(built_start);
-        self.prev_built_end.set(built_end);
-        let version_for_scroll = version.clone();
-        let scroll_ver = Rc::new(Cell::new(0_u64));
-        let scroll_handle = self.scroll_y.observe({
-            let pbs = self.prev_built_start.clone();
-            let pbe = self.prev_built_end.clone();
-            let sv = scroll_ver.clone();
-            let metrics = self.metrics.clone();
-            let source = self.source.clone();
-            move |y| {
-                let count = source.visible_count();
-                let (visible_start, visible_end) =
-                    metrics
-                        .borrow_mut()
-                        .visible_range(*y, viewport_h.get(), count, 0);
-                // Only rebuild when visible items fall outside the currently-built range
-                if visible_start < pbs.get() || visible_end > pbe.get() {
-                    let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
-                    // Clamp to `count` — build() realizes a `min(end, count)`
-                    // window, so an unclamped `pbe` past the end leaves the
-                    // dirty-check believing rows are built that never were,
-                    // so the bottom rows of a large tree never realize on a
-                    // fast scroll. Mirrors TableView's BodyPane.
-                    let new_end = (visible_end + BUFFER_ITEMS).min(count);
-                    pbs.set(new_start);
-                    pbe.set(new_end);
-                    let next = sv.get() + 1;
-                    sv.set(next);
-                    version_for_scroll.set(next);
-                }
-            }
-        });
-        ctx.own_handle(scroll_handle);
+        // Scroll-buffer exit is deliberately NOT observed here. It rebuilds
+        // the body pane and nothing else — the root's own children are
+        // unaffected by which rows are realized, and a root rebuild during a
+        // scrollbar thumb drag is exactly the one the framework defers.
 
         // --- Scroll event handler + DnD ---
         let scroll_y = self.scroll_y.clone();
@@ -745,283 +743,36 @@ impl<T: 'static> Widget for TreeView<T> {
 
         ctx.apply_self_handlers(handlers);
 
-        // --- Create visible item widgets ---
-        let (start, end) = self.visible_range();
-        self.item_entries.clear();
-        // Lazy: nudge the source to load the realized window, and fetch more
-        // as the viewport nears the end (append-only sources).
-        (self.source.dnd.request_window_fn)(start..end);
-        if (self.source.dnd.can_fetch_more_fn)()
-            && end + BUFFER_ITEMS >= self.source.visible_count()
-        {
-            (self.source.dnd.fetch_more_fn)();
-        }
-        let is_drag_source = self.export.is_drag_source(self.reorderable);
-        let tree_id = self.tree_id;
-        let self_id = ctx.self_id();
-        let row_state_fn = self.source.dnd.row_state_fn.clone();
-        // Establish this TreeView as the focus scope for the rows it builds, so
-        // their `StandardItem`s read *its* keyboard focus deterministically
-        // (rows may build before arena parenting is wired).
-        ctx.begin_view_focus();
-        for i in start..end {
-            let selected = self
-                .row_selection
-                .as_ref()
-                .map(|s| s.is_selected(i))
-                .unwrap_or(false);
-            // Row metadata (a11y level / expand state) from the source.
-            let meta = self.source.meta(i);
-            let item_has_children = meta.as_ref().is_some_and(|m| m.has_children);
-            // A `Loading` row (data not yet resident) renders a placeholder
-            // skeleton instead of being skipped, so the scrollbar and layout
-            // stay stable while the window loads. A placeholder reports no
-            // metadata, so the expand/drag wiring below is gated off.
-            let row_widget = self
-                .source
-                .with_row(i, &|item, m| (self.row_delegate)(i, item, m, selected))
-                .or_else(|| {
-                    ((row_state_fn)(i) == RowState::Loading)
-                        .then(crate::data_views::default_placeholder)
-                });
-            if let Some(widget) = row_widget {
-                let inner_id = ctx.add_boxed(widget);
-                let (level, position_1based, total_siblings, expanded_opt) =
-                    if let Some(ref m) = meta {
-                        let exp = if m.has_children {
-                            Some(m.is_expanded)
-                        } else {
-                            None
-                        };
-                        let (pos, total) = self.source.sibling_pos(i);
-                        (m.depth + 1, pos, total, exp)
-                    } else {
-                        (1, 1, 1, None)
-                    };
-                let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
-                    inner_id,
-                    level,
-                    position_1based,
-                    total_siblings,
-                    expanded_opt,
-                    selected,
-                ));
-
-                // Click handling: selection + expand/collapse for branch rows.
-                {
-                    let sel_click = self.row_selection.clone();
-                    let click_index = i;
-                    let source_click = self.source.clone();
-                    let click_anchor = self.source.anchor(i);
-                    let fi_click = self.focused_index.clone();
-                    let fi_anchor_click = self.focused_anchor.clone();
-                    let has_children = item_has_children && self.row_click_expands;
-                    // Deferred collapse: pressing an already-selected row keeps
-                    // the whole (multi-)selection so it can be dragged; the
-                    // collapse-to-single happens on release WITHOUT a drag.
-                    let pending_collapse = Rc::new(Cell::new(false));
-
-                    ctx.apply_handlers(
-                        child_id,
-                        HandlerSet::new().on_pointer_event(move |event, ctx| match event {
-                            bastyde_core::event::WidgetEvent::PointerDown {
-                                modifiers,
-                                button: bastyde_core::event::PointerButton::Primary,
-                                ..
-                            } => {
-                                // The press belongs to an interactive child (the
-                                // chevron, or an inline control) — toggling/acting
-                                // is its job; don't also select the row. Clear any
-                                // stale deferred-collapse (left by a prior drag
-                                // whose PointerUp the drag machinery consumed) so
-                                // it can't fire on this unrelated interaction. (This
-                                // guards the no-selection-model branch below — the
-                                // shared helper does the equivalent for its own
-                                // branch.)
-                                if ctx.press_claimed_by_interactive_child() {
-                                    pending_collapse.set(false);
-                                    return bastyde_core::event::EventResponse::Ignored;
-                                }
-                                // The shared deferred-select helper owns the
-                                // press-claimed guard, Ctrl/Shift handling, and
-                                // the defer-collapse-on-already-selected rule; it
-                                // returns false (skip the nav-cursor move) when an
-                                // interactive child claimed the press. Without a
-                                // selection model there's nothing to defer — a
-                                // plain click still moves the nav cursor.
-                                let moved = match sel_click.as_ref() {
-                                    Some(sel) => crate::data_views::deferred_select::on_down(
-                                        sel,
-                                        click_index,
-                                        *modifiers,
-                                        &pending_collapse,
-                                        ctx,
-                                    ),
-                                    None => true,
-                                };
-                                if moved {
-                                    // Move the keyboard-navigation cursor to the
-                                    // clicked row so a subsequent Arrow keypress
-                                    // steps from here — `focused_index` is the
-                                    // arrow-nav origin (`fi.get().unwrap_or(0)`)
-                                    // and is otherwise only written by the
-                                    // keyboard handler, so without this a click
-                                    // would select a row yet leave arrows
-                                    // stepping from the stale keyboard cursor.
-                                    // Refresh the anchor alongside it — see
-                                    // `set_focus` in the keyboard handler.
-                                    fi_click.set(Some(click_index));
-                                    *fi_anchor_click.borrow_mut() =
-                                        Some(source_click.anchor(click_index));
-                                }
-                                // Ignored lets the gesture arena also see the
-                                // PointerDown so DragRecognizer can capture the
-                                // press position and enable drag-to-reorder.
-                                bastyde_core::event::EventResponse::Ignored
-                            }
-                            bastyde_core::event::WidgetEvent::PointerUp {
-                                button: bastyde_core::event::PointerButton::Primary,
-                                ..
-                            } => {
-                                // A release on the chevron (or another interactive
-                                // child) is handled by that child's own tap — don't
-                                // also toggle from the row body.
-                                if ctx.press_claimed_by_interactive_child() {
-                                    return bastyde_core::event::EventResponse::Ignored;
-                                }
-                                // Reached only on a click WITHOUT a drag (an
-                                // active drag consumes PointerUp). Collapse the
-                                // deferred multi-selection to the clicked row.
-                                if let Some(ref sel) = sel_click {
-                                    crate::data_views::deferred_select::on_up(
-                                        sel,
-                                        click_index,
-                                        &pending_collapse,
-                                        ctx,
-                                    );
-                                }
-                                // Expand/collapse fires on release so a drag
-                                // gesture pre-empts it (once active_drag is
-                                // set, PointerUp is routed to handle_drag_drop
-                                // and never reaches this widget).
-                                // Anchored: rows above may have shifted since
-                                // this handler was built, so resolve the row's
-                                // current position rather than trusting the
-                                // captured index.
-                                if has_children && let Some(cur) = click_anchor.index() {
-                                    source_click.toggle_at(cur);
-                                }
-                                bastyde_core::event::EventResponse::Ignored
-                            }
-                            _ => bastyde_core::event::EventResponse::Ignored,
-                        }),
-                    );
-
-                    // Row activation (open/commit) — a gesture, so it arbitrates
-                    // against the reorder drag via the gesture arena (a click
-                    // activates, a drag does not). `SingleClick` → `on_tap`,
-                    // `DoubleClick` → `on_double_tap`; Enter/Space activates too
-                    // (keyboard handler). Distinct from selection, which also
-                    // moves on arrow navigation.
-                    if let Some(ref cb) = self.on_activate {
-                        let cb = cb.clone();
-                        let a = self.source.anchor(i);
-                        let handlers = match self.activate_on {
-                            crate::data_views::ActivateOn::SingleClick => {
-                                HandlerSet::new().on_tap(move |tap, ctx| {
-                                    // A Ctrl/Shift click is a selection-extension
-                                    // gesture (applied on PointerDown), not an
-                                    // activation — suppress open/commit so a
-                                    // multi-select click doesn't also fire the
-                                    // activate callback. Mirrors the PointerDown
-                                    // selection condition (`ctrl` toggles, `shift`
-                                    // extends) so the two stay in lock-step.
-                                    if tap.modifiers.ctrl() || tap.modifiers.shift() {
-                                        return;
-                                    }
-                                    if let Some(cur) = a.index() {
-                                        cb(cur, ctx)
-                                    }
-                                })
-                            }
-                            crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
-                                .on_double_tap(move |_tap, ctx| {
-                                    if let Some(cur) = a.index() {
-                                        cb(cur, ctx)
-                                    }
-                                }),
-                        };
-                        ctx.apply_handlers(child_id, handlers);
-                    }
-                }
-
-                // Drag handler when reorderable OR exportable, gated by the
-                // source's transferable verdict (`drag`). Emits the public
-                // `RowDragData<T>`; the source recovers the key + validates at
-                // hover/drop. The floating preview re-invokes the row delegate.
-                if is_drag_source && (self.source.dnd.drag_fn)(i) == DragEligibility::CanDrag {
-                    let drag_view_id = tree_id;
-                    let drag_self_id = self_id;
-                    let row_delegate = self.row_delegate.clone();
-                    let source_for_preview = self.source.clone();
-                    let flat_idx = i;
-                    let metrics_for_preview = self.metrics.clone();
-                    // Export capture: the dragged set is selection-aware; the
-                    // shared `RowExport` builds the payload (clones / MIME /
-                    // Loading-filter / stash) when the view opted in.
-                    let sel_for_drag = self.row_selection.clone();
-                    let export_for_drag = self.export.clone();
-                    let read_for_drag = self.source.read_item_fn.clone();
-                    let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
-                    ctx.apply_handlers(
-                        child_id,
-                        HandlerSet::new().on_drag(move |phase, ctx| {
-                            if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                                // Selection-aware dragged set: the whole
-                                // selection when the pressed row is part of a
-                                // multi-selection, else just the pressed row.
-                                let rows: Vec<usize> = match sel_for_drag.as_ref() {
-                                    Some(s) if s.is_selected(flat_idx) => {
-                                        let mut v = s.selected_indices();
-                                        v.sort_unstable();
-                                        if v.len() <= 1 { vec![flat_idx] } else { v }
-                                    }
-                                    _ => vec![flat_idx],
-                                };
-                                let Some(payload) = export_for_drag.build_payload(
-                                    drag_view_id,
-                                    rows,
-                                    &*read_for_drag,
-                                    &snapshot_for_drag,
-                                ) else {
-                                    return;
-                                };
-                                const PREVIEW_WIDTH: f32 = 240.0;
-                                let h = metrics_for_preview.borrow_mut().row_height(flat_idx);
-                                let rd = row_delegate.clone();
-                                let preview_opt =
-                                    source_for_preview.with_row(flat_idx, &move |item, m| {
-                                        Box::new(crate::drag_preview::DragPreview::new(
-                                            PREVIEW_WIDTH,
-                                            h,
-                                            rd(flat_idx, item, m, false),
-                                        ))
-                                            as Box<dyn Widget>
-                                    });
-                                if let Some(preview) = preview_opt {
-                                    ctx.start_drag_with_preview(drag_self_id, payload, preview);
-                                } else {
-                                    ctx.start_drag(drag_self_id, payload);
-                                }
-                            }
-                        }),
-                    );
-                }
-
-                self.item_entries.push((i, child_id));
-            }
-        }
-        ctx.end_view_focus();
+        // --- Body pane ---
+        // Hoisted into its own widget so that scroll-buffer-exit rebuilds
+        // (which happen mid-thumb-drag once the user scrolls past the buffered
+        // range) target a SIBLING of the scrollbar rather than the scrollbar's
+        // ancestor. Rebuilding the ancestor would be deferred by the framework
+        // to preserve the captured drag, leaving the tree blank until the user
+        // released the thumb. See `body_pane`'s module docs.
+        let pane = super::body_pane::TreeViewBodyPane::<T> {
+            source: self.source.clone(),
+            row_delegate: self.row_delegate.clone(),
+            metrics: self.metrics.clone(),
+            row_selection: self.row_selection.clone(),
+            focused_index: self.focused_index.clone(),
+            focused_anchor: self.focused_anchor.clone(),
+            reorderable: self.reorderable,
+            row_click_expands: self.row_click_expands,
+            export: self.export.clone(),
+            on_activate: self.on_activate.clone(),
+            activate_on: self.activate_on,
+            tree_id: self.tree_id,
+            root_id: self_id,
+            scroll_y: self.scroll_y.clone(),
+            viewport_height: self.viewport_height.clone(),
+            version: self.pane_version.clone(),
+            total_refresh: self.layout_refresh.clone(),
+            prev_built_start: self.pane_built_start.clone(),
+            prev_built_end: self.pane_built_end.clone(),
+            item_entries: Vec::new(),
+        };
+        self.body_pane_id = Some(ctx.add(pane));
 
         // --- Scrollbar ---
         let scrollbar = ScrollBar::new(
@@ -1035,12 +786,9 @@ impl<T: 'static> Widget for TreeView<T> {
             ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
             ScrollBarMode::Thin => ScrollBarVisual::Thin,
         });
-        let sb_id = ctx.add(scrollbar);
-        self.scrollbar_id = Some(sb_id);
+        self.scrollbar_id = Some(ctx.add(scrollbar));
 
-        let mut children: Vec<WidgetId> = self.item_entries.iter().map(|(_, id)| *id).collect();
-        children.push(sb_id);
-        children
+        self.child_ids()
     }
 
     fn layout_response(
@@ -1064,7 +812,7 @@ impl<T: 'static> Widget for TreeView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
         // Cache our own absolute bounds for the keyboard handler's
         // outer-scroll chase (`ensure_visible`), before the empty-children bail.
@@ -1079,8 +827,6 @@ impl<T: 'static> Widget for TreeView<T> {
         }
 
         let viewport_height = bounds.height;
-        let count = self.source.visible_count();
-        let item_count = self.item_entries.len();
         // Permanent reserves a column for the bar; Overlay / Thin float
         // over the content, so rows span the full width.
         let reserves_bar = self.scroll_bar_style == ScrollBarMode::Permanent;
@@ -1091,50 +837,10 @@ impl<T: 'static> Widget for TreeView<T> {
         };
         self.placed_content_width.set(content_width);
 
-        // Auto-measure pass: measure every realized row at the content
-        // width (height-for-width), feed the heights back, and apply the
-        // scroll-anchor delta so content above the viewport stays put.
-        // Measurements are collected with NO metrics borrow held.
-        if self.metrics.borrow().needs_measure() {
-            let mut measured = Vec::with_capacity(item_count);
-            for (idx, child) in children.iter().enumerate() {
-                if idx < item_count
-                    && let Some(size) =
-                        ctx.child_size(child.id, SizeProposal::with_width(content_width))
-                {
-                    let (flat_index, _) = self.item_entries[idx];
-                    measured.push((flat_index, size.height));
-                }
-            }
-            let anchor = self
-                .metrics
-                .borrow_mut()
-                .observe_measured(&measured, self.scroll_y.get());
-            if anchor.abs() > 0.01 {
-                // Safe from place_children: the dirty flag is set but the
-                // binding flush already ran this pass — lands next frame.
-                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
-            }
-
-            // Realization re-check: corrected offsets may reveal viewport
-            // rows the estimated offsets never realized. Request a
-            // rebuild for next frame; the 0.01 measurement epsilon
-            // guarantees convergence.
-            let (vs, ve) = self.metrics.borrow_mut().visible_range(
-                self.scroll_y.get(),
-                viewport_height,
-                count,
-                0,
-            );
-            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
-                self.prev_built_start.set(vs.saturating_sub(BUFFER_ITEMS));
-                self.prev_built_end.set((ve + BUFFER_ITEMS).min(count));
-                self.version.set(self.version.get() + 1);
-            }
-        }
-
-        // Post-measure totals so even frame 1's scrollbar reflects the
-        // measured window.
+        // Totals for the scrollbar. In auto-measure mode these are computed
+        // BEFORE the pane measures its rows (parent-before-child ordering), so
+        // the pane pokes `layout_refresh` when a measurement moves the total
+        // and we re-place next frame with the corrected value.
         let total_height = self.total_content_height();
         let max_y = (total_height - viewport_height).max(0.0);
         self.max_scroll_y.set(max_y);
@@ -1146,23 +852,20 @@ impl<T: 'static> Widget for TreeView<T> {
         self.viewport_ratio_y.set(ratio);
         self.clamp_scroll();
 
-        let scroll_y = self.scroll_y.get();
-
-        for (idx, child) in children.iter_mut().enumerate() {
-            if idx < item_count {
-                let (flat_index, _) = self.item_entries[idx];
-                let (top, height) = {
-                    let mut m = self.metrics.borrow_mut();
-                    (m.row_top(flat_index), m.row_height(flat_index))
-                };
-                let y = bounds.y + top - scroll_y;
-                child.origin = Point::new(bounds.x, y);
-                child.size = Size::new(content_width, height);
+        // Two children in a fixed order (see `child_ids`): the body pane fills
+        // the content column and positions its own rows; the scrollbar sits
+        // alongside it.
+        let mut next = 0;
+        if self.body_pane_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                child.origin = bounds.origin();
+                child.size = Size::new(content_width, bounds.height);
             }
+            next += 1;
         }
-
-        // Scrollbar
-        if let Some(sb_child) = children.last_mut() {
+        if self.scrollbar_id.is_some()
+            && let Some(sb_child) = children.get_mut(next)
+        {
             let needs_scrollbar = total_height > viewport_height + 0.5;
             if needs_scrollbar {
                 sb_child.origin =
@@ -1245,11 +948,7 @@ impl<T: 'static> Widget for TreeView<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        let mut ids: Vec<WidgetId> = self.item_entries.iter().map(|(_, id)| *id).collect();
-        if let Some(sb) = self.scrollbar_id {
-            ids.push(sb);
-        }
-        ids
+        self.child_ids()
     }
 
     fn clips_children(&self) -> bool {

@@ -177,10 +177,12 @@ impl<T: 'static> TreeView<T> {
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
-            version: Signal::new(0_u64),
-            prev_built_start: Rc::new(Cell::new(0)),
-            prev_built_end: Rc::new(Cell::new(0)),
-            item_entries: Vec::new(),
+            layout_refresh: Signal::new(0_u64),
+            paint_refresh: Signal::new(0_u64),
+            pane_version: Signal::new(0_u64),
+            pane_built_start: Rc::new(Cell::new(0)),
+            pane_built_end: Rc::new(Cell::new(0)),
+            body_pane_id: None,
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -489,6 +491,16 @@ impl<T: 'static> TreeView<T> {
     /// `TreeSlice` (the external source owns expand state).
     pub fn tree_slice(&self) -> Option<&TreeSlice<T>> {
         self.slice.as_deref()
+    }
+
+    /// The root's children, in the one order `build`, `children` and
+    /// `place_children` all rely on: body pane first, scrollbar second. The
+    /// pane is always mounted (an empty tree realizes zero rows inside it).
+    pub(super) fn child_ids(&self) -> Vec<WidgetId> {
+        [self.body_pane_id, self.scrollbar_id]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     pub(super) fn total_content_height(&self) -> f32 {

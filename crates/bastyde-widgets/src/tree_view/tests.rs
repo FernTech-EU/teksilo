@@ -3,7 +3,84 @@
 
 use super::*;
 use bastyde_core::widget_tree::WidgetTree;
+// Row-level concerns moved to `body_pane`; the tests still drive them from
+// here, so they import what the root no longer needs.
+use bastyde_data::{DragEligibility, RowState};
 use bastyde_i18n::lit;
+
+/// The realized row wrappers. `TreeView`'s own children are the body pane and
+/// the scrollbar (see `body_pane`'s module docs for why rows sit one level
+/// down), so every test that used to walk `tree.children(tv_id)` for rows goes
+/// through here.
+fn row_ids(tree: &WidgetTree, tv: WidgetId) -> Vec<WidgetId> {
+    let kids = tree.children(tv);
+    match kids.first() {
+        Some(&pane) => tree.children(pane),
+        None => Vec::new(),
+    }
+}
+
+/// The internal scrollbar — always the TreeView's last child.
+fn scrollbar_of(tree: &WidgetTree, tv: WidgetId) -> WidgetId {
+    *tree.children(tv).last().expect("TreeView has children")
+}
+
+#[test]
+fn smooth_scroll_survives_a_body_pane_rebuild() {
+    let model: TreeModel<&'static str> = TreeModel::new();
+    for i in 0..500 {
+        model.insert_root(i, "row");
+    }
+    let (mut wtree, tv_id) = make_tree_view(model.clone());
+    let scroll = {
+        wtree.layout(SizeProposal::exact(400.0, 200.0));
+        let any = wtree.widget_as_any(tv_id).unwrap();
+        // `tests` is a child module of `tree_view`, so it can read the
+        // private field directly — TreeView exposes no public scroll signal.
+        any.downcast_ref::<TreeView<&'static str>>()
+            .unwrap()
+            .scroll_y
+            .clone()
+    };
+    crate::common::thumb_drag_test::assert_fling_survives_pane_rebuild(
+        &mut wtree,
+        400.0,
+        200.0,
+        &scroll,
+        "TreeView",
+        || {
+            model.insert_root(0, "fresh");
+        },
+    );
+}
+
+#[test]
+fn rows_materialize_during_scrollbar_thumb_drag() {
+    // The reason `TreeViewBodyPane` exists — see
+    // `common::thumb_drag_test`'s module docs for the invariant.
+    let model: TreeModel<&'static str> = TreeModel::new();
+    for i in 0..500 {
+        model.insert_root(i, "row");
+    }
+    let (mut wtree, tv_id) = make_tree_view(model);
+    crate::common::thumb_drag_test::assert_body_survives_thumb_drag(
+        &mut wtree,
+        tv_id,
+        400.0,
+        200.0,
+        0.0,
+        "TreeView",
+        |t| {
+            row_ids(t, tv_id)
+                .into_iter()
+                .filter(|id| {
+                    let b = t.bounds(*id);
+                    b.height > 1.0 && b.y > -b.height && b.y < 200.0
+                })
+                .count()
+        },
+    );
+}
 
 #[derive(Debug)]
 struct FixedLeaf(f32, f32);
@@ -50,9 +127,8 @@ fn initial_shows_only_roots() {
     let (mut wtree, tv_id) = make_tree_view(tree);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let children = wtree.children(tv_id);
-    // 3 root items + 1 scrollbar
-    assert_eq!(children.len() - 1, 3);
+    // 3 root items, realized inside the body pane.
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 }
 
 #[test]
@@ -61,13 +137,13 @@ fn insert_child_into_root_updates_view() {
     let a = tree.root(0);
     let (mut wtree, tv_id) = make_tree_view(tree.clone());
     wtree.layout(SizeProposal::exact(400.0, 300.0));
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     // Insert a new child under A — since A is collapsed, visible count stays 3
     tree.insert_child(a, 2, "A3");
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     // Still 3 visible (A collapsed), but the tree knows about A3
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 }
 
 #[test]
@@ -76,12 +152,12 @@ fn model_mutation_triggers_rebuild() {
     let (mut wtree, tv_id) = make_tree_view(tree.clone());
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     tree.insert_root(3, "D");
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    assert_eq!(wtree.children(tv_id).len() - 1, 4);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 4);
 }
 
 #[test]
@@ -90,11 +166,11 @@ fn remove_triggers_rebuild() {
     let c = tree.root(2);
     let (mut wtree, tv_id) = make_tree_view(tree.clone());
     wtree.layout(SizeProposal::exact(400.0, 300.0));
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     tree.remove(c);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
-    assert_eq!(wtree.children(tv_id).len() - 1, 2);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 2);
 }
 
 #[test]
@@ -103,7 +179,7 @@ fn items_positioned_vertically() {
     let (mut wtree, tv_id) = make_tree_view(tree);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     let y0 = wtree.bounds(children[0]).y;
     let y1 = wtree.bounds(children[1]).y;
     let y2 = wtree.bounds(children[2]).y;
@@ -123,7 +199,7 @@ fn virtualization_with_large_tree() {
     // Viewport 300px, item height 28px → ~11 visible + 2*5 buffer = ~21
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let item_count = wtree.children(tv_id).len() - 1;
+    let item_count = row_ids(&wtree, tv_id).len();
     assert!(
         item_count < 30,
         "Expected fewer than 30 items, got {}",
@@ -142,9 +218,7 @@ fn scrollbar_collapses_when_not_needed() {
     let (mut wtree, tv_id) = make_tree_view(tree);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let children = wtree.children(tv_id);
-    let sb = children.last().unwrap();
-    let sb_bounds = wtree.bounds(*sb);
+    let sb_bounds = wtree.bounds(scrollbar_of(&wtree, tv_id));
     assert!(
         sb_bounds.width < 0.01 && sb_bounds.height < 0.01,
         "Scrollbar should be collapsed"
@@ -166,8 +240,10 @@ fn empty_tree() {
     let (mut wtree, tv_id) = make_tree_view(tree);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    // Only scrollbar
-    assert_eq!(wtree.children(tv_id).len(), 1);
+    // The body pane is mounted even with no data (it is the stable sibling
+    // the scrollbar needs) and realizes no rows.
+    assert_eq!(wtree.children(tv_id).len(), 2, "body pane + scrollbar");
+    assert!(row_ids(&wtree, tv_id).is_empty(), "no rows for an empty tree");
 }
 
 #[test]
@@ -176,7 +252,7 @@ fn tree_item_has_a11y_role_and_expanded() {
     let (mut wtree, tv_id) = make_tree_view(tree);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     // First child (A) should be a TreeItemWrapper with TreeItem role
     let info_a = wtree.accessibility_node(children[0]);
     assert_eq!(info_a.role(), bastyde_core::accesskit::Role::TreeItem);
@@ -574,7 +650,7 @@ fn chevron_press_toggles_without_selecting_the_row() {
     // chevron's own tap via `ctx.press_claimed_by_interactive_child()`.
     let (mut wtree, tv_id, selection) = make_standard_tree_view();
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "precondition: 3 collapsed roots"
     );
@@ -584,7 +660,7 @@ fn chevron_press_toggles_without_selecting_the_row() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         5,
         "chevron press should expand A, revealing A1 and A2"
     );
@@ -610,7 +686,7 @@ fn body_press_selects_the_row() {
         "body press should select row 0"
     );
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "body press must not expand when row_click_expands=false"
     );
@@ -652,7 +728,7 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
     let (mut wtree, tv_id) = make_reorderable_standard_tree_view();
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "precondition: 3 collapsed roots"
     );
@@ -677,7 +753,7 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         5,
         "the chevron tap must expand A (revealing A1, A2), not start a row drag"
     );
@@ -897,16 +973,16 @@ fn click_on_branch_with_nested_delegate_expands() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Sanity check: 3 roots visible.
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     // Click A (row 0). Use the wrapper's bounds center — hit_test will
     // walk down to whatever deep leaf is at that point.
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     wtree.click(children[0]);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         5,
         "Click on A (branch) should expand it even with a nested delegate"
     );
@@ -963,27 +1039,27 @@ fn click_on_branch_expands_and_collapses() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Initially collapsed — 3 roots visible.
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     // Click A (row 0, center y=14).
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     wtree.click(children[0]);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // A should now be expanded, showing its two children A1, A2.
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         5,
         "After clicking A, its two children should become visible"
     );
 
     // Click A again — collapses.
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     wtree.click(children[0]);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "Second click should collapse A back to 3 visible roots"
     );
@@ -1008,16 +1084,16 @@ fn row_click_expands_false_disables_auto_toggle() {
     );
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
-    assert_eq!(wtree.children(tv_id).len() - 1, 3);
+    assert_eq!(row_ids(&wtree, tv_id).len(), 3);
 
     // Click A (a branch with children). Body click should NOT
     // expand it.
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     wtree.click(children[0]);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "row body click on a branch must not auto-expand when row_click_expands=false"
     );
@@ -1062,7 +1138,7 @@ fn spring_loaded_folder_expands_after_dwell() {
     // Confirm B is currently collapsed.
     assert!(tree.with_item(b, |_| ()).is_some());
     assert_eq!(
-        wtree.children(_tv_id).len() - 1,
+        row_ids(&wtree, _tv_id).len(),
         3,
         "Precondition: 3 visible roots, nothing expanded"
     );
@@ -1074,13 +1150,13 @@ fn spring_loaded_folder_expands_after_dwell() {
 
     // B should now be expanded, revealing B1 (4 visible rows).
     assert_eq!(
-        wtree.children(_tv_id).len() - 1,
+        row_ids(&wtree, _tv_id).len(),
         4,
         "B should have spring-opened after the dwell"
     );
 
     // A was never hovered — still collapsed.
-    assert!(!wtree.children(_tv_id).is_empty());
+    assert!(!row_ids(&wtree, _tv_id).is_empty());
     let _ = a;
 
     // Clean up drag.
@@ -1132,7 +1208,7 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
         position: Point::new(60.0, 42.0),
     });
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         3,
         "Precondition: 3 visible roots, nothing expanded"
     );
@@ -1142,7 +1218,7 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
     sleep(Duration::from_millis(750));
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(
-        wtree.children(tv_id).len() - 1,
+        row_ids(&wtree, tv_id).len(),
         4,
         "B should have spring-opened after the dwell"
     );
@@ -1194,7 +1270,7 @@ fn alt_arrow_reorders_flat_root_sibling() {
 
     // Focus the TreeView and select the middle item (B)
     wtree.focus(tv_id);
-    wtree.click(wtree.children(tv_id)[1]); // B at index 1
+    wtree.click(row_ids(&wtree, tv_id)[1]); // B at index 1
     assert_eq!(selection.selected_indices(), vec![1]);
 
     // Press Alt+ArrowUp: B should move above A
@@ -1286,7 +1362,7 @@ fn alt_arrow_reorders_nested_sibling() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Select A2 (flat index 2: A at 0, A1 at 1, A2 at 2)
-    let children = wtree.children(tv_id);
+    let children = row_ids(&wtree, tv_id);
     wtree.click(children[2]);
     assert_eq!(selection.selected_indices(), vec![2]);
 
@@ -1344,7 +1420,7 @@ fn alt_arrow_cannot_move_past_boundaries() {
 
     // Focus and select first item (A)
     wtree.focus(tv_id);
-    wtree.click(wtree.children(tv_id)[0]);
+    wtree.click(row_ids(&wtree, tv_id)[0]);
 
     let a = model.root(0);
     let c = model.root(2);
@@ -1362,7 +1438,7 @@ fn alt_arrow_cannot_move_past_boundaries() {
     );
 
     // Select last item (C)
-    wtree.click(wtree.children(tv_id)[2]);
+    wtree.click(row_ids(&wtree, tv_id)[2]);
 
     // Alt+ArrowDown on last item should do nothing
     wtree.dispatch_event(bastyde_core::event::WidgetEvent::KeyDown {
@@ -1507,10 +1583,10 @@ fn keyboard_selection_chases_outer_scroll_area() {
 // --- Variable row heights ---
 
 /// Collect the (y, height) bounds of the realized rows (the
-/// scrollbar is always the last child), sorted by y.
+/// rows are the body pane's children), sorted by y.
 fn row_spans(tree: &WidgetTree, tv_id: WidgetId) -> Vec<(f32, f32)> {
-    let children = tree.children(tv_id);
-    let mut spans: Vec<(f32, f32)> = children[..children.len() - 1]
+    let children = row_ids(tree, tv_id);
+    let mut spans: Vec<(f32, f32)> = children[..]
         .iter()
         .map(|c| {
             let b = tree.bounds(*c);
@@ -1887,7 +1963,7 @@ fn from_source_row_scope_is_the_treeview_not_a_higher_ancestor() {
             .focusable(true),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    let rows = tree.children(tv);
+    let rows = row_ids(&tree, tv);
     let scope = tree.view_focus_active_for(rows[0]);
 
     tree.focus(tv);
@@ -1924,7 +2000,7 @@ fn view_focus_active_tracks_view_focus_for_rows() {
         .on_activate(|_, _| {}),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    let rows = tree.children(tv);
+    let rows = row_ids(&tree, tv);
     assert_eq!(tree.focused(), None, "no focus yet");
     tree.click(rows[1]);
     // Clicking a row must move keyboard focus to the TreeView (or a focusable
@@ -2079,7 +2155,7 @@ fn from_source_keyed_i64_survives_collapse_and_prunes() {
 
     // Visible order is [1, 2, 3, 4]; row 1 is node "a" (id 2). Clicking it
     // must store the KEY 2, proving index→key translation + the render path.
-    let rows = tree.children(tv);
+    let rows = row_ids(&tree, tv);
     tree.click(rows[1]);
     assert!(
         keyed.is_selected(&2),
@@ -2166,7 +2242,7 @@ fn from_source_drop_routes_through_source_and_refuses_cycle() {
         .reorderable(true),
     );
     t1.layout(SizeProposal::exact(400.0, 300.0));
-    let rows = t1.children(v1);
+    let rows = row_ids(&t1, v1);
     let from = t1.bounds(rows[2]).center();
     let to = t1.bounds(rows[3]).center();
     drag_item(&mut t1, from, to);
@@ -2198,7 +2274,7 @@ fn from_source_drop_routes_through_source_and_refuses_cycle() {
         .reorderable(true),
     );
     t2.layout(SizeProposal::exact(400.0, 300.0));
-    let rows2 = t2.children(v2);
+    let rows2 = row_ids(&t2, v2);
     let from2 = t2.bounds(rows2[0]).center();
     let to2 = t2.bounds(rows2[1]).center();
     drag_item(&mut t2, from2, to2);
@@ -2240,7 +2316,7 @@ fn from_source_reorder_bubbles_past_a_per_row_drop_target() {
         .reorderable(true),
     );
     t.layout(SizeProposal::exact(400.0, 300.0));
-    let rows = t.children(v);
+    let rows = row_ids(&t, v);
     // Drag node "b" (id 3, row 2) onto "root2" (id 4, row 3).
     let from = t.bounds(rows[2]).center();
     let to = t.bounds(rows[3]).center();
@@ -2287,7 +2363,7 @@ fn from_source_row_with_pointer_event_selection_stays_draggable() {
         .reorderable(true),
     );
     t.layout(SizeProposal::exact(400.0, 300.0));
-    let rows = t.children(v);
+    let rows = row_ids(&t, v);
     let from = t.bounds(rows[2]).center();
     let to = t.bounds(rows[3]).center();
     drag_item(&mut t, from, to);
@@ -2372,7 +2448,7 @@ fn lazy_loading_tree_rows_render_placeholders_and_request_the_window() {
 
     // 300px / 28px ≈ 10 visible + buffer → the loading rows are realized as
     // placeholder child widgets (children minus the scrollbar), NOT skipped.
-    let placeholder_rows = t.children(v).len() - 1;
+    let placeholder_rows = row_ids(&t, v).len();
     assert!(
         placeholder_rows >= 10,
         "loading tree rows must render as placeholders, got {placeholder_rows}"
@@ -2610,7 +2686,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
     // A2: rows are now A(0), A1(1), A2(2), B(3), C(4).
     press_at(&mut wtree, 8.0, 14.0);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
-    assert_eq!(wtree.children(tv).len() - 1, 5, "precondition: A expanded");
+    assert_eq!(row_ids(&wtree, tv).len(), 5, "precondition: A expanded");
 
     // Click C's BODY (past the chevron column) to focus it.
     press_at(&mut wtree, 100.0, 126.0);
@@ -2626,7 +2702,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
     press_at(&mut wtree, 8.0, 14.0);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(
-        wtree.children(tv).len() - 1,
+        row_ids(&wtree, tv).len(),
         3,
         "precondition: A collapsed again"
     );
@@ -2727,7 +2803,7 @@ fn a_natural_height_query_does_not_strand_the_realization_window() {
     // The first build predates any allocation, so it realizes off the
     // constructor's 600px seed: 21 rows in view plus the 5-row buffer either
     // side. The 654px allocation lands during this same pass.
-    assert_eq!(wtree.children(tv_id).len() - 1, 27, "fixture is wrong");
+    assert_eq!(row_ids(&wtree, tv_id).len(), 27, "fixture is wrong");
 
     // Someone asks how tall the tree would like to be.
     wtree.measure_root_intrinsic(SizeProposal::with_width(300.0));
@@ -2738,7 +2814,7 @@ fn a_natural_height_query_does_not_strand_the_realization_window() {
 
     // 654px at 28px a row is 24 rows in view, plus the 5-row buffer.
     // A viewport stranded at the 200px fallback yields 13.
-    let rows = wtree.children(tv_id).len() - 1; // less the scrollbar
+    let rows = row_ids(&wtree, tv_id).len();
     assert_eq!(
         rows, 29,
         "realized {rows} rows for a 654px viewport — the window was sized \
@@ -2747,7 +2823,7 @@ fn a_natural_height_query_does_not_strand_the_realization_window() {
 
     // Every realized row must actually be placed. Under the loop they kept
     // their default zero rect, because the next rebuild replaced them first.
-    for id in wtree.children(tv_id).iter().take(rows) {
+    for id in row_ids(&wtree, tv_id).iter().take(rows) {
         let b = wtree.bounds(*id);
         assert!(
             b.height > 0.0 && b.width > 0.0,
@@ -2758,12 +2834,12 @@ fn a_natural_height_query_does_not_strand_the_realization_window() {
     // And it converges: two idle passes must not re-realize anything.
     // Identity, not count — the loop held the count steady while discarding
     // and rebuilding every row.
-    let settled = wtree.children(tv_id);
+    let settled = row_ids(&wtree, tv_id);
     wtree.layout(SizeProposal::exact(300.0, 654.0));
     wtree.layout(SizeProposal::exact(300.0, 654.0));
     assert_eq!(
         settled,
-        wtree.children(tv_id),
+        row_ids(&wtree, tv_id),
         "the tree rebuilt its rows on an idle layout pass — build and \
          place_children disagree about the viewport"
     );

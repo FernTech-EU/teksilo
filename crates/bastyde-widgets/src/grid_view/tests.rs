@@ -43,6 +43,31 @@ fn tiles(tree: &WidgetTree, grid_id: WidgetId) -> Vec<WidgetId> {
 }
 
 #[test]
+fn tiles_materialize_during_scrollbar_thumb_drag() {
+    // The reason `GridBodyPane` exists — see `common::thumb_drag_test`'s
+    // module docs for the invariant, and for why every virtualized view
+    // asserts it.
+    let (mut tree, id, _model) = make_grid(3000);
+    crate::common::thumb_drag_test::assert_body_survives_thumb_drag(
+        &mut tree,
+        id,
+        400.0,
+        300.0,
+        0.0,
+        "GridView",
+        |t| {
+            tiles(t, id)
+                .into_iter()
+                .filter(|tile| {
+                    let b = t.bounds(*tile);
+                    b.height > 1.0 && b.y > -b.height && b.y < 300.0
+                })
+                .count()
+        },
+    );
+}
+
+#[test]
 fn virtualization_realizes_only_visible_tiles() {
     // 300 items, 3 columns → 100 rows. Viewport shows ~6 rows; with the
     // 5-row buffer that's ~12 rows × 3 = ~36 tiles, far fewer than 300.

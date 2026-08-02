@@ -4829,17 +4829,11 @@ mod tests {
 
     #[test]
     fn rows_rebuild_during_scrollbar_thumb_drag() {
-        // The reason the TreeBodyPane split exists: rebuilds targeting
-        // an ancestor of the pointer-captured scrollbar are deferred
-        // for the whole Down→Up sequence. Pre-split, the scroll-buffer
-        // exit had to rebuild the TreeTableView root (an ancestor), so
-        // dragging the thumb past the buffered window left the body
-        // stale/empty until release. The pane is a sibling of the
-        // scrollbar, so its buffer-exit rebuild goes through mid-drag.
-        use bastyde_canvas::Point;
-        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+        // The reason `TreeBodyPane` exists — see `common::thumb_drag_test`'s
+        // module docs for the invariant, and for why every virtualized view
+        // asserts it through the same driver.
         let model = TreeModel::new();
-        for i in 0..100 {
+        for i in 0..500 {
             model.insert_root(i, "root");
         }
         let proxy = SortFilterTreeModel::new(model);
@@ -4849,58 +4843,30 @@ mod tests {
                 .add_column(name_col())
                 .row_height(20.0),
         );
-        tree.layout(SizeProposal {
-            width: Some(400.0),
-            height: Some(200.0),
-        });
-
-        // Press the scrollbar thumb (right edge, inside the body band)
-        // and hold — the framework captures the pointer on it.
-        let thumb = Point::new(395.0, cp::HEADER_HEIGHT + 10.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: thumb,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-
-        // Scroll far past the buffered window while captured (the
-        // thumb drag drives scroll_y exactly like this).
-        let scroll = {
-            let any = tree.widget_as_any(table).unwrap();
-            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
-            tt.scroll_y_signal().clone()
-        };
-        scroll.set(1000.0);
-        tree.layout(SizeProposal {
-            width: Some(400.0),
-            height: Some(200.0),
-        });
-
-        // At least one materialised row must land inside the viewport
-        // at the new scroll position — i.e. the pane rebuilt mid-drag.
-        let mut walker = vec![table];
-        let mut any_in_viewport = false;
-        while let Some(id) = walker.pop() {
-            if tree.accessibility_node(id).role() == Role::Row {
-                let b = tree.bounds(id);
-                if b.y >= 0.0 && b.y < 200.0 {
-                    any_in_viewport = true;
+        crate::common::thumb_drag_test::assert_body_survives_thumb_drag(
+            &mut tree,
+            table,
+            400.0,
+            200.0,
+            cp::HEADER_HEIGHT,
+            "TreeTableView",
+            |t| {
+                let mut n = 0;
+                let mut walker = vec![table];
+                while let Some(id) = walker.pop() {
+                    if t.accessibility_node(id).role() == Role::Row {
+                        let b = t.bounds(id);
+                        if b.y >= 0.0 && b.y < 200.0 {
+                            n += 1;
+                        }
+                    }
+                    for c in t.children(id) {
+                        walker.push(c);
+                    }
                 }
-            }
-            for c in tree.children(id) {
-                walker.push(c);
-            }
-        }
-        assert!(
-            any_in_viewport,
-            "pane must rebuild past the buffer while the thumb is captured"
+                n
+            },
         );
-
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: thumb,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
     }
 
     #[test]

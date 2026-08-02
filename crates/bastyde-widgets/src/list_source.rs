@@ -29,6 +29,11 @@ use crate::data_views::{RowDragData, ViewId};
 
 /// The erased DnD + lazy capability closures for a list source. View-facing
 /// arguments are indices + the view's id; the closures resolve keys internally.
+///
+/// `Clone` is a shallow `Rc` bump throughout — the closures (and the drag-key
+/// stash they share) stay one instance, so a clone handed to a body pane sees
+/// exactly the same state the owning view does.
+#[derive(Clone)]
 pub(crate) struct DndLazy {
     /// Whether the row at `index` may begin a drag.
     pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
@@ -245,6 +250,27 @@ pub(crate) struct ListSource<T: 'static> {
     /// Erased DnD + lazy capability protocol (source-owned validation +
     /// windowing). Inert for `from_cloning_accessors` sources.
     pub(crate) dnd: DndLazy,
+}
+
+/// Shallow `Rc` bump of every erased accessor — hand-written rather than
+/// derived so it carries no `T: Clone` bound (`T` appears only inside
+/// `dyn Fn` signatures, never by value). Lets a view share its whole source
+/// with its body pane instead of threading nine closures separately.
+impl<T: 'static> Clone for ListSource<T> {
+    fn clone(&self) -> Self {
+        Self {
+            len_fn: self.len_fn.clone(),
+            with_item_fn: self.with_item_fn.clone(),
+            with_item_str_fn: self.with_item_str_fn.clone(),
+            read_item_fn: self.read_item_fn.clone(),
+            observe_fn: self.observe_fn.clone(),
+            move_item_fn: self.move_item_fn.clone(),
+            remove_item_fn: self.remove_item_fn.clone(),
+            first_changed_fn: self.first_changed_fn.clone(),
+            anchor_fn: self.anchor_fn.clone(),
+            dnd: self.dnd.clone(),
+        }
+    }
 }
 
 impl<T: 'static> ListSource<T> {

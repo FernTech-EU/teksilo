@@ -75,6 +75,38 @@ fn build_table(n: u32) -> (WidgetTree, WidgetId, ListModel<Row>) {
     (tree, table, model)
 }
 
+#[test]
+fn rows_materialize_during_scrollbar_thumb_drag() {
+    // The reason `BodyPane` exists — see `common::thumb_drag_test`'s module
+    // docs for the invariant, and for why every virtualized view asserts it.
+    use crate::styles::recipe_table_style as cp;
+    let (mut tree, table, _) = build_table(500);
+    crate::common::thumb_drag_test::assert_body_survives_thumb_drag(
+        &mut tree,
+        table,
+        400.0,
+        200.0,
+        cp::HEADER_HEIGHT,
+        "TableView",
+        |t| {
+            let mut n = 0;
+            let mut walker = vec![table];
+            while let Some(id) = walker.pop() {
+                if t.accessibility_node(id).role() == Role::Row {
+                    let b = t.bounds(id);
+                    if b.y >= 0.0 && b.y < 200.0 {
+                        n += 1;
+                    }
+                }
+                for c in t.children(id) {
+                    walker.push(c);
+                }
+            }
+            n
+        },
+    );
+}
+
 // ── Module structure ───────────────────────────────────────────────────────
 
 #[test]

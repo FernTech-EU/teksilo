@@ -52,8 +52,8 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{TreeSlice, TreeSliceHandle};
 use bastyde_data::{
-    DragEligibility, DropPosition, DropResponse, FlatEntry, ItemKey, KeyedSelectionModel, NodeId,
-    RowState, TreeDataSource, TreeModel,
+    DropPosition, DropResponse, FlatEntry, ItemKey, KeyedSelectionModel, NodeId, TreeDataSource,
+    TreeModel,
 };
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
@@ -237,16 +237,27 @@ pub struct TreeView<T: 'static> {
     /// float over the content instead, like `ScrollArea`.
     scroll_bar_style: ScrollBarMode,
 
-    /// Rebuild trigger. A persistent field (re-bound each build) so
-    /// `place_children`'s post-measure realization re-check can request
-    /// a rebuild when corrected offsets reveal unrealized viewport rows.
-    version: Signal<u64>,
-    /// Buffered row range materialized by the latest build.
-    prev_built_start: Rc<Cell<usize>>,
-    prev_built_end: Rc<Cell<usize>>,
+    /// Root-level **relayout** trigger. The root's `place_children` owns the
+    /// scrollbar totals (`max_scroll_y`, thumb ratio) and the content-width
+    /// decision, none of which its `build` output depends on — so a source
+    /// change, or a pane measurement that moves the content total, needs a
+    /// re-place here rather than a rebuild. Bumped by the source-version
+    /// observer and by [`body_pane::TreeViewBodyPane::total_refresh`].
+    layout_refresh: Signal<u64>,
+    /// Root-level **repaint** trigger for the container focus ring, which is
+    /// suppressed as soon as anything is selected. Selection changes rebuild
+    /// the pane (the delegate's `selected` argument) but must not rebuild the
+    /// root — they only change what the root paints.
+    paint_refresh: Signal<u64>,
+
+    /// Pane-local rebuild trigger, owned here so it survives pane rebuilds.
+    pane_version: Signal<u64>,
+    /// Buffered row range materialized by the pane's latest build.
+    pane_built_start: Rc<Cell<usize>>,
+    pane_built_end: Rc<Cell<usize>>,
 
     // Set during build
-    item_entries: Vec<(usize, WidgetId)>, // (flat_index, widget_id)
+    body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
     viewport_height: Rc<Cell<f32>>,
     /// The TreeView's own absolute (window) bounds, cached from
@@ -269,6 +280,7 @@ pub struct TreeView<T: 'static> {
     enabled: Prop<bool>,
 }
 
+mod body_pane;
 mod builder;
 mod widget_impl;
 

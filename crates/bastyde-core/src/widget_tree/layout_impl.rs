@@ -155,21 +155,31 @@ impl WidgetTree {
     /// widgets transitioning from dormant → active in the same
     /// layout pass get rebuilt *this* frame rather than the next.
     pub(super) fn process_pending_rebuilds(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        // Defer *selected* rebuilds during the gesture-arena latch
-        // window: from `PointerDown` (which stores the press position
-        // in the captured widget's arena) until either `PointerUp` or
-        // the arena fires `DragStarted`. Rebuilding the captured
-        // widget, or any of its ancestors, would destroy that arena
-        // and lose the press state — the recognizer would never fire.
+        // Defer *selected* rebuilds while a pointer capture is held:
+        // from `PointerDown` (which stores the press position in the
+        // captured widget's arena) until `PointerUp`. Rebuilding the
+        // captured widget, or any of its ancestors, would destroy that
+        // arena and lose the press state — the recognizer would never
+        // fire.
+        //
+        // The window really does last the whole gesture, NOT just up to
+        // `DragStarted`: a gesture drag auto-captures on `DragStarted`
+        // (`gesture_dispatch_impl`) and holds until `DragEnded`, and the
+        // only thing that lifts this filter is `active_drag`, which is
+        // the drag-and-DROP session set by `start_drag` — never a
+        // scrollbar thumb. So a widget holding a live gesture must not
+        // be a descendant of anything that rebuilds on data or scroll
+        // changes, or that rebuild is silently dropped until release.
         //
         // Rebuilds targeting widgets *outside* the captured widget's
         // ancestor chain are safe: destroying sibling subtrees leaves
         // the captured widget intact, so ongoing drags keep routing
-        // correctly. This matters for e.g. a virtualized `ListView`
-        // inside a ComboBox panel whose scrollbar sibling is capturing
-        // the pointer — the list must rebuild when scroll crosses its
-        // buffer, but the scrollbar itself (held elsewhere in the
-        // tree) must not be torn down mid-drag.
+        // correctly. That is exactly why all five virtualized views
+        // (`ListView`, `TreeView`, `TableView`, `TreeTableView`,
+        // `GridView`) hoist their rows into a body pane that is a
+        // *sibling* of their scrollbar rather than realizing rows on
+        // the view root — see `common::thumb_drag_test` in
+        // `bastyde-widgets`, which asserts it for each of them.
         //
         // Once `active_drag` is set, the framework routes PointerMove /
         // PointerUp via `handle_drag_move` / `handle_drag_drop` keyed

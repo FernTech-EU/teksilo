@@ -66,16 +66,18 @@ use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::{ItemKey, KeyedSelectionModel};
 
 use crate::data_views::RowSelection;
-use bastyde_data::{DataChange, DragEligibility, DropPosition, DropResponse, ListModel, RowState};
+use bastyde_data::{DataChange, DropPosition, DropResponse, ListModel};
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{
-    DragTransferMode, RowDragData, ViewId, ViewKind, default_placeholder, flat_insertion_target,
+    DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target,
 };
 use crate::list_source::ListSource;
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
+
+mod body_pane;
 
 /// Default number of extra items to create above and below the viewport.
 const BUFFER_ITEMS: usize = 5;
@@ -169,17 +171,30 @@ pub struct ListView<T: 'static> {
     /// navigation. Bound `RepaintOnly`.
     focus_visible: Signal<bool>,
 
-    /// Rebuild trigger. A persistent field (re-bound each build) so
-    /// `place_children`'s post-measure realization re-check can request
-    /// a rebuild when corrected offsets reveal unrealized viewport rows.
-    version: Signal<u64>,
-    /// Buffered row range materialized by the latest build — consulted
-    /// by both the scroll observer and the realization re-check.
-    prev_built_start: Rc<Cell<usize>>,
-    prev_built_end: Rc<Cell<usize>>,
+    /// Root-level **relayout** trigger. The root's own `place_children` owns
+    /// the scrollbar totals (`max_scroll_y`, thumb ratio) and the
+    /// content-width decision, none of which its `build` output depends on —
+    /// so a data change or a pane measurement that moves the content total
+    /// needs a re-place here, not a rebuild. Bumped by the data observer and
+    /// by [`body_pane::ListBodyPane::total_refresh`].
+    layout_refresh: Signal<u64>,
+    /// Root-level **repaint** trigger for the container focus ring, which is
+    /// suppressed as soon as anything is selected. Selection changes rebuild
+    /// the pane (the delegate's `selected` argument) but must not rebuild the
+    /// root — they only change what the root paints.
+    paint_refresh: Signal<u64>,
+
+    /// Pane-local rebuild trigger, owned here so it survives pane rebuilds.
+    /// Bumped by the root's data observer, and by the pane itself on
+    /// scroll-buffer exit, selection change and the post-measure realization
+    /// re-check.
+    pane_version: Signal<u64>,
+    /// Buffered row range materialized by the pane's latest build.
+    pane_built_start: Rc<Cell<usize>>,
+    pane_built_end: Rc<Cell<usize>>,
 
     // Set during build
-    item_entries: Vec<(usize, WidgetId)>, // (model_index, widget_id)
+    body_pane_id: Option<WidgetId>,
     scrollbar_id: Option<WidgetId>,
     /// Shared so the on_drag_tick closure sees the current viewport
     /// height when edge-computing its auto-scroll delta. Plain `Cell<f32>`
@@ -319,10 +334,12 @@ impl<T: 'static> ListView<T> {
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
-            version: Signal::new(0_u64),
-            prev_built_start: Rc::new(Cell::new(0)),
-            prev_built_end: Rc::new(Cell::new(0)),
-            item_entries: Vec::new(),
+            layout_refresh: Signal::new(0_u64),
+            paint_refresh: Signal::new(0_u64),
+            pane_version: Signal::new(0_u64),
+            pane_built_start: Rc::new(Cell::new(0)),
+            pane_built_end: Rc::new(Cell::new(0)),
+            body_pane_id: None,
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -590,6 +607,17 @@ impl<T: 'static> ListView<T> {
         )
     }
 
+    /// The root's children, in the one order `build`, `children` and
+    /// `place_children` all rely on: body pane first, scrollbar second.
+    /// The pane is always mounted (an empty list realizes zero rows inside
+    /// it), so the scrollbar's index only shifts with `show_scrollbar`.
+    fn child_ids(&self) -> Vec<WidgetId> {
+        [self.body_pane_id, self.scrollbar_id]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     /// Clamp scroll_y to valid range.
     fn clamp_scroll(&self) {
         let max = self.max_scroll_y.get();
@@ -669,24 +697,46 @@ impl<T: 'static> std::fmt::Debug for ListView<T> {
 
 impl<T: 'static> Widget for ListView<T> {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
-        // --- Version signal for rebuild triggering ---
-        // A persistent field (not `ctx.signal`) so the realization
-        // re-check in `place_children` can bump it after measurement.
+        // The root builds exactly two children — the body pane and the
+        // scrollbar — and neither depends on the data, the selection or the
+        // scroll offset. So it declares no `Rebuild`-level binding at all:
+        // row realization is the pane's job (see `body_pane`'s module docs
+        // for why that separation is load-bearing and not just tidy), and
+        // what the root still owns resolves at `Relayout` / `RepaintOnly`.
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
 
-        let version = self.version.clone();
-        version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // Scrollbar totals + the content-width decision live in the root's
+        // `place_children`; a data change or a pane measurement that moves
+        // the content total re-places the root through this.
+        self.layout_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        // Container focus ring: painted only while nothing is selected, so a
+        // selection change has to reach the root's paint — without rebuilding
+        // it and taking the scrollbar down with it.
+        self.paint_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
 
         // Bind scroll_y at Relayout so place_children runs on every scroll
-        // position change (repositions items) without a full rebuild.
+        // position change (re-clamps and refreshes the thumb) without a
+        // rebuild. The pane holds the matching binding for its rows.
         self.scroll_y.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
 
-        // Register animated signal for smooth scrolling
+        // Register animated signal for smooth scrolling. Deliberately the
+        // ROOT and only the root: the scheduler keys an animation to the
+        // widget that registered its signal last and cancels it when that
+        // widget rebuilds, so registering from the pane too would make every
+        // buffer-exit rebuild abort an in-flight fling.
         ctx.register_animated_signal(&self.scroll_y);
 
         // Bind drop_feedback at RepaintOnly so `set(...)` calls from
@@ -699,8 +749,8 @@ impl<T: 'static> Widget for ListView<T> {
         );
 
         // Focus signals for the container ring (see TreeView). `RepaintOnly` so
-        // focus-in/out redraws; selection-emptiness changes already rebuild.
-        // `begin_view_focus` keys the scope signal on this root id directly,
+        // focus-in/out redraws; selection-emptiness changes arrive on
+        // `paint_refresh`. `begin_view_focus` keys the scope signal on this root id directly,
         // independent of the arena focusable flag (not yet wired at this point):
         // a plain `view_focus_active()` would `find_focusable_at_or_above`
         // nothing and fall back to the constant-`true` "outside any scope"
@@ -722,7 +772,12 @@ impl<T: 'static> Widget for ListView<T> {
         );
 
         // --- Observe model changes ---
-        let version_for_data = version.clone();
+        // One observer, root-owned, doing the bookkeeping the pane can't
+        // (metrics divergence, selection shift, keyboard cursor) and then
+        // fanning out: rebuild the pane (row content changed) and re-place
+        // the root (the content total, hence the thumb, changed).
+        let pane_version_for_data = self.pane_version.clone();
+        let layout_refresh_for_data = self.layout_refresh.clone();
         let data_ver = Rc::new(Cell::new(0_u64));
         let data_handle = (self.source.observe_fn)(Box::new({
             let dv = data_ver.clone();
@@ -766,57 +821,31 @@ impl<T: 'static> Widget for ListView<T> {
                 }
                 let next = dv.get() + 1;
                 dv.set(next);
-                version_for_data.set(next);
+                pane_version_for_data.set(next);
+                layout_refresh_for_data.set(next);
             }
         }));
         ctx.own_handle(data_handle);
 
-        // --- Observe selection changes (rebuild to update delegate's `selected` param) ---
+        // --- Observe selection changes ---
+        // The pane runs its own selection observer for the delegate's
+        // `selected` argument; the root only needs its container focus ring
+        // repainted, since that ring is suppressed once anything is selected.
         if let Some(ref rs) = self.row_selection {
-            let version_for_sel = version.clone();
+            let paint_refresh_for_sel = self.paint_refresh.clone();
             let sel_ver = Rc::new(Cell::new(0_u64));
             let handle = rs.observe_for_rebuild(move || {
                 let next = sel_ver.get() + 1;
                 sel_ver.set(next);
-                version_for_sel.set(next);
+                paint_refresh_for_sel.set(next);
             });
             ctx.own_handle(handle);
         }
 
-        // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
-        let viewport_h = self.viewport_height.clone();
-        // Track the buffered range from this build. Only trigger a rebuild
-        // when the visible range exceeds the buffer — most scrolls just need
-        // a relayout (handled by scroll_y's Relayout binding above).
-        let (built_start, built_end) = self.visible_range();
-        self.prev_built_start.set(built_start);
-        self.prev_built_end.set(built_end);
-        let version_for_scroll = version.clone();
-        let scroll_ver = Rc::new(Cell::new(0_u64));
-        let scroll_handle = self.scroll_y.observe({
-            let pbs = self.prev_built_start.clone();
-            let pbe = self.prev_built_end.clone();
-            let sv = scroll_ver.clone();
-            let metrics = self.metrics.clone();
-            let len_fn = self.source.len_fn.clone();
-            move |y| {
-                let (visible_start, visible_end) =
-                    metrics
-                        .borrow_mut()
-                        .visible_range(*y, viewport_h.get(), (len_fn)(), 0);
-                // Only rebuild when visible items fall outside the currently-built range
-                if visible_start < pbs.get() || visible_end > pbe.get() {
-                    let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
-                    let new_end = visible_end + BUFFER_ITEMS;
-                    pbs.set(new_start);
-                    pbe.set(new_end);
-                    let next = sv.get() + 1;
-                    sv.set(next);
-                    version_for_scroll.set(next);
-                }
-            }
-        });
-        ctx.own_handle(scroll_handle);
+        // Scroll-buffer exit is deliberately NOT observed here. It rebuilds
+        // the body pane and nothing else — the root's own children are
+        // unaffected by which rows are realized, and a root rebuild during a
+        // scrollbar thumb drag is exactly the one the framework defers.
 
         // --- Set up scroll event handler + DnD handlers on self ---
         let scroll_y = self.scroll_y.clone();
@@ -1287,215 +1316,40 @@ impl<T: 'static> Widget for ListView<T> {
 
         ctx.apply_self_handlers(handlers);
 
-        // --- Create visible item widgets ---
-        let (start, end) = self.visible_range();
-        self.item_entries.clear();
-        // Lazy: nudge the source to load the realized window, and fetch more
-        // as the viewport nears the end (append-only sources).
-        (self.source.dnd.request_window_fn)(start..end);
-        if (self.source.dnd.can_fetch_more_fn)() && end + BUFFER_ITEMS >= self.source.len() {
-            (self.source.dnd.fetch_more_fn)();
-        }
-        let selection = &self.row_selection;
-        let is_drag_source = self.export.is_drag_source(self.reorderable);
-        let model_id = self.model_id;
-        let self_id = ctx.self_id();
-        let row_state_fn = self.source.dnd.row_state_fn.clone();
-        ctx.begin_view_focus();
-        for i in start..end {
-            let selected = selection
-                .as_ref()
-                .map(|s| s.is_selected(i))
-                .unwrap_or(false);
-            // A `Loading` row (data not yet resident) renders a placeholder
-            // skeleton instead of being skipped, so the scrollbar and layout
-            // stay stable while the window loads.
-            let row_widget =
-                (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
-                    .or_else(|| ((row_state_fn)(i) == RowState::Loading).then(default_placeholder));
-            if let Some(widget) = row_widget {
-                let inner_id = ctx.add_boxed(widget);
-                let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
-                    inner_id, selected,
-                ));
-
-                // Selection click handling: plain click selects,
-                // Ctrl+click toggles, Shift+click extends range.
-                if let Some(ref sel) = self.row_selection {
-                    let sel_click = sel.clone();
-                    let click_anchor = self.source.anchor(i);
-                    let fi_click = self.focused_index.clone();
-                    // Deferred collapse: pressing an already-selected row keeps
-                    // the whole (multi-)selection so it can be dragged; the
-                    // collapse-to-single happens on release WITHOUT a drag.
-                    let pending_collapse = Rc::new(Cell::new(false));
-                    ctx.apply_handlers(
-                        child_id,
-                        HandlerSet::new().on_pointer_event(move |event, ctx| match event {
-                            bastyde_core::event::WidgetEvent::PointerDown {
-                                modifiers,
-                                button: bastyde_core::event::PointerButton::Primary,
-                                ..
-                            } => {
-                                // The shared deferred-select helper owns the
-                                // press-claimed guard, Ctrl/Shift handling, and
-                                // the defer-collapse-on-already-selected rule; it
-                                // returns false (skip the nav-cursor move) when an
-                                // interactive child claimed the press.
-                                // Resolve the row's CURRENT position: rows above
-                                // may have shifted since this handler was built,
-                                // and a deleted row must not hand its click on.
-                                let Some(row) = click_anchor.index() else {
-                                    return bastyde_core::event::EventResponse::Ignored;
-                                };
-                                if crate::data_views::deferred_select::on_down(
-                                    &sel_click,
-                                    row,
-                                    *modifiers,
-                                    &pending_collapse,
-                                    ctx,
-                                ) {
-                                    fi_click.set(Some(row));
-                                }
-                                // Ignored so the gesture arena still arms the
-                                // DragRecognizer for drag-to-reorder.
-                                bastyde_core::event::EventResponse::Ignored
-                            }
-                            bastyde_core::event::WidgetEvent::PointerUp {
-                                button: bastyde_core::event::PointerButton::Primary,
-                                ..
-                            } => {
-                                // `on_up` owns clearing `pending_collapse`, so
-                                // a vanished row must still clear it — leaving
-                                // it set would collapse the selection on an
-                                // unrelated later release — but must not select
-                                // an index that no longer exists.
-                                match click_anchor.index() {
-                                    Some(row) => crate::data_views::deferred_select::on_up(
-                                        &sel_click,
-                                        row,
-                                        &pending_collapse,
-                                        ctx,
-                                    ),
-                                    None => pending_collapse.set(false),
-                                }
-                                bastyde_core::event::EventResponse::Ignored
-                            }
-                            _ => bastyde_core::event::EventResponse::Ignored,
-                        }),
-                    );
-                }
-
-                // Row activation (open/commit) — a gesture, so it arbitrates
-                // against the reorder drag via the gesture arena (a click
-                // activates, a drag does not). `SingleClick` → `on_tap`,
-                // `DoubleClick` → `on_double_tap`; Enter/Space activates too.
-                if let Some(ref cb) = self.on_activate {
-                    let cb = cb.clone();
-                    // Anchored: a row that moved (or vanished) between build and
-                    // click must not activate whoever took its slot.
-                    let a = self.source.anchor(i);
-                    let handlers = match self.activate_on {
-                        crate::data_views::ActivateOn::SingleClick => {
-                            let a = a.clone();
-                            HandlerSet::new().on_tap(move |_tap, ctx| {
-                                if let Some(cur) = a.index() {
-                                    cb(cur, ctx)
-                                }
-                            })
-                        }
-                        crate::data_views::ActivateOn::DoubleClick => HandlerSet::new()
-                            .on_double_tap(move |_tap, ctx| {
-                                if let Some(cur) = a.index() {
-                                    cb(cur, ctx)
-                                }
-                            }),
-                    };
-                    ctx.apply_handlers(child_id, handlers);
-                }
-
-                // When reorderable OR exportable, attach an on_drag handler to
-                // start the drag. The preview is a fresh copy of the delegate's
-                // widget for the pressed item, wrapped in a sized+raised
-                // `DragPreview` so the floating widget has a stable footprint
-                // and reads as "picked up" against the window surface. Uses
-                // `start_drag_with_preview` so the framework overlays the
-                // preview at the pointer.
-                if is_drag_source {
-                    let drag_index = i;
-                    let drag_model_id = model_id;
-                    let drag_self_id = self_id;
-                    let delegate_for_preview = self.delegate.clone();
-                    let with_item_for_preview = self.source.with_item_fn.clone();
-                    let metrics_for_preview = self.metrics.clone();
-                    let width_for_preview = self.placed_content_width.clone();
-                    let drag_gate = self.source.dnd.drag_fn.clone();
-                    // Export capture: the dragged set is selection-aware; the
-                    // shared `RowExport` builds the payload (clones / MIME /
-                    // Loading-filter / stash) when the view opted in.
-                    let sel_for_drag = self.row_selection.clone();
-                    let export_for_drag = self.export.clone();
-                    let read_for_drag = self.source.read_item_fn.clone();
-                    let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
-                    ctx.apply_handlers(
-                        child_id,
-                        HandlerSet::new().on_drag(move |phase, ctx| {
-                            if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                                // The source's per-row transferable gate.
-                                if (drag_gate)(drag_index) == DragEligibility::NoDrag {
-                                    return;
-                                }
-                                // Selection-aware dragged set: the whole
-                                // selection when the pressed row is part of a
-                                // multi-selection, else just the pressed row.
-                                let rows: Vec<usize> = match sel_for_drag.as_ref() {
-                                    Some(s) if s.is_selected(drag_index) => {
-                                        let mut v = s.selected_indices();
-                                        v.sort_unstable();
-                                        if v.len() <= 1 { vec![drag_index] } else { v }
-                                    }
-                                    _ => vec![drag_index],
-                                };
-                                let Some(payload) = export_for_drag.build_payload(
-                                    drag_model_id,
-                                    rows,
-                                    &*read_for_drag,
-                                    &snapshot_for_drag,
-                                ) else {
-                                    return;
-                                };
-                                let delegate = delegate_for_preview.clone();
-                                let w = width_for_preview.get().max(120.0);
-                                let h = metrics_for_preview.borrow_mut().row_height(drag_index);
-                                let preview_opt = (with_item_for_preview)(drag_index, &|item| {
-                                    Box::new(crate::drag_preview::DragPreview::new(
-                                        w,
-                                        h,
-                                        delegate(drag_index, item, false),
-                                    )) as Box<dyn Widget>
-                                });
-                                if let Some(preview) = preview_opt {
-                                    ctx.start_drag_with_preview(drag_self_id, payload, preview);
-                                } else {
-                                    ctx.start_drag(drag_self_id, payload);
-                                }
-                            }
-                        }),
-                    );
-                }
-
-                self.item_entries.push((i, child_id));
-            }
-        }
-        ctx.end_view_focus();
+        // --- Body pane ---
+        // Hoisted into its own widget so that scroll-buffer-exit rebuilds
+        // (which happen mid-thumb-drag once the user scrolls past the
+        // buffered range) target a SIBLING of the scrollbar rather than the
+        // scrollbar's ancestor. Rebuilding the ancestor would be deferred by
+        // the framework to preserve the captured drag, leaving the list blank
+        // until the user released the thumb. See `body_pane`'s module docs.
+        let pane = body_pane::ListBodyPane::<T> {
+            source: self.source.clone(),
+            delegate: self.delegate.clone(),
+            metrics: self.metrics.clone(),
+            row_selection: self.row_selection.clone(),
+            focused_index: self.focused_index.clone(),
+            reorderable: self.reorderable,
+            export: self.export.clone(),
+            on_activate: self.on_activate.clone(),
+            activate_on: self.activate_on,
+            model_id: self.model_id,
+            root_id: self_id,
+            scroll_y: self.scroll_y.clone(),
+            viewport_height: self.viewport_height.clone(),
+            placed_content_width: self.placed_content_width.clone(),
+            version: self.pane_version.clone(),
+            total_refresh: self.layout_refresh.clone(),
+            prev_built_start: self.pane_built_start.clone(),
+            prev_built_end: self.pane_built_end.clone(),
+            item_entries: Vec::new(),
+        };
+        self.body_pane_id = Some(ctx.add(pane));
 
         // --- Create scrollbar ---
         // Skipped when the caller opted out via `show_scrollbar(false)`
         // — they're expected to mount their own, wired through the
-        // exposed signal accessors, so it can outlive ListView
-        // rebuilds (e.g. a ComboBox panel keeping the scrollbar alive
-        // mid-thumb-drag so the drag isn't torn down when the visible
-        // range crosses the buffer).
+        // exposed signal accessors.
         if self.show_scrollbar {
             let scrollbar = ScrollBar::new(
                 ScrollBarOrientation::Vertical,
@@ -1514,12 +1368,9 @@ impl<T: 'static> Widget for ListView<T> {
             self.scrollbar_id = None;
         }
 
-        let mut children: Vec<WidgetId> = self.item_entries.iter().map(|(_, id)| *id).collect();
-        if let Some(sb) = self.scrollbar_id {
-            children.push(sb);
-        }
-        children
+        self.child_ids()
     }
+
 
     fn layout_response(
         &self,
@@ -1542,7 +1393,7 @@ impl<T: 'static> Widget for ListView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
         // Cache our own absolute bounds for the keyboard handler's
         // outer-scroll chase (`ensure_visible`). Done before the empty-children
@@ -1558,8 +1409,6 @@ impl<T: 'static> Widget for ListView<T> {
         }
 
         let viewport_height = bounds.height;
-        let count = self.source.len();
-        let item_count = self.item_entries.len();
 
         // The scrollbar decision uses the pre-measure total: the content
         // width must be known before rows can be measured at it. If a
@@ -1575,52 +1424,10 @@ impl<T: 'static> Widget for ListView<T> {
         };
         self.placed_content_width.set(content_width);
 
-        // Auto-measure pass: measure every realized row at the content
-        // width (height-for-width), feed the heights back, and apply the
-        // scroll-anchor delta so content above the viewport stays put.
-        // Measurements are collected with NO metrics borrow held.
-        if self.metrics.borrow().needs_measure() {
-            let mut measured = Vec::with_capacity(item_count);
-            for (idx, child) in children.iter().enumerate() {
-                if idx < item_count
-                    && let Some(size) =
-                        ctx.child_size(child.id, SizeProposal::with_width(content_width))
-                {
-                    let (model_index, _) = self.item_entries[idx];
-                    measured.push((model_index, size.height));
-                }
-            }
-            let anchor = self
-                .metrics
-                .borrow_mut()
-                .observe_measured(&measured, self.scroll_y.get());
-            if anchor.abs() > 0.01 {
-                // Safe from place_children: the dirty flag is set but the
-                // binding flush already ran this pass — lands next frame.
-                self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
-            }
-
-            // Realization re-check: corrected offsets may reveal viewport
-            // rows that the estimated offsets never realized (rows
-            // measured shorter than the estimate leave a gap at the
-            // bottom otherwise). Request a rebuild for next frame; the
-            // 0.01 measurement epsilon guarantees convergence.
-            let (vs, ve) = self.metrics.borrow_mut().visible_range(
-                self.scroll_y.get(),
-                viewport_height,
-                count,
-                0,
-            );
-            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
-                self.prev_built_start.set(vs.saturating_sub(BUFFER_ITEMS));
-                self.prev_built_end.set(ve + BUFFER_ITEMS);
-                self.version.set(self.version.get() + 1);
-            }
-        }
-
-        // Post-measure totals so even frame 1's scrollbar reflects the
-        // measured window (identical to the provisional total outside
-        // auto-measure mode).
+        // Totals for the scrollbar. In auto-measure mode these are computed
+        // BEFORE the pane measures its rows (parent-before-child ordering), so
+        // the pane pokes `layout_refresh` when a measurement moves the total
+        // and we re-place next frame with the corrected value.
         let total_height = self.total_content_height();
         let max_y = (total_height - viewport_height).max(0.0);
         self.max_scroll_y.set(max_y);
@@ -1632,25 +1439,19 @@ impl<T: 'static> Widget for ListView<T> {
         self.viewport_ratio_y.set(ratio);
         self.clamp_scroll();
 
-        let scroll_y = self.scroll_y.get();
-
-        // Place item widgets
-        for (idx, child) in children.iter_mut().enumerate() {
-            if idx < item_count {
-                let (model_index, _) = self.item_entries[idx];
-                let (top, height) = {
-                    let mut m = self.metrics.borrow_mut();
-                    (m.row_top(model_index), m.row_height(model_index))
-                };
-                let y = bounds.y + top - scroll_y;
-                child.origin = Point::new(bounds.x, y);
-                child.size = Size::new(content_width, height);
+        // Two children in a fixed order (see `child_ids`): the body pane
+        // fills the content column and positions its own rows; the scrollbar
+        // sits alongside it.
+        let mut next = 0;
+        if self.body_pane_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                child.origin = bounds.origin();
+                child.size = Size::new(content_width, bounds.height);
             }
+            next += 1;
         }
-
-        // Place scrollbar (last child) — only when the ListView owns one.
-        if self.show_scrollbar
-            && let Some(sb_child) = children.last_mut()
+        if self.scrollbar_id.is_some()
+            && let Some(sb_child) = children.get_mut(next)
         {
             if needs_internal_scrollbar {
                 sb_child.origin =
@@ -1723,11 +1524,7 @@ impl<T: 'static> Widget for ListView<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        let mut ids: Vec<WidgetId> = self.item_entries.iter().map(|(_, id)| *id).collect();
-        if let Some(sb) = self.scrollbar_id {
-            ids.push(sb);
-        }
-        ids
+        self.child_ids()
     }
 
     fn clips_children(&self) -> bool {
@@ -1739,6 +1536,68 @@ impl<T: 'static> Widget for ListView<T> {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+
+    /// The realized row wrappers. `ListView`'s own children are the body pane
+    /// and the scrollbar (see `body_pane`'s module docs for why the rows sit
+    /// one level down), so every test that used to walk `tree.children(lv_id)`
+    /// for rows goes through here.
+    fn row_ids(tree: &WidgetTree, lv: WidgetId) -> Vec<WidgetId> {
+        let kids = tree.children(lv);
+        match kids.first() {
+            Some(&pane) => tree.children(pane),
+            None => Vec::new(),
+        }
+    }
+
+    /// The internal scrollbar — always the ListView's last child.
+    fn scrollbar_of(tree: &WidgetTree, lv: WidgetId) -> WidgetId {
+        *tree.children(lv).last().expect("ListView has children")
+    }
+
+    #[test]
+    fn smooth_scroll_survives_a_body_pane_rebuild() {
+        let (mut tree, lv_id, model) = make_list_view(500, 20.0);
+        let scroll = {
+            tree.layout(SizeProposal::exact(400.0, 200.0));
+            let any = tree.widget_as_any(lv_id).unwrap();
+            any.downcast_ref::<ListView<usize>>()
+                .unwrap()
+                .scroll_y_signal()
+                .clone()
+        };
+        crate::common::thumb_drag_test::assert_fling_survives_pane_rebuild(
+            &mut tree,
+            400.0,
+            200.0,
+            &scroll,
+            "ListView",
+            || model.push(9999),
+        );
+    }
+
+    #[test]
+    fn rows_materialize_during_scrollbar_thumb_drag() {
+        // The reason `ListBodyPane` exists — see
+        // `common::thumb_drag_test`'s module docs for the invariant.
+        let (mut tree, lv_id, _model) = make_list_view(500, 20.0);
+        crate::common::thumb_drag_test::assert_body_survives_thumb_drag(
+            &mut tree,
+            lv_id,
+            400.0,
+            200.0,
+            0.0,
+            "ListView",
+            |t| {
+                row_ids(t, lv_id)
+                    .into_iter()
+                    .filter(|id| {
+                        let b = t.bounds(*id);
+                        b.height > 1.0 && b.y > -b.height && b.y < 200.0
+                    })
+                    .count()
+            },
+        );
+    }
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -2028,7 +1887,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let rows = tree.children(lv_id);
+        let rows = row_ids(&tree, lv_id);
         let row0 = tree.bounds(rows[0]);
         let press = |t: &mut WidgetTree, x: f32, y: f32| {
             t.dispatch_event(WidgetEvent::PointerDown {
@@ -2077,7 +1936,7 @@ mod tests {
         // Viewport: 300px tall, items 30px each = ~10 visible + 2*5 buffer = ~20
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         // children includes items + 1 scrollbar
         let item_count = children.len() - 1;
         assert!(
@@ -2097,9 +1956,10 @@ mod tests {
         let (mut tree, lv_id, _model) = make_list_view(0, 30.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
-        // Only the scrollbar child (items = 0)
-        assert_eq!(children.len(), 1);
+        // The pane is mounted even with no data (it is the stable sibling the
+        // scrollbar needs), and realizes no rows.
+        assert_eq!(tree.children(lv_id).len(), 2, "body pane + scrollbar");
+        assert!(row_ids(&tree, lv_id).is_empty(), "no rows for an empty model");
     }
 
     #[test]
@@ -2107,13 +1967,13 @@ mod tests {
         let (mut tree, lv_id, model) = make_list_view(5, 30.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let initial_items = tree.children(lv_id).len() - 1; // minus scrollbar
+        let initial_items = row_ids(&tree, lv_id).len(); // minus scrollbar
         assert_eq!(initial_items, 5);
 
         model.push(99);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let new_items = tree.children(lv_id).len() - 1;
+        let new_items = row_ids(&tree, lv_id).len();
         assert_eq!(new_items, 6);
     }
 
@@ -2121,11 +1981,11 @@ mod tests {
     fn remove_triggers_rebuild() {
         let (mut tree, lv_id, model) = make_list_view(5, 30.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(tree.children(lv_id).len() - 1, 5);
+        assert_eq!(row_ids(&tree, lv_id).len(), 5);
 
         model.remove(0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(tree.children(lv_id).len() - 1, 4);
+        assert_eq!(row_ids(&tree, lv_id).len(), 4);
     }
 
     #[test]
@@ -2133,7 +1993,7 @@ mod tests {
         let (mut tree, lv_id, _model) = make_list_view(3, 40.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         // Items should be at y=0, y=40, y=80
         let y0 = tree.bounds(children[0]).y;
         let y1 = tree.bounds(children[1]).y;
@@ -2148,7 +2008,7 @@ mod tests {
         let (mut tree, lv_id, _model) = make_list_view(3, 40.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         for i in 0..3 {
             let h = tree.bounds(children[i]).height;
             assert!((h - 40.0).abs() < 0.01, "Item {} height {} != 40.0", i, h);
@@ -2160,9 +2020,7 @@ mod tests {
         let (mut tree, lv_id, _model) = make_list_view(100, 30.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
-        let sb = children.last().unwrap();
-        let sb_bounds = tree.bounds(*sb);
+        let sb_bounds = tree.bounds(scrollbar_of(&tree, lv_id));
         // Scrollbar should be at right edge
         assert!(
             (sb_bounds.x - (400.0 - SCROLLBAR_THICKNESS)).abs() < 0.01,
@@ -2179,9 +2037,7 @@ mod tests {
         // 3 items * 30px = 90px < 300px viewport
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
-        let sb = children.last().unwrap();
-        let sb_bounds = tree.bounds(*sb);
+        let sb_bounds = tree.bounds(scrollbar_of(&tree, lv_id));
         assert!(
             sb_bounds.width < 0.01 && sb_bounds.height < 0.01,
             "Scrollbar should be collapsed for small lists"
@@ -2193,7 +2049,7 @@ mod tests {
         let (mut tree, lv_id, _model) = make_list_view(100, 30.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let item_width = tree.bounds(children[0]).width;
         assert!(
             (item_width - (400.0 - SCROLLBAR_THICKNESS)).abs() < 0.01,
@@ -2209,7 +2065,7 @@ mod tests {
         // 3 items * 30px = 90px < 300px viewport — no scrollbar needed
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let item_width = tree.bounds(children[0]).width;
         assert!(
             (item_width - 400.0).abs() < 0.01,
@@ -2248,7 +2104,7 @@ mod tests {
     fn click_selects_item() {
         let (mut tree, lv_id, _, selection) = make_selectable_list(5);
         // Click the second item (y = 30..60, center at 45)
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         tree.click(children[1]);
         assert!(selection.is_selected(1), "item 1 should be selected");
         assert!(!selection.is_selected(0), "item 0 should not be selected");
@@ -2257,7 +2113,7 @@ mod tests {
     #[test]
     fn click_replaces_selection() {
         let (mut tree, lv_id, _, selection) = make_selectable_list(5);
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         tree.click(children[0]);
         assert!(selection.is_selected(0));
 
@@ -2317,7 +2173,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // Click row 1 → the keyed model stores key 20, not index 1.
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         tree.click(children[1]);
         assert!(keyed.is_selected(&20), "selection is stored by key");
         assert_eq!(keyed.selected_keys(), vec![20]);
@@ -2328,7 +2184,7 @@ mod tests {
     fn ctrl_click_toggles() {
         use bastyde_core::event::Modifiers;
         let (mut tree, lv_id, _, selection) = make_selectable_list(5);
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
 
         // Select item 0
         tree.click(children[0]);
@@ -2355,7 +2211,7 @@ mod tests {
     fn shift_click_extends_range() {
         use bastyde_core::event::Modifiers;
         let (mut tree, lv_id, _, selection) = make_selectable_list(5);
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
 
         // Select item 1 as anchor
         tree.click(children[1]);
@@ -2398,7 +2254,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // Initially: items near index 0 should be visible
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let first_y = tree.bounds(children[0]).y;
         assert!(
             first_y.abs() < 30.0,
@@ -2415,7 +2271,7 @@ mod tests {
 
         // After scroll: the first item's Y should be near 0 (scroll offset applied),
         // and crucially it should NOT be the same items as before scroll.
-        let children_after = tree.children(lv_id);
+        let children_after = row_ids(&tree, lv_id);
         let item_count_after = children_after.len() - 1;
         assert!(
             item_count_after > 0,
@@ -2458,7 +2314,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // The direct children of ListView are ListItemWrappers (+ scrollbar)
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let info = tree.accessibility_node(children[0]);
         assert_eq!(
             info.role(),
@@ -2887,7 +2743,7 @@ mod tests {
 
         // Source: item 0 (y=0..30, center y=15). Target: between item 3 and 4
         // (y=120; insertion index = round((120 + 15) / 30) = 4 → after index-shift = 3).
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let from = tree.bounds(children[0]).center();
         let to = Point::new(from.x, 120.0);
         drag_item(&mut tree, from, to);
@@ -2905,7 +2761,7 @@ mod tests {
 
         // Source: item 3 (value 40, y=90..120, center y=105). Target: y=15 (just
         // below top → insertion index 1).
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let from = tree.bounds(children[3]).center();
         let to = Point::new(from.x, 15.0);
         drag_item(&mut tree, from, to);
@@ -2999,7 +2855,7 @@ mod tests {
 
         // Drag item 0 down to y=120 → insertion index 4 → (target 4, Before),
         // which the source resolves to the move (from 0, to 3).
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let from = tree.bounds(children[0]).center();
         let to = Point::new(from.x, 120.0);
         drag_item(&mut tree, from, to);
@@ -3029,7 +2885,7 @@ mod tests {
         });
 
         // Drag item 0 down to index 3
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let from = tree.bounds(children[0]).center();
         let to = Point::new(from.x, 120.0);
         drag_item(&mut tree, from, to);
@@ -3122,7 +2978,7 @@ mod tests {
         selected_rebuilds.borrow_mut().push(current_pass.take());
 
         // Click item 2.
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         tree.click(children[2]);
 
         // 1. Selection model updated.
@@ -3272,7 +3128,7 @@ mod tests {
 
         // 300px / 30px = 10 visible + buffer → the loading rows are realized as
         // placeholder child widgets (children minus the scrollbar), NOT skipped.
-        let placeholder_rows = tree.children(lv_id).len() - 1;
+        let placeholder_rows = row_ids(&tree, lv_id).len();
         assert!(
             placeholder_rows >= 10,
             "loading rows must render as placeholders, got {placeholder_rows}"
@@ -3535,8 +3391,8 @@ mod tests {
     /// Collect the (y, height) bounds of the realized item children (the
     /// scrollbar is always the last child), sorted by y.
     fn item_spans(tree: &WidgetTree, lv_id: WidgetId) -> Vec<(f32, f32)> {
-        let children = tree.children(lv_id);
-        let mut spans: Vec<(f32, f32)> = children[..children.len() - 1]
+        let children = row_ids(tree, lv_id);
+        let mut spans: Vec<(f32, f32)> = children[..]
             .iter()
             .map(|c| {
                 let b = tree.bounds(*c);
@@ -3592,7 +3448,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
-        let item_count = tree.children(lv_id).len() - 1;
+        let item_count = row_ids(&tree, lv_id).len();
         assert!(
             item_count < 40,
             "Expected fewer than 40 realized rows, got {item_count}"
@@ -3718,9 +3574,9 @@ mod tests {
         let lv_id = tree.add(lv);
 
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let item0_frame1 = tree.bounds(children[0]).width;
-        let sb_frame1 = tree.bounds(*children.last().unwrap()).width;
+        let sb_frame1 = tree.bounds(scrollbar_of(&tree, lv_id)).width;
         assert!(
             (item0_frame1 - 400.0).abs() < 0.01,
             "frame 1 uses the pre-measure (no-scrollbar) decision, got width {item0_frame1}"
@@ -3735,9 +3591,9 @@ mod tests {
         // the next `layout()` to re-run `place_children`.
         scroll_y.set(0.0);
         tree.layout(SizeProposal::exact(400.0, 300.0));
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let item0_frame2 = tree.bounds(children[0]).width;
-        let sb_frame2 = tree.bounds(*children.last().unwrap()).width;
+        let sb_frame2 = tree.bounds(scrollbar_of(&tree, lv_id)).width;
         assert!(
             (item0_frame2 - (400.0 - SCROLLBAR_THICKNESS)).abs() < 0.01,
             "frame 2 must self-correct to the measured (needs-scrollbar) width, got {item0_frame2}"
@@ -3796,7 +3652,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         // Drag item 4 (value 50) up to y = 35.
-        let children = tree.children(lv_id);
+        let children = row_ids(&tree, lv_id);
         let from = tree.bounds(children[4]).center();
         drag_item(&mut tree, from, Point::new(from.x, 35.0));
 
