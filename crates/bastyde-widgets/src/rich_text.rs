@@ -102,6 +102,8 @@ pub enum ScrollPolicy {
 
 /// The main rich text widget. Construct via [`RichTextEditor::read_only`]
 /// (view/select only) or [`RichTextEditor::editor`] (full editing).
+pub use self::state::TextAnnotationSpan;
+
 pub struct RichTextEditor {
     state: SharedState,
     v_scroll_policy: ScrollPolicy,
@@ -337,6 +339,23 @@ impl RichTextEditor {
                 st.needs_full_layout = true;
             }
         }
+        self
+    }
+
+    /// Declare the annotations (comment threads) covering ranges of this
+    /// document, for the **accessibility tree only**.
+    ///
+    /// Each span becomes a `Role::Comment` node, and every `Role::TextRun` it
+    /// covers points at it through AccessKit's `details` relation — the W3C
+    /// annotations pattern, and the reason a screen reader can say "has comment"
+    /// and let the user navigate in rather than reciting the thread every time the
+    /// caret crosses the span.
+    ///
+    /// Painting is a separate concern: a highlight session draws the underline. A
+    /// highlight carries no text and this carries no colour, so neither is
+    /// derivable from the other and both are supplied independently.
+    pub fn annotation_spans(self, spans: Vec<TextAnnotationSpan>) -> Self {
+        self.state.borrow_mut().annotation_spans = spans;
         self
     }
 
@@ -3384,6 +3403,25 @@ impl Widget for RichTextEditorBody {
                                 },
                                 attrs,
                             );
+
+                            // Annotations covering this run: one Role::Comment
+                            // node each, linked from the run through `details`.
+                            // Emitted per run rather than once per span because a
+                            // span can cross runs (a bold word inside a commented
+                            // sentence splits it), and every covered run must
+                            // carry the relation or the announcement drops out
+                            // halfway through the phrase.
+                            let run_start = block.position + *offset;
+                            let run_end = run_start + *length;
+                            for span in &st.annotation_spans {
+                                if span.start < run_end && span.end > run_start {
+                                    let detail = builder.push_annotation_child(
+                                        span.group_id,
+                                        span.summary.clone(),
+                                    );
+                                    builder.push_detail_on_child(node_id, detail);
+                                }
+                            }
 
                             // Remember where this run lives in the document so
                             // the on-access handler can resolve

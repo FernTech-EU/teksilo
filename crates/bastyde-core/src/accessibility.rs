@@ -75,6 +75,13 @@ pub enum SyntheticKind {
     /// A per-datum mark (bar / line point / pie slice) emitted by a
     /// `bastyde-charts` widget's `accessibility()`.
     ChartMark = 8,
+    /// An annotation body (a comment thread) attached to a run of text, emitted
+    /// by a rich-text widget alongside the `TextRun` that carries it. The run
+    /// points at this node through the `details` relation — AccessKit's
+    /// `aria-details` — which is what lets a screen reader say "has comment" and
+    /// let the user navigate in, rather than reciting the thread inline every
+    /// time the caret crosses the span.
+    Annotation = 9,
 }
 
 /// A captured live-region announcement — the text a screen reader would
@@ -289,6 +296,28 @@ impl AccessNodeBuilder {
     /// `access_labelled_by` to point at an external label widget.
     pub fn push_labelled_by(&mut self, id: NodeId) {
         self.inner.push_labelled_by(id);
+    }
+
+    /// Replace the `details` relationship list — AccessKit's analogue of
+    /// `aria-details`.
+    ///
+    /// Distinct from `described_by`, and deliberately so: a *description* is text
+    /// a screen reader appends when announcing the element, while *details* points
+    /// at a structured node the user can navigate **into**. The W3C annotations
+    /// pattern is built on that difference — an annotated run carries
+    /// `aria-details` to a `role="comment"` node, so the reader can say "has
+    /// comment" and let the user go read it, rather than reciting a whole thread
+    /// inline every time the caret crosses the span.
+    pub fn set_details(&mut self, ids: impl Into<Vec<NodeId>>) {
+        self.inner.set_details(ids);
+    }
+
+    /// Append one node to the `details` relationship list.
+    ///
+    /// It is a list, not a single id, because overlapping annotations are normal:
+    /// one run of text can carry several comments, and each gets its own entry.
+    pub fn push_detail(&mut self, id: NodeId) {
+        self.inner.push_detail(id);
     }
 
     /// Stable author-supplied identifier (test/debug id, equivalent to
@@ -709,6 +738,48 @@ impl AccessNodeBuilder {
         self.children_collected.push((node_id, node));
         self.inner.push_child(node_id);
         node_id
+    }
+
+    /// Push a `Role::Comment` child carrying an annotation's text, and return its
+    /// `NodeId` so the annotated run can point at it via [`push_detail`].
+    ///
+    /// `group_id` must be the annotation's own durable identity (a comment's uid,
+    /// never a store id), so the node keeps the same `NodeId` across rebuilds and
+    /// a screen reader's cursor is not thrown out of the thread by an unrelated
+    /// edit elsewhere in the document.
+    ///
+    /// Per the W3C annotations pattern the *body* carries the name; the annotated
+    /// span itself must NOT be given an accessible name (`role="mark"` forbids it)
+    /// — naming the span would make the reader announce the comment's text in
+    /// place of the prose.
+    pub fn push_annotation_child(&mut self, group_id: u64, text: impl Into<String>) -> NodeId {
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_annotation_child called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, group_id, SyntheticKind::Annotation);
+        let mut node = Node::new(Role::Comment);
+        node.set_value(text.into());
+        self.children_collected.push((node_id, node));
+        self.inner.push_child(node_id);
+        node_id
+    }
+
+    /// Add a `details` target to an already-pushed **child** node.
+    ///
+    /// The sub-tree API builds children eagerly into `children_collected`, so a
+    /// relation between two synthetic siblings (a `TextRun` and its annotation
+    /// body) cannot go through the current node's own setters — it has to reach
+    /// back into the collected child. A no-op if `child` was never pushed, which
+    /// keeps a caller that emitted spans for a run it then skipped from panicking.
+    pub fn push_detail_on_child(&mut self, child: NodeId, detail: NodeId) {
+        if let Some((_, node)) = self.children_collected.iter_mut().find(|(id, _)| *id == child) {
+            node.push_detail(detail);
+        }
     }
 
     /// Push a `Role::Link` child on the current node. Used by label

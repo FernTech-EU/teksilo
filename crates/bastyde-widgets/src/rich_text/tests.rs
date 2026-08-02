@@ -7101,3 +7101,119 @@ mod vertical_movement {
         assert!(handle.cursor_position() <= 61, "no running off the bottom");
     }
 }
+
+// ---------------------------------------------------------------------------
+// AccessKit annotation (comment) emission — the W3C annotations pattern
+// ---------------------------------------------------------------------------
+
+#[allow(unused_imports)]
+use crate::rich_text::TextAnnotationSpan;
+
+/// An annotated range must produce a `Role::Comment` body node, and the
+/// `Role::TextRun` covering it must point at that node through `details`
+/// (AccessKit's `aria-details`).
+///
+/// That relation is the whole feature: without it a screen reader has no way to
+/// know the prose is annotated, and the underline a sighted user sees has no
+/// accessible counterpart at all.
+#[test]
+fn an_annotated_range_emits_a_comment_node_linked_by_details() {
+    use bastyde_core::accesskit::Role;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("The lamp guttered").unwrap();
+    let editor = RichTextEditor::editor(doc).annotation_spans(vec![TextAnnotationSpan {
+        start: 4,
+        end: 8,
+        group_id: 77,
+        summary: "Jane: is this too on-the-nose?".into(),
+    }]);
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    let update = tree.sync_accessibility();
+
+    let comment = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Comment)
+        .expect("an annotated range must emit a Role::Comment body node");
+    assert_eq!(
+        comment.1.value(),
+        Some("Jane: is this too on-the-nose?"),
+        "the body carries the text to announce — the marked span must not, since \
+         role=mark forbids an accessible name"
+    );
+
+    let linked = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == Role::TextRun)
+        .any(|(_, n)| n.details().contains(&comment.0));
+    assert!(
+        linked,
+        "the TextRun covering the annotation must point at the comment via details"
+    );
+}
+
+/// No annotations, no comment nodes — the feature must cost nothing on an
+/// ordinary document.
+#[test]
+fn an_unannotated_document_emits_no_comment_nodes() {
+    use bastyde_core::accesskit::Role;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("The lamp guttered").unwrap();
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(RichTextEditor::editor(doc));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let update = tree.sync_accessibility();
+    assert!(
+        !update.nodes.iter().any(|(_, n)| n.role() == Role::Comment),
+        "an unannotated document must emit no annotation bodies"
+    );
+}
+
+/// Two overlapping annotations both reach the reader: `details` is a list, so the
+/// covered run points at both bodies. Overlap is normal in review, and a design
+/// that kept only one would silently hide a thread.
+#[test]
+fn overlapping_annotations_each_get_their_own_body_node() {
+    use bastyde_core::accesskit::Role;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("The lamp guttered").unwrap();
+    let editor = RichTextEditor::editor(doc).annotation_spans(vec![
+        TextAnnotationSpan {
+            start: 0,
+            end: 8,
+            group_id: 1,
+            summary: "first".into(),
+        },
+        TextAnnotationSpan {
+            start: 4,
+            end: 17,
+            group_id: 2,
+            summary: "second".into(),
+        },
+    ]);
+
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    let update = tree.sync_accessibility();
+
+    let bodies: Vec<&str> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == Role::Comment)
+        .filter_map(|(_, n)| n.value())
+        .collect();
+    assert!(bodies.contains(&"first"), "got {bodies:?}");
+    assert!(bodies.contains(&"second"), "got {bodies:?}");
+}

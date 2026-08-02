@@ -22,6 +22,26 @@ use bastyde_text::text_document::{
 use bastyde_text::{CursorAffinity, RichTextEngine, WrapMode};
 
 use super::caret_highlight::CaretHighlightSession;
+
+/// One annotation (a comment thread) covering `[start, end)` of the document, in
+/// document-absolute **character** offsets — the space cursors and `FindMatch`
+/// speak.
+///
+/// The framework stays ignorant of what an annotation *is*: the host supplies
+/// already-resolved spans and the text to announce, and this only turns them into
+/// AccessKit nodes. That keeps a comment feature's anchoring rules — which are
+/// application policy — out of the widget.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct TextAnnotationSpan {
+    pub start: usize,
+    pub end: usize,
+    /// Durable identity of the annotation, so its synthetic `NodeId` is stable
+    /// across rebuilds and a screen reader's cursor is not thrown out of the
+    /// thread by an unrelated edit elsewhere.
+    pub group_id: u64,
+    /// What a screen reader should read: author, body, reply count, state.
+    pub summary: String,
+}
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
 use crate::common::editor_runtime::{CaretBlink, Debounce};
@@ -138,6 +158,15 @@ pub(crate) struct EditorState {
     /// engine's per-block relayout. Default `true`; `read_only` defaults
     /// it to `false` (override either way via `RichTextEditor::show_highlights`).
     pub show_highlights: bool,
+    /// Annotation bodies (comment threads) covering ranges of this document, for
+    /// the accessibility tree only.
+    ///
+    /// Deliberately separate from the highlight sessions that *paint* them: paint
+    /// says "something is here", while this says what it is and lets a screen
+    /// reader navigate into it. A sighted user gets the underline; an AT user gets
+    /// `aria-details` to a `Role::Comment` node. Neither is derivable from the
+    /// other — a highlight carries no text, and this carries no colour.
+    pub annotation_spans: Vec<TextAnnotationSpan>,
 
     /// Window the render to the accumulated ancestor clip instead of this
     /// widget's own bounds. `false` by default: a normal self-scrolling editor
@@ -550,6 +579,7 @@ impl EditorState {
             engine,
             cursor,
             policy,
+            annotation_spans: Vec::new(),
             document_version: Signal::new(0),
             format_version: Signal::new(0),
             document_loaded_count: Signal::new(0),
