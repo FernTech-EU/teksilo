@@ -26,13 +26,51 @@ InputDialog::new(tr!(rename_title()))
     .present(ctx);
 ```
 
+## Live validation
+
+`validate` runs on every keystroke and both **disables OK**
+and shows its message under the field, so a value the caller cannot accept can never
+be submitted:
+
+```ignore
+InputDialog::new(tr!(save_as_template_title()))
+    .validate(move |name| {
+        if name.trim().is_empty() {
+            Err(None)                                  // block, say nothing
+        } else if let Some(clash) = taken(name) {
+            Err(Some(tr!(duplicate(name = clash))))    // block, and explain
+        } else {
+            Ok(())
+        }
+    })
+    .on_result(|result, _| { /* only ever called with a valid value */ })
+    .present(ctx);
+```
+
+`Err(None)` is the "not yet" case — it disables OK without printing anything, which
+is what an *untouched* empty field wants: shouting at someone before they have typed
+is noise, and the greyed button already says the dialog is not ready. A message is
+withheld until the field has been edited for the same reason, so a caller can return
+`Err(Some(..))` for the empty case without it flashing on open.
+
 ## Builder methods at a glance
 
-`prompt`, `placeholder`, `default_text`, `ok_label`, `cancel_label`, `on_result`, `present`
+`prompt`, `placeholder`, `default_text`, `ok_label`, `cancel_label`, `on_result`, `validate`, `present`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](../api/bastyde_widgets/input_dialog/index.html)
+
+## `pub type ValidateResult`
+
+Verdict from an `InputDialog::validate` callback.
+
+`Ok(())` accepts. `Err(None)` blocks silently; `Err(Some(msg))` blocks and shows
+`msg` beneath the field once it has been edited.
+
+```rust
+pub type ValidateResult = Result<(), Option<LocalizedString>>;
+```
 
 ## `pub struct InputDialog`
 
@@ -74,6 +112,22 @@ translated "Cancel" string).
 
 Result callback. Invoked exactly once when the user accepts
 (`Some(value)`) or cancels (`None`).
+
+#### `pub fn validate(mut self, f: impl Fn(&str) -> ValidateResult + 'static) -> Self`
+
+Install a **live** validator, run on every keystroke.
+
+While it returns `Err`, the OK button is disabled and Enter does nothing, so
+`on_result` is only ever called with a value the validator
+accepted (or with `None`, for Cancel). `Err(Some(msg))` shows `msg` under the
+field; `Err(None)` blocks without saying anything.
+
+The message is withheld until the field has been edited, so a validator that
+rejects the empty string does not greet the writer with an error on a dialog they
+have not yet typed into. The disabled OK is what communicates "not yet" there.
+
+Distinct from `TextInput::validator`,
+which fires on *commit* and cannot gate a dialog's accept path.
 
 #### `pub fn present(self, ctx: &mut EventContext)`
 
