@@ -227,9 +227,27 @@ impl Widget for Expand {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        // Measure against the parent's own proposal, NOT `unspecified()`.
+        //
+        // The two are identical on any axis the parent left open — which is every axis
+        // whose measurement we actually consume below, since each `child_size` read sits
+        // in a `None` arm. What differs is the *other* axis: passing the bound one
+        // through lets a child whose size on one axis depends on the other report the
+        // truth.
+        //
+        // Wrapping text is the case that exposed it. `TextWidget` in `Wrap` mode has no
+        // basis for wrapping without a width, so it measures as a **single line**
+        // (text_widget.rs, the `None => layout_single_line` arm). With `unspecified()`,
+        // an `Expand::horizontal` inside a width-bounded `HStack` therefore reported a
+        // one-line height for a paragraph that paints three — and the parent sized its
+        // chrome to that lie, so the text rendered *outside* its own container. Found in
+        // Skribisto, where a toast body spilled over the status bar.
+        //
+        // Flex-basis semantics are unaffected: `basis_w` / `basis_h` are only read when
+        // the parent left that axis open, so the proposal we forward has it open too.
         let child_size = self
             .child_id
-            .and_then(|id| ctx.child_size(id, SizeProposal::unspecified()))
+            .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or(Size::ZERO);
 
         // Two separate concerns:
@@ -336,6 +354,84 @@ mod tests {
         fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             Size::new(self.0, self.1).into()
         }
+    }
+
+    /// A child whose height depends on the width it is measured at — the shape of every
+    /// wrapping paragraph, and the one `unspecified()` measurement could not see.
+    #[derive(Debug)]
+    struct WrappingLeaf {
+        /// Total width the content needs on one line.
+        natural_width: f32,
+        line_height: f32,
+    }
+    impl Widget for WrappingLeaf {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            match proposal.width {
+                // Bounded: wrap into as many lines as it takes.
+                Some(w) if w > 0.0 => {
+                    let lines = (self.natural_width / w).ceil().max(1.0);
+                    Size::new(w, lines * self.line_height).into()
+                }
+                // Unbounded: exactly what `TextWidget` does in `Wrap` mode — no basis for
+                // wrapping, so report a single line.
+                _ => Size::new(self.natural_width, self.line_height).into(),
+            }
+        }
+    }
+
+    /// `Expand` must measure its child against the parent's own proposal, so a child
+    /// whose height depends on its width reports the height it will really occupy.
+    ///
+    /// Regression: `Expand::layout_response` measured with `SizeProposal::unspecified()`,
+    /// so a wrapping paragraph inside a width-bounded stack reported ONE line while
+    /// painting four. Every container above it sized to the one-line lie and the text
+    /// rendered outside its own chrome — seen in Skribisto as a toast body spilling over
+    /// the status bar.
+    #[test]
+    fn expand_measures_a_width_dependent_child_at_the_width_it_will_get() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(WrappingLeaf {
+            natural_width: 400.0,
+            line_height: 16.0,
+        });
+        let expand = tree.add(Expand::horizontal().child_id(child));
+
+        // The parent binds width and leaves height open — exactly what `ToastHost`
+        // proposes to each toast surface.
+        tree.layout(SizeProposal {
+            width: Some(100.0),
+            height: None,
+        });
+
+        let eb = tree.bounds(expand);
+        assert!(
+            (eb.height - 64.0).abs() < 0.01,
+            "400px of content at 100px wide is four 16px lines; \
+             got {} (a one-line answer means the bound width was discarded)",
+            eb.height
+        );
+    }
+
+    /// The companion property: on an axis the parent left open, the measurement is
+    /// unchanged — the forwarded proposal has that axis open too, so flex-basis and
+    /// shrink-wrap semantics are exactly what they were.
+    #[test]
+    fn expand_still_shrink_wraps_on_a_fully_open_proposal() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(WrappingLeaf {
+            natural_width: 400.0,
+            line_height: 16.0,
+        });
+        let expand = tree.add(Expand::horizontal().child_id(child));
+
+        tree.layout(SizeProposal::unspecified());
+
+        let eb = tree.bounds(expand);
+        assert!(
+            (eb.height - 16.0).abs() < 0.01,
+            "with no width to wrap at, the child's single-line height stands (got {})",
+            eb.height
+        );
     }
 
     #[test]

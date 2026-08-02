@@ -4,11 +4,13 @@
 //! ZStack — a layout container that layers children on top of each other.
 //!
 //! The container sizes itself to the maximum width and maximum height across
-//! all children (each measured at an unspecified proposal so background rects
-//! do not inflate the size).  Each child is then offered the full container
-//! bounds and positioned according to the container-level `Alignment`
-//! (default: `CENTER`); individual children can override alignment via
-//! `WidgetTree::set_alignment`.
+//! all children, measured at an unspecified proposal so background rects do not
+//! inflate the size. **Height additionally takes a width-bounded query** when the
+//! parent bound the width, so a wrapping child reports the height it will really
+//! occupy rather than a single line; see `layout_response` for why that query is
+//! width-only. Each child is then offered the full container bounds and
+//! positioned according to the container-level `Alignment` (default: `CENTER`);
+//! individual children can override alignment via `WidgetTree::set_alignment`.
 //!
 //! The primary use-cases are layered UIs — a background `RectWidget` beneath
 //! a `TextWidget`, a floating badge over a button icon — and card-like
@@ -109,15 +111,33 @@ impl Widget for ZStack {
         // This ensures background elements (like RectWidget, which returns 0x0 for
         // unspecified) don't inflate the stack's size.
         //
-        // NOTE: a known limitation is that a height-for-width child (wrapping
-        // text) measured here at `unspecified()` reports its single-line width
-        // rather than wrapping to the offered width. Forwarding the incoming
-        // `proposal` instead would fix wrapping, but it interacts badly with
-        // `MinSize` (which forwards `Some(min)` as the width): a *shrinkable*
-        // single-line label inside `MinSize → ZStack` then truncates to the min
-        // width during intrinsic measurement. A correct fix needs `MinSize`'s
-        // proposal semantics reworked for shrink- vs. wrap-aware children, so
-        // the conservative `unspecified()` is kept here for now.
+        // **Height gets a second, width-bounded query.** A height-for-width child
+        // (wrapping text) measured at `unspecified()` has no basis for wrapping, so it
+        // reports a *single line* — and the ZStack then sized its chrome to that, leaving
+        // the real paragraph to paint outside its own background. Found in Skribisto,
+        // where a toast body spilled over the status bar.
+        //
+        // The obvious fix — forwarding the whole incoming `proposal` — is the one this
+        // code deliberately avoided, for two separate reasons, and both still stand:
+        //
+        //  * **Width.** `MinSize` forwards `Some(min)` as the width, so a *shrinkable*
+        //    single-line label inside `MinSize → ZStack` would truncate to the min width
+        //    during intrinsic measurement. `max_w` is therefore still taken only from the
+        //    unspecified pass — untouched, bug-for-bug.
+        //  * **Height.** Forwarding a bound `proposal.height` would let a greedy child
+        //    (`RectWidget`) claim it and inflate the stack — exactly what the unspecified
+        //    pass exists to prevent. So the second query pins `height: None` and offers
+        //    only the width.
+        //
+        // What is left is precise: children are asked "how tall are you at the width you
+        // will actually get?", and nothing else changes. A greedy background answers 0,
+        // a truncating label answers one line either way, and only a wrapping child moves.
+        let bounded_for_height = SizeProposal {
+            width: proposal.width,
+            height: None,
+        };
+        let query_twice = proposal.width.is_some();
+
         let mut max_w: f32 = 0.0;
         let mut max_h: f32 = 0.0;
         let mut min_w: f32 = 0.0;
@@ -133,6 +153,14 @@ impl Widget for ZStack {
                 if r.shrink > 0.0 {
                     any_shrink = true;
                 }
+                any_queried = true;
+            }
+            // Height only. Skipped entirely when the parent left the width open, since
+            // the proposal would then be identical to the unspecified one above.
+            if query_twice
+                && let Some(r) = ctx.child_layout_response(child_id, bounded_for_height)
+            {
+                max_h = max_h.max(r.size.height);
                 any_queried = true;
             }
         }
@@ -221,6 +249,100 @@ mod tests {
         ) -> bastyde_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
+    }
+
+    /// A child whose height depends on the width it is measured at — the shape of a
+    /// wrapping paragraph, including its single-line answer when given no width.
+    #[derive(Debug)]
+    struct WrappingLeaf {
+        natural_width: f32,
+        line_height: f32,
+    }
+    impl Widget for WrappingLeaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            match proposal.width {
+                Some(w) if w > 0.0 => {
+                    let lines = (self.natural_width / w).ceil().max(1.0);
+                    Size::new(w, lines * self.line_height).into()
+                }
+                _ => Size::new(self.natural_width, self.line_height).into(),
+            }
+        }
+    }
+
+    /// A child that claims whatever it is offered — `RectWidget`'s shape, and the reason
+    /// the intrinsic pass exists.
+    #[derive(Debug)]
+    struct GreedyLeaf;
+    impl Widget for GreedyLeaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            Size::new(
+                proposal.width.unwrap_or(0.0),
+                proposal.height.unwrap_or(0.0),
+            )
+            .into()
+        }
+    }
+
+    /// The toast chrome's exact shape: a greedy background layered under wrapping content.
+    ///
+    /// Regression: both children were measured only at `unspecified()`, so the paragraph
+    /// reported a single line and the ZStack sized its background to that — the remaining
+    /// lines painted outside the chrome entirely. Seen in Skribisto as a toast body
+    /// spilling over the status bar.
+    #[test]
+    fn a_wrapping_child_gets_its_real_height_when_the_width_is_bound() {
+        let mut tree = WidgetTree::new();
+        let bg = tree.add(GreedyLeaf);
+        let text = tree.add(WrappingLeaf {
+            natural_width: 400.0,
+            line_height: 16.0,
+        });
+        let stack = tree.add(ZStack::new().add_child(bg).add_child(text));
+
+        // Width bound, height open — what a toast surface is offered.
+        tree.layout(SizeProposal {
+            width: Some(100.0),
+            height: None,
+        });
+
+        let b = tree.bounds(stack);
+        assert!(
+            (b.height - 64.0).abs() < 0.01,
+            "400px of content at 100px wide is four 16px lines; got {} \
+             (16 means the child was only ever measured unbounded)",
+            b.height
+        );
+    }
+
+    /// The guard the second query must not break: a greedy background still contributes
+    /// nothing to the height, because that query pins `height: None`.
+    #[test]
+    fn a_greedy_background_still_does_not_inflate_the_stack() {
+        let mut tree = WidgetTree::new();
+        let bg = tree.add(GreedyLeaf);
+        let content = tree.add(FixedLeaf(40.0, 20.0));
+        let stack = tree.add(ZStack::new().add_child(bg).add_child(content));
+
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+
+        let b = tree.bounds(stack);
+        assert!(
+            (b.height - 20.0).abs() < 0.01,
+            "the background must not set the height; got {}",
+            b.height
+        );
     }
 
     #[test]
