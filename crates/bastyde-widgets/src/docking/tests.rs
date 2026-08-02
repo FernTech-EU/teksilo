@@ -51,6 +51,21 @@ fn count_role(tree: &WidgetTree, id: WidgetId, role: Role) -> usize {
         .sum::<usize>()
 }
 
+/// Like [`count_role`], but counts only nodes that are actually laid out.
+/// Overflow parks the surplus rail items dormant (zero bounds) rather than
+/// removing them from the arena, so a plain `count_role` cannot see overflow at
+/// all — it would return the full item count regardless.
+fn count_role_laid_out(tree: &WidgetTree, id: WidgetId, role: Role) -> usize {
+    let here = usize::from(
+        tree.accessibility_node(id).role() == role && tree.bounds(id).height > 0.0,
+    );
+    here + tree
+        .children(id)
+        .iter()
+        .map(|&c| count_role_laid_out(tree, c, role))
+        .sum::<usize>()
+}
+
 fn dock(title: &'static str) -> (DockWidgetId, DockWidget) {
     let id = DockWidgetId::fresh();
     (
@@ -98,6 +113,28 @@ fn find_first_role(tree: &WidgetTree, id: WidgetId, role: Role) -> Option<Widget
     tree.children(id)
         .iter()
         .find_map(|&c| find_first_role(tree, c, role))
+}
+
+/// First laid-out node whose concrete widget type ends with `suffix`.
+///
+/// Needed for the activity bar's outer strip: its root is deliberately a
+/// property-free `Role::GenericContainer` (so the AT pass prunes it — see
+/// `DockActivityBar::accessibility`), which makes it indistinguishable by role
+/// from every layout primitive in the tree. `Role::TabList` is NOT a substitute:
+/// it now sits on `DockRailTabList`, which wraps only the items and is inset by
+/// the rail's padding, so measuring it answers "how wide is the item column",
+/// not "how wide is the strip".
+fn find_widget_type(tree: &WidgetTree, id: WidgetId, suffix: &str) -> Option<WidgetId> {
+    if tree
+        .widget_type_name(id)
+        .is_some_and(|n| n.ends_with(suffix))
+        && tree.bounds(id).height > 0.0
+    {
+        return Some(id);
+    }
+    tree.children(id)
+        .iter()
+        .find_map(|&c| find_widget_type(tree, c, suffix))
 }
 
 /// First laid-out node whose AT name equals `name`, anywhere in a subtree.
@@ -715,15 +752,25 @@ fn rail_strip_width_follows_the_size_mode() {
     model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
-    // The rail (Role::TabList) is the activity-bar strip; its width is the rail
-    // thickness.
-    let rail = find_first_role(&t, root, Role::TabList).expect("a rail renders");
+    // Measure the activity-bar STRIP, not its item column. Looking the strip up
+    // by `Role::TabList` would silently start measuring `DockRailTabList` (the
+    // items alone, inset by the rail padding) and the assertion below would
+    // still pass while no longer testing what it claims — the whole point is
+    // that the strip follows the size mode, not just its items.
+    let rail = find_widget_type(&t, root, "DockActivityBar").expect("a rail renders");
     let w_default = t.bounds(rail).width;
+    let items_default = t
+        .bounds(find_first_role(&t, root, Role::TabList).expect("a tab list renders"))
+        .width;
+    assert!(
+        w_default > items_default,
+        "the strip is wider than its item column (padding): {w_default} > {items_default}"
+    );
 
     // Compact must make the whole strip narrower — not just its items.
     model.set_side_rail_size(DockSide::Leading, DockRailItemSize::Compact);
     t.layout(SizeProposal::exact(1000.0, 800.0));
-    let rail = find_first_role(&t, root, Role::TabList).expect("the rail still renders");
+    let rail = find_widget_type(&t, root, "DockActivityBar").expect("the rail still renders");
     let w_compact = t.bounds(rail).width;
 
     assert!(
@@ -1335,9 +1382,21 @@ fn dock_drag_lands_on(locked: bool) -> DockSide {
         .expect("the trailing rail");
     let hb = t.bounds(header);
     let rb = t.bounds(rail);
+    // `rb` is now the rail's item column (`DockRailTabList`), not the whole
+    // strip — the drop handler lives on the strip, so assert the point we aim
+    // at really is inside it before relying on the drop landing there.
+    let strip = t.bounds(find_widget_type(&t, root, "DockActivityBar").expect("a rail strip"));
+    let drop_point = Point::new(rb.x + rb.width / 2.0, rb.y + rb.height / 2.0);
+    assert!(
+        drop_point.x >= strip.x
+            && drop_point.x <= strip.x + strip.width
+            && drop_point.y >= strip.y
+            && drop_point.y <= strip.y + strip.height,
+        "the drop point must land inside the rail strip {strip:?}, got {drop_point:?}"
+    );
     t.drag(
         Point::new(hb.x + hb.width / 2.0, hb.y + 6.0),
-        Point::new(rb.x + rb.width / 2.0, rb.y + rb.height / 2.0),
+        drop_point,
     );
     t.layout(SizeProposal::exact(1000.0, 800.0));
     model.dock_location(a).unwrap().side
@@ -2307,5 +2366,467 @@ fn splitter_pane_size_is_invariant_to_content_flex() {
     assert!(
         (w0_flex - 200.0).abs() < 20.0 && w1_flex > w0_flex + 100.0,
         "slack must follow the model's stretch (pane 1), not the content's flex (pane 0): w0={w0_flex}, w1={w1_flex}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Dockless rail actions (`DockAction`) + Strip bar slots.
+// ───────────────────────────────────────────────────────────────────────
+
+/// A rail action that records its activations, so a test can assert the
+/// closure really ran (and that a disabled action's did not).
+fn counting_action(
+    name: &'static str,
+    placement: super::DockActionPlacement,
+) -> (super::DockAction, std::rc::Rc<std::cell::Cell<usize>>) {
+    use super::{DockAction, DockActionId};
+    let hits = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let h = hits.clone();
+    let action = DockAction::new(
+        DockActionId::named(name),
+        lit!(name),
+        || crate::primitives::IconWidget::dash(16.0),
+        move |_ctx| h.set(h.get() + 1),
+    )
+    .placement(placement);
+    (action, hits)
+}
+
+#[test]
+fn dock_action_id_named_is_stable_and_distinct() {
+    use super::DockActionId;
+    assert_eq!(
+        DockActionId::named("app.settings"),
+        DockActionId::named("app.settings"),
+        "the same name must hash to the same id across calls (and runs)"
+    );
+    assert_ne!(
+        DockActionId::named("app.settings"),
+        DockActionId::named("app.about"),
+        "different names must not collide"
+    );
+    // Usable in a `const` item — the reason it is a `const fn`.
+    const SETTINGS: DockActionId = DockActionId::named("app.settings");
+    assert_eq!(SETTINGS, DockActionId::named("app.settings"));
+}
+
+/// Build a Rail-presentation leading side carrying one action per placement.
+fn rail_with_actions() -> (WidgetTree, WidgetId, DockingModel) {
+    use super::{DockActionPlacement as P, DockRail};
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .action(counting_action("start", P::Start).0)
+                    .action(counting_action("end", P::End).0)
+                    .action(counting_action("pinned", P::Pinned).0),
+            ),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    (t, root, model)
+}
+
+#[test]
+fn rail_actions_render_in_all_three_placements() {
+    let (t, root, _m) = rail_with_actions();
+
+    let start = t.bounds(find_named(&t, root, "start").expect("Start action renders"));
+    let end = t.bounds(find_named(&t, root, "end").expect("End action renders"));
+    let pinned = t.bounds(find_named(&t, root, "pinned").expect("Pinned action renders"));
+    let items = t.bounds(find_first_role(&t, root, Role::TabList).expect("the tab list"));
+
+    assert!(
+        start.y + start.height <= items.y + 0.01,
+        "Start sits above the activity items ({start:?} vs {items:?})"
+    );
+    assert!(
+        end.y >= items.y + items.height - 0.01,
+        "End sits below the activity items ({end:?} vs {items:?})"
+    );
+    assert!(
+        pinned.y > end.y,
+        "Pinned sits past the spacer, below End ({pinned:?} vs {end:?})"
+    );
+
+    // Pinned is anchored to the rail's far edge, not merely "after End": with
+    // one activity item there is a lot of slack between the two.
+    let strip = t.bounds(find_widget_type(&t, root, "DockActivityBar").expect("the rail strip"));
+    assert!(
+        pinned.y + pinned.height >= strip.y + strip.height - 16.0,
+        "Pinned hugs the bottom of the strip ({pinned:?} vs {strip:?})"
+    );
+    assert!(
+        pinned.y - (end.y + end.height) > 100.0,
+        "the spacer really does separate End from Pinned"
+    );
+}
+
+
+#[test]
+fn rail_action_toolbar_is_a_sibling_of_the_tab_list_not_a_child() {
+    let (t, root, _m) = rail_with_actions();
+
+    let tab_list = find_first_role(&t, root, Role::TabList).expect("the tab list");
+    assert!(
+        !subtree_has_role(&t, tab_list, Role::Toolbar),
+        "ARIA forbids a non-tab child of a tablist: the action toolbars must not \
+         be inside the tab list"
+    );
+    assert!(
+        !subtree_has_role(&t, tab_list, Role::Button),
+        "no plain buttons inside the tablist either"
+    );
+    // Every rail item under the tab list is a Tab, and all three action groups
+    // exist as toolbars elsewhere in the rail.
+    assert_eq!(
+        count_role(&t, root, Role::Toolbar),
+        3,
+        "one Role::Toolbar per non-empty placement"
+    );
+    assert!(count_role(&t, tab_list, Role::Tab) >= 1);
+}
+
+#[test]
+fn rail_slots_and_overflow_are_not_tab_list_children() {
+    use super::DockRail;
+    use crate::icon_button::IconButton;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .top_slot(|| IconButton::menu().tooltip(lit!("Logo")))
+                    .bottom_slot(|| IconButton::menu().tooltip(lit!("Account"))),
+            ),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let tab_list = find_first_role(&t, root, Role::TabList).expect("the tab list");
+    // Pre-existing ARIA violation, now fixed: the slots used to be ordinary
+    // children of the `Role::TabList`-tagged rail root.
+    assert!(
+        find_named(&t, tab_list, "Logo").is_none(),
+        "top_slot must not be a tablist descendant"
+    );
+    assert!(
+        find_named(&t, tab_list, "Account").is_none(),
+        "bottom_slot must not be a tablist descendant"
+    );
+    assert!(
+        find_named(&t, root, "Logo").is_some() && find_named(&t, root, "Account").is_some(),
+        "…but both must still render (restricting the AT tree would delete them)"
+    );
+}
+
+#[test]
+fn rail_action_activates_on_click_and_stays_inert_when_disabled() {
+    use super::{DockAction, DockActionId, DockActionPlacement as P, DockRail};
+    use bastyde_core::signal::Signal;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+
+    let (live, live_hits) = counting_action("live", P::Pinned);
+    let off_hits = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let h = off_hits.clone();
+    let off = DockAction::new(
+        DockActionId::named("off"),
+        lit!("off"),
+        || crate::primitives::IconWidget::dash(16.0),
+        move |_ctx| h.set(h.get() + 1),
+    )
+    .placement(P::Pinned)
+    .enabled(Signal::new(false));
+
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(DockRail::new(DockSide::Leading).action(live).action(off)),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    t.click(find_named(&t, root, "live").expect("the enabled action"));
+    assert_eq!(live_hits.get(), 1, "an enabled action runs its closure");
+
+    t.click(find_named(&t, root, "off").expect("the disabled action"));
+    assert_eq!(off_hits.get(), 0, "a disabled action is inert");
+
+    // …but it stays FOCUSABLE and in the AT tree. The group has exactly one
+    // Tab stop (chosen by its roving index); dropping a disabled item out of
+    // the focus order could strand that stop and make the whole toolbar
+    // keyboard-unreachable — and `enabled` is a live Prop, so that can happen
+    // at any time. ARIA's toolbar pattern wants disabled controls discoverable
+    // anyway.
+    let off_id = find_named(&t, root, "off").expect("the disabled action");
+    let node = t.accessibility_node(off_id);
+    assert_eq!(node.role(), Role::Button, "still a button in the AT tree");
+    // (`AccessibilityInfo::is_disabled` mirrors the *arena* enabled flag, not
+    // the widget's own `set_disabled()`, so it stays false here by design —
+    // the action is deliberately not `enabled_when`'d out of the arena. The
+    // AccessKit node still carries the disabled state; what this test pins is
+    // the actionable half, which is what a keyboard/AT user actually hits.)
+    assert!(
+        !node.actions().contains(&accesskit::Action::Click),
+        "a disabled action offers no Click to assistive tech"
+    );
+    assert!(
+        node.actions().contains(&accesskit::Action::Focus),
+        "but it remains focusable, so a keyboard user can still discover it"
+    );
+}
+
+#[test]
+fn rail_action_toggled_is_reflect_only() {
+    use super::{DockAction, DockActionId, DockActionPlacement as P, DockRail};
+    use bastyde_core::signal::Signal;
+
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let state = Signal::new(false);
+    let s = state.clone();
+    let action = DockAction::new(
+        DockActionId::named("toggle"),
+        lit!("toggle"),
+        || crate::primitives::IconWidget::dash(16.0),
+        move |_ctx| { /* deliberately does NOT write `s` */ },
+    )
+    .placement(P::Pinned)
+    .toggled(s.clone());
+
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(DockRail::new(DockSide::Leading).action(action)),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let id = find_named(&t, root, "toggle").expect("the toggled action");
+    t.click(id);
+    assert!(
+        !state.get(),
+        "the rail must not write the toggled signal — unlike IconButton::toggle, \
+         a DockAction's bistate is reflect-only so a derived signal is safe"
+    );
+
+    // …and it does reflect an external write.
+    state.set(true);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(t.accessibility_node(id).is_toggled());
+}
+
+
+#[test]
+fn actions_are_absent_in_strip_presentation() {
+    use super::{DockActionPlacement as P, DockRail};
+
+    // Rail-only, by decision: a Strip side renders no actions. Pinned here so
+    // the no-op is deliberate and cannot silently reverse.
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(DockRail::new(DockSide::Leading).action(counting_action("act", P::Pinned).0)),
+    );
+    // No `set_side_rail` ⇒ Strip presentation.
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert!(
+        find_named(&t, root, "act").is_none(),
+        "a Strip-presentation side renders no rail actions (mirror them with \
+         trailing_slot if the side may flip presentation)"
+    );
+}
+
+#[test]
+fn strip_trailing_slot_composes_with_the_hidden_activities_hamburger() {
+    use super::DockRail;
+    use crate::icon_button::IconButton;
+
+    // Both the app's trailing slot AND the framework's restore hamburger want
+    // `TabWidget::bar_trailing_slot`, which is last-write-wins — so without
+    // explicit composition one of them is silently dropped.
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .trailing_slot(|| IconButton::menu().tooltip(lit!("App slot"))),
+            ),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_visible(DockSide::Leading, true);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(
+        find_named(&t, root, "App slot").is_some(),
+        "the app's trailing slot renders on a Strip side"
+    );
+
+    // Hide every activity ⇒ the hamburger appears. Both must now be present.
+    let tab_id = model.side_tabs(DockSide::Leading)[0].id;
+    model.set_tab_hidden(tab_id, true);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(
+        find_named(&t, root, "Hidden activities").is_some(),
+        "the restore hamburger must survive an app-declared trailing slot"
+    );
+    assert!(
+        find_named(&t, root, "App slot").is_some(),
+        "…and the app's slot must survive the hamburger"
+    );
+}
+
+#[test]
+fn strip_slots_render_on_a_side_with_no_docks() {
+    use super::DockRail;
+    use crate::icon_button::IconButton;
+
+    // A configured-but-empty side is reachable, not misuse. The zero-tabs
+    // branch returns before the TabWidget is built, so the slots need their own
+    // bar there (the bug Qt's `setCornerWidget` still has).
+    let model = DockingModel::new();
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .leading_slot(|| IconButton::menu().tooltip(lit!("Lead")))
+                    .trailing_slot(|| IconButton::menu().tooltip(lit!("Trail"))),
+            ),
+    );
+    model.set_side_visible(DockSide::Leading, true);
+    model.set_side_size(DockSide::Leading, 240.0);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert!(
+        find_named(&t, root, "Lead").is_some(),
+        "leading_slot renders even with zero docks"
+    );
+    assert!(
+        find_named(&t, root, "Trail").is_some(),
+        "trailing_slot renders even with zero docks"
+    );
+}
+
+
+#[test]
+#[should_panic(expected = "duplicate DockActionId")]
+fn duplicate_action_ids_are_caught_in_debug() {
+    use super::{DockActionPlacement as P, DockRail};
+    // The id is an action's stable address for AT and the automation bridge;
+    // two buttons sharing one is silent (both render) but makes "click the
+    // settings action" ambiguous.
+    let _ = DockRail::new(DockSide::Leading)
+        .action(counting_action("dup", P::Pinned).0)
+        .action(counting_action("dup", P::End).0);
+}
+
+#[test]
+fn rail_composition_order_places_each_cluster_correctly() {
+    use super::{DockActionPlacement as P, DockRail};
+    use crate::icon_button::IconButton;
+
+    // Assert the rail column's child ORDER directly rather than via painted
+    // positions: the ordering that is easiest to get backwards is the End
+    // group versus the overflow trigger (both sit between the tab list and the
+    // spacer), and the trigger is only *painted* once the rail actually
+    // overflows — which depends on a signal written during layout.
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Explorer");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .rail(
+                DockRail::new(DockSide::Leading)
+                    .top_slot(|| IconButton::menu().tooltip(lit!("Logo")))
+                    .bottom_slot(|| IconButton::menu().tooltip(lit!("Account")))
+                    .overflow_icon(|| crate::primitives::IconWidget::dash(16.0))
+                    .action(counting_action("start", P::Start).0)
+                    .action(counting_action("end", P::End).0)
+                    .action(counting_action("pinned", P::Pinned).0),
+            ),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let tab_list = find_first_role(&t, root, Role::TabList).expect("the tab list");
+    let column = t.parent(tab_list).expect("the rail's item column");
+    let kids = t.children(column);
+    let type_at = |i: usize| t.widget_type_name(kids[i]).unwrap_or("");
+    let index_of = |needle: &str| {
+        (0..kids.len())
+            .find(|&i| type_at(i).contains(needle))
+            .unwrap_or_else(|| panic!("no `{needle}` among the rail column's children"))
+    };
+
+    let i_tab_list = index_of("DockRailTabList");
+    // The trigger is a `PopoverWidget<IconButton>`, not the `PopoverIconButton`
+    // builder's own name.
+    let i_trigger = index_of("PopoverWidget");
+    let i_spacer = index_of("Spacer");
+    let groups: Vec<usize> = (0..kids.len())
+        .filter(|&i| type_at(i).contains("DockRailActionGroup"))
+        .collect();
+    assert_eq!(groups.len(), 3, "one group per non-empty placement");
+    let (i_start, i_end, i_pinned) = (groups[0], groups[1], groups[2]);
+
+    assert!(i_start < i_tab_list, "Start precedes the activity items");
+    assert!(
+        i_tab_list < i_trigger,
+        "the overflow trigger follows the activity items"
+    );
+    assert!(
+        i_trigger < i_end,
+        "the End group follows the overflow trigger — both sit between the tab \
+         list and the spacer, and this is the ordering most easily inverted"
+    );
+    assert!(
+        i_end < i_spacer,
+        "End is before the spacer (it flows with the tabs)"
+    );
+    assert!(
+        i_spacer < i_pinned,
+        "Pinned is past the spacer — anchored to the rail's far edge"
+    );
+    assert_eq!(
+        i_pinned,
+        kids.len() - 2,
+        "only bottom_slot may follow the Pinned cluster"
     );
 }

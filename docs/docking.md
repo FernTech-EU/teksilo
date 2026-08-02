@@ -155,6 +155,79 @@ it with `DockingLayout::rail(DockRail::new(side)…)`:
 - `.overflow_icon(|| IconWidget…)` — when the items don't all fit, the surplus
   are parked **dormant** and reached through this caller-chosen trigger, which
   opens a popover list of the overflowed entries.
+- `.leading_slot(|| …)` / `.trailing_slot(|| …)` — the **Strip**-presentation
+  counterparts of `top_slot` / `bottom_slot`, pinned at the start / end of the
+  side's in-side tab bar. See "Bar slots on a Strip side" below.
+- `.action(DockAction::new(…))` — a **dockless command button** in the rail.
+  See "Rail actions" below.
+
+### Rail actions (`DockAction`)
+
+A rail item is normally one **activity** — a tab with a panel behind it. A
+`DockAction` is the other thing an icon in that column can be: a plain command
+that opens no panel.
+
+```rust
+const SETTINGS: DockActionId = DockActionId::named("app.settings");
+
+DockingLayout::new(model).rail(
+    DockRail::new(DockSide::Leading).action(
+        DockAction::new(SETTINGS, tr!(settings()), || IconWidget::from_svg_icon(&GEAR),
+                        |ctx| ctx.send_intent(Intent::new("app.settings")))
+            .placement(DockActionPlacement::Pinned),
+    ),
+)
+```
+
+An action is deliberately **more restricted** than an activity — it is never
+draggable, never hidable, has no "Move to" menu, and is never overflow-parked
+(it is reserved space). That matches VS Code's fixed Accounts / Manage cluster
+and IntelliJ's stripe, where the only non-tool-window button is IDE-owned
+chrome. It is rendered by the framework, so it tracks the rail's Default /
+Compact / `Icon + Label` size mode, gets the same selected-surface highlight an
+open activity gets, and places its tooltip to the **side** (a `Below` tooltip
+would land on the next item down the column).
+
+**Placement** picks which cluster it joins:
+
+| `DockActionPlacement` | Position |
+| --- | --- |
+| `Start` | before the first activity item, flowing with them |
+| `End` | after the last activity item **and after the overflow trigger**, still flowing |
+| `Pinned` | past the spacer, anchored to the rail's far edge — VS Code's Accounts / Manage cluster, and where a Settings gear belongs |
+
+`DockActionId::named("…")` is a `const fn`, so ids can be module-scope `const`
+items. Ids are **not** persisted — an action carries no user-mutable state, so
+nothing about it is serialized. The id exists so the accessibility tree and the
+automation bridge can address the action stably across runs.
+
+`.toggled(signal)` paints the selected surface while the signal is `true`. It is
+**reflect-only**: the rail never writes the signal, so a *derived* signal is
+safe here — unlike `IconButton::toggle`, which flips its signal on click.
+`on_activate` owns every write.
+
+**Rail presentation only.** A side in `TabPresentation::Strip` renders no
+actions, and `set_side_rail` can flip presentation at runtime — so a side that
+flips Rail → Strip drops its whole action cluster. If that is reachable in your
+app, mirror the cluster with `trailing_slot`, which the same `DockRail` carries
+alongside its actions.
+
+### Bar slots on a Strip side
+
+`top_slot` / `bottom_slot` are Rail-presentation chrome. Their Strip
+counterparts are `leading_slot` / `trailing_slot`, pinned at the start / end of
+the side's own tab bar (the `QTabWidget::setCornerWidget` shape). The framework
+composes your trailing slot **with** its own "hidden activities" hamburger, so
+neither is dropped when both are present, and both render even on a side that
+currently holds no docks.
+
+They carry a **weaker visibility contract** than the rail slots, and the
+difference is worth knowing before choosing one: the activity bar is built
+whenever the side has a rail, so `top_slot` / `bottom_slot` survive the side
+being collapsed; `leading_slot` / `trailing_slot` live inside the side's
+`TabWidget`, within the collapsing content region, so they disappear with the
+content when the side is hidden. If your content must survive a hidden side, use
+Rail presentation — or host it outside the docking system.
 
 **The rail width follows the size mode.** Switching Default / Compact / Icon +
 Label resizes the whole strip (the rail thickness is derived from the effective
@@ -389,8 +462,16 @@ let active  = model.side_selected_tab_signal(side);  // Signal<usize>
 
 - Container `Role::GenericContainer`; each side region `Role::Complementary`
   with a localized landmark name ("Leading panel" …).
-- Activity rail `Role::TabList` > `Role::Tab` (selected / click), persists in the
-  AT tree while the side is hidden.
+- Activity rail: the **items** live in a `Role::TabList` > `Role::Tab` (selected
+  / click) that persists in the AT tree while the side is hidden. The rail's own
+  root is a presentational `Role::GenericContainer`, and the slots, the overflow
+  trigger and each action cluster are **siblings** of the tab list, never inside
+  it — ARIA's Tabs pattern restricts a `tablist` to `tab` children, so a slot or
+  a command button nested there would be an invalid owned element.
+- Rail actions: one `Role::Toolbar` per placement (`Role::Button` children, with
+  `toggled` when the action declares a bistate). Tab list and toolbars are
+  independent composites in the ARIA sense — each is a single Tab stop with its
+  own roving Arrow/Home/End cycle, and Tab / Shift+Tab crosses between them.
 - In-side tab strip headers `Role::Tab`; resize handles `Role::Splitter` (value /
   expanded / Increment / Decrement / Collapse / Expand); split-pane ToolBox
   headers carry their own roles + the draggable affordance.

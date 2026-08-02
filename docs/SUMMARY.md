@@ -59,6 +59,7 @@
 
 - [Splitter](splitter.md)
 - [Docking layout](docking.md)
+  - [Rail actions & bar slots — design notes](docking-rail-actions-design.md)
 - [Table & tree-table views](table-view.md)
 - [Code & plain-text editors](code-editor.md)
 - [Log view (streaming)](log-view.md)

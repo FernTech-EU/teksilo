@@ -13,9 +13,21 @@
 //! - **`top_slot` / `bottom_slot`** — fixed widgets pinned above the items and
 //!   at the very bottom of the rail (e.g. a logo on top, settings/account at
 //!   the bottom, the VS Code convention).
+//! - **[`DockAction`]s** — dockless command buttons that look and behave like
+//!   activity items but open no panel. Never draggable, never hidable, never
+//!   persisted; grouped into an ARIA `Role::Toolbar` beside — never inside —
+//!   the tab list.
 //! - **Overflow** — when the items don't all fit, the surplus are parked
 //!   dormant and reached through a caller-chosen **overflow item** (an icon)
 //!   that opens a popover list of the overflowed entries.
+//!
+//! **Accessibility structure.** ARIA's Tabs pattern restricts a `role=tablist`
+//! to `role=tab` children, so the rail is NOT one flat tab list: the items live
+//! in a [`DockRailTabList`] (`Role::TabList`) and the actions in one
+//! [`DockRailActionGroup`] (`Role::Toolbar`) per placement, as siblings under a
+//! presentational root. The slots and the overflow trigger are likewise
+//! siblings, never tab-list children. Each composite is its own single Tab stop
+//! with its own roving Arrow/Home/End cycle; Tab/Shift+Tab crosses between them.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -28,7 +40,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::gesture::DragPhase;
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
@@ -109,6 +121,179 @@ const LABELED_TITLE_ALLOWANCE: f32 = 72.0;
 const LABELED_TOP_MARGIN: f32 = 6.0;
 
 // ───────────────────────────────────────────────────────────────────────
+// DockAction — a dockless command button in the rail.
+// ───────────────────────────────────────────────────────────────────────
+
+/// Stable identity for a [`DockAction`].
+///
+/// **Not** used for persistence — a rail action carries no user-mutable state,
+/// so nothing about it is serialized (see [`DockLayoutState`](super::DockLayoutState)'s
+/// "app-config is reconstructed each run" rule). It exists so the accessibility
+/// tree and the automation bridge can address a given action stably across
+/// runs; a fresh-per-run id would make every script that clicks a rail action
+/// flaky.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DockActionId(u64);
+
+impl DockActionId {
+    /// Derive a stable id from a caller-chosen name — identical across runs,
+    /// processes and machines. Prefer this over [`from_raw`](Self::from_raw):
+    /// it removes the hand-picked-`u64`-literal collision hazard entirely.
+    ///
+    /// `const` so ids can be declared as module-scope `const` items, the same
+    /// way apps already declare their [`DockWidgetId`](super::DockWidgetId)s.
+    ///
+    /// ```
+    /// # use bastyde_widgets::docking::DockActionId;
+    /// const SETTINGS: DockActionId = DockActionId::named("app.settings");
+    /// assert_eq!(SETTINGS, DockActionId::named("app.settings"));
+    /// assert_ne!(SETTINGS, DockActionId::named("app.about"));
+    /// ```
+    pub const fn named(name: &str) -> Self {
+        // FNV-1a. Chosen over a stronger hash because it must run in a `const`
+        // context; there is no adversarial input here, only a handful of
+        // app-chosen literals.
+        let bytes = name.as_bytes();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut i = 0;
+        while i < bytes.len() {
+            hash ^= bytes[i] as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            i += 1;
+        }
+        Self(hash)
+    }
+
+    /// Wrap a raw value. Prefer [`named`](Self::named).
+    pub const fn from_raw(v: u64) -> Self {
+        Self(v)
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// Where a [`DockAction`] sits along the rail's column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DockActionPlacement {
+    /// Before the first activity item, in the flowing cluster.
+    Start,
+    /// After the last activity item **and after the overflow trigger**, still
+    /// in the flowing cluster — the group grows downward with the tabs.
+    End,
+    /// Past the flexible spacer, anchored to the rail's far edge regardless of
+    /// how many activities exist — VS Code's Accounts / Manage-gear cluster.
+    /// Where a Settings gear belongs.
+    Pinned,
+}
+
+/// A **dockless command button** in the activity rail: it looks and behaves
+/// like an activity item, but opens no panel — activating it just runs a
+/// closure.
+///
+/// Declared on [`DockRail::action`], so (like the rail's slots) it is per-view
+/// app config, reconstructed each run. A rail action is deliberately **more
+/// restricted** than a real activity: it is never draggable, never hidable, has
+/// no "Move to" menu, and is never overflow-parked — it is reserved space. That
+/// matches every surveyed precedent (VS Code's fixed Accounts / Manage cluster;
+/// IntelliJ's stripe, whose only non-tool-window button is IDE-owned chrome).
+///
+/// ```ignore
+/// DockRail::new(DockSide::Leading).action(
+///     DockAction::new(
+///         DockActionId::named("app.settings"),
+///         lit!("Settings"),
+///         || IconWidget::gear(),
+///         |ctx| ctx.send_intent(Intent::new("app.settings")),
+///     )
+///     .placement(DockActionPlacement::Pinned),
+/// )
+/// ```
+#[derive(Clone)]
+pub struct DockAction {
+    pub(crate) id: DockActionId,
+    pub(crate) placement: DockActionPlacement,
+    pub(crate) label: LocalizedString,
+    pub(crate) icon: DockIconFactory,
+    pub(crate) tooltip: Option<LocalizedString>,
+    pub(crate) enabled: Prop<bool>,
+    /// `Some` => paints the selected surface while the signal is `true`.
+    ///
+    /// **Reflect-only**: the rail never writes this signal — `on_activate`
+    /// owns every write. That is deliberate, and differs from
+    /// [`IconButton::toggle`](crate::icon_button::IconButton::toggle), which
+    /// flips its signal on click: a rail action's toggled state is frequently
+    /// a *derived* signal (a `map` over app state), which cannot be written at
+    /// all, and a writable one would fight the model it mirrors.
+    pub(crate) toggled: Option<Signal<bool>>,
+    pub(crate) on_activate: Rc<dyn Fn(&mut EventContext)>,
+}
+
+impl std::fmt::Debug for DockAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockAction")
+            .field("id", &self.id)
+            .field("placement", &self.placement)
+            .finish()
+    }
+}
+
+impl DockAction {
+    /// Declare a rail action. Defaults to [`DockActionPlacement::End`],
+    /// enabled, untoggled, with the label as its hover tooltip.
+    pub fn new(
+        id: DockActionId,
+        label: impl Into<LocalizedString>,
+        icon: impl Fn() -> IconWidget + 'static,
+        on_activate: impl Fn(&mut EventContext) + 'static,
+    ) -> Self {
+        Self {
+            id,
+            placement: DockActionPlacement::End,
+            label: label.into(),
+            icon: Rc::new(icon),
+            tooltip: None,
+            enabled: Prop::Static(true),
+            toggled: None,
+            on_activate: Rc::new(on_activate),
+        }
+    }
+
+    /// Where the action sits along the rail. See [`DockActionPlacement`].
+    pub fn placement(mut self, placement: DockActionPlacement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    /// Override the hover tooltip (defaults to the label). Ignored in
+    /// `Icon + Label` rail mode, which paints the label inline instead.
+    pub fn tooltip(mut self, tooltip: impl Into<LocalizedString>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Enable / disable the action. Accepts a `bool` or a `Signal<bool>`.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
+        self
+    }
+
+    /// Paint the selected surface while `state` is `true` — the same
+    /// highlight an open activity gets. **Reflect-only**: activating the
+    /// action does not write `state`; `on_activate` must.
+    pub fn toggled(mut self, state: Signal<bool>) -> Self {
+        self.toggled = Some(state);
+        self
+    }
+
+    /// The action's id.
+    pub fn id(&self) -> DockActionId {
+        self.id
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
 // DockRail — app-facing configuration of a side's activity rail.
 // ───────────────────────────────────────────────────────────────────────
 
@@ -126,6 +311,9 @@ pub struct DockRail {
     pub(crate) divider: Option<ColorProp>,
     pub(crate) top_slot: Option<DockRailSlot>,
     pub(crate) bottom_slot: Option<DockRailSlot>,
+    pub(crate) leading_slot: Option<DockRailSlot>,
+    pub(crate) trailing_slot: Option<DockRailSlot>,
+    pub(crate) actions: Vec<DockAction>,
     pub(crate) overflow_icon: Option<DockIconFactory>,
 }
 
@@ -148,6 +336,9 @@ impl DockRail {
             divider: None,
             top_slot: None,
             bottom_slot: None,
+            leading_slot: None,
+            trailing_slot: None,
+            actions: Vec::new(),
             overflow_icon: None,
         }
     }
@@ -202,12 +393,76 @@ impl DockRail {
         self
     }
 
+    /// Widget pinned at the **start** of this side's **Strip**-presentation tab
+    /// bar (via [`TabWidget::bar_leading_slot`](crate::tab_widget::TabWidget::bar_leading_slot)).
+    /// The Rail-presentation counterpart is [`top_slot`](Self::top_slot).
+    ///
+    /// **Weaker contract than `top_slot`.** `top_slot`/`bottom_slot` sit on the
+    /// `DockActivityBar`, which is built whenever the side has a rail — they
+    /// survive the side being collapsed. `leading_slot`/`trailing_slot` sit
+    /// inside the side's `TabWidget`, which lives within the collapsing
+    /// `SideClipPane`, so they disappear with the content when the side is
+    /// hidden. If your content must survive a hidden side, use Rail
+    /// presentation, or host it outside the docking system.
+    pub fn leading_slot<W: Widget + 'static>(mut self, f: impl Fn() -> W + 'static) -> Self {
+        self.leading_slot = Some(Rc::new(move || Box::new(f()) as Box<dyn Widget>));
+        self
+    }
+
+    /// Widget pinned at the **end** of this side's **Strip**-presentation tab
+    /// bar. Composed *before* the side's own "hidden activities" hamburger when
+    /// both are present, so neither is dropped. See
+    /// [`leading_slot`](Self::leading_slot) for the visibility contract.
+    pub fn trailing_slot<W: Widget + 'static>(mut self, f: impl Fn() -> W + 'static) -> Self {
+        self.trailing_slot = Some(Rc::new(move || Box::new(f()) as Box<dyn Widget>));
+        self
+    }
+
+    /// Append a **dockless command button** to this side's rail. Declaration
+    /// order is render order within a placement. See [`DockAction`].
+    ///
+    /// **Rail presentation only.** A side in
+    /// [`TabPresentation::Strip`](super::TabPresentation::Strip) renders no
+    /// actions at all — and [`set_side_rail`](super::DockingModel::set_side_rail)
+    /// can flip presentation at runtime, so a side that flips Rail → Strip drops
+    /// its whole action cluster. If that is reachable in your app, mirror the
+    /// cluster with [`trailing_slot`](Self::trailing_slot), which the same
+    /// `DockRail` can carry alongside its actions.
+    pub fn action(mut self, action: DockAction) -> Self {
+        // A duplicate id is always a bug: the id is the action's stable address
+        // for assistive tech and the automation bridge, so two buttons sharing
+        // one makes "click the settings action" ambiguous — and it fails
+        // silently, because both still render. Catch it in debug the same way
+        // `open_dock` catches an unregistered dock. Two distinct names can also
+        // collide under `named`'s FNV-1a; astronomically unlikely, but this
+        // reports it as a collision instead of letting it ship.
+        debug_assert!(
+            !self.actions.iter().any(|a| a.id == action.id),
+            "duplicate DockActionId {:?} on the {:?} rail — ids must be unique \
+             per side (two `DockAction`s declared with the same id, or an \
+             FNV-1a collision between two `DockActionId::named` values)",
+            action.id,
+            self.side,
+        );
+        self.actions.push(action);
+        self
+    }
+
     /// Choose the glyph for the overflow trigger — the item shown (in place of
     /// the surplus items) when they don't all fit. Tapping it opens a popover
     /// list of the overflowed entries.
     pub fn overflow_icon(mut self, f: impl Fn() -> IconWidget + 'static) -> Self {
         self.overflow_icon = Some(Rc::new(f));
         self
+    }
+
+    /// This rail's actions for `placement`, in declaration order.
+    pub(crate) fn actions_at(&self, placement: DockActionPlacement) -> Vec<DockAction> {
+        self.actions
+            .iter()
+            .filter(|a| a.placement == placement)
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn side(&self) -> DockSide {
@@ -324,6 +579,30 @@ impl DockActivityBar {
         }
         s
     }
+
+    /// Build this rail's [`DockRailActionGroup`] for `placement`, or `None`
+    /// when the app declared no action there. Returning `None` (rather than an
+    /// always-built, sometimes-hidden group) is what keeps an empty
+    /// `Role::Toolbar` out of the AT tree — the same "`if is_some()`" shape the
+    /// slots already use.
+    fn build_action_group(
+        &self,
+        ctx: &mut BuildContext,
+        placement: DockActionPlacement,
+    ) -> Option<WidgetId> {
+        let actions = self.config.actions_at(placement);
+        if actions.is_empty() {
+            return None;
+        }
+        Some(ctx.add(DockRailActionGroup::new(
+            self.side,
+            placement,
+            actions,
+            self.effective_item_extent(),
+            item_glyph_size(self.effective_item_size()),
+            self.model.side_rail_size(self.side).shows_label(),
+        )))
+    }
 }
 
 impl Widget for DockActivityBar {
@@ -398,14 +677,28 @@ impl Widget for DockActivityBar {
         }
         self.item_count = pos;
 
+        // The items go into their own `Role::TabList` wrapper rather than
+        // sitting directly in the rail's column: ARIA's Tabs pattern restricts
+        // a tablist's children to tabs, and the column also holds slots, the
+        // overflow trigger and action groups — none of which are tabs. The
+        // wrapper's inner VStack is a bare `GenericContainer`, so the AT pass
+        // prunes it and the items read as direct tablist children.
+        let mut items_stack = VStack::new().spacing(RAIL_ITEM_SPACING);
+        for id in &items {
+            items_stack = items_stack.add_child(*id);
+        }
+        let items_stack = ctx.add(items_stack);
+        let tab_list = ctx.add(DockRailTabList::new(self.side, items_stack));
+
         // Item column (pushed to the top by a trailing Spacer).
         let mut column = VStack::new().spacing(RAIL_ITEM_SPACING);
         if let Some(top) = &self.config.top_slot {
             column = column.add_child(ctx.add_boxed((top)()));
         }
-        for id in &items {
-            column = column.add_child(*id);
+        if let Some(group) = self.build_action_group(ctx, DockActionPlacement::Start) {
+            column = column.add_child(group);
         }
+        column = column.add_child(tab_list);
         // Overflow trigger: a caller-chosen glyph that opens a popover list of
         // the overflowed entries. Shown only while something overflows.
         if let Some(of_icon) = &self.config.overflow_icon {
@@ -425,8 +718,14 @@ impl Widget for DockActivityBar {
             ctx.visible_when(overflow, visible_count.map(move |c| *c < total));
             column = column.add_child(overflow);
         }
+        if let Some(group) = self.build_action_group(ctx, DockActionPlacement::End) {
+            column = column.add_child(group);
+        }
         let spacer = ctx.add(Spacer::new());
         column = column.add_child(spacer);
+        if let Some(group) = self.build_action_group(ctx, DockActionPlacement::Pinned) {
+            column = column.add_child(group);
+        }
         if let Some(bottom) = &self.config.bottom_slot {
             let b = ctx.add_boxed((bottom)());
             column = column.add_child(b);
@@ -574,40 +873,82 @@ impl Widget for DockActivityBar {
         if stride <= 0.0 {
             return;
         }
-        let mut reserve = RAIL_PADDING * 2.0;
-        if self.config.top_slot.is_some() {
-            reserve += stride;
-        }
-        if self.config.bottom_slot.is_some() {
-            reserve += stride;
-        }
-        let avail = (bounds.height - reserve).max(0.0);
-        let fit = (avail / stride).floor() as usize;
-
-        let total = self.item_count;
-        let new_visible = if total <= fit {
-            total
-        } else if self.config.overflow_icon.is_some() {
-            // Reserve one slot for the overflow trigger.
-            fit.saturating_sub(1)
-        } else {
-            // No overflow affordance → just clip the surplus.
-            fit
-        };
+        let new_visible = shown_capacity(RailCapacity {
+            height: bounds.height,
+            stride,
+            slots: usize::from(self.config.top_slot.is_some())
+                + usize::from(self.config.bottom_slot.is_some()),
+            actions: self.config.actions.len(),
+            total: self.item_count,
+            has_overflow_trigger: self.config.overflow_icon.is_some(),
+        });
         if self.visible_count.get() != new_visible {
             self.visible_count.set(new_visible);
         }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use bastyde_core::accesskit::{Orientation as A11yOrientation, Role};
-        builder.set_role(Role::TabList);
-        builder.set_name(super::a11y::rail_label(self.side).resolve_now());
-        builder.set_orientation(A11yOrientation::Vertical);
+        // Deliberately property-free. `Role::TabList` now lives on the
+        // `DockRailTabList` wrapper around the items alone (ARIA forbids
+        // non-tab children of a tablist, and this root also holds slots, the
+        // overflow trigger and the action groups). This node must stay a bare
+        // `GenericContainer` — setting a name or an orientation here would
+        // stop the AT pass pruning it, and a screen reader would announce
+        // "Leading activity bar, group" immediately followed by "Leading
+        // activity bar, tab list".
+        builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {
         self.root.into_iter().collect()
+    }
+}
+
+/// Inputs to [`shown_capacity`] — everything competing for the rail's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RailCapacity {
+    /// The rail strip's height.
+    height: f32,
+    /// Per-item vertical stride (item extent + spacing, plus the Labeled
+    /// title allowance when captions are shown).
+    stride: f32,
+    /// How many of `top_slot` / `bottom_slot` are configured. Charged one
+    /// stride each — an approximation, since a caller's slot widget may be any
+    /// height. (Pre-existing; fixing it needs `DockRailSlot` to report a
+    /// measured extent, which is a separate change.)
+    slots: usize,
+    /// Declared [`DockAction`]s. Charged one stride each, which is **exact**:
+    /// an action renders at the rail's own item extent, and the count is fixed
+    /// at build time because an action can never be hidden.
+    actions: usize,
+    /// Non-hidden activity items competing for what's left.
+    total: usize,
+    /// Whether a caller supplied an overflow glyph. Without one the surplus is
+    /// simply clipped rather than parked behind a trigger.
+    has_overflow_trigger: bool,
+}
+
+/// How many activity items the rail can show, given everything else that
+/// reserves space in the same column.
+///
+/// Pure so the arithmetic is directly testable: the widget-level effect
+/// (parking the surplus dormant) depends on a signal write inside
+/// `place_children` propagating to `visible_when`, which a single headless
+/// layout pass does not settle.
+fn shown_capacity(c: RailCapacity) -> usize {
+    if c.stride <= 0.0 {
+        return c.total;
+    }
+    let reserve = RAIL_PADDING * 2.0 + (c.slots + c.actions) as f32 * c.stride;
+    let avail = (c.height - reserve).max(0.0);
+    let fit = (avail / c.stride).floor() as usize;
+    if c.total <= fit {
+        c.total
+    } else if c.has_overflow_trigger {
+        // One slot goes to the overflow trigger itself.
+        fit.saturating_sub(1)
+    } else {
+        fit
     }
 }
 
@@ -753,6 +1094,496 @@ fn rail_insertion(
         (prev_bottom + next_top) * 0.5
     };
     (vpos, line_y.clamp(0.0, bar_height))
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockRailTabList — the `Role::TabList` wrapper around the rail's items.
+// ───────────────────────────────────────────────────────────────────────
+
+/// Carries the rail's `Role::TabList` around **only** the [`DockRailItem`]s.
+///
+/// ARIA's Tabs pattern restricts a tablist's children to tabs, but the rail's
+/// column also holds slots, the overflow trigger and the action groups. Wrapping
+/// just the items keeps every one of those a sibling rather than an illegal
+/// tablist child.
+///
+/// Layout is delegated to the caller-supplied `VStack` (which already carries
+/// `RAIL_ITEM_SPACING`), so introducing this wrapper cannot change the column's
+/// spacing. That stack reports a bare `Role::GenericContainer`, so the AT pass
+/// prunes it and promotes the items to direct children of this node.
+#[derive(Debug)]
+pub(crate) struct DockRailTabList {
+    side: DockSide,
+    stack: WidgetId,
+}
+
+impl DockRailTabList {
+    fn new(side: DockSide, stack: WidgetId) -> Self {
+        Self { side, stack }
+    }
+}
+
+impl Widget for DockRailTabList {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        ctx.child_size(self.stack, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use bastyde_core::accesskit::{Orientation as A11yOrientation, Role};
+        builder.set_role(Role::TabList);
+        builder.set_name(super::a11y::rail_label(self.side).resolve_now());
+        builder.set_orientation(A11yOrientation::Vertical);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.stack]
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockRailActionGroup — the `Role::Toolbar` cluster of dockless actions.
+// ───────────────────────────────────────────────────────────────────────
+
+/// One placement's worth of [`DockAction`]s, as an ARIA toolbar sibling of the
+/// rail's tab list.
+///
+/// Deliberately **not** a member of [`DockRailTabList`]'s children and never
+/// registered into the rail's `RailItemBounds` / `RailItemIds`: the drop
+/// machinery resolves a drop position through `model_indices[vpos]`, so a
+/// non-tab entry sharing that indexed sequence would silently move the wrong
+/// tab. Keeping the two populations structurally separate makes that class of
+/// bug unreachable rather than merely guarded.
+///
+/// Keyboard: the group is its own single Tab stop with an internal roving
+/// Arrow/Home/End cycle (the ARIA toolbar pattern), independent of the tab
+/// list's. Tab / Shift+Tab crosses between the two composites; arrows never do.
+pub(crate) struct DockRailActionGroup {
+    side: DockSide,
+    placement: DockActionPlacement,
+    actions: Vec<DockAction>,
+    extent: f32,
+    glyph: f32,
+    labeled: bool,
+    /// Which action index is currently the group's single Tab stop. Local
+    /// focus history — mirrors `Toolbar::roving`, NOT `DockRailItem`'s
+    /// model-level `selected`: an action group has no "selected" concept.
+    roving: Signal<usize>,
+    item_ids: Rc<RefCell<Vec<WidgetId>>>,
+    root: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for DockRailActionGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockRailActionGroup")
+            .field("side", &self.side)
+            .field("placement", &self.placement)
+            .field("actions", &self.actions.len())
+            .finish()
+    }
+}
+
+impl DockRailActionGroup {
+    fn new(
+        side: DockSide,
+        placement: DockActionPlacement,
+        actions: Vec<DockAction>,
+        extent: f32,
+        glyph: f32,
+        labeled: bool,
+    ) -> Self {
+        Self {
+            side,
+            placement,
+            actions,
+            extent,
+            glyph,
+            labeled,
+            roving: Signal::new(0),
+            item_ids: Rc::new(RefCell::new(Vec::new())),
+            root: None,
+        }
+    }
+}
+
+impl Widget for DockRailActionGroup {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.item_ids.borrow_mut().clear();
+        let mut stack = VStack::new().spacing(RAIL_ITEM_SPACING);
+        let mut ids = Vec::with_capacity(self.actions.len());
+        for (i, action) in self.actions.iter().enumerate() {
+            let id = ctx.add(DockRailActionItem::new(
+                action.clone(),
+                i,
+                self.extent,
+                self.glyph,
+                self.labeled,
+                self.roving.clone(),
+                self.item_ids.clone(),
+            ));
+            ids.push(id);
+            stack = stack.add_child(id);
+        }
+        *self.item_ids.borrow_mut() = ids;
+        // The roving stop can outlive a rebuild that shortened the list (an
+        // app may declare a different action set per view); re-clamp so the
+        // group never points its only Tab stop at a missing item.
+        if self.roving.get() >= self.actions.len() {
+            self.roving.set(0);
+        }
+        let root = ctx.add(stack);
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use bastyde_core::accesskit::{Orientation as A11yOrientation, Role};
+        builder.set_role(Role::Toolbar);
+        builder.set_name(super::a11y::rail_actions_label(self.side, self.placement).resolve_now());
+        builder.set_orientation(A11yOrientation::Vertical);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DockRailActionItem — one dockless action button.
+// ───────────────────────────────────────────────────────────────────────
+
+/// One [`DockAction`], rendered to match a [`DockRailItem`] pixel for pixel.
+///
+/// Built from the same primitives as a rail item rather than from an
+/// [`IconButton`] on purpose:
+/// * `IconButton::toggle` **writes** its signal on click; a `DockAction`'s
+///   toggled state is reflect-only (§ [`DockAction::toggled`]).
+/// * `IconButton`'s tooltip opens `Below`, which on a vertical rail drops it
+///   onto the next stacked item — rail items use `TooltipPlacement::Side`.
+/// * The rail owns glyph sizing and the `Icon + Label` rotated caption, so an
+///   action tracks the Compact / Default / Labeled switch like a real item.
+struct DockRailActionItem {
+    action: DockAction,
+    index: usize,
+    extent: f32,
+    glyph: f32,
+    labeled: bool,
+    roving: Signal<usize>,
+    siblings: Rc<RefCell<Vec<WidgetId>>>,
+    focused: Signal<bool>,
+    root: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for DockRailActionItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockRailActionItem")
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
+impl DockRailActionItem {
+    fn new(
+        action: DockAction,
+        index: usize,
+        extent: f32,
+        glyph: f32,
+        labeled: bool,
+        roving: Signal<usize>,
+        siblings: Rc<RefCell<Vec<WidgetId>>>,
+    ) -> Self {
+        Self {
+            action,
+            index,
+            extent,
+            glyph,
+            labeled,
+            roving,
+            siblings,
+            focused: Signal::new(false),
+            root: None,
+        }
+    }
+}
+
+impl Widget for DockRailActionItem {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        let enabled = self.action.enabled.as_signal();
+        enabled.bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+
+        // Reflect-only toggled highlight, window-active-aware — the same
+        // treatment `DockRailItem` gives an open activity, so a toggled action
+        // reads as "on" exactly like an open panel does.
+        let toggled = self
+            .action
+            .toggled
+            .clone()
+            .unwrap_or_else(|| Signal::new(false));
+        toggled.bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        let bg = toggled.zip(&ctx.window_active_signal()).map(|(t, win)| {
+            if *t {
+                if *win {
+                    SurfaceRole::Selected
+                } else {
+                    SurfaceRole::SelectedInactive
+                }
+            } else {
+                SurfaceRole::Transparent
+            }
+        });
+        let ring = self.focused.and(&ctx.focus_visible());
+        let focus_ring_width = ctx.theme().shape.focus_ring_width;
+        let border_color: ColorProp = ring
+            .map(|f| {
+                if *f {
+                    BorderRole::Focused
+                } else {
+                    BorderRole::Transparent
+                }
+            })
+            .into();
+        let border_width = ring.map(move |f| if *f { focus_ring_width } else { 0.0 });
+        let bg_rect = ctx.add(
+            RectWidget::new()
+                .background(bg)
+                .border_color(border_color)
+                .border_width(border_width)
+                .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
+        );
+
+        let glyph_color: ColorProp = enabled
+            .map(|e| {
+                if *e {
+                    TextRole::Primary
+                } else {
+                    TextRole::Disabled
+                }
+            })
+            .into();
+        let icon = ctx.add(
+            (self.action.icon)()
+                .icon_size(self.glyph)
+                .color(glyph_color.clone()),
+        );
+        let centered = ctx.add(Center::new().child_id(icon));
+        let icon_box = ctx.add(
+            FixedSize::new()
+                .width(self.extent)
+                .height(self.extent)
+                .child_id(centered),
+        );
+
+        let content = if self.labeled {
+            let label = ctx.add(RotatedLabel::new(
+                self.action.label.clone(),
+                Signal::new(TextRole::Secondary),
+            ));
+            let stack = ctx.add(
+                VStack::new()
+                    .alignment(HAlignment::Center)
+                    .spacing(2.0)
+                    .add_child(label)
+                    .add_child(icon_box),
+            );
+            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child_id(stack))
+        } else {
+            icon_box
+        };
+        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
+        self.root = Some(root);
+
+        if !self.labeled {
+            // `Side`, never `Below` — a `Below` tooltip would land on the next
+            // item down the column (the same reason `DockRailItem` does this).
+            let text = self
+                .action
+                .tooltip
+                .clone()
+                .unwrap_or_else(|| self.action.label.clone());
+            let tip = ctx.add(crate::tooltip::TooltipWidget::new(text));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip_with_placement(
+                root,
+                tip,
+                delay,
+                crate::tooltip::TooltipPlacement::Side,
+            );
+        }
+
+        // One activation path for pointer, keyboard and the AT `Click` action.
+        // A disabled action is inert on every one of them.
+        let activate: Rc<dyn Fn(&mut EventContext)> = {
+            let on_activate = self.action.on_activate.clone();
+            let enabled = enabled.clone();
+            let roving = self.roving.clone();
+            let index = self.index;
+            Rc::new(move |ctx: &mut EventContext| {
+                if !enabled.get() {
+                    return;
+                }
+                roving.set(index);
+                (on_activate)(ctx);
+            })
+        };
+
+        // Roving tab stop: exactly one member of the group is a Tab stop.
+        let index = self.index;
+        ctx.set_tab_stop(self_id, self.roving.map(move |r| *r == index));
+        // A disabled action stays **focusable** on purpose — it is not
+        // `enabled_when`'d out of the focus order. Two reasons, one of them a
+        // real bug this avoids:
+        //   * ARIA's toolbar pattern explicitly keeps disabled toolbar controls
+        //     focusable so a keyboard user can discover that the command exists
+        //     at all (an unreachable greyed button is invisible to them).
+        //   * The group has exactly ONE Tab stop, chosen by `roving`. If that
+        //     item were removed from the focus order while disabled, the whole
+        //     toolbar would become unreachable by keyboard — and since
+        //     `enabled` is a live `Prop`, that can happen at any time, not just
+        //     at build. Staying focusable makes the trap unreachable instead of
+        //     needing a re-clamp on every enablement change.
+        // Activation is guarded in `activate` and the glyph dims, so a disabled
+        // action is inert and reads as inert without being lost.
+
+        let focused_sig = self.focused.clone();
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .on_tap({
+                    let activate = activate.clone();
+                    move |_e, ctx| activate(ctx)
+                })
+                .on_focus(move |gained, _ctx| focused_sig.set(gained))
+                .on_key({
+                    let activate = activate.clone();
+                    let siblings = self.siblings.clone();
+                    let roving = self.roving.clone();
+                    let index = self.index;
+                    move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                        let WidgetEvent::KeyDown { key, .. } = event else {
+                            return EventResponse::Ignored;
+                        };
+                        let ids = siblings.borrow();
+                        if ids.is_empty() {
+                            return EventResponse::Ignored;
+                        }
+                        let next = match key {
+                            Key::ArrowUp | Key::ArrowLeft => {
+                                (index + ids.len() - 1) % ids.len()
+                            }
+                            Key::ArrowDown | Key::ArrowRight => (index + 1) % ids.len(),
+                            Key::Home => 0,
+                            Key::End => ids.len() - 1,
+                            Key::Enter | Key::Space => {
+                                drop(ids);
+                                activate(ctx);
+                                return EventResponse::Handled;
+                            }
+                            _ => return EventResponse::Ignored,
+                        };
+                        let target = ids[next];
+                        drop(ids);
+                        roving.set(next);
+                        ctx.request_focus(target);
+                        EventResponse::Handled
+                    }
+                })
+                .on_access_action({
+                    let activate = activate.clone();
+                    move |action: bastyde_core::accesskit::Action, ctx: &mut EventContext| {
+                        if action == bastyde_core::accesskit::Action::Click {
+                            activate(ctx);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                })
+                .focusable(true)
+                .cursor(CursorIcon::Pointer),
+        );
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use bastyde_core::accesskit::{Action, Role};
+        // `Role::Button` — NOT `Role::Tab`. An action controls no tabpanel, so
+        // announcing it as a tab would promise a panel that never appears.
+        builder.set_role(Role::Button);
+        builder.set_name(self.action.label.resolve_now());
+        builder.add_action(Action::Focus);
+        // Announce the inert state rather than dropping out of the focus order
+        // (see the `set_tab_stop` comment in `build`): a disabled toolbar
+        // control stays reachable so it is discoverable, and says why.
+        if self.action.enabled.get() {
+            builder.add_action(Action::Click);
+        } else {
+            builder.set_disabled();
+        }
+        builder.set_position_in_set(self.index + 1);
+        builder.set_size_of_set(self.siblings.borrow().len());
+        // A reflect-only bistate reads as a toggle button to AT.
+        if let Some(t) = &self.action.toggled {
+            builder.set_toggled(t.get());
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -1600,6 +2431,91 @@ mod tests {
     #[test]
     fn rail_insertion_on_empty_rail_is_front() {
         assert_eq!(rail_insertion(50.0, &[], 0.0, 100.0).0, 0);
+    }
+
+    /// A 260 dp rail with 42 dp items: 252 dp usable ⇒ 6 items fit.
+    fn cap() -> RailCapacity {
+        RailCapacity {
+            height: 260.0,
+            stride: 42.0,
+            slots: 0,
+            actions: 0,
+            total: 8,
+            has_overflow_trigger: false,
+        }
+    }
+
+    #[test]
+    fn capacity_shows_everything_when_it_all_fits() {
+        let c = RailCapacity {
+            total: 4,
+            ..cap()
+        };
+        assert_eq!(shown_capacity(c), 4, "no overflow ⇒ every item shows");
+    }
+
+    #[test]
+    fn capacity_clips_without_a_trigger_and_reserves_one_slot_with_one() {
+        assert_eq!(shown_capacity(cap()), 6, "no trigger ⇒ the surplus is clipped");
+        assert_eq!(
+            shown_capacity(RailCapacity {
+                has_overflow_trigger: true,
+                ..cap()
+            }),
+            5,
+            "the trigger itself costs one slot"
+        );
+    }
+
+    #[test]
+    fn capacity_charges_actions_and_slots() {
+        // Each action is reserved space, never overflow-parked, so it costs an
+        // activity slot — this is the whole point of charging them here.
+        assert_eq!(
+            shown_capacity(RailCapacity {
+                actions: 3,
+                ..cap()
+            }),
+            3,
+            "three actions cost three activity slots (6 → 3)"
+        );
+        assert_eq!(
+            shown_capacity(RailCapacity { slots: 2, ..cap() }),
+            4,
+            "top_slot + bottom_slot cost one stride each"
+        );
+        assert_eq!(
+            shown_capacity(RailCapacity {
+                slots: 2,
+                actions: 3,
+                has_overflow_trigger: true,
+                ..cap()
+            }),
+            0,
+            "a rail crowded past its height shows no activities, and never \
+             underflows"
+        );
+    }
+
+    #[test]
+    fn capacity_never_underflows_or_divides_by_zero() {
+        assert_eq!(
+            shown_capacity(RailCapacity {
+                height: 0.0,
+                has_overflow_trigger: true,
+                ..cap()
+            }),
+            0,
+            "a zero-height rail shows nothing rather than wrapping around"
+        );
+        assert_eq!(
+            shown_capacity(RailCapacity {
+                stride: 0.0,
+                ..cap()
+            }),
+            8,
+            "a degenerate stride falls back to showing everything, not a divide by zero"
+        );
     }
 
     /// Fabricate a `WidgetId` without an arena — same convention as the

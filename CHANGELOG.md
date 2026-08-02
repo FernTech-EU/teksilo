@@ -13,6 +13,70 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added — `bastyde-widgets` docking: rail actions + Strip bar slots
+
+**`DockAction` — dockless command buttons in the activity rail.** A rail item
+was previously always one activity (a tab with a panel behind it); there was no
+way to put a plain command in that column. `DockRail::action(DockAction::new(…))`
+adds one, rendered by the framework so it matches a real activity item — same
+size modes, same selected-surface highlight, same side-placed tooltip, same
+`Icon + Label` rotated caption.
+
+An action is deliberately more restricted than an activity: never draggable,
+never hidable, no "Move to" menu, and never overflow-parked (it is reserved
+space). `DockActionPlacement::{Start, End, Pinned}` picks the cluster — `Pinned`
+sits past the spacer at the rail's far edge, VS Code's Accounts / Manage
+position, where a Settings gear belongs. `DockActionId::named("…")` is a
+`const fn` (FNV-1a), so ids are module-scope `const` items and stay stable across
+runs for the accessibility tree and the automation bridge.
+
+Nothing about an action is persisted — it carries no user-mutable state, so it
+is app config reconstructed each run, like the rail's slots.
+**`DockLayoutState` is unchanged and needs no migration.** `DockPolicy` is
+unchanged too: with hiding off the table there is nothing to gate, and a flag
+that enforced nothing would lie.
+
+`DockAction::toggled(signal)` is **reflect-only** — the rail never writes it, so
+a derived signal is safe (unlike `IconButton::toggle`, which flips its signal on
+click). `on_activate` owns every write.
+
+**`DockRail::leading_slot` / `trailing_slot` — bar slots for a Strip side.**
+`top_slot` / `bottom_slot` only ever reached the Rail presentation; a side
+showing its in-side tab strip had no app-facing slot at all, even though
+`TabWidget` has had `bar_leading_slot` / `bar_trailing_slot` all along. Two
+things had to be fixed for that to be usable rather than a footgun:
+
+- `TabWidget`'s bar slot is a single last-write-wins field, and `DockSidePanel`
+  already spends the trailing one on its "hidden activities" hamburger — the
+  only way back once every activity on a side is hidden. The two are now
+  explicitly composed, so declaring a trailing slot can no longer silently drop
+  the hamburger (or vice versa).
+- A side with **zero** docks returned early, before its `TabWidget` was built,
+  so a configured slot silently rendered nothing — a reachable state, not
+  misuse. (The same bug Qt's `QTabWidget::setCornerWidget` still has: the corner
+  widget only shows while at least one tab exists.) Slots now render there too.
+
+These carry a weaker visibility contract than the rail slots and it is
+documented as such: the activity bar is built whenever the side has a rail, so
+`top_slot` / `bottom_slot` survive a collapsed side, while `leading_slot` /
+`trailing_slot` live inside the collapsing content region and disappear with it.
+
+### Fixed — `bastyde-widgets` docking: rail accessibility
+
+**The activity rail was an invalid ARIA `tablist`.** `DockActivityBar` set
+`Role::TabList` on its whole root, so `top_slot` / `bottom_slot` widgets and the
+overflow trigger were non-`Role::Tab` children of a tablist — which ARIA's Tabs
+pattern forbids (Required Owned Elements), and which real screen readers
+navigate poorly. The role now sits on a `DockRailTabList` wrapping **only** the
+items; the slots, the overflow trigger and the new action clusters are siblings,
+and the rail root is a property-free `Role::GenericContainer` that the AT pass
+prunes. Restricting the AT children instead (via `accessibility_children`) would
+have deleted those controls from the tree rather than re-parenting them, turning
+a spec violation into a WCAG 2.1.1 failure — hence the wrapper.
+
+No app-facing API changed for this; a rail still reports one `Role::TabList` per
+side with the same localized name.
+
 ### Changed — `bastyde-settings` (breaking)
 
 **Cross-process safety is now the default and only behaviour for every

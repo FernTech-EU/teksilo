@@ -206,17 +206,79 @@ pub(crate) struct DockSidePanel {
     side: DockSide,
     model: DockingModel,
     content: DockContent,
+    /// This side's rail config. Only its Strip-presentation half is used here
+    /// (`leading_slot` / `trailing_slot`); the Rail half is `DockActivityBar`'s.
+    /// The two presentations share one config object so an app declares a
+    /// side's chrome in one place.
+    config: super::DockRail,
     root: Option<WidgetId>,
 }
 
 impl DockSidePanel {
-    pub(crate) fn new(side: DockSide, model: DockingModel, content: DockContent) -> Self {
+    pub(crate) fn new(
+        side: DockSide,
+        model: DockingModel,
+        content: DockContent,
+        config: super::DockRail,
+    ) -> Self {
         Self {
             side,
             model,
             content,
+            config,
             root: None,
         }
+    }
+
+    /// Compose this side's app-declared bar slots (and, on the trailing edge,
+    /// the framework's own "hidden activities" hamburger) into at most one
+    /// widget per edge.
+    ///
+    /// `TabWidget`'s `BarSlot` is a single last-write-wins `Option`, so calling
+    /// `bar_trailing_slot` twice silently drops one of the two — most likely
+    /// the hamburger, which is the only way back once every activity on the
+    /// side is hidden. Composing into one `HStack` per edge is therefore
+    /// mandatory, not stylistic.
+    fn compose_bar_slots(
+        &self,
+        ctx: &mut BuildContext,
+        needs_hamburger: bool,
+    ) -> (Option<WidgetId>, Option<WidgetId>) {
+        let leading = self
+            .config
+            .leading_slot
+            .as_ref()
+            .map(|f| ctx.add_boxed((f)()));
+
+        let mut trailing: Vec<WidgetId> = Vec::new();
+        if let Some(f) = self.config.trailing_slot.as_ref() {
+            trailing.push(ctx.add_boxed((f)()));
+        }
+        if needs_hamburger {
+            let m = self.model.clone();
+            let hb_side = self.side;
+            trailing.push(
+                ctx.add(
+                    PopoverIconButton::new(IconButton::menu().tooltip(lit!("Hidden activities")))
+                        .content(background_menu(&m, hb_side, DockMenuKind::Strip))
+                        .placement(OverlayPlacement::BelowPreferred),
+                ),
+            );
+        }
+        let trailing = match trailing.len() {
+            0 => None,
+            // A lone widget needs no wrapper — keeps the common case free of an
+            // extra layout node.
+            1 => Some(trailing[0]),
+            _ => {
+                let mut row = HStack::new().spacing(2.0);
+                for id in &trailing {
+                    row = row.add_child(*id);
+                }
+                Some(ctx.add(row))
+            }
+        };
+        (leading, trailing)
     }
 }
 
@@ -276,8 +338,30 @@ impl Widget for DockSidePanel {
             // the rail, or a drag-reveal strip) it shows a drop target so the
             // first dock can be dragged in; when hidden it's dormant anyway.
             let drop = empty_side_drop_target(ctx, &self.model, self.side);
-            self.root = Some(drop);
-            return vec![drop];
+            // A configured bar slot must still render here. This branch returns
+            // before the `TabWidget` is ever built, so without this an app that
+            // set `leading_slot`/`trailing_slot` would silently see nothing
+            // whenever the side happens to hold no docks — a reachable state,
+            // not a misuse. (Qt's `QTabWidget::setCornerWidget` has exactly this
+            // bug: the corner widget only shows while at least one tab exists.)
+            let (leading, trailing) = self.compose_bar_slots(ctx, false);
+            if leading.is_none() && trailing.is_none() {
+                self.root = Some(drop);
+                return vec![drop];
+            }
+            let mut bar = HStack::new().spacing(2.0);
+            if let Some(id) = leading {
+                bar = bar.add_child(id);
+            }
+            bar = bar.add_child(ctx.add(Spacer::new()));
+            if let Some(id) = trailing {
+                bar = bar.add_child(id);
+            }
+            let bar = ctx.add(bar);
+            let body = ctx.add(Expand::new().child_id(drop));
+            let root = ctx.add(VStack::new().add_child(bar).add_child(body));
+            self.root = Some(root);
+            return vec![root];
         }
 
         // Rebuild the strip when this side's tab-display pref flips (context
@@ -521,17 +605,16 @@ impl Widget for DockSidePanel {
                 .on_transfer_out(|_tid, _ctx| {});
         }
 
-        // When activities are hidden, a trailing **hamburger** in the bar opens
-        // the activities checklist (the restore affordance — and the only one
-        // left once *every* activity is hidden and no tab can be right-clicked).
-        if needs_hamburger {
-            let m = self.model.clone();
-            let hb_side = self.side;
-            tw = tw.bar_trailing_slot(
-                PopoverIconButton::new(IconButton::menu().tooltip(lit!("Hidden activities")))
-                    .content(background_menu(&m, hb_side, DockMenuKind::Strip))
-                    .placement(OverlayPlacement::BelowPreferred),
-            );
+        // Bar slots: the app's `leading_slot`/`trailing_slot`, composed with the
+        // framework's own trailing **hamburger** — which opens the activities
+        // checklist and is the only restore affordance left once *every*
+        // activity is hidden and no tab can be right-clicked.
+        let (leading_slot, trailing_slot) = self.compose_bar_slots(ctx, needs_hamburger);
+        if let Some(id) = leading_slot {
+            tw = tw.bar_leading_slot_id(id);
+        }
+        if let Some(id) = trailing_slot {
+            tw = tw.bar_trailing_slot_id(id);
         }
         let root = ctx.add(tw);
         self.root = Some(root);

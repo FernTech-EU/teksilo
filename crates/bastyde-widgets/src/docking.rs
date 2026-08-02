@@ -32,7 +32,9 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use activity_bar::{DockRail, DockRailSlot};
+pub use activity_bar::{
+    DockAction, DockActionId, DockActionPlacement, DockRail, DockRailSlot,
+};
 pub use geometry::{CornerOwners, DockCorner, DockSide, DockingRects, SideLayout, SideRects};
 pub use model::{
     DockIconFactory, DockLoc, DockOpenLocation, DockOpenMode, DockPolicy, DockRailItemSize,
@@ -268,10 +270,21 @@ impl Widget for DockingLayout {
             // frame beyond moving + clipping. Disabled when hidden so Tab
             // skips it; gate on `visible` (one change per toggle), never on the
             // per-frame `progress` signal.
+            // One rail config per side, shared by both presentations: the Rail
+            // half (items, slots, actions) is `DockActivityBar`'s, the Strip
+            // half (`leading_slot`/`trailing_slot`) is `DockSidePanel`'s. Built
+            // once here so a side declared with `.rail(..)` keeps its chrome
+            // whichever presentation it is currently in.
+            let config = self
+                .rails
+                .get(&side)
+                .cloned()
+                .unwrap_or_else(|| DockRail::new(side));
             let panel = ctx.add(DockSidePanel::new(
                 side,
                 self.model.clone(),
                 self.registry.clone(),
+                config.clone(),
             ));
             // Record the content region's id so this side's rail tabs can
             // advertise `controls` → this panel (ARIA tab → tabpanel link).
@@ -289,11 +302,6 @@ impl Widget for DockingLayout {
 
             // Rail (always present; empty when the side has no rail).
             let rail = if self.model.side_has_rail(side) {
-                let config = self
-                    .rails
-                    .get(&side)
-                    .cloned()
-                    .unwrap_or_else(|| DockRail::new(side));
                 ctx.add(DockActivityBar::new(
                     side,
                     self.model.clone(),
