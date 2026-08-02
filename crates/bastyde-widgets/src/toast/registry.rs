@@ -130,6 +130,16 @@ pub(crate) struct LiveEntry {
     /// `ToastHost`'s render-side filter and the per-route slot-pool
     /// admission/eviction bucketing in [`ToastRegistry::enqueue`].
     pub(crate) route: ToastRoute,
+    /// Whether this entry's body is clamped, unfolded, or short enough not to care
+    /// (`crate::toast::body::BodyState`, as a scalar).
+    ///
+    /// It lives on the **entry**, not inside the body widget, because `ToastHost` builds
+    /// a fresh `ToastSurface` on every rebuild — so a signal owned by the widget would
+    /// reset each time any *other* toast arrived or expired, silently re-folding
+    /// something the reader had just opened. The entry outlives every rebuild, and
+    /// cloning a `Signal` shares its state, so threading it through
+    /// `ToastSurfaceData` keeps the disclosure sticky for as long as the toast exists.
+    pub(crate) body_state: Signal<u8>,
 }
 
 impl ToastRegistry {
@@ -463,6 +473,9 @@ impl ToastRegistry {
             id: toast.id,
             archive: toast.archive,
             route: resolved_route,
+            // Starts at `Fits`; the body's own layout pass decides whether there is
+            // anything to disclose. See `crate::toast::body`.
+            body_state: Signal::new(0),
         };
         // Mirror to the archive BEFORE the entry is pushed to the
         // live queue — that way an `archive(false)` toast (e.g. a
@@ -729,6 +742,26 @@ impl ToastRegistry {
             .iter()
             .find(|e| e.entry_id == entry_id)
             .map(f)
+    }
+
+    /// Cancel an entry's auto-dismiss timer, making it persistent for the rest of its
+    /// life. Idempotent; a no-op for an entry that was already persistent or has gone.
+    ///
+    /// Called when a reader unfolds a clamped body. Hovering already pauses the timer, so
+    /// the toast survives while the pointer rests on it — but a reader who unfolds three
+    /// lines into ten and then moves the mouse away to read comfortably would otherwise
+    /// watch it vanish mid-sentence, which is precisely the frustration the disclosure
+    /// exists to remove. Asking to see more is a clear statement that the toast is being
+    /// read; the close button (and the notification archive) remain the way out.
+    pub(crate) fn cancel_auto_dismiss(&self, entry_id: u64) {
+        let mut inner = self.inner.borrow_mut();
+        if let Some(entry) = inner
+            .live_entries
+            .iter_mut()
+            .find(|e| e.entry_id == entry_id)
+        {
+            entry.time_left = None;
+        }
     }
 
     /// Take the boxed `leading` widget out of the entry — call exactly

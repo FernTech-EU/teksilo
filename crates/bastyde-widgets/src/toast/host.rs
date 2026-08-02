@@ -300,6 +300,9 @@ impl Widget for ToastHost {
                 show_close_button: e.show_close_button,
                 on_click: e.on_click.clone(),
                 style_override: e.style_override.clone(),
+                // Cloned, not re-created: the clone shares the entry's state, which is
+                // what keeps an unfolded body unfolded across this very rebuild.
+                body_state: e.body_state.clone(),
             }) else {
                 continue;
             };

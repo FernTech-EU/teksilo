@@ -46,6 +46,9 @@ pub struct ToastSurfaceData {
     pub show_close_button: bool,
     pub on_click: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,
     pub style_override: Option<SharedToastStyle>,
+    /// Clamped / unfolded state of the body, owned by the live entry so it survives the
+    /// host's surface rebuilds — see `LiveEntry::body_state`.
+    pub body_state: bastyde_core::signal::Signal<u8>,
 }
 
 impl std::fmt::Debug for ToastSurfaceData {
@@ -204,10 +207,17 @@ impl Widget for ToastSurface {
             .spacing(toast_tokens::TOAST_TITLE_BODY_GAP)
             .add_child(title);
         if let Some(body) = &self.data.body {
+            // Not a bare `TextWidget`: a body is whatever the app hands over, and apps
+            // hand over error text with no length bound. `CollapsibleBody` clamps it and
+            // grows a disclosure row only when clamping actually hid something — see its
+            // module docs.
+            let registry_for_expand = registry.clone();
             let body_widget = ctx.add(
-                TextWidget::new(body.clone())
-                    .style(TextStyleRole::Body)
-                    .color(TextRole::Secondary),
+                crate::toast::body::CollapsibleBody::new(
+                    body.clone(),
+                    self.data.body_state.clone(),
+                )
+                .on_expand(move || registry_for_expand.cancel_auto_dismiss(entry_id)),
             );
             text_column = text_column.add_child(body_widget);
         }

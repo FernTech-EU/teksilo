@@ -34,6 +34,7 @@
 //! );
 //! ```
 
+pub mod body;
 pub mod ext;
 pub mod host;
 pub mod registry;
@@ -47,6 +48,7 @@ use bastyde_core::widget::{EventContext, Widget};
 use bastyde_core::window::BastydeWindowId;
 
 pub use bastyde_core::styles::{ToastPriority, ToastStyleConfig};
+pub use body::TOAST_BODY_COLLAPSED_LINES;
 pub use ext::EventContextToastExt;
 pub use host::{ToastHost, ToastInstallOptions};
 pub use registry::ToastRegistry;
@@ -1254,6 +1256,7 @@ mod tests {
             show_close_button: false,
             on_click: None,
             style_override: None,
+            body_state: bastyde_core::signal::Signal::new(0),
         };
         let surface = ToastSurface::new(data, None, fresh_registry(), false);
         let mut builder = AccessNodeBuilder::new();

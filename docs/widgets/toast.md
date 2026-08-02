@@ -253,7 +253,29 @@ completion callback) or replaces it with a success/error toast.
 
 #### `pub fn body(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Optional secondary line below the title.
+Optional secondary text below the title.
+
+**Long bodies clamp and disclose.** A title is one line by construction, but a body is
+whatever the app passes — and apps pass error text, which has no length bound. A body
+needing more than `TOAST_BODY_COLLAPSED_LINES` (3) lines is clamped there and grows a
+thin row offering **Show more** and **Copy**:
+
+- *Show more / Show less* unfolds and refolds it. Unfolding also cancels the toast's
+  auto-dismiss timer — asking to see more is a statement that the toast is being read,
+  and a 10-second timer firing mid-sentence is exactly what the disclosure exists to
+  prevent. The close button (and the notification archive) remain the way out.
+- *Copy* puts the **whole** body on the clipboard, not the visible three lines. A clamped
+  body is usually an error chain; pasting its truncation would be worse than useless. The
+  label switches to *Copied* on success, and stays a live link so a second click re-copies.
+  A failed `set_text` (no clipboard, denied access) leaves the label alone rather than
+  claiming a copy that did not happen.
+
+A body short enough to fit gains none of this — no clamp, no row, no extra height. The
+accessibility tree always carries the full text as the alert's description, clamped or
+not, so a screen reader is never given the truncation.
+
+Nothing about this is configurable yet; if you need a different ceiling, say so rather
+than working around it with a pre-truncated string.
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
 

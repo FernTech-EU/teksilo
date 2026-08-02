@@ -361,3 +361,10 @@ window-menu-restore = Restaurer
 window-menu-maximize = Agrandir
 window-menu-minimize = Réduire
 window-menu-close = Fermer
+
+# Divulgation du corps d'une notification. Voir en-US.ftl pour le contexte
+# complet et crates/bastyde-widgets/src/toast/body.rs.
+toast-show-more = Afficher plus
+toast-show-less = Afficher moins
+toast-copy-body = Copier
+toast-body-copied = Copié

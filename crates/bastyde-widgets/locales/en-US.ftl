@@ -391,3 +391,12 @@ window-menu-restore = Restore
 window-menu-maximize = Maximize
 window-menu-minimize = Minimize
 window-menu-close = Close
+
+# Toast body disclosure. A toast body long enough to need more than
+# `TOAST_BODY_COLLAPSED_LINES` lines is clamped and gets this thin toggle row —
+# without it a raw error chain (paths, causes) can grow a toast to a quarter of
+# the window. See crates/bastyde-widgets/src/toast/body.rs.
+toast-show-more = Show more
+toast-show-less = Show less
+toast-copy-body = Copy
+toast-body-copied = Copied
