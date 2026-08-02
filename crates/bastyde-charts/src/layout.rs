@@ -181,6 +181,10 @@ pub struct PlotGeometryParams<'a> {
     pub legend_position: Option<LegendPosition>,
     pub text_backend: Option<&'a Rc<RefCell<dyn TextBackend>>>,
     pub label_style: &'a TextStyle,
+    /// The category labels the x axis will draw. Needed here, not just at paint time,
+    /// because a tilted label's bounding box is taller than its line height — the plot has
+    /// to hand back the difference or the labels are clipped.
+    pub x_labels: &'a [String],
 }
 
 pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
@@ -208,16 +212,40 @@ pub fn compute_plot_geometry(p: &PlotGeometryParams) -> PlotGeometry {
     };
     let title_height = p.label_style.size * 1.2;
 
-    let area = carve_plot_area(&CarveParams {
-        bounds: p.bounds,
-        axis_x: p.axis_x,
-        axis_y: p.axis_y,
-        y_label_max_width,
-        x_label_height: label_height,
-        axis_title_line_height: title_height,
-        legend_size: p.legend_size,
-        legend_position: p.legend_position,
-    });
+    // The x band's height depends on whether the labels tilt, which depends on how much
+    // width they have, which depends on the band. Carved twice for the same reason the y
+    // ticks are fitted twice: once provisionally to learn the width, then for real.
+    let carve = |x_band: f32| {
+        carve_plot_area(&CarveParams {
+            bounds: p.bounds,
+            axis_x: p.axis_x,
+            axis_y: p.axis_y,
+            y_label_max_width,
+            x_label_height: x_band,
+            axis_title_line_height: title_height,
+            legend_size: p.legend_size,
+            legend_position: p.legend_position,
+        })
+    };
+    let mut area = carve(label_height);
+    if p.axis_x.show_labels && !p.x_labels.is_empty() {
+        let widest = p
+            .x_labels
+            .iter()
+            .map(|l| measure_text_width_via(p.text_backend, l, p.label_style))
+            .fold(0.0_f32, f32::max);
+        let layout = crate::axis::resolve_label_layout(
+            p.x_labels.len(),
+            area.plot.width,
+            widest,
+            label_height,
+            p.axis_x.label_angle,
+        );
+        let band = crate::axis::label_band_height(layout, widest, label_height);
+        if band > label_height {
+            area = carve(band);
+        }
+    }
 
     let plot = area.plot;
     // Final pass: nice_ticks refitted to the carved plot rect.

@@ -606,6 +606,19 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         let y_domain = self
             .model
             .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
+        // Gathered here as well as at paint time: the carve needs them to size a tilted
+        // label band, and the same first-visible-series rule must pick them both times.
+        let x_labels: Vec<String> = self.model.with_all_series(|views| {
+            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
+            if visible.is_empty() {
+                return Vec::new();
+            }
+            visible[0]
+                .points
+                .iter()
+                .map(|d| format!("{}", d.category))
+                .collect()
+        });
         let geometry = compute_plot_geometry(&PlotGeometryParams {
             bounds,
             axis_x: &self.axis_x,
@@ -619,6 +632,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             },
             text_backend: backend,
             label_style,
+            x_labels: &x_labels,
         });
         *self.geometry_cache.borrow_mut() = Some((key, geometry.clone()));
         geometry
@@ -931,16 +945,39 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         if self.axis_x.show_labels && !x_labels.is_empty() {
             let n = x_labels.len();
             let slot_w = plot.width / n as f32;
+            let widest = x_labels
+                .iter()
+                .map(|l| measure_text_width(canvas, l, label_style))
+                .fold(0.0f32, f32::max);
+            let layout = crate::axis::resolve_label_layout(
+                n,
+                plot.width,
+                widest,
+                label_style.size * 1.2,
+                self.axis_x.label_angle,
+            );
             for (i, label) in x_labels.iter().enumerate() {
+                if i % layout.stride != 0 {
+                    continue;
+                }
                 let w = measure_text_width(canvas, label, label_style);
+                let h = label_style.size * 1.2;
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
-                let rect = Rect::new(
-                    center_x - w * 0.5,
-                    plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP,
-                    w,
-                    label_style.size * 1.2,
-                );
-                canvas.draw_text(label, rect, label_style, label_color);
+                let top = plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP;
+                if layout.angle.abs() < f32::EPSILON {
+                    let rect = Rect::new(center_x - w * 0.5, top, w, h);
+                    canvas.draw_text(label, rect, label_style, label_color);
+                } else {
+                    // Anchored at the tick and running down-left, so the label's *end* sits
+                    // under the bar it names — the reading order a tilted axis needs, and
+                    // the reason the text is drawn from a translated origin rather than
+                    // centred like the upright case.
+                    canvas.save();
+                    canvas.translate(center_x, top);
+                    canvas.rotate(-layout.angle);
+                    canvas.draw_text(label, Rect::new(-w, -h * 0.5, w, h), label_style, label_color);
+                    canvas.restore();
+                }
             }
         }
 
