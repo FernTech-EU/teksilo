@@ -1048,10 +1048,15 @@ impl<T: 'static> Widget for TreeView<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        let width = proposal.width.unwrap_or(300.0);
-        let height = proposal.height.unwrap_or(200.0);
-        self.viewport_height.set(height);
-        Size::new(width, height).into()
+        // Only an allocation may seed the cached viewport — see
+        // `common::viewport` for what a measurement pass does to `build`'s
+        // realization window otherwise.
+        crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(300.0, 200.0),
+        )
+        .into()
     }
 
     fn place_children(
@@ -1064,6 +1069,10 @@ impl<T: 'static> Widget for TreeView<T> {
         // Cache our own absolute bounds for the keyboard handler's
         // outer-scroll chase (`ensure_visible`), before the empty-children bail.
         self.viewport_bounds.set(bounds);
+        // The allocated height is the authoritative viewport: `build` sizes its
+        // realization window from this, and a stale value there costs a
+        // permanent rebuild loop (`common::viewport`).
+        crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
         if children.is_empty() {
             return;

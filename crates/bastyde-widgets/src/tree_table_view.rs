@@ -2129,12 +2129,21 @@ impl<T: 'static> Widget for TreeTableView<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        let width = proposal.width.unwrap_or(400.0);
-        let height = proposal.height.unwrap_or(300.0);
-        self.viewport_height.set(height);
-        // Viewport-relative imperatives are meaningful from here on.
-        self.laid_out.set(true);
-        Size::new(width, height).into()
+        // Only an allocation may seed the cached viewport (`common::viewport`);
+        // the body pane shares this very cell, so a measurement's fallback
+        // would desync its realization window.
+        let size = crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(400.0, 300.0),
+        );
+        if proposal.height.is_some() {
+            // Viewport-relative imperatives are meaningful from here on — but
+            // only once a real height has landed, for the reason `laid_out`
+            // exists at all.
+            self.laid_out.set(true);
+        }
+        size.into()
     }
 
     fn place_children(

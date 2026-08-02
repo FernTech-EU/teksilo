@@ -1526,14 +1526,15 @@ impl<T: 'static> Widget for ListView<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        // The viewport takes whatever the parent offers.
-        let width = proposal.width.unwrap_or(300.0);
-        let height = proposal.height.unwrap_or(200.0);
-
-        // Cache viewport height for visible range computation.
-        self.viewport_height.set(height);
-
-        Size::new(width, height).into()
+        // The viewport takes whatever the parent offers — but only an
+        // allocation is cached for the visible-range computation; a
+        // measurement's fallback is not a viewport (`common::viewport`).
+        crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(300.0, 200.0),
+        )
+        .into()
     }
 
     fn place_children(
@@ -1547,6 +1548,10 @@ impl<T: 'static> Widget for ListView<T> {
         // outer-scroll chase (`ensure_visible`). Done before the empty-children
         // bail so the rect stays fresh even for an empty list that later fills.
         self.viewport_bounds.set(bounds);
+        // The allocated height is the authoritative viewport: `build` sizes its
+        // realization window from this, and a stale value there costs a
+        // permanent rebuild loop (`common::viewport`).
+        crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
         if children.is_empty() {
             return;

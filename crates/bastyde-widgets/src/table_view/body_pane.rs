@@ -641,10 +641,14 @@ impl<T: 'static> Widget for BodyPane<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        let width = proposal.width.unwrap_or(400.0);
-        let height = proposal.height.unwrap_or(300.0);
-        self.viewport_height.set(height);
-        Size::new(width, height).into()
+        // Only an allocation may seed the cached viewport — a measurement's
+        // fallback would desync `build`'s realization window (`common::viewport`).
+        crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(400.0, 300.0),
+        )
+        .into()
     }
 
     fn place_children(
@@ -654,6 +658,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
+        // The allocated height is the authoritative viewport: `build` sizes its
+        // realization window from this, and a stale value there costs a
+        // permanent rebuild loop (`common::viewport`).
+        crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
+
         // Auto-measure pass: measure every realized row at the pane
         // width (BodyRow reports its tallest cell, height-for-width),
         // feed the heights back, and apply the scroll-anchor delta so

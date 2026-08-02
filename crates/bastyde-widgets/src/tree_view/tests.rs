@@ -2688,3 +2688,83 @@ fn alt_arrow_after_a_structural_change_reorders_the_row_the_cursor_is_on() {
          not the stale pre-insert index 2 (now N0)"
     );
 }
+
+// -- Realization window vs. a measuring caller ---------------------------
+
+/// `layout_response` runs for two different questions — "you get 654 px, lay
+/// yourself out" and "how tall would you like to be at this width?" — and it
+/// used to cache the height it resolved from either as the viewport. The
+/// second one carries no height, so it resolves to the bare fallback
+/// constant: 200 px, which has nothing to do with the real viewport.
+///
+/// `build` sizes its realization window from that cache. So after the next
+/// rebuild it realized the rows for a 200 px viewport, while `place_children`
+/// went on computing the range honestly against the real 654 and bumping the
+/// rebuild version to fetch the rows it thought were missing. Neither side
+/// ever agreed: a rebuild every frame, each generation of rows replaced
+/// before layout could place them. On screen the tree was an empty hole that
+/// survived scrolling, clicking and re-selection, while a core spun.
+///
+/// [`measure_root_intrinsic`](WidgetTree::measure_root_intrinsic) is the
+/// natural-height question in its plainest form, and it documents itself as
+/// safe to call right after a layout pass — true of bounds, and false of any
+/// state a widget caches out of `layout_response`. The mutation afterwards is
+/// the rebuild trigger, which is what selecting or opening a row does.
+#[test]
+fn a_natural_height_query_does_not_strand_the_realization_window() {
+    let model = TreeModel::new();
+    for i in 0..56 {
+        model.insert_root(i, i as i32);
+    }
+    let mut wtree = WidgetTree::new();
+    let tv_id = wtree.add(
+        TreeView::new(model.clone(), |_item: &i32, _entry, _sel| {
+            Box::new(FixedLeaf(280.0, 28.0))
+        })
+        .auto_item_height(28.0),
+    );
+    wtree.layout(SizeProposal::exact(300.0, 654.0));
+    // The first build predates any allocation, so it realizes off the
+    // constructor's 600px seed: 21 rows in view plus the 5-row buffer either
+    // side. The 654px allocation lands during this same pass.
+    assert_eq!(wtree.children(tv_id).len() - 1, 27, "fixture is wrong");
+
+    // Someone asks how tall the tree would like to be.
+    wtree.measure_root_intrinsic(SizeProposal::with_width(300.0));
+
+    // Force a rebuild, the way selecting a row does.
+    model.insert_root(56, 56);
+    wtree.layout(SizeProposal::exact(300.0, 654.0));
+
+    // 654px at 28px a row is 24 rows in view, plus the 5-row buffer.
+    // A viewport stranded at the 200px fallback yields 13.
+    let rows = wtree.children(tv_id).len() - 1; // less the scrollbar
+    assert_eq!(
+        rows, 29,
+        "realized {rows} rows for a 654px viewport — the window was sized \
+         from the measurement's fallback, not from the allocation"
+    );
+
+    // Every realized row must actually be placed. Under the loop they kept
+    // their default zero rect, because the next rebuild replaced them first.
+    for id in wtree.children(tv_id).iter().take(rows) {
+        let b = wtree.bounds(*id);
+        assert!(
+            b.height > 0.0 && b.width > 0.0,
+            "row {id:?} was never placed: {b:?}"
+        );
+    }
+
+    // And it converges: two idle passes must not re-realize anything.
+    // Identity, not count — the loop held the count steady while discarding
+    // and rebuilding every row.
+    let settled = wtree.children(tv_id);
+    wtree.layout(SizeProposal::exact(300.0, 654.0));
+    wtree.layout(SizeProposal::exact(300.0, 654.0));
+    assert_eq!(
+        settled,
+        wtree.children(tv_id),
+        "the tree rebuilt its rows on an idle layout pass — build and \
+         place_children disagree about the viewport"
+    );
+}

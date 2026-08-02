@@ -1467,11 +1467,18 @@ impl<T: 'static> Widget for GridView<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        let width = proposal.width.unwrap_or(400.0);
-        let height = proposal.height.unwrap_or(400.0);
-        self.viewport_width.set(width);
-        self.viewport_height.set(height);
-        Size::new(width, height).into()
+        // Only an allocation may seed the cached viewport (`common::viewport`);
+        // the body pane shares these cells, and `build` sizes its realization
+        // window — and the strategy its column count — from them.
+        let size = crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(400.0, 400.0),
+        );
+        if proposal.width.is_some() {
+            self.viewport_width.set(size.width);
+        }
+        size.into()
     }
 
     fn place_children(

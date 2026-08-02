@@ -515,10 +515,14 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        let width = proposal.width.unwrap_or(400.0);
-        let height = proposal.height.unwrap_or(300.0);
-        self.viewport_height.set(height);
-        Size::new(width, height).into()
+        // Only an allocation may seed the cached viewport — a measurement's
+        // fallback would desync `build`'s realization window (`common::viewport`).
+        crate::common::viewport::viewport_size(
+            proposal,
+            &self.viewport_height,
+            Size::new(400.0, 300.0),
+        )
+        .into()
     }
 
     fn place_children(
@@ -556,6 +560,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
              signal writes rely on no longer holds"
         );
         self.in_place_children.set(true);
+
+        // The allocated height is the authoritative viewport: `build` sizes its
+        // realization window from this, and a stale value there costs a
+        // permanent rebuild loop (`common::viewport`).
+        crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
         // Publish our absolute origin so GridView's keyboard handler can build
         // the focused tile's window rect for the outer-scroll chase.
