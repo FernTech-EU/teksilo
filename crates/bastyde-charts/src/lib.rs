@@ -33,6 +33,7 @@ pub mod pie_chart;
 #[cfg(feature = "preview")]
 mod preview_catalog;
 pub mod recipe_style;
+pub mod reference_line;
 pub mod style;
 pub(crate) mod text;
 

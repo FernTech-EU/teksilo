@@ -37,6 +37,7 @@ use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_pl
 use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
 use crate::recipe_style::RecipeChartStyle;
+use crate::reference_line::{ReferenceLine, ValueAxis, draw_reference_lines};
 use crate::text::measure_text_width;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +84,7 @@ pub struct BarChart<T: Clone + 'static> {
     style_override: Option<SharedChartStyle>,
     show_hover_tooltip: bool,
     selection: Option<ChartSelection>,
+    reference_lines: Vec<ReferenceLine>,
 
     hover: Signal<Option<(SeriesId, usize)>>,
     marks: Rc<RefCell<Vec<MarkGeometry>>>,
@@ -112,6 +114,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             style_override: None,
             show_hover_tooltip: true,
             selection: None,
+            reference_lines: Vec::new(),
             hover: Signal::new(None),
             marks: Rc::new(RefCell::new(Vec::new())),
             bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -175,6 +178,27 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
 
     pub fn bar_corner_radius(mut self, r: f32) -> Self {
         self.bar_corner_radius = Some(r);
+        self
+    }
+
+    /// Draw a labelled horizontal line across the plot at `value` on the value axis.
+    ///
+    /// For the comparison a chart is *about* — a median, a target, a budget. Without one, a
+    /// chart that tints its bars by how they compare to something leaves the something
+    /// invisible, and the reader is asked to judge a distance to a line that was never
+    /// drawn.
+    ///
+    /// Sits above the bars, because it is the thing being compared against. Call it more
+    /// than once for more than one comparison; see [`ReferenceLine`] for colour, width and
+    /// dash.
+    pub fn reference_line(mut self, line: ReferenceLine) -> Self {
+        self.reference_lines.push(line);
+        self
+    }
+
+    /// Every line at once, for a caller that already has them in hand.
+    pub fn reference_lines(mut self, lines: impl IntoIterator<Item = ReferenceLine>) -> Self {
+        self.reference_lines.extend(lines);
         self
     }
 
@@ -490,6 +514,28 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                     SELECTION_STROKE_WIDTH,
                 );
             }
+        }
+
+        // ─── Reference lines ────────────────────────────────────────────
+        // After the bars, so the thing being compared against stays legible over the thing
+        // being compared. The value axis follows the orientation: a horizontal bar chart
+        // measures rightward, so its reference lines are vertical.
+        if !self.reference_lines.is_empty() {
+            let (axis, lo, hi) = match self.orientation {
+                BarOrientation::Vertical => (ValueAxis::Vertical, geometry.y_lo, geometry.y_hi),
+                BarOrientation::Horizontal => (ValueAxis::Horizontal, geometry.y_lo, geometry.y_hi),
+            };
+            draw_reference_lines(
+                canvas,
+                theme,
+                enabled,
+                &self.reference_lines,
+                plot,
+                axis,
+                lo,
+                hi,
+                &label_style,
+            );
         }
 
         // ─── Value labels ───────────────────────────────────────────────
@@ -1396,5 +1442,52 @@ mod tests {
             baseline_shapes,
             after.shapes.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod reference_line_tests {
+    use super::*;
+    use bastyde_data::{ChartDatum, ChartSeries};
+    use bastyde_i18n::lit;
+
+    fn chart(values: &[f32]) -> BarChart<String> {
+        let data: Vec<ChartDatum<String>> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| ChartDatum::new(format!("c{i}"), *v))
+            .collect();
+        BarChart::new(ChartModel::from_series_vec(vec![
+            ChartSeries::new("s").data(data),
+        ]))
+    }
+
+    #[test]
+    fn a_chart_has_no_reference_lines_until_one_is_asked_for() {
+        assert!(chart(&[1.0, 2.0]).reference_lines.is_empty());
+    }
+
+    #[test]
+    fn reference_lines_keep_their_value_and_label() {
+        let c = chart(&[1.0, 2.0]).reference_line(ReferenceLine::new(2495.0, lit!("median")));
+        assert_eq!(c.reference_lines.len(), 1);
+        assert_eq!(c.reference_lines[0].value, 2495.0);
+        assert_eq!(c.reference_lines[0].label.resolve_now(), "median");
+    }
+
+    /// More than one is meaningful — a median and a target are different claims, and the
+    /// API exists so they can look different.
+    #[test]
+    fn several_lines_stack_in_the_order_they_were_added() {
+        let c = chart(&[1.0])
+            .reference_line(ReferenceLine::new(10.0, lit!("a")))
+            .reference_lines([
+                ReferenceLine::new(20.0, lit!("b")).color(TextRole::Primary),
+                ReferenceLine::bare(30.0).solid().width(2.0),
+            ]);
+        let values: Vec<f32> = c.reference_lines.iter().map(|r| r.value).collect();
+        assert_eq!(values, vec![10.0, 20.0, 30.0]);
+        assert!(c.reference_lines[1].color.is_some());
+        assert_eq!(c.reference_lines[2].dash, None);
     }
 }

@@ -37,6 +37,7 @@ use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_pl
 use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
 use crate::palette::ChartPalette;
 use crate::recipe_style::RecipeChartStyle;
+use crate::reference_line::{ReferenceLine, ValueAxis, draw_reference_lines};
 use crate::text::measure_text_width;
 
 /// Cache key for the memoized [`PlotGeometry`] — a miss recomputes.
@@ -70,6 +71,7 @@ pub struct LineChart<T: Clone + 'static> {
     palette: Prop<ChartPalette>,
     style_override: Option<SharedChartStyle>,
     selection: Option<ChartSelection>,
+    reference_lines: Vec<ReferenceLine>,
 
     /// Live hover state; bound at `RepaintOnly` so hovering doesn't relayout.
     hover: Signal<Option<(SeriesId, usize)>>,
@@ -99,6 +101,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             palette: Prop::Static(ChartPalette::FromTheme),
             style_override: None,
             selection: None,
+            reference_lines: Vec::new(),
             hover: Signal::new(None),
             marks: Rc::new(RefCell::new(Vec::new())),
             bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -130,6 +133,22 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
 
     pub fn hover_tooltip(mut self, on: bool) -> Self {
         self.show_hover_tooltip = on;
+        self
+    }
+
+    /// Draw a labelled horizontal line across the plot at `value`. Any number of them, any
+    /// colour — see [`ReferenceLine`].
+    ///
+    /// A chart that already plots its target as a *series* does not need one; this is for a
+    /// constant the data is judged against rather than tracked toward.
+    pub fn reference_line(mut self, line: ReferenceLine) -> Self {
+        self.reference_lines.push(line);
+        self
+    }
+
+    /// Every line at once, for a caller that already has them in hand.
+    pub fn reference_lines(mut self, lines: impl IntoIterator<Item = ReferenceLine>) -> Self {
+        self.reference_lines.extend(lines);
         self
     }
 
@@ -509,6 +528,23 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                     );
                 }
             }
+        }
+
+        // ─── Reference lines ────────────────────────────────────────────
+        // Over the series, because a constant the data is judged against has to stay
+        // readable where the data crosses it.
+        if !self.reference_lines.is_empty() {
+            draw_reference_lines(
+                canvas,
+                theme,
+                enabled,
+                &self.reference_lines,
+                plot,
+                ValueAxis::Vertical,
+                geometry.y_lo,
+                geometry.y_hi,
+                &label_style,
+            );
         }
 
         // ─── Axes ───────────────────────────────────────────────────────
