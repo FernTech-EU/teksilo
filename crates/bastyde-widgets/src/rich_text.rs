@@ -1884,6 +1884,31 @@ impl EditorHandle {
     // can drive selection / scroll-into-view on the current match through the
     // handle it captured — the widget itself is long gone into the tree by then.
 
+    /// This editor's content as Djot.
+    ///
+    /// The counterpart to [`insert_djot`](Self::insert_djot): a toolbar or command that can
+    /// write into an editor it did not build should be able to read it back the same way.
+    /// Without this the only route to the text is the host's own document bookkeeping,
+    /// which knows about the editors it *mounted* and not about the ones a list or a card
+    /// grid created — so a command ends up working on some surfaces and silently doing
+    /// nothing on others.
+    ///
+    /// Empty string on a serialisation error, matching `TextDocument::to_djot`'s own
+    /// callers: a command reading an editor has no better answer than "nothing there", and
+    /// propagating a `Result` here would push that decision onto every call site.
+    pub fn to_djot(&self) -> String {
+        self.state.borrow().document.to_djot().unwrap_or_default()
+    }
+
+    /// Whether this editor holds no text at all.
+    ///
+    /// `character_count() == 0`, so a document of one empty paragraph is empty but one
+    /// holding only spaces is not — the distinction a caller usually wants is
+    /// `to_djot().trim().is_empty()`, and this is the cheap O(1) pre-check.
+    pub fn is_empty(&self) -> bool {
+        self.state.borrow().document.is_empty()
+    }
+
     /// Reactive signal — `true` while **this** editor holds keyboard focus.
     /// See [`RichTextEditor::focused_signal`].
     pub fn focused_signal(&self) -> Signal<bool> {
@@ -3083,9 +3108,7 @@ impl Widget for RichTextEditorBody {
         // relayout + render this frame.
         {
             let target = st.effective_font_scale(ctx.text_scale);
-            if st.last_font_scale.is_nan()
-                || (st.last_font_scale - target).abs() > f32::EPSILON
-            {
+            if st.last_font_scale.is_nan() || (st.last_font_scale - target).abs() > f32::EPSILON {
                 st.last_font_scale = target;
                 st.engine.set_font_scale(target);
                 st.needs_full_layout = true;
@@ -3441,10 +3464,8 @@ impl Widget for RichTextEditorBody {
                             let run_end = run_start + *length;
                             for span in &st.annotation_spans {
                                 if span.start < run_end && span.end > run_start {
-                                    let detail = builder.push_annotation_child(
-                                        span.group_id,
-                                        span.summary.clone(),
-                                    );
+                                    let detail = builder
+                                        .push_annotation_child(span.group_id, span.summary.clone());
                                     builder.push_detail_on_child(node_id, detail);
                                 }
                             }

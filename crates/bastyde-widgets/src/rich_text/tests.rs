@@ -6019,6 +6019,56 @@ mod affinity_tests {
     }
 }
 
+// --- reading content back through EditorHandle -----------------------------
+
+/// The counterpart to `insert_djot`: a command that can write into an editor it did not
+/// build must be able to read it back the same way, or it works on the surfaces the host
+/// happens to track and silently does nothing on the rest.
+#[test]
+fn editor_handle_reads_its_content_back_as_djot() {
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+
+    handle.insert_djot("# Title\n\nSome prose.\n");
+
+    let out = handle.to_djot();
+    assert!(out.contains("Title"), "heading survives: {out}");
+    assert!(out.contains("Some prose."), "body survives: {out}");
+    assert_eq!(
+        out,
+        doc.to_djot().unwrap_or_default(),
+        "same as the document"
+    );
+}
+
+#[test]
+fn editor_handle_reports_emptiness() {
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    assert!(handle.is_empty(), "a fresh editor holds nothing");
+
+    handle.insert_text("x");
+    assert!(!handle.is_empty());
+}
+
+/// `is_empty` is a character count, so whitespace is content. Callers that mean "nothing
+/// worth keeping" want `to_djot().trim()`, and this pins the difference so nobody has to
+/// discover it from behaviour.
+#[test]
+fn editor_handle_counts_whitespace_as_content() {
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    handle.insert_text("   ");
+    assert!(!handle.is_empty(), "spaces are characters");
+    assert!(
+        handle.to_djot().trim().is_empty(),
+        "but nothing worth keeping"
+    );
+}
+
 // --- programmatic block insertion via EditorHandle -------------------------
 
 #[test]
@@ -6310,16 +6360,26 @@ type PinRecord = Rc<Cell<Option<bastyde_core::event::ScrollAlign>>>;
 /// column uses, and the only one where the enclosing page does the scrolling.
 fn typewriter_fixture(
     anchor: Option<f32>,
-) -> (WidgetTree, super::EditorHandle, PinRecord, bastyde_core::widget_id::WidgetId) {
+) -> (
+    WidgetTree,
+    super::EditorHandle,
+    PinRecord,
+    bastyde_core::widget_id::WidgetId,
+) {
+    use super::ScrollPolicy;
+    use crate::primitives::VStack;
     use bastyde_core::event::{EventResponse, WidgetEvent};
     use bastyde_core::widget_builder::WidgetBuilder;
-    use crate::primitives::VStack;
-    use super::ScrollPolicy;
 
     let doc = TextDocument::new();
     // Enough lines that a pin has somewhere to scroll to.
-    doc.set_plain_text(&(1..=40).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n"))
-        .unwrap();
+    doc.set_plain_text(
+        &(1..=40)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
 
     let editor = RichTextEditor::editor(doc)
         .min_lines(1)
@@ -6564,11 +6624,14 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
 mod caret_band {
     use super::*;
     use crate::rich_text::caret_highlight::{CaretHighlight, CaretHighlightScope};
-    use bastyde_text::text_document::{
-        Color, FlowElementSnapshot, HighlightFormat, HighlightMask,
-    };
+    use bastyde_text::text_document::{Color, FlowElementSnapshot, HighlightFormat, HighlightMask};
 
-    const BAND: Color = Color { red: 255, green: 254, blue: 235, alpha: 255 };
+    const BAND: Color = Color {
+        red: 255,
+        green: 254,
+        blue: 235,
+        alpha: 255,
+    };
 
     pub(super) fn band(scope: CaretHighlightScope) -> CaretHighlight {
         CaretHighlight {
@@ -6956,7 +7019,12 @@ mod caret_band_regressions {
                     .decorations
                     .iter()
                     .filter(|d| d.kind == bastyde_text::TypesetterDecorationKind::TextBackground)
-                    .map(|d| (d.rect[0].round() as i64, (d.rect[0] + d.rect[2]).round() as i64))
+                    .map(|d| {
+                        (
+                            d.rect[0].round() as i64,
+                            (d.rect[0] + d.rect[2]).round() as i64,
+                        )
+                    })
                     .collect();
                 v.sort();
                 v
@@ -6993,9 +7061,7 @@ mod vertical_movement {
     use bastyde_text::EditorTypographyDefaults;
 
     /// An editor whose paragraphs set `line_height`, the way prose does.
-    fn editor_with_line_height(
-        line_height: f32,
-    ) -> (crate::rich_text::EditorHandle, WidgetTree) {
+    fn editor_with_line_height(line_height: f32) -> (crate::rich_text::EditorHandle, WidgetTree) {
         let doc = TextDocument::new();
         doc.set_plain_text("Line one here.\nLine two here.\nLine three here.\nLine four here.")
             .unwrap();

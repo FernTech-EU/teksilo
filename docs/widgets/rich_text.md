@@ -32,7 +32,7 @@ let editor = RichTextEditor::editor(doc)
 
 ## Builder methods at a glance
 
-`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `set_highlight_mask`, `zoom`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_zoom_level`, `get_zoom_level`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
+`read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_activated`
 
 ## API reference
 
@@ -53,9 +53,6 @@ pub enum ScrollPolicy { /* variants */ }
 - **`AlwaysOff`** — Never show the scroll bar; useful when embedding the editor inside an outer `ScrollArea` or in headless tests.
 
 ## `pub struct RichTextEditor`
-
-The main rich text widget. Construct via `RichTextEditor::read_only`
-(view/select only) or `RichTextEditor::editor` (full editing).
 
 ```rust
 pub struct RichTextEditor { /* fields */ }
@@ -139,6 +136,21 @@ snapshot (no highlights at all, even metric ones like keyword bold) and
 ignores paint-only highlight events entirely, so it does zero work when
 the shared document's search/spell highlights change.
 
+#### `pub fn annotation_spans(self, spans: Vec<TextAnnotationSpan>) -> Self`
+
+Declare the annotations (comment threads) covering ranges of this
+document, for the **accessibility tree only**.
+
+Each span becomes a `Role::Comment` node, and every `Role::TextRun` it
+covers points at it through AccessKit's `details` relation — the W3C
+annotations pattern, and the reason a screen reader can say "has comment"
+and let the user navigate in rather than reciting the thread every time the
+caret crosses the span.
+
+Painting is a separate concern: a highlight session draws the underline. A
+highlight carries no text and this carries no colour, so neither is
+derivable from the other and both are supplied independently.
+
 #### `pub fn set_highlight_mask(&self, mask: bastyde_text::text_document::HighlightMask)`
 
 Set which highlight sessions **this view** renders, at runtime.
@@ -152,12 +164,6 @@ keeps one pane's find highlighting out of another pane over the same document.
 
 Forces a re-pull on the next tick so the change is visible immediately.
 
-#### `pub fn zoom(self, zoom: f32) -> Self`
-
-Set the initial zoom factor (`1.0` = 100 %). Applied before the first
-layout pass. Use `set_zoom_level` after the
-widget is mounted.
-
 #### `pub fn typography_defaults(self, defaults: EditorTypographyDefaults) -> Self`
 
 Set the initial non-destructive default typography (font family / line
@@ -166,6 +172,7 @@ explicit override. Applied before the first layout. These are display
 defaults — they never mutate the bound document (no undo entry, no
 `modified`); use `set_typography_defaults`
 or `EditorHandle::set_typography_defaults` to change them after mount.
+Preferred text size is `font_size_scale`.
 
 #### `pub fn background(self, color: impl Into<ColorProp>) -> Self`
 
@@ -244,52 +251,43 @@ where a caret change must never move the surrounding page.
 
 #### `pub fn typewriter(self, anchor: Option<f32>) -> Self`
 
-**Typewriter scrolling**: pin the caret's line at `anchor` of the way down the
-enclosing scroll area — `0.0` at the top, `0.5` centred, `1.0` at the bottom —
-and let the document scroll under it. `None` (the default) leaves the ordinary
-minimal-reveal follow in charge.
+**Typewriter scrolling**: pin the caret's line at `fraction` of the way
+down the enclosing scroll area — `0.0` at the top, `0.5` centred, `1.0`
+at the bottom — and let the document scroll under it. `None` (the
+default) leaves the ordinary minimal-reveal follow in charge.
 
-Unlike that follow, which only acts once the caret would leave the viewport, a
-pin re-asserts on every caret move, so the line being written holds a constant
-height on screen. The classic writing-app feature.
+Unlike that follow, which only acts once the caret would leave the
+viewport, a pin re-asserts on every caret move, so the line being written
+holds a constant height on screen. The classic writing-app feature.
 
-Three behaviours come with it, each of them the consensus answer among the
-editors that ship this well:
+Three behaviours come with it, each of them the consensus answer among
+the editors that ship this well:
 
 - **The pointer stands the pin down.** A click places the caret without
-  scrolling, and that position becomes the new resting place; a drag-selection is
-  never interrupted. The next keystroke resumes pinning. Editors that re-centre
-  on pointer input instead have open bugs about the view fighting the mouse and
-  about drag-selection becoming unusable.
-- **The rendered row is pinned, not the paragraph.** Under soft wrap a long
-  paragraph spans several visual rows; pinning the logical line would leave the
-  caret far from the mark.
-- **Typing snaps, page jumps glide.** PageUp/PageDown and `reveal_range` (a
-  search hit) animate; everything else is instant. Animating a pin that updates
-  on every keystroke is what produces the "screen bouncing" complaint other
+  scrolling, and that position becomes the new resting place; a
+  drag-selection is never interrupted. The next keystroke resumes
+  pinning. Editors that re-centre on pointer input instead have open bugs
+  about the view fighting the mouse and about drag-selection becoming
+  unusable.
+- **The rendered row is pinned, not the paragraph.** Under soft wrap a
+  long paragraph spans several visual rows; pinning the logical line
+  would leave the caret far from the mark.
+- **Typing snaps, page jumps glide.** Animating a pin that updates on
+  every keystroke is what produces the "screen bouncing" complaint other
   implementations attract.
 
-Requires `follow_caret_in_page` (on by default). `anchor` is clamped to
-`0.0..=1.0`.
+Requires `follow_caret_in_page` (on by
+default). `fraction` is clamped to `0.0..=1.0`.
 
-Near the start of the document the pin gives way to the scroll range — the caret
-rides above its line until there is room — and near the end it would do the same,
-which is usually not what you want: pair with
-`ScrollArea::scroll_past_end(1.0 - anchor)` so the last line can still reach the
-pin.
+Near the start of the document the pin gives way to the scroll range —
+the caret rides above its line until there is room — and near the end it
+would do the same, which is usually not what you want: pair this with
+`ScrollArea::scroll_past_end(1.0 - fraction)` so the last line can still
+reach the pin.
 
-Takes a plain value, like `typography_defaults`; to follow a setting live, push
-changes onto the handle with `EditorHandle::set_typewriter`.
-
-```rust,ignore
-// A flowing page whose caret stays centred.
-let editor = RichTextEditor::editor(doc)
-    .min_lines(10)
-    .v_scroll_policy(ScrollPolicy::AlwaysOff)   // the page scrolls, not the editor
-    .typewriter(Some(0.5));
-
-ScrollArea::new().scroll_past_end(0.5).child(editor)
-```
+Takes a plain value, like `typography_defaults`;
+to follow a setting live, push changes onto the handle with
+`EditorHandle::set_typewriter`.
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
@@ -344,8 +342,20 @@ scale (`ctx.text_scale`). Defaults to `true` — like every other text
 surface, the editor magnifies when the user raises the app-wide text
 size. Pass `false` for an editor whose font sizes are **document
 content** (a WYSIWYG / print-layout editor) that must stay at its true
-point size regardless of the reader's UI accessibility setting. The
-programmatic zoom (`set_zoom`) is unaffected either way.
+point size regardless of the reader's UI accessibility setting.
+
+Composed with `font_size_scale`:  
+`engine.font_scale = (follow ? text_scale : 1.0) × font_size_scale`.
+
+#### `pub fn font_size_scale(self, scale: f32) -> Self`
+
+Per-editor logical font-size multiplier (`1.0` = 100 %). Applied
+*before* shaping (same channel as accessibility text scale), so text
+grows, re-wraps, and stays sharp — the knob for a "Text size"
+preference. Composed as
+`(follow_text_scale ? ctx.text_scale : 1.0) × font_size_scale`.
+Clamped to `[0.1, 10.0]`. Use `set_font_size_scale`
+after mount.
 
 #### `pub fn context_menu( mut self, factory: impl Fn( bastyde_canvas::Point, &mut bastyde_core::widget::EventContext, ) -> Option<Box<dyn bastyde_core::widget::Widget>> + 'static, ) -> Self`
 
@@ -489,7 +499,7 @@ only when `wrap_mode` is `WrapMode::None`.
 #### `pub fn context_target_at(&self, point: Point) -> Option<hit_test::ContextTarget>`
 
 Classify what is under `point` in the widget's local coordinates
-(origin at the widget's top-left, scroll offset and zoom handled
+(origin at the widget's top-left, scroll offset handled
 internally by the typesetter), for applications building an
 external context menu. Returns `None` if the point does not
 land on any hit region.
@@ -584,11 +594,17 @@ Reveals an **arbitrary** offset range — the current search match — rather th
 caret the follow-into-view path tracks, and works whether or not the editor is focused.
 A no-op until the editor has a full layout.
 
+Under [`typewriter`` scrolling the range is *pinned* to
+the anchor rather than merely revealed, so a search walks matches to the
+same height the caret writes at instead of leaving them wherever they
+happened to fall. Because a search jump is a deliberate, screen-sized
+move, it glides.
+
 #### `pub fn set_bold(&self, enabled: bool)`
 
 Apply **bold** to the current selection (or set the typing bold
 state when no selection is active). Pairs with
-[`is_bold`` and `toggle_bold`.
+`is_bold` and `toggle_bold`.
 
 #### `pub fn set_italic(&self, enabled: bool)`
 
@@ -944,14 +960,15 @@ opens, not per frame. Returns `false` when no clipboard backend
 is installed (headless or feature-off builds) — the same
 "silently no-op" degradation the paste path itself uses.
 
-#### `pub fn set_zoom_level(&self, zoom: f32)`
+#### `pub fn set_font_size_scale(&self, scale: f32)`
 
-Set the editor's zoom level. Re-lays out immediately; triggers
-a repaint via the engine's dirty tracking on the next frame.
+Set the per-editor logical font-size multiplier (`1.0` = 100 %).
+Composed with accessibility text scale at paint; forces relayout.
+See `font_size_scale`.
 
-#### `pub fn get_zoom_level(&self) -> f32`
+#### `pub fn get_font_size_scale(&self) -> f32`
 
-Current zoom level.
+Current per-editor font-size scale (`1.0` = 100 %).
 
 #### `pub fn set_typography_defaults(&self, defaults: EditorTypographyDefaults)`
 
@@ -961,6 +978,44 @@ schedules a repaint. Never mutates the document.
 #### `pub fn get_typography_defaults(&self) -> EditorTypographyDefaults`
 
 Current default typography (see `typography_defaults`).
+
+#### `pub fn set_typewriter(&self, anchor: Option<f32>)`
+
+Set the typewriter-scrolling anchor at runtime — see
+`typewriter`. `None` turns pinning off.
+
+Takes effect on the next caret move rather than scrolling immediately: a
+pin is a follow rule, and re-anchoring the page the instant a setting
+changes would jump the view under a reader who is not even typing.
+
+#### `pub fn get_typewriter(&self) -> Option<f32>`
+
+Current typewriter anchor (see `typewriter`).
+
+#### `pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>)`
+
+Draw an ambient band behind the sentence — or paragraph — the caret is in.
+
+`None` (the default) draws nothing and registers no session on the document. The band
+shows only while **this** editor has focus, so two panes over one document never band
+twice, and it disappears when focus leaves the editor entirely.
+
+The band is registered below every other highlight layer, so a find match or a spell
+squiggle always paints over it. Give it a paint-only `format` — a background colour —
+or it will force a reshape on every caret move.
+
+#### `pub fn get_caret_highlight(&self) -> Option<caret_highlight::CaretHighlight>`
+
+What this editor's caret band is currently configured to draw.
+
+#### `pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect>`
+
+The caret's rectangle in **absolute window (tree) coordinates**, or
+`None` when the editor is unfocused or has not been laid out yet.
+
+The same rect the OS-IME reporting and the caret follow use, exposed for
+hosts that need to position something against the caret (and for tests
+that need to assert where a pin actually put it).
 
 #### `pub fn format_version(&self) -> Signal<u64>`
 
@@ -1052,6 +1107,29 @@ pub struct EditorHandle { /* fields */ }
 
 ### Methods
 
+#### `pub fn to_djot(&self) -> String`
+
+This editor's content as Djot.
+
+The counterpart to `insert_djot`: a toolbar or command that can
+write into an editor it did not build should be able to read it back the same way.
+Without this the only route to the text is the host's own document bookkeeping,
+which knows about the editors it *mounted* and not about the ones a list or a card
+grid created — so a command ends up working on some surfaces and silently doing
+nothing on others.
+
+Empty string on a serialisation error, matching `TextDocument::to_djot`'s own
+callers: a command reading an editor has no better answer than "nothing there", and
+propagating a `Result` here would push that decision onto every call site.
+
+#### `pub fn is_empty(&self) -> bool`
+
+Whether this editor holds no text at all.
+
+`character_count() == 0`, so a document of one empty paragraph is empty but one
+holding only spaces is not — the distinction a caller usually wants is
+`to_djot().trim().is_empty()`, and this is the cheap O(1) pre-check.
+
 #### `pub fn focused_signal(&self) -> Signal<bool>`
 
 Reactive signal — `true` while **this** editor holds keyboard focus.
@@ -1137,6 +1215,29 @@ them mixes two different moments in time and can invent — or miss — a select
 if the mirror lags. A caller deciding *"is there a selection, and over what"*
 wants one consistent answer.
 
+#### `pub fn range_rect(&self, start: usize, end: usize) -> Option<Rect>`
+
+The **window-space** rectangle enclosing the character range ``start, end)`.
+
+The inverse of [`offset_at_point``: that maps a point
+to an offset, this maps offsets back to a point. It is what a decoration
+drawn *outside* the editor — a margin annotation, a connector leader, a
+bracket spanning a paragraph — needs in order to line itself up with the
+text it refers to.
+
+Coordinates match what the arena stores (`viewport_origin` + engine-local −
+scroll), so the result can be compared with any other widget's bounds
+directly, and it tracks scrolling for free.
+
+`None` before the first full layout. Focus is **not** required — a margin
+annotation must stay aligned whether or not the writer is typing.
+
+#### `pub fn offset_rect(&self, offset: usize) -> Option<Rect>`
+
+The **window-space** caret rectangle at one offset — a zero-width
+`range_rect`, and the anchor point for a marker drawn at
+one end of a span (the triangle at a comment's tail).
+
 #### `pub fn offset_at_point(&self, window_point: Point) -> Option<usize>`
 
 Hit-test a point — **in window coordinates**, as a
@@ -1220,16 +1321,43 @@ stack, or `modified` flag. Schedules a relayout + repaint.
 
 Current default typography.
 
-#### `pub fn set_zoom_level(&self, zoom: f32)`
+#### `pub fn set_font_size_scale(&self, scale: f32)`
 
-Set the whole-editor zoom (`1.0` = 100 %), clamped to `[0.1, 10.0]`. A
-pure display transform (no document mutation). Schedules a relayout +
-repaint. The `EditorHandle` counterpart of
-`RichTextEditor::set_zoom_level`.
+Set the per-editor logical font-size multiplier. See
+`RichTextEditor::set_font_size_scale`.
 
-#### `pub fn get_zoom_level(&self) -> f32`
+#### `pub fn get_font_size_scale(&self) -> f32`
 
-Current zoom level.
+Current per-editor font-size scale (`1.0` = 100 %).
+
+#### `pub fn set_typewriter(&self, anchor: Option<f32>)`
+
+Set the typewriter-scrolling anchor — the `EditorHandle` counterpart of
+`RichTextEditor::set_typewriter`. `None` turns pinning off.
+
+This is the door a host uses to keep the pin following a live setting,
+the same way `set_typography_defaults`
+keeps typography following one.
+
+#### `pub fn get_typewriter(&self) -> Option<f32>`
+
+Current typewriter anchor.
+
+#### `pub fn set_caret_highlight(&self, highlight: Option<caret_highlight::CaretHighlight>)`
+
+Draw an ambient band behind the caret's sentence or paragraph — the `EditorHandle`
+counterpart of `RichTextEditor::set_caret_highlight`, for hosts that re-push it from a
+settings or theme effect after the editor is mounted.
+
+#### `pub fn get_caret_highlight(&self) -> Option<caret_highlight::CaretHighlight>`
+
+What this editor's caret band is currently configured to draw.
+
+#### `pub fn caret_window_rect(&self) -> Option<bastyde_canvas::Rect>`
+
+The caret's rectangle in **absolute window (tree) coordinates** — the
+`EditorHandle` counterpart of `RichTextEditor::caret_window_rect`.
+`None` when unfocused or not yet laid out.
 
 #### `pub fn apply_text_format(&self, fmt: TextFormat)`
 
