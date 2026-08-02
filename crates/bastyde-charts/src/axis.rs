@@ -297,7 +297,10 @@ pub struct LabelLayout {
 
 impl LabelLayout {
     pub fn upright() -> Self {
-        Self { angle: 0.0, stride: 1 }
+        Self {
+            angle: 0.0,
+            stride: 1,
+        }
     }
 }
 
@@ -353,14 +356,20 @@ pub fn resolve_label_layout(
 
     if let Some(degrees) = forced {
         let angle = degrees.to_radians();
-        return LabelLayout { angle, stride: stride_for(angle).max(1) };
+        return LabelLayout {
+            angle,
+            stride: stride_for(angle).max(1),
+        };
     }
 
     if stride_for(0.0) == 1 {
         return LabelLayout::upright();
     }
     let angle = AUTO_ANGLE_DEGREES.to_radians();
-    LabelLayout { angle, stride: stride_for(angle).max(1) }
+    LabelLayout {
+        angle,
+        stride: stride_for(angle).max(1),
+    }
 }
 
 /// Vertical room a row of labels needs, given the layout [`resolve_label_layout`] chose.
@@ -373,6 +382,64 @@ pub fn label_band_height(layout: LabelLayout, max_label_width: f32, label_height
     } else {
         max_label_width * layout.angle.sin().abs() + label_height * layout.angle.cos().abs()
     }
+}
+
+/// Draw one category label under the tick at `center_x`, `top` being the top edge of the
+/// label band. Shared by both charts so the tilted case exists once.
+///
+/// An upright label is centred on the tick. A tilted one is anchored at the tick and runs
+/// down-left, so the label's *end* sits under the bar it names — the reading order a
+/// tilted axis needs.
+///
+/// ## The transform
+///
+/// [`Canvas::translate`](bastyde_canvas::Canvas::translate) and
+/// [`rotate`](bastyde_canvas::Canvas::rotate) **post-multiply**: they compose in output
+/// space, so `translate(x, y)` then `rotate(θ)` spins the already-positioned result about
+/// the canvas origin rather than turning the label about its own anchor. Every label lands
+/// on a diagonal through the origin, nowhere near its bar.
+///
+/// [`Canvas::apply_transform`](bastyde_canvas::Canvas::apply_transform) is the
+/// pre-multiplying half of that pair — it takes a transform expressed in the coordinates
+/// of the content about to be drawn, which is what a local rotate-then-place is. So the
+/// local transform is built explicitly and pushed in one go, the same way
+/// `bastyde-scene`'s rotated text item does it.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_category_label(
+    canvas: &mut bastyde_canvas::Canvas,
+    label: &str,
+    layout: LabelLayout,
+    center_x: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    style: &bastyde_tokens::TextStyle,
+    color: bastyde_tokens::Color,
+) {
+    use bastyde_canvas::Rect;
+
+    if layout.angle.abs() < f32::EPSILON {
+        let rect = Rect::new(center_x - width * 0.5, top, width, height);
+        canvas.draw_text(label, rect, style, color);
+        return;
+    }
+    canvas.save();
+    canvas.apply_transform(tilted_label_transform(layout.angle, center_x, top));
+    canvas.draw_text(
+        label,
+        Rect::new(-width, -height * 0.5, width, height),
+        style,
+        color,
+    );
+    canvas.restore();
+}
+
+/// The local transform for a tilted label: turn about the anchor, *then* move the anchor
+/// onto the tick. Split out from [`draw_category_label`] because the composition order is
+/// the whole subtlety, and this way it can be asserted without a canvas.
+pub fn tilted_label_transform(angle: f32, center_x: f32, top: f32) -> bastyde_canvas::Transform2D {
+    use bastyde_canvas::Transform2D;
+    Transform2D::rotate(-angle).then(&Transform2D::translate(center_x, top))
 }
 
 #[cfg(test)]
@@ -390,8 +457,14 @@ mod label_layout_tests {
     #[test]
     fn a_crowded_axis_tilts_and_thins() {
         let l = resolve_label_layout(37, 400.0, 60.0, 12.0, None);
-        assert!(l.angle > 0.0, "it must tilt before it starts dropping labels");
-        assert!(l.stride > 1, "tilting alone cannot fit a 60px label in an 11px slot");
+        assert!(
+            l.angle > 0.0,
+            "it must tilt before it starts dropping labels"
+        );
+        assert!(
+            l.stride > 1,
+            "tilting alone cannot fit a 60px label in an 11px slot"
+        );
     }
 
     /// Rotation raises the ceiling rather than removing it — the property that makes
@@ -412,7 +485,10 @@ mod label_layout_tests {
     #[test]
     fn vertical_labels_fit_the_most() {
         let l = resolve_label_layout(37, 400.0, 60.0, 12.0, Some(90.0));
-        assert_eq!(l.stride, 2, "an 11px slot fits a 13.8px clearance every other label");
+        assert_eq!(
+            l.stride, 2,
+            "an 11px slot fits a 13.8px clearance every other label"
+        );
     }
 
     #[test]
@@ -426,18 +502,109 @@ mod label_layout_tests {
     fn a_tilted_band_is_taller_than_an_upright_one() {
         let upright = label_band_height(LabelLayout::upright(), 60.0, 12.0);
         let tilted = label_band_height(
-            LabelLayout { angle: std::f32::consts::FRAC_PI_4, stride: 1 },
+            LabelLayout {
+                angle: std::f32::consts::FRAC_PI_4,
+                stride: 1,
+            },
             60.0,
             12.0,
         );
         assert_eq!(upright, 12.0);
-        assert!(tilted > upright * 2.0, "a 60px label at 45° needs real vertical room");
+        assert!(
+            tilted > upright * 2.0,
+            "a 60px label at 45° needs real vertical room"
+        );
     }
 
     #[test]
     fn degenerate_inputs_do_not_divide_by_zero() {
-        assert_eq!(resolve_label_layout(0, 100.0, 10.0, 12.0, None), LabelLayout::upright());
-        assert_eq!(resolve_label_layout(5, 0.0, 10.0, 12.0, None), LabelLayout::upright());
+        assert_eq!(
+            resolve_label_layout(0, 100.0, 10.0, 12.0, None),
+            LabelLayout::upright()
+        );
+        assert_eq!(
+            resolve_label_layout(5, 0.0, 10.0, 12.0, None),
+            LabelLayout::upright()
+        );
         assert!(resolve_label_layout(5, 100.0, 10.0, 12.0, Some(0.0)).stride >= 1);
+    }
+}
+
+#[cfg(test)]
+mod tilted_label_tests {
+    use super::*;
+    use bastyde_canvas::{Point, Transform2D};
+
+    const ANGLE: f32 = std::f32::consts::FRAC_PI_4; // 45°
+    const TICK_X: f32 = 240.0;
+    const BAND_TOP: f32 = 300.0;
+    const LABEL_W: f32 = 60.0;
+
+    /// The label's trailing end is its anchor, and the anchor belongs on the tick.
+    ///
+    /// This is what the bug destroyed: `Canvas::translate` / `rotate` post-multiply in
+    /// output space, so translating to the tick and *then* rotating spins the already-
+    /// placed label about the canvas origin. Every label landed on one diagonal near the
+    /// top-left of the plot instead of under its own bar.
+    #[test]
+    fn the_anchor_lands_on_the_tick() {
+        let t = tilted_label_transform(ANGLE, TICK_X, BAND_TOP);
+        let anchor = t.apply_point(Point::new(0.0, 0.0));
+        assert!(
+            (anchor.x - TICK_X).abs() < 0.01 && (anchor.y - BAND_TOP).abs() < 0.01,
+            "anchor landed at {anchor:?}, not on the tick at ({TICK_X}, {BAND_TOP})"
+        );
+    }
+
+    /// …and the text runs down-LEFT from there, so it reads up towards the bar it names.
+    #[test]
+    fn the_label_runs_down_and_to_the_left() {
+        let t = tilted_label_transform(ANGLE, TICK_X, BAND_TOP);
+        let far_end = t.apply_point(Point::new(-LABEL_W, 0.0));
+        assert!(
+            far_end.x < TICK_X - 1.0,
+            "label head is at x={}, not left of the tick",
+            far_end.x
+        );
+        assert!(
+            far_end.y > BAND_TOP + 1.0,
+            "label head is at y={}, not below the band top (it ran upwards)",
+            far_end.y
+        );
+        // 45° puts it equally far left as down.
+        assert!((TICK_X - far_end.x - (far_end.y - BAND_TOP)).abs() < 0.01);
+    }
+
+    /// The head must stay inside the band [`label_band_height`] reserved for it, or the
+    /// tilted text spills over whatever is drawn beneath the chart.
+    #[test]
+    fn the_label_stays_within_the_reserved_band() {
+        let layout = LabelLayout {
+            angle: ANGLE,
+            stride: 1,
+        };
+        let line_h = 12.0;
+        let band = label_band_height(layout, LABEL_W, line_h);
+        let t = tilted_label_transform(ANGLE, TICK_X, BAND_TOP);
+        // Bottom-left corner of the label box is the deepest point.
+        let deepest = t.apply_point(Point::new(-LABEL_W, line_h * 0.5));
+        assert!(
+            deepest.y <= BAND_TOP + band + 0.01,
+            "label reaches {} but the band only reserves {}",
+            deepest.y - BAND_TOP,
+            band
+        );
+    }
+
+    /// Guards the composition order directly: the output-space order the canvas's own
+    /// `translate` + `rotate` produce does NOT keep the anchor on the tick.
+    #[test]
+    fn the_output_space_order_is_the_one_that_was_wrong() {
+        let wrong = Transform2D::translate(TICK_X, BAND_TOP).then(&Transform2D::rotate(-ANGLE));
+        let anchor = wrong.apply_point(Point::new(0.0, 0.0));
+        assert!(
+            (anchor.x - TICK_X).abs() > 1.0 || (anchor.y - BAND_TOP).abs() > 1.0,
+            "the fixture no longer distinguishes the two orders"
+        );
     }
 }

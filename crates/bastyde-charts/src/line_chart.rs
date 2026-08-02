@@ -817,20 +817,17 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
                 let h = label_style.size * 1.2;
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
                 let top = plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP;
-                if layout.angle.abs() < f32::EPSILON {
-                    let rect = Rect::new(center_x - w * 0.5, top, w, h);
-                    canvas.draw_text(label, rect, label_style, label_color);
-                } else {
-                    // Anchored at the tick and running down-left, so the label's *end* sits
-                    // under the bar it names — the reading order a tilted axis needs, and
-                    // the reason the text is drawn from a translated origin rather than
-                    // centred like the upright case.
-                    canvas.save();
-                    canvas.translate(center_x, top);
-                    canvas.rotate(-layout.angle);
-                    canvas.draw_text(label, Rect::new(-w, -h * 0.5, w, h), label_style, label_color);
-                    canvas.restore();
-                }
+                crate::axis::draw_category_label(
+                    canvas,
+                    label,
+                    layout,
+                    center_x,
+                    top,
+                    w,
+                    h,
+                    label_style,
+                    label_color,
+                );
             }
         }
 
